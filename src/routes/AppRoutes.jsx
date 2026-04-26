@@ -54,6 +54,8 @@ export default function AppRoutes() {
 
           <Route path="/access-denied" element={<AccessDeniedPage />} />
 
+          {/* REGISTRIES */}
+
           <Route
             path="/registries"
             element={
@@ -98,6 +100,9 @@ export default function AppRoutes() {
               </RoleRoute>
             }
           />
+
+          {/* REPORTS */}
+
           <Route
             path="/reports"
             element={
@@ -143,11 +148,115 @@ export default function AppRoutes() {
             }
           />
 
+          {/* WARD SCOPE   */}
           <Route
-            path="/maps"
+            path="/ward-scope/map"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MapPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/ward-scope/erfs"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Ward Scope ERFs"
+                  description="Operational ERF table from the Ward Warehouse. This will use ireps_erfs, not registry_erfs."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/ward-scope/premises"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Ward Scope Premises"
+                  description="Operational premises table from the Ward Warehouse. This will use premises, not registry_premises."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/ward-scope/meters"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Ward Scope Meters"
+                  description="Operational meters table from the Ward Warehouse. This will use asts, not registry_meters."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/ward-scope/geofences"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Ward Scope Geofences"
+                  description="View-only geofence grouping and spatial interrogation tools."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/maps"
+            element={<Navigate to="/ward-scope/maps" replace />}
+          />
+
+          {/* ADMIN */}
+
+          <Route
+            path="/admin/service-providers"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Service Providers"
+                  description="LM-wide service provider oversight."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/users"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Users"
+                  description="LM-wide user oversight."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/teams"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Teams"
+                  description="LM-wide team visibility and management."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/settings"
+            element={
+              <RoleRoute allowedRoles={ADMIN_ROLES}>
+                <ComingSoonPage
+                  title="Settings"
+                  description="LM scope settings and configuration."
+                />
               </RoleRoute>
             }
           />
