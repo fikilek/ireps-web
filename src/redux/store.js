@@ -14,6 +14,7 @@ import { mapWardsApi } from "./mapWardsApi";
 import { mapGeofencesApi } from "./mapGeofencesApi";
 import { mapPremisesApi } from "./mapPremisesApi";
 import { mapErfsApi } from "./mapErfsApi";
+import { wardErfsApi } from "./wardErfsApi";
 
 export const store = configureStore({
   reducer: {
@@ -32,6 +33,8 @@ export const store = configureStore({
     [mapGeofencesApi.reducerPath]: mapGeofencesApi.reducer,
     [mapPremisesApi.reducerPath]: mapPremisesApi.reducer,
     [mapErfsApi.reducerPath]: mapErfsApi.reducer,
+
+    [wardErfsApi.reducerPath]: wardErfsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware()
@@ -47,7 +50,8 @@ export const store = configureStore({
       .concat(mapWardsApi.middleware)
       .concat(mapGeofencesApi.middleware)
       .concat(mapPremisesApi.middleware)
-      .concat(mapErfsApi.middleware),
+      .concat(mapErfsApi.middleware)
+      .concat(wardErfsApi.middleware),
 });
 
 setupListeners(store.dispatch);
