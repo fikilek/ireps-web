@@ -1014,3 +1014,29 @@ p {
     flex-direction: column;
   }
 }
+
+.ward-scope-header {
+  align-items: stretch;
+}
+
+.ward-scope-stat-card {
+  min-width: 150px;
+  padding: 14px 16px;
+}
+
+.ward-scope-summary {
+  align-self: center;
+  min-width: 260px;
+}
+
+@media (max-width: 800px) {
+  .ward-scope-summary {
+    align-self: stretch;
+    min-width: 100%;
+    text-align: left;
+  }
+
+  .ward-scope-stat-card {
+    width: 100%;
+  }
+}

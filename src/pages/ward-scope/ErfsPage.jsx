@@ -1,13 +1,5 @@
-import { useGeo } from "../../context/GeoContext";
+import WardScopeHeader from "./components/WardScopeHeader";
 import { useWarehouse } from "../../context/WarehouseContext";
-
-const getWardPcode = (ward) => ward?.id || ward?.pcode || ward?.wardPcode || "";
-
-const getWardLabel = (ward) => {
-  if (!ward) return "NAv";
-
-  return ward?.name || `Ward ${ward?.code || ward?.wardNumber || "NAv"}`;
-};
 
 const getErfKey = (erf) => erf?.erfId || erf?.id || erf?.erfNo || "NAv";
 
@@ -24,91 +16,30 @@ const getPremiseCount = (erf) => {
 };
 
 export default function ErfsPage() {
-  const { geoState, updateGeo } = useGeo();
-  const { available, all, filtered, sync, scope, selected, loading } =
-    useWarehouse();
-
-  const wards = available?.wards || [];
+  const { all, filtered, sync, scope, loading } = useWarehouse();
 
   const allErfs = all?.erfs || [];
   const erfs = filtered?.erfs || [];
-
-  const selectedWardPcode = getWardPcode(geoState?.selectedWard);
-
-  const selectedWard = selected?.ward || null;
-
-  const selectedWardLabel = selectedWard
-    ? `${getWardLabel(selectedWard)} · ${getWardPcode(selectedWard)}`
-    : "No ward selected";
-
-  function handleWardChange(event) {
-    const wardPcode = event.target.value;
-
-    if (!wardPcode) {
-      updateGeo({
-        selectedWard: null,
-        lastSelectionType: null,
-      });
-      return;
-    }
-
-    const ward = wards.find((item) => getWardPcode(item) === wardPcode);
-
-    updateGeo({
-      selectedWard: ward || {
-        id: wardPcode,
-        pcode: wardPcode,
-        wardPcode,
-        name: `Ward ${wardPcode}`,
-      },
-      lastSelectionType: "WARD",
-    });
-  }
+  const selectedWardPcode = scope?.wardPcode || "";
 
   return (
     <>
-      <section className="filter-panel">
-        <label>
-          Ward
-          <select value={selectedWardPcode} onChange={handleWardChange}>
-            <option value="">Select ward</option>
-
-            {wards.map((ward) => {
-              const wardPcode = getWardPcode(ward);
-
-              return (
-                <option key={wardPcode} value={wardPcode}>
-                  {getWardLabel(ward)} · {wardPcode}
-                </option>
-              );
-            })}
-          </select>
-        </label>
-
-        <div className="stat-card">
-          <span>Ward ERFs</span>
-          <strong>
-            {loading
+      <WardScopeHeader
+        stats={[
+          {
+            label: "Ward ERFs",
+            value: loading
               ? "Loading..."
               : sync?.erfs?.status === "ready"
                 ? allErfs.length
-                : sync?.erfs?.status || "idle"}
-          </strong>
-        </div>
-
-        <div className="stat-card">
-          <span>Premises Loaded</span>
-          <strong>{filtered?.prems?.length || 0}</strong>
-        </div>
-
-        <div className="filter-summary">
-          <strong>{selectedWardLabel}</strong>
-          <span>
-            LM: {scope?.lmPcode || "NAv"} · Ward:{" "}
-            {scope?.wardPcode || "Not selected"}
-          </span>
-        </div>
-      </section>
+                : sync?.erfs?.status || "idle",
+          },
+          {
+            label: "Premises Loaded",
+            value: filtered?.prems?.length || 0,
+          },
+        ]}
+      />
 
       <section className="table-panel">
         <div className="load-more-row">
