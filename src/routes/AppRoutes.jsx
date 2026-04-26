@@ -23,6 +23,7 @@ import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
 import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 import MapPage from "../pages/maps/MapPage";
 import ErfsPage from "@/pages/ward-scope/ErfsPage";
+import PremisesPage from "@/pages/ward-scope/PremisesPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
@@ -172,10 +173,7 @@ export default function AppRoutes() {
             path="/ward-scope/premises"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Ward Scope Premises"
-                  description="Operational premises table from the Ward Warehouse. This will use premises, not registry_premises."
-                />
+                <PremisesPage />
               </RoleRoute>
             }
           />
