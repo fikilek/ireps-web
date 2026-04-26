@@ -22,6 +22,7 @@ import UserActivityReportPage from "../pages/reports/UserActivityReportPage";
 import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
 import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 import MapPage from "../pages/maps/MapPage";
+import ErfsPage from "@/pages/ward-scope/ErfsPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
@@ -162,10 +163,7 @@ export default function AppRoutes() {
             path="/ward-scope/erfs"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Ward Scope ERFs"
-                  description="Operational ERF table from the Ward Warehouse. This will use ireps_erfs, not registry_erfs."
-                />
+                <ErfsPage />
               </RoleRoute>
             }
           />
