@@ -24,6 +24,7 @@ import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 import MapPage from "../pages/maps/MapPage";
 import ErfsPage from "@/pages/ward-scope/ErfsPage";
 import PremisesPage from "@/pages/ward-scope/PremisesPage";
+import MetersPage from "../pages/ward-scope/MetersPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
@@ -182,10 +183,7 @@ export default function AppRoutes() {
             path="/ward-scope/meters"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Ward Scope Meters"
-                  description="Operational meters table from the Ward Warehouse. This will use asts, not registry_meters."
-                />
+                <MetersPage />
               </RoleRoute>
             }
           />
