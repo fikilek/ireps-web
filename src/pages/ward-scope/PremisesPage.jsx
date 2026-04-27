@@ -11,27 +11,33 @@ const getPremiseAddress = (premise) => {
 
   const address = premise?.address || {};
 
-  const parts = [
-    address?.strNo,
-    address?.strName,
-    address?.strType,
-    address?.suburbName,
-  ].filter(Boolean);
+  const parts = [address?.strNo, address?.strName, address?.strType].filter(
+    Boolean,
+  );
 
   if (parts.length) return parts.join(" ");
 
   return premise?.fullAddress || premise?.premiseAddress || "NAv";
 };
 
+const getSuburb = (premise) => {
+  if (typeof premise?.address === "string") return premise.address;
+
+  const suburb = premise?.address?.suburbName || "";
+
+  return suburb;
+};
+
 const getPropertyType = (premise) => {
   if (typeof premise?.propertyType === "string") return premise.propertyType;
 
-  return (
-    premise?.propertyType?.name ||
-    premise?.property?.type ||
-    premise?.type ||
-    "NAv"
-  );
+  return premise?.propertyType?.type || premise?.type || "NAv";
+};
+
+const getPropertyName = (premise) => {
+  if (typeof premise?.propertyName === "string") return premise.propertyName;
+
+  return premise?.propertyType?.name || "NAv";
 };
 
 const getUnitNo = (premise) => {
@@ -40,7 +46,7 @@ const getUnitNo = (premise) => {
     premise?.propertyType?.UnitNo ||
     premise?.unitNo ||
     premise?.unitNumber ||
-    "NAv"
+    ""
   );
 };
 
@@ -166,10 +172,12 @@ export default function PremisesPage() {
               <thead>
                 <tr>
                   <th>Address</th>
-                  <th>Property Type</th>
-                  <th>Unit</th>
-                  <th>Occupancy</th>
+                  <th>SUBURB NAME</th>
                   <th>ERF No</th>
+                  <th>Property Type</th>
+                  <th>Property Name</th>
+                  <th>Unit No</th>
+                  {/* <th>Occupancy</th> */}
                   <th>Electricity</th>
                   <th>Water</th>
                   <th>Total Meters</th>
@@ -181,10 +189,12 @@ export default function PremisesPage() {
                 {premises.map((premise) => (
                   <tr key={getPremiseKey(premise)}>
                     <td>{getPremiseAddress(premise)}</td>
-                    <td>{getPropertyType(premise)}</td>
-                    <td>{getUnitNo(premise)}</td>
-                    <td>{getOccupancyStatus(premise)}</td>
+                    <td>{getSuburb(premise)}</td>
                     <td title={getErfId(premise)}>{getErfNo(premise)}</td>
+                    <td>{getPropertyType(premise)}</td>
+                    <td>{getPropertyName(premise)}</td>
+                    <td>{getUnitNo(premise)}</td>
+                    {/* <td>{getOccupancyStatus(premise)}</td> */}
                     <td>{getElectricityMeterCount(premise)}</td>
                     <td>{getWaterMeterCount(premise)}</td>
                     <td>{getTotalMeterCount(premise)}</td>

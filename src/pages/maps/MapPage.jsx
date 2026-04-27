@@ -572,19 +572,6 @@ function getPremiseId(premise) {
   return premise?.premiseId || premise?.id || "";
 }
 
-// function getPremiseAddressLabel(premise) {
-//   const address = premise?.address || {};
-
-//   const parts = [
-//     address?.strNo,
-//     address?.strName,
-//     address?.strType,
-//     address?.suburbName,
-//   ].filter(Boolean);
-
-//   return parts.length ? parts.join(" ") : "NAv";
-// }
-
 function getPremiseErfNo(premise) {
   return premise?.erfNo || premise?.erf?.erfNo || "NAv";
 }
@@ -597,6 +584,65 @@ function getPremisePropertyParts(premise) {
     name: propertyType?.name || "",
     unitNo: propertyType?.unitNo || "",
   };
+}
+
+function getMeterId(meter) {
+  return (
+    meter?.ast?.astData?.astId ||
+    meter?.astData?.astId ||
+    meter?.meterId ||
+    meter?.id ||
+    ""
+  );
+}
+
+function getMeterNo(meter) {
+  return (
+    meter?.ast?.astData?.astNo ||
+    meter?.astData?.astNo ||
+    meter?.meterNo ||
+    "NAv"
+  );
+}
+
+function getMeterType(meter) {
+  return (
+    meter?.accessData?.meterType ||
+    meter?.ast?.astData?.astType ||
+    meter?.astData?.astType ||
+    meter?.meterType ||
+    "NAv"
+  );
+}
+
+function getMeterPremiseId(meter) {
+  return (
+    meter?.accessData?.premise?.id ||
+    meter?.premiseId ||
+    meter?.premise?.id ||
+    ""
+  );
+}
+
+function getMeterPoint(meter) {
+  const gps =
+    meter?.ast?.location?.gps || meter?.location?.gps || meter?.gps || null;
+
+  const lat = gps?.lat ?? gps?.latitude ?? null;
+  const lng = gps?.lng ?? gps?.longitude ?? null;
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return { lat, lng };
+}
+
+function getPremisePoint(premise) {
+  const lat = premise?.lat ?? premise?.geometry?.centroid?.lat ?? null;
+  const lng = premise?.lng ?? premise?.geometry?.centroid?.lng ?? null;
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return { lat, lng };
 }
 
 function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
@@ -707,7 +753,6 @@ function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
               <hr />
               <div>Electricity meters: ${premise.electricityMeterCount || 0}</div>
               <div>Water meters: ${premise.waterMeterCount || 0}</div>
-              <div>Total meters: ${premise.totalMeterCount || 0}</div>
               <div>Occupancy: ${premise?.occupancy?.status || premise?.occupancyStatus || "NAv"}</div>
             </div>
           `);
@@ -757,6 +802,194 @@ function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
   return null;
 }
 
+function MeterMarkersLayer({ meters, selectedMeterId, onSelectMeter }) {
+  const map = useMap();
+  const clustererRef = useRef(null);
+  const markersRef = useRef([]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+      clustererRef.current = null;
+    }
+
+    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current = [];
+
+    if (!Array.isArray(meters) || meters.length === 0) return;
+
+    const hoverInfoWindow = new window.google.maps.InfoWindow({
+      disableAutoPan: true,
+    });
+
+    const clickInfoWindow = new window.google.maps.InfoWindow();
+
+    const markers = meters
+      .map((meter) => {
+        const meterPoint = getMeterPoint(meter);
+        if (!meterPoint) return null;
+
+        const meterId = getMeterId(meter);
+        const meterNo = getMeterNo(meter);
+        const meterType = getMeterType(meter);
+        const premiseId = getMeterPremiseId(meter);
+        const isSelected = meterId === selectedMeterId;
+
+        const marker = new window.google.maps.Marker({
+          position: meterPoint,
+          label: {
+            text: meterType?.toLowerCase?.().startsWith("water") ? "W" : "E",
+            fontWeight: "900",
+            color: "#ffffff",
+          },
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: isSelected ? 8 : 5,
+            fillColor: meterType?.toLowerCase?.().startsWith("water")
+              ? "#0284c7"
+              : "#ca8a04",
+            fillOpacity: 0.95,
+            strokeColor: isSelected ? "#dc2626" : "#ffffff",
+            strokeWeight: isSelected ? 3 : 2,
+          },
+          zIndex: isSelected ? 130 : 90,
+        });
+
+        marker.addListener("mouseover", () => {
+          hoverInfoWindow.setContent(`
+            <div style="font-family: Arial, sans-serif; min-width: 170px;">
+              <strong>${meterNo}</strong>
+              <div style="margin-top: 4px;">${meterType}</div>
+            </div>
+          `);
+
+          hoverInfoWindow.open({
+            anchor: marker,
+            map,
+            shouldFocus: false,
+          });
+        });
+
+        marker.addListener("mouseout", () => {
+          hoverInfoWindow.close();
+        });
+
+        marker.addListener("click", () => {
+          onSelectMeter?.(meter);
+
+          hoverInfoWindow.close();
+
+          clickInfoWindow.setContent(`
+            <div style="font-family: Arial, sans-serif; min-width: 230px;">
+              <strong style="font-size: 14px;">${meterNo}</strong>
+              <div style="margin-top: 6px;">Type: ${meterType}</div>
+              <div>Premise: ${premiseId || "NAv"}</div>
+              <div>Meter ID: ${meterId || "NAv"}</div>
+            </div>
+          `);
+
+          clickInfoWindow.open({
+            anchor: marker,
+            map,
+            shouldFocus: false,
+          });
+        });
+
+        return marker;
+      })
+      .filter(Boolean);
+
+    markersRef.current = markers;
+
+    clustererRef.current = new MarkerClusterer({
+      map,
+      markers,
+    });
+
+    return () => {
+      hoverInfoWindow.close();
+      clickInfoWindow.close();
+
+      if (clustererRef.current) {
+        clustererRef.current.clearMarkers();
+        clustererRef.current = null;
+      }
+
+      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current = [];
+    };
+  }, [map, meters, selectedMeterId, onSelectMeter]);
+
+  return null;
+}
+
+function MeterPremiseConnectorLayer({ meters, premises, selectedMeterId }) {
+  // console.log(`meters`, meters);
+  // console.log(`premises`, premises);
+  // console.log(`selectedMeterId`, selectedMeterId);
+
+  const map = useMap();
+  const linesRef = useRef([]);
+
+  const premiseById = useMemo(() => {
+    const lookup = new globalThis.Map();
+    // const lookup = new Map();
+
+    (premises || []).forEach((premise) => {
+      const premiseId = getPremiseId(premise);
+      if (premiseId) lookup.set(premiseId, premise);
+    });
+
+    return lookup;
+  }, [premises]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+
+    linesRef.current.forEach((line) => line.setMap(null));
+    linesRef.current = [];
+
+    if (!Array.isArray(meters) || meters.length === 0) return;
+
+    const lines = meters
+      .map((meter) => {
+        const meterId = getMeterId(meter);
+        const meterPoint = getMeterPoint(meter);
+        const premiseId = getMeterPremiseId(meter);
+        const premise = premiseById.get(premiseId);
+        const premisePoint = getPremisePoint(premise);
+
+        if (!meterPoint || !premisePoint) return null;
+
+        const isSelected = meterId === selectedMeterId;
+
+        const line = new window.google.maps.Polyline({
+          path: [premisePoint, meterPoint],
+          strokeColor: isSelected ? "#dc2626" : "#475569",
+          strokeOpacity: isSelected ? 0.95 : 0.45,
+          strokeWeight: isSelected ? 3 : 1,
+          zIndex: isSelected ? 120 : 60,
+          clickable: false,
+        });
+
+        line.setMap(map);
+        return line;
+      })
+      .filter(Boolean);
+
+    linesRef.current = lines;
+
+    return () => {
+      linesRef.current.forEach((line) => line.setMap(null));
+      linesRef.current = [];
+    };
+  }, [map, meters, premiseById, selectedMeterId]);
+
+  return null;
+}
+
 function getPremiseAddressLabel(premise) {
   const address = premise?.address || {};
 
@@ -775,6 +1008,7 @@ export default function MapPage() {
   const { geoState, updateGeo } = useGeo();
 
   const { available, filtered, scope, sync, loading } = useWarehouse();
+  console.log(`MapPage --filtered`, filtered);
 
   const activeLmPcode = scope?.lmPcode || getActiveLmPcode(activeWorkbase);
 
@@ -790,11 +1024,17 @@ export default function MapPage() {
 
   const mapPremises = useMemo(() => filtered?.prems || [], [filtered?.prems]);
 
+  const mapMeters = useMemo(() => filtered?.meters || [], [filtered?.meters]);
+
   const selectedGeoFenceId = geoState?.selectedGeofence?.id || "";
   const [showGeoFences, setShowGeoFences] = useState(true);
 
   const [selectedPremiseId, setSelectedPremiseId] = useState("");
   const [showPremises, setShowPremises] = useState(true);
+
+  const [showMeters, setShowMeters] = useState(true);
+  const [showMeterLines, setShowMeterLines] = useState(true);
+  const [selectedMeterId, setSelectedMeterId] = useState("");
 
   const [currentZoom, setCurrentZoom] = useState(10);
   const [viewportBounds, setViewportBounds] = useState(null);
@@ -823,6 +1063,7 @@ export default function MapPage() {
 
       setSelectedErfId("");
       setSelectedPremiseId("");
+      setSelectedMeterId("");
     },
     [updateGeo, wardBoundaries],
   );
@@ -913,8 +1154,22 @@ export default function MapPage() {
       });
 
       setSelectedPremiseId("");
+      setSelectedMeterId("");
     },
     [updateGeo, visibleGeoFences],
+  );
+
+  const handleSelectMeter = useCallback(
+    (meter) => {
+      const meterId = getMeterId(meter);
+      setSelectedMeterId(meterId);
+
+      updateGeo({
+        selectedMeter: meter,
+        lastSelectionType: "METER",
+      });
+    },
+    [updateGeo],
   );
 
   const selectedPremise = useMemo(() => {
@@ -1046,6 +1301,56 @@ export default function MapPage() {
         </div>
 
         <div className="map-scope-card">
+          <span>Map Layers</span>
+
+          <label className="map-checkbox-row">
+            <input
+              type="checkbox"
+              checked={showErfBoundaries || showErfDots}
+              onChange={(event) => {
+                setShowErfBoundaries(event.target.checked);
+                setShowErfDots(event.target.checked);
+              }}
+            />
+            Show ERFs
+          </label>
+
+          <label className="map-checkbox-row">
+            <input
+              type="checkbox"
+              checked={showPremises}
+              onChange={(event) => setShowPremises(event.target.checked)}
+              disabled={!selectedWardPcode}
+            />
+            Show premises
+          </label>
+
+          <label className="map-checkbox-row">
+            <input
+              type="checkbox"
+              checked={showMeters}
+              onChange={(event) => setShowMeters(event.target.checked)}
+              disabled={!selectedWardPcode}
+            />
+            Show meters
+          </label>
+
+          <label className="map-checkbox-row">
+            <input
+              type="checkbox"
+              checked={showMeterLines}
+              onChange={(event) => setShowMeterLines(event.target.checked)}
+              disabled={!selectedWardPcode || !showMeters}
+            />
+            Show meter-premise lines
+          </label>
+
+          <p className="muted">
+            {mapPremises.length} premises · {mapMeters.length} meters
+          </p>
+        </div>
+
+        <div className="map-scope-card">
           <span>Ward Premises</span>
 
           <label className="map-checkbox-row">
@@ -1098,7 +1403,6 @@ export default function MapPage() {
       </div>
 
       <div className="map-canvas-panel">
-        <div className="map-zoom-badge">Zoom {currentZoom.toFixed(1)}</div>
         <APIProvider apiKey={googleMapsApiKey}>
           <Map
             defaultCenter={mapCenter}
@@ -1129,6 +1433,22 @@ export default function MapPage() {
                 premises={mapPremises}
                 selectedPremiseId={selectedPremiseId}
                 onSelectPremise={setSelectedPremiseId}
+              />
+            ) : null}
+
+            {showMeterLines && showMeters && selectedWardPcode ? (
+              <MeterPremiseConnectorLayer
+                meters={mapMeters}
+                premises={mapPremises}
+                selectedMeterId={selectedMeterId}
+              />
+            ) : null}
+
+            {showMeters && selectedWardPcode ? (
+              <MeterMarkersLayer
+                meters={mapMeters}
+                selectedMeterId={selectedMeterId}
+                onSelectMeter={handleSelectMeter}
               />
             ) : null}
 
