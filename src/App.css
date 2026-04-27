@@ -755,6 +755,21 @@ p {
   background: #e2e8f0;
   border: 1px solid #cbd5e1;
   border-radius: 24px;
+  position: relative;
+}
+
+.map-zoom-badge {
+  position: absolute;
+  top: 14px;
+  left: 440px;
+  z-index: 10;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
 }
 
 .map-scope-card {
@@ -1038,5 +1053,111 @@ p {
 
   .ward-scope-stat-card {
     width: 100%;
+  }
+}
+
+.ward-geofence-lens {
+  margin-top: 12px;
+}
+
+.ward-geofence-lens select {
+  min-width: 220px;
+}
+
+.ward-scope-header-compact {
+  display: grid;
+  grid-template-columns: minmax(360px, 460px) 1fr auto;
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+}
+
+.ward-scope-controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.compact-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.compact-field select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.ward-scope-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.ward-scope-stat-card {
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.ward-scope-stat-card span {
+  font-size: 11px;
+}
+
+.ward-scope-stat-card strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.ward-scope-mini-summary {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ward-scope-mini-summary strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .ward-scope-header-compact {
+    grid-template-columns: 1fr;
+  }
+
+  .ward-scope-stats {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .ward-scope-mini-summary {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .ward-scope-stats {
+    grid-template-columns: 1fr;
   }
 }

@@ -32,11 +32,6 @@ const navSections = [
         path: "/ward-scope/meters",
         allowedRoles: MANAGEMENT_ROLES,
       },
-      {
-        label: "Geofences",
-        path: "/ward-scope/geofences",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
     ],
   },
   {

@@ -7,6 +7,7 @@ import { useGetGeoFencesByLmQuery } from "../redux/mapGeofencesApi";
 import { useGetPremisesByWardQuery } from "../redux/mapPremisesApi";
 import { useGetWardBoundariesByLmQuery } from "../redux/mapWardsApi";
 import { useGetErfsByWardQuery } from "../redux/wardErfsApi";
+import { useGetAstsByLmPcodeWardPcodeQuery } from "../redux/astsApi";
 
 import {
   buildGeoLibrary,
@@ -146,12 +147,19 @@ export const WarehouseProvider = ({ children }) => {
   } = useGetPremisesByWardQuery(wardPcode, {
     skip: !scopeReady,
   });
+  console.log(`warehose --wardPrems`, wardPrems);
 
-  // TODO: Add a web operational ASTs API when available.
-  const cloudMeters = [];
-  const metersLoading = false;
-  const metersFetching = false;
-  const metersError = null;
+  const {
+    data: cloudMeters = [],
+    isLoading: metersLoading,
+    isFetching: metersFetching,
+    error: metersError,
+  } = useGetAstsByLmPcodeWardPcodeQuery(
+    { lmPcode, wardPcode },
+    {
+      skip: !scopeReady,
+    },
+  );
 
   // TODO: Add a web operational TRNs API when available.
   const cloudTrns = [];
@@ -220,9 +228,31 @@ export const WarehouseProvider = ({ children }) => {
   // Geofence remains a lens, not a territorial parent.
   // -------------------------------------------------
   const filtered = useMemo(() => {
-    const filteredGeofences = selectedGeofenceId
-      ? all.geofences.filter((geoFence) => geoFence?.id === selectedGeofenceId)
-      : all.geofences;
+    // const filteredGeofences = selectedGeofenceId
+    //   ? all.geofences.filter((geoFence) => geoFence?.id === selectedGeofenceId)
+    //   : all.geofences;
+
+    // Geofences are map overlays/lenses.
+    // Keep all ward geofences visible even when one is selected.
+    const filteredGeofences = all.geofences;
+
+    // console.log("🧭 WAREHOUSE GEOFENCE DEBUG", {
+    //   selectedGeofenceId,
+    //   allPremCount: all.prems.length,
+    //   filteredPremCount: selectFilteredPrems({
+    //     prems: all.prems,
+    //     selectedErfId,
+    //     selectedPremiseId,
+    //     selectedGeofenceId,
+    //   }).length,
+    //   samplePremises: all.prems.slice(0, 5).map((premise) => ({
+    //     id: premise?.id,
+    //     premiseId: premise?.premiseId,
+    //     erfNo: premise?.erfNo,
+    //     geofenceRefs: premise?.geofenceRefs,
+    //     geofenceIds: premise?.geofenceIds,
+    //   })),
+    // });
 
     return {
       wards: selectFilteredWards({ wards: all.wards }),
@@ -235,12 +265,14 @@ export const WarehouseProvider = ({ children }) => {
         prems: all.prems,
         selectedErfId,
         selectedPremiseId,
+        selectedGeofenceId,
       }),
       meters: selectFilteredMeters({
         meters: all.meters,
         selectedErfId,
         selectedPremiseId,
         selectedMeterId,
+        selectedGeofenceId,
       }),
       trns: selectFilteredTrns({
         trns: all.trns,

@@ -89,15 +89,20 @@ const getTotalMeterCount = (premise) => {
 };
 
 export default function PremisesPage() {
-  const { all, filtered, sync, scope, loading } = useWarehouse();
+  const { all, filtered, sync, scope, selected, loading } = useWarehouse();
 
   const allPremises = all?.prems || [];
   const premises = filtered?.prems || [];
   const selectedWardPcode = scope?.wardPcode || "";
+  const selectedGeofence = selected?.geofence || null;
+  const activeGeofenceLabel =
+    selectedGeofence?.name || selectedGeofence?.id || "None";
 
   return (
     <>
       <WardScopeHeader
+        showGeofenceLens
+        geofenceClearLabel="All ward premises"
         stats={[
           {
             label: "Ward Premises",
@@ -108,8 +113,12 @@ export default function PremisesPage() {
                 : sync?.premises?.status || "idle",
           },
           {
-            label: "Filtered Premises",
+            label: "Visible Premises",
             value: premises.length,
+          },
+          {
+            label: "Active Geofence",
+            value: activeGeofenceLabel,
           },
           {
             label: "Meters Loaded",

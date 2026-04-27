@@ -4,6 +4,7 @@ import { useWarehouse } from "../../context/WarehouseContext";
 const getMeterKey = (meter) =>
   meter?.ast?.astData?.astId ||
   meter?.astData?.astId ||
+  meter?.meterId ||
   meter?.id ||
   meter?.meterNo ||
   "NAv";
@@ -28,10 +29,7 @@ const getPremiseId = (meter) =>
   "NAv";
 
 const getPremiseAddress = (meter) =>
-  meter?.accessData?.premise?.address ||
-  meter?.premiseAddress ||
-  meter?.address ||
-  "NAv";
+  meter?.accessData?.premise?.address || meter?.premiseAddress || "NAv";
 
 const getErfNo = (meter) => meter?.accessData?.erfNo || meter?.erfNo || "NAv";
 
@@ -70,6 +68,17 @@ const getGpsLabel = (meter) => {
   return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
 };
 
+const getGeofenceNames = (meter) => {
+  const refs = Array.isArray(meter?.geofenceRefs) ? meter.geofenceRefs : [];
+
+  if (!refs.length) return "NAv";
+
+  return refs
+    .map((ref) => ref?.name || ref?.id)
+    .filter(Boolean)
+    .join(", ");
+};
+
 export default function MetersPage() {
   const { all, filtered, sync, scope, loading } = useWarehouse();
 
@@ -80,21 +89,24 @@ export default function MetersPage() {
   return (
     <>
       <WardScopeHeader
+        showGeofenceLens
+        geofenceClearLabel="Clear meters"
         stats={[
           {
             label: "Ward Meters",
             value: loading
               ? "Loading..."
-              : sync?.meters?.status === "ready"
+              : sync?.meters?.status === "ready" ||
+                  sync?.meters?.status === "pending"
                 ? allMeters.length
                 : sync?.meters?.status || "idle",
           },
           {
-            label: "Filtered Meters",
+            label: "Visible Meters",
             value: meters.length,
           },
           {
-            label: "Premises Loaded",
+            label: "Visible Premises",
             value: filtered?.prems?.length || 0,
           },
         ]}
@@ -106,7 +118,8 @@ export default function MetersPage() {
             <strong>Operational Meters</strong>
             <p className="muted">
               Meters are loaded through the Ward Warehouse from the operational
-              ASTs collection.
+              ASTs collection. The geofence dropdown filters meters and premises
+              through GeoContext.
             </p>
           </div>
 
@@ -127,8 +140,8 @@ export default function MetersPage() {
           <div className="empty-state">
             <h2>No meters loaded</h2>
             <p className="muted">
-              Meter sync status: {sync?.meters?.status || "idle"}. If this
-              remains empty, we will check the Firestore query/index for asts.
+              Meter sync status: {sync?.meters?.status || "idle"}. If a geofence
+              is selected, it may have no linked meters.
             </p>
           </div>
         ) : (
@@ -144,6 +157,7 @@ export default function MetersPage() {
                   <th>Ward</th>
                   <th>LM</th>
                   <th>GPS</th>
+                  <th>Geofence</th>
                   <th>Updated</th>
                   <th>Updated By</th>
                   <th>Meter ID</th>
@@ -161,6 +175,7 @@ export default function MetersPage() {
                     <td>{getWardPcode(meter)}</td>
                     <td>{getLmPcode(meter)}</td>
                     <td>{getGpsLabel(meter)}</td>
+                    <td>{getGeofenceNames(meter)}</td>
                     <td>{getUpdatedAt(meter)}</td>
                     <td>{getUpdatedBy(meter)}</td>
                     <td>{getMeterKey(meter)}</td>

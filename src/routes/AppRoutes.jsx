@@ -189,18 +189,6 @@ export default function AppRoutes() {
           />
 
           <Route
-            path="/ward-scope/geofences"
-            element={
-              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Ward Scope Geofences"
-                  description="View-only geofence grouping and spatial interrogation tools."
-                />
-              </RoleRoute>
-            }
-          />
-
-          <Route
             path="/maps"
             element={<Navigate to="/ward-scope/maps" replace />}
           />

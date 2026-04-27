@@ -23,18 +23,23 @@ function normalizePremiseRow(id, data) {
   const electricityMeters = safeArray(data?.services?.electricityMeters);
   const waterMeters = safeArray(data?.services?.waterMeters);
 
-  return {
-    id: data?.id || id,
-    premiseId: data?.id || id,
+  const premiseId = data?.id || id;
 
+  return {
+    // Preserve backend shape first.
+    ...data,
+
+    // Stable identity fields for UI convenience.
+    id: premiseId,
+    premiseId,
+
+    // Convenience flat fields.
+    // These do NOT replace the backend nested fields because they use new names.
     lmPcode: data?.parents?.lmPcode || "NAv",
     wardPcode: data?.parents?.wardPcode || "NAv",
 
-    erfId: data?.erfId || "NAv",
-    erfNo: data?.erfNo || "NAv",
-
-    address: buildPremiseAddress(data?.address),
-    propertyType: data?.propertyType?.type || "NAv",
+    premiseAddress: buildPremiseAddress(data?.address),
+    propertyTypeLabel: data?.propertyType?.type || "NAv",
     propertyName: data?.propertyType?.name || "",
     unitNo: data?.propertyType?.unitNo || "",
 
@@ -57,17 +62,25 @@ function normalizePremiseRow(id, data) {
 }
 
 function sortPremiseRows(a, b) {
-  const erfCompare = String(a.erfNo).localeCompare(String(b.erfNo), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  const erfCompare = String(a.erfNo || "").localeCompare(
+    String(b.erfNo || ""),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
 
   if (erfCompare !== 0) return erfCompare;
 
-  return String(a.address).localeCompare(String(b.address), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return String(a.premiseAddress || "").localeCompare(
+    String(b.premiseAddress || ""),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
 }
 
 export const mapPremisesApi = createApi({
@@ -104,9 +117,6 @@ export const mapPremisesApi = createApi({
                     documentSnapshot.id,
                     documentSnapshot.data(),
                   ),
-                )
-                .filter(
-                  (row) => Number.isFinite(row.lat) && Number.isFinite(row.lng),
                 )
                 .sort(sortPremiseRows);
 

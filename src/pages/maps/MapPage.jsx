@@ -2,13 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
-import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
 
 import { useAuth } from "../../auth/useAuth";
+import { useGeo } from "@/context/GeoContext";
+import { useWarehouse } from "@/context/WarehouseContext";
+
 import { useGetLmBoundaryByIdQuery } from "../../redux/mapLmsApi";
-import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
+
 import { useLazyGetVisibleErfsByWardViewportQuery } from "../../redux/mapErfsApi";
+
 import DesktopGeoCascadingSelector from "../../features/maps/DesktopGeoCascadingSelector";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -25,6 +28,23 @@ function getActiveLmPcode(activeWorkbase) {
     activeWorkbase?.id ||
     activeWorkbase?.localMunicipalityId ||
     null
+  );
+}
+
+function getWardPcode(ward) {
+  return ward?.id || ward?.pcode || ward?.wardPcode || "";
+}
+
+function getWardNumber(ward) {
+  return ward?.code || ward?.wardNumber || "NAv";
+}
+
+function getGeoFenceWardPcode(geoFence) {
+  return (
+    geoFence?.wardPcode ||
+    geoFence?.parents?.wardPcode ||
+    geoFence?.parents?.wardId ||
+    ""
   );
 }
 
@@ -210,7 +230,7 @@ function WardBoundariesLayer({
 
   const selectedWard = useMemo(() => {
     return (
-      wardBoundaries.find((ward) => ward.wardPcode === selectedWardPcode) ||
+      wardBoundaries.find((ward) => getWardPcode(ward) === selectedWardPcode) ||
       null
     );
   }, [wardBoundaries, selectedWardPcode]);
@@ -227,12 +247,14 @@ function WardBoundariesLayer({
 
     const polygons = wardBoundaries
       .map((ward) => {
+        const wardPcode = getWardPcode(ward);
         const parsedGeometry = parseGeometry(ward.geometry);
         const paths = geoJsonPolygonToGooglePaths(parsedGeometry);
 
         if (!paths.length) return null;
 
-        const isSelected = ward.wardPcode === selectedWardPcode;
+        const isSelected = wardPcode === selectedWardPcode;
+        const wardNumber = getWardNumber(ward);
 
         const polygon = new window.google.maps.Polygon({
           paths,
@@ -248,15 +270,15 @@ function WardBoundariesLayer({
         const infoWindow = new window.google.maps.InfoWindow({
           content: `
             <div style="font-family: Arial, sans-serif; min-width: 140px;">
-              <strong>${ward.name || `Ward ${ward.wardNumber}`}</strong>
-              <div>Ward ${ward.wardNumber}</div>
-              <div>${ward.wardPcode}</div>
+              <strong>${ward.name || `Ward ${wardNumber}`}</strong>
+              <div>Ward ${wardNumber}</div>
+              <div>${wardPcode}</div>
             </div>
           `,
         });
 
         polygon.addListener("click", (event) => {
-          onSelectWard?.(ward.wardPcode);
+          onSelectWard?.(wardPcode);
 
           infoWindow.setPosition(event.latLng);
           infoWindow.open({
@@ -443,19 +465,23 @@ function ErfsViewportLayer({
             zIndex: isSelected ? 90 : 70,
           });
 
+          const premiseCount = Array.isArray(erf?.premiseIds)
+            ? erf.premiseIds.length
+            : 0;
+
           const infoWindow = new window.google.maps.InfoWindow({
             content: `
               <div style="font-family: Arial, sans-serif; min-width: 160px;">
-                <strong>ERF ${erf.erfNo}</strong>
-                <div>${erf.type}</div>
-                <div>${erf.erfId}</div>
-                <div>Premises: ${erf.premiseIds.length}</div>
+                <strong>ERF ${erf.erfNo || "NAv"}</strong>
+                <div>${erf.type || "NAv"}</div>
+                <div>${erf.erfId || erf.id || "NAv"}</div>
+                <div>Premises: ${premiseCount}</div>
               </div>
             `,
           });
 
           polygon.addListener("click", (event) => {
-            onSelectErf?.(erf.erfId);
+            onSelectErf?.(erf.erfId || erf.id);
 
             infoWindow.setPosition(event.latLng);
             infoWindow.open({
@@ -476,11 +502,11 @@ function ErfsViewportLayer({
             lng: erf.centroid.lng,
           },
           map,
-          title: `ERF ${erf.erfNo}`,
+          title: `ERF ${erf.erfNo || "NAv"}`,
           label:
             showErfLabels && canShowErfLabels
               ? {
-                  text: String(erf.erfNo),
+                  text: String(erf.erfNo || ""),
                   fontSize: "11px",
                   fontWeight: "700",
                 }
@@ -497,7 +523,7 @@ function ErfsViewportLayer({
         });
 
         marker.addListener("click", () => {
-          onSelectErf?.(erf.erfId);
+          onSelectErf?.(erf.erfId || erf.id);
         });
 
         markers.push(marker);
@@ -542,6 +568,37 @@ function flyToPoint(map, point, zoom = 19) {
   map.setZoom(zoom);
 }
 
+function getPremiseId(premise) {
+  return premise?.premiseId || premise?.id || "";
+}
+
+// function getPremiseAddressLabel(premise) {
+//   const address = premise?.address || {};
+
+//   const parts = [
+//     address?.strNo,
+//     address?.strName,
+//     address?.strType,
+//     address?.suburbName,
+//   ].filter(Boolean);
+
+//   return parts.length ? parts.join(" ") : "NAv";
+// }
+
+function getPremiseErfNo(premise) {
+  return premise?.erfNo || premise?.erf?.erfNo || "NAv";
+}
+
+function getPremisePropertyParts(premise) {
+  const propertyType = premise?.propertyType || {};
+
+  return {
+    type: propertyType?.type || "",
+    name: propertyType?.name || "",
+    unitNo: propertyType?.unitNo || "",
+  };
+}
+
 function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
   const map = useMap();
   const clustererRef = useRef(null);
@@ -549,7 +606,7 @@ function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
 
   const selectedPremise = useMemo(() => {
     return (
-      premises.find((premise) => premise.premiseId === selectedPremiseId) ||
+      premises.find((premise) => getPremiseId(premise) === selectedPremiseId) ||
       null
     );
   }, [premises, selectedPremiseId]);
@@ -569,56 +626,101 @@ function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
       return;
     }
 
-    const infoWindow = new window.google.maps.InfoWindow();
-
-    const markers = premises.map((premise) => {
-      const isSelected = premise.premiseId === selectedPremiseId;
-
-      const marker = new window.google.maps.Marker({
-        position: {
-          lat: premise.lat,
-          lng: premise.lng,
-        },
-        title: premise.address,
-        label: {
-          text: isSelected ? "P" : "p",
-          fontWeight: "900",
-        },
-        zIndex: isSelected ? 90 : 70,
-      });
-
-      marker.addListener("click", () => {
-        onSelectPremise?.(premise.premiseId);
-
-        infoWindow.setContent(`
-          <div style="font-family: Arial, sans-serif; min-width: 210px;">
-            <strong>${premise.address}</strong>
-            <div>Premise: ${premise.premiseId}</div>
-            <div>ERF: ${premise.erfNo}</div>
-            <div>Type: ${premise.propertyType}</div>
-            ${
-              premise.propertyName
-                ? `<div>Name: ${premise.propertyName}</div>`
-                : ""
-            }
-            ${premise.unitNo ? `<div>Unit: ${premise.unitNo}</div>` : ""}
-            <hr />
-            <div>Electricity meters: ${premise.electricityMeterCount}</div>
-            <div>Water meters: ${premise.waterMeterCount}</div>
-            <div>Total meters: ${premise.totalMeterCount}</div>
-            <div>Occupancy: ${premise.occupancyStatus}</div>
-          </div>
-        `);
-
-        infoWindow.open({
-          anchor: marker,
-          map,
-          shouldFocus: false,
-        });
-      });
-
-      return marker;
+    const hoverInfoWindow = new window.google.maps.InfoWindow({
+      disableAutoPan: true,
     });
+
+    const clickInfoWindow = new window.google.maps.InfoWindow();
+
+    const markers = premises
+      .filter(
+        (premise) =>
+          Number.isFinite(premise?.lat) && Number.isFinite(premise?.lng),
+      )
+      .map((premise) => {
+        const premiseId = getPremiseId(premise);
+        const premiseAddress = getPremiseAddressLabel(premise);
+        const erfNo = getPremiseErfNo(premise);
+        const propertyParts = getPremisePropertyParts(premise);
+        console.log(`propertyParts`, propertyParts);
+        const isSelected = premiseId === selectedPremiseId;
+
+        const marker = new window.google.maps.Marker({
+          position: {
+            lat: premise.lat,
+            lng: premise.lng,
+          },
+          label: {
+            text: isSelected ? "P" : "p",
+            fontWeight: "900",
+          },
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: isSelected ? 8 : 5,
+            fillColor: isSelected ? "#dc2626" : "#2563eb",
+            fillOpacity: 0.92,
+            strokeColor: "#ffffff",
+            strokeWeight: 2,
+          },
+          zIndex: isSelected ? 110 : 80,
+        });
+
+        marker.addListener("mouseover", () => {
+          hoverInfoWindow.setContent(`
+            <div style="font-family: Arial, sans-serif; min-width: 170px;">
+              <strong>${premiseAddress}</strong>
+              <div style="margin-top: 4px;">ERF ${erfNo}</div>
+            </div>
+          `);
+
+          hoverInfoWindow.open({
+            anchor: marker,
+            map,
+            shouldFocus: false,
+          });
+        });
+
+        marker.addListener("mouseout", () => {
+          hoverInfoWindow.close();
+        });
+
+        marker.addListener("click", () => {
+          onSelectPremise?.(premiseId);
+
+          hoverInfoWindow.close();
+
+          clickInfoWindow.setContent(`
+            <div style="font-family: Arial, sans-serif; min-width: 230px;">
+              <strong style="font-size: 14px;">${premiseAddress}</strong>
+              <div style="margin-top: 6px;">ERF: ${erfNo}</div>
+
+              <div> 
+                <span>
+                
+                  ${propertyParts.type ? `${propertyParts.type}` : ""}
+                  ${propertyParts.name ? `- ${propertyParts.name}` : ""}
+                  ${propertyParts.unitNo ? `- ${propertyParts.unitNo}` : ""}
+                
+                </span>
+              </div>
+
+              <hr />
+              <div>Electricity meters: ${premise.electricityMeterCount || 0}</div>
+              <div>Water meters: ${premise.waterMeterCount || 0}</div>
+              <div>Total meters: ${premise.totalMeterCount || 0}</div>
+              <div>Occupancy: ${premise?.occupancy?.status || premise?.occupancyStatus || "NAv"}</div>
+            </div>
+          `);
+
+          clickInfoWindow.open({
+            anchor: marker,
+            map,
+            shouldFocus: false,
+          });
+        });
+
+        return marker;
+      });
 
     markersRef.current = markers;
 
@@ -639,6 +741,9 @@ function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
     }
 
     return () => {
+      hoverInfoWindow.close();
+      clickInfoWindow.close();
+
       if (clustererRef.current) {
         clustererRef.current.clearMarkers();
         clustererRef.current = null;
@@ -652,20 +757,44 @@ function PremiseMarkersLayer({ premises, selectedPremiseId, onSelectPremise }) {
   return null;
 }
 
+function getPremiseAddressLabel(premise) {
+  const address = premise?.address || {};
+
+  const parts = [
+    address?.strNo,
+    address?.strName,
+    address?.strType,
+    address?.suburbName,
+  ].filter(Boolean);
+
+  return parts.length ? parts.join(" ") : "NAv";
+}
+
 export default function MapPage() {
   const { activeWorkbase } = useAuth();
+  const { geoState, updateGeo } = useGeo();
 
-  const [selectedWardPcode, setSelectedWardPcode] = useState("");
+  const { available, filtered, scope, sync, loading } = useWarehouse();
 
-  const [selectedGeoFenceId, setSelectedGeoFenceId] = useState("");
+  const activeLmPcode = scope?.lmPcode || getActiveLmPcode(activeWorkbase);
+
+  // Phase 1 migration:
+  // LM boundary remains map-specific.
+  // Ward boundaries come from Warehouse.
+  const wardBoundaries = useMemo(
+    () => available?.wards || [],
+    [available?.wards],
+  );
+  const selectedWardPcode =
+    scope?.wardPcode || getWardPcode(geoState?.selectedWard);
+
+  const mapPremises = useMemo(() => filtered?.prems || [], [filtered?.prems]);
+
+  const selectedGeoFenceId = geoState?.selectedGeofence?.id || "";
   const [showGeoFences, setShowGeoFences] = useState(true);
-
-  const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
   const [selectedPremiseId, setSelectedPremiseId] = useState("");
   const [showPremises, setShowPremises] = useState(true);
-
-  // Viewport state is managed here in the page component, and passed down to the ERF layer, which triggers the ERF query when the viewport changes. This is because the ERF data is the most viewport-sensitive, and we want to avoid unnecessary re-renders and re-queries of the LM boundary, ward boundaries, and geofences when the viewport changes.
 
   const [currentZoom, setCurrentZoom] = useState(10);
   const [viewportBounds, setViewportBounds] = useState(null);
@@ -676,14 +805,27 @@ export default function MapPage() {
   const [showErfDots, setShowErfDots] = useState(true);
   const [showErfLabels, setShowErfLabels] = useState(true);
 
-  // Viewport end
+  const handleSelectWard = useCallback(
+    (wardPcode) => {
+      const ward =
+        wardBoundaries.find((item) => getWardPcode(item) === wardPcode) || null;
 
-  const handleSelectWard = useCallback((wardPcode) => {
-    setSelectedWardPcode(wardPcode);
-    setSelectedGeoFenceId("");
-    setSelectedErfId("");
-    setSelectedPremiseId("");
-  }, []);
+      updateGeo({
+        selectedWard: ward || {
+          id: wardPcode,
+          pcode: wardPcode,
+          wardPcode,
+          name: `Ward ${wardPcode}`,
+        },
+        selectedGeofence: null,
+        lastSelectionType: "WARD",
+      });
+
+      setSelectedErfId("");
+      setSelectedPremiseId("");
+    },
+    [updateGeo, wardBoundaries],
+  );
 
   const {
     data: lmBoundary,
@@ -693,25 +835,11 @@ export default function MapPage() {
   } = useGetLmBoundaryByIdQuery(activeLmPcode || skipToken);
 
   const {
-    data: wardBoundaries = [],
-    isLoading: isWardsLoading,
-    isFetching: isWardsFetching,
-    error: wardsError,
-  } = useGetWardBoundariesByLmQuery(activeLmPcode || skipToken);
-
-  const {
     data: geoFences = [],
     isLoading: isGeoFencesLoading,
     isFetching: isGeoFencesFetching,
     error: geoFencesError,
   } = useGetGeoFencesByLmQuery(activeLmPcode || skipToken);
-
-  const {
-    data: wardPremises = [],
-    isLoading: isPremisesLoading,
-    isFetching: isPremisesFetching,
-    error: premisesError,
-  } = useGetPremisesByWardQuery(selectedWardPcode || skipToken);
 
   const [
     fetchVisibleErfs,
@@ -747,23 +875,55 @@ export default function MapPage() {
 
   const visibleErfs = currentZoom >= 17 ? erfViewportResult.rows || [] : [];
 
-  // const selectedErf =
-  //   visibleErfs.find((erf) => erf.erfId === selectedErfId) || null;
-
   const visibleGeoFences = useMemo(() => {
     if (!selectedWardPcode) return geoFences;
 
-    return geoFences.filter(
-      (geoFence) => geoFence.wardPcode === selectedWardPcode,
-    );
+    return geoFences.filter((geoFence) => {
+      const geoFenceWardPcode = getGeoFenceWardPcode(geoFence);
+
+      if (!geoFenceWardPcode) return true;
+
+      return geoFenceWardPcode === selectedWardPcode;
+    });
   }, [geoFences, selectedWardPcode]);
+
+  const handleSelectGeoFence = useCallback(
+    (geoFenceId) => {
+      console.log(`geoFenceId`, geoFenceId);
+      if (!geoFenceId) {
+        updateGeo({
+          selectedGeofence: null,
+          lastSelectionType: null,
+        });
+
+        setSelectedPremiseId("");
+        return;
+      }
+
+      const geoFence = visibleGeoFences.find(
+        (item) => item?.id === geoFenceId,
+      ) || {
+        id: geoFenceId,
+      };
+      console.log(`geoFence`, geoFence);
+
+      updateGeo({
+        selectedGeofence: geoFence,
+        lastSelectionType: "GEOFENCE",
+      });
+
+      setSelectedPremiseId("");
+    },
+    [updateGeo, visibleGeoFences],
+  );
 
   const selectedPremise = useMemo(() => {
     return (
-      wardPremises.find((premise) => premise.premiseId === selectedPremiseId) ||
-      null
+      mapPremises.find(
+        (premise) => (premise?.premiseId || premise?.id) === selectedPremiseId,
+      ) || null
     );
-  }, [wardPremises, selectedPremiseId]);
+  }, [mapPremises, selectedPremiseId]);
 
   const mapCenter = lmBoundary?.centroid
     ? {
@@ -782,11 +942,9 @@ export default function MapPage() {
           : "NAv";
 
   const wardStatus =
-    isWardsLoading || isWardsFetching
-      ? "Loading..."
-      : wardsError
-        ? "Error"
-        : `${wardBoundaries.length} wards`;
+    sync?.wards?.status === "ready"
+      ? `${wardBoundaries.length} wards`
+      : sync?.wards?.status || "idle";
 
   const geoFenceStatus =
     isGeoFencesLoading || isGeoFencesFetching
@@ -794,8 +952,6 @@ export default function MapPage() {
       : geoFencesError
         ? "Error"
         : `${visibleGeoFences.length} geofences`;
-
-  // helpers
 
   if (!googleMapsApiKey) {
     return (
@@ -818,21 +974,6 @@ export default function MapPage() {
       <div className="map-side-panel">
         <p className="eyebrow">Map</p>
 
-        <h1>iREPS Reporting Map</h1>
-
-        <p className="muted">
-          Reporting-only spatial command centre. No field operations, no
-          creating premises, no creating meters, and no editing map data.
-        </p>
-
-        <div className="notice-panel">
-          <strong>Current map sprint</strong>
-          <p className="muted">
-            LM boundary first. Then we add ward boundaries, then selected-ward
-            ERFs, then premises, then meters.
-          </p>
-        </div>
-
         <DesktopGeoCascadingSelector
           activeLmPcode={activeLmPcode}
           lmBoundary={lmBoundary}
@@ -846,7 +987,7 @@ export default function MapPage() {
           geoFences={visibleGeoFences}
           geoFenceStatus={geoFenceStatus}
           selectedGeoFenceId={selectedGeoFenceId}
-          onSelectGeoFence={setSelectedGeoFenceId}
+          onSelectGeoFence={handleSelectGeoFence}
         />
 
         <div className="map-scope-card">
@@ -858,8 +999,8 @@ export default function MapPage() {
           </strong>
 
           <p className="muted">
-            ERFs load only inside the current viewport when a ward is selected
-            and zoom is 17 or higher.
+            ERFs still use the viewport layer for this step. Next migration will
+            derive map ERFs from the Warehouse ERF list.
           </p>
 
           <label className="map-checkbox-row">
@@ -920,25 +1061,30 @@ export default function MapPage() {
           <strong>
             {!selectedWardPcode
               ? "Select ward"
-              : isPremisesLoading || isPremisesFetching
+              : loading
                 ? "Loading..."
-                : premisesError
+                : sync?.premises?.status === "error"
                   ? "Error"
-                  : `${wardPremises.length} premises`}
+                  : `${mapPremises.length} premises`}
           </strong>
 
           <select
             value={selectedPremiseId}
             onChange={(event) => setSelectedPremiseId(event.target.value)}
-            disabled={!selectedWardPcode || !wardPremises.length}
+            disabled={!selectedWardPcode || !mapPremises.length}
           >
             <option value="">Select premise</option>
 
-            {wardPremises.map((premise) => (
-              <option key={premise.premiseId} value={premise.premiseId}>
-                {premise.address} · ERF {premise.erfNo}
-              </option>
-            ))}
+            {mapPremises.map((premise) => {
+              const premiseId = premise?.premiseId || premise?.id || "";
+              const addressLabel = getPremiseAddressLabel(premise);
+
+              return (
+                <option key={premiseId} value={premiseId}>
+                  {addressLabel} · ERF {premise?.erfNo || "NAv"} Erf No
+                </option>
+              );
+            })}
           </select>
 
           <p className="muted">
@@ -952,6 +1098,7 @@ export default function MapPage() {
       </div>
 
       <div className="map-canvas-panel">
+        <div className="map-zoom-badge">Zoom {currentZoom.toFixed(1)}</div>
         <APIProvider apiKey={googleMapsApiKey}>
           <Map
             defaultCenter={mapCenter}
@@ -962,22 +1109,24 @@ export default function MapPage() {
             style={{ width: "100%", height: "100%" }}
           >
             <LmBoundaryLayer lmBoundary={lmBoundary} />
+
             <WardBoundariesLayer
               wardBoundaries={wardBoundaries}
               selectedWardPcode={selectedWardPcode}
               onSelectWard={handleSelectWard}
             />
+
             {showGeoFences ? (
               <GeoFenceLayer
                 geoFences={visibleGeoFences}
                 selectedGeoFenceId={selectedGeoFenceId}
-                onSelectGeoFence={setSelectedGeoFenceId}
+                onSelectGeoFence={handleSelectGeoFence}
               />
             ) : null}
 
             {showPremises && selectedWardPcode ? (
               <PremiseMarkersLayer
-                premises={wardPremises}
+                premises={mapPremises}
                 selectedPremiseId={selectedPremiseId}
                 onSelectPremise={setSelectedPremiseId}
               />

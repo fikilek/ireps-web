@@ -49,22 +49,41 @@ export const selectFilteredErfs = ({ erfs = [], selectedErfId = null }) => {
   );
 };
 
+const belongsToSelectedGeofence = (entity, selectedGeofenceId = null) => {
+  if (!selectedGeofenceId) return true;
+
+  const geofenceRefs = Array.isArray(entity?.geofenceRefs)
+    ? entity.geofenceRefs
+    : [];
+
+  return geofenceRefs.some((ref) => ref?.id === selectedGeofenceId);
+};
+
 export const selectFilteredPrems = ({
   prems = [],
   selectedErfId = null,
   selectedPremiseId = null,
+  selectedGeofenceId = null,
 }) => {
   const premsArr = Array.isArray(prems) ? prems : [];
 
+  const geofenceFilteredPrems = premsArr.filter((premise) =>
+    belongsToSelectedGeofence(premise, selectedGeofenceId),
+  );
+
   if (selectedPremiseId) {
-    return premsArr.filter((p) => p?.id === selectedPremiseId);
+    return geofenceFilteredPrems.filter(
+      (p) => (p?.premiseId || p?.id || null) === selectedPremiseId,
+    );
   }
 
   if (selectedErfId) {
-    return premsArr.filter((p) => p?.erfId === selectedErfId);
+    return geofenceFilteredPrems.filter(
+      (p) => (p?.erfId || p?.erf?.id || null) === selectedErfId,
+    );
   }
 
-  return premsArr;
+  return geofenceFilteredPrems;
 };
 
 export const selectFilteredMeters = ({
@@ -72,26 +91,40 @@ export const selectFilteredMeters = ({
   selectedErfId = null,
   selectedPremiseId = null,
   selectedMeterId = null,
+  selectedGeofenceId = null,
 }) => {
   const metersArr = Array.isArray(meters) ? meters : [];
 
+  const geofenceFilteredMeters = metersArr.filter((meter) =>
+    belongsToSelectedGeofence(meter, selectedGeofenceId),
+  );
+
   if (selectedMeterId) {
-    return metersArr.filter(
-      (m) => (m?.ast?.astData?.astId || m?.id || null) === selectedMeterId,
+    return geofenceFilteredMeters.filter(
+      (m) =>
+        (m?.ast?.astData?.astId ||
+          m?.astData?.astId ||
+          m?.meterId ||
+          m?.id ||
+          null) === selectedMeterId,
     );
   }
 
   if (selectedPremiseId) {
-    return metersArr.filter(
-      (m) => m?.accessData?.premise?.id === selectedPremiseId,
+    return geofenceFilteredMeters.filter(
+      (m) =>
+        (m?.accessData?.premise?.id || m?.premiseId || null) ===
+        selectedPremiseId,
     );
   }
 
   if (selectedErfId) {
-    return metersArr.filter((m) => m?.accessData?.erfId === selectedErfId);
+    return geofenceFilteredMeters.filter(
+      (m) => (m?.accessData?.erfId || m?.erfId || null) === selectedErfId,
+    );
   }
 
-  return metersArr;
+  return geofenceFilteredMeters;
 };
 
 export const selectFilteredTrns = ({
