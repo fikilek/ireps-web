@@ -260,6 +260,11 @@ export default function ConsoleLayout() {
             <span>{serviceProviderName}</span>
           </div>
 
+          {/* 👇 NEW: Profile link */}
+          <NavLink to="/profile" className="secondary-button">
+            Profile
+          </NavLink>
+
           <button className="secondary-button" onClick={handleSignOut}>
             Sign out
           </button>

@@ -26,6 +26,8 @@ import ErfsPage from "@/pages/ward-scope/ErfsPage";
 import PremisesPage from "@/pages/ward-scope/PremisesPage";
 import MetersPage from "../pages/ward-scope/MetersPage";
 
+import ProfilePage from "../pages/profile/ProfilePage";
+
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
 const ADMIN_ROLES = ["SPU", "ADM", "MNG"];
@@ -239,6 +241,15 @@ export default function AppRoutes() {
                   title="Settings"
                   description="LM scope settings and configuration."
                 />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/profile"
+            element={
+              <RoleRoute allowedRoles={ALL_OPERATIONAL_ROLES}>
+                <ProfilePage />
               </RoleRoute>
             }
           />

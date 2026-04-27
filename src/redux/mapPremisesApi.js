@@ -61,26 +61,11 @@ function normalizePremiseRow(id, data) {
   };
 }
 
-function sortPremiseRows(a, b) {
-  const erfCompare = String(a.erfNo || "").localeCompare(
-    String(b.erfNo || ""),
-    undefined,
-    {
-      numeric: true,
-      sensitivity: "base",
-    },
-  );
+function sortPremisesByUpdatedAtDesc(a, b) {
+  const aAt = a?.metadata?.updatedAt || "";
+  const bAt = b?.metadata?.updatedAt || "";
 
-  if (erfCompare !== 0) return erfCompare;
-
-  return String(a.premiseAddress || "").localeCompare(
-    String(b.premiseAddress || ""),
-    undefined,
-    {
-      numeric: true,
-      sensitivity: "base",
-    },
-  );
+  return String(bAt).localeCompare(String(aAt));
 }
 
 export const mapPremisesApi = createApi({
@@ -118,7 +103,7 @@ export const mapPremisesApi = createApi({
                     documentSnapshot.data(),
                   ),
                 )
-                .sort(sortPremiseRows);
+                .sort(sortPremisesByUpdatedAtDesc);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...rows);

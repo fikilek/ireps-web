@@ -172,7 +172,6 @@ export const WarehouseProvider = ({ children }) => {
 
   // Web warehouse ERFs are normal arrays from wardErfsApi.
   // This replaces the mobile ERF pack-key model for now.
-  const packKeyMatches = scopeReady;
 
   // Narrow geo ids only for filtered selectors.
   const selectedErfId = getErfId(selectedErf);
@@ -235,24 +234,6 @@ export const WarehouseProvider = ({ children }) => {
     // Geofences are map overlays/lenses.
     // Keep all ward geofences visible even when one is selected.
     const filteredGeofences = all.geofences;
-
-    // console.log("🧭 WAREHOUSE GEOFENCE DEBUG", {
-    //   selectedGeofenceId,
-    //   allPremCount: all.prems.length,
-    //   filteredPremCount: selectFilteredPrems({
-    //     prems: all.prems,
-    //     selectedErfId,
-    //     selectedPremiseId,
-    //     selectedGeofenceId,
-    //   }).length,
-    //   samplePremises: all.prems.slice(0, 5).map((premise) => ({
-    //     id: premise?.id,
-    //     premiseId: premise?.premiseId,
-    //     erfNo: premise?.erfNo,
-    //     geofenceRefs: premise?.geofenceRefs,
-    //     geofenceIds: premise?.geofenceIds,
-    //   })),
-    // });
 
     return {
       wards: selectFilteredWards({ wards: all.wards }),

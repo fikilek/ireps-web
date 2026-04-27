@@ -1,5 +1,5 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 
 import { db } from "../firebase";
 
@@ -66,7 +66,44 @@ export const mapLmsApi = createApi({
         }
       },
     }),
+    getAllLms: builder.query({
+      async queryFn() {
+        return { data: [] };
+      },
+
+      async onCacheEntryAdded(
+        _arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = null;
+
+        try {
+          await cacheDataLoaded;
+
+          const lmsRef = collection(db, "lms");
+
+          unsubscribe = onSnapshot(lmsRef, (snapshot) => {
+            const rows = snapshot.docs
+              .map((docSnap) => ({
+                id: docSnap.id,
+                ...docSnap.data(),
+              }))
+              .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+            updateCachedData(() => rows);
+          });
+        } catch (error) {
+          console.error("getAllLms stream error:", error);
+        }
+
+        await cacheEntryRemoved;
+
+        if (unsubscribe) {
+          unsubscribe();
+        }
+      },
+    }),
   }),
 });
 
-export const { useGetLmBoundaryByIdQuery } = mapLmsApi;
+export const { useGetLmBoundaryByIdQuery, useGetAllLmsQuery } = mapLmsApi;

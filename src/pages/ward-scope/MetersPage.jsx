@@ -151,11 +151,8 @@ export default function MetersPage() {
                 <tr>
                   <th>Meter No</th>
                   <th>Type</th>
-                  <th>Premise</th>
                   <th>Address</th>
                   <th>ERF No</th>
-                  <th>Ward</th>
-                  <th>LM</th>
                   <th>GPS</th>
                   <th>Geofence</th>
                   <th>Updated</th>
@@ -169,11 +166,8 @@ export default function MetersPage() {
                   <tr key={getMeterKey(meter)}>
                     <td>{getMeterNo(meter)}</td>
                     <td>{getMeterType(meter)}</td>
-                    <td>{getPremiseId(meter)}</td>
                     <td>{getPremiseAddress(meter)}</td>
                     <td title={getErfId(meter)}>{getErfNo(meter)}</td>
-                    <td>{getWardPcode(meter)}</td>
-                    <td>{getLmPcode(meter)}</td>
                     <td>{getGpsLabel(meter)}</td>
                     <td>{getGeofenceNames(meter)}</td>
                     <td>{getUpdatedAt(meter)}</td>
