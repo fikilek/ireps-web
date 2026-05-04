@@ -52,6 +52,13 @@ import {
 
 import { recomputeGeoFenceCounts } from "./geofences/membership.js";
 
+import { onMeterLifecycleTrnCallable } from "./meterLifecycle/callables.js";
+
+import {
+  onIrepsSelectOptionsCallable,
+  onIrepsSelectLookupAdminCallable,
+} from "./lookups/index.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -76,6 +83,9 @@ export {
   deleteTeam,
   createGeoFence,
   onGeoFenceCreated,
+  onMeterLifecycleTrnCallable,
+  onIrepsSelectOptionsCallable,
+  onIrepsSelectLookupAdminCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
