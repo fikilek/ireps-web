@@ -10,7 +10,7 @@
     "lint:functions": "eslint functions",
     "lint:web": "eslint src",
     "lint:fix": "eslint . --fix",
-    "check:functions": "node --check functions/index.js && node --check functions/meterLifecycle/helpers.js && node --check functions/meterLifecycle/callables.js && node --check functions/meterLifecycle/instructionCallable.js",
+    "check:functions": "node --check functions/index.js && node --check functions/meterLifecycle/helpers.js && node --check functions/meterLifecycle/callables.js && node --check functions/meterLifecycle/instructionCallable.js && node --check functions/meterLifecycle/acceptRejectCallable.js",
     "preview": "vite preview"
   },
   "dependencies": {
