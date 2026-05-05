@@ -1414,6 +1414,25 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
   };
 }
 
+export function sanitizeWorkorderRef(workorder = {}) {
+  const id = String(workorder?.id || "").trim();
+  const type = normalizeUpper(
+    workorder?.type || (id ? "WORKORDER" : "GENERAL"),
+  );
+  const createdMode = normalizeUpper(
+    workorder?.createdMode || (id ? "MASS" : "INDIVIDUAL"),
+  );
+
+  return {
+    id: id || null,
+    name: String(workorder?.name || (id ? id : "General")).trim(),
+    type: ["GENERAL", "WORKORDER"].includes(type) ? type : "GENERAL",
+    createdMode: ["INDIVIDUAL", "MASS"].includes(createdMode)
+      ? createdMode
+      : "INDIVIDUAL",
+  };
+}
+
 export function buildLifecycleInstructionTrnPayload({
   data,
   astDoc,
@@ -1537,6 +1556,8 @@ export function buildLifecycleInstructionTrnPayload({
         id: "NAv",
         name: "NAv",
       },
+
+    workorder: sanitizeWorkorderRef(data?.workorder || {}),
 
     metadata: buildFlatMetadata({
       now,
