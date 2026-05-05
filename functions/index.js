@@ -55,6 +55,7 @@ import { recomputeGeoFenceCounts } from "./geofences/membership.js";
 import { onMeterLifecycleTrnCallable } from "./meterLifecycle/callables.js";
 import { onCreateMeterLifecycleInstructionCallable } from "./meterLifecycle/instructionCallable.js";
 import { onAcceptRejectLifecycleInstructionCallable } from "./meterLifecycle/acceptRejectCallable.js";
+import { onManageLifecycleInstructionCallable } from "./meterLifecycle/manageInstructionCallable.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -90,6 +91,7 @@ export {
   onIrepsSelectLookupAdminCallable,
   onCreateMeterLifecycleInstructionCallable,
   onAcceptRejectLifecycleInstructionCallable,
+  onManageLifecycleInstructionCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
