@@ -16,6 +16,30 @@ export const IMPLEMENTED_LIFECYCLE_TRN_TYPES = [
   "METER_RECONNECTION",
 ];
 
+export const OFFICE_LCT_INSTRUCTION_TRN_TYPES = [
+  "METER_INSPECTION",
+  "METER_DISCONNECTION",
+  "METER_RECONNECTION",
+  "METER_REMOVAL",
+];
+
+export const ACTIVE_LCT_WORKFLOW_STATES = [
+  "ISSUED",
+  "REASSIGNED",
+  "ACCEPTED",
+  "IN_PROGRESS",
+];
+
+export const LCT_WORKFLOW_STATES = [
+  "ISSUED",
+  "REASSIGNED",
+  "ACCEPTED",
+  "REJECTED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "CANCELLED",
+];
+
 export const COMMISSIONING_MEDIA_TAGS = {
   vendingEvidence: "vendingEvidence",
   finalSwitchOnEvidence: "finalSwitchOnEvidence",
@@ -1206,4 +1230,318 @@ export function validateMeterReconnection({ data, astDoc }) {
     astStatusChanged: currentState !== nextAstState,
     astDataChanged: Object.keys(astPatch).length > 0,
   };
+}
+
+// new LCT helpers
+
+export function sanitizeGeofenceRefs(geofenceRefs = []) {
+  if (!Array.isArray(geofenceRefs)) return [];
+
+  return geofenceRefs
+    .map((item) => ({
+      id: String(item?.id || "").trim(),
+      name: String(item?.name || "").trim(),
+    }))
+    .filter((item) => item.id && item.name);
+}
+
+export function validateCreateLifecycleInstructionInput(data = {}) {
+  const trnId = String(data?.id || "").trim();
+  const trnType = normalizeUpper(
+    data?.trnType || data?.accessData?.trnType || "",
+  );
+  const astId = String(data?.astId || data?.ast?.astData?.astId || "").trim();
+  const premiseId = String(
+    data?.premiseId || data?.accessData?.premise?.id || "",
+  ).trim();
+
+  if (!trnId) {
+    return {
+      ok: false,
+      code: "INVALID_TRN_ID",
+      message: "TRN id is required",
+    };
+  }
+
+  if (!OFFICE_LCT_INSTRUCTION_TRN_TYPES.includes(trnType)) {
+    return {
+      ok: false,
+      code: "INVALID_OFFICE_LCT_TYPE",
+      message:
+        "Only INSPECTION, DISCONNECTION, RECONNECTION and REMOVAL instructions can be created from Operations.",
+    };
+  }
+
+  if (!astId) {
+    return {
+      ok: false,
+      code: "INVALID_AST_ID",
+      message: "astId is required",
+    };
+  }
+
+  if (!premiseId) {
+    return {
+      ok: false,
+      code: "INVALID_PREMISE_ID",
+      message: "premiseId is required",
+    };
+  }
+
+  return {
+    ok: true,
+    trnId,
+    trnType,
+    astId,
+    premiseId,
+  };
+}
+
+export function validateLifecycleInstructionAssignment(
+  assignment = {},
+  trnType = "NAv",
+) {
+  const instruction = assignment?.instruction || {};
+  const createdFor = assignment?.createdFor || {};
+  const createdForType = normalizeUpper(createdFor?.type);
+
+  if (!instruction?.code) {
+    return {
+      ok: false,
+      code: "INVALID_ASSIGNMENT_INSTRUCTION_CODE",
+      message: "assignment.instruction.code is required",
+    };
+  }
+
+  if (normalizeUpper(instruction.code) !== normalizeUpper(trnType)) {
+    return {
+      ok: false,
+      code: "ASSIGNMENT_INSTRUCTION_MISMATCH",
+      message: "assignment.instruction.code must match trnType",
+    };
+  }
+
+  if (!String(instruction?.text || "").trim()) {
+    return {
+      ok: false,
+      code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
+      message: "assignment.instruction.text is required",
+    };
+  }
+
+  if (!["USER", "TEAM"].includes(createdForType)) {
+    return {
+      ok: false,
+      code: "INVALID_ASSIGNMENT_CREATED_FOR_TYPE",
+      message: "assignment.createdFor.type must be USER or TEAM",
+    };
+  }
+
+  if (!String(createdFor?.id || "").trim()) {
+    return {
+      ok: false,
+      code: "INVALID_ASSIGNMENT_CREATED_FOR_ID",
+      message: "assignment.createdFor.id is required",
+    };
+  }
+
+  if (!String(createdFor?.name || "").trim()) {
+    return {
+      ok: false,
+      code: "INVALID_ASSIGNMENT_CREATED_FOR_NAME",
+      message: "assignment.createdFor.name is required",
+    };
+  }
+
+  return { ok: true };
+}
+
+export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
+  const currentState = getAstCurrentState(astDoc);
+
+  if (trnType === "METER_INSPECTION") {
+    if (currentState === "REMOVED") {
+      return {
+        ok: false,
+        code: "INVALID_AST_STATE",
+        message: "REMOVED meters cannot be issued for inspection",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  if (trnType === "METER_DISCONNECTION") {
+    if (currentState !== "CONNECTED") {
+      return {
+        ok: false,
+        code: "INVALID_AST_STATE",
+        message: "Only CONNECTED meters can be issued for disconnection",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  if (trnType === "METER_RECONNECTION") {
+    if (currentState !== "DISCONNECTED") {
+      return {
+        ok: false,
+        code: "INVALID_AST_STATE",
+        message: "Only DISCONNECTED meters can be issued for reconnection",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  if (trnType === "METER_REMOVAL") {
+    if (currentState === "REMOVED") {
+      return {
+        ok: false,
+        code: "INVALID_AST_STATE",
+        message: "This meter has already been removed",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    code: "INVALID_OFFICE_LCT_TYPE",
+    message: "Unsupported lifecycle instruction type",
+  };
+}
+
+export function buildLifecycleInstructionTrnPayload({
+  data,
+  astDoc,
+  premiseData,
+  now,
+  actorUid,
+  actorName,
+}) {
+  const trnType = normalizeUpper(
+    data?.trnType || data?.accessData?.trnType || "",
+  );
+
+  const astId = String(data?.astId || data?.ast?.astData?.astId || "").trim();
+  const serverAstData = getAstData(astDoc);
+  const geofenceRefs = sanitizeGeofenceRefs(data?.geofenceRefs || []);
+
+  const assignment = data?.assignment || {};
+
+  return removeUndefinedDeep({
+    id: data.id,
+
+    accessData: {
+      access: {
+        hasAccess: data?.accessData?.access?.hasAccess || "yes",
+        reason: data?.accessData?.access?.reason || "NAv",
+      },
+
+      erfId: astDoc?.accessData?.erfId || premiseData?.erfId || "NAv",
+      erfNo: astDoc?.accessData?.erfNo || premiseData?.erfNo || "NAv",
+
+      parents: astDoc?.accessData?.parents || premiseData?.parents || {},
+
+      premise: {
+        id:
+          astDoc?.accessData?.premise?.id ||
+          data?.premiseId ||
+          premiseData?.id ||
+          "NAv",
+
+        address:
+          astDoc?.accessData?.premise?.address ||
+          data?.accessData?.premise?.address ||
+          "NAv",
+
+        propertyType:
+          astDoc?.accessData?.premise?.propertyType ||
+          data?.accessData?.premise?.propertyType ||
+          "NAv",
+      },
+
+      trnType,
+    },
+
+    assignment: {
+      instruction: {
+        code: normalizeUpper(assignment?.instruction?.code || trnType),
+        text: String(assignment?.instruction?.text || ""),
+        notes: String(assignment?.instruction?.notes || ""),
+        mediaRequired: assignment?.instruction?.mediaRequired === true,
+      },
+
+      createdFor: {
+        type: normalizeUpper(assignment?.createdFor?.type || "USER"),
+        id: String(assignment?.createdFor?.id || "NAv"),
+        name: String(assignment?.createdFor?.name || "NAv"),
+      },
+
+      acceptedRejectedAt: null,
+      acceptedRejectedUid: null,
+      acceptedRejectedUser: null,
+      rejectReason: "",
+
+      cancelledAt: null,
+      cancelledByUid: null,
+      cancelledByUser: null,
+      cancelReason: "",
+    },
+
+    workflow: {
+      state: "ISSUED",
+      createdMode: "OFFICE",
+      reassignmentCount: 0,
+      executionStartedAt: null,
+      completedAt: null,
+      completedByUid: null,
+      completedByUser: null,
+    },
+
+    assignmentHistory: [],
+
+    geofenceRefs,
+
+    ast: {
+      astData: {
+        astId,
+        astNo: serverAstData?.astNo || "NAv",
+        astManufacturer: serverAstData?.astManufacturer || "NAv",
+        astName: serverAstData?.astName || "NAv",
+        meter: serverAstData?.meter || {},
+      },
+    },
+
+    meterType: astDoc?.meterType || data?.meterType || "NAv",
+
+    commissioning: null,
+    removal: null,
+    disconnection: null,
+    reconnection: null,
+    inspection: null,
+
+    media: [],
+
+    status: {
+      state: astDoc?.status?.state || null,
+      id: astDoc?.status?.id || data?.status?.id || "NAv",
+      detail: astDoc?.status?.detail || data?.status?.detail || "NAv",
+    },
+
+    serviceProvider: astDoc?.serviceProvider ||
+      data?.serviceProvider || {
+        id: "NAv",
+        name: "NAv",
+      },
+
+    metadata: buildFlatMetadata({
+      now,
+      actorUid,
+      actorName,
+    }),
+  });
 }
