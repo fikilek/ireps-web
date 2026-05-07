@@ -5,13 +5,11 @@
 import { getFirestore } from "firebase-admin/firestore";
 
 import {
-  appendGeoFenceId,
   appendGeoFenceRef,
   doesEntityBelongToGeoFence,
   extractAstPoint,
   extractErfPoint,
   extractPremisePoint,
-  normalizeGeoFenceIds,
   normalizeGeoFenceRefs,
 } from "./helpers.js";
 
@@ -57,31 +55,20 @@ export const geoFenceRefsEqual = (left = [], right = []) => {
   return true;
 };
 
-// export const arraysEqual = (left = [], right = []) => {
-//   if (left === right) return true;
-//   if (!Array.isArray(left) || !Array.isArray(right)) return false;
-//   if (left.length !== right.length) return false;
+function hasGeoFenceRef(item = {}, geoFenceId = "") {
+  const refs = Array.isArray(item?.geofenceRefs) ? item.geofenceRefs : [];
 
-//   for (let i = 0; i < left.length; i += 1) {
-//     if (left[i] !== right[i]) return false;
-//   }
-
-//   return true;
-// };
+  return refs.some((ref) => ref?.id === geoFenceId);
+}
 
 export const buildMembershipUpdate = ({
   docRef,
-  existingGeoFenceIds,
   existingGeoFenceRefs,
   geoFenceId,
   geoFenceName,
 }) => {
-  const currentGeoFenceIds = normalizeGeoFenceIds(existingGeoFenceIds || []);
-  const nextGeoFenceIds = normalizeGeoFenceIds(
-    appendGeoFenceId(currentGeoFenceIds, geoFenceId),
-  );
-
   const currentGeoFenceRefs = normalizeGeoFenceRefs(existingGeoFenceRefs || []);
+
   const nextGeoFenceRefs = normalizeGeoFenceRefs(
     appendGeoFenceRef(currentGeoFenceRefs, {
       id: geoFenceId,
@@ -89,50 +76,22 @@ export const buildMembershipUpdate = ({
     }),
   );
 
-  const idsUnchanged = primitiveArraysEqual(
-    currentGeoFenceIds,
-    nextGeoFenceIds,
-  );
-
   const refsUnchanged = geoFenceRefsEqual(
     currentGeoFenceRefs,
     nextGeoFenceRefs,
   );
 
-  if (idsUnchanged && refsUnchanged) {
+  if (refsUnchanged) {
     return null;
   }
 
   return {
     ref: docRef,
     data: {
-      geofenceIds: nextGeoFenceIds,
       geofenceRefs: nextGeoFenceRefs,
     },
   };
 };
-
-// export const buildMembershipUpdate = ({
-//   docRef,
-//   existingGeoFenceIds,
-//   geoFenceId,
-// }) => {
-//   const currentGeoFenceIds = normalizeGeoFenceIds(existingGeoFenceIds || []);
-//   const nextGeoFenceIds = normalizeGeoFenceIds(
-//     appendGeoFenceId(currentGeoFenceIds, geoFenceId),
-//   );
-
-//   if (arraysEqual(currentGeoFenceIds, nextGeoFenceIds)) {
-//     return null;
-//   }
-
-//   return {
-//     ref: docRef,
-//     data: {
-//       geofenceIds: nextGeoFenceIds,
-//     },
-//   };
-// };
 
 /* =====================================================
    COLLECT ENTITY UPDATES
@@ -163,17 +122,10 @@ export const collectGeoFenceErfUpdates = ({
 
     const update = buildMembershipUpdate({
       docRef: erfDoc.ref,
-      existingGeoFenceIds: erfData?.geofenceIds,
       existingGeoFenceRefs: erfData?.geofenceRefs,
       geoFenceId,
       geoFenceName,
     });
-
-    // const update = buildMembershipUpdate({
-    //   docRef: erfDoc.ref,
-    //   existingGeoFenceIds: erfData?.geofenceIds,
-    //   geoFenceId,
-    // });
 
     if (update) {
       updates.push(update);
@@ -208,17 +160,10 @@ export const collectGeoFencePremiseUpdates = ({
 
     const update = buildMembershipUpdate({
       docRef: premiseDoc.ref,
-      existingGeoFenceIds: premiseData?.geofenceIds,
       existingGeoFenceRefs: premiseData?.geofenceRefs,
       geoFenceId,
       geoFenceName,
     });
-
-    // const update = buildMembershipUpdate({
-    //   docRef: premiseDoc.ref,
-    //   existingGeoFenceIds: premiseData?.geofenceIds,
-    //   geoFenceId,
-    // });
 
     if (update) {
       updates.push(update);
@@ -253,17 +198,10 @@ export const collectGeoFenceAstUpdates = ({
 
     const update = buildMembershipUpdate({
       docRef: astDoc.ref,
-      existingGeoFenceIds: astData?.geofenceIds,
       existingGeoFenceRefs: astData?.geofenceRefs,
       geoFenceId,
       geoFenceName,
     });
-
-    // const update = buildMembershipUpdate({
-    //   docRef: astDoc.ref,
-    //   existingGeoFenceIds: astData?.geofenceIds,
-    //   geoFenceId,
-    // });
 
     if (update) {
       updates.push(update);
@@ -330,33 +268,39 @@ export const recomputeGeoFenceCounts = async ({
     db = getFirestore();
   }
 
-  const erfCountSnapshot = await db
+  const erfSnapshot = await db
     .collection("ireps_erfs")
     .where("admin.localMunicipality.pcode", "==", lmPcode)
     .where("admin.ward.pcode", "==", wardPcode)
-    .where("geofenceIds", "array-contains", geoFenceId)
-    .count()
     .get();
 
-  const premiseCountSnapshot = await db
+  const premiseSnapshot = await db
     .collection("premises")
     .where("parents.lmPcode", "==", lmPcode)
     .where("parents.wardPcode", "==", wardPcode)
-    .where("geofenceIds", "array-contains", geoFenceId)
-    .count()
     .get();
 
-  const astCountSnapshot = await db
+  const astSnapshot = await db
     .collection("asts")
     .where("accessData.parents.lmPcode", "==", lmPcode)
     .where("accessData.parents.wardPcode", "==", wardPcode)
-    .where("geofenceIds", "array-contains", geoFenceId)
-    .count()
     .get();
 
+  const erfs = erfSnapshot.docs.filter((doc) =>
+    hasGeoFenceRef(doc.data(), geoFenceId),
+  ).length;
+
+  const premises = premiseSnapshot.docs.filter((doc) =>
+    hasGeoFenceRef(doc.data(), geoFenceId),
+  ).length;
+
+  const meters = astSnapshot.docs.filter((doc) =>
+    hasGeoFenceRef(doc.data(), geoFenceId),
+  ).length;
+
   return {
-    erfs: erfCountSnapshot.data().count || 0,
-    premises: premiseCountSnapshot.data().count || 0,
-    meters: astCountSnapshot.data().count || 0,
+    erfs,
+    premises,
+    meters,
   };
 };
