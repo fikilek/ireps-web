@@ -1,5 +1,8 @@
 const NOW_FALLBACK_USER = "SYSTEM";
 
+// All meter lifecycle-family TRN types known to the platform.
+// Note: METER_COMMISSIONING is valid, but it is handled by
+// functions/commissioning/, not by the generic meterLifecycle callable.
 export const LIFECYCLE_TRN_TYPES = [
   "METER_COMMISSIONING",
   "METER_INSPECTION",
