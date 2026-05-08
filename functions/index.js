@@ -32,6 +32,9 @@ import { rebuildWorkbaseRegistryRowCallable } from "./registry/workbaseCallable.
 import { startWorkbaseRegistrySyncCallable } from "./registry/workbaseSyncCallable.js";
 import { onWorkbaseRegistryJobCreated } from "./registry/workbaseSyncTrigger.js";
 
+import { onCreateMeterCommissioningCallable } from "./commissioning/callable.js";
+import { onMeterCommissioningTrnCreated } from "./commissioning/trigger.js";
+
 import { createGeoFence } from "./geofences/callables.js";
 import { onGeoFenceCreated } from "./geofences/triggers.js";
 
@@ -76,9 +79,6 @@ export {
   rebuildPremiseRegistryRowCallable,
   rebuildMeterRegistryRowCallable,
   onTrnWritten,
-  // rebuildErfRegistryForLmCallable,
-  // startErfRegistrySyncCallable,
-  // onErfRegistryJobCreated,
   createTeam,
   renameTeam,
   addTeamMember,
@@ -87,11 +87,13 @@ export {
   createGeoFence,
   onGeoFenceCreated,
   onMeterLifecycleTrnCallable,
-  onIrepsSelectOptionsCallable,
-  onIrepsSelectLookupAdminCallable,
   onCreateMeterLifecycleInstructionCallable,
   onAcceptRejectLifecycleInstructionCallable,
   onManageLifecycleInstructionCallable,
+  onCreateMeterCommissioningCallable,
+  onMeterCommissioningTrnCreated,
+  onIrepsSelectOptionsCallable,
+  onIrepsSelectLookupAdminCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
@@ -2576,157 +2578,459 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
   }
 });
 
-export const onMeterCreated = onDocumentCreated(
-  "asts/{astId}",
-  async (event) => {
-    const db = getFirestore();
+function getAstScope(astData = {}) {
+  return {
+    lmPcode: astData?.accessData?.parents?.lmPcode || null,
+    wardPcode: astData?.accessData?.parents?.wardPcode || null,
+  };
+}
 
-    const astId = event.params.astId;
+function getAstAuditContext(astData = {}) {
+  const metadata = astData?.metadata || {};
 
-    try {
-      console.log("onMeterCreated ---- START", { astId });
+  return {
+    auditUid: metadata?.updatedByUid || metadata?.createdByUid || "SYSTEM",
+    auditUser: metadata?.updatedByUser || metadata?.createdByUser || "SYSTEM",
+  };
+}
 
-      const snap = event.data;
-      if (!snap?.exists) {
-        console.log("onMeterCreated ---- no snapshot");
-        return null;
-      }
+function normalizeAstGeoFenceRefs(refs = []) {
+  return normalizeGeoFenceRefs(Array.isArray(refs) ? refs : []);
+}
 
-      const data = snap.data() || {};
-      /* ------------------------------------------------
-   0. SYNC PREMISE SERVICE SNAPSHOT
-   ------------------------------------------------ */
-      await syncPremiseServiceSnapshotFromMeter({
-        astId,
-        astData: data,
+function geoFenceRefsSignature(refs = []) {
+  return normalizeAstGeoFenceRefs(refs)
+    .map((ref) => `${ref.id}:${ref.name || ""}`)
+    .sort()
+    .join("|");
+}
+
+function geoFenceRefsSame(left = [], right = []) {
+  return geoFenceRefsSignature(left) === geoFenceRefsSignature(right);
+}
+
+function getGeoFenceRefIds(refs = []) {
+  return [
+    ...new Set(
+      normalizeAstGeoFenceRefs(refs)
+        .map((ref) => ref?.id || null)
+        .filter((id) => id && id !== "NAv"),
+    ),
+  ];
+}
+
+function unionGeoFenceRefIds(...refLists) {
+  return [
+    ...new Set(refLists.flatMap((refs) => getGeoFenceRefIds(refs || []))),
+  ];
+}
+
+function getAstPointSignature(astData = {}) {
+  const point = extractAstPoint(astData);
+
+  if (!point) return "NO_POINT";
+
+  const lat = Number(point.lat);
+  const lng = Number(point.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return "NO_POINT";
+  }
+
+  return `${lat.toFixed(8)},${lng.toFixed(8)}`;
+}
+
+function getAstSpatialSignature(astData = {}) {
+  const { lmPcode, wardPcode } = getAstScope(astData);
+
+  return [
+    lmPcode || "NO_LM",
+    wardPcode || "NO_WARD",
+    getAstPointSignature(astData),
+  ].join("|");
+}
+
+function didAstSpatialContextChange(before = {}, after = {}) {
+  return getAstSpatialSignature(before) !== getAstSpatialSignature(after);
+}
+
+async function safeRun(label, entityId, fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    logger.error(`${label} -- ERROR`, {
+      entityId,
+      message: error?.message || String(error),
+      stack: error?.stack || "NAv",
+    });
+
+    return null;
+  }
+}
+
+async function resolveAstGeoFenceRefs({ db, astId, astData }) {
+  const { lmPcode, wardPcode } = getAstScope(astData);
+  const astPoint = extractAstPoint(astData);
+
+  if (!lmPcode || !wardPcode) {
+    logger.warn("resolveAstGeoFenceRefs -- missing LM/Ward", {
+      astId,
+      lmPcode,
+      wardPcode,
+    });
+
+    return [];
+  }
+
+  if (!astPoint) {
+    logger.warn("resolveAstGeoFenceRefs -- missing AST point", {
+      astId,
+    });
+
+    return [];
+  }
+
+  const geoFenceSnapshot = await db
+    .collection("geo_fences")
+    .where("parents.lmPcode", "==", lmPcode)
+    .where("parents.wardPcode", "==", wardPcode)
+    .where("status", "==", "ACTIVE")
+    .get();
+
+  const matchedGeoFences = [];
+
+  for (const geoFenceDoc of geoFenceSnapshot.docs) {
+    const geoFence = geoFenceDoc.data() || {};
+    const bbox = geoFence?.geometry?.bbox || null;
+    const polygonPoints = geoFence?.geometry?.points || [];
+
+    if (!bbox || polygonPoints.length < 3) continue;
+
+    const belongs = doesEntityBelongToGeoFence({
+      point: astPoint,
+      bbox,
+      polygonPoints,
+    });
+
+    if (!belongs) continue;
+
+    matchedGeoFences.push({
+      id: geoFenceDoc.id,
+      name: geoFence?.name || geoFence?.description || geoFenceDoc.id,
+    });
+  }
+
+  return normalizeGeoFenceRefs(matchedGeoFences);
+}
+
+async function recomputeGeoFenceCountsForIds({
+  db,
+  geoFenceIds = [],
+  auditUid = "SYSTEM",
+  auditUser = "SYSTEM",
+}) {
+  const uniqueGeoFenceIds = [...new Set((geoFenceIds || []).filter(Boolean))];
+
+  for (const geoFenceId of uniqueGeoFenceIds) {
+    const geoFenceRef = db.collection("geo_fences").doc(geoFenceId);
+    const geoFenceSnap = await geoFenceRef.get();
+
+    if (!geoFenceSnap.exists) {
+      logger.warn("recomputeGeoFenceCountsForIds -- geofence missing", {
+        geoFenceId,
       });
+      continue;
+    }
 
-      /* ------------------------------------------------
-         1. KEEP EXISTING BEHAVIOR
-         ------------------------------------------------ */
-      await rebuildMeterRegistryRow(astId);
+    const geoFence = geoFenceSnap.data() || {};
+    const lmPcode = geoFence?.parents?.lmPcode || null;
+    const wardPcode = geoFence?.parents?.wardPcode || null;
 
-      /* ------------------------------------------------
-         2. RESOLVE GEOFENCE MEMBERSHIP
-         ------------------------------------------------ */
-
-      const lmPcode = data?.accessData?.parents?.lmPcode || null;
-      const wardPcode = data?.accessData?.parents?.wardPcode || null;
-      const metadata = data?.metadata || {};
-      const auditUid =
-        metadata?.updatedByUid || metadata?.createdByUid || "unknown_uid";
-      const auditUser =
-        metadata?.updatedByUser || metadata?.createdByUser || "Unknown Agent";
-
-      console.log("onMeterCreated ---- lmPcode", lmPcode);
-      console.log("onMeterCreated ---- wardPcode", wardPcode);
-      console.log("onMeterCreated ---- metadata", metadata);
-      console.log("onMeterCreated ---- auditUid", auditUid);
-      console.log("onMeterCreated ---- auditUser", auditUser);
-
-      console.log("onMeterCreated ---- scope", {
+    if (!lmPcode || !wardPcode) {
+      logger.warn("recomputeGeoFenceCountsForIds -- missing scope", {
+        geoFenceId,
         lmPcode,
         wardPcode,
       });
+      continue;
+    }
 
-      if (!lmPcode || !wardPcode) {
-        console.log(
-          "onMeterCreated ---- missing LM/Ward, skipping geofence sync",
-        );
-        return null;
-      }
+    const counts = await recomputeGeoFenceCounts({
+      db,
+      geoFenceId,
+      lmPcode,
+      wardPcode,
+    });
 
-      const astPoint = extractAstPoint(data);
+    await geoFenceRef.update({
+      counts,
+      "metadata.updatedAt": new Date().toISOString(),
+      "metadata.updatedByUid": auditUid,
+      "metadata.updatedByUser": auditUser,
+    });
 
-      if (!astPoint) {
-        console.log(
-          "onMeterCreated ---- no valid AST point, skipping geofence sync",
-        );
-        return null;
-      }
+    logger.info("recomputeGeoFenceCountsForIds -- updated", {
+      geoFenceId,
+      counts,
+    });
+  }
+}
 
-      const geoFenceSnapshot = await db
-        .collection("geo_fences")
-        .where("parents.lmPcode", "==", lmPcode)
-        .where("parents.wardPcode", "==", wardPcode)
-        .where("status", "==", "ACTIVE")
-        .get();
+async function syncAstGeoFenceMembership({
+  snap,
+  astId,
+  astData,
+  previousGeoFenceRefs = null,
+}) {
+  const db = getFirestore();
 
-      console.log("onMeterCreated ---- geofence candidates", {
-        count: geoFenceSnapshot.size,
-      });
+  const { auditUid, auditUser } = getAstAuditContext(astData);
 
-      const matchedGeoFences = [];
+  const currentGeoFenceRefs = normalizeAstGeoFenceRefs(
+    Array.isArray(previousGeoFenceRefs)
+      ? previousGeoFenceRefs
+      : astData?.geofenceRefs,
+  );
 
-      for (const geoFenceDoc of geoFenceSnapshot.docs) {
-        const geoFence = geoFenceDoc.data() || {};
-        const bbox = geoFence?.geometry?.bbox || null;
-        const polygonPoints = geoFence?.geometry?.points || [];
+  const nextGeoFenceRefs = await resolveAstGeoFenceRefs({
+    db,
+    astId,
+    astData,
+  });
 
-        const belongs = doesEntityBelongToGeoFence({
-          point: astPoint,
-          bbox,
-          polygonPoints,
-        });
+  const affectedGeoFenceIds = unionGeoFenceRefIds(
+    currentGeoFenceRefs,
+    nextGeoFenceRefs,
+  );
 
-        if (!belongs) continue;
+  if (!geoFenceRefsSame(currentGeoFenceRefs, nextGeoFenceRefs)) {
+    await snap.ref.update({
+      geofenceRefs: nextGeoFenceRefs,
+      "metadata.updatedAt": new Date().toISOString(),
+      "metadata.updatedByUid": auditUid,
+      "metadata.updatedByUser": auditUser,
+    });
 
-        matchedGeoFences.push({
-          id: geoFenceDoc.id,
-          name: geoFence?.name || geoFence?.description || geoFenceDoc.id,
-        });
-      }
+    logger.info("syncAstGeoFenceMembership -- AST membership updated", {
+      astId,
+      geofenceRefs: nextGeoFenceRefs,
+    });
+  } else {
+    logger.info("syncAstGeoFenceMembership -- AST membership unchanged", {
+      astId,
+      geofenceRefs: nextGeoFenceRefs,
+    });
+  }
 
-      const nextGeoFenceRefs = normalizeGeoFenceRefs(matchedGeoFences);
+  await recomputeGeoFenceCountsForIds({
+    db,
+    geoFenceIds: affectedGeoFenceIds,
+    auditUid,
+    auditUser,
+  });
 
-      await snap.ref.update({
-        geofenceRefs: nextGeoFenceRefs,
-        "metadata.updatedAt": new Date().toISOString(),
-        "metadata.updatedByUid": auditUid,
-        "metadata.updatedByUser": auditUser,
-      });
+  return {
+    geofenceRefs: nextGeoFenceRefs,
+    affectedGeoFenceIds,
+  };
+}
 
-      console.log("onMeterCreated ---- AST geofence membership updated", {
-        astId,
-        geofenceRefs: nextGeoFenceRefs,
-      });
+export const onMeterCreated = onDocumentCreated(
+  "asts/{astId}",
+  async (event) => {
+    const astId = event.params.astId;
+    const snap = event.data;
 
-      /* ------------------------------------------------
-         3. RECOMPUTE COUNTS
-         ------------------------------------------------ */
-
-      for (const geoFenceRef of nextGeoFenceRefs) {
-        const geoFenceId = geoFenceRef.id;
-
-        const counts = await recomputeGeoFenceCounts({
-          db,
-          geoFenceId,
-          lmPcode,
-          wardPcode,
-        });
-
-        await db.collection("geo_fences").doc(geoFenceId).update({
-          counts,
-          "metadata.updatedAt": new Date().toISOString(),
-          "metadata.updatedByUid": auditUid,
-          "metadata.updatedByUser": auditUser,
-        });
-      }
-
-      console.log("onMeterCreated ---- SUCCESS", { astId });
-
-      return null;
-    } catch (error) {
-      console.log("error", error);
-      console.error("onMeterCreated ---- ERROR", {
-        astId,
-        message: error?.message || String(error),
-        stack: error?.stack || "NAv",
-      });
+    if (!snap?.exists) {
+      console.log("onMeterCreated ---- no snapshot", { astId });
       return null;
     }
+
+    const data = snap.data() || {};
+
+    console.log("onMeterCreated ---- START", { astId });
+
+    await safeRun("onMeterCreated geofence sync", astId, async () => {
+      await syncAstGeoFenceMembership({
+        snap,
+        astId,
+        astData: data,
+        previousGeoFenceRefs: data?.geofenceRefs || [],
+      });
+    });
+
+    await safeRun(
+      "onMeterCreated premise service snapshot sync",
+      astId,
+      async () => {
+        await syncPremiseServiceSnapshotFromMeter({
+          astId,
+          astData: data,
+        });
+      },
+    );
+
+    await safeRun("onMeterCreated meter registry rebuild", astId, async () => {
+      await rebuildMeterRegistryRow(astId);
+    });
+
+    console.log("onMeterCreated ---- END", { astId });
+
+    return null;
   },
 );
+
+// export const onMeterCreated = onDocumentCreated(
+//   "asts/{astId}",
+//   async (event) => {
+//     const db = getFirestore();
+
+//     const astId = event.params.astId;
+
+//     try {
+//       console.log("onMeterCreated ---- START", { astId });
+
+//       const snap = event.data;
+//       if (!snap?.exists) {
+//         console.log("onMeterCreated ---- no snapshot");
+//         return null;
+//       }
+
+//       const data = snap.data() || {};
+//       /* ------------------------------------------------
+//    0. SYNC PREMISE SERVICE SNAPSHOT
+//    ------------------------------------------------ */
+//       await syncPremiseServiceSnapshotFromMeter({
+//         astId,
+//         astData: data,
+//       });
+
+//       /* ------------------------------------------------
+//          1. KEEP EXISTING BEHAVIOR
+//          ------------------------------------------------ */
+//       await rebuildMeterRegistryRow(astId);
+
+//       /* ------------------------------------------------
+//          2. RESOLVE GEOFENCE MEMBERSHIP
+//          ------------------------------------------------ */
+
+//       const lmPcode = data?.accessData?.parents?.lmPcode || null;
+//       const wardPcode = data?.accessData?.parents?.wardPcode || null;
+//       const metadata = data?.metadata || {};
+//       const auditUid =
+//         metadata?.updatedByUid || metadata?.createdByUid || "unknown_uid";
+//       const auditUser =
+//         metadata?.updatedByUser || metadata?.createdByUser || "Unknown Agent";
+
+//       console.log("onMeterCreated ---- lmPcode", lmPcode);
+//       console.log("onMeterCreated ---- wardPcode", wardPcode);
+//       console.log("onMeterCreated ---- metadata", metadata);
+//       console.log("onMeterCreated ---- auditUid", auditUid);
+//       console.log("onMeterCreated ---- auditUser", auditUser);
+
+//       console.log("onMeterCreated ---- scope", {
+//         lmPcode,
+//         wardPcode,
+//       });
+
+//       if (!lmPcode || !wardPcode) {
+//         console.log(
+//           "onMeterCreated ---- missing LM/Ward, skipping geofence sync",
+//         );
+//         return null;
+//       }
+
+//       const astPoint = extractAstPoint(data);
+
+//       if (!astPoint) {
+//         console.log(
+//           "onMeterCreated ---- no valid AST point, skipping geofence sync",
+//         );
+//         return null;
+//       }
+
+//       const geoFenceSnapshot = await db
+//         .collection("geo_fences")
+//         .where("parents.lmPcode", "==", lmPcode)
+//         .where("parents.wardPcode", "==", wardPcode)
+//         .where("status", "==", "ACTIVE")
+//         .get();
+
+//       console.log("onMeterCreated ---- geofence candidates", {
+//         count: geoFenceSnapshot.size,
+//       });
+
+//       const matchedGeoFences = [];
+
+//       for (const geoFenceDoc of geoFenceSnapshot.docs) {
+//         const geoFence = geoFenceDoc.data() || {};
+//         const bbox = geoFence?.geometry?.bbox || null;
+//         const polygonPoints = geoFence?.geometry?.points || [];
+
+//         const belongs = doesEntityBelongToGeoFence({
+//           point: astPoint,
+//           bbox,
+//           polygonPoints,
+//         });
+
+//         if (!belongs) continue;
+
+//         matchedGeoFences.push({
+//           id: geoFenceDoc.id,
+//           name: geoFence?.name || geoFence?.description || geoFenceDoc.id,
+//         });
+//       }
+
+//       const nextGeoFenceRefs = normalizeGeoFenceRefs(matchedGeoFences);
+
+//       await snap.ref.update({
+//         geofenceRefs: nextGeoFenceRefs,
+//         "metadata.updatedAt": new Date().toISOString(),
+//         "metadata.updatedByUid": auditUid,
+//         "metadata.updatedByUser": auditUser,
+//       });
+
+//       console.log("onMeterCreated ---- AST geofence membership updated", {
+//         astId,
+//         geofenceRefs: nextGeoFenceRefs,
+//       });
+
+//       /* ------------------------------------------------
+//          3. RECOMPUTE COUNTS
+//          ------------------------------------------------ */
+
+//       for (const geoFenceRef of nextGeoFenceRefs) {
+//         const geoFenceId = geoFenceRef.id;
+
+//         const counts = await recomputeGeoFenceCounts({
+//           db,
+//           geoFenceId,
+//           lmPcode,
+//           wardPcode,
+//         });
+
+//         await db.collection("geo_fences").doc(geoFenceId).update({
+//           counts,
+//           "metadata.updatedAt": new Date().toISOString(),
+//           "metadata.updatedByUid": auditUid,
+//           "metadata.updatedByUser": auditUser,
+//         });
+//       }
+
+//       console.log("onMeterCreated ---- SUCCESS", { astId });
+
+//       return null;
+//     } catch (error) {
+//       console.log("error", error);
+//       console.error("onMeterCreated ---- ERROR", {
+//         astId,
+//         message: error?.message || String(error),
+//         stack: error?.stack || "NAv",
+//       });
+//       return null;
+//     }
+//   },
+// );
 
 export const onMeterUpdated = onDocumentUpdated(
   "asts/{astId}",
@@ -2741,30 +3045,124 @@ export const onMeterUpdated = onDocumentUpdated(
     const beforeStatus = getMeterStatusState(dataBefore);
     const afterStatus = getMeterStatusState(dataAfter);
 
-    if (afterUpdatedAt === beforeUpdatedAt && afterStatus === beforeStatus) {
+    const updatedAtChanged = beforeUpdatedAt !== afterUpdatedAt;
+    const statusChanged = beforeStatus !== afterStatus;
+    const spatialChanged = didAstSpatialContextChange(dataBefore, dataAfter);
+
+    const geofenceRefsChanged = !geoFenceRefsSame(
+      dataBefore?.geofenceRefs || [],
+      dataAfter?.geofenceRefs || [],
+    );
+
+    if (
+      !updatedAtChanged &&
+      !statusChanged &&
+      !spatialChanged &&
+      !geofenceRefsChanged
+    ) {
       return null;
     }
 
-    try {
-      await rebuildMeterRegistryRow(astId);
+    console.log("onMeterUpdated ---- START", {
+      astId,
+      beforeStatus,
+      afterStatus,
+      updatedAtChanged,
+      statusChanged,
+      spatialChanged,
+      geofenceRefsChanged,
+    });
 
-      if (afterStatus !== beforeStatus) {
-        await syncPremiseServiceSnapshotFromMeter({
+    await safeRun("onMeterUpdated geofence maintenance", astId, async () => {
+      if (spatialChanged) {
+        await syncAstGeoFenceMembership({
+          snap: event.data.after,
           astId,
           astData: dataAfter,
+          previousGeoFenceRefs: dataBefore?.geofenceRefs || [],
         });
+
+        return;
       }
 
-      return null;
-    } catch (error) {
-      logger.error("onMeterUpdated ---- ERROR", {
+      if (statusChanged || geofenceRefsChanged) {
+        const db = getFirestore();
+        const { auditUid, auditUser } = getAstAuditContext(dataAfter);
+
+        const affectedGeoFenceIds = unionGeoFenceRefIds(
+          dataBefore?.geofenceRefs || [],
+          dataAfter?.geofenceRefs || [],
+        );
+
+        await recomputeGeoFenceCountsForIds({
+          db,
+          geoFenceIds: affectedGeoFenceIds,
+          auditUid,
+          auditUser,
+        });
+      }
+    });
+
+    await safeRun("onMeterUpdated meter registry rebuild", astId, async () => {
+      await rebuildMeterRegistryRow(astId);
+    });
+
+    if (statusChanged) {
+      await safeRun(
+        "onMeterUpdated premise service snapshot sync",
         astId,
-        message: error?.message || String(error),
-      });
-      return null;
+        async () => {
+          await syncPremiseServiceSnapshotFromMeter({
+            astId,
+            astData: dataAfter,
+          });
+        },
+      );
     }
+
+    console.log("onMeterUpdated ---- END", { astId });
+
+    return null;
   },
 );
+
+// export const onMeterUpdated = onDocumentUpdated(
+//   "asts/{astId}",
+//   async (event) => {
+//     const dataAfter = event.data.after.data() || {};
+//     const dataBefore = event.data.before.data() || {};
+//     const astId = event.params.astId;
+
+//     const beforeUpdatedAt = dataBefore?.metadata?.updatedAt || null;
+//     const afterUpdatedAt = dataAfter?.metadata?.updatedAt || null;
+
+//     const beforeStatus = getMeterStatusState(dataBefore);
+//     const afterStatus = getMeterStatusState(dataAfter);
+
+//     if (afterUpdatedAt === beforeUpdatedAt && afterStatus === beforeStatus) {
+//       return null;
+//     }
+
+//     try {
+//       await rebuildMeterRegistryRow(astId);
+
+//       if (afterStatus !== beforeStatus) {
+//         await syncPremiseServiceSnapshotFromMeter({
+//           astId,
+//           astData: dataAfter,
+//         });
+//       }
+
+//       return null;
+//     } catch (error) {
+//       logger.error("onMeterUpdated ---- ERROR", {
+//         astId,
+//         message: error?.message || String(error),
+//       });
+//       return null;
+//     }
+//   },
+// );
 
 /* =====================================================
    HELPERS
