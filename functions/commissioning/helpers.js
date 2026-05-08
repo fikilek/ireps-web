@@ -3,8 +3,6 @@ import {
   buildPremiseServiceSnapshotPatch,
   getAstCurrentState,
   getAstData,
-  getAstMeterType,
-  getAstPrepaidType,
   normalizeUpper,
   removeUndefinedDeep,
   sanitizeCommissioning,
