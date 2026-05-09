@@ -51,6 +51,7 @@ export const REMOVAL_MEDIA_TAGS = {
   removalInstructionEvidence: "removalInstructionEvidence",
   removalEvidence: "removalEvidence",
   finalReadingEvidence: "finalReadingEvidence",
+  tokenReadingPhoto: "tokenReadingPhoto",
   supplySafeEvidence: "supplySafeEvidence",
 };
 
@@ -72,13 +73,20 @@ export const DISCONNECTION_LEVELS = {
 export const DISCONNECTION_MEDIA_TAGS = {
   instructionEvidence: "disconnectionInstructionEvidence",
   levelEvidence: "disconnectionLevelEvidence",
+  // NOTE: frontend drafts briefly used levelEvidence. Keep as compatibility.
+  legacyLevelEvidence: "levelEvidence",
   meterReadingEvidence: "disconnectionMeterReadingEvidence",
+  tokenReadingPhoto: "tokenReadingPhoto",
+  safetyEvidence: "safetyEvidence",
 };
 
 export const RECONNECTION_MEDIA_TAGS = {
   instructionEvidence: "reconnectionInstructionEvidence",
   reconnectionEvidence: "reconnectionEvidence",
   meterReadingEvidence: "reconnectionMeterReadingEvidence",
+  tokenReadingPhoto: "tokenReadingPhoto",
+  safetyEvidence: "safetyEvidence",
+  supplyTestedEvidence: "supplyTestedEvidence",
 };
 
 export function buildFailureResult(code, message, extra = {}) {
@@ -303,10 +311,30 @@ export function hasMediaTag(media = [], tag, { requireUrl = true } = {}) {
   });
 }
 
+function normalizeAssignmentTarget(target = {}) {
+  return {
+    type: normalizeUpper(target?.type || ""),
+    id: String(target?.id || "").trim(),
+    name: String(target?.name || target?.title || target?.id || "").trim(),
+  };
+}
+
+export function normalizeAssignmentTargets(assignment = {}) {
+  const targets = Array.isArray(assignment?.targets) ? assignment.targets : [];
+
+  return targets
+    .map(normalizeAssignmentTarget)
+    .filter(
+      (target) =>
+        ["USER", "TEAM", "SP"].includes(target.type) &&
+        Boolean(target.id) &&
+        Boolean(target.name),
+    );
+}
+
 export function validateAssignment(assignment = {}, trnType = "NAv") {
   const instruction = assignment?.instruction || {};
-  const createdFor = assignment?.createdFor || {};
-  const createdForType = normalizeUpper(createdFor?.type);
+  const targets = normalizeAssignmentTargets(assignment);
 
   if (!instruction?.code) {
     return {
@@ -324,7 +352,7 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
     };
   }
 
-  if (!instruction?.text) {
+  if (!String(instruction?.text || "").trim()) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
@@ -332,19 +360,12 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
     };
   }
 
-  if (!["USER", "TEAM"].includes(createdForType)) {
+  if (targets.length === 0) {
     return {
       ok: false,
-      code: "INVALID_ASSIGNMENT_CREATED_FOR_TYPE",
-      message: "assignment.createdFor.type must be USER or TEAM",
-    };
-  }
-
-  if (!createdFor?.id) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_CREATED_FOR_ID",
-      message: "assignment.createdFor.id is required",
+      code: "INVALID_ASSIGNMENT_TARGETS",
+      message:
+        "assignment.targets must contain at least one USER, TEAM, or SP target",
     };
   }
 
@@ -353,17 +374,13 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
 
 export function sanitizeAssignment(assignment = {}) {
   return {
+    targets: normalizeAssignmentTargets(assignment),
+
     instruction: {
       code: normalizeUpper(assignment?.instruction?.code || "NAv"),
       text: String(assignment?.instruction?.text || ""),
       notes: String(assignment?.instruction?.notes || ""),
       mediaRequired: assignment?.instruction?.mediaRequired === true,
-    },
-
-    createdFor: {
-      type: normalizeUpper(assignment?.createdFor?.type || "USER"),
-      id: String(assignment?.createdFor?.id || "NAv"),
-      name: String(assignment?.createdFor?.name || "NAv"),
     },
 
     acceptedRejectedAt: assignment?.acceptedRejectedAt || null,
@@ -623,19 +640,14 @@ export function getRemovalNotes(data = {}, key) {
 
 export function sanitizeRemoval(removal = {}) {
   return {
-    removalInstruction: {
-      text: String(removal?.removalInstruction?.text || ""),
-    },
-
     meterRemoved: {
       answer: normalizeYesNo(removal?.meterRemoved?.answer),
       notes: String(removal?.meterRemoved?.notes || ""),
     },
 
-    finalReading: {
-      reading: String(removal?.finalReading?.reading || ""),
-      noReadingReason: String(removal?.finalReading?.noReadingReason || ""),
-    },
+    finalReading: getFlatOrNestedReading(removal, "finalReading"),
+    tokenReading: String(removal?.tokenReading || ""),
+    noReadingReason: selectValueToText(removal?.noReadingReason),
 
     supplyMadeSafe: {
       answer: normalizeYesNo(removal?.supplyMadeSafe?.answer),
@@ -651,13 +663,9 @@ export function validateMeterRemoval({ data, astDoc }) {
   const meterRemoved = getRemovalAnswer(data, "meterRemoved");
   const supplyMadeSafe = getRemovalAnswer(data, "supplyMadeSafe");
 
-  const finalReading = String(
-    data?.removal?.finalReading?.reading || "",
-  ).trim();
-
-  const noReadingReason = String(
-    data?.removal?.finalReading?.noReadingReason || "",
-  ).trim();
+  const finalReading = getRemovalFinalReading(data);
+  const tokenReading = getRemovalTokenReading(data);
+  const noReadingReason = getRemovalNoReadingReason(data);
 
   if (currentState === "REMOVED") {
     return {
@@ -683,15 +691,15 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!finalReading && !noReadingReason) {
+  if (!finalReading && !tokenReading && !noReadingReason) {
     return {
       ok: false,
       code: "FINAL_READING_OR_REASON_REQUIRED",
-      message: "Final reading or no-reading reason is required",
+      message: "Final reading, token reading, or no-reading reason is required",
     };
   }
 
-  if (finalReading && !/^\d+(\.\d+)?$/.test(finalReading)) {
+  if (finalReading && !isNumericReading(finalReading)) {
     return {
       ok: false,
       code: "INVALID_FINAL_READING",
@@ -709,6 +717,19 @@ export function validateMeterRemoval({ data, astDoc }) {
       ok: false,
       code: "MISSING_FINAL_READING_EVIDENCE",
       message: "Final reading evidence media is required",
+    };
+  }
+
+  if (
+    tokenReading &&
+    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.tokenReadingPhoto, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_TOKEN_READING_EVIDENCE",
+      message: "Token reading photo is required",
     };
   }
 
@@ -761,6 +782,10 @@ export function validateMeterRemoval({ data, astDoc }) {
 
   if (finalReading) {
     astPatch["ast.meterReading"] = finalReading;
+  }
+
+  if (tokenReading) {
+    astPatch["ast.tokenReading"] = tokenReading;
   }
 
   return {
@@ -889,29 +914,89 @@ function normalizeCodeLabel(value = {}) {
   return {
     code: String(value?.code || "").trim(),
     label: String(value?.label || "").trim(),
+    otherText: String(value?.otherText || "").trim(),
   };
 }
 
+function selectValueToText(value) {
+  if (!value) return "";
+
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  const code = String(value?.code || "").trim();
+  const label = String(value?.label || "").trim();
+  const otherText = String(value?.otherText || "").trim();
+
+  if (normalizeUpper(code) === "OTHER") {
+    return otherText || label || code;
+  }
+
+  return label || code || otherText;
+}
+
+function getFlatOrNestedReading(bucket = {}, key = "meterReading") {
+  const value = bucket?.[key];
+
+  if (typeof value === "object" && value !== null) {
+    return String(value?.reading || "").trim();
+  }
+
+  return String(value || "").trim();
+}
+
+function getFlatOrNestedNoReadingReason(
+  bucket = {},
+  readingKey = "meterReading",
+) {
+  const directReason = bucket?.noReadingReason;
+
+  if (directReason) {
+    return selectValueToText(directReason);
+  }
+
+  const nestedReason = bucket?.[readingKey]?.noReadingReason;
+
+  return selectValueToText(nestedReason);
+}
+
 function getLifecycleReading(data = {}, key) {
-  return String(data?.[key]?.meterReading?.reading || "").trim();
+  return getFlatOrNestedReading(data?.[key] || {}, "meterReading");
 }
 
 function getLifecycleNoReadingReason(data = {}, key) {
-  return String(data?.[key]?.meterReading?.noReadingReason || "").trim();
+  return getFlatOrNestedNoReadingReason(data?.[key] || {}, "meterReading");
+}
+
+function getLifecycleTokenReading(data = {}, key) {
+  return String(data?.[key]?.tokenReading || "").trim();
+}
+
+function getRemovalFinalReading(data = {}) {
+  return getFlatOrNestedReading(data?.removal || {}, "finalReading");
+}
+
+function getRemovalTokenReading(data = {}) {
+  return String(data?.removal?.tokenReading || "").trim();
+}
+
+function getRemovalNoReadingReason(data = {}) {
+  return getFlatOrNestedNoReadingReason(data?.removal || {}, "finalReading");
 }
 
 function isNumericReading(value) {
   return /^\d+(\.\d+)?$/.test(String(value || "").trim());
 }
 
+function hasAnyMediaTag(media = [], tags = [], options = {}) {
+  return tags.some((tag) => hasMediaTag(media, tag, options));
+}
+
 // SANITIZE FUNCTIONS
 
 export function sanitizeMeterDisconnection(disconnection = {}) {
   return {
-    instruction: {
-      text: String(disconnection?.instruction?.text || ""),
-    },
-
     level: normalizeCodeLabel(disconnection?.level || {}),
 
     supplyDisconnected: {
@@ -919,36 +1004,39 @@ export function sanitizeMeterDisconnection(disconnection = {}) {
       notes: String(disconnection?.supplyDisconnected?.notes || ""),
     },
 
-    meterReading: {
-      reading: String(disconnection?.meterReading?.reading || ""),
-      noReadingReason: String(
-        disconnection?.meterReading?.noReadingReason || "",
-      ),
+    meterReading: getFlatOrNestedReading(disconnection, "meterReading"),
+    tokenReading: String(disconnection?.tokenReading || ""),
+    noReadingReason: selectValueToText(disconnection?.noReadingReason),
+
+    safetyConfirmed: {
+      answer: normalizeYesNo(disconnection?.safetyConfirmed?.answer),
+      notes: String(disconnection?.safetyConfirmed?.notes || ""),
     },
   };
 }
 
 export function sanitizeMeterReconnection(reconnection = {}) {
   return {
-    instruction: {
-      text: String(reconnection?.instruction?.text || ""),
-    },
-
     supplyReconnected: {
       answer: normalizeYesNo(reconnection?.supplyReconnected?.answer),
       notes: String(reconnection?.supplyReconnected?.notes || ""),
     },
 
-    meterReading: {
-      reading: String(reconnection?.meterReading?.reading || ""),
-      noReadingReason: String(
-        reconnection?.meterReading?.noReadingReason || "",
-      ),
+    meterReading: getFlatOrNestedReading(reconnection, "meterReading"),
+    tokenReading: String(reconnection?.tokenReading || ""),
+    noReadingReason: selectValueToText(reconnection?.noReadingReason),
+
+    safetyConfirmed: {
+      answer: normalizeYesNo(reconnection?.safetyConfirmed?.answer),
+      notes: String(reconnection?.safetyConfirmed?.notes || ""),
+    },
+
+    supplyTested: {
+      answer: normalizeYesNo(reconnection?.supplyTested?.answer),
+      notes: String(reconnection?.supplyTested?.notes || ""),
     },
   };
 }
-
-// validation functions
 
 export function validateMeterDisconnection({ data, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
@@ -956,7 +1044,9 @@ export function validateMeterDisconnection({ data, astDoc }) {
 
   const disconnection = data?.disconnection || {};
 
-  const instructionText = String(disconnection?.instruction?.text || "").trim();
+  const instructionText = String(
+    data?.assignment?.instruction?.text || "",
+  ).trim();
 
   const level = normalizeCodeLabel(disconnection?.level || {});
   const levelConfig = DISCONNECTION_LEVELS[level.code];
@@ -969,7 +1059,16 @@ export function validateMeterDisconnection({ data, astDoc }) {
     disconnection?.supplyDisconnected?.notes || "",
   ).trim();
 
+  const safetyConfirmed = normalizeYesNo(
+    disconnection?.safetyConfirmed?.answer,
+  );
+
+  const safetyConfirmedNotes = String(
+    disconnection?.safetyConfirmed?.notes || "",
+  ).trim();
+
   const meterReading = getLifecycleReading(data, "disconnection");
+  const tokenReading = getLifecycleTokenReading(data, "disconnection");
   const noReadingReason = getLifecycleNoReadingReason(data, "disconnection");
 
   if (currentState !== "CONNECTED") {
@@ -1024,11 +1123,19 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (!meterReading && !noReadingReason) {
+  if (!safetyConfirmed) {
+    return {
+      ok: false,
+      code: "INVALID_DISCONNECTION_SAFETY_ANSWER",
+      message: "Safety confirmed answer must be yes or no",
+    };
+  }
+
+  if (!meterReading && !tokenReading && !noReadingReason) {
     return {
       ok: false,
       code: "METER_READING_OR_REASON_REQUIRED",
-      message: "Meter reading or no-reading reason is required",
+      message: "Meter reading, token reading, or no-reading reason is required",
     };
   }
 
@@ -1054,15 +1161,46 @@ export function validateMeterDisconnection({ data, astDoc }) {
   }
 
   if (
-    supplyDisconnected === "yes" &&
-    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.levelEvidence, {
+    tokenReading &&
+    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.tokenReadingPhoto, {
       requireUrl: true,
     })
   ) {
     return {
       ok: false,
+      code: "MISSING_TOKEN_READING_EVIDENCE",
+      message: "Token reading photo is required",
+    };
+  }
+
+  if (
+    supplyDisconnected === "yes" &&
+    !hasAnyMediaTag(
+      data?.media,
+      [
+        DISCONNECTION_MEDIA_TAGS.levelEvidence,
+        DISCONNECTION_MEDIA_TAGS.legacyLevelEvidence,
+      ],
+      { requireUrl: true },
+    )
+  ) {
+    return {
+      ok: false,
       code: "MISSING_DISCONNECTION_LEVEL_EVIDENCE",
       message: "Disconnection level evidence media is required",
+    };
+  }
+
+  if (
+    safetyConfirmed === "yes" &&
+    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.safetyEvidence, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_DISCONNECTION_SAFETY_EVIDENCE",
+      message: "Safety evidence media is required",
     };
   }
 
@@ -1074,13 +1212,27 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  const disconnectionPassed = supplyDisconnected === "yes";
+  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
+    return {
+      ok: false,
+      code: "NOTES_REQUIRED_FOR_FAILED_DISCONNECTION_SAFETY",
+      message: "Notes are required when safetyConfirmed is no",
+    };
+  }
+
+  const disconnectionPassed =
+    supplyDisconnected === "yes" && safetyConfirmed === "yes";
+
   const nextAstState = disconnectionPassed ? "DISCONNECTED" : currentState;
 
   const astPatch = {};
 
   if (meterReading) {
     astPatch["ast.meterReading"] = meterReading;
+  }
+
+  if (tokenReading) {
+    astPatch["ast.tokenReading"] = tokenReading;
   }
 
   return {
@@ -1105,7 +1257,9 @@ export function validateMeterReconnection({ data, astDoc }) {
 
   const reconnection = data?.reconnection || {};
 
-  const instructionText = String(reconnection?.instruction?.text || "").trim();
+  const instructionText = String(
+    data?.assignment?.instruction?.text || "",
+  ).trim();
 
   const supplyReconnected = normalizeYesNo(
     reconnection?.supplyReconnected?.answer,
@@ -1115,7 +1269,20 @@ export function validateMeterReconnection({ data, astDoc }) {
     reconnection?.supplyReconnected?.notes || "",
   ).trim();
 
+  const safetyConfirmed = normalizeYesNo(reconnection?.safetyConfirmed?.answer);
+
+  const safetyConfirmedNotes = String(
+    reconnection?.safetyConfirmed?.notes || "",
+  ).trim();
+
+  const supplyTested = normalizeYesNo(reconnection?.supplyTested?.answer);
+
+  const supplyTestedNotes = String(
+    reconnection?.supplyTested?.notes || "",
+  ).trim();
+
   const meterReading = getLifecycleReading(data, "reconnection");
+  const tokenReading = getLifecycleTokenReading(data, "reconnection");
   const noReadingReason = getLifecycleNoReadingReason(data, "reconnection");
 
   if (currentState !== "DISCONNECTED") {
@@ -1162,11 +1329,27 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (!meterReading && !noReadingReason) {
+  if (!safetyConfirmed) {
+    return {
+      ok: false,
+      code: "INVALID_RECONNECTION_SAFETY_ANSWER",
+      message: "Safety confirmed answer must be yes or no",
+    };
+  }
+
+  if (!supplyTested) {
+    return {
+      ok: false,
+      code: "INVALID_RECONNECTION_SUPPLY_TESTED_ANSWER",
+      message: "Supply tested answer must be yes or no",
+    };
+  }
+
+  if (!meterReading && !tokenReading && !noReadingReason) {
     return {
       ok: false,
       code: "METER_READING_OR_REASON_REQUIRED",
-      message: "Meter reading or no-reading reason is required",
+      message: "Meter reading, token reading, or no-reading reason is required",
     };
   }
 
@@ -1192,6 +1375,19 @@ export function validateMeterReconnection({ data, astDoc }) {
   }
 
   if (
+    tokenReading &&
+    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.tokenReadingPhoto, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_TOKEN_READING_EVIDENCE",
+      message: "Token reading photo is required",
+    };
+  }
+
+  if (
     supplyReconnected === "yes" &&
     !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.reconnectionEvidence, {
       requireUrl: true,
@@ -1204,6 +1400,32 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
+  if (
+    safetyConfirmed === "yes" &&
+    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.safetyEvidence, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_RECONNECTION_SAFETY_EVIDENCE",
+      message: "Safety evidence media is required",
+    };
+  }
+
+  if (
+    supplyTested === "yes" &&
+    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.supplyTestedEvidence, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_RECONNECTION_SUPPLY_TESTED_EVIDENCE",
+      message: "Supply tested evidence media is required",
+    };
+  }
+
   if (supplyReconnected === "no" && !supplyReconnectedNotes) {
     return {
       ok: false,
@@ -1212,13 +1434,37 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  const reconnectionPassed = supplyReconnected === "yes";
+  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
+    return {
+      ok: false,
+      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION_SAFETY",
+      message: "Notes are required when safetyConfirmed is no",
+    };
+  }
+
+  if (supplyTested === "no" && !supplyTestedNotes) {
+    return {
+      ok: false,
+      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION_SUPPLY_TEST",
+      message: "Notes are required when supplyTested is no",
+    };
+  }
+
+  const reconnectionPassed =
+    supplyReconnected === "yes" &&
+    safetyConfirmed === "yes" &&
+    supplyTested === "yes";
+
   const nextAstState = reconnectionPassed ? "CONNECTED" : currentState;
 
   const astPatch = {};
 
   if (meterReading) {
     astPatch["ast.meterReading"] = meterReading;
+  }
+
+  if (tokenReading) {
+    astPatch["ast.tokenReading"] = tokenReading;
   }
 
   return {
@@ -1302,59 +1548,7 @@ export function validateLifecycleInstructionAssignment(
   assignment = {},
   trnType = "NAv",
 ) {
-  const instruction = assignment?.instruction || {};
-  const createdFor = assignment?.createdFor || {};
-  const createdForType = normalizeUpper(createdFor?.type);
-
-  if (!instruction?.code) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_INSTRUCTION_CODE",
-      message: "assignment.instruction.code is required",
-    };
-  }
-
-  if (normalizeUpper(instruction.code) !== normalizeUpper(trnType)) {
-    return {
-      ok: false,
-      code: "ASSIGNMENT_INSTRUCTION_MISMATCH",
-      message: "assignment.instruction.code must match trnType",
-    };
-  }
-
-  if (!String(instruction?.text || "").trim()) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
-      message: "assignment.instruction.text is required",
-    };
-  }
-
-  if (!["USER", "TEAM"].includes(createdForType)) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_CREATED_FOR_TYPE",
-      message: "assignment.createdFor.type must be USER or TEAM",
-    };
-  }
-
-  if (!String(createdFor?.id || "").trim()) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_CREATED_FOR_ID",
-      message: "assignment.createdFor.id is required",
-    };
-  }
-
-  if (!String(createdFor?.name || "").trim()) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_CREATED_FOR_NAME",
-      message: "assignment.createdFor.name is required",
-    };
-  }
-
-  return { ok: true };
+  return validateAssignment(assignment, trnType);
 }
 
 export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
@@ -1450,8 +1644,6 @@ export function buildLifecycleInstructionTrnPayload({
   const serverAstData = getAstData(astDoc);
   const geofenceRefs = sanitizeGeofenceRefs(data?.geofenceRefs || []);
 
-  const assignment = data?.assignment || {};
-
   return removeUndefinedDeep({
     id: data.id,
 
@@ -1487,30 +1679,7 @@ export function buildLifecycleInstructionTrnPayload({
       trnType,
     },
 
-    assignment: {
-      instruction: {
-        code: normalizeUpper(assignment?.instruction?.code || trnType),
-        text: String(assignment?.instruction?.text || ""),
-        notes: String(assignment?.instruction?.notes || ""),
-        mediaRequired: assignment?.instruction?.mediaRequired === true,
-      },
-
-      createdFor: {
-        type: normalizeUpper(assignment?.createdFor?.type || "USER"),
-        id: String(assignment?.createdFor?.id || "NAv"),
-        name: String(assignment?.createdFor?.name || "NAv"),
-      },
-
-      acceptedRejectedAt: null,
-      acceptedRejectedUid: null,
-      acceptedRejectedUser: null,
-      rejectReason: "",
-
-      cancelledAt: null,
-      cancelledByUid: null,
-      cancelledByUser: null,
-      cancelReason: "",
-    },
+    assignment: sanitizeAssignment(data?.assignment || {}),
 
     workflow: {
       state: "ISSUED",

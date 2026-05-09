@@ -59,6 +59,16 @@ function getActorRole({ profile = {}, token = {} }) {
   );
 }
 
+function getActorServiceProviderId({ profile = {}, token = {} }) {
+  return readFirstString(
+    token?.spId,
+    token?.serviceProviderId,
+    token?.employmentServiceProviderId,
+    profile?.employment?.serviceProvider?.id,
+    profile?.serviceProvider?.id,
+  );
+}
+
 async function findActorProfile(db, uid) {
   const candidatePaths = [
     `users/${uid}`,
@@ -95,6 +105,10 @@ function getTeamMemberIds(teamData = {}) {
     teamData.memberUids.forEach(addId);
   }
 
+  if (Array.isArray(teamData?.scope?.memberUserIds)) {
+    teamData.scope.memberUserIds.forEach(addId);
+  }
+
   if (Array.isArray(teamData?.members)) {
     teamData.members.forEach((member) => {
       if (typeof member === "string") {
@@ -124,23 +138,71 @@ function getTeamMemberIds(teamData = {}) {
   return [...ids];
 }
 
-function isAssignedToActor({ trnData = {}, actorUid, teamMap = new Map() }) {
-  const createdFor = trnData?.assignment?.createdFor || {};
-  const createdForType = normalizeUpper(createdFor?.type);
-  const createdForId = String(createdFor?.id || "").trim();
+function normalizeAssignmentTarget(target = {}) {
+  return {
+    type: normalizeUpper(target?.type),
+    id: String(target?.id || "").trim(),
+    name: String(target?.name || target?.title || target?.id || "").trim(),
+  };
+}
 
-  if (createdForType === "USER") {
-    return createdForId === actorUid;
-  }
+function getAssignmentTargets(trnData = {}) {
+  const targets = Array.isArray(trnData?.assignment?.targets)
+    ? trnData.assignment.targets
+    : [];
 
-  if (createdForType === "TEAM") {
-    const teamData = teamMap.get(createdForId) || {};
+  return targets
+    .map(normalizeAssignmentTarget)
+    .filter(
+      (target) =>
+        ["USER", "TEAM", "SP"].includes(target.type) &&
+        Boolean(target.id) &&
+        Boolean(target.name),
+    );
+}
+
+function getTargetTeamIdsFromRows(trnRows = []) {
+  return [
+    ...new Set(
+      trnRows
+        .flatMap((row) => getAssignmentTargets(row.data))
+        .filter((target) => target.type === "TEAM")
+        .map((target) => target.id)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function isAssignedToActor({
+  trnData = {},
+  actorUid,
+  actorSpId,
+  teamMap = new Map(),
+}) {
+  const targets = getAssignmentTargets(trnData);
+
+  if (targets.length === 0) return false;
+
+  const directlyAssigned = targets.some(
+    (target) => target.type === "USER" && target.id === actorUid,
+  );
+
+  if (directlyAssigned) return true;
+
+  const teamAssigned = targets.some((target) => {
+    if (target.type !== "TEAM") return false;
+
+    const teamData = teamMap.get(target.id) || {};
     const teamMemberIds = getTeamMemberIds(teamData);
 
     return teamMemberIds.includes(actorUid);
-  }
+  });
 
-  return false;
+  if (teamAssigned) return true;
+
+  return targets.some(
+    (target) => target.type === "SP" && target.id === actorSpId,
+  );
 }
 
 function buildWorkflowPatch({
@@ -210,6 +272,11 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         );
       }
 
+      const actorSpId = getActorServiceProviderId({
+        profile: actorProfile,
+        token,
+      });
+
       const actorName =
         getProfileDisplayName(actorProfile, null) ||
         getActorNameFromRequest(request);
@@ -255,6 +322,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         trnIds,
         actorUid,
         actorRole,
+        actorSpId,
       });
 
       let responsePayload = null;
@@ -289,19 +357,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           data: snap.data() || {},
         }));
 
-        const teamIds = [
-          ...new Set(
-            trnRows
-              .filter(
-                (row) =>
-                  normalizeUpper(row.data?.assignment?.createdFor?.type) ===
-                  "TEAM",
-              )
-              .map((row) => String(row.data?.assignment?.createdFor?.id || ""))
-              .filter(Boolean),
-          ),
-        ];
-
+        const teamIds = getTargetTeamIdsFromRows(trnRows);
         const teamMap = new Map();
 
         for (const teamId of teamIds) {
@@ -312,7 +368,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         for (const row of trnRows) {
           const trnType = row.data?.accessData?.trnType || "NAv";
           const workflowState = normalizeUpper(row.data?.workflow?.state);
-          const createdFor = row.data?.assignment?.createdFor || {};
+          const targets = getAssignmentTargets(row.data);
 
           if (!ACCEPT_REJECT_ALLOWED_STATES.includes(workflowState)) {
             responsePayload = buildFailureResult(
@@ -348,6 +404,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
             !isAssignedToActor({
               trnData: row.data,
               actorUid,
+              actorSpId,
               teamMap,
             })
           ) {
@@ -357,7 +414,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
               {
                 trnId: row.trnId,
                 trnType,
-                createdFor,
+                targets,
               },
             );
 

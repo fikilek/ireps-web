@@ -152,54 +152,78 @@ async function resolveManageAuthority({ db, request }) {
   };
 }
 
-function normalizeCreatedFor(value = {}) {
+function normalizeAssignmentTarget(value = {}) {
   return {
     type: normalizeUpper(value?.type || ""),
     id: String(value?.id || "").trim(),
-    name: String(value?.name || "").trim(),
+    name: String(value?.name || value?.title || value?.id || "").trim(),
   };
 }
 
-function validateNewCreatedFor(createdFor = {}) {
-  const cleanCreatedFor = normalizeCreatedFor(createdFor);
+function normalizeAssignmentTargets(value = []) {
+  const rawTargets = Array.isArray(value) ? value : [];
 
-  if (!["USER", "TEAM"].includes(cleanCreatedFor.type)) {
+  return rawTargets
+    .map(normalizeAssignmentTarget)
+    .filter(
+      (target) =>
+        ["USER", "TEAM", "SP"].includes(target.type) &&
+        Boolean(target.id) &&
+        Boolean(target.name),
+    );
+}
+
+function createdForToTargets(createdFor = {}) {
+  const target = normalizeAssignmentTarget(createdFor);
+
+  if (!["USER", "TEAM", "SP"].includes(target.type)) return [];
+  if (!target.id || !target.name) return [];
+
+  return [target];
+}
+
+function getNewTargetsFromRequest(data = {}) {
+  const directTargets = normalizeAssignmentTargets(data?.targets);
+
+  if (directTargets.length) return directTargets;
+
+  const assignmentTargets = normalizeAssignmentTargets(
+    data?.assignment?.targets,
+  );
+
+  if (assignmentTargets.length) return assignmentTargets;
+
+  const newAssignmentTargets = normalizeAssignmentTargets(
+    data?.newAssignment?.targets,
+  );
+
+  if (newAssignmentTargets.length) return newAssignmentTargets;
+
+  // Temporary compatibility: accept old request shape but convert it to targets.
+  return createdForToTargets(
+    data?.createdFor ||
+      data?.assignment?.createdFor ||
+      data?.newAssignment?.createdFor ||
+      {},
+  );
+}
+
+function validateNewTargets(targets = []) {
+  const cleanTargets = normalizeAssignmentTargets(targets);
+
+  if (!cleanTargets.length) {
     return {
       ok: false,
-      code: "INVALID_CREATED_FOR_TYPE",
-      message: "createdFor.type must be USER or TEAM",
-    };
-  }
-
-  if (!cleanCreatedFor.id) {
-    return {
-      ok: false,
-      code: "INVALID_CREATED_FOR_ID",
-      message: "createdFor.id is required",
-    };
-  }
-
-  if (!cleanCreatedFor.name) {
-    return {
-      ok: false,
-      code: "INVALID_CREATED_FOR_NAME",
-      message: "createdFor.name is required",
+      code: "INVALID_ASSIGNMENT_TARGETS",
+      message:
+        "assignment.targets must contain at least one USER, TEAM, or SP target",
     };
   }
 
   return {
     ok: true,
-    createdFor: cleanCreatedFor,
+    targets: cleanTargets,
   };
-}
-
-function getNewCreatedForFromRequest(data = {}) {
-  return (
-    data?.createdFor ||
-    data?.assignment?.createdFor ||
-    data?.newAssignment?.createdFor ||
-    {}
-  );
 }
 
 function buildAssignmentHistoryItem({
@@ -219,11 +243,9 @@ function buildAssignmentHistoryItem({
 
     previousWorkflowState: trnData?.workflow?.state || "NAv",
 
-    previousCreatedFor: {
-      type: trnData?.assignment?.createdFor?.type || "NAv",
-      id: trnData?.assignment?.createdFor?.id || "NAv",
-      name: trnData?.assignment?.createdFor?.name || "NAv",
-    },
+    previousTargets: Array.isArray(trnData?.assignment?.targets)
+      ? trnData.assignment.targets
+      : [],
 
     previousAcceptedRejectedAt: trnData?.assignment?.acceptedRejectedAt || null,
 
@@ -239,7 +261,7 @@ function buildAssignmentHistoryItem({
 
 function buildReassignPatch({
   trnData,
-  createdFor,
+  targets,
   reason,
   now,
   actorUid,
@@ -248,7 +270,7 @@ function buildReassignPatch({
   const currentCount = Number(trnData?.workflow?.reassignmentCount || 0);
 
   return {
-    "assignment.createdFor": createdFor,
+    "assignment.targets": targets,
 
     "assignment.acceptedRejectedAt": null,
     "assignment.acceptedRejectedUid": null,
@@ -375,21 +397,16 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
       );
     }
 
-    let newCreatedFor = null;
+    let newTargets = null;
 
     if (action === "REASSIGN") {
-      const createdForCheck = validateNewCreatedFor(
-        getNewCreatedForFromRequest(data),
-      );
+      const targetsCheck = validateNewTargets(getNewTargetsFromRequest(data));
 
-      if (!createdForCheck.ok) {
-        return buildFailureResult(
-          createdForCheck.code,
-          createdForCheck.message,
-        );
+      if (!targetsCheck.ok) {
+        return buildFailureResult(targetsCheck.code, targetsCheck.message);
       }
 
-      newCreatedFor = createdForCheck.createdFor;
+      newTargets = targetsCheck.targets;
     }
 
     if (action === "CANCEL" && !cancelReason) {
@@ -538,7 +555,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             row.ref,
             buildReassignPatch({
               trnData: row.data,
-              createdFor: newCreatedFor,
+              targets: newTargets,
               reason,
               now,
               actorUid,
