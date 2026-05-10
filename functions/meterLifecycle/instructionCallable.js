@@ -130,6 +130,20 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
       const data = request?.data || {};
       const authContext = request?.auth || null;
 
+      logger.info("MLCT_INSTRUCTION_INCOMING_PAYLOAD", {
+        trnId: data?.id || "NAv",
+        trnType: data?.trnType || data?.accessData?.trnType || "NAv",
+        mediaRequired: data?.assignment?.instruction?.mediaRequired === true,
+        mediaIsArray: Array.isArray(data?.media),
+        mediaCount: Array.isArray(data?.media) ? data.media.length : 0,
+        mediaTags: Array.isArray(data?.media)
+          ? data.media.map((item) => item?.tag || "NAv")
+          : [],
+        mediaUrls: Array.isArray(data?.media)
+          ? data.media.map((item) => Boolean(item?.url))
+          : [],
+      });
+
       if (!authContext?.uid) {
         return buildFailureResult(
           "UNAUTHENTICATED",
@@ -184,6 +198,29 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         return buildFailureResult(
           assignmentCheck.code,
           assignmentCheck.message,
+          {
+            trnId,
+            trnType,
+            astId,
+          },
+        );
+      }
+
+      const instructionMediaRequired =
+        data?.assignment?.instruction?.mediaRequired === true;
+
+      const hasInstructionMedia =
+        Array.isArray(data?.media) &&
+        data.media.some(
+          (item) =>
+            item?.tag === "instructionMedia" &&
+            Boolean(String(item?.url || "").trim()),
+        );
+
+      if (instructionMediaRequired && !hasInstructionMedia) {
+        return buildFailureResult(
+          "INSTRUCTION_MEDIA_REQUIRED",
+          "Instruction media is required when assignment.instruction.mediaRequired is true",
           {
             trnId,
             trnType,
