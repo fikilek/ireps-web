@@ -418,6 +418,10 @@ export function getAstPrepaidType(astDoc = {}, input = {}) {
   return normalizeMeterKind(astMeter?.type || inputMeter?.type || "");
 }
 
+export function isPrepaidAstMeter(astDoc = {}, input = {}) {
+  return getAstPrepaidType(astDoc, input) === "prepaid";
+}
+
 export function validateCommonLifecycleInput(data = {}) {
   const trnId = data?.id || "NAv";
   const trnType = data?.accessData?.trnType || "NAv";
@@ -638,15 +642,19 @@ export function getRemovalNotes(data = {}, key) {
   return String(data?.removal?.[key]?.notes || "").trim();
 }
 
-export function sanitizeRemoval(removal = {}) {
+export function sanitizeRemoval(removal = {}, { isPrepaidMeter = false } = {}) {
   return {
     meterRemoved: {
       answer: normalizeYesNo(removal?.meterRemoved?.answer),
       notes: String(removal?.meterRemoved?.notes || ""),
     },
 
-    finalReading: getFlatOrNestedReading(removal, "finalReading"),
-    tokenReading: String(removal?.tokenReading || ""),
+    finalReading: isPrepaidMeter
+      ? ""
+      : getFlatOrNestedReading(removal, "finalReading"),
+
+    tokenReading: isPrepaidMeter ? String(removal?.tokenReading || "") : "",
+
     noReadingReason: selectValueToText(removal?.noReadingReason),
 
     supplyMadeSafe: {
@@ -659,6 +667,7 @@ export function sanitizeRemoval(removal = {}) {
 export function validateMeterRemoval({ data, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
   const meterType = getAstMeterType(astDoc, data);
+  const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
   const meterRemoved = getRemovalAnswer(data, "meterRemoved");
   const supplyMadeSafe = getRemovalAnswer(data, "supplyMadeSafe");
@@ -691,11 +700,35 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!finalReading && !tokenReading && !noReadingReason) {
+  if (isPrepaidMeter && finalReading) {
+    return {
+      ok: false,
+      code: "INVALID_PREPAID_FINAL_READING",
+      message: "Prepaid meters must use token reading, not final reading",
+    };
+  }
+
+  if (!isPrepaidMeter && tokenReading) {
+    return {
+      ok: false,
+      code: "INVALID_CONVENTIONAL_TOKEN_READING",
+      message: "Conventional meters must use final reading, not token reading",
+    };
+  }
+
+  if (isPrepaidMeter && !tokenReading && !noReadingReason) {
+    return {
+      ok: false,
+      code: "TOKEN_READING_OR_REASON_REQUIRED",
+      message: "Token reading or no-reading reason is required",
+    };
+  }
+
+  if (!isPrepaidMeter && !finalReading && !noReadingReason) {
     return {
       ok: false,
       code: "FINAL_READING_OR_REASON_REQUIRED",
-      message: "Final reading, token reading, or no-reading reason is required",
+      message: "Final reading or no-reading reason is required",
     };
   }
 
@@ -704,6 +737,14 @@ export function validateMeterRemoval({ data, astDoc }) {
       ok: false,
       code: "INVALID_FINAL_READING",
       message: "Final reading must be numeric",
+    };
+  }
+
+  if (tokenReading && !isNumericReading(tokenReading)) {
+    return {
+      ok: false,
+      code: "INVALID_TOKEN_READING",
+      message: "Token reading must be numeric",
     };
   }
 
@@ -780,11 +821,11 @@ export function validateMeterRemoval({ data, astDoc }) {
 
   const astPatch = {};
 
-  if (finalReading) {
+  if (!isPrepaidMeter && finalReading) {
     astPatch["ast.meterReading"] = finalReading;
   }
 
-  if (tokenReading) {
+  if (isPrepaidMeter && tokenReading) {
     astPatch["ast.tokenReading"] = tokenReading;
   }
 
@@ -792,6 +833,7 @@ export function validateMeterRemoval({ data, astDoc }) {
     ok: true,
     currentState,
     meterType,
+    isPrepaidMeter,
     removalPassed,
     nextAstState,
     astPatch,
@@ -812,6 +854,8 @@ export function buildLifecycleTrnPayload({
   const astId = data?.ast?.astData?.astId;
   const serverAstData = getAstData(astDoc);
   const inputAstData = data?.ast?.astData || {};
+
+  const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
   return removeUndefinedDeep({
     id: data.id,
@@ -869,17 +913,21 @@ export function buildLifecycleTrnPayload({
 
     removal:
       trnType === "METER_REMOVAL"
-        ? sanitizeRemoval(data?.removal || {})
+        ? sanitizeRemoval(data?.removal || {}, { isPrepaidMeter })
         : undefined,
 
     disconnection:
       trnType === "METER_DISCONNECTION"
-        ? sanitizeMeterDisconnection(data?.disconnection || {})
+        ? sanitizeMeterDisconnection(data?.disconnection || {}, {
+            isPrepaidMeter,
+          })
         : undefined,
 
     reconnection:
       trnType === "METER_RECONNECTION"
-        ? sanitizeMeterReconnection(data?.reconnection || {})
+        ? sanitizeMeterReconnection(data?.reconnection || {}, {
+            isPrepaidMeter,
+          })
         : undefined,
 
     assignment: sanitizeAssignment(data?.assignment || {}),
@@ -900,11 +948,9 @@ export function buildLifecycleTrnPayload({
       actorName,
     }),
 
-    serviceProvider: astDoc?.serviceProvider ||
-      data?.serviceProvider || {
-        id: "NAv",
-        name: "NAv",
-      },
+    serviceProvider: sanitizeServiceProvider(
+      data?.serviceProvider || astDoc?.serviceProvider || {},
+    ),
   });
 }
 
@@ -995,7 +1041,10 @@ function hasAnyMediaTag(media = [], tags = [], options = {}) {
 
 // SANITIZE FUNCTIONS
 
-export function sanitizeMeterDisconnection(disconnection = {}) {
+export function sanitizeMeterDisconnection(
+  disconnection = {},
+  { isPrepaidMeter = false } = {},
+) {
   return {
     level: normalizeCodeLabel(disconnection?.level || {}),
 
@@ -1004,8 +1053,14 @@ export function sanitizeMeterDisconnection(disconnection = {}) {
       notes: String(disconnection?.supplyDisconnected?.notes || ""),
     },
 
-    meterReading: getFlatOrNestedReading(disconnection, "meterReading"),
-    tokenReading: String(disconnection?.tokenReading || ""),
+    meterReading: isPrepaidMeter
+      ? ""
+      : getFlatOrNestedReading(disconnection, "meterReading"),
+
+    tokenReading: isPrepaidMeter
+      ? String(disconnection?.tokenReading || "")
+      : "",
+
     noReadingReason: selectValueToText(disconnection?.noReadingReason),
 
     safetyConfirmed: {
@@ -1015,15 +1070,24 @@ export function sanitizeMeterDisconnection(disconnection = {}) {
   };
 }
 
-export function sanitizeMeterReconnection(reconnection = {}) {
+export function sanitizeMeterReconnection(
+  reconnection = {},
+  { isPrepaidMeter = false } = {},
+) {
   return {
     supplyReconnected: {
       answer: normalizeYesNo(reconnection?.supplyReconnected?.answer),
       notes: String(reconnection?.supplyReconnected?.notes || ""),
     },
 
-    meterReading: getFlatOrNestedReading(reconnection, "meterReading"),
-    tokenReading: String(reconnection?.tokenReading || ""),
+    meterReading: isPrepaidMeter
+      ? ""
+      : getFlatOrNestedReading(reconnection, "meterReading"),
+
+    tokenReading: isPrepaidMeter
+      ? String(reconnection?.tokenReading || "")
+      : "",
+
     noReadingReason: selectValueToText(reconnection?.noReadingReason),
 
     safetyConfirmed: {
@@ -1041,6 +1105,8 @@ export function sanitizeMeterReconnection(reconnection = {}) {
 export function validateMeterDisconnection({ data, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
   const meterType = getAstMeterType(astDoc, data);
+
+  const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
   const disconnection = data?.disconnection || {};
 
@@ -1131,11 +1197,35 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (!meterReading && !tokenReading && !noReadingReason) {
+  if (isPrepaidMeter && meterReading) {
+    return {
+      ok: false,
+      code: "INVALID_PREPAID_METER_READING",
+      message: "Prepaid meters must use token reading, not meter reading",
+    };
+  }
+
+  if (!isPrepaidMeter && tokenReading) {
+    return {
+      ok: false,
+      code: "INVALID_CONVENTIONAL_TOKEN_READING",
+      message: "Conventional meters must use meter reading, not token reading",
+    };
+  }
+
+  if (isPrepaidMeter && !tokenReading && !noReadingReason) {
+    return {
+      ok: false,
+      code: "TOKEN_READING_OR_REASON_REQUIRED",
+      message: "Token reading or no-reading reason is required",
+    };
+  }
+
+  if (!isPrepaidMeter && !meterReading && !noReadingReason) {
     return {
       ok: false,
       code: "METER_READING_OR_REASON_REQUIRED",
-      message: "Meter reading, token reading, or no-reading reason is required",
+      message: "Meter reading or no-reading reason is required",
     };
   }
 
@@ -1144,6 +1234,14 @@ export function validateMeterDisconnection({ data, astDoc }) {
       ok: false,
       code: "INVALID_METER_READING",
       message: "Meter reading must be numeric",
+    };
+  }
+
+  if (tokenReading && !isNumericReading(tokenReading)) {
+    return {
+      ok: false,
+      code: "INVALID_TOKEN_READING",
+      message: "Token reading must be numeric",
     };
   }
 
@@ -1227,11 +1325,11 @@ export function validateMeterDisconnection({ data, astDoc }) {
 
   const astPatch = {};
 
-  if (meterReading) {
+  if (!isPrepaidMeter && meterReading) {
     astPatch["ast.meterReading"] = meterReading;
   }
 
-  if (tokenReading) {
+  if (isPrepaidMeter && tokenReading) {
     astPatch["ast.tokenReading"] = tokenReading;
   }
 
@@ -1248,12 +1346,15 @@ export function validateMeterDisconnection({ data, astDoc }) {
     astPatch,
     astStatusChanged: currentState !== nextAstState,
     astDataChanged: Object.keys(astPatch).length > 0,
+    isPrepaidMeter,
   };
 }
 
 export function validateMeterReconnection({ data, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
   const meterType = getAstMeterType(astDoc, data);
+
+  const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
   const reconnection = data?.reconnection || {};
 
@@ -1345,11 +1446,35 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (!meterReading && !tokenReading && !noReadingReason) {
+  if (isPrepaidMeter && meterReading) {
+    return {
+      ok: false,
+      code: "INVALID_PREPAID_METER_READING",
+      message: "Prepaid meters must use token reading, not meter reading",
+    };
+  }
+
+  if (!isPrepaidMeter && tokenReading) {
+    return {
+      ok: false,
+      code: "INVALID_CONVENTIONAL_TOKEN_READING",
+      message: "Conventional meters must use meter reading, not token reading",
+    };
+  }
+
+  if (isPrepaidMeter && !tokenReading && !noReadingReason) {
+    return {
+      ok: false,
+      code: "TOKEN_READING_OR_REASON_REQUIRED",
+      message: "Token reading or no-reading reason is required",
+    };
+  }
+
+  if (!isPrepaidMeter && !meterReading && !noReadingReason) {
     return {
       ok: false,
       code: "METER_READING_OR_REASON_REQUIRED",
-      message: "Meter reading, token reading, or no-reading reason is required",
+      message: "Meter reading or no-reading reason is required",
     };
   }
 
@@ -1358,6 +1483,14 @@ export function validateMeterReconnection({ data, astDoc }) {
       ok: false,
       code: "INVALID_METER_READING",
       message: "Meter reading must be numeric",
+    };
+  }
+
+  if (tokenReading && !isNumericReading(tokenReading)) {
+    return {
+      ok: false,
+      code: "INVALID_TOKEN_READING",
+      message: "Token reading must be numeric",
     };
   }
 
@@ -1459,11 +1592,11 @@ export function validateMeterReconnection({ data, astDoc }) {
 
   const astPatch = {};
 
-  if (meterReading) {
+  if (!isPrepaidMeter && meterReading) {
     astPatch["ast.meterReading"] = meterReading;
   }
 
-  if (tokenReading) {
+  if (isPrepaidMeter && tokenReading) {
     astPatch["ast.tokenReading"] = tokenReading;
   }
 
@@ -1476,6 +1609,7 @@ export function validateMeterReconnection({ data, astDoc }) {
     astPatch,
     astStatusChanged: currentState !== nextAstState,
     astDataChanged: Object.keys(astPatch).length > 0,
+    isPrepaidMeter,
   };
 }
 
@@ -1609,23 +1743,63 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
   };
 }
 
-export function sanitizeWorkorderRef(workorder = {}) {
-  const id = String(workorder?.id || "").trim();
-  const type = normalizeUpper(
-    workorder?.type || (id ? "WORKORDER" : "GENERAL"),
+export function sanitizeServiceProvider(serviceProvider = {}) {
+  const id = String(serviceProvider?.id || "").trim();
+  const name = String(
+    serviceProvider?.name ||
+      serviceProvider?.profile?.tradingName ||
+      serviceProvider?.profile?.registeredName ||
+      serviceProvider?.profile?.name ||
+      id ||
+      "NAv",
+  ).trim();
+
+  return {
+    id: id || "NAv",
+    name: name || "NAv",
+  };
+}
+
+export function sanitizeOrigin(origin = {}, fallback = {}) {
+  const channel = normalizeUpper(
+    origin?.channel || fallback?.channel || "OFFICE",
   );
+
+  const source = normalizeUpper(
+    origin?.source || fallback?.source || "TRN_ORIGIN",
+  );
+
+  return {
+    channel: channel === "FIELD" ? "FIELD" : "OFFICE",
+    source: source || "TRN_ORIGIN",
+    parentInspectionTrnId:
+      origin?.parentInspectionTrnId || fallback?.parentInspectionTrnId || null,
+  };
+}
+
+export function sanitizeBucketRef(bucket = {}) {
+  const id = String(bucket?.id || "").trim();
+  const type = normalizeUpper(bucket?.type || (id ? "CAMPAIGN" : "GENERAL"));
   const createdMode = normalizeUpper(
-    workorder?.createdMode || (id ? "MASS" : "INDIVIDUAL"),
+    bucket?.createdMode || (id ? "MASS" : "INDIVIDUAL"),
   );
 
   return {
     id: id || null,
-    name: String(workorder?.name || (id ? id : "General")).trim(),
-    type: ["GENERAL", "WORKORDER"].includes(type) ? type : "GENERAL",
+    name: String(bucket?.name || (id ? id : "General")).trim(),
+    type: ["GENERAL", "CAMPAIGN", "BULK", "GEOFENCE"].includes(type)
+      ? type
+      : "GENERAL",
     createdMode: ["INDIVIDUAL", "MASS"].includes(createdMode)
       ? createdMode
       : "INDIVIDUAL",
   };
+}
+
+// Temporary compatibility helper. New iREPS vocabulary is "bucket", not
+// "workorder", because Workorder is only a synonym for TRN.
+export function sanitizeWorkorderRef(workorder = {}) {
+  return sanitizeBucketRef(workorder);
 }
 
 export function buildLifecycleInstructionTrnPayload({
@@ -1679,6 +1853,12 @@ export function buildLifecycleInstructionTrnPayload({
       trnType,
     },
 
+    origin: sanitizeOrigin(data?.origin || {}, {
+      channel: "OFFICE",
+      source: "TRN_ORIGIN",
+      parentInspectionTrnId: null,
+    }),
+
     assignment: sanitizeAssignment(data?.assignment || {}),
 
     workflow: {
@@ -1713,7 +1893,7 @@ export function buildLifecycleInstructionTrnPayload({
     reconnection: null,
     inspection: null,
 
-    media: [],
+    media: sanitizeMedia(data?.media || []),
 
     status: {
       state: astDoc?.status?.state || null,
@@ -1721,13 +1901,11 @@ export function buildLifecycleInstructionTrnPayload({
       detail: astDoc?.status?.detail || data?.status?.detail || "NAv",
     },
 
-    serviceProvider: astDoc?.serviceProvider ||
-      data?.serviceProvider || {
-        id: "NAv",
-        name: "NAv",
-      },
+    serviceProvider: sanitizeServiceProvider(
+      data?.serviceProvider || astDoc?.serviceProvider || {},
+    ),
 
-    workorder: sanitizeWorkorderRef(data?.workorder || {}),
+    bucket: sanitizeBucketRef(data?.bucket || data?.workorder || {}),
 
     metadata: buildFlatMetadata({
       now,
