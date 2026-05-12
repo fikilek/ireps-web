@@ -1,2 +1,9 @@
 node_modules/
 *.local
+
+# Secrets
+*.json.key
+*service-account*.json
+*firebase-adminsdk*.json
+.env.local
+.env.production.local
