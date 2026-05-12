@@ -5,6 +5,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import {
   buildFailureResult,
   buildSuccessResult,
+  buildTrnActiveLifecycle,
   getActorNameFromRequest,
   normalizeUpper,
 } from "./helpers.js";
@@ -199,7 +200,6 @@ function getNewTargetsFromRequest(data = {}) {
 
   if (newAssignmentTargets.length) return newAssignmentTargets;
 
-  // Temporary compatibility: accept old request shape but convert it to targets.
   return createdForToTargets(
     data?.createdFor ||
       data?.assignment?.createdFor ||
@@ -329,6 +329,128 @@ function buildCancelPatch({ trnData, cancelReason, now, actorUid, actorName }) {
   };
 }
 
+function buildAstLifecyclePatch({
+  trnId,
+  trnType,
+  workflowState,
+  now,
+  actorUid,
+  actorName,
+}) {
+  return {
+    trnActiveLifecycle: buildTrnActiveLifecycle({
+      trnId,
+      trnType,
+      workflowState,
+      outcome: "NAv",
+      updatedAt: now,
+      updatedByUser: actorName,
+    }),
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+  };
+}
+
+function buildHistoryEvent({
+  trnId,
+  trnType,
+  astId,
+  event,
+  workflowState,
+  actorUid,
+  actorName,
+  now,
+  note = "",
+}) {
+  return {
+    event,
+    workflowState,
+    outcome: "NAv",
+    trnId,
+    trnType,
+    astId,
+    note,
+    actor: {
+      uid: actorUid || "NAv",
+      name: actorName || "NAv",
+    },
+    metadata: {
+      createdAt: now,
+      createdByUid: actorUid || "NAv",
+      createdByUser: actorName || "NAv",
+      updatedAt: now,
+      updatedByUid: actorUid || "NAv",
+      updatedByUser: actorName || "NAv",
+    },
+  };
+}
+
+function buildNotificationRecord({
+  trnId,
+  trnType,
+  workflowState,
+  target,
+  actorUid,
+  actorName,
+  now,
+}) {
+  const targetType = normalizeUpper(target?.type || "USER");
+  const targetName = String(target?.name || target?.id || "NAv").trim();
+
+  return {
+    type: "MLCT_REASSIGNED",
+    channelPreference: ["IN_APP", "EMAIL", "WHATSAPP"],
+
+    recipient: {
+      type: targetType || "USER",
+      id: String(target?.id || "NAv").trim(),
+      name: targetName || "NAv",
+      email: String(target?.email || "").trim(),
+      phone: String(target?.phone || "").trim(),
+    },
+
+    trn: {
+      id: trnId,
+      trnType,
+      workflowState,
+    },
+
+    message: {
+      title: "Lifecycle work reassigned",
+      body:
+        trnType === "METER_DISCONNECTION"
+          ? "A meter disconnection work item has been reassigned to you."
+          : "A meter lifecycle work item has been reassigned to you.",
+    },
+
+    delivery: {
+      status: "PENDING",
+      attempts: 0,
+      lastAttemptAt: null,
+      deliveredAt: null,
+      error: "",
+    },
+
+    metadata: {
+      createdAt: now,
+      createdByUid: actorUid || "NAv",
+      createdByUser: actorName || "NAv",
+      updatedAt: now,
+      updatedByUid: actorUid || "NAv",
+      updatedByUser: actorName || "NAv",
+    },
+  };
+}
+
+function getTrnType(trnData = {}) {
+  return normalizeUpper(trnData?.accessData?.trnType || trnData?.trnType || "");
+}
+
+function getAstId(trnData = {}) {
+  return String(trnData?.ast?.astData?.astId || trnData?.astId || "").trim();
+}
+
 export const onManageLifecycleInstructionCallable = onCall(async (request) => {
   try {
     const db = getFirestore();
@@ -355,7 +477,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
     if (!authority.ok) {
       return buildFailureResult(
         "UNAUTHORIZED_LCT_MANAGER",
-        "Only MNG and MNC supervisors can reassign or cancel lifecycle instructions",
+        "Only MNG and SPV(MNC) can reassign or cancel lifecycle instructions",
         {
           actorRole: authority.role,
           actorSpId: authority.spId,
@@ -455,9 +577,27 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         data: snap.data() || {},
       }));
 
+      const astRefsById = new Map();
+
       for (const row of rows) {
-        const trnType = row.data?.accessData?.trnType || "NAv";
+        const astId = getAstId(row.data);
+
+        if (astId) {
+          astRefsById.set(astId, db.collection("asts").doc(astId));
+        }
+      }
+
+      const astSnapsById = new Map();
+
+      for (const [astId, astRef] of astRefsById.entries()) {
+        const astSnap = await tx.get(astRef);
+        astSnapsById.set(astId, astSnap);
+      }
+
+      for (const row of rows) {
+        const trnType = getTrnType(row.data) || "NAv";
         const workflowState = normalizeUpper(row.data?.workflow?.state);
+        const astId = getAstId(row.data);
 
         if (!MANAGED_LCT_TYPES.includes(trnType)) {
           responsePayload = buildFailureResult(
@@ -466,6 +606,35 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             {
               trnId: row.trnId,
               trnType,
+            },
+          );
+
+          return;
+        }
+
+        if (!astId) {
+          responsePayload = buildFailureResult(
+            "INVALID_AST_ID",
+            "TRN is missing ast.astData.astId",
+            {
+              trnId: row.trnId,
+              trnType,
+            },
+          );
+
+          return;
+        }
+
+        const astSnap = astSnapsById.get(astId);
+
+        if (!astSnap?.exists) {
+          responsePayload = buildFailureResult(
+            "AST_NOT_FOUND",
+            "The referenced AST does not exist",
+            {
+              trnId: row.trnId,
+              trnType,
+              astId,
             },
           );
 
@@ -549,7 +718,13 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         }
       }
 
+      const nextWorkflowState =
+        action === "REASSIGN" ? "REASSIGNED" : "CANCELLED";
+
       for (const row of rows) {
+        const trnType = getTrnType(row.data) || "NAv";
+        const astId = getAstId(row.data);
+
         if (action === "REASSIGN") {
           tx.update(
             row.ref,
@@ -576,6 +751,57 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             }),
           );
         }
+
+        tx.update(
+          db.collection("asts").doc(astId),
+          buildAstLifecyclePatch({
+            trnId: row.trnId,
+            trnType,
+            workflowState: nextWorkflowState,
+            now,
+            actorUid,
+            actorName,
+          }),
+        );
+
+        const historyRef = row.ref.collection("history").doc();
+
+        tx.set(
+          historyRef,
+          buildHistoryEvent({
+            trnId: row.trnId,
+            trnType,
+            astId,
+            event: nextWorkflowState,
+            workflowState: nextWorkflowState,
+            actorUid,
+            actorName,
+            now,
+            note:
+              nextWorkflowState === "REASSIGNED"
+                ? `Lifecycle instruction reassigned: ${reason || "NAv"}`
+                : `Lifecycle instruction cancelled: ${cancelReason}`,
+          }),
+        );
+
+        if (action === "REASSIGN") {
+          for (const target of newTargets) {
+            const notificationRef = db.collection("notifications").doc();
+
+            tx.set(
+              notificationRef,
+              buildNotificationRecord({
+                trnId: row.trnId,
+                trnType,
+                workflowState: "REASSIGNED",
+                target,
+                actorUid,
+                actorName,
+                now,
+              }),
+            );
+          }
+        }
       }
 
       responsePayload = buildSuccessResult(
@@ -587,7 +813,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           action,
           trnIds,
           count: trnIds.length,
-          workflowState: action === "REASSIGN" ? "REASSIGNED" : "CANCELLED",
+          workflowState: nextWorkflowState,
         },
       );
     });

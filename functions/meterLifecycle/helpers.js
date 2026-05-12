@@ -71,13 +71,12 @@ export const DISCONNECTION_LEVELS = {
 };
 
 export const DISCONNECTION_MEDIA_TAGS = {
-  instructionEvidence: "disconnectionInstructionEvidence",
   levelEvidence: "disconnectionLevelEvidence",
-  // NOTE: frontend drafts briefly used levelEvidence. Keep as compatibility.
-  legacyLevelEvidence: "levelEvidence",
+  previousDraftLevelEvidence: "levelEvidence",
   meterReadingEvidence: "disconnectionMeterReadingEvidence",
   tokenReadingPhoto: "tokenReadingPhoto",
   safetyEvidence: "safetyEvidence",
+  noAccessPhoto: "noAccessPhoto",
 };
 
 export const RECONNECTION_MEDIA_TAGS = {
@@ -139,6 +138,32 @@ export function buildFlatMetadata({ now, actorUid, actorName }) {
     updatedAt: now,
     updatedByUid: actorUid || NOW_FALLBACK_USER,
     updatedByUser: actorName || NOW_FALLBACK_USER,
+  };
+}
+
+export function buildFlatUpdateMetadata({ now, actorUid, actorName }) {
+  return {
+    updatedAt: now,
+    updatedByUid: actorUid || NOW_FALLBACK_USER,
+    updatedByUser: actorName || NOW_FALLBACK_USER,
+  };
+}
+
+export function buildTrnActiveLifecycle({
+  trnId,
+  trnType,
+  workflowState,
+  outcome = "NAv",
+  updatedAt,
+  updatedByUser,
+}) {
+  return {
+    trnId: trnId || "NAv",
+    trnType: normalizeUpper(trnType || "NAv"),
+    workflowState: normalizeUpper(workflowState || "NAv"),
+    outcome: normalizeUpper(outcome || "NAv"),
+    updatedAt: updatedAt || null,
+    updatedByUser: updatedByUser || NOW_FALLBACK_USER,
   };
 }
 
@@ -857,6 +882,8 @@ export function buildLifecycleTrnPayload({
 
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
+  const noAccess = isNoAccessExecution(data);
+
   return removeUndefinedDeep({
     id: data.id,
 
@@ -920,7 +947,13 @@ export function buildLifecycleTrnPayload({
       trnType === "METER_DISCONNECTION"
         ? sanitizeMeterDisconnection(data?.disconnection || {}, {
             isPrepaidMeter,
+            noAccess,
           })
+        : undefined,
+
+    executionOutcome:
+      trnType === "METER_DISCONNECTION"
+        ? sanitizeLifecycleExecutionOutcome(data?.executionOutcome || {})
         : undefined,
 
     reconnection:
@@ -1039,12 +1072,68 @@ function hasAnyMediaTag(media = [], tags = [], options = {}) {
   return tags.some((tag) => hasMediaTag(media, tag, options));
 }
 
+function getAccessOutcome(data = {}) {
+  const hasAccess = normalizeLower(
+    data?.accessData?.access?.hasAccess || "yes",
+  );
+
+  return hasAccess === "no" ? "no" : "yes";
+}
+
+function isNoAccessExecution(data = {}) {
+  return getAccessOutcome(data) === "no";
+}
+
+function getNoAccessReason(data = {}) {
+  const reasonText = String(data?.accessData?.access?.reason || "").trim();
+
+  if (reasonText && reasonText !== "NAv") {
+    return reasonText;
+  }
+
+  return selectValueToText(data?.accessData?.access?.reasonSelect);
+}
+
+export function sanitizeLifecycleExecutionOutcome(outcome = {}) {
+  const cleanOutcome = normalizeUpper(outcome?.outcome || "");
+  const isNoAccess = cleanOutcome === "NO_ACCESS";
+
+  return {
+    outcome: isNoAccess ? "NO_ACCESS" : "SUCCESS",
+    success: !isNoAccess,
+  };
+}
+
 // SANITIZE FUNCTIONS
 
 export function sanitizeMeterDisconnection(
   disconnection = {},
-  { isPrepaidMeter = false } = {},
+  { isPrepaidMeter = false, noAccess = false } = {},
 ) {
+  if (noAccess) {
+    return {
+      level: {
+        code: "",
+        label: "",
+        otherText: "",
+      },
+
+      supplyDisconnected: {
+        answer: null,
+        notes: "",
+      },
+
+      meterReading: "",
+      tokenReading: "",
+      noReadingReason: "",
+
+      safetyConfirmed: {
+        answer: null,
+        notes: "",
+      },
+    };
+  }
+
   return {
     level: normalizeCodeLabel(disconnection?.level || {}),
 
@@ -1105,8 +1194,10 @@ export function sanitizeMeterReconnection(
 export function validateMeterDisconnection({ data, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
   const meterType = getAstMeterType(astDoc, data);
-
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
+
+  const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
 
   const disconnection = data?.disconnection || {};
 
@@ -1121,17 +1212,9 @@ export function validateMeterDisconnection({ data, astDoc }) {
     disconnection?.supplyDisconnected?.answer,
   );
 
-  const supplyDisconnectedNotes = String(
-    disconnection?.supplyDisconnected?.notes || "",
-  ).trim();
-
   const safetyConfirmed = normalizeYesNo(
     disconnection?.safetyConfirmed?.answer,
   );
-
-  const safetyConfirmedNotes = String(
-    disconnection?.safetyConfirmed?.notes || "",
-  ).trim();
 
   const meterReading = getLifecycleReading(data, "disconnection");
   const tokenReading = getLifecycleTokenReading(data, "disconnection");
@@ -1161,15 +1244,42 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (
-    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.instructionEvidence, {
-      requireUrl: true,
-    })
-  ) {
+  if (noAccess) {
+    if (!noAccessReason || noAccessReason === "NAv") {
+      return {
+        ok: false,
+        code: "NO_ACCESS_REASON_REQUIRED",
+        message: "No-access reason is required",
+      };
+    }
+
+    if (
+      !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.noAccessPhoto, {
+        requireUrl: true,
+      })
+    ) {
+      return {
+        ok: false,
+        code: "MISSING_NO_ACCESS_PHOTO",
+        message: "No access photo is required",
+      };
+    }
+
     return {
-      ok: false,
-      code: "MISSING_DISCONNECTION_INSTRUCTION_EVIDENCE",
-      message: "Disconnection instruction evidence media is required",
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      disconnectionPassed: false,
+      executionOutcome: {
+        outcome: "NO_ACCESS",
+        success: false,
+      },
+      noAccessReason,
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
     };
   }
 
@@ -1189,11 +1299,27 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
+  if (supplyDisconnected !== "yes") {
+    return {
+      ok: false,
+      code: "SUPPLY_DISCONNECTION_NOT_CONFIRMED",
+      message: "Supply must be confirmed as disconnected before submit",
+    };
+  }
+
   if (!safetyConfirmed) {
     return {
       ok: false,
       code: "INVALID_DISCONNECTION_SAFETY_ANSWER",
       message: "Safety confirmed answer must be yes or no",
+    };
+  }
+
+  if (safetyConfirmed !== "yes") {
+    return {
+      ok: false,
+      code: "DISCONNECTION_SAFETY_NOT_CONFIRMED",
+      message: "Safety must be confirmed before submit",
     };
   }
 
@@ -1272,12 +1398,11 @@ export function validateMeterDisconnection({ data, astDoc }) {
   }
 
   if (
-    supplyDisconnected === "yes" &&
     !hasAnyMediaTag(
       data?.media,
       [
         DISCONNECTION_MEDIA_TAGS.levelEvidence,
-        DISCONNECTION_MEDIA_TAGS.legacyLevelEvidence,
+        DISCONNECTION_MEDIA_TAGS.previousDraftLevelEvidence,
       ],
       { requireUrl: true },
     )
@@ -1290,7 +1415,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
   }
 
   if (
-    safetyConfirmed === "yes" &&
     !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.safetyEvidence, {
       requireUrl: true,
     })
@@ -1301,27 +1425,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
       message: "Safety evidence media is required",
     };
   }
-
-  if (supplyDisconnected === "no" && !supplyDisconnectedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_DISCONNECTION",
-      message: "Notes are required when supplyDisconnected is no",
-    };
-  }
-
-  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_DISCONNECTION_SAFETY",
-      message: "Notes are required when safetyConfirmed is no",
-    };
-  }
-
-  const disconnectionPassed =
-    supplyDisconnected === "yes" && safetyConfirmed === "yes";
-
-  const nextAstState = disconnectionPassed ? "DISCONNECTED" : currentState;
 
   const astPatch = {};
 
@@ -1337,16 +1440,20 @@ export function validateMeterDisconnection({ data, astDoc }) {
     ok: true,
     currentState,
     meterType,
-    disconnectionPassed,
+    isPrepaidMeter,
+    disconnectionPassed: true,
+    executionOutcome: {
+      outcome: "SUCCESS",
+      success: true,
+    },
     disconnectionLevel: {
       code: levelConfig.code,
       label: levelConfig.label,
     },
-    nextAstState,
+    nextAstState: "DISCONNECTED",
     astPatch,
-    astStatusChanged: currentState !== nextAstState,
+    astStatusChanged: currentState !== "DISCONNECTED",
     astDataChanged: Object.keys(astPatch).length > 0,
-    isPrepaidMeter,
   };
 }
 

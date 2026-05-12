@@ -5,6 +5,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import {
   buildFailureResult,
   buildSuccessResult,
+  buildTrnActiveLifecycle,
   getActorNameFromRequest,
   normalizeUpper,
 } from "./helpers.js";
@@ -237,6 +238,71 @@ function buildWorkflowPatch({
   };
 }
 
+function buildAstLifecyclePatch({
+  trnId,
+  trnType,
+  workflowState,
+  now,
+  actorUid,
+  actorName,
+}) {
+  return {
+    trnActiveLifecycle: buildTrnActiveLifecycle({
+      trnId,
+      trnType,
+      workflowState,
+      outcome: "NAv",
+      updatedAt: now,
+      updatedByUser: actorName,
+    }),
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+  };
+}
+
+function buildHistoryEvent({
+  trnId,
+  trnType,
+  astId,
+  event,
+  workflowState,
+  actorUid,
+  actorName,
+  now,
+  note = "",
+}) {
+  return {
+    event,
+    workflowState,
+    outcome: "NAv",
+    trnId,
+    trnType,
+    astId,
+    note,
+    actor: {
+      uid: actorUid || "NAv",
+      name: actorName || "NAv",
+    },
+    metadata: {
+      createdAt: now,
+      createdByUid: actorUid || "NAv",
+      createdByUser: actorName || "NAv",
+      updatedAt: now,
+      updatedByUid: actorUid || "NAv",
+      updatedByUser: actorName || "NAv",
+    },
+  };
+}
+
+function getTrnType(trnData = {}) {
+  return normalizeUpper(trnData?.accessData?.trnType || trnData?.trnType || "");
+}
+
+function getAstId(trnData = {}) {
+  return String(trnData?.ast?.astData?.astId || trnData?.astId || "").trim();
+}
+
 export const onAcceptRejectLifecycleInstructionCallable = onCall(
   async (request) => {
     try {
@@ -262,10 +328,12 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         token,
       });
 
-      if (actorRole !== "FWR") {
+      const canAcceptRejectAssignedWork = ["FWR", "SPV"].includes(actorRole);
+
+      if (!canAcceptRejectAssignedWork) {
         return buildFailureResult(
           "UNAUTHORIZED_LCT_ASSIGNEE_ACTION",
-          "Only field workers can accept or reject assigned lifecycle instructions",
+          "Only field workers or supervisors can accept or reject assigned lifecycle instructions",
           {
             actorRole: actorRole || "UNKNOWN",
           },
@@ -365,10 +433,28 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           teamMap.set(teamId, teamSnap.exists ? teamSnap.data() || {} : {});
         }
 
+        const astRefsById = new Map();
+
         for (const row of trnRows) {
-          const trnType = row.data?.accessData?.trnType || "NAv";
+          const astId = getAstId(row.data);
+
+          if (astId) {
+            astRefsById.set(astId, db.collection("asts").doc(astId));
+          }
+        }
+
+        const astSnapsById = new Map();
+
+        for (const [astId, astRef] of astRefsById.entries()) {
+          const astSnap = await tx.get(astRef);
+          astSnapsById.set(astId, astSnap);
+        }
+
+        for (const row of trnRows) {
+          const trnType = getTrnType(row.data) || "NAv";
           const workflowState = normalizeUpper(row.data?.workflow?.state);
           const targets = getAssignmentTargets(row.data);
+          const astId = getAstId(row.data);
 
           if (!ACCEPT_REJECT_ALLOWED_STATES.includes(workflowState)) {
             responsePayload = buildFailureResult(
@@ -410,7 +496,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           ) {
             responsePayload = buildFailureResult(
               "TRN_NOT_ASSIGNED_TO_ACTOR",
-              "This TRN is not assigned to the current field worker",
+              "This TRN is not assigned to the current field actor",
               {
                 trnId: row.trnId,
                 trnType,
@@ -420,7 +506,38 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
 
             return;
           }
+
+          if (!astId) {
+            responsePayload = buildFailureResult(
+              "INVALID_AST_ID",
+              "TRN is missing ast.astData.astId",
+              {
+                trnId: row.trnId,
+                trnType,
+              },
+            );
+
+            return;
+          }
+
+          const astSnap = astSnapsById.get(astId);
+
+          if (!astSnap?.exists) {
+            responsePayload = buildFailureResult(
+              "AST_NOT_FOUND",
+              "The referenced AST does not exist",
+              {
+                trnId: row.trnId,
+                trnType,
+                astId,
+              },
+            );
+
+            return;
+          }
         }
+
+        const nextWorkflowState = action === "ACCEPT" ? "ACCEPTED" : "REJECTED";
 
         const patch = buildWorkflowPatch({
           action,
@@ -431,7 +548,42 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         });
 
         for (const row of trnRows) {
+          const trnType = getTrnType(row.data) || "NAv";
+          const astId = getAstId(row.data);
+
           tx.update(row.ref, patch);
+
+          tx.update(
+            db.collection("asts").doc(astId),
+            buildAstLifecyclePatch({
+              trnId: row.trnId,
+              trnType,
+              workflowState: nextWorkflowState,
+              now,
+              actorUid,
+              actorName,
+            }),
+          );
+
+          const historyRef = row.ref.collection("history").doc();
+
+          tx.set(
+            historyRef,
+            buildHistoryEvent({
+              trnId: row.trnId,
+              trnType,
+              astId,
+              event: nextWorkflowState,
+              workflowState: nextWorkflowState,
+              actorUid,
+              actorName,
+              now,
+              note:
+                nextWorkflowState === "ACCEPTED"
+                  ? "Lifecycle instruction accepted"
+                  : `Lifecycle instruction rejected: ${rejectReason}`,
+            }),
+          );
         }
 
         responsePayload = buildSuccessResult(
@@ -443,7 +595,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
             action,
             trnIds,
             count: trnIds.length,
-            workflowState: action === "ACCEPT" ? "ACCEPTED" : "REJECTED",
+            workflowState: nextWorkflowState,
           },
         );
       });

@@ -7,6 +7,7 @@ import {
   buildFailureResult,
   buildLifecycleInstructionTrnPayload,
   buildSuccessResult,
+  buildTrnActiveLifecycle,
   getActorNameFromRequest,
   normalizeUpper,
   validateCreateLifecycleInstructionInput,
@@ -122,6 +123,106 @@ async function resolveCreateInstructionAuthority({ db, request }) {
   };
 }
 
+function buildUpdateMetadataPatch({ now, actorUid, actorName }) {
+  return {
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid || "NAv",
+    "metadata.updatedByUser": actorName || "NAv",
+  };
+}
+
+function buildHistoryEvent({
+  trnId,
+  trnType,
+  astId,
+  event,
+  workflowState,
+  outcome = "NAv",
+  actorUid,
+  actorName,
+  now,
+  note = "",
+}) {
+  return {
+    event,
+    workflowState,
+    outcome,
+    trnId,
+    trnType,
+    astId,
+    note,
+    actor: {
+      uid: actorUid || "NAv",
+      name: actorName || "NAv",
+    },
+    metadata: {
+      createdAt: now,
+      createdByUid: actorUid || "NAv",
+      createdByUser: actorName || "NAv",
+      updatedAt: now,
+      updatedByUid: actorUid || "NAv",
+      updatedByUser: actorName || "NAv",
+    },
+  };
+}
+
+function buildNotificationRecord({
+  trnId,
+  trnType,
+  workflowState,
+  target,
+  actorUid,
+  actorName,
+  now,
+}) {
+  const targetType = normalizeUpper(target?.type || "USER");
+  const targetName = String(target?.name || target?.id || "NAv").trim();
+
+  return {
+    type: "MLCT_ISSUED",
+    channelPreference: ["IN_APP", "EMAIL", "WHATSAPP"],
+
+    recipient: {
+      type: targetType || "USER",
+      id: String(target?.id || "NAv").trim(),
+      name: targetName || "NAv",
+      email: String(target?.email || "").trim(),
+      phone: String(target?.phone || "").trim(),
+    },
+
+    trn: {
+      id: trnId,
+      trnType,
+      workflowState,
+    },
+
+    message: {
+      title: "New DCN work issued",
+      body:
+        trnType === "METER_DISCONNECTION"
+          ? "A meter disconnection work item has been assigned to you."
+          : "A meter lifecycle work item has been assigned to you.",
+    },
+
+    delivery: {
+      status: "PENDING",
+      attempts: 0,
+      lastAttemptAt: null,
+      deliveredAt: null,
+      error: "",
+    },
+
+    metadata: {
+      createdAt: now,
+      createdByUid: actorUid || "NAv",
+      createdByUser: actorName || "NAv",
+      updatedAt: now,
+      updatedByUid: actorUid || "NAv",
+      updatedByUser: actorName || "NAv",
+    },
+  };
+}
+
 export const onCreateMeterLifecycleInstructionCallable = onCall(
   async (request) => {
     try {
@@ -163,7 +264,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
       if (!authority.ok) {
         return buildFailureResult(
           "UNAUTHORIZED_LCT_ORIGINATOR",
-          "Only MNG and MNC supervisors can create lifecycle instructions",
+          "Only MNG and SPV(MNC) can create lifecycle instructions",
           {
             actorRole: authority.role,
             actorRelationshipType: authority.relationshipType,
@@ -343,6 +444,61 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         });
 
         tx.create(trnRef, cleanInstructionTrn);
+
+        tx.update(astRef, {
+          trnActiveLifecycle: buildTrnActiveLifecycle({
+            trnId,
+            trnType,
+            workflowState: "ISSUED",
+            outcome: "NAv",
+            updatedAt: now,
+            updatedByUser: actorName,
+          }),
+          ...buildUpdateMetadataPatch({
+            now,
+            actorUid,
+            actorName,
+          }),
+        });
+
+        const historyRef = trnRef.collection("history").doc();
+
+        tx.set(
+          historyRef,
+          buildHistoryEvent({
+            trnId,
+            trnType,
+            astId,
+            event: "ISSUED",
+            workflowState: "ISSUED",
+            outcome: "NAv",
+            actorUid,
+            actorName,
+            now,
+            note: "Lifecycle instruction issued",
+          }),
+        );
+
+        const targets = Array.isArray(cleanInstructionTrn?.assignment?.targets)
+          ? cleanInstructionTrn.assignment.targets
+          : [];
+
+        for (const target of targets) {
+          const notificationRef = db.collection("notifications").doc();
+
+          tx.set(
+            notificationRef,
+            buildNotificationRecord({
+              trnId,
+              trnType,
+              workflowState: "ISSUED",
+              target,
+              actorUid,
+              actorName,
+              now,
+            }),
+          );
+        }
 
         responsePayload = buildSuccessResult(
           trnId,
