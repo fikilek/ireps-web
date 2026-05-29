@@ -1,20 +1,14 @@
 import {
   buildFlatMetadata,
-  buildPremiseServiceSnapshotPatch,
   getAstCurrentState,
   getAstData,
   normalizeUpper,
   removeUndefinedDeep,
-  sanitizeCommissioning,
   sanitizeMedia,
-  validateMeterCommissioning,
 } from "../meterLifecycle/helpers.js";
 
 export const COMMISSIONING_TRN_TYPE = "METER_COMMISSIONING";
 export const COMMISSIONING_TRN_PREFIX = "TRN_MCOM_";
-
-export const COMMISSIONING_INSTRUCTION_TEXT =
-  "Confirm meter can vend and is ready for final switch-on";
 
 function cleanString(value, fallback = "") {
   const clean = String(value || "").trim();
@@ -25,11 +19,111 @@ function cleanId(value, fallback = "NAv") {
   return cleanString(value, fallback);
 }
 
+function normalizeLower(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
 function normalizeMeterNo(value) {
   return String(value || "")
     .replace(/\s+/g, "")
     .trim()
     .toUpperCase();
+}
+
+function readQuestionAnswer(question = {}) {
+  return normalizeLower(question?.answer);
+}
+
+function readQuestionNotes(question = {}) {
+  return cleanString(question?.notes, "");
+}
+
+function hasMediaTag(media = [], tag) {
+  if (!Array.isArray(media)) return false;
+
+  return media.some((item) => {
+    return String(item?.tag || "").trim() === tag;
+  });
+}
+
+function buildQuestion(answer = "", notes = "") {
+  return {
+    answer: normalizeLower(answer),
+    notes: cleanString(notes, ""),
+  };
+}
+
+function sanitizeCommissioningAnswers(commissioning = {}) {
+  return removeUndefinedDeep({
+    vendingConfirmed: buildQuestion(
+      commissioning?.vendingConfirmed?.answer,
+      commissioning?.vendingConfirmed?.notes,
+    ),
+
+    finalSwitchOnTested: buildQuestion(
+      commissioning?.finalSwitchOnTested?.answer,
+      commissioning?.finalSwitchOnTested?.notes,
+    ),
+
+    keypadIssued: buildQuestion(
+      commissioning?.keypadIssued?.answer,
+      commissioning?.keypadIssued?.notes,
+    ),
+
+    waterMeterOperational: buildQuestion(
+      commissioning?.waterMeterOperational?.answer,
+      commissioning?.waterMeterOperational?.notes,
+    ),
+
+    waterReadingOrFlowConfirmed: buildQuestion(
+      commissioning?.waterReadingOrFlowConfirmed?.answer,
+      commissioning?.waterReadingOrFlowConfirmed?.notes,
+    ),
+  });
+}
+
+function validateRequiredCommissioningCheck({
+  commissioning = {},
+  media = [],
+  fieldKey,
+  fieldLabel,
+  evidenceTag,
+  evidenceLabel,
+}) {
+  const question = commissioning?.[fieldKey] || {};
+  const answer = readQuestionAnswer(question);
+  const notes = readQuestionNotes(question);
+
+  if (!["yes", "no"].includes(answer)) {
+    return {
+      ok: false,
+      code: "INVALID_COMMISSIONING_ANSWER",
+      message: `${fieldLabel} must be answered yes or no`,
+    };
+  }
+
+  if (answer === "no" && !notes) {
+    return {
+      ok: false,
+      code: "COMMISSIONING_NOTES_REQUIRED",
+      message: `Notes are required when ${fieldLabel} is no`,
+    };
+  }
+
+  if (answer === "yes" && evidenceTag && !hasMediaTag(media, evidenceTag)) {
+    return {
+      ok: false,
+      code: "COMMISSIONING_EVIDENCE_REQUIRED",
+      message: `${evidenceLabel || fieldLabel} evidence is required`,
+    };
+  }
+
+  return {
+    ok: true,
+    passed: answer === "yes",
+  };
 }
 
 export function getCommissioningTrnType(data = {}) {
@@ -57,59 +151,13 @@ export function getCommissioningPremiseId(data = {}) {
 
 export function getCommissioningMeterNo({ trn = {}, astDoc = {} }) {
   const astData = getAstData(astDoc);
+
   return normalizeMeterNo(
     astData?.astNo ||
       trn?.ast?.astData?.astNo ||
       trn?.astData?.astNo ||
       trn?.meterNo,
   );
-}
-
-export function validateCommissioningInstruction(assignment = {}) {
-  const instruction = assignment?.instruction || {};
-  const code = normalizeUpper(instruction?.code);
-
-  if (Array.isArray(assignment?.targets) && assignment.targets.length > 0) {
-    return {
-      ok: false,
-      code: "COMMISSIONING_TARGETS_NOT_ALLOWED",
-      message: "Commissioning must not use assignment.targets",
-    };
-  }
-
-  if (assignment?.createdFor) {
-    return {
-      ok: false,
-      code: "COMMISSIONING_CREATED_FOR_NOT_ALLOWED",
-      message: "Commissioning must not use assignment.createdFor",
-    };
-  }
-
-  if (!code) {
-    return {
-      ok: false,
-      code: "INVALID_COMMISSIONING_INSTRUCTION_CODE",
-      message: "assignment.instruction.code is required",
-    };
-  }
-
-  if (code !== COMMISSIONING_TRN_TYPE) {
-    return {
-      ok: false,
-      code: "COMMISSIONING_INSTRUCTION_MISMATCH",
-      message: "assignment.instruction.code must be METER_COMMISSIONING",
-    };
-  }
-
-  if (!cleanString(instruction?.text)) {
-    return {
-      ok: false,
-      code: "INVALID_COMMISSIONING_INSTRUCTION_TEXT",
-      message: "assignment.instruction.text is required",
-    };
-  }
-
-  return { ok: true };
 }
 
 export function validateCommissioningCreateInput(data = {}) {
@@ -174,14 +222,6 @@ export function validateCommissioningCreateInput(data = {}) {
     };
   }
 
-  const instructionCheck = validateCommissioningInstruction(
-    data?.assignment || {},
-  );
-
-  if (!instructionCheck.ok) {
-    return instructionCheck;
-  }
-
   return {
     ok: true,
     trnId,
@@ -192,22 +232,139 @@ export function validateCommissioningCreateInput(data = {}) {
 }
 
 export function validateCommissioningAgainstAst({ data = {}, astDoc = {} }) {
-  return validateMeterCommissioning({
-    data,
-    astDoc,
-  });
-}
+  const currentState = getAstCurrentState(astDoc);
+  const meterType = normalizeLower(astDoc?.meterType || data?.meterType);
+  const astData = getAstData(astDoc);
+  const meterKind = normalizeLower(
+    astData?.meter?.type || data?.ast?.astData?.meter?.type,
+  );
 
-export function sanitizeCommissioningInstruction(assignment = {}) {
-  const instruction = assignment?.instruction || {};
+  if (currentState !== "FIELD") {
+    return {
+      ok: false,
+      code: "AST_NOT_FIELD",
+      message: "Only FIELD meters can be commissioned",
+      currentState,
+      meterType,
+      commissioningPassed: false,
+      nextAstState: currentState || "NAv",
+      astStatusChanged: false,
+    };
+  }
+
+  if (!["electricity", "water"].includes(meterType)) {
+    return {
+      ok: false,
+      code: "INVALID_COMMISSIONING_METER_TYPE",
+      message: "Only electricity or water meters can be commissioned",
+      currentState,
+      meterType,
+      commissioningPassed: false,
+      nextAstState: "FIELD",
+      astStatusChanged: false,
+    };
+  }
+
+  const commissioning = data?.commissioning || {};
+  const media = Array.isArray(data?.media) ? data.media : [];
+  const checks = [];
+
+  if (meterType === "electricity" && meterKind === "prepaid") {
+    checks.push(
+      validateRequiredCommissioningCheck({
+        commissioning,
+        media,
+        fieldKey: "vendingConfirmed",
+        fieldLabel: "Vending confirmation",
+        evidenceTag: "vendingEvidence",
+        evidenceLabel: "Vending",
+      }),
+    );
+
+    checks.push(
+      validateRequiredCommissioningCheck({
+        commissioning,
+        media,
+        fieldKey: "finalSwitchOnTested",
+        fieldLabel: "Final switch-on / energisation confirmation",
+        evidenceTag: "finalSwitchOnEvidence",
+        evidenceLabel: "Final switch-on",
+      }),
+    );
+
+    checks.push(
+      validateRequiredCommissioningCheck({
+        commissioning,
+        media,
+        fieldKey: "keypadIssued",
+        fieldLabel: "Keypad issued confirmation",
+        evidenceTag: "keypadIssuedEvidence",
+        evidenceLabel: "Keypad issued",
+      }),
+    );
+  }
+
+  if (meterType === "electricity" && meterKind !== "prepaid") {
+    checks.push(
+      validateRequiredCommissioningCheck({
+        commissioning,
+        media,
+        fieldKey: "finalSwitchOnTested",
+        fieldLabel: "Final switch-on / energisation confirmation",
+        evidenceTag: "finalSwitchOnEvidence",
+        evidenceLabel: "Final switch-on",
+      }),
+    );
+  }
+
+  if (meterType === "water") {
+    checks.push(
+      validateRequiredCommissioningCheck({
+        commissioning,
+        media,
+        fieldKey: "waterMeterOperational",
+        fieldLabel: "Water meter operational / service confirmation",
+        evidenceTag: "waterOperationalEvidence",
+        evidenceLabel: "Water operational",
+      }),
+    );
+
+    checks.push(
+      validateRequiredCommissioningCheck({
+        commissioning,
+        media,
+        fieldKey: "waterReadingOrFlowConfirmed",
+        fieldLabel: "Water reading or flow confirmation",
+        evidenceTag: "waterReadingEvidence",
+        evidenceLabel: "Water reading / flow",
+      }),
+    );
+  }
+
+  const failedValidation = checks.find((check) => !check?.ok);
+
+  if (failedValidation) {
+    return {
+      ...failedValidation,
+      currentState,
+      meterType,
+      meterKind,
+      commissioningPassed: false,
+      nextAstState: "FIELD",
+      astStatusChanged: false,
+    };
+  }
+
+  const commissioningPassed = checks.every((check) => check?.passed === true);
 
   return {
-    instruction: {
-      code: COMMISSIONING_TRN_TYPE,
-      text: cleanString(instruction?.text, COMMISSIONING_INSTRUCTION_TEXT),
-      notes: cleanString(instruction?.notes, ""),
-      mediaRequired: instruction?.mediaRequired !== false,
-    },
+    ok: true,
+    currentState,
+    meterType,
+    meterKind,
+    commissioningPassed,
+    nextAstState: commissioningPassed ? "CONNECTED" : "FIELD",
+    astStatusChanged: commissioningPassed,
   };
 }
 
@@ -217,16 +374,10 @@ export function buildCommissioningTrnPayload({
   now,
   actorUid,
   actorName,
-  statusState,
 }) {
   const serverAstData = getAstData(astDoc);
   const inputAstData = data?.ast?.astData || {};
   const astId = getCommissioningAstId(data);
-
-  const nextStatusState =
-    normalizeUpper(statusState) ||
-    normalizeUpper(data?.status?.state) ||
-    getAstCurrentState(astDoc);
 
   return removeUndefinedDeep({
     id: data.id,
@@ -262,8 +413,6 @@ export function buildCommissioningTrnPayload({
       trnType: COMMISSIONING_TRN_TYPE,
     },
 
-    assignment: sanitizeCommissioningInstruction(data?.assignment || {}),
-
     ast: {
       astData: {
         astId,
@@ -281,7 +430,7 @@ export function buildCommissioningTrnPayload({
       },
     },
 
-    commissioning: sanitizeCommissioning(data?.commissioning || {}),
+    commissioning: sanitizeCommissioningAnswers(data?.commissioning || {}),
 
     media: sanitizeMedia(data?.media || []),
 
@@ -298,188 +447,31 @@ export function buildCommissioningTrnPayload({
         id: "NAv",
         name: "NAv",
       },
-
-    status: {
-      state: nextStatusState,
-      id:
-        astDoc?.status?.id ||
-        data?.status?.id ||
-        astDoc?.accessData?.parents?.lmPcode ||
-        data?.accessData?.parents?.lmPcode ||
-        "NAv",
-      detail:
-        astDoc?.status?.detail ||
-        data?.status?.detail ||
-        astDoc?.accessData?.parents?.lmPcode ||
-        data?.accessData?.parents?.lmPcode ||
-        "NAv",
-    },
   });
 }
 
 export function buildCommissioningAstPatch({
-  actionCheck = {},
+  astDoc = {},
+  trn = {},
   now,
   actorUid,
   actorName,
 }) {
-  const nextAstState = normalizeUpper(actionCheck?.nextAstState);
-
-  if (!nextAstState) {
-    return {
-      ok: false,
-      code: "INVALID_NEXT_AST_STATE",
-      message: "Commissioning next AST state could not be resolved",
-    };
-  }
-
-  const patch = {
-    "metadata.updatedAt": now,
-    "metadata.updatedByUid": actorUid,
-    "metadata.updatedByUser": actorName,
-  };
-
-  if (actionCheck.astStatusChanged === true) {
-    patch["status.state"] = nextAstState;
-  }
+  const lmPcode =
+    astDoc?.status?.id ||
+    astDoc?.accessData?.parents?.lmPcode ||
+    trn?.accessData?.parents?.lmPcode ||
+    "NAv";
 
   return {
     ok: true,
-    patch,
-  };
-}
-
-export function buildCommissioningPremisePatch({
-  premiseData = {},
-  astId,
-  meterType,
-  status,
-  now,
-  actorUid,
-  actorName,
-}) {
-  const servicePatchResult = buildPremiseServiceSnapshotPatch({
-    premiseData,
-    astId,
-    meterType,
-    status,
-    updatedAt: now,
-  });
-
-  if (!servicePatchResult.ok) {
-    return servicePatchResult;
-  }
-
-  return {
-    ok: true,
-    serviceBucket: servicePatchResult.serviceBucket,
     patch: {
-      ...servicePatchResult.patch,
+      "status.state": "CONNECTED",
+      "status.id": lmPcode,
+      "status.detail": lmPcode,
       "metadata.updatedAt": now,
       "metadata.updatedByUid": actorUid,
       "metadata.updatedByUser": actorName,
     },
-  };
-}
-
-export function buildCommissioningMasterPatch({
-  trn = {},
-  astDoc = {},
-  statusState,
-  now,
-  actorUid,
-  actorName,
-}) {
-  const meterNo = getCommissioningMeterNo({
-    trn,
-    astDoc,
-  });
-
-  if (!meterNo || meterNo === "NAv") {
-    return {
-      ok: false,
-      code: "INVALID_MASTER_METER_NO",
-      message: "Cannot update meter_master without a meter number",
-    };
-  }
-
-  const status = {
-    state: normalizeUpper(statusState),
-    id:
-      astDoc?.status?.id ||
-      trn?.status?.id ||
-      astDoc?.accessData?.parents?.lmPcode ||
-      trn?.accessData?.parents?.lmPcode ||
-      "NAv",
-    detail:
-      astDoc?.status?.detail ||
-      trn?.status?.detail ||
-      astDoc?.accessData?.parents?.lmPcode ||
-      trn?.accessData?.parents?.lmPcode ||
-      "NAv",
-  };
-
-  return {
-    ok: true,
-    meterNo,
-    patch: {
-      id: meterNo,
-      meterNo,
-      meterType: astDoc?.meterType || trn?.meterType || "electricity",
-      status,
-      refs: {
-        asts: {
-          id: getCommissioningAstId(trn),
-        },
-        trns: {
-          id: trn?.id || "NAv",
-        },
-        premise: {
-          id: getCommissioningPremiseId(trn),
-        },
-      },
-      parents: astDoc?.accessData?.parents || trn?.accessData?.parents || {},
-      metadata: {
-        updatedAt: now,
-        updatedByUid: actorUid,
-        updatedByUser: actorName,
-      },
-    },
-  };
-}
-
-export function shouldApplyCommissioningAstUpdate(actionCheck = {}) {
-  return (
-    actionCheck?.ok === true &&
-    actionCheck?.commissioningPassed === true &&
-    normalizeUpper(actionCheck?.nextAstState) === "CONNECTED"
-  );
-}
-
-export function buildCommissioningProcessingPatch({
-  actionCheck = {},
-  now,
-  actorUid,
-  actorName,
-  processingState,
-  message,
-}) {
-  const nextState =
-    processingState ||
-    (shouldApplyCommissioningAstUpdate(actionCheck)
-      ? "AST_UPDATED"
-      : "AST_UNCHANGED");
-
-  return {
-    "processing.commissioning.state": nextState,
-    "processing.commissioning.message": message || "",
-    "processing.commissioning.processedAt": now,
-    "processing.commissioning.processedByUid": actorUid,
-    "processing.commissioning.processedByUser": actorName,
-    "processing.commissioning.astStatusAfter":
-      actionCheck?.nextAstState || "FIELD",
-    "metadata.updatedAt": now,
-    "metadata.updatedByUid": actorUid,
-    "metadata.updatedByUser": actorName,
   };
 }

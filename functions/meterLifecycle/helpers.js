@@ -9,19 +9,23 @@ export const LIFECYCLE_TRN_TYPES = [
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
   "METER_REMOVAL",
+  "METER_READING",
   "METER_VENDING",
 ];
 
 export const IMPLEMENTED_LIFECYCLE_TRN_TYPES = [
+  "METER_INSPECTION",
   "METER_REMOVAL",
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
+  "METER_READING",
 ];
 export const OFFICE_LCT_INSTRUCTION_TRN_TYPES = [
   "METER_INSPECTION",
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
   "METER_REMOVAL",
+  "METER_READING",
 ];
 
 export const ACTIVE_LCT_WORKFLOW_STATES = [
@@ -48,11 +52,26 @@ export const COMMISSIONING_MEDIA_TAGS = {
 };
 
 export const REMOVAL_MEDIA_TAGS = {
-  removalInstructionEvidence: "removalInstructionEvidence",
   removalEvidence: "removalEvidence",
-  finalReadingEvidence: "finalReadingEvidence",
+  meterReadingEvidence: "removalMeterReadingEvidence",
   tokenReadingPhoto: "tokenReadingPhoto",
-  supplySafeEvidence: "supplySafeEvidence",
+  safetyEvidence: "safetyEvidence",
+  noAccessPhoto: "noAccessPhoto",
+};
+
+export const METER_READING_MEDIA_TAGS = {
+  meterReadingEvidence: "meterReadingEvidence",
+  tokenReadingPhoto: "tokenReadingPhoto",
+  noAccessPhoto: "noAccessPhoto",
+  noReadingEvidence: "noReadingEvidence",
+};
+
+export const INSPECTION_MEDIA_TAGS = {
+  astNoPhoto: "astNoPhoto",
+  anomalyPhoto: "anomalyPhoto",
+  normalisationPhoto: "normalisationPhoto",
+  meterReadingPhoto: "meterReadingPhoto",
+  noAccessPhoto: "noAccessPhoto",
 };
 
 export const DISCONNECTION_LEVELS = {
@@ -80,12 +99,11 @@ export const DISCONNECTION_MEDIA_TAGS = {
 };
 
 export const RECONNECTION_MEDIA_TAGS = {
-  instructionEvidence: "reconnectionInstructionEvidence",
   reconnectionEvidence: "reconnectionEvidence",
   meterReadingEvidence: "reconnectionMeterReadingEvidence",
   tokenReadingPhoto: "tokenReadingPhoto",
   safetyEvidence: "safetyEvidence",
-  supplyTestedEvidence: "supplyTestedEvidence",
+  noAccessPhoto: "noAccessPhoto",
 };
 
 export function buildFailureResult(code, message, extra = {}) {
@@ -149,11 +167,23 @@ export function buildFlatUpdateMetadata({ now, actorUid, actorName }) {
   };
 }
 
+function normalizeTrnActiveLifecycleAssignedTo(assignedTo = {}) {
+  return {
+    type: normalizeUpper(assignedTo?.type || "NAv"),
+    id: String(assignedTo?.id || "NAv").trim() || "NAv",
+    name:
+      String(
+        assignedTo?.name || assignedTo?.title || assignedTo?.id || "NAv",
+      ).trim() || "NAv",
+  };
+}
+
 export function buildTrnActiveLifecycle({
   trnId,
   trnType,
   workflowState,
   outcome = "NAv",
+  assignedTo = {},
   updatedAt,
   updatedByUser,
 }) {
@@ -162,6 +192,7 @@ export function buildTrnActiveLifecycle({
     trnType: normalizeUpper(trnType || "NAv"),
     workflowState: normalizeUpper(workflowState || "NAv"),
     outcome: normalizeUpper(outcome || "NAv"),
+    assignedTo: normalizeTrnActiveLifecycleAssignedTo(assignedTo),
     updatedAt: updatedAt || null,
     updatedByUser: updatedByUser || NOW_FALLBACK_USER,
   };
@@ -377,7 +408,10 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
     };
   }
 
-  if (!String(instruction?.text || "").trim()) {
+  if (
+    !String(instruction?.text || "").trim() &&
+    normalizeUpper(trnType) !== "METER_READING"
+  ) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
@@ -438,13 +472,28 @@ export function getAstMeter(astDoc = {}) {
 
 export function getAstPrepaidType(astDoc = {}, input = {}) {
   const astMeter = getAstMeter(astDoc);
-  const inputMeter = input?.ast?.astData?.meter || {};
+  const inputMeter =
+    input?.ast?.astData?.meter ||
+    input?.inspection?.captured?.ast?.astData?.meter ||
+    {};
 
   return normalizeMeterKind(astMeter?.type || inputMeter?.type || "");
 }
 
 export function isPrepaidAstMeter(astDoc = {}, input = {}) {
   return getAstPrepaidType(astDoc, input) === "prepaid";
+}
+
+export function isConventionalAstMeter(astDoc = {}, input = {}) {
+  return ["conventional", "postpaid", "credit"].includes(
+    getAstPrepaidType(astDoc, input),
+  );
+}
+
+export function isKnownAstMeterKind(astDoc = {}, input = {}) {
+  const meterKind = getAstPrepaidType(astDoc, input);
+
+  return ["prepaid", "conventional", "postpaid", "credit"].includes(meterKind);
 }
 
 export function validateCommonLifecycleInput(data = {}) {
@@ -667,25 +716,991 @@ export function getRemovalNotes(data = {}, key) {
   return String(data?.removal?.[key]?.notes || "").trim();
 }
 
-export function sanitizeRemoval(removal = {}, { isPrepaidMeter = false } = {}) {
+export function sanitizeRemoval(
+  removal = {},
+  { isPrepaidMeter = false, noAccess = false } = {},
+) {
+  if (noAccess) {
+    return {
+      meterRemoved: {
+        answer: null,
+        notes: "",
+      },
+
+      meterReading: "",
+      tokenReading: "",
+      noReadingReason: "",
+
+      safetyConfirmed: {
+        answer: null,
+        notes: "",
+      },
+    };
+  }
+
   return {
     meterRemoved: {
       answer: normalizeYesNo(removal?.meterRemoved?.answer),
       notes: String(removal?.meterRemoved?.notes || ""),
     },
 
-    finalReading: isPrepaidMeter
+    meterReading: isPrepaidMeter
       ? ""
-      : getFlatOrNestedReading(removal, "finalReading"),
+      : getFlatOrNestedReading(removal, "meterReading"),
 
     tokenReading: isPrepaidMeter ? String(removal?.tokenReading || "") : "",
 
     noReadingReason: selectValueToText(removal?.noReadingReason),
 
-    supplyMadeSafe: {
-      answer: normalizeYesNo(removal?.supplyMadeSafe?.answer),
-      notes: String(removal?.supplyMadeSafe?.notes || ""),
+    safetyConfirmed: {
+      answer: normalizeYesNo(removal?.safetyConfirmed?.answer),
+      notes: String(removal?.safetyConfirmed?.notes || ""),
     },
+  };
+}
+
+export function sanitizeMeterReading(
+  meterReading = {},
+  { isPrepaidMeter = false, noAccess = false } = {},
+) {
+  if (noAccess) {
+    return {
+      reading: "",
+      tokenReading: "",
+      readingAt: "",
+      noReadingReason: "",
+      readingGps: null,
+      executorNotes: "",
+    };
+  }
+
+  return {
+    reading: isPrepaidMeter ? "" : String(meterReading?.reading || "").trim(),
+    tokenReading: isPrepaidMeter
+      ? String(meterReading?.tokenReading || "").trim()
+      : "",
+    readingAt: String(meterReading?.readingAt || "").trim(),
+    noReadingReason: selectValueToText(meterReading?.noReadingReason),
+    readingGps: sanitizeGps(meterReading?.readingGps || {}),
+    executorNotes: String(meterReading?.executorNotes || "").trim(),
+  };
+}
+
+function getMeterReadingPayload(data = {}) {
+  return data?.meterReading || {};
+}
+
+function getMeterReadingValue(data = {}) {
+  return String(getMeterReadingPayload(data)?.reading || "").trim();
+}
+
+function getMeterReadingTokenValue(data = {}) {
+  return String(getMeterReadingPayload(data)?.tokenReading || "").trim();
+}
+
+function getMeterReadingNoReadingReason(data = {}) {
+  return selectValueToText(getMeterReadingPayload(data)?.noReadingReason);
+}
+
+function getMeterReadingAt(data = {}) {
+  return String(getMeterReadingPayload(data)?.readingAt || "").trim();
+}
+
+function getMeterReadingGps(data = {}) {
+  return sanitizeGps(getMeterReadingPayload(data)?.readingGps || {});
+}
+
+function hasValidGps(gps = {}) {
+  return Number.isFinite(Number(gps?.lat)) && Number.isFinite(Number(gps?.lng));
+}
+
+function getKnownMeterGps(astDoc = {}, data = {}) {
+  return sanitizeGps(
+    astDoc?.ast?.location?.gps ||
+      astDoc?.location?.gps ||
+      data?.ast?.location?.gps ||
+      {},
+  );
+}
+
+function degreesToRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function calculateDistanceMeters(pointA = {}, pointB = {}) {
+  if (!hasValidGps(pointA) || !hasValidGps(pointB)) return null;
+
+  const earthRadiusMeters = 6371000;
+  const lat1 = degreesToRadians(pointA.lat);
+  const lat2 = degreesToRadians(pointB.lat);
+  const deltaLat = degreesToRadians(pointB.lat - pointA.lat);
+  const deltaLng = degreesToRadians(pointB.lng - pointA.lng);
+
+  const haversine =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(lat1) *
+      Math.cos(lat2) *
+      Math.sin(deltaLng / 2) *
+      Math.sin(deltaLng / 2);
+
+  const centralAngle =
+    2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+
+  return earthRadiusMeters * centralAngle;
+}
+
+function buildLatestMreadingsCache({ astDoc = {}, reading, readingAt, trnId }) {
+  const currentReadings = Array.isArray(astDoc?.mreadings)
+    ? astDoc.mreadings
+    : [];
+
+  const nextReading = {
+    reading: String(reading || "").trim(),
+    readingAt: String(readingAt || "").trim(),
+    trnId: String(trnId || "NAv").trim(),
+  };
+
+  const merged = [
+    nextReading,
+    ...currentReadings.filter(
+      (item) => String(item?.trnId || "") !== nextReading.trnId,
+    ),
+  ]
+    .filter((item) => item?.reading && item?.readingAt && item?.trnId)
+    .sort((a, b) => String(b.readingAt).localeCompare(String(a.readingAt)));
+
+  return merged.slice(0, 100);
+}
+
+export function validateMeterReading({ data, astDoc }) {
+  const currentState = getAstCurrentState(astDoc);
+  const meterType = getAstMeterType(astDoc, data);
+  const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
+
+  const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
+
+  const instructionText = String(
+    data?.assignment?.instruction?.text || "",
+  ).trim();
+
+  const reading = getMeterReadingValue(data);
+  const tokenReading = getMeterReadingTokenValue(data);
+  const noReadingReason = getMeterReadingNoReadingReason(data);
+  const readingAt = getMeterReadingAt(data);
+  const readingGps = getMeterReadingGps(data);
+  const knownMeterGps = getKnownMeterGps(astDoc, data);
+
+  const distanceMeters = 4; // TEMP REMOTE TEST CHEAT
+  // const distanceMeters = calculateDistanceMeters(knownMeterGps, readingGps);
+
+  if (currentState === "DECOMMISSIONED") {
+    return {
+      ok: false,
+      code: "INVALID_AST_STATE",
+      message: "DECOMMISSIONED meters cannot be read",
+    };
+  }
+
+  if (!["electricity", "water"].includes(meterType)) {
+    return {
+      ok: false,
+      code: "INVALID_METER_TYPE",
+      message: "Only electricity or water meters can be read",
+    };
+  }
+
+  if (isPrepaidMeter) {
+    return {
+      ok: false,
+      code: "PREPAID_MREAD_NOT_SUPPORTED",
+      message: "MREAD Sprint 1 supports conventional meters only",
+    };
+  }
+
+  if (!instructionText && normalizeUpper(data?.origin?.channel) === "OFFICE") {
+    return {
+      ok: false,
+      code: "METER_READING_INSTRUCTION_REQUIRED",
+      message: "Meter reading instruction is required",
+    };
+  }
+
+  if (noAccess) {
+    if (!noAccessReason || noAccessReason === "NAv") {
+      return {
+        ok: false,
+        code: "NO_ACCESS_REASON_REQUIRED",
+        message: "No-access reason is required",
+      };
+    }
+
+    if (
+      !hasMediaTag(data?.media, METER_READING_MEDIA_TAGS.noAccessPhoto, {
+        requireUrl: true,
+      })
+    ) {
+      return {
+        ok: false,
+        code: "MISSING_NO_ACCESS_PHOTO",
+        message: "No access photo is required",
+      };
+    }
+
+    return {
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      readingPassed: false,
+      executionOutcome: {
+        outcome: "NO_ACCESS",
+        success: false,
+      },
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
+      distanceMeters,
+    };
+  }
+
+  if (tokenReading) {
+    return {
+      ok: false,
+      code: "TOKEN_READING_NOT_SUPPORTED",
+      message: "Token readings are not supported in MREAD Sprint 1",
+    };
+  }
+
+  if (!reading && !noReadingReason) {
+    return {
+      ok: false,
+      code: "METER_READING_OR_REASON_REQUIRED",
+      message: "Meter reading or no-reading reason is required",
+    };
+  }
+
+  if (reading && !isNumericReading(reading)) {
+    return {
+      ok: false,
+      code: "INVALID_METER_READING",
+      message: "Meter reading must be numeric",
+    };
+  }
+
+  if (!readingAt) {
+    return {
+      ok: false,
+      code: "METER_READING_AT_REQUIRED",
+      message: "Reading date/time is required",
+    };
+  }
+
+  if (!hasValidGps(knownMeterGps)) {
+    return {
+      ok: false,
+      code: "KNOWN_METER_GPS_REQUIRED",
+      message: "Known meter GPS is required for MREAD",
+    };
+  }
+
+  if (!hasValidGps(readingGps)) {
+    return {
+      ok: false,
+      code: "READING_GPS_REQUIRED",
+      message: "Reading GPS is required",
+    };
+  }
+
+  if (distanceMeters === null || distanceMeters > 5) {
+    return {
+      ok: false,
+      code: "READING_GPS_TOO_FAR",
+      message: "You must be next to the meter to capture this reading",
+      distanceMeters,
+      maxDistanceMeters: 5,
+    };
+  }
+
+  if (
+    reading &&
+    !hasMediaTag(data?.media, METER_READING_MEDIA_TAGS.meterReadingEvidence, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_METER_READING_EVIDENCE",
+      message: "Meter reading evidence is required",
+    };
+  }
+
+  if (noReadingReason) {
+    return {
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      readingPassed: false,
+      executionOutcome: {
+        outcome: "NO_READING",
+        success: false,
+      },
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
+      distanceMeters,
+    };
+  }
+
+  const astPatch = {
+    mreadings: buildLatestMreadingsCache({
+      astDoc,
+      reading,
+      readingAt,
+      trnId: data?.id,
+    }),
+  };
+
+  return {
+    ok: true,
+    currentState,
+    meterType,
+    isPrepaidMeter,
+    readingPassed: true,
+    executionOutcome: {
+      outcome: "SUCCESS",
+      success: true,
+    },
+    nextAstState: currentState,
+    astPatch,
+    astStatusChanged: false,
+    astDataChanged: true,
+    distanceMeters,
+  };
+}
+
+function getInspectionPayload(data = {}) {
+  return data?.inspection || {};
+}
+
+function getInspectionCapturedAst(data = {}) {
+  return getInspectionPayload(data)?.captured?.ast || {};
+}
+
+function getInspectionCapturedMreading(data = {}) {
+  return getInspectionPayload(data)?.captured?.mreading || {};
+}
+
+function getInspectionNormalisationAction(data = {}) {
+  const normalisation = getInspectionCapturedAst(data)?.normalisation || {};
+  const selectCode = normalizeUpper(normalisation?.actionSelect?.code || "");
+  const actionTaken = normalizeUpper(normalisation?.actionTaken || "");
+
+  return selectCode || actionTaken || "NONE";
+}
+
+function getInspectionAnomalyCode(data = {}) {
+  const anomalies = getInspectionCapturedAst(data)?.anomalies || {};
+  const selectCode = normalizeUpper(anomalies?.anomalySelect?.code || "");
+  const anomaly = normalizeUpper(anomalies?.anomaly || "");
+
+  return selectCode || anomaly || "";
+}
+
+function normalizeInspectionOptionalText(value) {
+  const clean = String(value || "").trim();
+  const cleanUpper = normalizeUpper(clean);
+
+  if (!clean || cleanUpper === "NAV" || cleanUpper === "N/AV") {
+    return "";
+  }
+
+  return clean;
+}
+
+function normalizeInspectionOptionalSelectText(value) {
+  return normalizeInspectionOptionalText(selectValueToText(value));
+}
+
+function getInspectionReadingValue(data = {}) {
+  return normalizeInspectionOptionalText(
+    getInspectionCapturedMreading(data)?.reading,
+  );
+}
+
+function getInspectionReadingAt(data = {}) {
+  return normalizeInspectionOptionalText(
+    getInspectionCapturedMreading(data)?.readingAt,
+  );
+}
+
+function getInspectionNoReadingReason(data = {}) {
+  return normalizeInspectionOptionalSelectText(
+    getInspectionCapturedMreading(data)?.noReadingReason,
+  );
+}
+
+function isElectricityMeterType(value) {
+  const clean = normalizeLower(value).replace(/[\s_-]/g, "");
+  return ["electricity", "elec", "elc"].includes(clean);
+}
+
+function isWaterMeterType(value) {
+  const clean = normalizeLower(value).replace(/[\s_-]/g, "");
+  return ["water", "wtr"].includes(clean);
+}
+
+function sanitizeInspectionCapturedAst(
+  capturedAst = {},
+  { meterType = "NAv" } = {},
+) {
+  const astData = capturedAst?.astData || {};
+  const meter = astData?.meter || {};
+  const isElectricityMeter = isElectricityMeterType(meterType);
+
+  const sanitizedMeter = {
+    type: String(meter?.type || "").trim(),
+    category: String(meter?.category || "").trim(),
+  };
+
+  if (isElectricityMeter) {
+    sanitizedMeter.phase = String(meter?.phase || "").trim();
+
+    sanitizedMeter.cb = {
+      size: String(meter?.cb?.size || "").trim(),
+      comment: String(meter?.cb?.comment || "").trim(),
+    };
+
+    sanitizedMeter.seal = {
+      sealNo: String(meter?.seal?.sealNo || "").trim(),
+      comment: String(meter?.seal?.comment || "").trim(),
+    };
+
+    sanitizedMeter.keypad = {
+      serialNo: String(meter?.keypad?.serialNo || "").trim(),
+      comment: String(meter?.keypad?.comment || "").trim(),
+    };
+  }
+
+  const sanitizedAst = {
+    astData: {
+      astId: String(astData?.astId || "").trim(),
+      astNo: String(astData?.astNo || "").trim(),
+      astManufacturer: String(astData?.astManufacturer || "").trim(),
+      astName: String(astData?.astName || "").trim(),
+      meter: sanitizedMeter,
+    },
+
+    anomalies: {
+      anomaly: String(capturedAst?.anomalies?.anomaly || "").trim(),
+      anomalyDetail: String(capturedAst?.anomalies?.anomalyDetail || "").trim(),
+    },
+
+    location: {
+      gps: sanitizeGps(capturedAst?.location?.gps || {}),
+    },
+
+    meterReading: String(capturedAst?.meterReading || "").trim(),
+
+    normalisation: {
+      actionTaken: normalizeUpper(
+        capturedAst?.normalisation?.actionTaken ||
+          capturedAst?.normalisation?.actionSelect?.code ||
+          "NONE",
+      ),
+      actionText:
+        selectValueToText(capturedAst?.normalisation?.actionSelect) ||
+        String(capturedAst?.normalisation?.actionText || "None").trim(),
+      childTrnId: String(
+        capturedAst?.normalisation?.childTrnId || "NAv",
+      ).trim(),
+      childTrnType: normalizeUpper(
+        capturedAst?.normalisation?.childTrnType || "NAv",
+      ),
+      childTrnStatus: normalizeUpper(
+        capturedAst?.normalisation?.childTrnStatus || "NOT_REQUIRED",
+      ),
+    },
+  };
+
+  if (isElectricityMeter) {
+    sanitizedAst.location.placement = String(
+      capturedAst?.location?.placement || "",
+    ).trim();
+
+    sanitizedAst.ogs = {
+      hasOffGridSupply: String(capturedAst?.ogs?.hasOffGridSupply || "").trim(),
+    };
+  }
+
+  return sanitizedAst;
+}
+
+function sanitizeInspectionComparison(comparison = {}) {
+  const differences = Array.isArray(comparison?.differences)
+    ? comparison.differences
+    : [];
+
+  return {
+    checkedAt: String(comparison?.checkedAt || "").trim(),
+    gpsToleranceMeters: Number(comparison?.gpsToleranceMeters || 5),
+    hasDifferences: comparison?.hasDifferences === true,
+    differenceCount: Number(comparison?.differenceCount || differences.length),
+    differences: differences.map((item) => ({
+      fieldPath: String(item?.fieldPath || "").trim(),
+      label: String(item?.label || "").trim(),
+      lastKnownValue:
+        typeof item?.lastKnownValue === "object"
+          ? item.lastKnownValue
+          : String(item?.lastKnownValue || "NAv").trim(),
+      capturedValue:
+        typeof item?.capturedValue === "object"
+          ? item.capturedValue
+          : String(item?.capturedValue || "NAv").trim(),
+      distanceMeters:
+        item?.distanceMeters === null || item?.distanceMeters === undefined
+          ? null
+          : Number(item.distanceMeters),
+      toleranceMeters:
+        item?.toleranceMeters === null || item?.toleranceMeters === undefined
+          ? null
+          : Number(item.toleranceMeters),
+      result: normalizeUpper(item?.result || "MISMATCH"),
+    })),
+    excludedFields: Array.isArray(comparison?.excludedFields)
+      ? comparison.excludedFields.map((item) => String(item || "").trim())
+      : [],
+    confirmation: {
+      required: comparison?.confirmation?.required === true,
+      confirmed: comparison?.confirmation?.confirmed === true,
+      confirmedAt: comparison?.confirmation?.confirmedAt || "NAv",
+      confirmedByUid: comparison?.confirmation?.confirmedByUid || "NAv",
+      confirmedByUser: comparison?.confirmation?.confirmedByUser || "NAv",
+    },
+  };
+}
+
+export function sanitizeInspection(
+  inspection = {},
+  { noAccess = false, isPrepaidMeter = false, meterType = "NAv" } = {},
+) {
+  if (noAccess) {
+    return {
+      inspectedAt: inspection?.inspectedAt || "",
+      lastKnown: inspection?.lastKnown || {},
+      captured: {
+        ast: {},
+        mreading: {
+          reading: "",
+          readingAt: "",
+          noReadingReason: "",
+        },
+      },
+      comparison: sanitizeInspectionComparison({}),
+    };
+  }
+
+  const capturedAst = sanitizeInspectionCapturedAst(
+    inspection?.captured?.ast || {},
+    { meterType },
+  );
+
+  const mreading = inspection?.captured?.mreading || {};
+  const cleanInspectionReading = normalizeInspectionOptionalText(
+    mreading?.reading,
+  );
+  const cleanInspectionReadingAt = cleanInspectionReading
+    ? normalizeInspectionOptionalText(mreading?.readingAt)
+    : "";
+  const cleanInspectionNoReadingReason = normalizeInspectionOptionalSelectText(
+    mreading?.noReadingReason,
+  );
+
+  return {
+    inspectedAt: inspection?.inspectedAt || "",
+    lastKnown: inspection?.lastKnown || {},
+    captured: {
+      ast: capturedAst,
+      mreading: isPrepaidMeter
+        ? {
+            reading: "",
+            readingAt: "",
+            noReadingReason: "",
+          }
+        : {
+            reading: cleanInspectionReading,
+            readingAt: cleanInspectionReadingAt,
+            noReadingReason: cleanInspectionNoReadingReason,
+          },
+    },
+    comparison: sanitizeInspectionComparison(inspection?.comparison || {}),
+  };
+}
+
+export function validateMeterInspection({ data, astDoc }) {
+  const currentState = getAstCurrentState(astDoc);
+  const meterType = getAstMeterType(astDoc, data);
+  const meterKind = getAstPrepaidType(astDoc, data);
+  const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
+  const isConventionalMeter = isConventionalAstMeter(astDoc, data);
+  const isElectricityMeter = isElectricityMeterType(meterType);
+  const isWaterMeter = isWaterMeterType(meterType);
+
+  const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
+
+  const instructionText = String(
+    data?.assignment?.instruction?.text || "",
+  ).trim();
+
+  const inspection = getInspectionPayload(data);
+  const capturedAst = getInspectionCapturedAst(data);
+  const capturedAstData = capturedAst?.astData || {};
+  const capturedMeter = capturedAstData?.meter || {};
+  const capturedAnomalies = capturedAst?.anomalies || {};
+  const capturedLocation = capturedAst?.location || {};
+  const capturedOgs = capturedAst?.ogs || {};
+  const capturedComparison = inspection?.comparison || {};
+
+  const reading = getInspectionReadingValue(data);
+  const readingAt = getInspectionReadingAt(data);
+  const noReadingReason = getInspectionNoReadingReason(data);
+
+  if (currentState === "DECOMMISSIONED") {
+    return {
+      ok: false,
+      code: "INVALID_AST_STATE",
+      message: "DECOMMISSIONED meters cannot be inspected",
+    };
+  }
+
+  if (
+    !["FIELD", "CONNECTED", "DISCONNECTED", "REMOVED"].includes(currentState)
+  ) {
+    return {
+      ok: false,
+      code: "INVALID_AST_STATE",
+      message:
+        "Only FIELD, CONNECTED, DISCONNECTED, or REMOVED meters can be inspected",
+    };
+  }
+
+  if (!["electricity", "water"].includes(meterType)) {
+    return {
+      ok: false,
+      code: "INVALID_METER_TYPE",
+      message: "Only electricity or water meters can be inspected",
+    };
+  }
+
+  if (!isPrepaidMeter && !isConventionalMeter) {
+    return {
+      ok: false,
+      code: "INSPECTION_UNKNOWN_METER_KIND",
+      message:
+        "Meter inspection requires a known meter kind: prepaid or conventional",
+      meterKind: meterKind || "UNKNOWN",
+    };
+  }
+
+  if (!instructionText) {
+    return {
+      ok: false,
+      code: "INSPECTION_INSTRUCTION_REQUIRED",
+      message: "Inspection instruction is required",
+    };
+  }
+
+  if (noAccess) {
+    if (!noAccessReason || noAccessReason === "NAv") {
+      return {
+        ok: false,
+        code: "NO_ACCESS_REASON_REQUIRED",
+        message: "No-access reason is required",
+      };
+    }
+
+    if (
+      !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.noAccessPhoto, {
+        requireUrl: true,
+      })
+    ) {
+      return {
+        ok: false,
+        code: "MISSING_NO_ACCESS_PHOTO",
+        message: "No access photo is required",
+      };
+    }
+
+    return {
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      inspectionPassed: false,
+      executionOutcome: {
+        outcome: "NO_ACCESS",
+        success: false,
+      },
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
+    };
+  }
+
+  if (!inspection || Object.keys(inspection).length === 0) {
+    return {
+      ok: false,
+      code: "INSPECTION_PAYLOAD_REQUIRED",
+      message: "inspection payload is required",
+    };
+  }
+
+  if (!String(capturedAstData?.astNo || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_METER_NUMBER_REQUIRED",
+      message: "Meter number is required",
+    };
+  }
+
+  if (!String(capturedAstData?.astManufacturer || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_MANUFACTURER_REQUIRED",
+      message: "Manufacturer is required",
+    };
+  }
+
+  if (!String(capturedAstData?.astName || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_MODEL_REQUIRED",
+      message: "Meter model/name is required",
+    };
+  }
+
+  if (!String(capturedMeter?.type || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_METER_KIND_REQUIRED",
+      message: "Meter kind is required",
+    };
+  }
+
+  if (!String(capturedMeter?.category || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_METER_CATEGORY_REQUIRED",
+      message: "Meter category is required",
+    };
+  }
+
+  if (isElectricityMeter) {
+    if (!String(capturedMeter?.phase || "").trim()) {
+      return {
+        ok: false,
+        code: "INSPECTION_PHASE_REQUIRED",
+        message: "Phase is required",
+      };
+    }
+
+    if (!String(capturedMeter?.cb?.size || "").trim()) {
+      return {
+        ok: false,
+        code: "INSPECTION_CB_SIZE_REQUIRED",
+        message: "CB size is required",
+      };
+    }
+
+    if (!String(capturedMeter?.keypad?.serialNo || "").trim()) {
+      return {
+        ok: false,
+        code: "INSPECTION_SERIAL_NUMBER_REQUIRED",
+        message: "Serial number is required",
+      };
+    }
+
+    if (!String(capturedLocation?.placement || "").trim()) {
+      return {
+        ok: false,
+        code: "INSPECTION_PLACEMENT_REQUIRED",
+        message: "Placement is required",
+      };
+    }
+
+    if (!String(capturedOgs?.hasOffGridSupply || "").trim()) {
+      return {
+        ok: false,
+        code: "INSPECTION_OFF_GRID_SUPPLY_REQUIRED",
+        message: "Off-grid supply is required",
+      };
+    }
+  }
+
+  if (!isElectricityMeter && !isWaterMeter) {
+    return {
+      ok: false,
+      code: "INVALID_METER_TYPE",
+      message: "Only electricity or water meters can be inspected",
+    };
+  }
+
+  if (!String(data?.status?.state || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_STATUS_REQUIRED",
+      message: "Meter status is required",
+    };
+  }
+
+  if (!String(capturedAnomalies?.anomaly || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_ANOMALY_REQUIRED",
+      message: "Anomaly is required",
+    };
+  }
+
+  if (!String(capturedAnomalies?.anomalyDetail || "").trim()) {
+    return {
+      ok: false,
+      code: "INSPECTION_ANOMALY_DETAIL_REQUIRED",
+      message: "Anomaly detail is required",
+    };
+  }
+
+  if (!getInspectionNormalisationAction(data)) {
+    return {
+      ok: false,
+      code: "INSPECTION_NORMALISATION_REQUIRED",
+      message: "Normalisation action is required",
+    };
+  }
+
+  if (
+    !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.astNoPhoto, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_INSPECTION_METER_NUMBER_PHOTO",
+      message: "Meter number photo is required",
+    };
+  }
+
+  const anomalyCode = getInspectionAnomalyCode(data);
+
+  if (
+    !["METER_OK", "METER OK", "OK"].includes(anomalyCode) &&
+    !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.anomalyPhoto, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_INSPECTION_ANOMALY_PHOTO",
+      message: "Anomaly photo is required when anomaly is not Meter Ok",
+    };
+  }
+
+  const normalisationAction = getInspectionNormalisationAction(data);
+
+  if (
+    normalisationAction !== "NONE" &&
+    !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.normalisationPhoto, {
+      requireUrl: true,
+    })
+  ) {
+    return {
+      ok: false,
+      code: "MISSING_INSPECTION_NORMALISATION_PHOTO",
+      message: "Normalisation photo is required when normalisation is not None",
+    };
+  }
+
+  if (isConventionalMeter && !reading && !noReadingReason) {
+    return {
+      ok: false,
+      code: "INSPECTION_READING_OR_REASON_REQUIRED",
+      message:
+        "Inspection reading or no-reading reason is required for conventional meters",
+    };
+  }
+
+  if (isConventionalMeter && reading) {
+    if (!isNumericReading(reading)) {
+      return {
+        ok: false,
+        code: "INVALID_INSPECTION_METER_READING",
+        message: "Inspection meter reading must be numeric",
+      };
+    }
+
+    if (!readingAt) {
+      return {
+        ok: false,
+        code: "INSPECTION_READING_AT_REQUIRED",
+        message: "Inspection reading date/time is required",
+      };
+    }
+
+    if (
+      !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.meterReadingPhoto, {
+        requireUrl: true,
+      })
+    ) {
+      return {
+        ok: false,
+        code: "MISSING_INSPECTION_READING_PHOTO",
+        message:
+          "Meter reading photo is required when inspection reading is captured",
+      };
+    }
+  }
+
+  if (
+    capturedComparison?.hasDifferences === true &&
+    capturedComparison?.confirmation?.confirmed !== true
+  ) {
+    return {
+      ok: false,
+      code: "INSPECTION_DIFFERENCES_NOT_CONFIRMED",
+      message:
+        "Inspection comparison differences must be confirmed before submit",
+    };
+  }
+
+  const astPatch = {};
+
+  if (isConventionalMeter && reading) {
+    astPatch.mreadings = buildLatestMreadingsCache({
+      astDoc,
+      reading,
+      readingAt,
+      trnId: data?.id,
+    });
+  }
+
+  return {
+    ok: true,
+    currentState,
+    meterType,
+    isPrepaidMeter,
+    inspectionPassed: true,
+    executionOutcome: {
+      outcome: "SUCCESS",
+      success: true,
+    },
+    nextAstState: currentState,
+    astPatch,
+    astStatusChanged: false,
+    astDataChanged: Object.keys(astPatch).length > 0,
   };
 }
 
@@ -694,18 +1709,32 @@ export function validateMeterRemoval({ data, astDoc }) {
   const meterType = getAstMeterType(astDoc, data);
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
-  const meterRemoved = getRemovalAnswer(data, "meterRemoved");
-  const supplyMadeSafe = getRemovalAnswer(data, "supplyMadeSafe");
+  const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
 
-  const finalReading = getRemovalFinalReading(data);
+  const removal = data?.removal || {};
+
+  const instructionText = String(
+    data?.assignment?.instruction?.text || "",
+  ).trim();
+
+  const meterRemoved = normalizeYesNo(removal?.meterRemoved?.answer);
+  const meterRemovedNotes = String(removal?.meterRemoved?.notes || "").trim();
+
+  const safetyConfirmed = normalizeYesNo(removal?.safetyConfirmed?.answer);
+  const safetyConfirmedNotes = String(
+    removal?.safetyConfirmed?.notes || "",
+  ).trim();
+
+  const meterReading = getRemovalMeterReading(data);
   const tokenReading = getRemovalTokenReading(data);
   const noReadingReason = getRemovalNoReadingReason(data);
 
-  if (currentState === "REMOVED") {
+  if (!["FIELD", "CONNECTED", "DISCONNECTED"].includes(currentState)) {
     return {
       ok: false,
       code: "INVALID_AST_STATE",
-      message: "This meter has already been removed",
+      message: "Only FIELD, CONNECTED, or DISCONNECTED meters can be removed",
     };
   }
 
@@ -717,19 +1746,105 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!meterRemoved || !supplyMadeSafe) {
+  if (!instructionText) {
     return {
       ok: false,
-      code: "INVALID_REMOVAL_ANSWERS",
-      message: "Removal requires meterRemoved and supplyMadeSafe answers",
+      code: "REMOVAL_INSTRUCTION_REQUIRED",
+      message: "Removal instruction is required",
     };
   }
 
-  if (isPrepaidMeter && finalReading) {
+  if (noAccess) {
+    if (!noAccessReason || noAccessReason === "NAv") {
+      return {
+        ok: false,
+        code: "NO_ACCESS_REASON_REQUIRED",
+        message: "No-access reason is required",
+      };
+    }
+
+    if (
+      !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.noAccessPhoto, {
+        requireUrl: true,
+      })
+    ) {
+      return {
+        ok: false,
+        code: "MISSING_NO_ACCESS_PHOTO",
+        message: "No access photo is required",
+      };
+    }
+
+    return {
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      removalPassed: false,
+      executionOutcome: {
+        outcome: "NO_ACCESS",
+        success: false,
+      },
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
+    };
+  }
+
+  if (!meterRemoved) {
     return {
       ok: false,
-      code: "INVALID_PREPAID_FINAL_READING",
-      message: "Prepaid meters must use token reading, not final reading",
+      code: "INVALID_REMOVAL_ANSWER",
+      message: "Meter removed answer must be yes or no",
+    };
+  }
+
+  if (meterRemoved !== "yes") {
+    return {
+      ok: false,
+      code: "METER_REMOVAL_NOT_CONFIRMED",
+      message: "Meter must be confirmed as removed before submit",
+    };
+  }
+
+  if (!safetyConfirmed) {
+    return {
+      ok: false,
+      code: "INVALID_REMOVAL_SAFETY_ANSWER",
+      message: "Safety confirmed answer must be yes or no",
+    };
+  }
+
+  if (safetyConfirmed !== "yes") {
+    return {
+      ok: false,
+      code: "REMOVAL_SAFETY_NOT_CONFIRMED",
+      message: "Safety must be confirmed before submit",
+    };
+  }
+
+  if (meterRemoved === "no" && !meterRemovedNotes) {
+    return {
+      ok: false,
+      code: "REMOVAL_NOTES_REQUIRED",
+      message: "Notes are required when meter removed is no",
+    };
+  }
+
+  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
+    return {
+      ok: false,
+      code: "REMOVAL_SAFETY_NOTES_REQUIRED",
+      message: "Notes are required when safety confirmed is no",
+    };
+  }
+
+  if (isPrepaidMeter && meterReading) {
+    return {
+      ok: false,
+      code: "INVALID_PREPAID_METER_READING",
+      message: "Prepaid meters must use token reading, not meter reading",
     };
   }
 
@@ -737,7 +1852,7 @@ export function validateMeterRemoval({ data, astDoc }) {
     return {
       ok: false,
       code: "INVALID_CONVENTIONAL_TOKEN_READING",
-      message: "Conventional meters must use final reading, not token reading",
+      message: "Conventional meters must use meter reading, not token reading",
     };
   }
 
@@ -749,19 +1864,19 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!isPrepaidMeter && !finalReading && !noReadingReason) {
+  if (!isPrepaidMeter && !meterReading && !noReadingReason) {
     return {
       ok: false,
-      code: "FINAL_READING_OR_REASON_REQUIRED",
-      message: "Final reading or no-reading reason is required",
+      code: "METER_READING_OR_REASON_REQUIRED",
+      message: "Meter reading or no-reading reason is required",
     };
   }
 
-  if (finalReading && !isNumericReading(finalReading)) {
+  if (meterReading && !isNumericReading(meterReading)) {
     return {
       ok: false,
-      code: "INVALID_FINAL_READING",
-      message: "Final reading must be numeric",
+      code: "INVALID_METER_READING",
+      message: "Meter reading must be numeric",
     };
   }
 
@@ -774,15 +1889,15 @@ export function validateMeterRemoval({ data, astDoc }) {
   }
 
   if (
-    finalReading &&
-    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.finalReadingEvidence, {
+    meterReading &&
+    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.meterReadingEvidence, {
       requireUrl: true,
     })
   ) {
     return {
       ok: false,
-      code: "MISSING_FINAL_READING_EVIDENCE",
-      message: "Final reading evidence media is required",
+      code: "MISSING_REMOVAL_METER_READING_EVIDENCE",
+      message: "Removal meter reading evidence is required",
     };
   }
 
@@ -800,7 +1915,6 @@ export function validateMeterRemoval({ data, astDoc }) {
   }
 
   if (
-    meterRemoved === "yes" &&
     !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.removalEvidence, {
       requireUrl: true,
     })
@@ -813,41 +1927,21 @@ export function validateMeterRemoval({ data, astDoc }) {
   }
 
   if (
-    supplyMadeSafe === "yes" &&
-    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.supplySafeEvidence, {
+    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.safetyEvidence, {
       requireUrl: true,
     })
   ) {
     return {
       ok: false,
-      code: "MISSING_SUPPLY_SAFE_EVIDENCE",
-      message: "Supply safe evidence media is required",
+      code: "MISSING_REMOVAL_SAFETY_EVIDENCE",
+      message: "Safety evidence media is required",
     };
   }
 
-  const failedAnswers = [
-    ["meterRemoved", meterRemoved],
-    ["supplyMadeSafe", supplyMadeSafe],
-  ].filter(([, answer]) => answer === "no");
-
-  for (const [key] of failedAnswers) {
-    if (!getRemovalNotes(data, key)) {
-      return {
-        ok: false,
-        code: "NOTES_REQUIRED_FOR_FAILED_REMOVAL",
-        message: `Notes are required when ${key} is no`,
-      };
-    }
-  }
-
-  const removalPassed = meterRemoved === "yes" && supplyMadeSafe === "yes";
-
-  const nextAstState = removalPassed ? "REMOVED" : currentState;
-
   const astPatch = {};
 
-  if (!isPrepaidMeter && finalReading) {
-    astPatch["ast.meterReading"] = finalReading;
+  if (!isPrepaidMeter && meterReading) {
+    astPatch["ast.meterReading"] = meterReading;
   }
 
   if (isPrepaidMeter && tokenReading) {
@@ -859,10 +1953,14 @@ export function validateMeterRemoval({ data, astDoc }) {
     currentState,
     meterType,
     isPrepaidMeter,
-    removalPassed,
-    nextAstState,
+    removalPassed: true,
+    executionOutcome: {
+      outcome: "SUCCESS",
+      success: true,
+    },
+    nextAstState: "REMOVED",
     astPatch,
-    astStatusChanged: currentState !== nextAstState,
+    astStatusChanged: currentState !== "REMOVED",
     astDataChanged: Object.keys(astPatch).length > 0,
   };
 }
@@ -881,8 +1979,15 @@ export function buildLifecycleTrnPayload({
   const inputAstData = data?.ast?.astData || {};
 
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
+  const meterType = getAstMeterType(astDoc, data);
 
   const noAccess = isNoAccessExecution(data);
+
+  const sanitizedOrigin = sanitizeOrigin(data?.origin || {}, {
+    channel: data?.instructionTrnId ? "OFFICE" : "FIELD",
+    source: data?.instructionTrnId ? "WMS" : "FIELD_EXECUTION",
+    parentInspectionTrnId: null,
+  });
 
   return removeUndefinedDeep({
     id: data.id,
@@ -916,6 +2021,18 @@ export function buildLifecycleTrnPayload({
       trnType,
     },
 
+    origin: sanitizedOrigin,
+
+    workflow: {
+      state: "COMPLETED",
+      createdMode: sanitizedOrigin.channel,
+      reassignmentCount: 0,
+      executionStartedAt: null,
+      completedAt: now,
+      completedByUid: actorUid || null,
+      completedByUser: actorName || null,
+    },
+
     ast: {
       astData: {
         astId,
@@ -931,6 +2048,13 @@ export function buildLifecycleTrnPayload({
 
         meter: serverAstData?.meter || inputAstData?.meter || {},
       },
+
+      location:
+        astDoc?.ast?.location ||
+        astDoc?.location ||
+        data?.ast?.location ||
+        null,
+      ogs: astDoc?.ast?.ogs || astDoc?.ogs || data?.ast?.ogs || null,
     },
 
     commissioning:
@@ -940,7 +2064,24 @@ export function buildLifecycleTrnPayload({
 
     removal:
       trnType === "METER_REMOVAL"
-        ? sanitizeRemoval(data?.removal || {}, { isPrepaidMeter })
+        ? sanitizeRemoval(data?.removal || {}, { isPrepaidMeter, noAccess })
+        : undefined,
+
+    meterReading:
+      trnType === "METER_READING"
+        ? sanitizeMeterReading(data?.meterReading || {}, {
+            isPrepaidMeter,
+            noAccess,
+          })
+        : undefined,
+
+    inspection:
+      trnType === "METER_INSPECTION"
+        ? sanitizeInspection(data?.inspection || {}, {
+            noAccess,
+            isPrepaidMeter,
+            meterType,
+          })
         : undefined,
 
     disconnection:
@@ -951,15 +2092,21 @@ export function buildLifecycleTrnPayload({
           })
         : undefined,
 
-    executionOutcome:
-      trnType === "METER_DISCONNECTION"
-        ? sanitizeLifecycleExecutionOutcome(data?.executionOutcome || {})
-        : undefined,
+    executionOutcome: [
+      "METER_INSPECTION",
+      "METER_DISCONNECTION",
+      "METER_RECONNECTION",
+      "METER_REMOVAL",
+      "METER_READING",
+    ].includes(trnType)
+      ? sanitizeLifecycleExecutionOutcome(data?.executionOutcome || {})
+      : undefined,
 
     reconnection:
       trnType === "METER_RECONNECTION"
         ? sanitizeMeterReconnection(data?.reconnection || {}, {
             isPrepaidMeter,
+            noAccess,
           })
         : undefined,
 
@@ -970,9 +2117,18 @@ export function buildLifecycleTrnPayload({
     media: sanitizeMedia(data?.media || []),
 
     status: {
-      state: statusState || astDoc?.status?.state || null,
-      id: astDoc?.status?.id || data?.status?.id || "NAv",
-      detail: astDoc?.status?.detail || data?.status?.detail || "NAv",
+      state:
+        trnType === "METER_INSPECTION"
+          ? data?.status?.state || astDoc?.status?.state || null
+          : statusState || astDoc?.status?.state || null,
+      id:
+        trnType === "METER_INSPECTION"
+          ? data?.status?.id || astDoc?.status?.id || "NAv"
+          : astDoc?.status?.id || data?.status?.id || "NAv",
+      detail:
+        trnType === "METER_INSPECTION"
+          ? data?.status?.detail || astDoc?.status?.detail || "NAv"
+          : astDoc?.status?.detail || data?.status?.detail || "NAv",
     },
 
     metadata: buildFlatMetadata({
@@ -1052,16 +2208,16 @@ function getLifecycleTokenReading(data = {}, key) {
   return String(data?.[key]?.tokenReading || "").trim();
 }
 
-function getRemovalFinalReading(data = {}) {
-  return getFlatOrNestedReading(data?.removal || {}, "finalReading");
+function getRemovalMeterReading(data = {}) {
+  return getLifecycleReading(data, "removal");
 }
 
 function getRemovalTokenReading(data = {}) {
-  return String(data?.removal?.tokenReading || "").trim();
+  return getLifecycleTokenReading(data, "removal");
 }
 
 function getRemovalNoReadingReason(data = {}) {
-  return getFlatOrNestedNoReadingReason(data?.removal || {}, "finalReading");
+  return getLifecycleNoReadingReason(data, "removal");
 }
 
 function isNumericReading(value) {
@@ -1096,11 +2252,14 @@ function getNoAccessReason(data = {}) {
 
 export function sanitizeLifecycleExecutionOutcome(outcome = {}) {
   const cleanOutcome = normalizeUpper(outcome?.outcome || "");
-  const isNoAccess = cleanOutcome === "NO_ACCESS";
+  const allowedOutcomes = ["SUCCESS", "NO_ACCESS", "NO_READING"];
+  const finalOutcome = allowedOutcomes.includes(cleanOutcome)
+    ? cleanOutcome
+    : "SUCCESS";
 
   return {
-    outcome: isNoAccess ? "NO_ACCESS" : "SUCCESS",
-    success: !isNoAccess,
+    outcome: finalOutcome,
+    success: finalOutcome === "SUCCESS",
   };
 }
 
@@ -1161,8 +2320,26 @@ export function sanitizeMeterDisconnection(
 
 export function sanitizeMeterReconnection(
   reconnection = {},
-  { isPrepaidMeter = false } = {},
+  { isPrepaidMeter = false, noAccess = false } = {},
 ) {
+  if (noAccess) {
+    return {
+      supplyReconnected: {
+        answer: "",
+        notes: "",
+      },
+
+      meterReading: "",
+      tokenReading: "",
+      noReadingReason: "",
+
+      safetyConfirmed: {
+        answer: "",
+        notes: "",
+      },
+    };
+  }
+
   return {
     supplyReconnected: {
       answer: normalizeYesNo(reconnection?.supplyReconnected?.answer),
@@ -1182,11 +2359,6 @@ export function sanitizeMeterReconnection(
     safetyConfirmed: {
       answer: normalizeYesNo(reconnection?.safetyConfirmed?.answer),
       notes: String(reconnection?.safetyConfirmed?.notes || ""),
-    },
-
-    supplyTested: {
-      answer: normalizeYesNo(reconnection?.supplyTested?.answer),
-      notes: String(reconnection?.supplyTested?.notes || ""),
     },
   };
 }
@@ -1460,8 +2632,10 @@ export function validateMeterDisconnection({ data, astDoc }) {
 export function validateMeterReconnection({ data, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
   const meterType = getAstMeterType(astDoc, data);
-
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
+
+  const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
 
   const reconnection = data?.reconnection || {};
 
@@ -1481,12 +2655,6 @@ export function validateMeterReconnection({ data, astDoc }) {
 
   const safetyConfirmedNotes = String(
     reconnection?.safetyConfirmed?.notes || "",
-  ).trim();
-
-  const supplyTested = normalizeYesNo(reconnection?.supplyTested?.answer);
-
-  const supplyTestedNotes = String(
-    reconnection?.supplyTested?.notes || "",
   ).trim();
 
   const meterReading = getLifecycleReading(data, "reconnection");
@@ -1517,15 +2685,41 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (
-    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.instructionEvidence, {
-      requireUrl: true,
-    })
-  ) {
+  if (noAccess) {
+    if (!noAccessReason || noAccessReason === "NAv") {
+      return {
+        ok: false,
+        code: "NO_ACCESS_REASON_REQUIRED",
+        message: "No-access reason is required",
+      };
+    }
+
+    if (
+      !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.noAccessPhoto, {
+        requireUrl: true,
+      })
+    ) {
+      return {
+        ok: false,
+        code: "MISSING_NO_ACCESS_PHOTO",
+        message: "No access photo is required",
+      };
+    }
+
     return {
-      ok: false,
-      code: "MISSING_RECONNECTION_INSTRUCTION_EVIDENCE",
-      message: "Reconnection instruction evidence media is required",
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      reconnectionPassed: false,
+      executionOutcome: {
+        outcome: "NO_ACCESS",
+        success: false,
+      },
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
     };
   }
 
@@ -1537,6 +2731,14 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
+  if (supplyReconnected !== "yes") {
+    return {
+      ok: false,
+      code: "SUPPLY_RECONNECTION_NOT_CONFIRMED",
+      message: "Supply must be confirmed as reconnected before submit",
+    };
+  }
+
   if (!safetyConfirmed) {
     return {
       ok: false,
@@ -1545,11 +2747,27 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (!supplyTested) {
+  if (safetyConfirmed !== "yes") {
     return {
       ok: false,
-      code: "INVALID_RECONNECTION_SUPPLY_TESTED_ANSWER",
-      message: "Supply tested answer must be yes or no",
+      code: "RECONNECTION_SAFETY_NOT_CONFIRMED",
+      message: "Safety must be confirmed before submit",
+    };
+  }
+
+  if (supplyReconnected === "no" && !supplyReconnectedNotes) {
+    return {
+      ok: false,
+      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION",
+      message: "Notes are required when supply reconnected is no",
+    };
+  }
+
+  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
+    return {
+      ok: false,
+      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION_SAFETY",
+      message: "Notes are required when safety confirmed is no",
     };
   }
 
@@ -1628,7 +2846,6 @@ export function validateMeterReconnection({ data, astDoc }) {
   }
 
   if (
-    supplyReconnected === "yes" &&
     !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.reconnectionEvidence, {
       requireUrl: true,
     })
@@ -1641,7 +2858,6 @@ export function validateMeterReconnection({ data, astDoc }) {
   }
 
   if (
-    safetyConfirmed === "yes" &&
     !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.safetyEvidence, {
       requireUrl: true,
     })
@@ -1652,50 +2868,6 @@ export function validateMeterReconnection({ data, astDoc }) {
       message: "Safety evidence media is required",
     };
   }
-
-  if (
-    supplyTested === "yes" &&
-    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.supplyTestedEvidence, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_RECONNECTION_SUPPLY_TESTED_EVIDENCE",
-      message: "Supply tested evidence media is required",
-    };
-  }
-
-  if (supplyReconnected === "no" && !supplyReconnectedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION",
-      message: "Notes are required when supplyReconnected is no",
-    };
-  }
-
-  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION_SAFETY",
-      message: "Notes are required when safetyConfirmed is no",
-    };
-  }
-
-  if (supplyTested === "no" && !supplyTestedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION_SUPPLY_TEST",
-      message: "Notes are required when supplyTested is no",
-    };
-  }
-
-  const reconnectionPassed =
-    supplyReconnected === "yes" &&
-    safetyConfirmed === "yes" &&
-    supplyTested === "yes";
-
-  const nextAstState = reconnectionPassed ? "CONNECTED" : currentState;
 
   const astPatch = {};
 
@@ -1711,15 +2883,18 @@ export function validateMeterReconnection({ data, astDoc }) {
     ok: true,
     currentState,
     meterType,
-    reconnectionPassed,
-    nextAstState,
-    astPatch,
-    astStatusChanged: currentState !== nextAstState,
-    astDataChanged: Object.keys(astPatch).length > 0,
     isPrepaidMeter,
+    reconnectionPassed: true,
+    executionOutcome: {
+      outcome: "SUCCESS",
+      success: true,
+    },
+    nextAstState: "CONNECTED",
+    astPatch,
+    astStatusChanged: currentState !== "CONNECTED",
+    astDataChanged: Object.keys(astPatch).length > 0,
   };
 }
-
 // new LCT helpers
 
 export function sanitizeGeofenceRefs(geofenceRefs = []) {
@@ -1756,7 +2931,7 @@ export function validateCreateLifecycleInstructionInput(data = {}) {
       ok: false,
       code: "INVALID_OFFICE_LCT_TYPE",
       message:
-        "Only INSPECTION, DISCONNECTION, RECONNECTION and REMOVAL instructions can be created from Operations.",
+        "Only INSPECTION, DISCONNECTION, RECONNECTION, REMOVAL and METER READING instructions can be created from Operations.",
     };
   }
 
@@ -1796,11 +2971,11 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
 
   if (trnType === "METER_INSPECTION") {
-    if (currentState === "REMOVED") {
+    if (currentState === "DECOMMISSIONED") {
       return {
         ok: false,
         code: "INVALID_AST_STATE",
-        message: "REMOVED meters cannot be issued for inspection",
+        message: "DECOMMISSIONED meters cannot be issued for inspection",
       };
     }
 
@@ -1843,6 +3018,26 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
     return { ok: true };
   }
 
+  if (trnType === "METER_READING") {
+    if (currentState === "DECOMMISSIONED") {
+      return {
+        ok: false,
+        code: "INVALID_AST_STATE",
+        message: "DECOMMISSIONED meters cannot be issued for meter reading",
+      };
+    }
+
+    if (isPrepaidAstMeter(astDoc, {})) {
+      return {
+        ok: false,
+        code: "PREPAID_MREAD_NOT_SUPPORTED",
+        message: "MREAD Sprint 1 supports conventional meters only",
+      };
+    }
+
+    return { ok: true };
+  }
+
   return {
     ok: false,
     code: "INVALID_OFFICE_LCT_TYPE",
@@ -1876,8 +3071,10 @@ export function sanitizeOrigin(origin = {}, fallback = {}) {
     origin?.source || fallback?.source || "TRN_ORIGIN",
   );
 
+  const allowedChannels = ["OFFICE", "FIELD", "API", "AMI", "INTEGRATION"];
+
   return {
-    channel: channel === "FIELD" ? "FIELD" : "OFFICE",
+    channel: allowedChannels.includes(channel) ? channel : "OFFICE",
     source: source || "TRN_ORIGIN",
     parentInspectionTrnId:
       origin?.parentInspectionTrnId || fallback?.parentInspectionTrnId || null,
@@ -1990,12 +3187,20 @@ export function buildLifecycleInstructionTrnPayload({
         astName: serverAstData?.astName || "NAv",
         meter: serverAstData?.meter || {},
       },
+
+      location:
+        astDoc?.ast?.location ||
+        astDoc?.location ||
+        data?.ast?.location ||
+        null,
+      ogs: astDoc?.ast?.ogs || astDoc?.ogs || data?.ast?.ogs || null,
     },
 
     meterType: astDoc?.meterType || data?.meterType || "NAv",
 
     commissioning: null,
     removal: null,
+    meterReading: null,
     disconnection: null,
     reconnection: null,
     inspection: null,

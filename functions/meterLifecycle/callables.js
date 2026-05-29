@@ -15,7 +15,9 @@ import {
   validateAssignment,
   validateCommonLifecycleInput,
   validateMeterCommissioning,
+  validateMeterInspection,
   validateMeterRemoval,
+  validateMeterReading,
   validateMeterDisconnection,
   validateMeterReconnection,
 } from "./helpers.js";
@@ -28,6 +30,66 @@ function readWorkflowState(trnData = {}) {
 
 function readTrnType(trnData = {}) {
   return normalizeUpper(trnData?.accessData?.trnType || trnData?.trnType || "");
+}
+
+const INSTRUCTION_MEDIA_TAG = "instructionMedia";
+
+function readMediaUniqueKey(mediaItem = {}) {
+  return [
+    String(mediaItem?.tag || "").trim(),
+    String(mediaItem?.url || mediaItem?.uri || "").trim(),
+  ].join("::");
+}
+
+function getPreservedInstructionMedia(existingMedia = []) {
+  if (!Array.isArray(existingMedia)) return [];
+
+  return existingMedia.filter((mediaItem) => {
+    if (!mediaItem) return false;
+    if (mediaItem?.tag !== INSTRUCTION_MEDIA_TAG) return false;
+
+    return Boolean(mediaItem?.url || mediaItem?.uri);
+  });
+}
+
+function mergeUniqueMediaGroups(mediaGroups = []) {
+  const seenKeys = new Set();
+  const mergedMedia = [];
+
+  mediaGroups.forEach((mediaGroup) => {
+    const safeMediaGroup = Array.isArray(mediaGroup) ? mediaGroup : [];
+
+    safeMediaGroup.forEach((mediaItem) => {
+      if (!mediaItem) return;
+
+      const key = readMediaUniqueKey(mediaItem);
+
+      if (seenKeys.has(key)) return;
+
+      seenKeys.add(key);
+      mergedMedia.push(mediaItem);
+    });
+  });
+
+  return mergedMedia;
+}
+
+function buildWmsCompletedMedia({
+  existingTrn = {},
+  executionMedia = [],
+} = {}) {
+  const preservedInstructionMedia = getPreservedInstructionMedia(
+    existingTrn?.media,
+  );
+
+  const safeExecutionMedia = Array.isArray(executionMedia)
+    ? executionMedia
+    : [];
+
+  return mergeUniqueMediaGroups([
+    preservedInstructionMedia,
+    safeExecutionMedia,
+  ]);
 }
 
 function buildHistoryEvent({
@@ -81,8 +143,22 @@ function getActionCheck({ trnType, data, astDoc }) {
     });
   }
 
+  if (trnType === "METER_INSPECTION") {
+    return validateMeterInspection({
+      data,
+      astDoc,
+    });
+  }
+
   if (trnType === "METER_REMOVAL") {
     return validateMeterRemoval({
+      data,
+      astDoc,
+    });
+  }
+
+  if (trnType === "METER_READING") {
+    return validateMeterReading({
       data,
       astDoc,
     });
@@ -136,8 +212,17 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     const { trnId, trnType, astId, premiseId } = commonCheck;
 
     const instructionTrnId = String(data?.instructionTrnId || "").trim();
-    const isWmsDisconnectionExecution =
-      trnType === "METER_DISCONNECTION" && instructionTrnId === trnId;
+
+    const WMS_EXECUTION_TRN_TYPES = [
+      "METER_INSPECTION",
+      "METER_DISCONNECTION",
+      "METER_RECONNECTION",
+      "METER_REMOVAL",
+      "METER_READING",
+    ];
+
+    const isWmsLifecycleExecution =
+      WMS_EXECUTION_TRN_TYPES.includes(trnType) && instructionTrnId === trnId;
 
     logger.info("onMeterLifecycleTrnCallable -- START", {
       trnId,
@@ -146,13 +231,25 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       astId,
       premiseId,
       actorUid,
-      isWmsDisconnectionExecution,
+      isWmsLifecycleExecution,
     });
 
     if (!IMPLEMENTED_LIFECYCLE_TRN_TYPES.includes(trnType)) {
       return buildFailureResult(
         "LCT_TYPE_NOT_IMPLEMENTED",
         `${trnType} is not implemented yet`,
+        {
+          trnId,
+          trnType,
+          astId,
+        },
+      );
+    }
+
+    if (trnType === "METER_INSPECTION" && !isWmsLifecycleExecution) {
+      return buildFailureResult(
+        "INSPECTION_OFFICE_WMS_ONLY",
+        "Meter inspection execution must complete an accepted office-originated instruction TRN",
         {
           trnId,
           trnType,
@@ -223,11 +320,11 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       // DCN execution updates the existing instructionTrnId.
       // It must not create a second TRN_MDCN document.
       // ------------------------------------------------------------
-      if (isWmsDisconnectionExecution) {
+      if (isWmsLifecycleExecution) {
         if (!trnSnap.exists) {
           responsePayload = buildFailureResult(
             "INSTRUCTION_TRN_NOT_FOUND",
-            "The DCN instruction TRN does not exist",
+            "The lifecycle instruction TRN does not exist",
             {
               trnId,
               trnType,
@@ -242,10 +339,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         const existingTrnType = readTrnType(existingTrn);
         const workflowState = readWorkflowState(existingTrn);
 
-        if (existingTrnType !== "METER_DISCONNECTION") {
+        if (existingTrnType !== trnType) {
           responsePayload = buildFailureResult(
             "INVALID_INSTRUCTION_TRN_TYPE",
-            "The referenced instruction TRN is not a DCN instruction",
+            "The referenced instruction TRN type does not match the execution payload",
             {
               trnId,
               existingTrnType,
@@ -263,7 +360,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
           responsePayload = buildSuccessResult(
             trnId,
-            "DCN instruction is already completed",
+            `${trnType} instruction is already completed`,
             {
               trnType,
               astId,
@@ -285,7 +382,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         if (["REJECTED", "CANCELLED"].includes(workflowState)) {
           responsePayload = buildFailureResult(
             "INSTRUCTION_NOT_EXECUTABLE",
-            "Rejected or cancelled DCN instructions cannot be executed",
+            "Rejected or cancelled lifecycle instructions cannot be executed",
             {
               trnId,
               trnType,
@@ -300,7 +397,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         if (workflowState !== "ACCEPTED") {
           responsePayload = buildFailureResult(
             "INSTRUCTION_NOT_ACCEPTED",
-            "DCN instruction must be accepted before execution can be submitted",
+            "Lifecycle instruction must be accepted before execution can be submitted",
             {
               trnId,
               trnType,
@@ -312,7 +409,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           return;
         }
 
-        const actionCheck = validateMeterDisconnection({
+        const actionCheck = getActionCheck({
+          trnType,
           data,
           astDoc,
         });
@@ -370,11 +468,29 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           premiseServicePatch = servicePatchResult.patch;
         }
 
+        const passed =
+          trnType === "METER_INSPECTION"
+            ? actionCheck.inspectionPassed === true
+            : trnType === "METER_DISCONNECTION"
+              ? actionCheck.disconnectionPassed === true
+              : trnType === "METER_RECONNECTION"
+                ? actionCheck.reconnectionPassed === true
+                : trnType === "METER_REMOVAL"
+                  ? actionCheck.removalPassed === true
+                  : trnType === "METER_READING"
+                    ? actionCheck.readingPassed === true
+                    : false;
+
         const executionOutcome = actionCheck.executionOutcome ||
           cleanExecution?.executionOutcome || {
-            outcome: actionCheck.disconnectionPassed ? "SUCCESS" : "NO_ACCESS",
-            success: actionCheck.disconnectionPassed === true,
+            outcome: passed ? "SUCCESS" : "NO_ACCESS",
+            success: passed,
           };
+
+        const completedMedia = buildWmsCompletedMedia({
+          existingTrn,
+          executionMedia: cleanExecution?.media || [],
+        });
 
         const trnUpdatePatch = {
           "workflow.state": "COMPLETED",
@@ -382,10 +498,30 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           "workflow.completedByUid": actorUid,
           "workflow.completedByUser": actorName,
 
-          disconnection: cleanExecution?.disconnection || {},
+          ...(trnType === "METER_INSPECTION"
+            ? { inspection: cleanExecution?.inspection || {} }
+            : {}),
+
+          ...(trnType === "METER_DISCONNECTION"
+            ? { disconnection: cleanExecution?.disconnection || {} }
+            : {}),
+
+          ...(trnType === "METER_RECONNECTION"
+            ? { reconnection: cleanExecution?.reconnection || {} }
+            : {}),
+
+          ...(trnType === "METER_REMOVAL"
+            ? { removal: cleanExecution?.removal || {} }
+            : {}),
+
+          ...(trnType === "METER_READING"
+            ? { meterReading: cleanExecution?.meterReading || {} }
+            : {}),
+
           executionOutcome,
 
-          media: cleanExecution?.media || [],
+          media: completedMedia,
+
           status: cleanExecution?.status || {
             state: statusAfter,
             id: astDoc?.status?.id || "NAv",
@@ -409,6 +545,23 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         const astPatch = actionCheck?.astPatch || {};
         const astDataChanged = Object.keys(astPatch).length > 0;
 
+        const existingTargets = Array.isArray(existingTrn?.assignment?.targets)
+          ? existingTrn.assignment.targets
+          : [];
+
+        const executionTargets = Array.isArray(
+          cleanExecution?.assignment?.targets,
+        )
+          ? cleanExecution.assignment.targets
+          : [];
+
+        const payloadTargets = Array.isArray(data?.assignment?.targets)
+          ? data.assignment.targets
+          : [];
+
+        const assignedTo =
+          existingTargets[0] || executionTargets[0] || payloadTargets[0] || {};
+
         const astUpdatePatch = {
           ...astPatch,
 
@@ -417,6 +570,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             trnType,
             workflowState: "COMPLETED",
             outcome: executionOutcome?.outcome || "NAv",
+            assignedTo,
             updatedAt: now,
             updatedByUser: actorName,
           }),
@@ -459,18 +613,23 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             actorUid,
             actorName,
             now,
+
             note:
               executionOutcome?.outcome === "NO_ACCESS"
-                ? "DCN completed with NO_ACCESS outcome"
-                : "DCN completed successfully",
+                ? `${trnType} completed with NO_ACCESS outcome`
+                : `${trnType} completed successfully`,
           }),
         );
 
         responsePayload = buildSuccessResult(
           trnId,
+
           executionOutcome?.outcome === "NO_ACCESS"
-            ? "DCN completed with NO ACCESS. AST status unchanged."
-            : "DCN completed and AST updated successfully",
+            ? `${trnType} completed with NO ACCESS. AST status unchanged.`
+            : trnType === "METER_INSPECTION"
+              ? `${trnType} completed successfully. AST status unchanged.`
+              : `${trnType} completed and AST updated successfully`,
+
           {
             trnType,
             astId,
@@ -479,6 +638,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             astStatusChanged: actionCheck.astStatusChanged === true,
             astDataChanged,
             executionOutcome,
+            distanceMeters: actionCheck.distanceMeters ?? null,
           },
         );
 
@@ -619,6 +779,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           astStatusAfter: statusAfter,
           astStatusChanged: actionCheck.astStatusChanged === true,
           astDataChanged: actionCheck.astDataChanged === true,
+          executionOutcome: actionCheck.executionOutcome || null,
+          distanceMeters: actionCheck.distanceMeters ?? null,
         },
       );
     });

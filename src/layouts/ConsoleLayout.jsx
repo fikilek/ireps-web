@@ -86,6 +86,41 @@ const navSections = [
           },
         ],
       },
+      {
+        label: "Operations",
+        items: [
+          {
+            label: "Operations Overview",
+            path: "/operations",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "TC Uploads",
+            path: "/operations/tc-uploads",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "BGO",
+            path: "/operations/bgo",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Operational Teams",
+            path: "/operations/teams",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Geo-Fences",
+            path: "/operations/geo-fences",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "WMS Dashboard",
+            path: "/operations/wms-dashboard",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+        ],
+      },
     ],
   },
 
@@ -181,6 +216,16 @@ function getFlatNavItems(sections = []) {
   });
 }
 
+function getActiveNavItem(items = [], pathname) {
+  const matchingItems = items.filter((item) => pathname.startsWith(item.path));
+
+  if (matchingItems.length === 0) {
+    return items[0];
+  }
+
+  return matchingItems.sort((a, b) => b.path.length - a.path.length)[0];
+}
+
 export default function ConsoleLayout() {
   const location = useLocation();
 
@@ -193,9 +238,7 @@ export default function ConsoleLayout() {
   const visibleSections = getVisibleSections(role);
   const visibleNavItems = getFlatNavItems(visibleSections);
 
-  const activeNavItem =
-    visibleNavItems.find((item) => location.pathname.startsWith(item.path)) ||
-    visibleNavItems[0];
+  const activeNavItem = getActiveNavItem(visibleNavItems, location.pathname);
 
   async function handleSignOut() {
     await signOut(auth);
@@ -260,7 +303,6 @@ export default function ConsoleLayout() {
             <span>{serviceProviderName}</span>
           </div>
 
-          {/* 👇 NEW: Profile link */}
           <NavLink to="/profile" className="secondary-button">
             Profile
           </NavLink>

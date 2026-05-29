@@ -10,9 +10,22 @@ import {
   normalizeUpper,
 } from "./helpers.js";
 
-const ACCEPT_REJECT_ALLOWED_STATES = ["ISSUED", "REASSIGNED"];
+const ACCEPT_ALLOWED_WORKFLOW_STATES = ["ISSUED", "REASSIGNED"];
+const REJECT_ALLOWED_WORKFLOW_STATES = ["ISSUED", "REASSIGNED", "ACCEPTED"];
 
 const ACCEPT_REJECT_ACTIONS = ["ACCEPT", "REJECT"];
+
+function getAllowedWorkflowStatesForAction(action) {
+  return action === "REJECT"
+    ? REJECT_ALLOWED_WORKFLOW_STATES
+    : ACCEPT_ALLOWED_WORKFLOW_STATES;
+}
+
+function getInvalidWorkflowStateMessage(action) {
+  return action === "REJECT"
+    ? "Only ISSUED, REASSIGNED, or ACCEPTED TRNs can be rejected"
+    : "Only ISSUED or REASSIGNED TRNs can be accepted";
+}
 
 function normalizeTrnIds(data = {}) {
   const rawIds = Array.isArray(data?.trnIds)
@@ -242,6 +255,7 @@ function buildAstLifecyclePatch({
   trnId,
   trnType,
   workflowState,
+  assignedTo = {},
   now,
   actorUid,
   actorName,
@@ -252,6 +266,7 @@ function buildAstLifecyclePatch({
       trnType,
       workflowState,
       outcome: "NAv",
+      assignedTo,
       updatedAt: now,
       updatedByUser: actorName,
     }),
@@ -456,10 +471,13 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           const targets = getAssignmentTargets(row.data);
           const astId = getAstId(row.data);
 
-          if (!ACCEPT_REJECT_ALLOWED_STATES.includes(workflowState)) {
+          if (
+            row.data?.workflow?.completedAt ||
+            workflowState === "COMPLETED"
+          ) {
             responsePayload = buildFailureResult(
-              "INVALID_WORKFLOW_STATE",
-              `Only ISSUED or REASSIGNED TRNs can be ${action.toLowerCase()}ed`,
+              "TRN_ALREADY_COMPLETED",
+              "Completed lifecycle instructions cannot be accepted or rejected",
               {
                 trnId: row.trnId,
                 trnType,
@@ -480,6 +498,25 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
               {
                 trnId: row.trnId,
                 trnType,
+                workflowState: workflowState || "NAv",
+              },
+            );
+
+            return;
+          }
+
+          const allowedWorkflowStates =
+            getAllowedWorkflowStatesForAction(action);
+
+          if (!allowedWorkflowStates.includes(workflowState)) {
+            responsePayload = buildFailureResult(
+              "INVALID_WORKFLOW_STATE",
+              getInvalidWorkflowStateMessage(action),
+              {
+                trnId: row.trnId,
+                trnType,
+                workflowState: workflowState || "NAv",
+                allowedWorkflowStates,
               },
             );
 
@@ -550,6 +587,9 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         for (const row of trnRows) {
           const trnType = getTrnType(row.data) || "NAv";
           const astId = getAstId(row.data);
+          const targets = getAssignmentTargets(row.data);
+          const assignedTo =
+            targets[0] || row.data?.trnActiveLifecycle?.assignedTo || {};
 
           tx.update(row.ref, patch);
 
@@ -559,6 +599,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
               trnId: row.trnId,
               trnType,
               workflowState: nextWorkflowState,
+              assignedTo,
               now,
               actorUid,
               actorName,

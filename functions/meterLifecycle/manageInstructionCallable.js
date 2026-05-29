@@ -12,15 +12,16 @@ import {
 
 const MANAGE_ACTIONS = ["REASSIGN", "CANCEL"];
 
-const REASSIGN_ALLOWED_STATES = ["ISSUED", "REJECTED", "REASSIGNED"];
+const REASSIGN_ALLOWED_STATES = ["ISSUED", "REJECTED"];
 
-const CANCEL_ALLOWED_STATES = ["ISSUED", "REASSIGNED", "REJECTED", "ACCEPTED"];
+const CANCEL_ALLOWED_STATES = ["ISSUED", "REJECTED"];
 
 const MANAGED_LCT_TYPES = [
   "METER_INSPECTION",
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
   "METER_REMOVAL",
+  "METER_READING",
 ];
 
 function readFirstString(...values) {
@@ -277,7 +278,7 @@ function buildReassignPatch({
     "assignment.acceptedRejectedUser": null,
     "assignment.rejectReason": "",
 
-    "workflow.state": "REASSIGNED",
+    "workflow.state": "ISSUED",
     "workflow.reassignedAt": now,
     "workflow.reassignedByUid": actorUid,
     "workflow.reassignedByUser": actorName,
@@ -333,6 +334,7 @@ function buildAstLifecyclePatch({
   trnId,
   trnType,
   workflowState,
+  assignedTo = {},
   now,
   actorUid,
   actorName,
@@ -343,6 +345,7 @@ function buildAstLifecyclePatch({
       trnType,
       workflowState,
       outcome: "NAv",
+      assignedTo,
       updatedAt: now,
       updatedByUser: actorName,
     }),
@@ -689,7 +692,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         ) {
           responsePayload = buildFailureResult(
             "INVALID_REASSIGN_STATE",
-            "Only ISSUED, REJECTED or REASSIGNED lifecycle instructions can be reassigned",
+            "Only ISSUED or REJECTED lifecycle instructions can be reassigned",
             {
               trnId: row.trnId,
               trnType,
@@ -706,7 +709,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         ) {
           responsePayload = buildFailureResult(
             "INVALID_CANCEL_STATE",
-            "Only ISSUED, REASSIGNED, REJECTED or ACCEPTED lifecycle instructions can be cancelled",
+            "Only ISSUED or REJECTED lifecycle instructions can be cancelled",
             {
               trnId: row.trnId,
               trnType,
@@ -718,8 +721,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         }
       }
 
-      const nextWorkflowState =
-        action === "REASSIGN" ? "REASSIGNED" : "CANCELLED";
+      const nextWorkflowState = action === "REASSIGN" ? "ISSUED" : "CANCELLED";
 
       for (const row of rows) {
         const trnType = getTrnType(row.data) || "NAv";
@@ -752,12 +754,24 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           );
         }
 
+        const existingTargets = normalizeAssignmentTargets(
+          row.data?.assignment?.targets,
+        );
+
+        const assignedTo =
+          action === "REASSIGN"
+            ? newTargets?.[0] || {}
+            : existingTargets[0] ||
+              row.data?.trnActiveLifecycle?.assignedTo ||
+              {};
+
         tx.update(
           db.collection("asts").doc(astId),
           buildAstLifecyclePatch({
             trnId: row.trnId,
             trnType,
             workflowState: nextWorkflowState,
+            assignedTo,
             now,
             actorUid,
             actorName,
@@ -772,14 +786,16 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             trnId: row.trnId,
             trnType,
             astId,
-            event: nextWorkflowState,
+            event: action === "REASSIGN" ? "REASSIGNED" : "CANCELLED",
             workflowState: nextWorkflowState,
             actorUid,
             actorName,
             now,
             note:
-              nextWorkflowState === "REASSIGNED"
-                ? `Lifecycle instruction reassigned: ${reason || "NAv"}`
+              action === "REASSIGN"
+                ? `Lifecycle instruction reassigned and returned to ISSUED: ${
+                    reason || "NAv"
+                  }`
                 : `Lifecycle instruction cancelled: ${cancelReason}`,
           }),
         );
@@ -793,7 +809,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
               buildNotificationRecord({
                 trnId: row.trnId,
                 trnType,
-                workflowState: "REASSIGNED",
+                workflowState: "ISSUED",
                 target,
                 actorUid,
                 actorName,

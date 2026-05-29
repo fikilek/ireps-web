@@ -1,3 +1,5 @@
+// src/redux/store.js
+
 import { configureStore } from "@reduxjs/toolkit";
 import { setupListeners } from "@reduxjs/toolkit/query";
 
@@ -16,6 +18,8 @@ import { mapPremisesApi } from "./mapPremisesApi";
 import { mapErfsApi } from "./mapErfsApi";
 import { wardErfsApi } from "./wardErfsApi";
 import { astsApi } from "./astsApi";
+import { tcApi } from "./tcApi";
+import { geofencesApi } from "./geofencesApi";
 
 export const store = configureStore({
   reducer: {
@@ -37,7 +41,10 @@ export const store = configureStore({
 
     [wardErfsApi.reducerPath]: wardErfsApi.reducer,
     [astsApi.reducerPath]: astsApi.reducer,
+    [tcApi.reducerPath]: tcApi.reducer,
+    [geofencesApi.reducerPath]: geofencesApi.reducer,
   },
+
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware()
       .concat(registryWardsApi.middleware)
@@ -54,7 +61,9 @@ export const store = configureStore({
       .concat(mapPremisesApi.middleware)
       .concat(mapErfsApi.middleware)
       .concat(wardErfsApi.middleware)
-      .concat(astsApi.middleware),
+      .concat(astsApi.middleware)
+      .concat(tcApi.middleware)
+      .concat(geofencesApi.middleware),
 });
 
 setupListeners(store.dispatch);

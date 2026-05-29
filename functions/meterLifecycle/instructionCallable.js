@@ -197,11 +197,13 @@ function buildNotificationRecord({
     },
 
     message: {
-      title: "New DCN work issued",
+      title: "New lifecycle work issued",
       body:
         trnType === "METER_DISCONNECTION"
           ? "A meter disconnection work item has been assigned to you."
-          : "A meter lifecycle work item has been assigned to you.",
+          : trnType === "METER_READING"
+            ? "A meter reading work item has been assigned to you."
+            : "A meter lifecycle work item has been assigned to you.",
     },
 
     delivery: {
@@ -443,6 +445,12 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
           actorName,
         });
 
+        const targets = Array.isArray(cleanInstructionTrn?.assignment?.targets)
+          ? cleanInstructionTrn.assignment.targets
+          : [];
+
+        const assignedTo = targets[0] || {};
+
         tx.create(trnRef, cleanInstructionTrn);
 
         tx.update(astRef, {
@@ -451,6 +459,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
             trnType,
             workflowState: "ISSUED",
             outcome: "NAv",
+            assignedTo,
             updatedAt: now,
             updatedByUser: actorName,
           }),
@@ -478,10 +487,6 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
             note: "Lifecycle instruction issued",
           }),
         );
-
-        const targets = Array.isArray(cleanInstructionTrn?.assignment?.targets)
-          ? cleanInstructionTrn.assignment.targets
-          : [];
 
         for (const target of targets) {
           const notificationRef = db.collection("notifications").doc();

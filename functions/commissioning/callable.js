@@ -6,8 +6,6 @@ import {
   buildFailureResult,
   buildSuccessResult,
   getActorNameFromRequest,
-  getAstMeterType,
-  normalizeUpper,
 } from "../meterLifecycle/helpers.js";
 
 import {
@@ -70,19 +68,10 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
     let responsePayload = null;
 
     await db.runTransaction(async (tx) => {
-      // ------------------------------------------------------------
-      // READS FIRST
-      // Firestore transactions require all reads before writes.
-      // ------------------------------------------------------------
       const trnSnap = await tx.get(trnRef);
       const astSnap = await tx.get(astRef);
       const premiseSnap = await tx.get(premiseRef);
 
-      // ------------------------------------------------------------
-      // IDEMPOTENCY
-      // If client retries after timeout/offline sync, do not duplicate.
-      // Treat existing immutable COMM TRN as success.
-      // ------------------------------------------------------------
       if (trnSnap.exists) {
         logger.info(
           "onCreateMeterCommissioningCallable -- TRN already exists",
@@ -101,7 +90,6 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
             astId,
             premiseId,
             idempotent: true,
-            processingState: "TRN_ALREADY_EXISTS",
           },
         );
 
@@ -140,20 +128,15 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
 
       const astDoc = astSnap.data() || {};
 
-      // ------------------------------------------------------------
-      // COMMISSIONING VALIDATION
-      // Validates FIELD-only, electricity-only, answers, notes, media.
-      // This is validation only. AST updates happen in the trigger.
-      // ------------------------------------------------------------
-      const actionCheck = validateCommissioningAgainstAst({
+      const commissioningCheck = validateCommissioningAgainstAst({
         data,
         astDoc,
       });
 
-      if (!actionCheck?.ok) {
+      if (!commissioningCheck?.ok) {
         responsePayload = buildFailureResult(
-          actionCheck?.code,
-          actionCheck?.message,
+          commissioningCheck?.code,
+          commissioningCheck?.message,
           {
             trnId,
             trnType,
@@ -165,24 +148,14 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
         return;
       }
 
-      const statusAfter = normalizeUpper(
-        actionCheck?.nextAstState || data?.status?.state || "FIELD",
-      );
-
       const cleanTrn = buildCommissioningTrnPayload({
         data,
         astDoc,
         now,
         actorUid,
         actorName,
-        statusState: statusAfter,
       });
 
-      // ------------------------------------------------------------
-      // WRITE ONLY THE AUDIT TRN
-      // Do not update AST, premise, or meter_master here.
-      // onMeterCommissioningTrnCreated will process the TRN.
-      // ------------------------------------------------------------
       tx.create(trnRef, cleanTrn);
 
       responsePayload = buildSuccessResult(
@@ -192,12 +165,7 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
           trnType,
           astId,
           premiseId,
-          meterType: getAstMeterType(astDoc, data),
-          commissioningPassed: actionCheck?.commissioningPassed === true,
-          astStatusBefore: actionCheck?.currentState || "NAv",
-          astStatusAfter: statusAfter,
-          astStatusChanged: false,
-          processingState: "TRN_CREATED",
+          meterType: cleanTrn?.meterType || "NAv",
         },
       );
     });

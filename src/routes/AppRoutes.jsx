@@ -21,12 +21,21 @@ import NoAccessReportPage from "../pages/reports/NoAccessReportPage";
 import UserActivityReportPage from "../pages/reports/UserActivityReportPage";
 import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
 import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
+
+import OperationsLandingPage from "../pages/operations/OperationsLandingPage";
+import TcUploadsPage from "../pages/operations/TcUploadsPage";
+import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
+import TcBgoPage from "../pages/operations/TcBgoPage";
+import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
+
 import MapPage from "../pages/maps/MapPage";
 import ErfsPage from "@/pages/ward-scope/ErfsPage";
 import PremisesPage from "@/pages/ward-scope/PremisesPage";
 import MetersPage from "../pages/ward-scope/MetersPage";
 
 import ProfilePage from "../pages/profile/ProfilePage";
+
+import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
@@ -153,7 +162,100 @@ export default function AppRoutes() {
             }
           />
 
-          {/* WARD SCOPE   */}
+          {/* OPERATIONS */}
+
+          <Route
+            path="/operations"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <OperationsLandingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/tc-uploads"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TcUploadsPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/tc-uploads/:tcId"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TcUploadDetailsPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/tc-uploads/:tcId/bgo"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TcBgoPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/tc-uploads/:tcId/final-report"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TcFinalReportPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/bgo"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Bulk Geofence Origin"
+                  description="Create bulk operation TRNs from validated TC rows."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/teams"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Operational Teams"
+                  description="Web-based operational team management."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/geo-fences"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <GeoFencesPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/wms-dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="WMS Dashboard"
+                  description="Ward workorder control cockpit for office-issued work."
+                />
+              </RoleRoute>
+            }
+          />
+
+          {/* WARD SCOPE */}
+
           <Route
             path="/ward-scope/map"
             element={

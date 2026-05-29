@@ -38,6 +38,20 @@ import { onMeterCommissioningTrnCreated } from "./commissioning/trigger.js";
 import { createGeoFence } from "./geofences/callables.js";
 import { onGeoFenceCreated } from "./geofences/triggers.js";
 
+import { onUploadAndValidateTcCallable } from "./tcUploads/callables.js";
+import { onRefreshTcUploadGeofenceReadinessCallable } from "./tcUploads/refreshCallable.js";
+import { onDeleteTcUploadCallable } from "./tcUploads/deleteCallable.js";
+import {
+  getActiveSameOperationLifecycle,
+  getEligibilityResult,
+} from "./tcUploads/helpers.js";
+import {
+  applyTcRowBgoReadiness,
+  isTcRowUsedByBgo,
+  normalizeTcGeoFenceRefs,
+  refreshTcUploadSummariesForTcIds,
+} from "./tcUploads/readiness.js";
+
 import {
   createTeam,
   renameTeam,
@@ -94,6 +108,9 @@ export {
   onMeterCommissioningTrnCreated,
   onIrepsSelectOptionsCallable,
   onIrepsSelectLookupAdminCallable,
+  onUploadAndValidateTcCallable,
+  onRefreshTcUploadGeofenceReadinessCallable,
+  onDeleteTcUploadCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
@@ -2835,6 +2852,511 @@ async function syncAstGeoFenceMembership({
   };
 }
 
+
+
+/* ------------------------------------------------
+   TC ROW UPDATE AFTER METER GEOFENCE CHANGED
+   ------------------------------------------------ */
+
+const TC_GEOFENCE_SYSTEM_UID = "SYSTEM";
+const TC_GEOFENCE_SYSTEM_USER = "Meter Geofence TC Update";
+const TC_STATUS_SYSTEM_UID = "SYSTEM";
+const TC_STATUS_SYSTEM_USER = "Meter Status TC Update";
+
+function normalizeTcText(value) {
+  return String(value || "").trim();
+}
+
+function normalizeTcUpper(value) {
+  return normalizeTcText(value).toUpperCase();
+}
+
+function hasMeaningfulTcValue(value) {
+  const normalizedValue = normalizeTcUpper(value);
+
+  return (
+    normalizedValue !== "" &&
+    normalizedValue !== "NAV" &&
+    normalizedValue !== "N/A" &&
+    normalizedValue !== "NA" &&
+    normalizedValue !== "NULL" &&
+    normalizedValue !== "UNDEFINED"
+  );
+}
+
+function getTcIdFromRow(rowData = {}) {
+  return (
+    rowData?.tcId ||
+    rowData?.upload?.tcId ||
+    rowData?.upload?.id ||
+    rowData?.tcUploadId ||
+    "NAv"
+  );
+}
+
+function getTcRowTrnType(rowData = {}) {
+  return normalizeTcUpper(
+    rowData?.backend?.trnType ||
+      rowData?.upload?.trnType ||
+      rowData?.trnType ||
+      "",
+  );
+}
+
+function getTcBackendErrorsAfterEligibility({ rowData = {}, eligibility = {} }) {
+  const currentErrors = Array.isArray(rowData?.backend?.errors)
+    ? rowData.backend.errors
+    : [];
+
+  const nonEligibilityErrors = currentErrors.filter((error) => {
+    const text = normalizeTcUpper(error);
+
+    if (!text) return false;
+
+    return !(
+      text.includes("CANNOT BE SELECTED FOR METER_") ||
+      (text.includes("METER IS ") && text.includes("CANNOT BE SELECTED")) ||
+      text.includes("METER STATUS COULD NOT BE RESOLVED") ||
+      text.includes("NOT ELIGIBLE FOR THE SELECTED OPERATION")
+    );
+  });
+
+  if (!eligibility?.eligible && eligibility?.message) {
+    nonEligibilityErrors.push(eligibility.message);
+  }
+
+  return nonEligibilityErrors;
+}
+
+function getAstMeterNo(astData = {}) {
+  return normalizeMeterNo(
+    astData?.ast?.astData?.astNo ||
+      astData?.astData?.astNo ||
+      astData?.master?.id ||
+      astData?.meterNo ||
+      "",
+  );
+}
+
+function getAstMeterTypeForTc(astData = {}) {
+  return (
+    astData?.meterType ||
+    astData?.ast?.meterType ||
+    astData?.ast?.astData?.meterType ||
+    astData?.astData?.meterType ||
+    "NAv"
+  );
+}
+
+function addTcAstLinkQuerySpec(querySpecs, field, value) {
+  if (!hasMeaningfulTcValue(value)) return;
+
+  const key = `${field}:${value}`;
+
+  if (querySpecs.some((item) => item.key === key)) return;
+
+  querySpecs.push({ key, field, value });
+}
+
+async function findInFlightTcRowsForAstId({ db, astId }) {
+  const querySpecs = [];
+
+  addTcAstLinkQuerySpec(querySpecs, "ast.id", astId);
+  addTcAstLinkQuerySpec(querySpecs, "ast.astId", astId);
+  addTcAstLinkQuerySpec(querySpecs, "ast.trnId", astId);
+  addTcAstLinkQuerySpec(querySpecs, "backend.astId", astId);
+  addTcAstLinkQuerySpec(querySpecs, "backend.matchedAstId", astId);
+  addTcAstLinkQuerySpec(querySpecs, "matchedAstId", astId);
+
+  const rowDocMap = new Map();
+
+  for (const spec of querySpecs) {
+    try {
+      const snapshot = await db
+        .collection("tc_rows")
+        .where(spec.field, "==", spec.value)
+        .limit(1000)
+        .get();
+
+      logger.info("findInFlightTcRowsForAstId -- query", {
+        astId,
+        field: spec.field,
+        value: spec.value,
+        count: snapshot.size,
+      });
+
+      snapshot.docs.forEach((doc) => {
+        const rowData = doc.data() || {};
+
+        if (isTcRowUsedByBgo(rowData)) return;
+
+        rowDocMap.set(doc.id, doc);
+      });
+    } catch (error) {
+      logger.warn("findInFlightTcRowsForAstId -- query skipped", {
+        astId,
+        field: spec.field,
+        value: spec.value,
+        message: error?.message || String(error),
+      });
+    }
+  }
+
+  const rows = Array.from(rowDocMap.values());
+
+  logger.info("findInFlightTcRowsForAstId -- candidates", {
+    astId,
+    candidateRows: rows.length,
+  });
+
+  return rows;
+}
+
+async function updateTcRowsAfterMeterGeofenceChanged({
+  astId,
+  beforeGeoFenceRefs = [],
+  afterGeoFenceRefs = [],
+}) {
+  const db = getFirestore();
+  const now = new Date().toISOString();
+  const nextGeoFenceRefs = normalizeTcGeoFenceRefs(afterGeoFenceRefs);
+
+  logger.info("updateTcRowsAfterMeterGeofenceChanged -- START", {
+    astId,
+    beforeGeofenceRefsCount: normalizeTcGeoFenceRefs(beforeGeoFenceRefs).length,
+    afterGeofenceRefsCount: nextGeoFenceRefs.length,
+    afterGeofenceRefs: nextGeoFenceRefs,
+  });
+
+  const candidateRows = await findInFlightTcRowsForAstId({ db, astId });
+
+  if (candidateRows.length === 0) {
+    logger.info("updateTcRowsAfterMeterGeofenceChanged -- no in-flight rows", {
+      astId,
+    });
+
+    return {
+      updatedRows: 0,
+      affectedTcIds: [],
+    };
+  }
+
+  const affectedTcIds = new Set();
+  let batch = db.batch();
+  let operationCount = 0;
+  let updatedRows = 0;
+  let skippedRows = 0;
+
+  for (const rowDoc of candidateRows) {
+    const rowData = rowDoc.data() || {};
+    const tcId = getTcIdFromRow(rowData);
+
+    if (rowData?.backend?.matched !== true) {
+      skippedRows += 1;
+
+      logger.info("updateTcRowsAfterMeterGeofenceChanged -- row skipped", {
+        astId,
+        tcRowId: rowDoc.id,
+        tcId,
+        reason: "ROW_NOT_MATCHED",
+      });
+
+      continue;
+    }
+
+    const beforeReady = rowData?.bgo?.ready === true;
+    const beforeReadinessState = rowData?.bgo?.readinessState || "NAv";
+
+    const evaluatedRow = applyTcRowBgoReadiness({
+      row: {
+        ...rowData,
+        geofenceRefs: nextGeoFenceRefs,
+      },
+      geofenceRefs: nextGeoFenceRefs,
+      now,
+      updatedByUid: TC_GEOFENCE_SYSTEM_UID,
+      updatedByUser: TC_GEOFENCE_SYSTEM_USER,
+    });
+
+    const patch = {
+      geofenceRefs: evaluatedRow.geofenceRefs,
+      backend: {
+        ...(evaluatedRow?.backend || {}),
+        geofenceRefsCount: nextGeoFenceRefs.length,
+        refreshedFromAstAt: now,
+        refreshReason: "METER_GEOFENCE_CHANGED",
+      },
+      bgo: evaluatedRow.bgo,
+      "metadata.updatedAt": now,
+      "metadata.updatedByUid": TC_GEOFENCE_SYSTEM_UID,
+      "metadata.updatedByUser": TC_GEOFENCE_SYSTEM_USER,
+    };
+
+    batch.update(rowDoc.ref, patch);
+    operationCount += 1;
+    updatedRows += 1;
+
+    if (hasMeaningfulTcValue(tcId)) {
+      affectedTcIds.add(tcId);
+    }
+
+    logger.info("updateTcRowsAfterMeterGeofenceChanged -- ROW_UPDATE", {
+      astId,
+      tcRowId: rowDoc.id,
+      tcId,
+      beforeReady,
+      afterReady: evaluatedRow?.bgo?.ready === true,
+      beforeReadinessState,
+      afterReadinessState: evaluatedRow?.bgo?.readinessState || "NAv",
+      geofenceRefsCount: nextGeoFenceRefs.length,
+      reasonCodes: evaluatedRow?.backend?.reasonCodes || [],
+    });
+
+    if (operationCount === 450) {
+      await batch.commit();
+      logger.info("updateTcRowsAfterMeterGeofenceChanged -- batch commit", {
+        astId,
+        operationCount,
+      });
+      batch = db.batch();
+      operationCount = 0;
+    }
+  }
+
+  if (operationCount > 0) {
+    await batch.commit();
+    logger.info("updateTcRowsAfterMeterGeofenceChanged -- final batch commit", {
+      astId,
+      operationCount,
+    });
+  }
+
+  const tcUploadRefresh = await refreshTcUploadSummariesForTcIds({
+    db,
+    tcIds: Array.from(affectedTcIds),
+    now,
+    updatedByUid: TC_GEOFENCE_SYSTEM_UID,
+    updatedByUser: TC_GEOFENCE_SYSTEM_USER,
+  });
+
+  logger.info("updateTcRowsAfterMeterGeofenceChanged -- upload summary refresh", {
+    astId,
+    ...tcUploadRefresh,
+  });
+
+  logger.info("updateTcRowsAfterMeterGeofenceChanged -- END", {
+    astId,
+    candidateRows: candidateRows.length,
+    updatedRows,
+    skippedRows,
+    affectedTcIds: Array.from(affectedTcIds),
+  });
+
+  return {
+    updatedRows,
+    skippedRows,
+    affectedTcIds: Array.from(affectedTcIds),
+  };
+}
+
+async function updateTcRowsAfterMeterStatusChanged({
+  astId,
+  beforeStatus = "NAv",
+  afterStatus = "NAv",
+  afterAstData = {},
+}) {
+  const db = getFirestore();
+  const now = new Date().toISOString();
+
+  logger.info("updateTcRowsAfterMeterStatusChanged -- START", {
+    astId,
+    beforeStatus,
+    afterStatus,
+  });
+
+  const candidateRows = await findInFlightTcRowsForAstId({ db, astId });
+
+  if (candidateRows.length === 0) {
+    logger.info("updateTcRowsAfterMeterStatusChanged -- no in-flight rows", {
+      astId,
+      beforeStatus,
+      afterStatus,
+    });
+
+    return {
+      updatedRows: 0,
+      affectedTcIds: [],
+    };
+  }
+
+  const affectedTcIds = new Set();
+  let batch = db.batch();
+  let operationCount = 0;
+  let updatedRows = 0;
+  let skippedRows = 0;
+
+  for (const rowDoc of candidateRows) {
+    const rowData = rowDoc.data() || {};
+    const tcId = getTcIdFromRow(rowData);
+
+    if (rowData?.backend?.matched !== true) {
+      skippedRows += 1;
+
+      logger.info("updateTcRowsAfterMeterStatusChanged -- row skipped", {
+        astId,
+        tcRowId: rowDoc.id,
+        tcId,
+        reason: "ROW_NOT_MATCHED",
+      });
+
+      continue;
+    }
+
+    const trnType = getTcRowTrnType(rowData);
+
+    if (!hasMeaningfulTcValue(trnType)) {
+      skippedRows += 1;
+
+      logger.warn("updateTcRowsAfterMeterStatusChanged -- row missing trnType", {
+        astId,
+        tcRowId: rowDoc.id,
+        tcId,
+      });
+
+      continue;
+    }
+
+    const eligibility = getEligibilityResult({
+      trnType,
+      astData: afterAstData,
+    });
+
+    const activeLifecycle = getActiveSameOperationLifecycle({
+      trnType,
+      astData: afterAstData,
+    });
+
+    const nextBackend = {
+      ...(rowData?.backend || {}),
+      eligible: eligibility.eligible === true,
+      notEligible: eligibility.eligible !== true,
+      eligibilityCode: eligibility.code || null,
+      eligibilityMessage: eligibility.message || null,
+      alreadyHasActiveSameOperationTrn: Boolean(activeLifecycle),
+      activeLifecycle,
+      errors: getTcBackendErrorsAfterEligibility({ rowData, eligibility }),
+      trnType,
+    };
+
+    const nextRowForEvaluation = {
+      ...rowData,
+      ast: {
+        ...(rowData?.ast || {}),
+        statusState: afterStatus,
+      },
+      backend: nextBackend,
+    };
+
+    const beforeReady = rowData?.bgo?.ready === true;
+    const beforeReadinessState = rowData?.bgo?.readinessState || "NAv";
+    const beforeRowStatus = rowData?.ast?.statusState || "NAv";
+
+    const evaluatedRow = applyTcRowBgoReadiness({
+      row: nextRowForEvaluation,
+      geofenceRefs: rowData?.geofenceRefs || [],
+      now,
+      updatedByUid: TC_STATUS_SYSTEM_UID,
+      updatedByUser: TC_STATUS_SYSTEM_USER,
+    });
+
+    const patch = {
+      "ast.statusState": afterStatus,
+      backend: {
+        ...(evaluatedRow?.backend || {}),
+        refreshedFromAstAt: now,
+        refreshReason: "METER_STATUS_CHANGED",
+        statusRefresh: {
+          beforeStatus,
+          afterStatus,
+        },
+      },
+      bgo: evaluatedRow.bgo,
+      "metadata.updatedAt": now,
+      "metadata.updatedByUid": TC_STATUS_SYSTEM_UID,
+      "metadata.updatedByUser": TC_STATUS_SYSTEM_USER,
+    };
+
+    batch.update(rowDoc.ref, patch);
+    operationCount += 1;
+    updatedRows += 1;
+
+    if (hasMeaningfulTcValue(tcId)) {
+      affectedTcIds.add(tcId);
+    }
+
+    logger.info("updateTcRowsAfterMeterStatusChanged -- ROW_UPDATE", {
+      astId,
+      tcRowId: rowDoc.id,
+      tcId,
+      trnType,
+      beforeRowStatus,
+      afterRowStatus: afterStatus,
+      beforeReady,
+      afterReady: evaluatedRow?.bgo?.ready === true,
+      beforeReadinessState,
+      afterReadinessState: evaluatedRow?.bgo?.readinessState || "NAv",
+      eligibilityCode: eligibility.code || "NAv",
+      eligibilityMessage: eligibility.message || "NAv",
+      reasonCodes: evaluatedRow?.backend?.reasonCodes || [],
+    });
+
+    if (operationCount === 450) {
+      await batch.commit();
+      logger.info("updateTcRowsAfterMeterStatusChanged -- batch commit", {
+        astId,
+        operationCount,
+      });
+      batch = db.batch();
+      operationCount = 0;
+    }
+  }
+
+  if (operationCount > 0) {
+    await batch.commit();
+    logger.info("updateTcRowsAfterMeterStatusChanged -- final batch commit", {
+      astId,
+      operationCount,
+    });
+  }
+
+  const tcUploadRefresh = await refreshTcUploadSummariesForTcIds({
+    db,
+    tcIds: Array.from(affectedTcIds),
+    now,
+    updatedByUid: TC_STATUS_SYSTEM_UID,
+    updatedByUser: TC_STATUS_SYSTEM_USER,
+  });
+
+  logger.info("updateTcRowsAfterMeterStatusChanged -- upload summary refresh", {
+    astId,
+    ...tcUploadRefresh,
+  });
+
+  logger.info("updateTcRowsAfterMeterStatusChanged -- END", {
+    astId,
+    candidateRows: candidateRows.length,
+    updatedRows,
+    skippedRows,
+    affectedTcIds: Array.from(affectedTcIds),
+  });
+
+  return {
+    updatedRows,
+    skippedRows,
+    affectedTcIds: Array.from(affectedTcIds),
+  };
+}
+
 export const onMeterCreated = onDocumentCreated(
   "asts/{astId}",
   async (event) => {
@@ -2880,158 +3402,6 @@ export const onMeterCreated = onDocumentCreated(
   },
 );
 
-// export const onMeterCreated = onDocumentCreated(
-//   "asts/{astId}",
-//   async (event) => {
-//     const db = getFirestore();
-
-//     const astId = event.params.astId;
-
-//     try {
-//       console.log("onMeterCreated ---- START", { astId });
-
-//       const snap = event.data;
-//       if (!snap?.exists) {
-//         console.log("onMeterCreated ---- no snapshot");
-//         return null;
-//       }
-
-//       const data = snap.data() || {};
-//       /* ------------------------------------------------
-//    0. SYNC PREMISE SERVICE SNAPSHOT
-//    ------------------------------------------------ */
-//       await syncPremiseServiceSnapshotFromMeter({
-//         astId,
-//         astData: data,
-//       });
-
-//       /* ------------------------------------------------
-//          1. KEEP EXISTING BEHAVIOR
-//          ------------------------------------------------ */
-//       await rebuildMeterRegistryRow(astId);
-
-//       /* ------------------------------------------------
-//          2. RESOLVE GEOFENCE MEMBERSHIP
-//          ------------------------------------------------ */
-
-//       const lmPcode = data?.accessData?.parents?.lmPcode || null;
-//       const wardPcode = data?.accessData?.parents?.wardPcode || null;
-//       const metadata = data?.metadata || {};
-//       const auditUid =
-//         metadata?.updatedByUid || metadata?.createdByUid || "unknown_uid";
-//       const auditUser =
-//         metadata?.updatedByUser || metadata?.createdByUser || "Unknown Agent";
-
-//       console.log("onMeterCreated ---- lmPcode", lmPcode);
-//       console.log("onMeterCreated ---- wardPcode", wardPcode);
-//       console.log("onMeterCreated ---- metadata", metadata);
-//       console.log("onMeterCreated ---- auditUid", auditUid);
-//       console.log("onMeterCreated ---- auditUser", auditUser);
-
-//       console.log("onMeterCreated ---- scope", {
-//         lmPcode,
-//         wardPcode,
-//       });
-
-//       if (!lmPcode || !wardPcode) {
-//         console.log(
-//           "onMeterCreated ---- missing LM/Ward, skipping geofence sync",
-//         );
-//         return null;
-//       }
-
-//       const astPoint = extractAstPoint(data);
-
-//       if (!astPoint) {
-//         console.log(
-//           "onMeterCreated ---- no valid AST point, skipping geofence sync",
-//         );
-//         return null;
-//       }
-
-//       const geoFenceSnapshot = await db
-//         .collection("geo_fences")
-//         .where("parents.lmPcode", "==", lmPcode)
-//         .where("parents.wardPcode", "==", wardPcode)
-//         .where("status", "==", "ACTIVE")
-//         .get();
-
-//       console.log("onMeterCreated ---- geofence candidates", {
-//         count: geoFenceSnapshot.size,
-//       });
-
-//       const matchedGeoFences = [];
-
-//       for (const geoFenceDoc of geoFenceSnapshot.docs) {
-//         const geoFence = geoFenceDoc.data() || {};
-//         const bbox = geoFence?.geometry?.bbox || null;
-//         const polygonPoints = geoFence?.geometry?.points || [];
-
-//         const belongs = doesEntityBelongToGeoFence({
-//           point: astPoint,
-//           bbox,
-//           polygonPoints,
-//         });
-
-//         if (!belongs) continue;
-
-//         matchedGeoFences.push({
-//           id: geoFenceDoc.id,
-//           name: geoFence?.name || geoFence?.description || geoFenceDoc.id,
-//         });
-//       }
-
-//       const nextGeoFenceRefs = normalizeGeoFenceRefs(matchedGeoFences);
-
-//       await snap.ref.update({
-//         geofenceRefs: nextGeoFenceRefs,
-//         "metadata.updatedAt": new Date().toISOString(),
-//         "metadata.updatedByUid": auditUid,
-//         "metadata.updatedByUser": auditUser,
-//       });
-
-//       console.log("onMeterCreated ---- AST geofence membership updated", {
-//         astId,
-//         geofenceRefs: nextGeoFenceRefs,
-//       });
-
-//       /* ------------------------------------------------
-//          3. RECOMPUTE COUNTS
-//          ------------------------------------------------ */
-
-//       for (const geoFenceRef of nextGeoFenceRefs) {
-//         const geoFenceId = geoFenceRef.id;
-
-//         const counts = await recomputeGeoFenceCounts({
-//           db,
-//           geoFenceId,
-//           lmPcode,
-//           wardPcode,
-//         });
-
-//         await db.collection("geo_fences").doc(geoFenceId).update({
-//           counts,
-//           "metadata.updatedAt": new Date().toISOString(),
-//           "metadata.updatedByUid": auditUid,
-//           "metadata.updatedByUser": auditUser,
-//         });
-//       }
-
-//       console.log("onMeterCreated ---- SUCCESS", { astId });
-
-//       return null;
-//     } catch (error) {
-//       console.log("error", error);
-//       console.error("onMeterCreated ---- ERROR", {
-//         astId,
-//         message: error?.message || String(error),
-//         stack: error?.stack || "NAv",
-//       });
-//       return null;
-//     }
-//   },
-// );
-
 export const onMeterUpdated = onDocumentUpdated(
   "asts/{astId}",
   async (event) => {
@@ -3045,9 +3415,26 @@ export const onMeterUpdated = onDocumentUpdated(
     const beforeStatus = getMeterStatusState(dataBefore);
     const afterStatus = getMeterStatusState(dataAfter);
 
+    const beforeMeterType = getAstMeterTypeForTc(dataBefore);
+    const afterMeterType = getAstMeterTypeForTc(dataAfter);
+
+    const beforeAstNo = getAstMeterNo(dataBefore);
+    const afterAstNo = getAstMeterNo(dataAfter);
+
+    const beforeActiveLifecycleSignature = JSON.stringify(
+      dataBefore?.trnActiveLifecycle || {},
+    );
+    const afterActiveLifecycleSignature = JSON.stringify(
+      dataAfter?.trnActiveLifecycle || {},
+    );
+
     const updatedAtChanged = beforeUpdatedAt !== afterUpdatedAt;
     const statusChanged = beforeStatus !== afterStatus;
     const spatialChanged = didAstSpatialContextChange(dataBefore, dataAfter);
+    const meterTypeChanged = beforeMeterType !== afterMeterType;
+    const astNoChanged = beforeAstNo !== afterAstNo;
+    const activeLifecycleChanged =
+      beforeActiveLifecycleSignature !== afterActiveLifecycleSignature;
 
     const geofenceRefsChanged = !geoFenceRefsSame(
       dataBefore?.geofenceRefs || [],
@@ -3058,7 +3445,10 @@ export const onMeterUpdated = onDocumentUpdated(
       !updatedAtChanged &&
       !statusChanged &&
       !spatialChanged &&
-      !geofenceRefsChanged
+      !geofenceRefsChanged &&
+      !meterTypeChanged &&
+      !astNoChanged &&
+      !activeLifecycleChanged
     ) {
       return null;
     }
@@ -3071,6 +3461,9 @@ export const onMeterUpdated = onDocumentUpdated(
       statusChanged,
       spatialChanged,
       geofenceRefsChanged,
+      meterTypeChanged,
+      astNoChanged,
+      activeLifecycleChanged,
     });
 
     await safeRun("onMeterUpdated geofence maintenance", astId, async () => {
@@ -3120,49 +3513,40 @@ export const onMeterUpdated = onDocumentUpdated(
       );
     }
 
+    if (statusChanged) {
+      await safeRun(
+        "onMeterUpdated TC rows after meter status changed",
+        astId,
+        async () => {
+          await updateTcRowsAfterMeterStatusChanged({
+            astId,
+            beforeStatus,
+            afterStatus,
+            afterAstData: dataAfter,
+          });
+        },
+      );
+    }
+
+    if (geofenceRefsChanged) {
+      await safeRun(
+        "onMeterUpdated TC rows after meter geofence changed",
+        astId,
+        async () => {
+          await updateTcRowsAfterMeterGeofenceChanged({
+            astId,
+            beforeGeoFenceRefs: dataBefore?.geofenceRefs || [],
+            afterGeoFenceRefs: dataAfter?.geofenceRefs || [],
+          });
+        },
+      );
+    }
+
     console.log("onMeterUpdated ---- END", { astId });
 
     return null;
   },
 );
-
-// export const onMeterUpdated = onDocumentUpdated(
-//   "asts/{astId}",
-//   async (event) => {
-//     const dataAfter = event.data.after.data() || {};
-//     const dataBefore = event.data.before.data() || {};
-//     const astId = event.params.astId;
-
-//     const beforeUpdatedAt = dataBefore?.metadata?.updatedAt || null;
-//     const afterUpdatedAt = dataAfter?.metadata?.updatedAt || null;
-
-//     const beforeStatus = getMeterStatusState(dataBefore);
-//     const afterStatus = getMeterStatusState(dataAfter);
-
-//     if (afterUpdatedAt === beforeUpdatedAt && afterStatus === beforeStatus) {
-//       return null;
-//     }
-
-//     try {
-//       await rebuildMeterRegistryRow(astId);
-
-//       if (afterStatus !== beforeStatus) {
-//         await syncPremiseServiceSnapshotFromMeter({
-//           astId,
-//           astData: dataAfter,
-//         });
-//       }
-
-//       return null;
-//     } catch (error) {
-//       logger.error("onMeterUpdated ---- ERROR", {
-//         astId,
-//         message: error?.message || String(error),
-//       });
-//       return null;
-//     }
-//   },
-// );
 
 /* =====================================================
    HELPERS
