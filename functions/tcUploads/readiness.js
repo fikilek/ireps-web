@@ -214,11 +214,11 @@ export function evaluateTcRowBgoReadiness({ row = {}, geofenceRefs = null } = {}
     reasonCodes = addReason(reasonCodes, getEligibilityReasonCode(row));
   }
 
-  if (activeSameOperation) {
+  if (activeSameOperation && !used) {
     reasonCodes = addReason(reasonCodes, TC_BLOCKED_ACTIVE_SAME_OPERATION_TRN);
   }
 
-  if (matched && eligible && !hasGeofence) {
+  if (matched && eligible && !hasGeofence && !used) {
     reasonCodes = addReason(reasonCodes, TC_NEEDS_GEOFENCE);
     warnings = uniqueWarnings([...warnings, "Matched meter has no geofenceRefs."]);
   }
@@ -247,14 +247,14 @@ export function evaluateTcRowBgoReadiness({ row = {}, geofenceRefs = null } = {}
     readinessState = TC_NOT_FOUND;
   } else if (duplicateMeterNo) {
     readinessState = TC_DUPLICATE_METER_IN_UPLOAD;
+  } else if (used) {
+    readinessState = TC_USED_BY_BGO;
   } else if (!eligible) {
     readinessState = TC_NOT_ELIGIBLE;
   } else if (activeSameOperation) {
     readinessState = TC_BLOCKED_ACTIVE_SAME_OPERATION_TRN;
   } else if (!hasGeofence) {
     readinessState = TC_NEEDS_GEOFENCE;
-  } else if (used) {
-    readinessState = TC_USED_BY_BGO;
   }
 
   const readinessReason = getReadinessReason({

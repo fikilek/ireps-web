@@ -16,6 +16,7 @@ const TC_UPLOAD_DEDUPE_COLLECTION = "tc_upload_dedupe";
 const TC_UPLOAD_DELETIONS_COLLECTION = "tc_upload_deletions";
 const TC_REPORTS_COLLECTION = "tc_reports";
 const TC_REPORT_ROWS_COLLECTION = "tc_report_rows";
+const BGO_BATCHES_COLLECTION = "bgo_batches";
 const BGO_ROWS_COLLECTION = "bgo_rows";
 const TRNS_COLLECTION = "trns";
 const USERS_COLLECTION = "users";
@@ -156,12 +157,34 @@ function getRowUsageEvidence(rowData = {}) {
   return evidence;
 }
 
+async function getBgoBatchDocs({ db, tcId }) {
+  return getDocsByTcIdFields({
+    db,
+    collectionName: BGO_BATCHES_COLLECTION,
+    tcId,
+    fields: [
+      "tcId",
+      "origin.tcId",
+      "bgo.tcId",
+      "refs.tcUploadId",
+      "sourceUpload.id",
+    ],
+  });
+}
+
 async function getBgoRowDocs({ db, tcId }) {
   return getDocsByTcIdFields({
     db,
     collectionName: BGO_ROWS_COLLECTION,
     tcId,
-    fields: ["tcId", "upload.tcId", "bgo.tcId", "source.tcId"],
+    fields: [
+      "tcId",
+      "upload.tcId",
+      "origin.tcId",
+      "bgo.tcId",
+      "source.tcId",
+      "refs.tcUploadId",
+    ],
   });
 }
 
@@ -175,7 +198,11 @@ async function getTrnDocsForTcUpload({ db, tcId }) {
       "upload.tcId",
       "origin.tcId",
       "bgo.tcId",
+      "bgo.tcUploadId",
       "bucket.tcId",
+      "bucket.tcUploadId",
+      "refs.tcId",
+      "refs.tcUploadId",
       "tc.tcId",
     ],
   });
@@ -306,6 +333,20 @@ export const onDeleteTcUploadCallable = onCall(
           tcId,
           blockedBy: "TC_ROW_USAGE",
           rows: rowUsageEvidence.slice(0, 20),
+        },
+      );
+    }
+
+    const bgoBatchDocs = await getBgoBatchDocs({ db, tcId });
+
+    if (bgoBatchDocs.length > 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "This TC upload cannot be deleted because BGO batches already exist for it.",
+        {
+          tcId,
+          blockedBy: "BGO_BATCHES_EXIST",
+          count: bgoBatchDocs.length,
         },
       );
     }

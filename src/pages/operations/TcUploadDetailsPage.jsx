@@ -22,6 +22,14 @@ const QUICK_FILTERS = [
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
+const STATS_VIEW_OPTIONS = [
+  { key: "BALANCE", label: "Balance View" },
+  { key: "BGO_READY", label: "BGO Ready View" },
+  { key: "ELIGIBLE", label: "Eligible View" },
+  { key: "GEOFENCE", label: "Geofence View" },
+  { key: "BLOCKED", label: "Blocked View" },
+];
+
 const NO_GEOFENCE_FILTER_VALUE = "NO_GEOFENCE";
 
 const EMPTY_COLUMN_FILTERS = {
@@ -528,9 +536,73 @@ function buildFilterOptions(rows = []) {
 function getEligibleReviewPath(row) {
   if (row?.backend?.eligible !== true) return null;
   if (isBgoReady(row)) return "READY";
+  if (isBgoUsed(row)) return "USED";
   if (row?.backend?.alreadyHasActiveSameOperationTrn === true) return "BLOCKED";
   if (getGeofenceRefs(row).length === 0) return "NEEDS_GEOFENCE";
   return "OTHER";
+}
+
+function isFoundRow(row) {
+  return row?.backend?.matched === true;
+}
+
+function isNotEligibleRow(row) {
+  return isFoundRow(row) && row?.backend?.notEligible === true;
+}
+
+function isBlockedSameOperationRow(row) {
+  return row?.backend?.alreadyHasActiveSameOperationTrn === true;
+}
+
+function isBgoNotReadyRow(row) {
+  return isFoundRow(row) && !isBgoReady(row) && !isBgoUsed(row);
+}
+
+function buildGeofenceBgoSplit(rows = []) {
+  const geofenceMap = new Map();
+
+  rows.forEach((row) => {
+    if (!isFoundRow(row)) return;
+
+    const geofenceRefs = getGeofenceRefs(row);
+    const refs =
+      geofenceRefs.length > 0
+        ? geofenceRefs
+        : [{ id: NO_GEOFENCE_FILTER_VALUE, name: "No Geofence" }];
+
+    refs.forEach((ref) => {
+      const id = ref?.id || ref?.name || NO_GEOFENCE_FILTER_VALUE;
+      const name = ref?.name || ref?.id || "No Geofence";
+
+      if (!geofenceMap.has(id)) {
+        geofenceMap.set(id, {
+          id,
+          name,
+          found: 0,
+          ready: 0,
+          used: 0,
+          notReady: 0,
+        });
+      }
+
+      const current = geofenceMap.get(id);
+      current.found += 1;
+
+      if (isBgoReady(row)) {
+        current.ready += 1;
+      } else if (isBgoUsed(row)) {
+        current.used += 1;
+      } else {
+        current.notReady += 1;
+      }
+    });
+  });
+
+  return Array.from(geofenceMap.values()).sort((left, right) => {
+    if (left.id === NO_GEOFENCE_FILTER_VALUE) return 1;
+    if (right.id === NO_GEOFENCE_FILTER_VALUE) return -1;
+    return left.name.localeCompare(right.name);
+  });
 }
 
 function buildRowSummary(rows = []) {
@@ -554,9 +626,18 @@ function buildRowSummary(rows = []) {
   ).length;
   const readyRows = rows.filter((row) => isBgoReady(row)).length;
   const usedRows = rows.filter((row) => isBgoUsed(row)).length;
-  const blockedRows = rows.filter(
-    (row) => row?.backend?.alreadyHasActiveSameOperationTrn === true,
+  const bgoForwardRows = readyRows + usedRows;
+  const bgoNotReadyRows = rows.filter((row) => isBgoNotReadyRow(row)).length;
+  const blockedRows = rows.filter((row) =>
+    isBlockedSameOperationRow(row),
   ).length;
+  const notEligibleBlockedRows = rows.filter(
+    (row) => isNotEligibleRow(row) && isBlockedSameOperationRow(row),
+  ).length;
+  const notEligibleOnlyRows = Math.max(
+    notEligibleRows - notEligibleBlockedRows,
+    0,
+  );
 
   const eligibleReadyRows = rows.filter(
     (row) => getEligibleReviewPath(row) === "READY",
@@ -581,7 +662,11 @@ function buildRowSummary(rows = []) {
     noGeofenceRows,
     readyRows,
     usedRows,
+    bgoForwardRows,
+    bgoNotReadyRows,
     blockedRows,
+    notEligibleBlockedRows,
+    notEligibleOnlyRows,
     eligibleReadyRows,
     eligibleNeedsGeofenceRows,
     eligibleBlockedRows,
@@ -646,6 +731,15 @@ export default function TcUploadDetailsPage() {
   const summary = useMemo(() => buildRowSummary(rows), [rows]);
   const filterOptions = useMemo(() => buildFilterOptions(rows), [rows]);
 
+  const canOpenBgo =
+    summary.readyRows > 0 ||
+    summary.usedRows > 0 ||
+    ["READY_FOR_BGO", "PARTIALLY_USED", "USED"].includes(
+      String(upload?.bgoStatus || "")
+        .trim()
+        .toUpperCase(),
+    );
+
   const quickFilteredRows = useMemo(
     () => applyQuickFilter(rows, activeFilter),
     [rows, activeFilter],
@@ -654,11 +748,6 @@ export default function TcUploadDetailsPage() {
   const filteredRows = useMemo(
     () => applyColumnFilters(quickFilteredRows, columnFilters),
     [quickFilteredRows, columnFilters],
-  );
-
-  const filteredSummary = useMemo(
-    () => buildRowSummary(filteredRows),
-    [filteredRows],
   );
 
   const pageBounds = getPageBounds({
@@ -748,9 +837,36 @@ export default function TcUploadDetailsPage() {
 
   return (
     <section style={styles.page}>
-      <Link to="/operations/tc-uploads" style={styles.backLink}>
-        ← Back to TC Uploads
-      </Link>
+      <div style={styles.topActionRow}>
+        <Link to="/operations/tc-uploads" style={styles.backLink}>
+          ← Back to TC Uploads
+        </Link>
+
+        <Link
+          to={`/operations/tc-uploads/${tcId}/final-report`}
+          style={styles.headerActionLink}
+        >
+          Final Report
+        </Link>
+
+        {canOpenBgo ? (
+          <Link
+            to={`/operations/tc-uploads/${tcId}/bgo`}
+            style={styles.bgoActionLink}
+          >
+            Open BGO
+          </Link>
+        ) : (
+          <button
+            type="button"
+            style={styles.bgoActionDisabled}
+            disabled
+            title="BGO opens when rows are ready for BGO or already used by BGO."
+          >
+            Open BGO
+          </button>
+        )}
+      </div>
 
       <div style={styles.header}>
         <div>
@@ -777,64 +893,7 @@ export default function TcUploadDetailsPage() {
         <>
           <UploadInfoPanel upload={upload} />
 
-          <DecisionStatsPanel summary={summary} upload={upload} />
-
-          <div style={styles.summaryGrid}>
-            <SummaryCard
-              label="Total Rows"
-              value={summary.totalRows}
-              filteredValue={filteredSummary.totalRows}
-              helpText={HELP_TEXT.totalRows}
-            />
-            <SummaryCard
-              label="Found"
-              value={summary.foundRows}
-              filteredValue={filteredSummary.foundRows}
-              helpText={HELP_TEXT.foundRows}
-            />
-            <SummaryCard
-              label="Not Found"
-              value={summary.notFoundRows}
-              filteredValue={filteredSummary.notFoundRows}
-              helpText={HELP_TEXT.notFoundRows}
-            />
-            <SummaryCard
-              label="Eligible"
-              value={summary.eligibleRows}
-              filteredValue={filteredSummary.eligibleRows}
-              helpText={HELP_TEXT.eligibleRows}
-            />
-            <SummaryCard
-              label="Not Eligible"
-              value={summary.notEligibleRows}
-              filteredValue={filteredSummary.notEligibleRows}
-              helpText={HELP_TEXT.notEligibleRows}
-            />
-            <SummaryCard
-              label="No Geofence"
-              value={summary.noGeofenceRows}
-              filteredValue={filteredSummary.noGeofenceRows}
-              helpText={HELP_TEXT.noGeofenceRows}
-            />
-            <SummaryCard
-              label="Ready for BGO"
-              value={summary.readyRows}
-              filteredValue={filteredSummary.readyRows}
-              helpText={HELP_TEXT.readyRows}
-            />
-            <SummaryCard
-              label="Blocked Same Operation"
-              value={summary.blockedRows}
-              filteredValue={filteredSummary.blockedRows}
-              helpText={HELP_TEXT.blockedRows}
-            />
-            <SummaryCard
-              label="Used by BGO"
-              value={summary.usedRows}
-              filteredValue={filteredSummary.usedRows}
-              helpText={HELP_TEXT.usedRows}
-            />
-          </div>
+          <TcStatsViewPanel summary={summary} rows={rows} />
 
           <div style={styles.stickyPanel}>
             <div style={styles.panelHeader}>
@@ -1264,106 +1323,291 @@ function InfoCard({ label, value, helpText }) {
   );
 }
 
-function DecisionStatsPanel({ summary, upload }) {
-  const geofenceBreakdown = asArray(upload?.summary?.geofenceBreakdown);
+function TcStatsViewPanel({ summary, rows }) {
+  const [activeView, setActiveView] = useState("BALANCE");
 
   return (
     <div style={styles.decisionPanel}>
       <div style={styles.decisionHeader}>
         <div>
-          <h3 style={styles.decisionTitle}>TC Decision Funnel</h3>
+          <h3 style={styles.decisionTitle}>TC Stats View</h3>
           <p style={styles.decisionSubtitle}>
-            This shows how the upload resolves from total rows into BGO-ready
-            rows and exception buckets.
+            One stats window with one selected view at a time. Every view keeps
+            the numbers balanced and explains how rows move toward BGO.
           </p>
         </div>
       </div>
 
-      <div style={styles.funnelGrid}>
-        <MathLine
-          title="Matching"
-          leftLabel="Total Rows"
-          leftValue={summary.totalRows}
-          parts={[
-            { label: "Found", value: summary.foundRows },
-            { label: "Not Found", value: summary.notFoundRows },
-          ]}
-        />
-
-        <MathLine
-          title="Eligibility"
-          leftLabel="Found"
-          leftValue={summary.foundRows}
-          parts={[
-            { label: "Eligible", value: summary.eligibleRows },
-            { label: "Not Eligible", value: summary.notEligibleRows },
-          ]}
-        />
-
-        <MathLine
-          title="BGO Readiness"
-          leftLabel="Eligible"
-          leftValue={summary.eligibleRows}
-          parts={[
-            { label: "Ready", value: summary.eligibleReadyRows },
-            {
-              label: "Needs Geofence",
-              value: summary.eligibleNeedsGeofenceRows,
-            },
-            {
-              label: "Blocked Same Operation",
-              value: summary.eligibleBlockedRows,
-            },
-            { label: "Other Not Ready", value: summary.eligibleOtherRows },
-          ]}
-        />
-
-        <MathLine
-          title="Geofence View"
-          leftLabel="Found"
-          leftValue={summary.foundRows}
-          parts={[
-            { label: "With Geofence", value: summary.withGeofenceRows },
-            { label: "No Geofence", value: summary.noGeofenceRows },
-          ]}
-        />
+      <div style={styles.statsTabRow}>
+        {STATS_VIEW_OPTIONS.map((view) => (
+          <button
+            key={view.key}
+            type="button"
+            style={{
+              ...styles.statsTabButton,
+              ...(activeView === view.key ? styles.statsTabButtonActive : null),
+            }}
+            onClick={() => setActiveView(view.key)}
+          >
+            {view.label}
+          </button>
+        ))}
       </div>
 
-      {geofenceBreakdown.length > 0 ? (
-        <div style={styles.geofenceBreakdownBox}>
-          <HelpLabel
-            label="Geofence Breakdown"
-            helpText="Counts of matched rows by geofenceRefs. A row can be in a geofence and still not be BGO-ready if it is not eligible or blocked."
-          />
-          <div style={styles.geofencePills}>
-            {geofenceBreakdown.map((item) => (
-              <span key={item.id || item.name} style={styles.geofencePill}>
-                {item.name || item.id}: <strong>{item.count}</strong>
-              </span>
-            ))}
-            <span style={styles.geofencePill}>
-              No Geofence: <strong>{summary.noGeofenceRows}</strong>
-            </span>
-          </div>
-        </div>
+      {activeView === "BALANCE" ? <BalanceStatsView summary={summary} /> : null}
+      {activeView === "BGO_READY" ? <BgoReadyStatsView summary={summary} /> : null}
+      {activeView === "ELIGIBLE" ? <EligibleStatsView summary={summary} /> : null}
+      {activeView === "GEOFENCE" ? (
+        <GeofenceStatsView summary={summary} rows={rows} />
       ) : null}
+      {activeView === "BLOCKED" ? <BlockedStatsView summary={summary} /> : null}
     </div>
   );
 }
 
-function MathLine({ title, leftLabel, leftValue, parts }) {
+function BalanceStatsView({ summary }) {
   return (
-    <div style={styles.mathLineCard}>
-      <div style={styles.mathTitle}>{title}</div>
-      <div style={styles.mathEquation}>
-        <span style={styles.mathLeft}>
+    <div style={styles.statsViewBody}>
+      <StatsEquationRow
+        title="Matching"
+        leftValue={summary.totalRows}
+        leftLabel="Total Rows"
+        parts={[
+          { label: "Found", value: summary.foundRows },
+          { label: "Not Found", value: summary.notFoundRows },
+        ]}
+      />
+
+      <StatsEquationRow
+        title="Eligibility"
+        leftValue={summary.foundRows}
+        leftLabel="Found"
+        parts={[
+          { label: "Eligible", value: summary.eligibleRows },
+          { label: "Not Eligible", value: summary.notEligibleRows },
+        ]}
+      />
+
+      <StatsEquationRow
+        title="BGO Movement"
+        leftValue={summary.foundRows}
+        leftLabel="Found"
+        parts={[
+          { label: "BGO Ready", value: summary.readyRows },
+          { label: "Used by BGO", value: summary.usedRows },
+          { label: "BGO Not Ready", value: summary.bgoNotReadyRows },
+        ]}
+      />
+
+      <StatsEquationRow
+        title="BGO Not Ready"
+        leftValue={summary.bgoNotReadyRows}
+        leftLabel="BGO Not Ready"
+        parts={[
+          { label: "Not Eligible", value: summary.notEligibleRows },
+          { label: "Eligible Blocked", value: summary.eligibleBlockedRows },
+          { label: "Needs Geofence", value: summary.eligibleNeedsGeofenceRows },
+          { label: "Other", value: summary.eligibleOtherRows },
+        ]}
+      />
+    </div>
+  );
+}
+
+function BgoReadyStatsView({ summary }) {
+  return (
+    <div style={styles.statsViewBody}>
+      <TreeRoot
+        label="Found"
+        value={summary.foundRows}
+        childrenNodes={[
+          {
+            label: "BGO Ready / Used by BGO",
+            value: summary.bgoForwardRows,
+            childrenNodes: [
+              { label: "BGO Ready", value: summary.readyRows },
+              { label: "Used by BGO", value: summary.usedRows },
+            ],
+          },
+          {
+            label: "BGO Not Ready",
+            value: summary.bgoNotReadyRows,
+            childrenNodes: [
+              {
+                label: "Not Eligible",
+                value: summary.notEligibleRows,
+                childrenNodes: [
+                  {
+                    label: "Not Eligible Only",
+                    value: summary.notEligibleOnlyRows,
+                  },
+                  {
+                    label: "Not Eligible + Blocked Same Operation",
+                    value: summary.notEligibleBlockedRows,
+                  },
+                ],
+              },
+              {
+                label: "Eligible Blocked Same Operation",
+                value: summary.eligibleBlockedRows,
+              },
+              {
+                label: "Needs Geofence",
+                value: summary.eligibleNeedsGeofenceRows,
+              },
+              { label: "Other BGO Not Ready", value: summary.eligibleOtherRows },
+            ],
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+function EligibleStatsView({ summary }) {
+  return (
+    <div style={styles.statsViewBody}>
+      <TreeRoot
+        label="Found"
+        value={summary.foundRows}
+        childrenNodes={[
+          {
+            label: "Eligible",
+            value: summary.eligibleRows,
+            childrenNodes: [
+              { label: "Ready for BGO", value: summary.readyRows },
+              {
+                label: "Used by BGO",
+                value: summary.usedRows,
+              },
+              {
+                label: "Eligible Blocked Same Operation",
+                value: summary.eligibleBlockedRows,
+              },
+              {
+                label: "Needs Geofence",
+                value: summary.eligibleNeedsGeofenceRows,
+              },
+              { label: "Other Eligible Not Ready", value: summary.eligibleOtherRows },
+            ],
+          },
+          {
+            label: "Not Eligible",
+            value: summary.notEligibleRows,
+            childrenNodes: [
+              { label: "Not Eligible Only", value: summary.notEligibleOnlyRows },
+              {
+                label: "Not Eligible + Blocked Same Operation",
+                value: summary.notEligibleBlockedRows,
+              },
+            ],
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+function GeofenceStatsView({ summary, rows }) {
+  const geofenceRows = buildGeofenceBgoSplit(rows);
+  const totals = geofenceRows.reduce(
+    (acc, row) => ({
+      found: acc.found + row.found,
+      ready: acc.ready + row.ready,
+      used: acc.used + row.used,
+      notReady: acc.notReady + row.notReady,
+    }),
+    { found: 0, ready: 0, used: 0, notReady: 0 },
+  );
+
+  return (
+    <div style={styles.statsViewBody}>
+      <StatsEquationRow
+        title="Geofence View"
+        leftValue={summary.foundRows}
+        leftLabel="Found"
+        parts={[
+          { label: "With Geofence", value: summary.withGeofenceRows },
+          { label: "No Geofence", value: summary.noGeofenceRows },
+        ]}
+      />
+
+      <div style={styles.geofenceSplitBox}>
+        <h4 style={styles.statsSectionTitle}>Per Geofence BGO Split</h4>
+        <div style={styles.geofenceSplitTableWrap}>
+          <table style={styles.geofenceSplitTable}>
+            <thead>
+              <tr>
+                <th style={styles.geofenceSplitTh}>Geofence</th>
+                <th style={styles.geofenceSplitThNumber}>Found</th>
+                <th style={styles.geofenceSplitThNumber}>BGO Ready</th>
+                <th style={styles.geofenceSplitThNumber}>Used by BGO</th>
+                <th style={styles.geofenceSplitThNumber}>BGO Not Ready</th>
+              </tr>
+            </thead>
+            <tbody>
+              {geofenceRows.map((row) => (
+                <tr key={row.id}>
+                  <td style={styles.geofenceSplitTd}>{row.name}</td>
+                  <td style={styles.geofenceSplitTdNumber}>{row.found}</td>
+                  <td style={styles.geofenceSplitTdNumber}>{row.ready}</td>
+                  <td style={styles.geofenceSplitTdNumber}>{row.used}</td>
+                  <td style={styles.geofenceSplitTdNumber}>{row.notReady}</td>
+                </tr>
+              ))}
+              <tr>
+                <td style={styles.geofenceSplitTotalTd}>Totals</td>
+                <td style={styles.geofenceSplitTotalNumber}>{totals.found}</td>
+                <td style={styles.geofenceSplitTotalNumber}>{totals.ready}</td>
+                <td style={styles.geofenceSplitTotalNumber}>{totals.used}</td>
+                <td style={styles.geofenceSplitTotalNumber}>{totals.notReady}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BlockedStatsView({ summary }) {
+  return (
+    <div style={styles.statsViewBody}>
+      <TreeRoot
+        label="Blocked Same Operation"
+        value={summary.blockedRows}
+        childrenNodes={[
+          {
+            label: "Eligible Blocked Same Operation",
+            value: summary.eligibleBlockedRows,
+          },
+          {
+            label: "Not Eligible + Blocked Same Operation",
+            value: summary.notEligibleBlockedRows,
+          },
+        ]}
+      />
+      <p style={styles.statsNote}>
+        Blocked Same Operation is a flag view. It can overlap with Not Eligible,
+        so this view explains the split separately.
+      </p>
+    </div>
+  );
+}
+
+function StatsEquationRow({ title, leftValue, leftLabel, parts }) {
+  return (
+    <div style={styles.statsEquationRow}>
+      <div style={styles.statsEquationTitle}>{title}</div>
+      <div style={styles.statsEquationContent}>
+        <span style={styles.statsEquationLeft}>
           <strong>{leftValue}</strong> {leftLabel}
         </span>
-        <span style={styles.mathEquals}>=</span>
-        <span style={styles.mathParts}>
+        <span style={styles.statsEquationEquals}>=</span>
+        <span style={styles.statsEquationParts}>
           {parts.map((part, index) => (
-            <span key={part.label} style={styles.mathPart}>
-              {index > 0 ? <span style={styles.mathPlus}>+</span> : null}
+            <span key={part.label} style={styles.statsEquationPart}>
+              {index > 0 ? <span style={styles.statsEquationPlus}>+</span> : null}
               <strong>{part.value}</strong> {part.label}
             </span>
           ))}
@@ -1373,17 +1617,36 @@ function MathLine({ title, leftLabel, leftValue, parts }) {
   );
 }
 
-function SummaryCard({ label, value, filteredValue, helpText }) {
+function TreeRoot({ label, value, childrenNodes }) {
   return (
-    <div style={styles.summaryCard}>
-      <HelpLabel label={label} helpText={helpText} />
-      <strong style={styles.summaryValue}>{value}</strong>
-      <span
-        style={styles.filteredSummaryValue}
-        title={`Filtered ${label}: ${filteredValue ?? 0}`}
-      >
-        {filteredValue ?? 0}
-      </span>
+    <div style={styles.treeBox}>
+      <TreeNode label={label} value={value} childrenNodes={childrenNodes} />
+    </div>
+  );
+}
+
+function TreeNode({ label, value, childrenNodes, depth = 0 }) {
+  const hasChildren = asArray(childrenNodes).length > 0;
+
+  return (
+    <div style={styles.treeNodeWrap}>
+      <div style={{ ...styles.treeNodeLine, paddingLeft: depth * 24 }}>
+        {depth > 0 ? <span style={styles.treeConnector}>└──</span> : null}
+        <span style={styles.treeValue}>{value}</span>
+        <span style={styles.treeLabel}>{label}</span>
+      </div>
+
+      {hasChildren
+        ? childrenNodes.map((node) => (
+            <TreeNode
+              key={`${node.label}-${node.value}-${depth}`}
+              label={node.label}
+              value={node.value}
+              childrenNodes={node.childrenNodes}
+              depth={depth + 1}
+            />
+          ))
+        : null}
     </div>
   );
 }
@@ -1807,6 +2070,190 @@ const styles = {
     borderRadius: 999,
     padding: "7px 10px",
     fontSize: 12,
+  },
+  statsTabRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+    borderTop: "1px solid #e2e8f0",
+    paddingTop: 14,
+    marginBottom: 14,
+  },
+  statsTabButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 999,
+    background: "#ffffff",
+    color: "#334155",
+    padding: "9px 12px",
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  statsTabButtonActive: {
+    borderColor: "#2563eb",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+  },
+  statsViewBody: {
+    display: "grid",
+    gap: 12,
+  },
+  statsEquationRow: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    padding: 14,
+    background: "#f8fafc",
+  },
+  statsEquationTitle: {
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  statsEquationContent: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    color: "#334155",
+    fontSize: 14,
+    lineHeight: 1.6,
+  },
+  statsEquationLeft: {
+    color: "#0f172a",
+  },
+  statsEquationEquals: {
+    color: "#64748b",
+    fontWeight: 900,
+  },
+  statsEquationParts: {
+    display: "inline-flex",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  statsEquationPart: {
+    display: "inline-flex",
+    gap: 4,
+    alignItems: "center",
+  },
+  statsEquationPlus: {
+    color: "#64748b",
+    fontWeight: 900,
+  },
+  treeBox: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    padding: 16,
+    background: "#f8fafc",
+    color: "#334155",
+    overflowX: "auto",
+  },
+  treeNodeWrap: {
+    display: "grid",
+    gap: 5,
+  },
+  treeNodeLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    minHeight: 28,
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    fontSize: 13,
+    whiteSpace: "nowrap",
+  },
+  treeConnector: {
+    color: "#94a3b8",
+    fontWeight: 900,
+  },
+  treeValue: {
+    color: "#0f172a",
+    fontWeight: 900,
+  },
+  treeLabel: {
+    color: "#334155",
+    fontWeight: 800,
+  },
+  statsNote: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: 13,
+    lineHeight: 1.6,
+  },
+  statsSectionTitle: {
+    margin: "0 0 10px",
+    color: "#0f172a",
+    fontSize: 14,
+  },
+  geofenceSplitBox: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    padding: 14,
+    background: "#ffffff",
+  },
+  geofenceSplitTableWrap: {
+    overflowX: "auto",
+    border: "1px solid #e2e8f0",
+    borderRadius: 14,
+  },
+  geofenceSplitTable: {
+    width: "100%",
+    borderCollapse: "separate",
+    borderSpacing: 0,
+    minWidth: 650,
+  },
+  geofenceSplitTh: {
+    textAlign: "left",
+    background: "#f8fafc",
+    color: "#475569",
+    borderBottom: "1px solid #e2e8f0",
+    padding: "11px 12px",
+    fontSize: 11,
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  geofenceSplitThNumber: {
+    textAlign: "right",
+    background: "#f8fafc",
+    color: "#475569",
+    borderBottom: "1px solid #e2e8f0",
+    padding: "11px 12px",
+    fontSize: 11,
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  geofenceSplitTd: {
+    color: "#334155",
+    borderBottom: "1px solid #f1f5f9",
+    padding: "11px 12px",
+    fontSize: 13,
+    fontWeight: 800,
+  },
+  geofenceSplitTdNumber: {
+    color: "#0f172a",
+    borderBottom: "1px solid #f1f5f9",
+    padding: "11px 12px",
+    textAlign: "right",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+  geofenceSplitTotalTd: {
+    color: "#0f172a",
+    background: "#f8fafc",
+    padding: "12px",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+  geofenceSplitTotalNumber: {
+    color: "#0f172a",
+    background: "#f8fafc",
+    padding: "12px",
+    textAlign: "right",
+    fontSize: 13,
+    fontWeight: 900,
   },
   summaryGrid: {
     display: "grid",
@@ -2302,5 +2749,52 @@ const styles = {
     color: "#991b1b",
     fontWeight: 800,
     marginBottom: 16,
+  },
+
+  topActionRow: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 14,
+  },
+
+  headerActionLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #bfdbfe",
+    borderRadius: 999,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    padding: "8px 12px",
+    fontSize: 12,
+    fontWeight: 900,
+    textDecoration: "none",
+  },
+
+  bgoActionLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #bbf7d0",
+    borderRadius: 999,
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "8px 12px",
+    fontSize: 12,
+    fontWeight: 900,
+    textDecoration: "none",
+  },
+
+  bgoActionDisabled: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #e2e8f0",
+    borderRadius: 999,
+    background: "#f8fafc",
+    color: "#94a3b8",
+    padding: "8px 12px",
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: "not-allowed",
   },
 };

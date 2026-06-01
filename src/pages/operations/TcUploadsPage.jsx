@@ -153,7 +153,8 @@ const TC_UPLOAD_FILE_RULES = [
   },
   {
     rule: "Optional values",
-    description: "All other columns may be blank, but their headers must still exist.",
+    description:
+      "All other columns may be blank, but their headers must still exist.",
   },
   {
     rule: "Blank rows",
@@ -169,43 +170,50 @@ const TC_UPLOAD_FILE_RULES = [
   },
   {
     rule: "Duplicate rowNo",
-    description: "Duplicate rowNo values are not allowed. The file must be fixed before upload.",
+    description:
+      "Duplicate rowNo values are not allowed. The file must be fixed before upload.",
   },
   {
     rule: "Duplicate meterNo",
-    description: "Duplicate meterNo values are allowed at the file-structure stage, but affected rows may be blocked during backend validation.",
+    description:
+      "Duplicate meterNo values are allowed at the file-structure stage, but affected rows may be blocked during backend validation.",
   },
   {
     rule: "Leading zeros",
-    description: "Meter numbers must be preserved as text. Example: 04085348813 must not become 4085348813.",
+    description:
+      "Meter numbers must be preserved as text. Example: 04085348813 must not become 4085348813.",
   },
   {
     rule: "Failed structure check",
-    description: "If file structure fails, no tc_uploads or tc_rows records are created.",
+    description:
+      "If file structure fails, no tc_uploads or tc_rows records are created.",
   },
 ];
-
 
 const TC_UPLOAD_DICTIONARY = [
   {
     term: "TC",
     meaning: "TRN Candidate.",
-    description: "A TC upload is a CSV file submitted so each row can be checked and prepared as a possible candidate for later work creation.",
+    description:
+      "A TC upload is a CSV file submitted so each row can be checked and prepared as a possible candidate for later work creation.",
   },
   {
     term: "TRN",
     meaning: "Transaction.",
-    description: "The actual iREPS work/transaction document created for operations such as METER_DISCONNECTION, METER_RECONNECTION, METER_READING, METER_REMOVAL, or METER_INSPECTION.",
+    description:
+      "The actual iREPS work/transaction document created for operations such as METER_DISCONNECTION, METER_RECONNECTION, METER_READING, METER_REMOVAL, or METER_INSPECTION.",
   },
   {
     term: "BGO",
     meaning: "Bulk Geofence Origin.",
-    description: "The bulk origin process that consumes clean, ready TC rows and creates work in bulk, usually grouped by geofence.",
+    description:
+      "The bulk origin process that consumes clean, ready TC rows and creates work in bulk, usually grouped by geofence.",
   },
   {
     term: "DCN",
     meaning: "Meter Disconnection.",
-    description: "The operation/work type used when a file lists meters proposed for disconnection.",
+    description:
+      "The operation/work type used when a file lists meters proposed for disconnection.",
   },
   {
     term: "CSV",
@@ -215,128 +223,208 @@ const TC_UPLOAD_DICTIONARY = [
   {
     term: "TC Upload",
     meaning: "The parent upload record.",
-    description: "One uploaded CSV file and the matching parent document in tc_uploads. It stores upload metadata and summary counts.",
+    description:
+      "One uploaded CSV file and the matching parent document in tc_uploads. It stores upload metadata and summary counts.",
   },
   {
     term: "TC Row",
     meaning: "The row-level detail record.",
-    description: "One uploaded CSV row after validation and preparation. It becomes a document in tc_rows.",
+    description:
+      "One uploaded CSV row after validation and preparation. It becomes a document in tc_rows.",
   },
   {
     term: "File Structure",
     meaning: "The required shape of the CSV file.",
-    description: "This includes file type, headers, column order, required values, row count, and duplicate rowNo rules.",
+    description:
+      "This includes file type, headers, column order, required values, row count, and duplicate rowNo rules.",
   },
   {
     term: "Header",
     meaning: "The first row of the CSV file.",
-    description: "The header names the columns. For v1, it must match the official TC Upload template order exactly.",
+    description:
+      "The header names the columns. For v1, it must match the official TC Upload template order exactly.",
   },
   {
     term: "rowNo",
     meaning: "Original uploaded row number.",
-    description: "The row reference used to trace the upload and report back to LM. It must be unique, positive, whole-number text.",
+    description:
+      "The row reference used to trace the upload and report back to LM. It must be unique, positive, whole-number text.",
   },
   {
     term: "meterNo",
     meaning: "Uploaded meter number.",
-    description: "The main matching key used to find the meter/AST in iREPS. It is text and must preserve leading zeroes.",
+    description:
+      "The main matching key used to find the meter/AST in iREPS. It is text and must preserve leading zeroes.",
   },
   {
     term: "Meter Match",
     meaning: "A successful iREPS meter lookup.",
-    description: "This happens when the uploaded meterNo is matched to an iREPS AST/meter record.",
+    description:
+      "This happens when the uploaded meterNo is matched to an iREPS AST/meter record.",
   },
   {
     term: "AST",
     meaning: "iREPS asset/meter record.",
-    description: "The operational source of truth for meter existence, meter status, meter type, premise link, ward/ERF context, GPS, and geofence membership.",
+    description:
+      "The operational source of truth for meter existence, meter status, meter type, premise link, ward/ERF context, GPS, and geofence membership.",
   },
   {
     term: "Premise",
     meaning: "Customer/location/property record.",
-    description: "For TC feedback, the premise mainly provides the address and property type shown to the user and returned in reports.",
+    description:
+      "For TC feedback, the premise mainly provides the address and property type shown to the user and returned in reports.",
   },
   {
     term: "ERF",
     meaning: "Land/property parcel number context.",
-    description: "Used in TC feedback to compare uploaded billing/LM ERF values with iREPS ERF values.",
+    description:
+      "Used in TC feedback to compare uploaded billing/LM ERF values with iREPS ERF values.",
   },
   {
     term: "Ward",
     meaning: "Local municipal ward area.",
-    description: "TC uploads can be LM-scoped and still contain rows from different wards. Each matched AST supplies the row-level ward context.",
+    description:
+      "TC uploads can be LM-scoped and still contain rows from different wards. Each matched AST supplies the row-level ward context.",
   },
   {
     term: "LM",
     meaning: "Local Municipality.",
-    description: "The municipal scope for the TC upload. Example: Lesedi uses lmPcode ZA7423.",
+    description:
+      "The municipal scope for the TC upload. Example: Lesedi uses lmPcode ZA7423.",
   },
   {
     term: "Geofence",
     meaning: "Polygon work area.",
-    description: "A geographic grouping used to prepare and originate bulk work. Rows without geofence usually cannot proceed to BGO.",
+    description:
+      "A geographic grouping used to prepare and originate bulk work. Rows without geofence usually cannot proceed to BGO.",
   },
   {
     term: "NEEDS_GEOFENCE",
     meaning: "Matched meter has no geofence membership.",
-    description: "The row is blocked from BGO until the meter is included in a valid geofence.",
+    description:
+      "The row is blocked from BGO until the meter is included in a valid geofence.",
   },
   {
     term: "Eligibility",
     meaning: "Whether a meter can be used for the selected operation.",
-    description: "For DCN, a CONNECTED meter can be eligible, while FIELD, DISCONNECTED, or REMOVED meters are not eligible for disconnection.",
+    description:
+      "For DCN, a CONNECTED meter can be eligible, while FIELD, DISCONNECTED, or REMOVED meters are not eligible for disconnection.",
   },
   {
     term: "BGO Ready",
     meaning: "The row is ready to be consumed by BGO.",
-    description: "A row is BGO ready only after it is valid, matched, eligible, geofenced, not duplicate-blocked, not blocked by active same-operation work, not used, and has no batchId.",
+    description:
+      "A row is BGO ready only after it is valid, matched, eligible, geofenced, not duplicate-blocked, not blocked by active same-operation work, not used, and has no batchId.",
   },
   {
     term: "Frontend Pre-check",
     meaning: "File structure validation before backend upload.",
-    description: "This checks CSV-only, official headers, rowNo, meterNo, duplicates, row count, and other structure rules before any backend records are created.",
+    description:
+      "This checks CSV-only, official headers, rowNo, meterNo, duplicates, row count, and other structure rules before any backend records are created.",
   },
   {
     term: "Backend Validation",
     meaning: "Authoritative row-level validation.",
-    description: "Backend validation matches meters to iREPS, checks eligibility, geofence membership, duplicates, active work, and prepares TC rows and summaries.",
+    description:
+      "Backend validation matches meters to iREPS, checks eligibility, geofence membership, duplicates, active work, and prepares TC rows and summaries.",
   },
   {
     term: "Data Cleansing",
     meaning: "Comparing uploaded LM/billing data with iREPS data.",
-    description: "Each upload can help LM identify billing-system mismatches such as address, property type, ERF, ward, status, account, or meter-type differences.",
+    description:
+      "Each upload can help LM identify billing-system mismatches such as address, property type, ERF, ward, status, account, or meter-type differences.",
   },
   {
     term: "Feedback Report",
     meaning: "Report returned to LM/uploader.",
-    description: "The report should show uploaded values, iREPS values, comparison results, operational decisions, and required LM actions.",
+    description:
+      "The report should show uploaded values, iREPS values, comparison results, operational decisions, and required LM actions.",
   },
   {
     term: "Delete Upload",
     meaning: "Controlled delete before BGO.",
-    description: "Deletes a TC upload and its tc_rows only before BGO rows or TRNs exist. Backend blocks deletion if any row has been consumed by BGO, has a batchId, or has TRN evidence.",
+    description:
+      "Deletes a TC upload and its tc_rows only before BGO batches or TRNs exist. Backend blocks deletion if any row has been consumed by BGO, has a batchId, or has TRN evidence.",
   },
   {
     term: "Source of Truth",
     meaning: "The authoritative place for a value.",
-    description: "The uploaded file is truth for what LM submitted; AST is truth for meter state; premise is truth for address/property type; geofence membership is truth for BGO grouping.",
+    description:
+      "The uploaded file is truth for what LM submitted; AST is truth for meter state; premise is truth for address/property type; geofence membership is truth for BGO grouping.",
   },
 ];
 
 const TC_UPLOAD_DATA_FLOW_STEPS = [
-  { step: "1", title: "Upload CSV file", description: "The user selects the official TC Upload CSV file." },
-  { step: "2", title: "Frontend file-structure pre-check", description: "iREPS checks the file type, header row, official columns, required values, duplicate rowNo, and row count." },
-  { step: "3A", title: "If file structure fails", description: "The upload stops. No tc_uploads or tc_rows records are created. The user must fix the CSV and upload again." },
-  { step: "3B", title: "If file structure passes", description: "The file is allowed to proceed to backend upload and validation." },
-  { step: "4", title: "Create tc_uploads parent record", description: "Backend creates the parent upload/header document with metadata and summary fields." },
-  { step: "5", title: "Create tc_rows detail records", description: "Each uploaded data row becomes a row-level candidate record." },
-  { step: "6", title: "Match uploaded meterNo to iREPS AST", description: "Backend tries to find the live iREPS meter/AST for each uploaded meter number." },
-  { step: "7", title: "Compare upload values to iREPS values", description: "Uploaded values are compared against AST, premise, geofence, and future account/data-cleansing context." },
-  { step: "8", title: "Check operation eligibility", description: "Backend checks whether the matched meter is eligible for the selected operation such as DCN." },
-  { step: "9", title: "Check geofence readiness", description: "Backend checks whether the matched meter has geofence membership needed for BGO." },
-  { step: "10", title: "Set BGO Ready TRUE/FALSE", description: "Backend stores the row-level BGO readiness decision in tc_rows.bgo." },
-  { step: "11", title: "Prepare LM feedback/report", description: "The final output can show uploaded values, iREPS values, mismatches, decision codes, and required LM action." },
+  {
+    step: "1",
+    title: "Upload CSV file",
+    description: "The user selects the official TC Upload CSV file.",
+  },
+  {
+    step: "2",
+    title: "Frontend file-structure pre-check",
+    description:
+      "iREPS checks the file type, header row, official columns, required values, duplicate rowNo, and row count.",
+  },
+  {
+    step: "3A",
+    title: "If file structure fails",
+    description:
+      "The upload stops. No tc_uploads or tc_rows records are created. The user must fix the CSV and upload again.",
+  },
+  {
+    step: "3B",
+    title: "If file structure passes",
+    description:
+      "The file is allowed to proceed to backend upload and validation.",
+  },
+  {
+    step: "4",
+    title: "Create tc_uploads parent record",
+    description:
+      "Backend creates the parent upload/header document with metadata and summary fields.",
+  },
+  {
+    step: "5",
+    title: "Create tc_rows detail records",
+    description: "Each uploaded data row becomes a row-level candidate record.",
+  },
+  {
+    step: "6",
+    title: "Match uploaded meterNo to iREPS AST",
+    description:
+      "Backend tries to find the live iREPS meter/AST for each uploaded meter number.",
+  },
+  {
+    step: "7",
+    title: "Compare upload values to iREPS values",
+    description:
+      "Uploaded values are compared against AST, premise, geofence, and future account/data-cleansing context.",
+  },
+  {
+    step: "8",
+    title: "Check operation eligibility",
+    description:
+      "Backend checks whether the matched meter is eligible for the selected operation such as DCN.",
+  },
+  {
+    step: "9",
+    title: "Check geofence readiness",
+    description:
+      "Backend checks whether the matched meter has geofence membership needed for BGO.",
+  },
+  {
+    step: "10",
+    title: "Set BGO Ready TRUE/FALSE",
+    description:
+      "Backend stores the row-level BGO readiness decision in tc_rows.bgo.",
+  },
+  {
+    step: "11",
+    title: "Prepare LM feedback/report",
+    description:
+      "The final output can show uploaded values, iREPS values, mismatches, decision codes, and required LM action.",
+  },
 ];
 
 const TC_UPLOAD_PURPOSES = {
@@ -488,9 +576,10 @@ function parseCsvText(csvText) {
   };
 }
 
-
 function isCsvFile(fileName) {
-  return String(fileName || "").toLowerCase().endsWith(".csv");
+  return String(fileName || "")
+    .toLowerCase()
+    .endsWith(".csv");
 }
 
 function isBlankCsvRow(values = []) {
@@ -523,7 +612,9 @@ function runFrontendPrecheck({ fileContent, fileName, guide }) {
   const supportedFile = Boolean(fileName) && isCsvFile(fileName);
 
   if (!supportedFile) {
-    errors.push("Only CSV files are allowed for TC Uploads v1. Please use the official .csv template.");
+    errors.push(
+      "Only CSV files are allowed for TC Uploads v1. Please use the official .csv template.",
+    );
 
     return {
       passed: false,
@@ -749,7 +840,6 @@ function runFrontendPrecheck({ fileContent, fileName, guide }) {
   };
 }
 
-
 function getTcReportStatus(upload = {}) {
   const status = String(
     upload?.report?.status ||
@@ -763,7 +853,6 @@ function getTcReportStatus(upload = {}) {
   return status || "DRAFT";
 }
 
-
 function hasMeaningfulValue(value) {
   const text = String(value || "").trim();
 
@@ -775,7 +864,9 @@ function hasMeaningfulValue(value) {
 }
 
 function canDeleteTcUploadFromUi(upload = {}) {
-  const bgoStatus = String(upload?.bgoStatus || "").trim().toUpperCase();
+  const bgoStatus = String(upload?.bgoStatus || "")
+    .trim()
+    .toUpperCase();
 
   if (["USED", "PARTIALLY_USED"].includes(bgoStatus)) return false;
   if (Number(upload?.usedRows || 0) > 0) return false;
@@ -845,6 +936,7 @@ export default function TcUploadsPage() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [activeHelpModal, setActiveHelpModal] = useState(null);
   const [deleteModalUpload, setDeleteModalUpload] = useState(null);
+  const [deleteSuccessModalData, setDeleteSuccessModalData] = useState(null);
   const [deleteStatusMessage, setDeleteStatusMessage] = useState("");
   const [deleteTcUpload, { isLoading: isDeletingUpload }] =
     useDeleteTcUploadMutation();
@@ -880,7 +972,9 @@ export default function TcUploadsPage() {
     const tcId = deleteModalUpload?.id || deleteModalUpload?.tcId;
 
     if (!tcId) {
-      setDeleteStatusMessage("TC upload id is missing. Delete cannot continue.");
+      setDeleteStatusMessage(
+        "TC upload id is missing. Delete cannot continue.",
+      );
       return;
     }
 
@@ -889,9 +983,17 @@ export default function TcUploadsPage() {
     try {
       const response = await deleteTcUpload({ tcId }).unwrap();
 
-      setDeleteStatusMessage(
-        response?.message || `TC upload ${tcId} deleted successfully.`,
-      );
+      setDeleteStatusMessage("");
+      setDeleteSuccessModalData({
+        tcId,
+        fileName: deleteModalUpload?.fileName || "NAv",
+        trnType: deleteModalUpload?.trnType || "NAv",
+        deletedDocuments: response?.deletedDocuments || 0,
+        deletedRows: response?.deletedRows || 0,
+        deletedReportRows: response?.deletedReportRows || 0,
+        dedupeDeleted: response?.dedupeDeleted === true,
+        message: response?.message || `TC upload ${tcId} deleted successfully.`,
+      });
       setDeleteModalUpload(null);
     } catch (error) {
       setDeleteStatusMessage(
@@ -975,7 +1077,8 @@ export default function TcUploadsPage() {
           <div>
             <h3 style={styles.panelTitle}>Upload Register</h3>
             <p style={styles.panelSubtitle}>
-              Live stream from Firestore collection tc_uploads. New uploads should appear automatically without refreshing the page.
+              Live stream from Firestore collection tc_uploads. New uploads
+              should appear automatically without refreshing the page.
               {isFetchingUploads ? " Connecting..." : ""}
             </p>
             {uploadsError ? (
@@ -1068,13 +1171,6 @@ export default function TcUploadsPage() {
                             style={styles.rowLinkButton}
                           >
                             TC Rows
-                          </Link>
-
-                          <Link
-                            to={`/operations/tc-uploads/${upload.id}/bgo`}
-                            style={styles.rowLinkButton}
-                          >
-                            BGO
                           </Link>
 
                           <Link
@@ -1177,6 +1273,13 @@ export default function TcUploadsPage() {
         />
       ) : null}
 
+      {deleteSuccessModalData ? (
+        <DeleteTcUploadSuccessModal
+          result={deleteSuccessModalData}
+          onClose={() => setDeleteSuccessModalData(null)}
+        />
+      ) : null}
+
       {activeHelpModal ? (
         <TcUploadsHelpModal
           type={activeHelpModal}
@@ -1198,9 +1301,9 @@ function DeleteTcUploadModal({ upload, isDeleting, onCancel, onConfirm }) {
             <p style={styles.eyebrow}>TC Upload Delete</p>
             <h3 style={styles.modalTitle}>Delete Upload?</h3>
             <p style={styles.modalSubtitle}>
-              This will delete the TC upload and its TC rows only if no BGO rows
-              and no TRNs have been created from this upload. The backend will
-              run the final safety check before deleting anything.
+              This will delete the TC upload and its TC rows only if no BGO
+              batches and no TRNs have been created from this upload. The
+              backend will run the final safety check before deleting anything.
             </p>
           </div>
 
@@ -1217,8 +1320,8 @@ function DeleteTcUploadModal({ upload, isDeleting, onCancel, onConfirm }) {
         <div style={styles.deleteWarningBox}>
           <strong>Delete allowed only before BGO.</strong>
           <p style={styles.deleteWarningText}>
-            If any TC row has been consumed by BGO, if a batchId exists, if
-            bgo_rows exist, or if TRNs exist for this upload, deletion will be
+            If any TC row has been consumed by BGO, if a batchId exists, if a
+            BGO batch exists, or if TRNs exist for this upload, deletion will be
             blocked.
           </p>
         </div>
@@ -1262,6 +1365,63 @@ function DeleteTcUploadModal({ upload, isDeleting, onCancel, onConfirm }) {
   );
 }
 
+function DeleteTcUploadSuccessModal({ result, onClose }) {
+  const tcId = result?.tcId || "NAv";
+
+  return (
+    <div style={styles.modalBackdrop}>
+      <div style={styles.deleteSuccessModalCard}>
+        <div style={styles.modalHeader}>
+          <div>
+            <p style={styles.eyebrow}>TC Upload Delete</p>
+            <h3 style={styles.modalTitle}>Upload Deleted</h3>
+            <p style={styles.modalSubtitle}>
+              {result?.message || "TC upload and TC rows deleted successfully."}
+            </p>
+          </div>
+
+          <button type="button" style={styles.closeButton} onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <div style={styles.deleteSuccessBox}>
+          <strong>Delete completed.</strong>
+          <p style={styles.deleteSuccessText}>
+            The upload was removed before BGO/TRN creation. The upload register
+            will update from the live stream.
+          </p>
+        </div>
+
+        <div style={styles.deleteFactsGrid}>
+          <InfoMini label="TC ID" value={tcId} />
+          <InfoMini label="File" value={result?.fileName || "NAv"} />
+          <InfoMini label="TRN Type" value={result?.trnType || "NAv"} />
+          <InfoMini
+            label="Deleted Docs"
+            value={result?.deletedDocuments || 0}
+          />
+          <InfoMini label="Deleted Rows" value={result?.deletedRows || 0} />
+          <InfoMini
+            label="Report Rows"
+            value={result?.deletedReportRows || 0}
+          />
+          <InfoMini
+            label="Dedupe Lock"
+            value={result?.dedupeDeleted ? "Deleted" : "NAv"}
+          />
+        </div>
+
+        <div style={styles.modalActions}>
+          <button type="button" style={styles.primaryButton} onClick={onClose}>
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InfoMini({ label, value }) {
   return (
     <div style={styles.infoMiniCard}>
@@ -1272,7 +1432,9 @@ function InfoMini({ label, value }) {
 }
 
 function TcUploadsHelpModal({ type, onClose }) {
-  const expectedHeaders = TC_UPLOAD_COLUMNS.map((column) => column.name).join(",");
+  const expectedHeaders = TC_UPLOAD_COLUMNS.map((column) => column.name).join(
+    ",",
+  );
 
   const titleByType = {
     columns: "TC Upload Columns Help",
@@ -1291,9 +1453,9 @@ function TcUploadsHelpModal({ type, onClose }) {
               <p style={styles.eyebrow}>TC Uploads v1</p>
               <h3 style={styles.modalTitle}>{titleByType[type]}</h3>
               <p style={styles.modalSubtitle}>
-                TC Uploads v1 accepts CSV files only. The uploaded file is checked
-                before backend validation and before tc_uploads / tc_rows records are
-                created.
+                TC Uploads v1 accepts CSV files only. The uploaded file is
+                checked before backend validation and before tc_uploads /
+                tc_rows records are created.
               </p>
             </div>
 
@@ -1343,7 +1505,9 @@ function HelpDictionaryContent() {
           <tbody>
             {TC_UPLOAD_DICTIONARY.map((item) => (
               <tr key={item.term}>
-                <Td help strong>{item.term}</Td>
+                <Td help strong>
+                  {item.term}
+                </Td>
                 <Td help>{item.meaning}</Td>
                 <Td help>{item.description}</Td>
               </tr>
@@ -1361,9 +1525,9 @@ function HelpDataFlowContent() {
       <h4 style={styles.helpTitle}>TC Upload data flow</h4>
       <p style={styles.helpText}>
         TC Uploads starts with a CSV file. If the file structure is wrong, the
-        upload stops and the user must fix the file. If the structure is correct,
-        the backend can create tc_uploads and tc_rows, validate the rows, prepare
-        BGO readiness, and produce LM feedback.
+        upload stops and the user must fix the file. If the structure is
+        correct, the backend can create tc_uploads and tc_rows, validate the
+        rows, prepare BGO readiness, and produce LM feedback.
       </p>
 
       <div style={styles.flowDiagram}>
@@ -1385,7 +1549,9 @@ function HelpDataFlowContent() {
             <div style={styles.flowBranchLabel}>Yes</div>
             <div style={styles.flowNodeSuccess}>Send to backend</div>
             <div style={styles.flowArrow}>↓</div>
-            <div style={styles.flowNodeSuccess}>Create tc_uploads + tc_rows</div>
+            <div style={styles.flowNodeSuccess}>
+              Create tc_uploads + tc_rows
+            </div>
             <div style={styles.flowArrow}>↓</div>
             <div style={styles.flowNodeSuccess}>
               Validate, compare, and prepare BGO readiness
@@ -1407,7 +1573,9 @@ function HelpDataFlowContent() {
           <tbody>
             {TC_UPLOAD_DATA_FLOW_STEPS.map((item) => (
               <tr key={item.step}>
-                <Td help strong>{item.step}</Td>
+                <Td help strong>
+                  {item.step}
+                </Td>
                 <Td help>{item.title}</Td>
                 <Td help>{item.description}</Td>
               </tr>
@@ -1443,7 +1611,9 @@ function HelpColumnsContent() {
           <tbody>
             {TC_UPLOAD_COLUMNS.map((column) => (
               <tr key={column.name}>
-                <Td help strong>{column.name}</Td>
+                <Td help strong>
+                  {column.name}
+                </Td>
                 <Td help>
                   <Badge tone={column.headerRequired ? "danger" : "neutral"}>
                     {column.headerRequired ? "YES" : "NO"}
@@ -1469,9 +1639,9 @@ function HelpFileRulesContent() {
     <div style={styles.helpPanelFlat}>
       <h4 style={styles.helpTitle}>File structure rules</h4>
       <p style={styles.helpText}>
-        The file-structure gate protects iREPS from creating bad TC Upload and TC
-        Row records. If the CSV structure is wrong, the user must fix the file and
-        upload again.
+        The file-structure gate protects iREPS from creating bad TC Upload and
+        TC Row records. If the CSV structure is wrong, the user must fix the
+        file and upload again.
       </p>
 
       <div style={styles.helpTableWrap}>
@@ -1486,7 +1656,9 @@ function HelpFileRulesContent() {
           <tbody>
             {TC_UPLOAD_FILE_RULES.map((item) => (
               <tr key={item.rule}>
-                <Td help strong>{item.rule}</Td>
+                <Td help strong>
+                  {item.rule}
+                </Td>
                 <Td help>{item.description}</Td>
               </tr>
             ))}
@@ -1502,9 +1674,9 @@ function HelpColumnRulesContent() {
     <div style={styles.helpPanelFlat}>
       <h4 style={styles.helpTitle}>Rules for each column</h4>
       <p style={styles.helpText}>
-        Uploaded values are not treated as operational truth. iREPS preserves them
-        for comparison with iREPS AST, premise, geofence, and future billing/data
-        cleansing records.
+        Uploaded values are not treated as operational truth. iREPS preserves
+        them for comparison with iREPS AST, premise, geofence, and future
+        billing/data cleansing records.
       </p>
 
       <div style={styles.helpTableWrap}>
@@ -1520,7 +1692,9 @@ function HelpColumnRulesContent() {
           <tbody>
             {TC_UPLOAD_COLUMNS.map((column) => (
               <tr key={column.name}>
-                <Td help strong>{column.name}</Td>
+                <Td help strong>
+                  {column.name}
+                </Td>
                 <Td help>{column.type}</Td>
                 <Td help>{column.rule}</Td>
               </tr>
@@ -1704,121 +1878,125 @@ function UploadTcFileModal({ onClose, onUploadCreated, onDuplicateUpload }) {
       <div style={styles.modalCard}>
         <div style={styles.uploadModalFixedHeader}>
           <div style={{ ...styles.modalHeader, marginBottom: 0 }}>
-          <div>
-            <p style={styles.eyebrow}>TC Upload</p>
-            <h3 style={styles.modalTitle}>Upload TC File</h3>
-            <p style={styles.modalSubtitle}>
-              TC Uploads v1 accepts CSV files only. The CSV must use the official
-              12-column template. Frontend pre-check validates file structure;
-              backend validation remains authoritative.
-            </p>
-          </div>
+            <div>
+              <p style={styles.eyebrow}>TC Upload</p>
+              <h3 style={styles.modalTitle}>Upload TC File</h3>
+              <p style={styles.modalSubtitle}>
+                TC Uploads v1 accepts CSV files only. The CSV must use the
+                official 12-column template. Frontend pre-check validates file
+                structure; backend validation remains authoritative.
+              </p>
+            </div>
 
-          <button type="button" style={styles.closeButton} onClick={onClose}>
-            ×
-          </button>
+            <button type="button" style={styles.closeButton} onClick={onClose}>
+              ×
+            </button>
           </div>
         </div>
 
         <div style={styles.uploadModalScrollBody}>
           <div style={styles.modalToolbar}>
-          <button
-            type="button"
-            style={styles.helpButton}
-            onClick={() => setShowHelp((current) => !current)}
-          >
-            ? Help
-          </button>
+            <button
+              type="button"
+              style={styles.helpButton}
+              onClick={() => setShowHelp((current) => !current)}
+            >
+              ? Help
+            </button>
 
-          <button
-            type="button"
-            style={styles.secondaryButton}
-            onClick={() => downloadCsvTemplate(form.trnType)}
-          >
-            Download Template
-          </button>
-
-          {fileContent ? (
             <button
               type="button"
               style={styles.secondaryButton}
-              onClick={rerunPrecheck}
+              onClick={() => downloadCsvTemplate(form.trnType)}
             >
-              Re-run Pre-check
+              Download Template
             </button>
-          ) : null}
+
+            {fileContent ? (
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={rerunPrecheck}
+              >
+                Re-run Pre-check
+              </button>
+            ) : null}
           </div>
 
           {showHelp ? <UploadHelpPanel guide={guide} /> : null}
 
           <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGrid}>
-            <label style={styles.label}>
-              TRN Type
-              <select
-                style={styles.input}
-                value={form.trnType}
-                onChange={(event) => updateField("trnType", event.target.value)}
-              >
-                {trnTypeOptions.map((trnType) => (
-                  <option key={trnType} value={trnType}>
-                    {trnType}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div style={styles.formGrid}>
+              <label style={styles.label}>
+                TRN Type
+                <select
+                  style={styles.input}
+                  value={form.trnType}
+                  onChange={(event) =>
+                    updateField("trnType", event.target.value)
+                  }
+                >
+                  {trnTypeOptions.map((trnType) => (
+                    <option key={trnType} value={trnType}>
+                      {trnType}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={styles.label}>
+                LM
+                <input
+                  style={styles.input}
+                  value={form.lmPcode}
+                  onChange={(event) =>
+                    updateField("lmPcode", event.target.value)
+                  }
+                />
+              </label>
+            </div>
 
             <label style={styles.label}>
-              LM
+              CSV File
               <input
                 style={styles.input}
-                value={form.lmPcode}
-                onChange={(event) => updateField("lmPcode", event.target.value)}
+                type="file"
+                accept=".csv,text/csv"
+                onChange={handleFileChange}
               />
             </label>
-          </div>
 
-          <label style={styles.label}>
-            CSV File
-            <input
-              style={styles.input}
-              type="file"
-              accept=".csv,text/csv"
-              onChange={handleFileChange}
-            />
-          </label>
+            {fileName ? (
+              <div style={styles.fileNotice}>Selected file: {fileName}</div>
+            ) : null}
 
-          {fileName ? (
-            <div style={styles.fileNotice}>Selected file: {fileName}</div>
-          ) : null}
+            {precheckResult ? (
+              <FrontendPrecheckPanel precheckResult={precheckResult} />
+            ) : null}
 
-          {precheckResult ? (
-            <FrontendPrecheckPanel precheckResult={precheckResult} />
-          ) : null}
+            {frontendFeedback ? (
+              <ValidationFeedbackPanel
+                title="Validation Feedback Preview"
+                subtitle="Frontend pre-check can only validate file structure and obvious row issues. Backend will fill found/not found and geofence results."
+                result={frontendFeedback}
+              />
+            ) : null}
 
-          {frontendFeedback ? (
-            <ValidationFeedbackPanel
-              title="Validation Feedback Preview"
-              subtitle="Frontend pre-check can only validate file structure and obvious row issues. Backend will fill found/not found and geofence results."
-              result={frontendFeedback}
-            />
-          ) : null}
+            <label style={styles.label}>
+              Notes
+              <textarea
+                style={{ ...styles.input, minHeight: 90, resize: "vertical" }}
+                value={form.notes}
+                onChange={(event) => updateField("notes", event.target.value)}
+                placeholder="Optional upload notes"
+              />
+            </label>
 
-          <label style={styles.label}>
-            Notes
-            <textarea
-              style={{ ...styles.input, minHeight: 90, resize: "vertical" }}
-              value={form.notes}
-              onChange={(event) => updateField("notes", event.target.value)}
-              placeholder="Optional upload notes"
-            />
-          </label>
+            {statusMessage ? (
+              <div style={styles.modalStatus}>{statusMessage}</div>
+            ) : null}
 
-          {statusMessage ? (
-            <div style={styles.modalStatus}>{statusMessage}</div>
-          ) : null}
-
-          <div style={styles.modalActions}>
+            <div style={styles.modalActions}>
               <button
                 type="button"
                 style={{
@@ -1841,7 +2019,9 @@ function UploadTcFileModal({ onClose, onUploadCreated, onDuplicateUpload }) {
                 }}
                 disabled={!precheckResult?.passed || isUploading}
               >
-                {isUploading ? "Uploading & Validating..." : "Upload & Validate"}
+                {isUploading
+                  ? "Uploading & Validating..."
+                  : "Upload & Validate"}
               </button>
             </div>
           </form>
@@ -1870,16 +2050,30 @@ function UploadHelpPanel({ guide }) {
         <ul style={styles.rulesList}>
           <li>Only .csv files are allowed for this version.</li>
           <li>The first row must be the header row.</li>
-          <li>The CSV must contain exactly the 12 official columns shown below.</li>
+          <li>
+            The CSV must contain exactly the 12 official columns shown below.
+          </li>
           <li>The column order must match the official template exactly.</li>
-          <li>rowNo and meterNo are the only columns whose values are required.</li>
-          <li>All other column values may be blank, but their headers must exist.</li>
-          <li>rowNo must be a positive whole number, greater than 0, and unique.</li>
+          <li>
+            rowNo and meterNo are the only columns whose values are required.
+          </li>
+          <li>
+            All other column values may be blank, but their headers must exist.
+          </li>
+          <li>
+            rowNo must be a positive whole number, greater than 0, and unique.
+          </li>
           <li>meterNo is treated as text; leading zeroes must be preserved.</li>
           <li>Duplicate rowNo fails the file structure gate.</li>
-          <li>Duplicate meterNo does not fail this gate; backend validation will classify those rows.</li>
+          <li>
+            Duplicate meterNo does not fail this gate; backend validation will
+            classify those rows.
+          </li>
           <li>Fully blank rows are ignored.</li>
-          <li>If the file structure gate fails, fix the CSV before backend validation.</li>
+          <li>
+            If the file structure gate fails, fix the CSV before backend
+            validation.
+          </li>
         </ul>
       </div>
 
@@ -2429,6 +2623,16 @@ const styles = {
     boxShadow: "0 30px 80px rgba(15, 23, 42, 0.35)",
     padding: 24,
   },
+  deleteSuccessModalCard: {
+    width: "min(720px, 100%)",
+    maxHeight: "90vh",
+    overflowY: "auto",
+    background: "#ffffff",
+    borderRadius: 24,
+    border: "1px solid #bbf7d0",
+    boxShadow: "0 30px 80px rgba(15, 23, 42, 0.35)",
+    padding: 24,
+  },
   deleteWarningBox: {
     border: "1px solid #fecaca",
     background: "#fef2f2",
@@ -2440,6 +2644,21 @@ const styles = {
   deleteWarningText: {
     margin: "6px 0 0",
     color: "#7f1d1d",
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.5,
+  },
+  deleteSuccessBox: {
+    border: "1px solid #bbf7d0",
+    background: "#f0fdf4",
+    color: "#166534",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+  },
+  deleteSuccessText: {
+    margin: "6px 0 0",
+    color: "#166534",
     fontSize: 13,
     fontWeight: 800,
     lineHeight: 1.5,

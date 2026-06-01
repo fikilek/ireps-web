@@ -100,6 +100,11 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            label: "BGO Dashboard",
+            path: "/operations/bgo-dashboard",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "BGO",
             path: "/operations/bgo",
             allowedRoles: MANAGEMENT_ROLES,
@@ -217,6 +222,16 @@ function getFlatNavItems(sections = []) {
 }
 
 function getActiveNavItem(items = [], pathname) {
+  if (pathname.includes("/bgo-dashboard")) {
+    const bgoDashboardItem = items.find(
+      (item) => item.path === "/operations/bgo-dashboard",
+    );
+
+    if (bgoDashboardItem) {
+      return bgoDashboardItem;
+    }
+  }
+
   const matchingItems = items.filter((item) => pathname.startsWith(item.path));
 
   if (matchingItems.length === 0) {

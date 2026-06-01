@@ -19,6 +19,11 @@ import { mapErfsApi } from "./mapErfsApi";
 import { wardErfsApi } from "./wardErfsApi";
 import { astsApi } from "./astsApi";
 import { tcApi } from "./tcApi";
+import { bgoApi } from "./bgoApi";
+import { trnsApi } from "./trnsApi";
+import { teamsApi } from "./teamsApi";
+import { serviceProvidersApi } from "./serviceProvidersApi";
+import { usersApi } from "./usersApi";
 import { geofencesApi } from "./geofencesApi";
 
 export const store = configureStore({
@@ -42,6 +47,11 @@ export const store = configureStore({
     [wardErfsApi.reducerPath]: wardErfsApi.reducer,
     [astsApi.reducerPath]: astsApi.reducer,
     [tcApi.reducerPath]: tcApi.reducer,
+    [bgoApi.reducerPath]: bgoApi.reducer,
+    [trnsApi.reducerPath]: trnsApi.reducer,
+    [teamsApi.reducerPath]: teamsApi.reducer,
+    [serviceProvidersApi.reducerPath]: serviceProvidersApi.reducer,
+    [usersApi.reducerPath]: usersApi.reducer,
     [geofencesApi.reducerPath]: geofencesApi.reducer,
   },
 
@@ -63,6 +73,11 @@ export const store = configureStore({
       .concat(wardErfsApi.middleware)
       .concat(astsApi.middleware)
       .concat(tcApi.middleware)
+      .concat(bgoApi.middleware)
+      .concat(trnsApi.middleware)
+      .concat(teamsApi.middleware)
+      .concat(serviceProvidersApi.middleware)
+      .concat(usersApi.middleware)
       .concat(geofencesApi.middleware),
 });
 

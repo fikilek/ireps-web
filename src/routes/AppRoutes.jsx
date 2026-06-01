@@ -27,6 +27,8 @@ import TcUploadsPage from "../pages/operations/TcUploadsPage";
 import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
+import BgoDashboardPage from "../pages/operations/BgoDashboardPage";
+import TcBgoDashboardPage from "../pages/operations/TcBgoDashboardPage";
 
 import MapPage from "../pages/maps/MapPage";
 import ErfsPage from "@/pages/ward-scope/ErfsPage";
@@ -201,10 +203,28 @@ export default function AppRoutes() {
           />
 
           <Route
+            path="/operations/tc-uploads/:tcId/bgo-dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TcBgoDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
             path="/operations/tc-uploads/:tcId/final-report"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TcFinalReportPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/bgo-dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <BgoDashboardPage />
               </RoleRoute>
             }
           />

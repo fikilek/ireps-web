@@ -74,6 +74,9 @@ import { onCreateMeterLifecycleInstructionCallable } from "./meterLifecycle/inst
 import { onAcceptRejectLifecycleInstructionCallable } from "./meterLifecycle/acceptRejectCallable.js";
 import { onManageLifecycleInstructionCallable } from "./meterLifecycle/manageInstructionCallable.js";
 
+import { onCreateBgoCallable } from "./bgo/callables.js";
+import { onDeleteUnacceptedBgoCallable } from "./bgo/deleteCallable.js";
+
 import {
   onIrepsSelectOptionsCallable,
   onIrepsSelectLookupAdminCallable,
@@ -111,6 +114,8 @@ export {
   onUploadAndValidateTcCallable,
   onRefreshTcUploadGeofenceReadinessCallable,
   onDeleteTcUploadCallable,
+  onCreateBgoCallable,
+  onDeleteUnacceptedBgoCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
@@ -2858,10 +2863,8 @@ async function syncAstGeoFenceMembership({
    TC ROW UPDATE AFTER METER GEOFENCE CHANGED
    ------------------------------------------------ */
 
-const TC_GEOFENCE_SYSTEM_UID = "SYSTEM";
-const TC_GEOFENCE_SYSTEM_USER = "Meter Geofence TC Update";
-const TC_STATUS_SYSTEM_UID = "SYSTEM";
-const TC_STATUS_SYSTEM_USER = "Meter Status TC Update";
+const TC_TRUTH_SYSTEM_UID = "SYSTEM";
+const TC_TRUTH_SYSTEM_USER = "Meter Truth TC Readiness Update";
 
 function normalizeTcText(value) {
   return String(value || "").trim();
@@ -3012,175 +3015,53 @@ async function findInFlightTcRowsForAstId({ db, astId }) {
   return rows;
 }
 
-async function updateTcRowsAfterMeterGeofenceChanged({
-  astId,
-  beforeGeoFenceRefs = [],
-  afterGeoFenceRefs = [],
-}) {
-  const db = getFirestore();
-  const now = new Date().toISOString();
-  const nextGeoFenceRefs = normalizeTcGeoFenceRefs(afterGeoFenceRefs);
+function resolveTcMeterTruthChangeReason({
+  statusChanged = false,
+  geofenceRefsChanged = false,
+  activeLifecycleChanged = false,
+  meterTypeChanged = false,
+  astNoChanged = false,
+} = {}) {
+  const reasons = [];
 
-  logger.info("updateTcRowsAfterMeterGeofenceChanged -- START", {
-    astId,
-    beforeGeofenceRefsCount: normalizeTcGeoFenceRefs(beforeGeoFenceRefs).length,
-    afterGeofenceRefsCount: nextGeoFenceRefs.length,
-    afterGeofenceRefs: nextGeoFenceRefs,
-  });
+  if (statusChanged) reasons.push("METER_STATUS_CHANGED");
+  if (geofenceRefsChanged) reasons.push("METER_GEOFENCE_CHANGED");
+  if (activeLifecycleChanged) reasons.push("METER_ACTIVE_LIFECYCLE_CHANGED");
+  if (meterTypeChanged) reasons.push("METER_TYPE_CHANGED");
+  if (astNoChanged) reasons.push("METER_NUMBER_CHANGED");
 
-  const candidateRows = await findInFlightTcRowsForAstId({ db, astId });
-
-  if (candidateRows.length === 0) {
-    logger.info("updateTcRowsAfterMeterGeofenceChanged -- no in-flight rows", {
-      astId,
-    });
-
-    return {
-      updatedRows: 0,
-      affectedTcIds: [],
-    };
-  }
-
-  const affectedTcIds = new Set();
-  let batch = db.batch();
-  let operationCount = 0;
-  let updatedRows = 0;
-  let skippedRows = 0;
-
-  for (const rowDoc of candidateRows) {
-    const rowData = rowDoc.data() || {};
-    const tcId = getTcIdFromRow(rowData);
-
-    if (rowData?.backend?.matched !== true) {
-      skippedRows += 1;
-
-      logger.info("updateTcRowsAfterMeterGeofenceChanged -- row skipped", {
-        astId,
-        tcRowId: rowDoc.id,
-        tcId,
-        reason: "ROW_NOT_MATCHED",
-      });
-
-      continue;
-    }
-
-    const beforeReady = rowData?.bgo?.ready === true;
-    const beforeReadinessState = rowData?.bgo?.readinessState || "NAv";
-
-    const evaluatedRow = applyTcRowBgoReadiness({
-      row: {
-        ...rowData,
-        geofenceRefs: nextGeoFenceRefs,
-      },
-      geofenceRefs: nextGeoFenceRefs,
-      now,
-      updatedByUid: TC_GEOFENCE_SYSTEM_UID,
-      updatedByUser: TC_GEOFENCE_SYSTEM_USER,
-    });
-
-    const patch = {
-      geofenceRefs: evaluatedRow.geofenceRefs,
-      backend: {
-        ...(evaluatedRow?.backend || {}),
-        geofenceRefsCount: nextGeoFenceRefs.length,
-        refreshedFromAstAt: now,
-        refreshReason: "METER_GEOFENCE_CHANGED",
-      },
-      bgo: evaluatedRow.bgo,
-      "metadata.updatedAt": now,
-      "metadata.updatedByUid": TC_GEOFENCE_SYSTEM_UID,
-      "metadata.updatedByUser": TC_GEOFENCE_SYSTEM_USER,
-    };
-
-    batch.update(rowDoc.ref, patch);
-    operationCount += 1;
-    updatedRows += 1;
-
-    if (hasMeaningfulTcValue(tcId)) {
-      affectedTcIds.add(tcId);
-    }
-
-    logger.info("updateTcRowsAfterMeterGeofenceChanged -- ROW_UPDATE", {
-      astId,
-      tcRowId: rowDoc.id,
-      tcId,
-      beforeReady,
-      afterReady: evaluatedRow?.bgo?.ready === true,
-      beforeReadinessState,
-      afterReadinessState: evaluatedRow?.bgo?.readinessState || "NAv",
-      geofenceRefsCount: nextGeoFenceRefs.length,
-      reasonCodes: evaluatedRow?.backend?.reasonCodes || [],
-    });
-
-    if (operationCount === 450) {
-      await batch.commit();
-      logger.info("updateTcRowsAfterMeterGeofenceChanged -- batch commit", {
-        astId,
-        operationCount,
-      });
-      batch = db.batch();
-      operationCount = 0;
-    }
-  }
-
-  if (operationCount > 0) {
-    await batch.commit();
-    logger.info("updateTcRowsAfterMeterGeofenceChanged -- final batch commit", {
-      astId,
-      operationCount,
-    });
-  }
-
-  const tcUploadRefresh = await refreshTcUploadSummariesForTcIds({
-    db,
-    tcIds: Array.from(affectedTcIds),
-    now,
-    updatedByUid: TC_GEOFENCE_SYSTEM_UID,
-    updatedByUser: TC_GEOFENCE_SYSTEM_USER,
-  });
-
-  logger.info("updateTcRowsAfterMeterGeofenceChanged -- upload summary refresh", {
-    astId,
-    ...tcUploadRefresh,
-  });
-
-  logger.info("updateTcRowsAfterMeterGeofenceChanged -- END", {
-    astId,
-    candidateRows: candidateRows.length,
-    updatedRows,
-    skippedRows,
-    affectedTcIds: Array.from(affectedTcIds),
-  });
-
-  return {
-    updatedRows,
-    skippedRows,
-    affectedTcIds: Array.from(affectedTcIds),
-  };
+  return reasons.length ? reasons.join("+") : "METER_TRUTH_CHANGED";
 }
 
-async function updateTcRowsAfterMeterStatusChanged({
+async function updateTcRowsAfterMeterTruthChanged({
   astId,
   beforeStatus = "NAv",
   afterStatus = "NAv",
   afterAstData = {},
+  changeReason = "METER_TRUTH_CHANGED",
 }) {
   const db = getFirestore();
   const now = new Date().toISOString();
+  const nextGeoFenceRefs = normalizeTcGeoFenceRefs(afterAstData?.geofenceRefs || []);
+  const afterAstNo = getAstMeterNo(afterAstData);
+  const afterMeterType = getAstMeterTypeForTc(afterAstData);
 
-  logger.info("updateTcRowsAfterMeterStatusChanged -- START", {
+  logger.info("updateTcRowsAfterMeterTruthChanged -- START", {
     astId,
     beforeStatus,
     afterStatus,
+    changeReason,
+    geofenceRefsCount: nextGeoFenceRefs.length,
   });
 
   const candidateRows = await findInFlightTcRowsForAstId({ db, astId });
 
   if (candidateRows.length === 0) {
-    logger.info("updateTcRowsAfterMeterStatusChanged -- no in-flight rows", {
+    logger.info("updateTcRowsAfterMeterTruthChanged -- no in-flight rows", {
       astId,
       beforeStatus,
       afterStatus,
+      changeReason,
     });
 
     return {
@@ -3202,11 +3083,12 @@ async function updateTcRowsAfterMeterStatusChanged({
     if (rowData?.backend?.matched !== true) {
       skippedRows += 1;
 
-      logger.info("updateTcRowsAfterMeterStatusChanged -- row skipped", {
+      logger.info("updateTcRowsAfterMeterTruthChanged -- row skipped", {
         astId,
         tcRowId: rowDoc.id,
         tcId,
         reason: "ROW_NOT_MATCHED",
+        changeReason,
       });
 
       continue;
@@ -3217,10 +3099,11 @@ async function updateTcRowsAfterMeterStatusChanged({
     if (!hasMeaningfulTcValue(trnType)) {
       skippedRows += 1;
 
-      logger.warn("updateTcRowsAfterMeterStatusChanged -- row missing trnType", {
+      logger.warn("updateTcRowsAfterMeterTruthChanged -- row missing trnType", {
         astId,
         tcRowId: rowDoc.id,
         tcId,
+        changeReason,
       });
 
       continue;
@@ -3248,12 +3131,21 @@ async function updateTcRowsAfterMeterStatusChanged({
       trnType,
     };
 
+    const nextAstSummary = {
+      ...(rowData?.ast || {}),
+      id: astId,
+      astId,
+      astNo: afterAstNo,
+      meterNo: afterAstNo,
+      meterType: afterMeterType,
+      statusState: afterStatus,
+      geofenceRefs: nextGeoFenceRefs,
+    };
+
     const nextRowForEvaluation = {
       ...rowData,
-      ast: {
-        ...(rowData?.ast || {}),
-        statusState: afterStatus,
-      },
+      ast: nextAstSummary,
+      geofenceRefs: nextGeoFenceRefs,
       backend: nextBackend,
     };
 
@@ -3261,29 +3153,40 @@ async function updateTcRowsAfterMeterStatusChanged({
     const beforeReadinessState = rowData?.bgo?.readinessState || "NAv";
     const beforeRowStatus = rowData?.ast?.statusState || "NAv";
 
+    // IMPORTANT:
+    // Do not manually set bgo.ready in multiple places.
+    // Always run the official BGO readiness resolver so TC rows have one truth:
+    // BGO READY or BGO NOT READY with a reason.
     const evaluatedRow = applyTcRowBgoReadiness({
       row: nextRowForEvaluation,
-      geofenceRefs: rowData?.geofenceRefs || [],
+      geofenceRefs: nextGeoFenceRefs,
       now,
-      updatedByUid: TC_STATUS_SYSTEM_UID,
-      updatedByUser: TC_STATUS_SYSTEM_USER,
+      updatedByUid: TC_TRUTH_SYSTEM_UID,
+      updatedByUser: TC_TRUTH_SYSTEM_USER,
     });
 
     const patch = {
-      "ast.statusState": afterStatus,
+      geofenceRefs: evaluatedRow.geofenceRefs,
+      ast: evaluatedRow.ast,
       backend: {
         ...(evaluatedRow?.backend || {}),
         refreshedFromAstAt: now,
-        refreshReason: "METER_STATUS_CHANGED",
+        refreshReason: changeReason,
         statusRefresh: {
           beforeStatus,
           afterStatus,
         },
+        meterTruthRefresh: {
+          astNo: afterAstNo,
+          meterType: afterMeterType,
+          geofenceRefsCount: nextGeoFenceRefs.length,
+          activeLifecycleChanged: changeReason.includes("ACTIVE_LIFECYCLE"),
+        },
       },
       bgo: evaluatedRow.bgo,
       "metadata.updatedAt": now,
-      "metadata.updatedByUid": TC_STATUS_SYSTEM_UID,
-      "metadata.updatedByUser": TC_STATUS_SYSTEM_USER,
+      "metadata.updatedByUid": TC_TRUTH_SYSTEM_UID,
+      "metadata.updatedByUser": TC_TRUTH_SYSTEM_USER,
     };
 
     batch.update(rowDoc.ref, patch);
@@ -3294,11 +3197,12 @@ async function updateTcRowsAfterMeterStatusChanged({
       affectedTcIds.add(tcId);
     }
 
-    logger.info("updateTcRowsAfterMeterStatusChanged -- ROW_UPDATE", {
+    logger.info("updateTcRowsAfterMeterTruthChanged -- ROW_UPDATE", {
       astId,
       tcRowId: rowDoc.id,
       tcId,
       trnType,
+      changeReason,
       beforeRowStatus,
       afterRowStatus: afterStatus,
       beforeReady,
@@ -3307,12 +3211,13 @@ async function updateTcRowsAfterMeterStatusChanged({
       afterReadinessState: evaluatedRow?.bgo?.readinessState || "NAv",
       eligibilityCode: eligibility.code || "NAv",
       eligibilityMessage: eligibility.message || "NAv",
+      activeLifecycle: activeLifecycle || null,
       reasonCodes: evaluatedRow?.backend?.reasonCodes || [],
     });
 
     if (operationCount === 450) {
       await batch.commit();
-      logger.info("updateTcRowsAfterMeterStatusChanged -- batch commit", {
+      logger.info("updateTcRowsAfterMeterTruthChanged -- batch commit", {
         astId,
         operationCount,
       });
@@ -3323,7 +3228,7 @@ async function updateTcRowsAfterMeterStatusChanged({
 
   if (operationCount > 0) {
     await batch.commit();
-    logger.info("updateTcRowsAfterMeterStatusChanged -- final batch commit", {
+    logger.info("updateTcRowsAfterMeterTruthChanged -- final batch commit", {
       astId,
       operationCount,
     });
@@ -3333,16 +3238,16 @@ async function updateTcRowsAfterMeterStatusChanged({
     db,
     tcIds: Array.from(affectedTcIds),
     now,
-    updatedByUid: TC_STATUS_SYSTEM_UID,
-    updatedByUser: TC_STATUS_SYSTEM_USER,
+    updatedByUid: TC_TRUTH_SYSTEM_UID,
+    updatedByUser: TC_TRUTH_SYSTEM_USER,
   });
 
-  logger.info("updateTcRowsAfterMeterStatusChanged -- upload summary refresh", {
+  logger.info("updateTcRowsAfterMeterTruthChanged -- upload summary refresh", {
     astId,
     ...tcUploadRefresh,
   });
 
-  logger.info("updateTcRowsAfterMeterStatusChanged -- END", {
+  logger.info("updateTcRowsAfterMeterTruthChanged -- END", {
     astId,
     candidateRows: candidateRows.length,
     updatedRows,
@@ -3513,30 +3418,30 @@ export const onMeterUpdated = onDocumentUpdated(
       );
     }
 
-    if (statusChanged) {
+    const tcReadinessImpactChanged =
+      statusChanged ||
+      geofenceRefsChanged ||
+      activeLifecycleChanged ||
+      meterTypeChanged ||
+      astNoChanged;
+
+    if (tcReadinessImpactChanged) {
       await safeRun(
-        "onMeterUpdated TC rows after meter status changed",
+        "onMeterUpdated TC rows after meter truth changed",
         astId,
         async () => {
-          await updateTcRowsAfterMeterStatusChanged({
+          await updateTcRowsAfterMeterTruthChanged({
             astId,
             beforeStatus,
             afterStatus,
             afterAstData: dataAfter,
-          });
-        },
-      );
-    }
-
-    if (geofenceRefsChanged) {
-      await safeRun(
-        "onMeterUpdated TC rows after meter geofence changed",
-        astId,
-        async () => {
-          await updateTcRowsAfterMeterGeofenceChanged({
-            astId,
-            beforeGeoFenceRefs: dataBefore?.geofenceRefs || [],
-            afterGeoFenceRefs: dataAfter?.geofenceRefs || [],
+            changeReason: resolveTcMeterTruthChangeReason({
+              statusChanged,
+              geofenceRefsChanged,
+              activeLifecycleChanged,
+              meterTypeChanged,
+              astNoChanged,
+            }),
           });
         },
       );

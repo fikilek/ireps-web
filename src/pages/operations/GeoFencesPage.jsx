@@ -25,6 +25,35 @@ const FALLBACK_CENTER = {
   lng: 28.50667220650696,
 };
 
+function isZeroZeroPoint(point) {
+  const lat = Number(point?.lat ?? point?.latitude);
+  const lng = Number(point?.lng ?? point?.longitude);
+
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat === 0 && lng === 0;
+}
+
+function isUsableMapPoint(point) {
+  const lat = Number(point?.lat ?? point?.latitude);
+  const lng = Number(point?.lng ?? point?.longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+  // iREPS operational geography is never at 0,0. Treat this as missing/bad GPS
+  // so a single bad point cannot pull the map away from the selected geofence.
+  if (lat === 0 && lng === 0) return false;
+
+  return true;
+}
+
+function toUsableLatLng(point) {
+  if (!isUsableMapPoint(point)) return null;
+
+  return {
+    lat: Number(point?.lat ?? point?.latitude),
+    lng: Number(point?.lng ?? point?.longitude),
+  };
+}
+
 function getActiveLmPcode(activeWorkbase, selectedLm) {
   return (
     selectedLm?.pcode ||
@@ -87,6 +116,44 @@ function getWardPcodeFromFocusAstId(focusAstId, lmPcode) {
   const wardMatch = cleanFocusAstId.match(/ZA\d{7}/);
 
   return wardMatch?.[0] || "";
+}
+
+function getBooleanSearchParam(value) {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return text === "true" || text === "1" || text === "yes";
+}
+
+function parseFocusPointFromSearchParams(searchParams) {
+  const lat = Number(searchParams.get("focusLat"));
+  const lng = Number(searchParams.get("focusLng"));
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
+function getFocusDisplayLabel({
+  focusType,
+  focusLabel,
+  focusAstId,
+  focusPremiseId,
+  focusGeofenceId,
+  focusGeofenceName,
+}) {
+  return (
+    focusLabel ||
+    focusGeofenceName ||
+    focusAstId ||
+    focusPremiseId ||
+    focusGeofenceId ||
+    focusType ||
+    "NAv"
+  );
 }
 
 function getWardPcode(ward) {
@@ -154,6 +221,14 @@ function normalizeBbox(bbox) {
     return null;
   }
 
+  if (minLat === 0 && maxLat === 0 && minLng === 0 && maxLng === 0) {
+    return null;
+  }
+
+  if (minLat > maxLat || minLng > maxLng) {
+    return null;
+  }
+
   return {
     minLat,
     maxLat,
@@ -202,13 +277,8 @@ function getGeoFencePath(geoFence) {
 
   return [...points]
     .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
-    .map((point) => ({
-      lat: Number(point?.latitude ?? point?.lat),
-      lng: Number(point?.longitude ?? point?.lng),
-    }))
-    .filter(
-      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng),
-    );
+    .map(toUsableLatLng)
+    .filter(Boolean);
 }
 
 function getGeoFencePointCount(geoFence) {
@@ -229,27 +299,32 @@ function fitMapToGeoFenceAndWarningMeters(
   const geoFencePath = getGeoFencePath(geoFence);
 
   geoFencePath.forEach((point) => {
-    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return;
+    const usablePoint = toUsableLatLng(point);
 
-    bounds.extend(point);
+    if (!usablePoint) return;
+
+    bounds.extend(usablePoint);
     hasAnyPoint = true;
   });
 
   noGeofenceMeters.forEach((meter) => {
-    const point = getMarkerPoint(meter);
+    const usablePoint = toUsableLatLng(getMarkerPoint(meter));
 
-    if (!point) return;
-    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return;
+    if (!usablePoint) return;
 
-    bounds.extend({
-      lat: point.lat,
-      lng: point.lng,
-    });
-
+    bounds.extend(usablePoint);
     hasAnyPoint = true;
   });
 
-  if (!hasAnyPoint) return;
+  if (!hasAnyPoint) {
+    const bbox = normalizeBbox(geoFence?.bbox || geoFence?.geometry?.bbox);
+
+    if (bbox) {
+      fitMapToBbox(map, bbox, padding);
+    }
+
+    return;
+  }
 
   map.fitBounds(bounds, padding);
 }
@@ -486,6 +561,7 @@ function ExistingGeoFenceLayer({
   selectedGeoFenceId,
   onSelectGeoFence,
   noGeofenceMeters,
+  includeWarningMetersInFit = true,
 }) {
   const map = useMap();
   const polygonsRef = useRef([]);
@@ -567,13 +643,13 @@ function ExistingGeoFenceLayer({
       fitMapToGeoFenceAndWarningMeters(
         map,
         selectedGeoFence,
-        noGeofenceMeters,
+        includeWarningMetersInFit ? noGeofenceMeters : [],
         88,
       );
     }, 120);
 
     return () => clearTimeout(timer);
-  }, [map, selectedGeoFence, noGeofenceMeters]);
+  }, [map, selectedGeoFence, noGeofenceMeters, includeWarningMetersInFit]);
 
   return null;
 }
@@ -661,12 +737,9 @@ function NoGeofenceMetersLayer({ meters }) {
 
     const markers = (meters || [])
       .map((meter) => {
-        const point = getMarkerPoint(meter);
+        const point = toUsableLatLng(getMarkerPoint(meter));
 
-        if (!point) return;
-        if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) {
-          return null;
-        }
+        if (!point) return null;
 
         const marker = new window.google.maps.Marker({
           position: {
@@ -745,7 +818,7 @@ function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
 
     (premises || []).forEach((premise) => {
       const premiseId = getPremiseMatchId(premise);
-      const premisePoint = getMarkerPoint(premise);
+      const premisePoint = toUsableLatLng(getMarkerPoint(premise));
 
       if (!premiseId || !premisePoint) return;
 
@@ -758,7 +831,7 @@ function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
     const lines = (meters || [])
       .map((meter) => {
         const premiseId = getMeterPremiseMatchId(meter);
-        const meterPoint = getMarkerPoint(meter);
+        const meterPoint = toUsableLatLng(getMarkerPoint(meter));
         const premiseItem = premiseById.get(premiseId);
 
         if (!premiseItem || !meterPoint) return null;
@@ -836,7 +909,7 @@ function SelectedGeofenceMetersLayer({ meters }) {
 
     const markers = (meters || [])
       .map((meter) => {
-        const point = getMarkerPoint(meter);
+        const point = toUsableLatLng(getMarkerPoint(meter));
         if (!point) return null;
 
         const marker = new window.google.maps.Marker({
@@ -900,7 +973,7 @@ function SelectedGeofencePremisesLayer({ premises }) {
 
     const markers = (premises || [])
       .map((premise) => {
-        const point = getMarkerPoint(premise);
+        const point = toUsableLatLng(getMarkerPoint(premise));
         if (!point) return null;
 
         const address = formatPremiseAddress(premise);
@@ -1008,7 +1081,7 @@ function SelectedGeofenceErfsLayer({ erfs }) {
         polygons.push(polygon);
       });
 
-      const point = getMarkerPoint(erf);
+      const point = toUsableLatLng(getMarkerPoint(erf));
 
       if (point) {
         const marker = new window.google.maps.Marker({
@@ -1075,7 +1148,7 @@ function TcFocusMeterLayer({ tcMeters, focusAstId }) {
       markerRef.current = null;
     }
 
-    const point = getMarkerPoint(focusRow);
+    const point = toUsableLatLng(getMarkerPoint(focusRow));
     if (!point) return;
 
     const marker = new window.google.maps.Marker({
@@ -1121,6 +1194,93 @@ function TcFocusMeterLayer({ tcMeters, focusAstId }) {
   return null;
 }
 
+function UrlFocusPointLayer({ focusType, point, label }) {
+  const map = useMap();
+  const markerRef = useRef(null);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps || !point || !isUsableMapPoint(point)) return;
+
+    if (markerRef.current) {
+      markerRef.current.setMap(null);
+      markerRef.current = null;
+    }
+
+    const normalizedFocusType = String(focusType || "FOCUS").toUpperCase();
+    const isPremise = normalizedFocusType === "PREMISE";
+    const markerLabel = isPremise ? "P" : "M";
+    const markerColor = isPremise ? "#2563eb" : "#0f766e";
+
+    const marker = new window.google.maps.Marker({
+      position: {
+        lat: point.lat,
+        lng: point.lng,
+      },
+      map,
+      title: label || normalizedFocusType,
+      label: {
+        text: markerLabel,
+        color: "#ffffff",
+        fontWeight: "900",
+      },
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: markerColor,
+        fillOpacity: 0.96,
+        strokeColor: "#ffffff",
+        strokeWeight: 4,
+      },
+      zIndex: 240,
+    });
+
+    const infoWindow = new window.google.maps.InfoWindow({
+      content: `
+        <div style="font-family: Arial, sans-serif; min-width: 220px;">
+          <strong>${label || normalizedFocusType}</strong>
+          <div style="margin-top: 6px; color: ${markerColor}; font-weight: 800;">
+            BGO ${normalizedFocusType} focus
+          </div>
+        </div>
+      `,
+    });
+
+    marker.addListener("click", () => {
+      infoWindow.open({
+        anchor: marker,
+        map,
+        shouldFocus: false,
+      });
+    });
+
+    markerRef.current = marker;
+
+    map.panTo({
+      lat: point.lat,
+      lng: point.lng,
+    });
+
+    map.setZoom(19);
+
+    window.setTimeout(() => {
+      infoWindow.open({
+        anchor: marker,
+        map,
+        shouldFocus: false,
+      });
+    }, 350);
+
+    return () => {
+      if (markerRef.current) {
+        markerRef.current.setMap(null);
+        markerRef.current = null;
+      }
+    };
+  }, [map, focusType, point, label]);
+
+  return null;
+}
+
 /* =====================================================
    MODAL
    ===================================================== */
@@ -1162,8 +1322,24 @@ export default function GeoFencesPage() {
   const queryWardPcode = sanitizeScopeValue(searchParams.get("wardPcode"));
 
   const tcId = sanitizeScopeValue(searchParams.get("tcId"));
+  const focusType = sanitizeScopeValue(searchParams.get("focusType")).toUpperCase();
   const focusAstId = sanitizeScopeValue(searchParams.get("focusAstId"));
-  console.log(`Focus AST ID: ${focusAstId}`);
+  const focusPremiseId = sanitizeScopeValue(searchParams.get("focusPremiseId"));
+  const focusGeofenceId = sanitizeScopeValue(searchParams.get("focusGeofenceId"));
+  const focusGeofenceName = sanitizeScopeValue(
+    searchParams.get("focusGeofenceName"),
+  );
+  const focusLabel = sanitizeScopeValue(searchParams.get("focusLabel"));
+  const fitGeofence = getBooleanSearchParam(searchParams.get("fitGeofence"));
+  const focusPoint = parseFocusPointFromSearchParams(searchParams);
+  const focusDisplayLabel = getFocusDisplayLabel({
+    focusType,
+    focusLabel,
+    focusAstId,
+    focusPremiseId,
+    focusGeofenceId,
+    focusGeofenceName,
+  });
   const isTcContext = Boolean(tcId);
 
   const lmPcode =
@@ -1211,6 +1387,25 @@ export default function GeoFencesPage() {
       { lmPcode, wardPcode },
       { skip: !lmPcode || !wardPcode },
     );
+
+  useEffect(() => {
+    if (!focusGeofenceId || geofences.length === 0) return;
+
+    const nextGeoFence =
+      geofences.find((geoFence) => geoFence.id === focusGeofenceId) ||
+      geofences.find((geoFence) => geoFence.name === focusGeofenceName) ||
+      null;
+
+    if (!nextGeoFence) return;
+    if (selectedGeoFence?.id === nextGeoFence.id) return;
+
+    setSelectedGeoFence(nextGeoFence);
+  }, [
+    focusGeofenceId,
+    focusGeofenceName,
+    geofences,
+    selectedGeoFence?.id,
+  ]);
 
   const { data: noGeofenceMeters = [] } = useGetNoGeofenceMetersByWardQuery(
     { lmPcode, wardPcode },
@@ -1415,8 +1610,9 @@ export default function GeoFencesPage() {
 
           {isTcContext ? (
             <p style={{ margin: "4px 0 0", color: "#64748B" }}>
-              TC: <strong>{tcId}</strong> • Focus AST:{" "}
-              <strong>{focusAstId || "NAv"}</strong>
+              TC: <strong>{tcId}</strong> • Focus:{" "}
+              <strong>{focusType || "AST"}</strong> •{" "}
+              <strong>{focusDisplayLabel || "NAv"}</strong>
               {!queryWardPcode && wardPcodeFromFocusAstId ? (
                 <> • Ward recovered from Focus AST</>
               ) : null}
@@ -1524,7 +1720,7 @@ export default function GeoFencesPage() {
           >
             <WardBoundaryLayer
               ward={selectedWardDoc}
-              shouldFit={!selectedGeoFenceId && !focusAstId}
+              shouldFit={!selectedGeoFenceId && !focusAstId && !focusPoint}
             />
 
             <ExistingGeoFenceLayer
@@ -1532,6 +1728,7 @@ export default function GeoFencesPage() {
               selectedGeoFenceId={selectedGeoFenceId}
               onSelectGeoFence={setSelectedGeoFence}
               noGeofenceMeters={noGeofenceMeters}
+              includeWarningMetersInFit={!fitGeofence}
             />
 
             {selectedGeoFenceId ? (
@@ -1553,8 +1750,16 @@ export default function GeoFencesPage() {
 
             <NoGeofenceMetersLayer meters={noGeofenceMeters} />
 
-            {isTcContext ? (
+            {isTcContext && focusAstId && !focusPoint ? (
               <TcFocusMeterLayer tcMeters={tcMeters} focusAstId={focusAstId} />
+            ) : null}
+
+            {focusPoint ? (
+              <UrlFocusPointLayer
+                focusType={focusType}
+                point={focusPoint}
+                label={focusDisplayLabel}
+              />
             ) : null}
 
             <DraftGeoFenceLayer draftPoints={draftPoints} />
