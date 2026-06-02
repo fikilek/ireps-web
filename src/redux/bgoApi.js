@@ -216,8 +216,12 @@ function normalizeBgoRowDoc(docSnap) {
     trn: data.trn || null,
     executionOutcomeCode: valueOrNav(
       data.executionOutcome?.code ||
+        data.executionOutcome?.outcome ||
+        data.executionOutcome?.state ||
         data.executionOutcomeCode ||
-        data.trn?.executionOutcomeCode,
+        data.trn?.executionOutcomeCode ||
+        data.trn?.executionOutcome?.code ||
+        data.trn?.executionOutcome?.outcome,
     ),
     completedAt: normalizeDateValue(
       data.workflow?.completedAt || data.completedAt || data.trn?.completedAt,

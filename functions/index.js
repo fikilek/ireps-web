@@ -75,7 +75,12 @@ import { onAcceptRejectLifecycleInstructionCallable } from "./meterLifecycle/acc
 import { onManageLifecycleInstructionCallable } from "./meterLifecycle/manageInstructionCallable.js";
 
 import { onCreateBgoCallable } from "./bgo/callables.js";
+import {
+  onAcceptRejectBgoBatchCallable,
+  onReverseBgoBatchAcceptanceCallable,
+} from "./bgo/acceptanceCallable.js";
 import { onDeleteUnacceptedBgoCallable } from "./bgo/deleteCallable.js";
+import { onBgoChildTrnExecutionSummaryWritten } from "./bgo/executionSummaryTrigger.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -115,7 +120,10 @@ export {
   onRefreshTcUploadGeofenceReadinessCallable,
   onDeleteTcUploadCallable,
   onCreateBgoCallable,
+  onAcceptRejectBgoBatchCallable,
+  onReverseBgoBatchAcceptanceCallable,
   onDeleteUnacceptedBgoCallable,
+  onBgoChildTrnExecutionSummaryWritten,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
