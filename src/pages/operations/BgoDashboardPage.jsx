@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useGetTcUploadsQuery } from "../../redux/tcApi";
+import { useGetBgoRowsByTcIdQuery } from "../../redux/bgoApi";
 
 const FILTER_ALL = "ALL";
 
@@ -23,6 +24,107 @@ function formatNumber(value) {
   return asNumber(value).toLocaleString("en-ZA");
 }
 
+function normalizeUpper(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase();
+}
+
+function hasMeaningfulValue(value) {
+  if (value === null || value === undefined) return false;
+
+  const text = String(value).trim().toUpperCase();
+
+  return (
+    text !== "" &&
+    text !== "NAV" &&
+    text !== "N/A" &&
+    text !== "NA" &&
+    text !== "NULL" &&
+    text !== "UNDEFINED"
+  );
+}
+
+function getWorkflowState(source = {}) {
+  return valueOrNav(
+    source.workflowState ||
+      source.workflow?.state ||
+      source.raw?.workflow?.state ||
+      source.raw?.workflowState ||
+      source.trn?.workflow?.state ||
+      source.trn?.workflowState,
+  );
+}
+
+function getExecutionOutcome(source = {}) {
+  const raw = source.raw || {};
+  const directOutcome =
+    source.executionOutcomeCode ||
+    source.executionOutcome ||
+    source.outcome ||
+    raw.executionOutcome?.code ||
+    raw.executionOutcome?.outcome ||
+    raw.executionOutcome?.state ||
+    raw.executionOutcomeCode ||
+    raw.outcome ||
+    source.trn?.executionOutcomeCode ||
+    source.trn?.executionOutcome ||
+    source.trn?.outcome;
+
+  if (typeof directOutcome === "object" && directOutcome !== null) {
+    return valueOrNav(
+      directOutcome.code ||
+        directOutcome.id ||
+        directOutcome.state ||
+        directOutcome.status ||
+        directOutcome.outcome ||
+        directOutcome.result ||
+        directOutcome.answer ||
+        directOutcome.label ||
+        directOutcome.name,
+    );
+  }
+
+  return valueOrNav(directOutcome);
+}
+
+function isCompletedState(value) {
+  return normalizeUpper(value) === "COMPLETED";
+}
+
+function isCancelledState(value) {
+  const state = normalizeUpper(value);
+  return state === "CANCELLED" || state === "CANCELED";
+}
+
+function isSuccessOutcome(value) {
+  const outcome = normalizeUpper(value);
+  return outcome === "SUCCESS" || outcome === "SUCCESSFUL" || outcome === "ACCESS_YES";
+}
+
+function calculateLiveExecutionMetrics(bgoRows = []) {
+  const rows = asArray(bgoRows);
+  const completedRows = rows.filter((row) => isCompletedState(getWorkflowState(row)));
+  const cancelledRows = rows.filter((row) => isCancelledState(getWorkflowState(row)));
+  const successfulRows = completedRows.filter((row) =>
+    isSuccessOutcome(getExecutionOutcome(row)),
+  );
+  const unsuccessfulRows = completedRows.filter(
+    (row) =>
+      hasMeaningfulValue(getExecutionOutcome(row)) &&
+      !isSuccessOutcome(getExecutionOutcome(row)),
+  );
+
+  return {
+    hasLiveRows: rows.length > 0,
+    issuedRows: rows.length,
+    executedRows: completedRows.length,
+    cancelledRows: cancelledRows.length,
+    successfulRows: successfulRows.length,
+    unsuccessfulRows: unsuccessfulRows.length,
+  };
+}
+
 function getDashboardCounts(upload = {}) {
   return upload.dashboardSummary?.counts || upload.raw?.dashboardSummary?.counts || {};
 }
@@ -31,8 +133,9 @@ function getDashboardAttention(upload = {}) {
   return upload.dashboardSummary?.attention || upload.raw?.dashboardSummary?.attention || {};
 }
 
-function calculateUploadMetrics(upload = {}) {
+function calculateUploadMetrics(upload = {}, bgoRows = []) {
   const dashboardCounts = getDashboardCounts(upload);
+  const liveExecution = calculateLiveExecutionMetrics(bgoRows);
 
   const totalRows = asNumber(
     dashboardCounts.totalRows ?? upload.totalRows ?? upload.summary?.totalRows,
@@ -44,11 +147,14 @@ function calculateUploadMetrics(upload = {}) {
     dashboardCounts.notFoundRows ?? upload.notFoundRows ?? upload.summary?.notFoundRows,
   );
 
-  const issuedToBgoRows = asNumber(
-    dashboardCounts.issuedToBgoRows ??
-      dashboardCounts.issuedRows ??
-      upload.usedRows ??
-      upload.summary?.usedRows,
+  const issuedToBgoRows = Math.max(
+    asNumber(
+      dashboardCounts.issuedToBgoRows ??
+        dashboardCounts.issuedRows ??
+        upload.usedRows ??
+        upload.summary?.usedRows,
+    ),
+    liveExecution.issuedRows,
   );
 
   const notYetIssuedRows = asNumber(
@@ -76,22 +182,19 @@ function calculateUploadMetrics(upload = {}) {
     dashboardCounts.bgoNotReadyRows ?? Math.max(knownNotReadyRows, foundRows - bgoReadyRows),
   );
 
-  const cancelledRows = asNumber(
-    dashboardCounts.cancelledRows ?? dashboardCounts.cancelled ?? 0,
-  );
-  const executedRows = asNumber(
-    dashboardCounts.executedRows ?? dashboardCounts.completedRows ?? 0,
-  );
-  const notExecutedRows = asNumber(
-    dashboardCounts.notExecutedRows ??
-      Math.max(issuedToBgoRows - executedRows - cancelledRows, 0),
-  );
-  const successfulRows = asNumber(
-    dashboardCounts.successfulRows ?? dashboardCounts.successRows ?? 0,
-  );
-  const unsuccessfulRows = asNumber(
-    dashboardCounts.unsuccessfulRows ?? dashboardCounts.failedRows ?? 0,
-  );
+  const cancelledRows = liveExecution.hasLiveRows
+    ? liveExecution.cancelledRows
+    : asNumber(dashboardCounts.cancelledRows ?? dashboardCounts.cancelled ?? 0);
+  const executedRows = liveExecution.hasLiveRows
+    ? liveExecution.executedRows
+    : asNumber(dashboardCounts.executedRows ?? dashboardCounts.completedRows ?? 0);
+  const notExecutedRows = Math.max(issuedToBgoRows - executedRows - cancelledRows, 0);
+  const successfulRows = liveExecution.hasLiveRows
+    ? liveExecution.successfulRows
+    : asNumber(dashboardCounts.successfulRows ?? dashboardCounts.successRows ?? 0);
+  const unsuccessfulRows = liveExecution.hasLiveRows
+    ? liveExecution.unsuccessfulRows
+    : asNumber(dashboardCounts.unsuccessfulRows ?? dashboardCounts.failedRows ?? 0);
 
   return {
     totalRows,
@@ -232,10 +335,17 @@ function AttentionReasons({ reasons = [] }) {
 }
 
 function UploadDashboardCard({ upload }) {
-  const metrics = calculateUploadMetrics(upload);
+  const tcId = upload.id || upload.tcId;
+
+  const { data: bgoRows = [], isFetching: isFetchingBgoRows } =
+    useGetBgoRowsByTcIdQuery(
+      { tcId, limit: 1000 },
+      { skip: !tcId },
+    );
+
+  const metrics = calculateUploadMetrics(upload, bgoRows);
   const primaryStatus = getPrimaryStatus(metrics);
   const attentionReasons = getAttentionReasons(upload, metrics);
-  const tcId = upload.id || upload.tcId;
   const tcDashboardPath = `/operations/tc-uploads/${tcId}/bgo-dashboard`;
 
   return (
@@ -257,6 +367,9 @@ function UploadDashboardCard({ upload }) {
           ) : (
             <span style={styles.goodPill}>ON TRACK</span>
           )}
+          {isFetchingBgoRows ? (
+            <span style={styles.streamMiniPill}>LIVE EXECUTION</span>
+          ) : null}
         </div>
       </div>
 
@@ -491,6 +604,14 @@ const styles = {
     background: "#EFF6FF",
     color: "#1D4ED8",
     fontSize: 12,
+    fontWeight: 900,
+  },
+  streamMiniPill: {
+    padding: "6px 9px",
+    borderRadius: 999,
+    background: "#ECFEFF",
+    color: "#0E7490",
+    fontSize: 11,
     fontWeight: 900,
   },
   filterPanel: {
