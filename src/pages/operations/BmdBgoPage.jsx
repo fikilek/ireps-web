@@ -13,7 +13,6 @@ import {
 import { useGetGeoFencesByWardQuery } from "../../redux/geofencesApi";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
-import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -189,7 +188,7 @@ function getTargetOptionSubtitle(target = {}) {
       ? `SUBC under ${target.parentServiceProviderName}`
       : "SUBC service provider";
 
-  return `${target.memberCount || 0} member(s) • ${parentText}`;
+  return parentText;
 }
 
 function getTargetOptionMicroText(target = {}) {
@@ -197,143 +196,7 @@ function getTargetOptionMicroText(target = {}) {
     return `Owner: ${target.mncServiceProviderName || "NAv"}`;
   }
 
-  return target.registeredName && target.registeredName !== "NAv"
-    ? `Registered: ${target.registeredName}`
-    : "";
-}
-
-function getUserDisplayName(user = {}) {
-  return (
-    user.displayName ||
-    [user.name, user.surname].filter(Boolean).join(" ") ||
-    user.email ||
-    user.id ||
-    "Unknown user"
-  );
-}
-
-function getUserRoleLabel(user = {}) {
-  const role = valueOrNav(user.role);
-  const accountStatus = valueOrNav(user.accountStatus);
-  const onboardingStatus = valueOrNav(user.onboardingStatus);
-
-  return `${role} • ${accountStatus} • ${onboardingStatus}`;
-}
-
-function buildUsersById(users = []) {
-  const map = new Map();
-
-  asArray(users).forEach((user) => {
-    if (!user?.id) return;
-
-    map.set(user.id, user);
-    if (user.uid) map.set(user.uid, user);
-  });
-
-  return map;
-}
-
-function buildUnknownMember(userId) {
-  return {
-    id: userId,
-    uid: userId,
-    displayName: `Unknown user ${userId}`,
-    name: "Unknown",
-    surname: "",
-    email: "",
-    role: "NAv",
-    accountStatus: "NAv",
-    onboardingStatus: "NAv",
-    serviceProviderId: "NAv",
-    serviceProviderName: "NAv",
-    missing: true,
-  };
-}
-
-function enrichTeamsWithMembers(teams = [], usersById = new Map()) {
-  return asArray(teams).map((team) => {
-    const memberUserIds = asArray(team.memberUserIds)
-      .map((id) => String(id || "").trim())
-      .filter(Boolean);
-
-    const members = memberUserIds.map((userId) => {
-      const user = usersById.get(userId) || buildUnknownMember(userId);
-
-      return {
-        ...user,
-        id: user.id || userId,
-        uid: user.uid || userId,
-        displayName: getUserDisplayName(user),
-      };
-    });
-
-    return {
-      ...team,
-      members,
-      memberCount: members.length,
-      memberNames: members.map(getUserDisplayName),
-    };
-  });
-}
-
-function enrichServiceProvidersWithMembers(serviceProviders = [], users = []) {
-  return asArray(serviceProviders).map((serviceProvider) => {
-    const members = asArray(users)
-      .filter((user) => user.serviceProviderId === serviceProvider.id)
-      .sort((left, right) =>
-        getUserDisplayName(left).localeCompare(getUserDisplayName(right)),
-      );
-
-    return {
-      ...serviceProvider,
-      members,
-      memberCount: members.length,
-      memberNames: members.map(getUserDisplayName),
-    };
-  });
-}
-
-function getTargetMembers(target = {}) {
-  return asArray(target.members);
-}
-
-function MembersList({ target, maxItems = 6 }) {
-  const members = getTargetMembers(target);
-
-  if (members.length === 0) {
-    return (
-      <div style={styles.memberEmpty}>
-        {target.type === "TEAM"
-          ? "No team members resolved yet."
-          : "No SP members resolved yet."}
-      </div>
-    );
-  }
-
-  const visibleMembers = members.slice(0, maxItems);
-  const hiddenCount = Math.max(members.length - visibleMembers.length, 0);
-
-  return (
-    <div style={styles.memberList}>
-      {visibleMembers.map((member) => (
-        <span
-          key={member.id || member.uid || getUserDisplayName(member)}
-          style={{
-            ...styles.memberChip,
-            ...(member.missing ? styles.memberChipWarning : null),
-          }}
-          title={getUserRoleLabel(member)}
-        >
-          <strong>{getUserDisplayName(member)}</strong>
-          <small>{getUserRoleLabel(member)}</small>
-        </span>
-      ))}
-
-      {hiddenCount > 0 ? (
-        <span style={styles.memberMore}>+{hiddenCount} more</span>
-      ) : null}
-    </div>
-  );
+  return `SP ID: ${target.id || "NAv"}`;
 }
 
 function buildTargetPayload(target = null) {
@@ -351,7 +214,6 @@ function buildTargetPayload(target = null) {
     name,
     memberCount: safeNumber(target.memberCount),
     serviceProviderCount: safeNumber(target.serviceProviderCount),
-    members: asArray(target.members),
   };
 }
 
@@ -576,21 +438,6 @@ function createGeofenceMapRoute({ lmPcode, wardPcode, group }) {
   return `/operations/geo-fences?${params.toString()}`;
 }
 
-function createExistingBmdMapRoute(batch = {}) {
-  const raw = batch?.raw || {};
-  const geofenceId = readFirstString(batch?.geofenceId, batch?.geofenceRef?.id);
-  const geofenceName = readFirstString(batch?.geofenceName, batch?.geofenceRef?.name);
-
-  return createGeofenceMapRoute({
-    lmPcode: readFirstString(raw?.scope?.lmPcode, batch?.lmPcode),
-    wardPcode: readFirstString(raw?.scope?.wardPcode, batch?.wardPcode),
-    group: {
-      geofenceId,
-      geofenceName,
-    },
-  });
-}
-
 function Badge({ tone = "neutral", children }) {
   return <span style={{ ...styles.badge, ...(styles[`badge_${tone}`] || {}) }}>{children}</span>;
 }
@@ -605,34 +452,6 @@ function getBatchWorkflowState(batch = {}) {
 
 function getBatchReleaseState(batch = {}) {
   return normalizeUpper(batch?.releaseState || batch?.raw?.bgo?.releaseState || batch?.raw?.releaseState);
-}
-
-function getBatchTargetName(batch = {}) {
-  const raw = batch?.raw || {};
-  const target =
-    batch?.target ||
-    raw?.target ||
-    raw?.assignment?.target ||
-    asArray(raw?.assignment?.targets)[0] ||
-    raw?.bgo?.target ||
-    {};
-
-  return valueOrNav(
-    readFirstString(
-      batch?.targetName,
-      batch?.target?.name,
-      target?.name,
-      target?.label,
-      target?.displayName,
-      raw?.targetName,
-      raw?.bgo?.targetName,
-      raw?.assignment?.targetName,
-      target?.id,
-      batch?.targetId,
-      raw?.targetId,
-      raw?.bgo?.targetId,
-    ),
-  );
 }
 
 function getBatchBmdCreatedPremiseCount(batch = {}) {
@@ -710,22 +529,15 @@ function buildExistingAllocationByGeofenceId(existingBmdBatches = []) {
 function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
   const raw = batch?.raw || {};
   const batchId = getBatchId(batch);
-  const geofenceName = batch.geofenceName || "NAv";
-  const targetName = getBatchTargetName(batch);
-  const allocationTitle =
-    targetName && targetName !== "NAv"
-      ? `${geofenceName} (${targetName})`
-      : geofenceName;
-  const totalErfs = safeNumber(raw?.summary?.erfCount ?? raw?.batchReleaseSummary?.totalRows);
-  const totalPremises = safeNumber(raw?.summary?.premiseCount);
-  const totalMeters = safeNumber(raw?.summary?.meterCount);
+  const premiseCreatedCount = getBatchBmdCreatedPremiseCount(batch);
+  const meterCreatedCount = getBatchBmdCreatedMeterCount(batch);
   const removable = canRemoveBmdBatch(batch) && !isDeleting;
 
   return (
     <div style={styles.existingBatchCard}>
       <div style={styles.existingBatchMain}>
         <div>
-          <strong style={styles.existingBatchTitle}>{allocationTitle}</strong>
+          <strong style={styles.existingBatchTitle}>{batch.geofenceName || "NAv"}</strong>
           <span style={styles.existingBatchSub}>{batchId}</span>
         </div>
         <Badge tone={isBatchWaitingForAcceptance(batch) ? "warning" : "neutral"}>
@@ -734,30 +546,26 @@ function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
       </div>
 
       <div style={styles.existingBatchGrid}>
-        <InfoCard label="Total ERFs" value={totalErfs} />
-        <InfoCard label="Total Premises" value={totalPremises} />
-        <InfoCard label="Total Meters" value={totalMeters} />
+        <InfoCard label="Target" value={getTargetLabel(batch.target)} />
+        <InfoCard label="ERFs" value={raw?.summary?.erfCount || raw?.batchReleaseSummary?.totalRows || 0} />
+        <InfoCard label="BMD Premises Created" value={premiseCreatedCount} />
+        <InfoCard label="BMD Meters Created" value={meterCreatedCount} />
       </div>
 
       <div style={styles.existingBatchFooter}>
         <span style={styles.existingBatchReason}>{getRemoveDisabledReason(batch)}</span>
-        <div style={styles.existingBatchActions}>
-          <Link to={createExistingBmdMapRoute(batch)} style={styles.openMapLink}>
-            Open map
-          </Link>
-          <button
-            type="button"
-            style={{
-              ...styles.dangerOutlineButton,
-              ...(removable ? styles.dangerOutlineButtonEnabled : null),
-            }}
-            disabled={!removable}
-            onClick={() => onRemove(batch)}
-            title={getRemoveDisabledReason(batch)}
-          >
-            Remove
-          </button>
-        </div>
+        <button
+          type="button"
+          style={{
+            ...styles.dangerOutlineButton,
+            ...(removable ? styles.dangerOutlineButtonEnabled : null),
+          }}
+          disabled={!removable}
+          onClick={() => onRemove(batch)}
+          title={getRemoveDisabledReason(batch)}
+        >
+          Remove
+        </button>
       </div>
     </div>
   );
@@ -849,9 +657,6 @@ export default function BmdBgoPage() {
   const { data: availableServiceProviders = [], isLoading: serviceProvidersLoading } =
     useGetAvailableServiceProvidersQuery({ limit: 500 });
 
-  const { data: usersDirectory = [], isLoading: usersLoading } =
-    useGetUsersDirectoryQuery({ limit: 1000 });
-
   const [createBgo, createBgoState] = useCreateBgoMutation();
   const [deleteUnacceptedBgo, deleteBgoState] = useDeleteUnacceptedBgoMutation();
 
@@ -920,29 +725,14 @@ export default function BmdBgoPage() {
     allocatableReadyGroups[0] ||
     null;
 
-  const usersById = useMemo(
-    () => buildUsersById(usersDirectory),
-    [usersDirectory],
-  );
-
-  const availableTeamsWithMembers = useMemo(
-    () => enrichTeamsWithMembers(availableTeams, usersById),
-    [availableTeams, usersById],
-  );
-
-  const availableServiceProvidersWithMembers = useMemo(
-    () => enrichServiceProvidersWithMembers(availableServiceProviders, usersDirectory),
-    [availableServiceProviders, usersDirectory],
-  );
-
   const targetOptions = useMemo(
     () =>
       buildTargetOptions({
-        teams: availableTeamsWithMembers,
-        serviceProviders: availableServiceProvidersWithMembers,
+        teams: availableTeams,
+        serviceProviders: availableServiceProviders,
         targetType,
       }),
-    [availableTeamsWithMembers, availableServiceProvidersWithMembers, targetType],
+    [availableTeams, availableServiceProviders, targetType],
   );
 
   const selectedTargetOption =
@@ -963,9 +753,7 @@ export default function BmdBgoPage() {
     0,
   );
 
-  const totalGeofenceCount = allocatableReadyGroups.length + activeAllocatedGeofenceCount;
-
-  const wardGeofenceSummary = useMemo(
+  const totalSummary = useMemo(
     () =>
       readyGroups.reduce(
         (acc, group) => ({
@@ -1262,11 +1050,7 @@ export default function BmdBgoPage() {
   }
 
   const isLoading =
-    geofencesLoading ||
-    teamsLoading ||
-    serviceProvidersLoading ||
-    usersLoading ||
-    existingBmdBatchesLoading;
+    geofencesLoading || teamsLoading || serviceProvidersLoading || existingBmdBatchesLoading;
   const errorMessage =
     geofencesErrorData?.message ||
     geofencesErrorData?.data?.message ||
@@ -1327,16 +1111,17 @@ export default function BmdBgoPage() {
           </div>
         </div>
 
-        <div style={styles.summaryMetricStack}>
-          <div style={styles.summaryMetricGridThree}>
-            <InfoCard label="Total Geofences" value={totalGeofenceCount} />
+        <div style={styles.summaryMetricRows}>
+          <div style={styles.summaryMetricRow}>
+            <InfoCard label="Total Geofences" value={readyGroups.length} />
             <InfoCard label="Available" value={allocatableReadyGroups.length} />
             <InfoCard label="Allocated" value={activeAllocatedGeofenceCount} />
           </div>
-          <div style={styles.summaryMetricGridThree}>
-            <InfoCard label="ERFs" value={wardGeofenceSummary.erfs} />
-            <InfoCard label="Premises" value={wardGeofenceSummary.premises} />
-            <InfoCard label="Meters" value={wardGeofenceSummary.meters} />
+
+          <div style={styles.summaryMetricRow}>
+            <InfoCard label="ERFs" value={totalSummary.erfs} />
+            <InfoCard label="Premises" value={totalSummary.premises} />
+            <InfoCard label="Meters" value={totalSummary.meters} />
           </div>
         </div>
       </div>
@@ -1421,10 +1206,7 @@ export default function BmdBgoPage() {
                         <strong style={styles.targetTitle}>{target.name}</strong>
                       </div>
                       <p style={styles.targetSub}>{getTargetOptionSubtitle(target)}</p>
-                      {getTargetOptionMicroText(target) ? (
-                        <span style={styles.targetMicro}>{getTargetOptionMicroText(target)}</span>
-                      ) : null}
-                      <MembersList target={target} maxItems={5} />
+                      <span style={styles.targetMicro}>{getTargetOptionMicroText(target)}</span>
                     </button>
                   );
                 })}
@@ -1432,6 +1214,18 @@ export default function BmdBgoPage() {
             )}
           </div>
 
+          <div style={styles.panel}>
+            <h3 style={styles.panelTitle}>Selected Target</h3>
+            {selectedTargetPayload ? (
+              <div style={styles.selectedTargetCard}>
+                <span style={styles.targetType}>{selectedTargetPayload.type}</span>
+                <strong>{selectedTargetPayload.name}</strong>
+                <span style={styles.targetMicro}>{selectedTargetPayload.id}</span>
+              </div>
+            ) : (
+              <div style={styles.emptyState}>Select or drag a TEAM/SP target.</div>
+            )}
+          </div>
         </section>
 
         <section style={styles.panel}>
@@ -1964,11 +1758,11 @@ const styles = {
     fontSize: 13,
     fontWeight: 800,
   },
-  summaryMetricStack: {
+  summaryMetricRows: {
     display: "grid",
     gap: 10,
   },
-  summaryMetricGridThree: {
+  summaryMetricRow: {
     display: "grid",
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: 10,
@@ -2114,48 +1908,6 @@ const styles = {
     fontWeight: 800,
     marginTop: 6,
     wordBreak: "break-word",
-  },
-  memberList: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 8,
-  },
-  memberChip: {
-    display: "grid",
-    gap: 2,
-    border: "1px solid #cbd5e1",
-    borderRadius: 999,
-    background: "#f8fafc",
-    padding: "5px 8px",
-    color: "#0f172a",
-    maxWidth: "100%",
-    fontSize: 11,
-  },
-  memberChipWarning: {
-    borderColor: "#f59e0b",
-    background: "#fffbeb",
-  },
-  memberMore: {
-    display: "inline-flex",
-    alignItems: "center",
-    border: "1px solid #e2e8f0",
-    borderRadius: 999,
-    background: "#ffffff",
-    padding: "6px 9px",
-    color: "#475569",
-    fontSize: 11,
-    fontWeight: 900,
-  },
-  memberEmpty: {
-    border: "1px dashed #cbd5e1",
-    borderRadius: 12,
-    background: "#f8fafc",
-    color: "#64748b",
-    fontSize: 12,
-    fontWeight: 800,
-    padding: 10,
-    marginTop: 8,
   },
   selectedTargetCard: {
     display: "grid",
@@ -2575,13 +2327,6 @@ const styles = {
     alignItems: "center",
     gap: 12,
     marginTop: 12,
-  },
-  existingBatchActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
   },
   existingBatchReason: {
     color: "#64748b",
