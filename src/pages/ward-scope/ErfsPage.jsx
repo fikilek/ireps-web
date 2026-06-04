@@ -1,6 +1,57 @@
 import WardScopeHeader from "./components/WardScopeHeader";
 import { useWarehouse } from "../../context/WarehouseContext";
 
+const WAITING_STATUSES = new Set(["pending", "syncing"]);
+
+const isWaitingForRows = ({ status, loading, selectedWardPcode, rowCount }) => {
+  if (!selectedWardPcode) return false;
+  if (rowCount > 0) return false;
+
+  return loading || WAITING_STATUSES.has(status);
+};
+
+const InlineSpinner = ({ label = "Loading..." }) => (
+  <span className="ward-scope-inline-spinner">
+    <span className="ward-scope-spinner-dot" aria-hidden="true" />
+    <span>{label}</span>
+    <style>
+      {`@keyframes wardScopeSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .ward-scope-inline-spinner {
+        align-items: center;
+        display: inline-flex;
+        gap: 0.45rem;
+        justify-content: center;
+        white-space: nowrap;
+      }
+
+      .ward-scope-spinner-dot {
+        animation: wardScopeSpin 0.8s linear infinite;
+        border: 2px solid currentColor;
+        border-radius: 999px;
+        border-right-color: transparent;
+        display: inline-block;
+        height: 0.85rem;
+        width: 0.85rem;
+      }`}
+    </style>
+  </span>
+);
+
+const LoadingState = ({ title, message }) => (
+  <div className="empty-state">
+    <h2>
+      <InlineSpinner label={title} />
+    </h2>
+    <p className="muted">{message}</p>
+  </div>
+);
+
+
 const getErfKey = (erf) => erf?.erfId || erf?.id || erf?.erfNo || "NAv";
 
 const getErfNo = (erf) => erf?.erfNo || erf?.sg?.parcelNo || "NAv";
@@ -16,11 +67,19 @@ const getPremiseCount = (erf) => {
 };
 
 export default function ErfsPage() {
-  const { all, filtered, sync, scope, loading } = useWarehouse();
+  const { all, filtered, sync, loading } = useWarehouse();
 
   const allErfs = all?.erfs || [];
   const erfs = filtered?.erfs || [];
-  const selectedWardPcode = scope?.wardPcode || "";
+  const erfSyncStatus = sync?.erfs?.status || "idle";
+  const selectedWardPcode =
+    sync?.scope?.wardPcode || sync?.erfs?.wardPcode || "";
+  const isWaitingForErfs = isWaitingForRows({
+    status: erfSyncStatus,
+    loading,
+    selectedWardPcode,
+    rowCount: allErfs.length,
+  });
 
   return (
     <>
@@ -28,11 +87,13 @@ export default function ErfsPage() {
         stats={[
           {
             label: "Ward ERFs",
-            value: loading
-              ? "Loading..."
-              : sync?.erfs?.status === "ready"
-                ? allErfs.length
-                : sync?.erfs?.status || "idle",
+            value: isWaitingForErfs ? (
+              <InlineSpinner label="Loading..." />
+            ) : erfSyncStatus === "ready" ? (
+              allErfs.length
+            ) : (
+              erfSyncStatus
+            ),
           },
           {
             label: "Premises Loaded",
@@ -51,7 +112,13 @@ export default function ErfsPage() {
           </div>
 
           <div className="filter-summary">
-            <strong>{sync?.erfs?.status || "idle"}</strong>
+            <strong>
+              {isWaitingForErfs ? (
+                <InlineSpinner label={erfSyncStatus} />
+              ) : (
+                erfSyncStatus
+              )}
+            </strong>
             <span>{erfs.length} visible rows</span>
           </div>
         </div>
@@ -63,12 +130,17 @@ export default function ErfsPage() {
               Choose a ward above to load operational ERFs from the warehouse.
             </p>
           </div>
+        ) : isWaitingForErfs ? (
+          <LoadingState
+            title="Loading ERFs..."
+            message="Please wait while the Ward Warehouse loads operational ERFs for the selected ward."
+          />
         ) : erfs.length === 0 ? (
           <div className="empty-state">
             <h2>No ERFs loaded</h2>
             <p className="muted">
-              ERF sync status: {sync?.erfs?.status || "idle"}. If this remains
-              empty, we will check the Firestore query/index for ireps_erfs.
+              ERF sync status: {erfSyncStatus}. If this remains empty, we will
+              check the Firestore query/index for ireps_erfs.
             </p>
           </div>
         ) : (

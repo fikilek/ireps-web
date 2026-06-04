@@ -1,6 +1,57 @@
 import WardScopeHeader from "./components/WardScopeHeader";
 import { useWarehouse } from "../../context/WarehouseContext";
 
+const WAITING_STATUSES = new Set(["pending", "syncing"]);
+
+const isWaitingForRows = ({ status, loading, selectedWardPcode, rowCount }) => {
+  if (!selectedWardPcode) return false;
+  if (rowCount > 0) return false;
+
+  return loading || WAITING_STATUSES.has(status);
+};
+
+const InlineSpinner = ({ label = "Loading..." }) => (
+  <span className="ward-scope-inline-spinner">
+    <span className="ward-scope-spinner-dot" aria-hidden="true" />
+    <span>{label}</span>
+    <style>
+      {`@keyframes wardScopeSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .ward-scope-inline-spinner {
+        align-items: center;
+        display: inline-flex;
+        gap: 0.45rem;
+        justify-content: center;
+        white-space: nowrap;
+      }
+
+      .ward-scope-spinner-dot {
+        animation: wardScopeSpin 0.8s linear infinite;
+        border: 2px solid currentColor;
+        border-radius: 999px;
+        border-right-color: transparent;
+        display: inline-block;
+        height: 0.85rem;
+        width: 0.85rem;
+      }`}
+    </style>
+  </span>
+);
+
+const LoadingState = ({ title, message }) => (
+  <div className="empty-state">
+    <h2>
+      <InlineSpinner label={title} />
+    </h2>
+    <p className="muted">{message}</p>
+  </div>
+);
+
+
 const getMeterKey = (meter) =>
   meter?.ast?.astData?.astId ||
   meter?.astData?.astId ||
@@ -89,8 +140,15 @@ export default function MetersPage() {
 
   const allMeters = all?.meters || [];
   const meters = filtered?.meters || [];
+  const meterSyncStatus = sync?.meters?.status || "idle";
   const selectedWardPcode =
     sync?.scope?.wardPcode || sync?.meters?.wardPcode || "";
+  const isWaitingForMeters = isWaitingForRows({
+    status: meterSyncStatus,
+    loading,
+    selectedWardPcode,
+    rowCount: allMeters.length,
+  });
 
   return (
     <>
@@ -100,12 +158,13 @@ export default function MetersPage() {
         stats={[
           {
             label: "Ward Meters",
-            value: loading
-              ? "Loading..."
-              : sync?.meters?.status === "ready" ||
-                  sync?.meters?.status === "pending"
-                ? allMeters.length
-                : sync?.meters?.status || "idle",
+            value: isWaitingForMeters ? (
+              <InlineSpinner label="Loading..." />
+            ) : meterSyncStatus === "ready" || meterSyncStatus === "pending" ? (
+              allMeters.length
+            ) : (
+              meterSyncStatus
+            ),
           },
           {
             label: "Visible Meters",
@@ -130,7 +189,13 @@ export default function MetersPage() {
           </div>
 
           <div className="filter-summary">
-            <strong>{sync?.meters?.status || "idle"}</strong>
+            <strong>
+              {isWaitingForMeters ? (
+                <InlineSpinner label={meterSyncStatus} />
+              ) : (
+                meterSyncStatus
+              )}
+            </strong>
             <span>{meters.length} visible rows</span>
           </div>
         </div>
@@ -142,12 +207,17 @@ export default function MetersPage() {
               Choose a ward above to load operational meters from the warehouse.
             </p>
           </div>
+        ) : isWaitingForMeters ? (
+          <LoadingState
+            title="Loading meters..."
+            message="Please wait while the Ward Warehouse loads operational meters from the ASTs collection."
+          />
         ) : meters.length === 0 ? (
           <div className="empty-state">
             <h2>No meters loaded</h2>
             <p className="muted">
-              Meter sync status: {sync?.meters?.status || "idle"}. If a geofence
-              is selected, it may have no linked meters.
+              Meter sync status: {meterSyncStatus}. If a geofence is selected, it
+              may have no linked meters.
             </p>
           </div>
         ) : (

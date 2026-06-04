@@ -1,6 +1,57 @@
 import WardScopeHeader from "./components/WardScopeHeader";
 import { useWarehouse } from "../../context/WarehouseContext";
 
+const WAITING_STATUSES = new Set(["pending", "syncing"]);
+
+const isWaitingForRows = ({ status, loading, selectedWardPcode, rowCount }) => {
+  if (!selectedWardPcode) return false;
+  if (rowCount > 0) return false;
+
+  return loading || WAITING_STATUSES.has(status);
+};
+
+const InlineSpinner = ({ label = "Loading..." }) => (
+  <span className="ward-scope-inline-spinner">
+    <span className="ward-scope-spinner-dot" aria-hidden="true" />
+    <span>{label}</span>
+    <style>
+      {`@keyframes wardScopeSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .ward-scope-inline-spinner {
+        align-items: center;
+        display: inline-flex;
+        gap: 0.45rem;
+        justify-content: center;
+        white-space: nowrap;
+      }
+
+      .ward-scope-spinner-dot {
+        animation: wardScopeSpin 0.8s linear infinite;
+        border: 2px solid currentColor;
+        border-radius: 999px;
+        border-right-color: transparent;
+        display: inline-block;
+        height: 0.85rem;
+        width: 0.85rem;
+      }`}
+    </style>
+  </span>
+);
+
+const LoadingState = ({ title, message }) => (
+  <div className="empty-state">
+    <h2>
+      <InlineSpinner label={title} />
+    </h2>
+    <p className="muted">{message}</p>
+  </div>
+);
+
+
 const getPremiseKey = (premise) =>
   premise?.premiseId || premise?.id || premise?.address || "NAv";
 
@@ -95,11 +146,21 @@ const getTotalMeterCount = (premise) => {
 };
 
 export default function PremisesPage() {
-  const { all, filtered, sync, scope, selected, loading } = useWarehouse();
+  const { all, filtered, sync, selected, loading } = useWarehouse();
 
   const allPremises = all?.prems || [];
   const premises = filtered?.prems || [];
-  const selectedWardPcode = scope?.wardPcode || "";
+  const premiseSyncStatus =
+    sync?.premises?.status ||
+    (loading && allPremises.length === 0 ? "syncing" : "ready");
+  const selectedWardPcode =
+    sync?.scope?.wardPcode || sync?.premises?.wardPcode || "";
+  const isWaitingForPremises = isWaitingForRows({
+    status: premiseSyncStatus,
+    loading,
+    selectedWardPcode,
+    rowCount: allPremises.length,
+  });
   const selectedGeofence = selected?.geofence || null;
   const activeGeofenceLabel =
     selectedGeofence?.name || selectedGeofence?.id || "None";
@@ -112,11 +173,13 @@ export default function PremisesPage() {
         stats={[
           {
             label: "Ward Premises",
-            value: loading
-              ? "Loading..."
-              : sync?.premises?.status === "ready"
-                ? allPremises.length
-                : sync?.premises?.status || "idle",
+            value: isWaitingForPremises ? (
+              <InlineSpinner label="Loading..." />
+            ) : premiseSyncStatus === "ready" ? (
+              allPremises.length
+            ) : (
+              premiseSyncStatus
+            ),
           },
           {
             label: "Visible Premises",
@@ -144,7 +207,13 @@ export default function PremisesPage() {
           </div>
 
           <div className="filter-summary">
-            <strong>{sync?.premises?.status || "idle"}</strong>
+            <strong>
+              {isWaitingForPremises ? (
+                <InlineSpinner label={premiseSyncStatus} />
+              ) : (
+                premiseSyncStatus
+              )}
+            </strong>
             <span>{premises.length} visible rows</span>
           </div>
         </div>
@@ -157,13 +226,17 @@ export default function PremisesPage() {
               warehouse.
             </p>
           </div>
+        ) : isWaitingForPremises ? (
+          <LoadingState
+            title="Loading premises..."
+            message="Please wait while the Ward Warehouse loads operational premises for the selected ward."
+          />
         ) : premises.length === 0 ? (
           <div className="empty-state">
             <h2>No premises loaded</h2>
             <p className="muted">
-              Premise sync status: {sync?.premises?.status || "idle"}. If this
-              remains empty, we will check the Firestore query/index for
-              premises.
+              Premise sync status: {premiseSyncStatus}. If this remains empty,
+              we will check the Firestore query/index for premises.
             </p>
           </div>
         ) : (
