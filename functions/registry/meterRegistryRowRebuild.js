@@ -31,11 +31,36 @@ function getStandardMetadata(sourceMeta = {}) {
   };
 }
 
+function resolveMeterKind(data = {}) {
+  return (
+    data?.ast?.astData?.meter?.type ||
+    data?.astData?.meter?.type ||
+    data?.meterKind ||
+    "NAv"
+  );
+}
+
+function resolveMeterPhase(data = {}) {
+  return (
+    data?.ast?.astData?.meter?.phase ||
+    data?.astData?.meter?.phase ||
+    data?.meterPhase ||
+    "NAv"
+  );
+}
+
+function resolveMeterVisibility(data = {}) {
+  return data?.master?.visibility || data?.visibility || "NAv";
+}
+
 function buildMeterRegistryRow(astId, data = {}) {
   const sourceMetadata = getStandardMetadata(data?.metadata || {});
 
   const meterNoRaw = data?.ast?.astData?.astNo || data?.master?.id || "NAv";
   const meterNo = normalizeMeterNo(meterNoRaw) || "NAv";
+  const meterKind = resolveMeterKind(data);
+  const meterPhase = resolveMeterPhase(data);
+  const visibility = resolveMeterVisibility(data);
 
   return {
     id: astId,
@@ -43,8 +68,10 @@ function buildMeterRegistryRow(astId, data = {}) {
 
     meterNo,
     meterType: data?.meterType || "NAv",
+    meterKind,
+    meterPhase,
 
-    visibility: data?.master?.visibility || "NAv",
+    visibility,
 
     premiseId: data?.accessData?.premise?.id || "NAv",
     premiseAddress: data?.accessData?.premise?.address || "NAv",
@@ -113,6 +140,9 @@ export async function rebuildMeterRegistryRow(astId) {
       astId,
       meterNo: row.meterNo,
       meterType: row.meterType,
+      meterKind: row.meterKind,
+      meterPhase: row.meterPhase,
+      visibility: row.visibility,
       lmPcode: row?.parents?.lmPcode || "NAv",
       wardPcode: row?.parents?.wardPcode || "NAv",
     });

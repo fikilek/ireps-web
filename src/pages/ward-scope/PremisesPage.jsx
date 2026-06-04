@@ -1,56 +1,119 @@
+import { useMemo, useState } from "react";
+
 import WardScopeHeader from "./components/WardScopeHeader";
 import { useWarehouse } from "../../context/WarehouseContext";
 
-const WAITING_STATUSES = new Set(["pending", "syncing"]);
-
-const isWaitingForRows = ({ status, loading, selectedWardPcode, rowCount }) => {
-  if (!selectedWardPcode) return false;
-  if (rowCount > 0) return false;
-
-  return loading || WAITING_STATUSES.has(status);
+const EMPTY_COLUMN_FILTERS = {
+  address: "",
+  suburb: "",
+  erfNo: "",
+  propertyType: "",
+  propertyName: "",
+  unitNo: "",
+  electricity: "",
+  water: "",
+  totalMeters: "",
+  premiseId: "",
 };
 
-const InlineSpinner = ({ label = "Loading..." }) => (
-  <span className="ward-scope-inline-spinner">
-    <span className="ward-scope-spinner-dot" aria-hidden="true" />
-    <span>{label}</span>
-    <style>
-      {`@keyframes wardScopeSpin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
 
-      .ward-scope-inline-spinner {
-        align-items: center;
-        display: inline-flex;
-        gap: 0.45rem;
-        justify-content: center;
-        white-space: nowrap;
-      }
+const COLUMN_HEADER_FILTER_WRAP_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
 
-      .ward-scope-spinner-dot {
-        animation: wardScopeSpin 0.8s linear infinite;
-        border: 2px solid currentColor;
-        border-radius: 999px;
-        border-right-color: transparent;
-        display: inline-block;
-        height: 0.85rem;
-        width: 0.85rem;
-      }`}
-    </style>
-  </span>
-);
+const COLUMN_HEADER_LABEL_STYLE = {
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
 
-const LoadingState = ({ title, message }) => (
-  <div className="empty-state">
-    <h2>
-      <InlineSpinner label={title} />
-    </h2>
-    <p className="muted">{message}</p>
-  </div>
-);
+const COLUMN_FILTER_INPUT_STYLE = {
+  width: "100%",
+  minWidth: 86,
+  boxSizing: "border-box",
+  border: "1px solid #cbd5e1",
+  borderRadius: 8,
+  background: "#fff",
+  color: "#0f172a",
+  fontSize: 11,
+  padding: "6px 8px",
+};
 
+const CLEAR_FILTERS_BUTTON_STYLE = {
+  border: "1px solid #fbbf24",
+  borderRadius: 999,
+  background: "#fffbeb",
+  color: "#92400e",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "8px 12px",
+};
+
+const LOADING_STATE_STYLE = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+};
+
+const SPINNER_STYLE = {
+  width: 16,
+  height: 16,
+  border: "3px solid #e2e8f0",
+  borderTopColor: "#2563eb",
+  borderRadius: "50%",
+  animation: "irepsWardScopeSpin 0.8s linear infinite",
+};
+
+function normalizeFilterText(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function matchesTextFilter(value, filterValue) {
+  const needle = normalizeFilterText(filterValue);
+
+  if (!needle) return true;
+
+  return normalizeFilterText(value).includes(needle);
+}
+
+function hasActiveColumnFilters(columnFilters) {
+  return Object.values(columnFilters).some((value) => normalizeFilterText(value));
+}
+
+function ColumnHeaderFilter({ label, field, value, onChange, placeholder }) {
+  return (
+    <div style={COLUMN_HEADER_FILTER_WRAP_STYLE}>
+      <span style={COLUMN_HEADER_LABEL_STYLE}>{label}</span>
+      <input
+        aria-label={`Filter ${label}`}
+        placeholder={placeholder || "Filter"}
+        style={COLUMN_FILTER_INPUT_STYLE}
+        type="text"
+        value={value || ""}
+        onChange={(event) => onChange(field, event.target.value)}
+      />
+    </div>
+  );
+}
+
+function LoadingRowsState({ label }) {
+  return (
+    <div className="empty-state">
+      <style>{`@keyframes irepsWardScopeSpin { to { transform: rotate(360deg); } }`}</style>
+      <div style={LOADING_STATE_STYLE}>
+        <span aria-hidden="true" style={SPINNER_STYLE} />
+        <div>
+          <h2>{label}</h2>
+          <p className="muted">Waiting for the Ward Warehouse stream.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const getPremiseKey = (premise) =>
   premise?.premiseId || premise?.id || premise?.address || "NAv";
@@ -101,15 +164,6 @@ const getUnitNo = (premise) => {
   );
 };
 
-const getOccupancyStatus = (premise) => {
-  return (
-    premise?.occupancyStatus ||
-    premise?.occupancy?.status ||
-    premise?.status ||
-    "NAv"
-  );
-};
-
 const getErfNo = (premise) => {
   return premise?.erfNo || premise?.erf?.erfNo || "NAv";
 };
@@ -145,25 +199,61 @@ const getTotalMeterCount = (premise) => {
   );
 };
 
+function applyColumnFilters(premises, columnFilters) {
+  return premises.filter((premise) => {
+    return (
+      matchesTextFilter(getPremiseAddress(premise), columnFilters.address) &&
+      matchesTextFilter(getSuburb(premise), columnFilters.suburb) &&
+      matchesTextFilter(getErfNo(premise), columnFilters.erfNo) &&
+      matchesTextFilter(getPropertyType(premise), columnFilters.propertyType) &&
+      matchesTextFilter(getPropertyName(premise), columnFilters.propertyName) &&
+      matchesTextFilter(getUnitNo(premise), columnFilters.unitNo) &&
+      matchesTextFilter(
+        getElectricityMeterCount(premise),
+        columnFilters.electricity,
+      ) &&
+      matchesTextFilter(getWaterMeterCount(premise), columnFilters.water) &&
+      matchesTextFilter(getTotalMeterCount(premise), columnFilters.totalMeters) &&
+      matchesTextFilter(getPremiseId(premise), columnFilters.premiseId)
+    );
+  });
+}
+
 export default function PremisesPage() {
   const { all, filtered, sync, selected, loading } = useWarehouse();
+  const [columnFilters, setColumnFilters] = useState(EMPTY_COLUMN_FILTERS);
 
   const allPremises = all?.prems || [];
   const premises = filtered?.prems || [];
-  const premiseSyncStatus =
-    sync?.premises?.status ||
-    (loading && allPremises.length === 0 ? "syncing" : "ready");
+  const premisesSync = sync?.premises || sync?.prems || {};
   const selectedWardPcode =
-    sync?.scope?.wardPcode || sync?.premises?.wardPcode || "";
-  const isWaitingForPremises = isWaitingForRows({
-    status: premiseSyncStatus,
-    loading,
-    selectedWardPcode,
-    rowCount: allPremises.length,
-  });
+    sync?.scope?.wardPcode || premisesSync?.wardPcode || "";
   const selectedGeofence = selected?.geofence || null;
   const activeGeofenceLabel =
     selectedGeofence?.name || selectedGeofence?.id || "None";
+  const hasColumnFilters = hasActiveColumnFilters(columnFilters);
+  const visiblePremises = useMemo(
+    () => applyColumnFilters(premises, columnFilters),
+    [premises, columnFilters],
+  );
+  const isWaitingForPremises =
+    Boolean(selectedWardPcode) &&
+    premises.length === 0 &&
+    (loading ||
+      premisesSync?.status === "pending" ||
+      premisesSync?.status === "loading" ||
+      premisesSync?.status === "syncing");
+
+  function updateColumnFilter(field, value) {
+    setColumnFilters((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function clearColumnFilters() {
+    setColumnFilters(EMPTY_COLUMN_FILTERS);
+  }
 
   return (
     <>
@@ -173,17 +263,15 @@ export default function PremisesPage() {
         stats={[
           {
             label: "Ward Premises",
-            value: isWaitingForPremises ? (
-              <InlineSpinner label="Loading..." />
-            ) : premiseSyncStatus === "ready" ? (
-              allPremises.length
-            ) : (
-              premiseSyncStatus
-            ),
+            value: loading
+              ? "Loading..."
+              : premisesSync?.status === "ready"
+                ? allPremises.length
+                : premisesSync?.status || "idle",
           },
           {
             label: "Visible Premises",
-            value: premises.length,
+            value: visiblePremises.length,
           },
           {
             label: "Active Geofence",
@@ -207,14 +295,17 @@ export default function PremisesPage() {
           </div>
 
           <div className="filter-summary">
-            <strong>
-              {isWaitingForPremises ? (
-                <InlineSpinner label={premiseSyncStatus} />
-              ) : (
-                premiseSyncStatus
-              )}
-            </strong>
-            <span>{premises.length} visible rows</span>
+            <strong>{premisesSync?.status || "idle"}</strong>
+            <span>{visiblePremises.length} visible rows</span>
+            {hasColumnFilters ? (
+              <button
+                type="button"
+                style={CLEAR_FILTERS_BUTTON_STYLE}
+                onClick={clearColumnFilters}
+              >
+                Clear filters
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -227,16 +318,14 @@ export default function PremisesPage() {
             </p>
           </div>
         ) : isWaitingForPremises ? (
-          <LoadingState
-            title="Loading premises..."
-            message="Please wait while the Ward Warehouse loads operational premises for the selected ward."
-          />
+          <LoadingRowsState label="Loading premises" />
         ) : premises.length === 0 ? (
           <div className="empty-state">
             <h2>No premises loaded</h2>
             <p className="muted">
-              Premise sync status: {premiseSyncStatus}. If this remains empty,
-              we will check the Firestore query/index for premises.
+              Premise sync status: {premisesSync?.status || "idle"}. If this
+              remains empty, we will check the Firestore query/index for
+              premises.
             </p>
           </div>
         ) : (
@@ -244,36 +333,110 @@ export default function PremisesPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Address</th>
-                  <th>SUBURB NAME</th>
-                  <th>ERF No</th>
-                  <th>Property Type</th>
-                  <th>Property Name</th>
-                  <th>Unit No</th>
-                  {/* <th>Occupancy</th> */}
-                  <th>Electricity</th>
-                  <th>Water</th>
-                  <th>Total Meters</th>
-                  <th>Premise ID</th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="address"
+                      label="Address"
+                      value={columnFilters.address}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="suburb"
+                      label="SUBURB NAME"
+                      value={columnFilters.suburb}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="erfNo"
+                      label="ERF No"
+                      value={columnFilters.erfNo}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="propertyType"
+                      label="Property Type"
+                      value={columnFilters.propertyType}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="propertyName"
+                      label="Property Name"
+                      value={columnFilters.propertyName}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="unitNo"
+                      label="Unit No"
+                      value={columnFilters.unitNo}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="electricity"
+                      label="Electricity"
+                      value={columnFilters.electricity}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="water"
+                      label="Water"
+                      value={columnFilters.water}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="totalMeters"
+                      label="Total Meters"
+                      value={columnFilters.totalMeters}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
+                  <th>
+                    <ColumnHeaderFilter
+                      field="premiseId"
+                      label="Premise ID"
+                      value={columnFilters.premiseId}
+                      onChange={updateColumnFilter}
+                    />
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {premises.map((premise) => (
-                  <tr key={getPremiseKey(premise)}>
-                    <td>{getPremiseAddress(premise)}</td>
-                    <td>{getSuburb(premise)}</td>
-                    <td title={getErfId(premise)}>{getErfNo(premise)}</td>
-                    <td>{getPropertyType(premise)}</td>
-                    <td>{getPropertyName(premise)}</td>
-                    <td>{getUnitNo(premise)}</td>
-                    {/* <td>{getOccupancyStatus(premise)}</td> */}
-                    <td>{getElectricityMeterCount(premise)}</td>
-                    <td>{getWaterMeterCount(premise)}</td>
-                    <td>{getTotalMeterCount(premise)}</td>
-                    <td>{getPremiseId(premise)}</td>
+                {visiblePremises.length === 0 ? (
+                  <tr>
+                    <td colSpan={10}>No premises match the column filters.</td>
                   </tr>
-                ))}
+                ) : (
+                  visiblePremises.map((premise) => (
+                    <tr key={getPremiseKey(premise)}>
+                      <td>{getPremiseAddress(premise)}</td>
+                      <td>{getSuburb(premise)}</td>
+                      <td title={getErfId(premise)}>{getErfNo(premise)}</td>
+                      <td>{getPropertyType(premise)}</td>
+                      <td>{getPropertyName(premise)}</td>
+                      <td>{getUnitNo(premise)}</td>
+                      <td>{getElectricityMeterCount(premise)}</td>
+                      <td>{getWaterMeterCount(premise)}</td>
+                      <td>{getTotalMeterCount(premise)}</td>
+                      <td>{getPremiseId(premise)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
