@@ -583,3 +583,222 @@ export function buildTcRowBgoPatch({
 export function getInstructionMedia(media = []) {
   return safeArray(media).filter((item) => item?.tag === "instructionMedia");
 }
+
+/* =====================================================
+   BMD-BGO FACTORY
+   -----------------------------------------------------
+   Creates a BGO batch for Bulk Meter Discovery only.
+   No child TRNs are created upfront.
+===================================================== */
+
+export function buildBmdBgoBatchDoc({
+  bgoBatchId,
+  trnType = "METER_DISCOVERY",
+  scope = {},
+  geofenceRef,
+  target,
+  worklist = {},
+  summary = {},
+  now,
+  actorUid,
+  actorName,
+}) {
+  const operationCode = getTrnShortCode(trnType);
+  const erfRefs = safeArray(worklist?.erfRefs);
+  const erfCount = Number(summary?.erfCount ?? erfRefs.length) || 0;
+  const premiseCount = Number(summary?.premiseCount ?? 0) || 0;
+  const meterCount = Number(summary?.meterCount ?? 0) || 0;
+
+  return {
+    id: bgoBatchId,
+    tcId: null,
+    trnType: "BULK_GEOFENCE_ORIGIN",
+    operationType: trnType,
+    operationCode,
+
+    origin: {
+      channel: "OFFICE",
+      source: "BGO",
+      sourceModule: "BULK_METER_DISCOVERY",
+      tcId: null,
+      createdMode: "OFFICE",
+    },
+
+    assignment: {
+      targets: [target],
+      instruction: {
+        code: trnType,
+        text: "Bulk meter discovery geofence allocation",
+        notes: "NAv",
+        mediaRequired: true,
+      },
+    },
+
+    geofenceRef,
+
+    scope: {
+      lmPcode: scope?.lmPcode || "NAv",
+      lmName: scope?.lmName || "NAv",
+      wardPcode: scope?.wardPcode || "NAv",
+      wardName: scope?.wardName || "NAv",
+    },
+
+    workflow: {
+      state: "ISSUED",
+      createdMode: "OFFICE",
+      issuedAt: now,
+      issuedByUid: actorUid || "NAv",
+      issuedByUser: actorName || "NAv",
+      acceptedAt: null,
+      acceptedByUid: null,
+      acceptedByUser: null,
+      rejectedAt: null,
+      rejectedByUid: null,
+      rejectedByUser: null,
+      rejectReason: "",
+      cancelledAt: null,
+      cancelledByUid: null,
+      cancelledByUser: null,
+      completedAt: null,
+      completedByUid: null,
+      completedByUser: null,
+    },
+
+    worklist: {
+      type: "ERF_LIST",
+      erfRefs,
+    },
+
+    summary: {
+      erfCount,
+      premiseCount,
+      meterCount,
+      totalRows: erfCount,
+      totalTrnsCreated: 0,
+      totalChildTrns: 0,
+    },
+
+    batchReleaseSummary: {
+      totalRows: erfCount,
+      totalTrnsCreated: 0,
+      totalWaitingBatchAcceptance: erfCount,
+      totalReleased: 0,
+      totalAcceptedForExecution: 0,
+      totalRejectedAtBatch: 0,
+      totalCancelledAtBatch: 0,
+    },
+
+    derivedExecutionSummary: {
+      sourceCollection: "trns",
+      sourceField: "bgo.batchId",
+      derivedAt: null,
+      totalChildTrns: 0,
+      totalNotExecuted: 0,
+      totalAccepted: 0,
+      totalInProgress: 0,
+      totalCompleted: 0,
+      totalSuccess: 0,
+      totalNoAccess: 0,
+      totalNoReading: 0,
+      totalCancelled: 0,
+      totalRejected: 0,
+    },
+
+    bgo: {
+      kind: "BGO_BATCH",
+      batchMode: "BMD",
+      batchId: bgoBatchId,
+      targetType: target.type,
+      targetId: target.id,
+      targetName: target.name,
+      geofenceId: geofenceRef.id,
+      geofenceName: geofenceRef.name,
+      releaseState: BGO_CHILD_RELEASE_STATES.waiting,
+      childTrnCreationMode: "FIELD_CREATED_ON_DISCOVERY_SUBMIT",
+      createsChildTrnsUpfront: false,
+    },
+
+    refs: {
+      tcUploadId: null,
+      trnIds: [],
+    },
+
+    metadata: buildRootMetadata({ now, actorUid, actorName }),
+  };
+}
+
+export function buildBmdBgoBatchHistoryDoc({
+  bgoBatchId,
+  geofenceRef,
+  target,
+  summary = {},
+  actorUid,
+  actorName,
+  now,
+}) {
+  return {
+    event: "ISSUED",
+    workflowState: "ISSUED",
+    outcome: "NAv",
+    bgoBatchId,
+    trnType: "METER_DISCOVERY",
+    geofenceRef,
+    target,
+    summary,
+    note: "BMD-BGO batch issued without upfront child TRNs",
+    actor: {
+      uid: actorUid || "NAv",
+      name: actorName || "NAv",
+    },
+    metadata: buildRootMetadata({ now, actorUid, actorName }),
+  };
+}
+
+export function buildBmdBgoNotificationRecord({
+  bgoBatchId,
+  target,
+  geofenceRef,
+  summary = {},
+  actorUid,
+  actorName,
+  now,
+}) {
+  return {
+    type: "BMD_BGO_BATCH_ISSUED",
+    channelPreference: ["IN_APP", "EMAIL", "WHATSAPP"],
+
+    recipient: {
+      type: target.type,
+      id: target.id,
+      name: target.name,
+      email: String(target?.email || "").trim(),
+      phone: String(target?.phone || "").trim(),
+    },
+
+    bgo: {
+      batchId: bgoBatchId,
+      batchMode: "BMD",
+      trnType: "METER_DISCOVERY",
+      geofenceRef,
+      workflowState: "ISSUED",
+      erfCount: Number(summary?.erfCount || 0),
+      premiseCount: Number(summary?.premiseCount || 0),
+      meterCount: Number(summary?.meterCount || 0),
+    },
+
+    message: {
+      title: "New Bulk Meter Discovery batch issued",
+      body: `${Number(summary?.erfCount || 0)} ERF(s) have been issued for meter discovery in ${geofenceRef.name}.`,
+    },
+
+    delivery: {
+      status: "PENDING",
+      attempts: 0,
+      lastAttemptAt: null,
+      deliveredAt: null,
+      error: "",
+    },
+
+    metadata: buildRootMetadata({ now, actorUid, actorName }),
+  };
+}

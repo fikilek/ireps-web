@@ -20,6 +20,9 @@ import {
   safeArray,
   selectedGeofenceBelongsToRow,
   validateCreateBgoPayload,
+  isBmdBgoCreatePayload,
+  buildBmdBgoBatchId,
+  validateCreateBmdBgoPayload,
   assertNoDuplicateRowUseAcrossAllocations,
   BGO_COLLECTIONS,
 } from "./helpers.js";
@@ -30,6 +33,9 @@ import {
   buildBgoNotificationRecord,
   buildBgoRowAndChildTrnDocs,
   buildTcRowBgoPatch,
+  buildBmdBgoBatchDoc,
+  buildBmdBgoBatchHistoryDoc,
+  buildBmdBgoNotificationRecord,
 } from "./trnFactory.js";
 
 import { refreshBgoBatchDerivedExecutionSummaries } from "./executionSummary.js";
@@ -565,6 +571,141 @@ async function refreshImpactedTcRowsAfterBgoCreate({
   };
 }
 
+
+async function createBmdBgoBatch({
+  db,
+  data,
+  now,
+  actorUid,
+  actorName,
+}) {
+  const payloadCheck = validateCreateBmdBgoPayload(data);
+
+  if (!payloadCheck.ok) {
+    return buildFailureResult(payloadCheck.code, payloadCheck.message);
+  }
+
+  const { trnType, scope, geofenceRef, target, worklist, summary } = payloadCheck;
+
+  const bgoBatchId = buildBmdBgoBatchId({
+    lmPcode: scope.lmPcode,
+    wardPcode: scope.wardPcode,
+    geofenceId: geofenceRef.id,
+    targetType: target.type,
+    targetId: target.id,
+  });
+
+  logger.info("onCreateBgoCallable -- BMD START", {
+    bgoBatchId,
+    trnType,
+    lmPcode: scope.lmPcode,
+    wardPcode: scope.wardPcode,
+    geofenceId: geofenceRef.id,
+    target,
+    erfCount: summary.erfCount,
+    premiseCount: summary.premiseCount,
+    meterCount: summary.meterCount,
+    actorUid,
+  });
+
+  const existingOutputPaths = await validateExistingOutputDocs({
+    db,
+    plannedBatchIds: [bgoBatchId],
+    plannedTrnIds: [],
+  });
+
+  if (existingOutputPaths) {
+    return buildFailureResult(
+      "BMD_BGO_BATCH_ALREADY_EXISTS",
+      "A BMD-BGO batch already exists for this LM/Ward/geofence/target. Review existing BMD allocation before creating another.",
+      {
+        bgoBatchId,
+        existingOutputPaths: existingOutputPaths.slice(0, 20),
+        existingCount: existingOutputPaths.length,
+      },
+    );
+  }
+
+  const batchDoc = buildBmdBgoBatchDoc({
+    bgoBatchId,
+    trnType,
+    scope,
+    geofenceRef,
+    target,
+    worklist,
+    summary,
+    now,
+    actorUid,
+    actorName,
+  });
+
+  const historyDoc = buildBmdBgoBatchHistoryDoc({
+    bgoBatchId,
+    geofenceRef,
+    target,
+    summary,
+    actorUid,
+    actorName,
+    now,
+  });
+
+  const notificationDoc = buildBmdBgoNotificationRecord({
+    bgoBatchId,
+    target,
+    geofenceRef,
+    summary,
+    actorUid,
+    actorName,
+    now,
+  });
+
+  const writeJobs = [];
+
+  writeJobs.push((batch) => {
+    const batchRef = db.collection(BGO_COLLECTIONS.batches).doc(bgoBatchId);
+    batch.create(batchRef, batchDoc);
+  });
+
+  writeJobs.push((batch) => {
+    const historyRef = db
+      .collection(BGO_COLLECTIONS.batches)
+      .doc(bgoBatchId)
+      .collection("history")
+      .doc();
+
+    batch.set(historyRef, historyDoc);
+  });
+
+  writeJobs.push((batch) => {
+    const notificationRef = db.collection(BGO_COLLECTIONS.notifications).doc();
+    batch.set(notificationRef, notificationDoc);
+  });
+
+  const committedWrites = await commitWriteJobsInChunks({
+    db,
+    writeJobs,
+    chunkSize: 380,
+  });
+
+  logger.info("onCreateBgoCallable -- BMD SUCCESS", {
+    bgoBatchId,
+    committedWrites,
+    actorUid,
+  });
+
+  return buildSuccessResult("BMD-BGO batch created successfully", {
+    batchMode: "BMD",
+    bgoBatchId,
+    bgoBatchIds: [bgoBatchId],
+    createdBgoBatchCount: 1,
+    createdBgoRowCount: 0,
+    createdChildTrnCount: 0,
+    trnIds: [],
+    committedWrites,
+    summary,
+  });
+}
+
 export const onCreateBgoCallable = onCall(async (request) => {
   const startedAtMs = Date.now();
 
@@ -598,6 +739,16 @@ export const onCreateBgoCallable = onCall(async (request) => {
           actorClientType: authority.clientType,
         },
       );
+    }
+
+    if (isBmdBgoCreatePayload(data)) {
+      return await createBmdBgoBatch({
+        db,
+        data,
+        now,
+        actorUid,
+        actorName,
+      });
     }
 
     const payloadCheck = validateCreateBgoPayload(data);

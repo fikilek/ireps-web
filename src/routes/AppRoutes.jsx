@@ -28,6 +28,7 @@ import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
 import BgoDashboardPage from "../pages/operations/BgoDashboardPage";
+import BmdBgoPage from "../pages/operations/BmdBgoPage";
 import TcBgoDashboardPage from "../pages/operations/TcBgoDashboardPage";
 
 import MapPage from "../pages/maps/MapPage";
@@ -233,10 +234,7 @@ export default function AppRoutes() {
             path="/operations/bgo"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Bulk Geofence Origin"
-                  description="Create bulk operation TRNs from validated TC rows."
-                />
+                <BmdBgoPage />
               </RoleRoute>
             }
           />

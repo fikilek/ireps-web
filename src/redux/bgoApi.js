@@ -40,6 +40,10 @@ function normalizeDateValue(value) {
   return String(value);
 }
 
+function normalizeUpper(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
 function normalizeGeofenceRef(data = {}) {
   const geofenceRef =
     data.geofenceRef ||
@@ -97,6 +101,10 @@ function getWorkflowState(data = {}) {
   );
 }
 
+function getReleaseState(data = {}) {
+  return valueOrNav(data.bgo?.releaseState || data.releaseState || data.workflow?.releaseState);
+}
+
 function getTcId(data = {}, fallbackId = "") {
   return valueOrNav(
     data.tcId ||
@@ -136,6 +144,8 @@ function normalizeBgoBatchDoc(docSnap) {
 
   const data = docSnap.data() || {};
   const summary = data.summary || {};
+  const batchReleaseSummary = data.batchReleaseSummary || {};
+  const derivedExecutionSummary = data.derivedExecutionSummary || {};
   const metadata = data.metadata || {};
   const geofenceRef = normalizeGeofenceRef(data);
   const target = normalizeTarget(data);
@@ -157,21 +167,25 @@ function normalizeBgoBatchDoc(docSnap) {
     targetId: target.id,
     targetName: target.name,
     workflowState: getWorkflowState(data),
+    releaseState: getReleaseState(data),
     summary: {
       ...summary,
-      totalRows: safeNumber(summary.totalRows ?? data.totalRows),
+      totalRows: safeNumber(summary.totalRows ?? batchReleaseSummary.totalRows ?? data.totalRows),
       totalTrnsCreated: safeNumber(
-        summary.totalTrnsCreated ?? summary.totalChildTrns ?? data.totalTrnsCreated,
+        summary.totalTrnsCreated ??
+          summary.totalChildTrns ??
+          batchReleaseSummary.totalTrnsCreated ??
+          data.totalTrnsCreated,
       ),
       totalAvailable: safeNumber(summary.totalAvailable),
-      totalAccepted: safeNumber(summary.totalAccepted),
-      totalInProgress: safeNumber(summary.totalInProgress),
-      totalCompleted: safeNumber(summary.totalCompleted),
-      totalSuccess: safeNumber(summary.totalSuccess),
-      totalNoAccess: safeNumber(summary.totalNoAccess),
-      totalNoReading: safeNumber(summary.totalNoReading),
-      totalRejected: safeNumber(summary.totalRejected),
-      totalCancelled: safeNumber(summary.totalCancelled),
+      totalAccepted: safeNumber(summary.totalAccepted ?? derivedExecutionSummary.totalAccepted),
+      totalInProgress: safeNumber(summary.totalInProgress ?? derivedExecutionSummary.totalInProgress),
+      totalCompleted: safeNumber(summary.totalCompleted ?? derivedExecutionSummary.totalCompleted),
+      totalSuccess: safeNumber(summary.totalSuccess ?? derivedExecutionSummary.totalSuccess),
+      totalNoAccess: safeNumber(summary.totalNoAccess ?? derivedExecutionSummary.totalNoAccess),
+      totalNoReading: safeNumber(summary.totalNoReading ?? derivedExecutionSummary.totalNoReading),
+      totalRejected: safeNumber(summary.totalRejected ?? derivedExecutionSummary.totalRejected),
+      totalCancelled: safeNumber(summary.totalCancelled ?? derivedExecutionSummary.totalCancelled),
     },
     metadata: {
       ...metadata,
@@ -298,11 +312,25 @@ function resolveLimit(arg, fallback = 500) {
   return safeNumber(arg?.limit, fallback);
 }
 
+function isBmdBatchForScope(batch = {}, lmPcode = "", wardPcode = "") {
+  const raw = batch.raw || {};
+  const isBmd =
+    normalizeUpper(raw?.bgo?.batchMode) === "BMD" ||
+    (normalizeUpper(raw?.operationType) === "METER_DISCOVERY" &&
+      normalizeUpper(raw?.origin?.sourceModule) === "BULK_METER_DISCOVERY");
+
+  if (!isBmd) return false;
+
+  const batchLmPcode = String(raw?.scope?.lmPcode || raw?.sourceUpload?.lmPcode || "").trim();
+  const batchWardPcode = String(raw?.scope?.wardPcode || "").trim();
+
+  return batchLmPcode === lmPcode && batchWardPcode === wardPcode;
+}
+
 export const bgoApi = createApi({
   reducerPath: "bgoApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
-
     createBgo: builder.mutation({
       async queryFn(payload) {
         try {
@@ -359,6 +387,54 @@ export const bgoApi = createApi({
               message: error?.message || "Failed to delete BGO",
             },
           };
+        }
+      },
+    }),
+
+    getBmdBgoBatchesByWard: builder.query({
+      queryFn: () => ({ data: [] }),
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = String(arg?.lmPcode || "").trim();
+        const wardPcode = String(arg?.wardPcode || "").trim();
+        if (!lmPcode || !wardPcode) return;
+
+        const maxResults = resolveLimit(arg, 500);
+        let unsubscribe = null;
+
+        try {
+          await cacheDataLoaded;
+
+          const collectionRef = collection(db, BGO_BATCHES_COLLECTION);
+          const bmdQuery = query(
+            collectionRef,
+            where("operationType", "==", "METER_DISCOVERY"),
+            limitQuery(maxResults),
+          );
+
+          unsubscribe = onSnapshot(
+            bmdQuery,
+            (snapshot) => {
+              const batches = snapshot.docs
+                .map((docSnapshot) => normalizeBgoBatchDoc(docSnapshot))
+                .filter(Boolean)
+                .filter((batch) => isBmdBatchForScope(batch, lmPcode, wardPcode))
+                .sort(sortByCreatedDesc);
+
+              updateCachedData((draft) => {
+                draft.splice(0, draft.length, ...batches);
+              });
+            },
+            (error) => {
+              console.error("bgoApi getBmdBgoBatchesByWard stream error:", error);
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) unsubscribe();
         }
       },
     }),
@@ -539,6 +615,7 @@ export const bgoApi = createApi({
 export const {
   useCreateBgoMutation,
   useDeleteUnacceptedBgoMutation,
+  useGetBmdBgoBatchesByWardQuery,
   useGetBgoBatchesByTcIdQuery,
   useGetBgoRowsByTcIdQuery,
   useGetBgoRowsByBatchIdQuery,

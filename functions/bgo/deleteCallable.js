@@ -146,6 +146,83 @@ async function getBgoChildTrnDocsForBatch({ db, bgoBatchId }) {
   return Array.from(docsByPath.values());
 }
 
+
+function isBmdBgoBatch(batch = {}) {
+  return (
+    normalizeUpper(batch?.bgo?.batchMode) === "BMD" ||
+    (normalizeUpper(batch?.operationType) === "METER_DISCOVERY" &&
+      normalizeUpper(batch?.origin?.sourceModule) === "BULK_METER_DISCOVERY")
+  );
+}
+
+async function getDocsLinkedToBgoBatch({ db, collectionName, bgoBatchId, fields = [] }) {
+  const docsByPath = new Map();
+
+  for (const field of fields) {
+    try {
+      const snapshot = await db
+        .collection(collectionName)
+        .where(field, "==", bgoBatchId)
+        .limit(1000)
+        .get();
+
+      snapshot.docs.forEach((doc) => {
+        docsByPath.set(doc.ref.path, doc);
+      });
+    } catch (error) {
+      logger.warn("getDocsLinkedToBgoBatch -- query skipped", {
+        collectionName,
+        field,
+        bgoBatchId,
+        message: error?.message || String(error),
+      });
+    }
+  }
+
+  return Array.from(docsByPath.values());
+}
+
+async function getBmdCreatedWorkDocs({ db, bgoBatchId }) {
+  const linkFields = [
+    "bgo.batchId",
+    "bgo.bgoBatchId",
+    "refs.bgoBatchId",
+    "refs.batchId",
+    "origin.bgoBatchId",
+    "bucket.batchId",
+    "bmd.batchId",
+    "bmd.bgoBatchId",
+  ];
+
+  const [trnDocs, premiseDocs, astDocs] = await Promise.all([
+    getDocsLinkedToBgoBatch({
+      db,
+      collectionName: BGO_COLLECTIONS.trns,
+      bgoBatchId,
+      fields: linkFields,
+    }),
+    getDocsLinkedToBgoBatch({
+      db,
+      collectionName: BGO_COLLECTIONS.premises,
+      bgoBatchId,
+      fields: linkFields,
+    }),
+    getDocsLinkedToBgoBatch({
+      db,
+      collectionName: BGO_COLLECTIONS.asts,
+      bgoBatchId,
+      fields: linkFields,
+    }),
+  ]);
+
+  return {
+    trnDocs,
+    premiseDocs,
+    astDocs,
+    total: trnDocs.length + premiseDocs.length + astDocs.length,
+  };
+}
+
 function buildTcRowRestorePatch({ bgoBatchId, now, actorUid, actorName }) {
   return {
     "bgo.ready": true,
@@ -239,6 +316,65 @@ export const onDeleteUnacceptedBgoCallable = onCall(async (request) => {
           workflowState: getWorkflowState(bgoBatch),
         },
       );
+    }
+
+
+    if (isBmdBgoBatch(bgoBatch)) {
+      const linkedWorkDocs = await getBmdCreatedWorkDocs({ db, bgoBatchId });
+
+      if (linkedWorkDocs.total > 0) {
+        return buildFailureResult(
+          "BMD_BGO_HAS_CREATED_WORK",
+          "This MD BGO allocation cannot be removed because a premise or meter has already been created under it",
+          {
+            bgoBatchId,
+            linkedTrns: linkedWorkDocs.trnDocs.length,
+            linkedPremises: linkedWorkDocs.premiseDocs.length,
+            linkedMeters: linkedWorkDocs.astDocs.length,
+          },
+        );
+      }
+
+      const batchHistoryDocs = await getHistoryDocs(bgoBatchRef);
+      const notificationDocs = await getNotificationDocsForBatch({
+        db,
+        bgoBatchId,
+      });
+
+      const writeJobs = [];
+
+      batchHistoryDocs.forEach((historyDoc) => {
+        writeJobs.push((batch) => batch.delete(historyDoc.ref));
+      });
+
+      notificationDocs.forEach((notificationDoc) => {
+        writeJobs.push((batch) => batch.delete(notificationDoc.ref));
+      });
+
+      writeJobs.push((batch) => batch.delete(bgoBatchRef));
+
+      const committedWrites = await commitWriteJobsInChunks({
+        db,
+        writeJobs,
+        chunkSize: 380,
+      });
+
+      const elapsedMs = Date.now() - startedAtMs;
+
+      logger.info("onDeleteUnacceptedBgoCallable -- BMD SUCCESS", {
+        bgoBatchId,
+        committedWrites,
+        elapsedMs,
+      });
+
+      return buildSuccessResult("MD BGO allocation removed successfully", {
+        bgoBatchId,
+        deletedBgoRows: 0,
+        deletedChildTrns: 0,
+        restoredTcRows: 0,
+        committedWrites,
+        elapsedMs,
+      });
     }
 
     const bgoTrnDocs = await getBgoChildTrnDocsForBatch({ db, bgoBatchId });

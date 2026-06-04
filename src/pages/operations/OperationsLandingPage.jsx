@@ -4,18 +4,26 @@ const operationModules = [
   {
     title: "TC Uploads",
     description:
-      "Upload, validate, and prepare TRN candidate rows before BGO consumes them.",
+      "Upload, validate, and prepare TRN candidate rows before AST-focused BGO consumes them.",
     path: "/operations/tc-uploads",
     status: "Active",
     active: true,
   },
   {
-    title: "BGO",
+    title: "MD BGO",
     description:
-      "Create bulk operation TRNs from validated TC rows and geofence scope.",
+      "Allocate existing ward geofences to TEAMs or SPs for bulk meter discovery.",
     path: "/operations/bgo",
-    status: "Coming Soon",
-    active: false,
+    status: "Active",
+    active: true,
+  },
+  {
+    title: "BGO Dashboard",
+    description:
+      "Monitor BGO batch progress, release state, and execution summaries.",
+    path: "/operations/bgo-dashboard",
+    status: "Active",
+    active: true,
   },
   {
     title: "Operational Teams",
@@ -30,8 +38,8 @@ const operationModules = [
     description:
       "Manage operational geospatial work areas for planning and batch work.",
     path: "/operations/geo-fences",
-    status: "Coming Soon",
-    active: false,
+    status: "Active",
+    active: true,
   },
   {
     title: "WMS Dashboard",

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
 
@@ -10,7 +11,6 @@ const ADMIN_ROLES = ["SPU", "ADM", "MNG"];
 
 const navSections = [
   {
-    // title: "Ward Scope",
     items: [
       {
         label: "Map",
@@ -100,13 +100,13 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "BGO Dashboard",
-            path: "/operations/bgo-dashboard",
+            label: "MD BGO",
+            path: "/operations/bgo",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "BGO",
-            path: "/operations/bgo",
+            label: "BGO Dashboard",
+            path: "/operations/bgo-dashboard",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
@@ -126,35 +126,74 @@ const navSections = [
           },
         ],
       },
-    ],
-  },
-
-  {
-    title: "Admin",
-    items: [
       {
-        label: "Service Providers",
-        path: "/admin/service-providers",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
-      {
-        label: "Users",
-        path: "/admin/users",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
-      {
-        label: "Teams",
-        path: "/admin/teams",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
-      {
-        label: "Settings",
-        path: "/admin/settings",
-        allowedRoles: ADMIN_ROLES,
+        label: "Admin",
+        items: [
+          {
+            label: "Service Providers",
+            path: "/admin/service-providers",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Users",
+            path: "/admin/users",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Teams",
+            path: "/admin/teams",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Settings",
+            path: "/admin/settings",
+            allowedRoles: ADMIN_ROLES,
+          },
+        ],
       },
     ],
   },
 ];
+
+const sidebarStyles = {
+  mainLink: {
+    fontSize: "0.98rem",
+    fontWeight: 850,
+    letterSpacing: "0.01em",
+  },
+  groupButton: {
+    width: "100%",
+    border: 0,
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0.66rem 0.75rem",
+    borderRadius: "0.85rem",
+    fontSize: "0.98rem",
+    fontWeight: 850,
+    letterSpacing: "0.01em",
+    textAlign: "left",
+  },
+  groupButtonOpen: {
+    background: "rgba(15, 23, 42, 0.06)",
+  },
+  groupArrow: {
+    fontSize: "0.78rem",
+    fontWeight: 900,
+    opacity: 0.72,
+  },
+  groupItems: {
+    marginTop: "0.25rem",
+    paddingLeft: "0.45rem",
+  },
+  childLink: {
+    fontSize: "0.88rem",
+    fontWeight: 650,
+  },
+};
 
 function getDisplayName(profile, email) {
   return (
@@ -202,8 +241,8 @@ function getVisibleSections(role) {
   return navSections
     .map((section) => ({
       ...section,
-      items: getVisibleItems(section.items, role),
-      groups: getVisibleGroups(section.groups, role),
+      items: getVisibleItems(section.items || [], role),
+      groups: getVisibleGroups(section.groups || [], role),
     }))
     .filter(
       (section) =>
@@ -241,8 +280,17 @@ function getActiveNavItem(items = [], pathname) {
   return matchingItems.sort((a, b) => b.path.length - a.path.length)[0];
 }
 
+function isGroupActive(group, pathname) {
+  return (group?.items || []).some((item) => pathname.startsWith(item.path));
+}
+
+function buildToggleKey(groupLabel) {
+  return String(groupLabel || "").trim().toLowerCase().replace(/\s+/g, "-");
+}
+
 export default function ConsoleLayout() {
   const location = useLocation();
+  const [openGroups, setOpenGroups] = useState({});
 
   const { email, profile, role, serviceProvider, activeWorkbase } = useAuth();
 
@@ -254,6 +302,20 @@ export default function ConsoleLayout() {
   const visibleNavItems = getFlatNavItems(visibleSections);
 
   const activeNavItem = getActiveNavItem(visibleNavItems, location.pathname);
+
+  function handleToggleGroup(groupLabel) {
+    const key = buildToggleKey(groupLabel);
+
+    setOpenGroups((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }
+
+  function isOpenGroup(group) {
+    const key = buildToggleKey(group.label);
+    return openGroups[key] === true;
+  }
 
   async function handleSignOut() {
     await signOut(auth);
@@ -286,26 +348,61 @@ export default function ConsoleLayout() {
                     key={item.path}
                     to={item.path}
                     className={({ isActive }) => (isActive ? "active" : "")}
+                    style={sidebarStyles.mainLink}
                   >
                     {item.label}
                   </NavLink>
                 ))}
 
-                {(section.groups || []).map((group) => (
-                  <div key={group.label} className="sidebar-nav-group">
-                    <p className="sidebar-group-title">{group.label}</p>
+                {(section.groups || []).map((group) => {
+                  const groupOpen = isOpenGroup(group);
+                  const groupActive = isGroupActive(group, location.pathname);
 
-                    {group.items.map((item) => (
-                      <NavLink
-                        key={item.path}
-                        to={item.path}
-                        className={({ isActive }) => (isActive ? "active" : "")}
+                  return (
+                    <div key={group.label} className="sidebar-nav-group">
+                      <button
+                        type="button"
+                        className={`sidebar-group-title-button${
+                          groupActive ? " active" : ""
+                        }`}
+                        style={{
+                          ...sidebarStyles.groupButton,
+                          ...(groupOpen || groupActive
+                            ? sidebarStyles.groupButtonOpen
+                            : null),
+                        }}
+                        onClick={() => handleToggleGroup(group.label)}
+                        aria-expanded={groupOpen}
+                        aria-controls={`sidebar-group-${buildToggleKey(group.label)}`}
                       >
-                        {item.label}
-                      </NavLink>
-                    ))}
-                  </div>
-                ))}
+                        <span>{group.label}</span>
+                        <span style={sidebarStyles.groupArrow}>
+                          {groupOpen ? "▾" : "▸"}
+                        </span>
+                      </button>
+
+                      {groupOpen ? (
+                        <div
+                          id={`sidebar-group-${buildToggleKey(group.label)}`}
+                          style={sidebarStyles.groupItems}
+                        >
+                          {group.items.map((item) => (
+                            <NavLink
+                              key={item.path}
+                              to={item.path}
+                              className={({ isActive }) =>
+                                isActive ? "active" : ""
+                              }
+                              style={sidebarStyles.childLink}
+                            >
+                              {item.label}
+                            </NavLink>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </nav>

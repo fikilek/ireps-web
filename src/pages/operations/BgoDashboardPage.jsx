@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useGetTcUploadsQuery } from "../../redux/tcApi";
-import { useGetBgoRowsByTcIdQuery } from "../../redux/bgoApi";
+import {
+  useGetBgoBatchesByTcIdQuery,
+  useGetBgoRowsByTcIdQuery,
+} from "../../redux/bgoApi";
 
 const FILTER_ALL = "ALL";
 
@@ -125,6 +128,72 @@ function calculateLiveExecutionMetrics(bgoRows = []) {
   };
 }
 
+function getBatchDerivedExecutionSummary(batch = {}) {
+  return (
+    batch.derivedExecutionSummary ||
+    batch.raw?.derivedExecutionSummary ||
+    batch.summary?.derivedExecutionSummary ||
+    {}
+  );
+}
+
+function hasDerivedExecutionSummary(summary = {}) {
+  return Object.keys(summary || {}).some((key) => key.startsWith("total"));
+}
+
+function calculateDerivedExecutionMetrics(bgoBatches = []) {
+  const initialMetrics = {
+    hasDerivedSummary: false,
+    issuedRows: 0,
+    executedRows: 0,
+    notExecutedRows: 0,
+    cancelledRows: 0,
+    successfulRows: 0,
+    unsuccessfulRows: 0,
+  };
+
+  return asArray(bgoBatches).reduce((metrics, batch) => {
+    const summary = getBatchDerivedExecutionSummary(batch);
+
+    if (!hasDerivedExecutionSummary(summary)) {
+      return metrics;
+    }
+
+    const totalChildTrns = asNumber(
+      summary.totalChildTrns ??
+        summary.totalTrns ??
+        batch.summary?.totalTrnsCreated ??
+        batch.summary?.totalRows,
+    );
+    const totalCompleted = asNumber(summary.totalCompleted);
+    const totalCancelled = asNumber(summary.totalCancelled);
+    const totalSuccess = asNumber(summary.totalSuccess);
+    const totalNoAccess = asNumber(summary.totalNoAccess);
+    const totalNoReading = asNumber(summary.totalNoReading);
+    const totalNotExecuted = asNumber(
+      summary.totalNotExecuted ??
+        Math.max(totalChildTrns - totalCompleted - totalCancelled, 0),
+    );
+    const totalUnsuccessful = asNumber(
+      summary.totalUnsuccessful ??
+        Math.max(totalCompleted - totalSuccess, 0),
+    );
+
+    metrics.hasDerivedSummary = true;
+    metrics.issuedRows += totalChildTrns;
+    metrics.executedRows += totalCompleted;
+    metrics.notExecutedRows += totalNotExecuted;
+    metrics.cancelledRows += totalCancelled;
+    metrics.successfulRows += totalSuccess;
+    metrics.unsuccessfulRows += Math.max(
+      totalUnsuccessful,
+      totalNoAccess + totalNoReading,
+    );
+
+    return metrics;
+  }, initialMetrics);
+}
+
 function getDashboardCounts(upload = {}) {
   return upload.dashboardSummary?.counts || upload.raw?.dashboardSummary?.counts || {};
 }
@@ -133,9 +202,10 @@ function getDashboardAttention(upload = {}) {
   return upload.dashboardSummary?.attention || upload.raw?.dashboardSummary?.attention || {};
 }
 
-function calculateUploadMetrics(upload = {}, bgoRows = []) {
+function calculateUploadMetrics(upload = {}, bgoRows = [], bgoBatches = []) {
   const dashboardCounts = getDashboardCounts(upload);
   const liveExecution = calculateLiveExecutionMetrics(bgoRows);
+  const derivedExecution = calculateDerivedExecutionMetrics(bgoBatches);
 
   const totalRows = asNumber(
     dashboardCounts.totalRows ?? upload.totalRows ?? upload.summary?.totalRows,
@@ -154,6 +224,7 @@ function calculateUploadMetrics(upload = {}, bgoRows = []) {
         upload.usedRows ??
         upload.summary?.usedRows,
     ),
+    derivedExecution.issuedRows,
     liveExecution.issuedRows,
   );
 
@@ -182,19 +253,29 @@ function calculateUploadMetrics(upload = {}, bgoRows = []) {
     dashboardCounts.bgoNotReadyRows ?? Math.max(knownNotReadyRows, foundRows - bgoReadyRows),
   );
 
-  const cancelledRows = liveExecution.hasLiveRows
-    ? liveExecution.cancelledRows
-    : asNumber(dashboardCounts.cancelledRows ?? dashboardCounts.cancelled ?? 0);
-  const executedRows = liveExecution.hasLiveRows
-    ? liveExecution.executedRows
-    : asNumber(dashboardCounts.executedRows ?? dashboardCounts.completedRows ?? 0);
-  const notExecutedRows = Math.max(issuedToBgoRows - executedRows - cancelledRows, 0);
-  const successfulRows = liveExecution.hasLiveRows
-    ? liveExecution.successfulRows
-    : asNumber(dashboardCounts.successfulRows ?? dashboardCounts.successRows ?? 0);
-  const unsuccessfulRows = liveExecution.hasLiveRows
-    ? liveExecution.unsuccessfulRows
-    : asNumber(dashboardCounts.unsuccessfulRows ?? dashboardCounts.failedRows ?? 0);
+  const cancelledRows = derivedExecution.hasDerivedSummary
+    ? derivedExecution.cancelledRows
+    : liveExecution.hasLiveRows
+      ? liveExecution.cancelledRows
+      : asNumber(dashboardCounts.cancelledRows ?? dashboardCounts.cancelled ?? 0);
+  const executedRows = derivedExecution.hasDerivedSummary
+    ? derivedExecution.executedRows
+    : liveExecution.hasLiveRows
+      ? liveExecution.executedRows
+      : asNumber(dashboardCounts.executedRows ?? dashboardCounts.completedRows ?? 0);
+  const notExecutedRows = derivedExecution.hasDerivedSummary
+    ? derivedExecution.notExecutedRows
+    : Math.max(issuedToBgoRows - executedRows - cancelledRows, 0);
+  const successfulRows = derivedExecution.hasDerivedSummary
+    ? derivedExecution.successfulRows
+    : liveExecution.hasLiveRows
+      ? liveExecution.successfulRows
+      : asNumber(dashboardCounts.successfulRows ?? dashboardCounts.successRows ?? 0);
+  const unsuccessfulRows = derivedExecution.hasDerivedSummary
+    ? derivedExecution.unsuccessfulRows
+    : liveExecution.hasLiveRows
+      ? liveExecution.unsuccessfulRows
+      : asNumber(dashboardCounts.unsuccessfulRows ?? dashboardCounts.failedRows ?? 0);
 
   return {
     totalRows,
@@ -337,13 +418,19 @@ function AttentionReasons({ reasons = [] }) {
 function UploadDashboardCard({ upload }) {
   const tcId = upload.id || upload.tcId;
 
+  const { data: bgoBatches = [], isFetching: isFetchingBgoBatches } =
+    useGetBgoBatchesByTcIdQuery(
+      { tcId, limit: 500 },
+      { skip: !tcId },
+    );
+
   const { data: bgoRows = [], isFetching: isFetchingBgoRows } =
     useGetBgoRowsByTcIdQuery(
       { tcId, limit: 1000 },
       { skip: !tcId },
     );
 
-  const metrics = calculateUploadMetrics(upload, bgoRows);
+  const metrics = calculateUploadMetrics(upload, bgoRows, bgoBatches);
   const primaryStatus = getPrimaryStatus(metrics);
   const attentionReasons = getAttentionReasons(upload, metrics);
   const tcDashboardPath = `/operations/tc-uploads/${tcId}/bgo-dashboard`;
@@ -367,7 +454,7 @@ function UploadDashboardCard({ upload }) {
           ) : (
             <span style={styles.goodPill}>ON TRACK</span>
           )}
-          {isFetchingBgoRows ? (
+          {isFetchingBgoBatches || isFetchingBgoRows ? (
             <span style={styles.streamMiniPill}>LIVE EXECUTION</span>
           ) : null}
         </div>

@@ -624,3 +624,158 @@ export async function commitWriteJobsInChunks({
 
   return committedWrites;
 }
+
+/* =====================================================
+   BMD-BGO HELPERS
+   -----------------------------------------------------
+   Bulk Meter Discovery uses the existing bgo_batches
+   collection but does not consume TC rows and does not
+   create child METER_DISCOVERY TRNs upfront.
+===================================================== */
+
+export function isBmdBgoCreatePayload(data = {}) {
+  const batchMode = normalizeUpper(
+    data?.batchMode || data?.bgo?.batchMode || data?.mode || "",
+  );
+
+  const sourceModule = normalizeUpper(
+    data?.sourceModule || data?.origin?.sourceModule || data?.bgo?.sourceModule || "",
+  );
+
+  const operationType = normalizeUpper(data?.operationType || data?.trnType || "");
+
+  return (
+    batchMode === "BMD" ||
+    sourceModule === "BULK_METER_DISCOVERY" ||
+    (operationType === "METER_DISCOVERY" && batchMode === "BMD")
+  );
+}
+
+export function buildBmdBgoBatchId({
+  lmPcode,
+  wardPcode,
+  geofenceId,
+  targetType,
+  targetId,
+}) {
+  const targetHash = buildHash(targetId || "NAv", 8);
+
+  return [
+    "BMD",
+    sanitizeFirestoreIdPart(lmPcode, "NO_LM"),
+    sanitizeFirestoreIdPart(wardPcode, "NO_WARD"),
+    "BGO",
+    sanitizeFirestoreIdPart(geofenceId, "NO_GEOFENCE"),
+    sanitizeFirestoreIdPart(targetType, "NO_TARGET"),
+    targetHash,
+  ].join("_");
+}
+
+export function validateCreateBmdBgoPayload(data = {}) {
+  const trnType = normalizeUpper(data?.trnType || data?.operationType || "");
+
+  if (trnType !== "METER_DISCOVERY") {
+    return {
+      ok: false,
+      code: "INVALID_BMD_OPERATION_TYPE",
+      message: "BMD-BGO operationType must be METER_DISCOVERY",
+    };
+  }
+
+  const scope = data?.scope || {};
+  const lmPcode = normalizeText(
+    scope?.lmPcode || data?.lmPcode || data?.parents?.lmPcode || "",
+  );
+  const lmName = normalizeText(scope?.lmName || data?.lmName || "NAv") || "NAv";
+  const wardPcode = normalizeText(
+    scope?.wardPcode || data?.wardPcode || data?.parents?.wardPcode || "",
+  );
+  const wardName = normalizeText(scope?.wardName || data?.wardName || "NAv") || "NAv";
+
+  if (!lmPcode || !wardPcode) {
+    return {
+      ok: false,
+      code: "INVALID_BMD_SCOPE",
+      message: "BMD-BGO requires lmPcode and wardPcode",
+    };
+  }
+
+  const geofenceRef = normalizeGeofenceRef(
+    data?.geofenceRef ||
+      data?.geofence ||
+      {
+        id: data?.geofenceId,
+        name: data?.geofenceName,
+      },
+  );
+
+  if (!geofenceRef) {
+    return {
+      ok: false,
+      code: "INVALID_BMD_GEOFENCE",
+      message: "BMD-BGO requires a geofence id",
+    };
+  }
+
+  const targetCheck = validateTarget(
+    data?.target || {
+      type: data?.targetType,
+      id: data?.targetId,
+      name: data?.targetName,
+    },
+  );
+
+  if (!targetCheck.ok) return targetCheck;
+
+  const rawErfRefs = safeArray(data?.worklist?.erfRefs || data?.erfRefs);
+
+  const seenErfIds = new Set();
+  const erfRefs = rawErfRefs
+    .map((erf) => ({
+      id: normalizeText(erf?.id || erf?.erfId || ""),
+      erfNo: normalizeText(erf?.erfNo || erf?.number || erf?.id || "NAv") || "NAv",
+      erfType: normalizeUpper(erf?.erfType || erf?.type || "FORMAL") || "FORMAL",
+    }))
+    .filter((erf) => {
+      if (!erf.id || seenErfIds.has(erf.id)) return false;
+      seenErfIds.add(erf.id);
+      return true;
+    });
+
+  if (erfRefs.length === 0) {
+    return {
+      ok: false,
+      code: "BMD_GEOFENCE_HAS_NO_ERFS",
+      message: "The selected BMD geofence must have at least one ERF in the worklist",
+    };
+  }
+
+  const summary = data?.summary || {};
+  const safeCount = (value, fallback = 0) => {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : fallback;
+  };
+
+  return {
+    ok: true,
+    trnType: "METER_DISCOVERY",
+    operationCode: "MDIS",
+    scope: {
+      lmPcode,
+      lmName,
+      wardPcode,
+      wardName,
+    },
+    geofenceRef,
+    target: targetCheck.target,
+    worklist: {
+      type: "ERF_LIST",
+      erfRefs,
+    },
+    summary: {
+      erfCount: safeCount(summary?.erfCount, erfRefs.length),
+      premiseCount: safeCount(summary?.premiseCount, 0),
+      meterCount: safeCount(summary?.meterCount, 0),
+    },
+  };
+}
