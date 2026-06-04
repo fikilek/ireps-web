@@ -1,5 +1,11 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  limit as firestoreLimit,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
 
 import { db } from "../firebase";
 
@@ -122,7 +128,67 @@ export const mapPremisesApi = createApi({
         }
       },
     }),
+
+    getPremisesByLmPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = typeof arg === "string" ? arg : arg?.lmPcode;
+        const maxRows = Number(arg?.limit || 0);
+
+        if (!lmPcode) return;
+
+        let unsubscribe = null;
+
+        try {
+          await cacheDataLoaded;
+
+          const premisesRef = collection(db, PREMISES_COLLECTION);
+          const queryParts = [
+            premisesRef,
+            where("parents.lmPcode", "==", lmPcode),
+          ];
+
+          if (Number.isFinite(maxRows) && maxRows > 0) {
+            queryParts.push(firestoreLimit(maxRows));
+          }
+
+          const premisesQuery = query(...queryParts);
+
+          unsubscribe = onSnapshot(
+            premisesQuery,
+            (snapshot) => {
+              const rows = snapshot.docs
+                .map((documentSnapshot) =>
+                  normalizePremiseRow(
+                    documentSnapshot.id,
+                    documentSnapshot.data(),
+                  ),
+                )
+                .sort(sortPremisesByUpdatedAtDesc);
+
+              updateCachedData((draft) => {
+                draft.splice(0, draft.length, ...rows);
+              });
+            },
+            (error) => {
+              console.error("mapPremisesApi LM stream error:", error);
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) {
+            unsubscribe();
+          }
+        }
+      },
+    }),
   }),
 });
 
-export const { useGetPremisesByWardQuery } = mapPremisesApi;
+export const { useGetPremisesByWardQuery, useGetPremisesByLmPcodeQuery } =
+  mapPremisesApi;

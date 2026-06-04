@@ -10,6 +10,8 @@ import {
   useGetBgoBatchesByTcIdQuery,
   useGetBgoRowsByTcIdQuery,
 } from "../../redux/bgoApi";
+import { useGetAstsByLmPcodeQuery } from "../../redux/astsApi";
+import { useGetPremisesByLmPcodeQuery } from "../../redux/mapPremisesApi";
 
 const FILTER_ALL = "ALL";
 
@@ -219,18 +221,105 @@ function getBatchDerivedSummary(batch = {}) {
   return raw.derivedExecutionSummary || batch.derivedExecutionSummary || {};
 }
 
-function getMdBgoMetrics(batch = {}) {
+function getMdBgoWorklistErfRefs(batch = {}) {
+  const raw = getBatchRaw(batch);
+
+  return asArray(
+    raw.worklist?.erfRefs ||
+      raw.bgo?.worklist?.erfRefs ||
+      raw.erfRefs ||
+      batch.worklist?.erfRefs,
+  );
+}
+
+function getErfRefId(ref = {}) {
+  return readFirstString(ref.id, ref.erfId, ref.erf?.id, ref.pcode);
+}
+
+function getPremiseId(premise = {}) {
+  return readFirstString(premise.id, premise.premiseId, premise.raw?.id);
+}
+
+function getPremiseErfId(premise = {}) {
+  return readFirstString(
+    premise.erfId,
+    premise.accessData?.erfId,
+    premise.raw?.erfId,
+    premise.raw?.accessData?.erfId,
+  );
+}
+
+function getMeterErfId(meter = {}) {
+  return readFirstString(
+    meter.accessData?.erfId,
+    meter.accessData?.erf?.id,
+    meter.erfId,
+    meter.raw?.accessData?.erfId,
+  );
+}
+
+function getMeterPremiseId(meter = {}) {
+  return readFirstString(
+    meter.accessData?.premise?.id,
+    meter.premiseId,
+    meter.raw?.accessData?.premise?.id,
+    meter.raw?.premiseId,
+  );
+}
+
+function getMdBgoMetrics(batch = {}, liveStats = null) {
   const summary = getBatchSummary(batch);
   const releaseSummary = getBatchReleaseSummary(batch);
-  const derivedSummary = getBatchDerivedSummary(batch);
 
   return {
-    totalErfs: asNumber(summary.erfCount ?? releaseSummary.totalRows),
-    totalPremises: asNumber(summary.premiseCount),
-    totalMeters: asNumber(summary.meterCount),
-    totalChildTrns: asNumber(derivedSummary.totalChildTrns),
-    totalCompleted: asNumber(derivedSummary.totalCompleted),
+    totalErfs: asNumber(liveStats?.totalErfs ?? summary.erfCount ?? releaseSummary.totalRows),
+    totalPremises: asNumber(liveStats?.totalPremises ?? summary.premiseCount),
+    totalMeters: asNumber(liveStats?.totalMeters ?? summary.meterCount),
   };
+}
+
+function buildMdBgoLiveStatsByBatchId({ batches = [], premises = [], meters = [] }) {
+  const premiseList = asArray(premises);
+  const meterList = asArray(meters);
+
+  return asArray(batches).reduce((acc, batch) => {
+    const batchId = getBatchId(batch);
+    const erfRefs = getMdBgoWorklistErfRefs(batch);
+    const erfIds = new Set(erfRefs.map(getErfRefId).filter(Boolean));
+
+    if (!batchId || erfIds.size === 0) {
+      acc[batchId] = {
+        totalErfs: erfRefs.length,
+        totalPremises: 0,
+        totalMeters: 0,
+      };
+      return acc;
+    }
+
+    const batchPremises = premiseList.filter((premise) =>
+      erfIds.has(getPremiseErfId(premise)),
+    );
+
+    const premiseIds = new Set(batchPremises.map(getPremiseId).filter(Boolean));
+
+    const batchMeters = meterList.filter((meter) => {
+      const meterErfId = getMeterErfId(meter);
+      const meterPremiseId = getMeterPremiseId(meter);
+
+      return (
+        (meterErfId && erfIds.has(meterErfId)) ||
+        (meterPremiseId && premiseIds.has(meterPremiseId))
+      );
+    });
+
+    acc[batchId] = {
+      totalErfs: erfRefs.length,
+      totalPremises: batchPremises.length,
+      totalMeters: batchMeters.length,
+    };
+
+    return acc;
+  }, {});
 }
 
 function sortBatchesByUpdatedDesc(left, right) {
@@ -808,7 +897,7 @@ function MiniMetric({ label, value }) {
   );
 }
 
-function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [] }) {
+function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [], liveStats = null }) {
   const batchId = getBatchId(batch);
   const geofence = getBatchGeofence(batch);
   const target = getBatchTarget(batch);
@@ -822,7 +911,7 @@ function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [] }) {
   const releaseState = getBatchReleaseState(batch);
   const operationType = getBatchOperationType(batch);
   const updatedAt = getBatchUpdatedAt(batch);
-  const metrics = getMdBgoMetrics(batch);
+  const metrics = getMdBgoMetrics(batch, liveStats);
   const hasMapScope =
     hasMeaningfulValue(scope.wardPcode) && hasMeaningfulValue(geofence.id);
 
@@ -852,21 +941,6 @@ function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [] }) {
         <MiniMetric label="Total ERFs" value={metrics.totalErfs} />
         <MiniMetric label="Total Premises" value={metrics.totalPremises} />
         <MiniMetric label="Total Meters" value={metrics.totalMeters} />
-        <MiniMetric label="Discovery TRNs" value={metrics.totalChildTrns} />
-      </div>
-
-      <div style={styles.attentionBlock}>
-        <p style={styles.sectionMiniTitle}>Discovery campaign status</p>
-        <div style={styles.reasonList}>
-          <span style={styles.goodPill}>FIELD TRNS CREATED ON DISCOVERY SUBMIT</span>
-          {metrics.totalCompleted > 0 ? (
-            <span style={styles.goodPill}>
-              {formatNumber(metrics.totalCompleted)} completed discovery TRN(s)
-            </span>
-          ) : (
-            <span style={styles.warningPill}>No discovery TRNs completed yet</span>
-          )}
-        </div>
       </div>
 
       <div style={styles.cardActions}>
@@ -915,9 +989,33 @@ export default function BgoDashboardPage() {
     isError: isBgoBatchesError,
   } = useGetBgoBatchesByLmQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode });
 
+  const {
+    data: livePremises = [],
+    isLoading: isLoadingLivePremises,
+    isFetching: isFetchingLivePremises,
+  } = useGetPremisesByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+
+  const {
+    data: liveMeters = [],
+    isLoading: isLoadingLiveMeters,
+    isFetching: isFetchingLiveMeters,
+  } = useGetAstsByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+
   const mdBgoBatches = useMemo(() => {
     return asArray(bgoBatches).filter(isMdBgoBatch).sort(sortBatchesByUpdatedDesc);
   }, [bgoBatches]);
+
+  const liveSourcesReady = !isLoadingLivePremises && !isLoadingLiveMeters;
+
+  const mdBgoLiveStatsByBatchId = useMemo(() => {
+    if (!liveSourcesReady) return {};
+
+    return buildMdBgoLiveStatsByBatchId({
+      batches: mdBgoBatches,
+      premises: livePremises,
+      meters: liveMeters,
+    });
+  }, [liveSourcesReady, mdBgoBatches, livePremises, liveMeters]);
 
   const wardOptions = useMemo(
     () => buildWardOptions({ availableWards: available?.wards, batches: mdBgoBatches }),
@@ -957,7 +1055,11 @@ export default function BgoDashboardPage() {
     });
   }, [mdBgoBatches, selectedWardPcode, selectedDashboardType]);
 
-  const isConnecting = isFetching || isFetchingBgoBatches;
+  const isConnecting =
+    isFetching ||
+    isFetchingBgoBatches ||
+    isFetchingLivePremises ||
+    isFetchingLiveMeters;
   const isPageLoading = isLoading || isLoadingBgoBatches;
   const hasVisibleCards = visibleMdBgoBatches.length > 0 || visibleUploads.length > 0;
 
@@ -1079,6 +1181,7 @@ export default function BgoDashboardPage() {
                 batch={batch}
                 lmPcode={lmPcode}
                 wardOptions={wardOptions}
+                liveStats={mdBgoLiveStatsByBatchId[getBatchId(batch)] || null}
               />
             ))
           : null}

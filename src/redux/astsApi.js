@@ -24,6 +24,53 @@ export const astsApi = createApi({
   reducerPath: "astsApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getAstsByLmPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          if (!lmPcode) return;
+
+          const q = query(
+            collection(db, "asts"),
+            where("accessData.parents.lmPcode", "==", lmPcode),
+            orderBy("accessData.metadata.updatedAt", "desc"),
+          );
+
+          unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+              updateCachedData(() => {
+                const next = snapshot.docs.map((docSnap) => ({
+                  id: docSnap.id,
+                  ...docSnap.data(),
+                }));
+
+                sortAstsByUpdatedAtDesc(next);
+
+                return next;
+              });
+            },
+            (error) => {
+              console.error("❌ [AST_LM_SNAPSHOT_ERROR]:", error);
+            },
+          );
+        } catch (error) {
+          console.error("❌ [AST_LM_STREAM_ERROR]:", error);
+        }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
+
     getAstById: builder.query({
       queryFn: () => ({ data: null }),
 
@@ -115,5 +162,8 @@ export const astsApi = createApi({
   }),
 });
 
-export const { useGetAstByIdQuery, useGetAstsByLmPcodeWardPcodeQuery } =
-  astsApi;
+export const {
+  useGetAstByIdQuery,
+  useGetAstsByLmPcodeQuery,
+  useGetAstsByLmPcodeWardPcodeQuery,
+} = astsApi;
