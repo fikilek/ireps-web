@@ -607,6 +607,34 @@ function getBatchReleaseState(batch = {}) {
   return normalizeUpper(batch?.releaseState || batch?.raw?.bgo?.releaseState || batch?.raw?.releaseState);
 }
 
+function getBatchTargetName(batch = {}) {
+  const raw = batch?.raw || {};
+  const target =
+    batch?.target ||
+    raw?.target ||
+    raw?.assignment?.target ||
+    asArray(raw?.assignment?.targets)[0] ||
+    raw?.bgo?.target ||
+    {};
+
+  return valueOrNav(
+    readFirstString(
+      batch?.targetName,
+      batch?.target?.name,
+      target?.name,
+      target?.label,
+      target?.displayName,
+      raw?.targetName,
+      raw?.bgo?.targetName,
+      raw?.assignment?.targetName,
+      target?.id,
+      batch?.targetId,
+      raw?.targetId,
+      raw?.bgo?.targetId,
+    ),
+  );
+}
+
 function getBatchBmdCreatedPremiseCount(batch = {}) {
   const raw = batch?.raw || {};
   return safeNumber(
@@ -682,6 +710,12 @@ function buildExistingAllocationByGeofenceId(existingBmdBatches = []) {
 function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
   const raw = batch?.raw || {};
   const batchId = getBatchId(batch);
+  const geofenceName = batch.geofenceName || "NAv";
+  const targetName = getBatchTargetName(batch);
+  const allocationTitle =
+    targetName && targetName !== "NAv"
+      ? `${geofenceName} (${targetName})`
+      : geofenceName;
   const totalErfs = safeNumber(raw?.summary?.erfCount ?? raw?.batchReleaseSummary?.totalRows);
   const totalPremises = safeNumber(raw?.summary?.premiseCount);
   const totalMeters = safeNumber(raw?.summary?.meterCount);
@@ -691,7 +725,7 @@ function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
     <div style={styles.existingBatchCard}>
       <div style={styles.existingBatchMain}>
         <div>
-          <strong style={styles.existingBatchTitle}>{batch.geofenceName || "NAv"}</strong>
+          <strong style={styles.existingBatchTitle}>{allocationTitle}</strong>
           <span style={styles.existingBatchSub}>{batchId}</span>
         </div>
         <Badge tone={isBatchWaitingForAcceptance(batch) ? "warning" : "neutral"}>

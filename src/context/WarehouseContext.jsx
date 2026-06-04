@@ -147,7 +147,6 @@ export const WarehouseProvider = ({ children }) => {
   } = useGetPremisesByWardQuery(wardPcode, {
     skip: !scopeReady,
   });
-  console.log(`warehose --wardPrems`, wardPrems);
 
   const {
     data: cloudMeters = [],

@@ -1,7 +1,7 @@
 // src/pages/operations/GeoFencesPage.jsx
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
@@ -116,14 +116,6 @@ function getWardPcodeFromFocusAstId(focusAstId, lmPcode) {
   const wardMatch = cleanFocusAstId.match(/ZA\d{7}/);
 
   return wardMatch?.[0] || "";
-}
-
-function getBooleanSearchParam(value) {
-  const text = String(value || "")
-    .trim()
-    .toLowerCase();
-
-  return text === "true" || text === "1" || text === "yes";
 }
 
 function parseFocusPointFromSearchParams(searchParams) {
@@ -285,13 +277,15 @@ function getGeoFencePointCount(geoFence) {
   return getGeoFencePath(geoFence).length;
 }
 
-function fitMapToGeoFenceAndWarningMeters(
-  map,
-  geoFence,
-  noGeofenceMeters = [],
-  padding = 88,
-) {
+function fitMapToGeoFence(map, geoFence, padding = 88) {
   if (!map || !geoFence || !window.google?.maps) return;
+
+  const bbox = normalizeBbox(geoFence?.bbox || geoFence?.geometry?.bbox);
+
+  if (bbox) {
+    fitMapToBbox(map, bbox, padding);
+    return;
+  }
 
   const bounds = new window.google.maps.LatLngBounds();
   let hasAnyPoint = false;
@@ -307,8 +301,27 @@ function fitMapToGeoFenceAndWarningMeters(
     hasAnyPoint = true;
   });
 
-  noGeofenceMeters.forEach((meter) => {
-    const usablePoint = toUsableLatLng(getMarkerPoint(meter));
+  if (!hasAnyPoint) return;
+
+  map.fitBounds(bounds, padding);
+}
+
+function fitMapToWard(map, ward, padding = 56) {
+  if (!map || !ward || !window.google?.maps) return;
+
+  const bbox = normalizeBbox(ward?.bbox || ward?.geometry?.bbox);
+
+  if (bbox) {
+    fitMapToBbox(map, bbox, padding);
+    return;
+  }
+
+  const paths = geoJsonPolygonToGooglePaths(parseGeometry(ward?.geometry));
+  const bounds = new window.google.maps.LatLngBounds();
+  let hasAnyPoint = false;
+
+  paths.flat().forEach((point) => {
+    const usablePoint = toUsableLatLng(point);
 
     if (!usablePoint) return;
 
@@ -316,17 +329,17 @@ function fitMapToGeoFenceAndWarningMeters(
     hasAnyPoint = true;
   });
 
-  if (!hasAnyPoint) {
-    const bbox = normalizeBbox(geoFence?.bbox || geoFence?.geometry?.bbox);
-
-    if (bbox) {
-      fitMapToBbox(map, bbox, padding);
-    }
-
+  if (hasAnyPoint) {
+    map.fitBounds(bounds, padding);
     return;
   }
 
-  map.fitBounds(bounds, padding);
+  const center = getWardCenter(ward);
+
+  if (!center || center === FALLBACK_CENTER) return;
+
+  map.panTo(center);
+  map.setZoom(14);
 }
 
 function getParentsFromScope({
@@ -505,17 +518,174 @@ function getMeterPremiseMatchId(meter) {
   );
 }
 
+function getEntityPreviewPoint(entity) {
+  return (
+    toUsableLatLng(entity?.__point) ||
+    toUsableLatLng(entity?.__gps) ||
+    toUsableLatLng(entity?.geometry?.centroid) ||
+    toUsableLatLng(entity?.centroid) ||
+    toUsableLatLng(entity?.location?.gps) ||
+    toUsableLatLng(entity?.ast?.location?.gps) ||
+    toUsableLatLng(entity?.accessData?.gps) ||
+    toUsableLatLng(entity?.accessData?.location?.gps) ||
+    null
+  );
+}
+
+function getErfPreviewPoint(erf, geoLibrary = {}) {
+  const erfId = erf?.id || erf?.erfId || erf?.__erfId || "";
+  const geoEntry = erfId ? geoLibrary?.[erfId] : null;
+
+  return (
+    getEntityPreviewPoint(erf) ||
+    toUsableLatLng(geoEntry?.centroid) ||
+    null
+  );
+}
+
+function pointIsInsidePolygon(point, polygonPoints = []) {
+  const candidate = toUsableLatLng(point);
+  const polygon = (polygonPoints || []).map(toUsableLatLng).filter(Boolean);
+
+  if (!candidate || polygon.length < 3) return false;
+
+  const x = candidate.lng;
+  const y = candidate.lat;
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lng;
+    const yi = polygon[i].lat;
+    const xj = polygon[j].lng;
+    const yj = polygon[j].lat;
+
+    const intersects =
+      yi > y !== yj > y &&
+      x < ((xj - xi) * (y - yi)) / (yj - yi || Number.EPSILON) + xi;
+
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function buildDraftGeofencePreviewStats({
+  draftPoints = [],
+  erfs = [],
+  premises = [],
+  meters = [],
+  geoLibrary = {},
+}) {
+  const polygonPoints = (draftPoints || []).map(toUsableLatLng).filter(Boolean);
+
+  if (polygonPoints.length < 3) {
+    return {
+      erfs: 0,
+      premises: 0,
+      meters: 0,
+    };
+  }
+
+  const premiseById = new globalThis.Map();
+  const insidePremiseIds = new Set();
+
+  (premises || []).forEach((premise) => {
+    const premiseId = getPremiseMatchId(premise);
+    if (premiseId) premiseById.set(premiseId, premise);
+
+    const point = getEntityPreviewPoint(premise);
+    if (!point || !pointIsInsidePolygon(point, polygonPoints)) return;
+
+    if (premiseId) insidePremiseIds.add(premiseId);
+  });
+
+  const insideErfIds = new Set();
+
+  (erfs || []).forEach((erf) => {
+    const erfId = erf?.id || erf?.erfId || erf?.__erfId || "";
+    const point = getErfPreviewPoint(erf, geoLibrary);
+
+    if (!erfId || !point || !pointIsInsidePolygon(point, polygonPoints)) return;
+
+    insideErfIds.add(erfId);
+  });
+
+  const insideMeterIds = new Set();
+
+  (meters || []).forEach((meter, index) => {
+    const meterId =
+      meter?.id ||
+      meter?.astId ||
+      meter?.ast?.astData?.astId ||
+      meter?.ast?.astData?.astNo ||
+      meter?.astData?.astNo ||
+      `meter_${index}`;
+
+    const point = getEntityPreviewPoint(meter);
+    const premiseId = getMeterPremiseMatchId(meter);
+    const premise = premiseId ? premiseById.get(premiseId) : null;
+    const premisePoint = premise ? getEntityPreviewPoint(premise) : null;
+
+    const isInside =
+      (point && pointIsInsidePolygon(point, polygonPoints)) ||
+      (premisePoint && pointIsInsidePolygon(premisePoint, polygonPoints));
+
+    if (!isInside) return;
+
+    insideMeterIds.add(meterId);
+  });
+
+  return {
+    erfs: insideErfIds.size,
+    premises: insidePremiseIds.size,
+    meters: insideMeterIds.size,
+  };
+}
+
 /* =====================================================
    MAP LAYERS
    ===================================================== */
 
-function WardBoundaryLayer({ ward, shouldFit }) {
+function WardBoundaryLayer({
+  ward,
+  shouldFit,
+  manualWardFlightKey = 0,
+  manualWardFlightWard = null,
+}) {
   const map = useMap();
   const polygonRef = useRef(null);
+  const wardPcode = getWardPcode(ward);
+  const manualWardPcode = getWardPcode(manualWardFlightWard);
 
   const paths = useMemo(() => {
     return geoJsonPolygonToGooglePaths(parseGeometry(ward?.geometry));
   }, [ward?.geometry]);
+
+  useEffect(() => {
+    if (!map || !shouldFit) return;
+
+    const timer = setTimeout(() => {
+      fitMapToWard(map, ward, 56);
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [map, shouldFit, wardPcode, ward?.bbox, ward?.geometry]);
+
+  useEffect(() => {
+    if (!map || !manualWardFlightKey || !manualWardFlightWard) return;
+
+    const timer = setTimeout(() => {
+      fitMapToWard(map, manualWardFlightWard, 56);
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [
+    map,
+    manualWardFlightKey,
+    manualWardPcode,
+    manualWardFlightWard?.bbox,
+    manualWardFlightWard?.geometry,
+  ]);
 
   useEffect(() => {
     if (!map || !window.google?.maps) return;
@@ -541,17 +711,13 @@ function WardBoundaryLayer({ ward, shouldFit }) {
     polygon.setMap(map);
     polygonRef.current = polygon;
 
-    if (shouldFit) {
-      fitMapToBbox(map, ward?.bbox, 56);
-    }
-
     return () => {
       if (polygonRef.current) {
         polygonRef.current.setMap(null);
         polygonRef.current = null;
       }
     };
-  }, [map, paths, ward?.bbox, shouldFit]);
+  }, [map, paths]);
 
   return null;
 }
@@ -560,8 +726,6 @@ function ExistingGeoFenceLayer({
   geofences,
   selectedGeoFenceId,
   onSelectGeoFence,
-  noGeofenceMeters,
-  includeWarningMetersInFit = true,
 }) {
   const map = useMap();
   const polygonsRef = useRef([]);
@@ -640,16 +804,11 @@ function ExistingGeoFenceLayer({
     if (!map || !selectedGeoFence) return;
 
     const timer = setTimeout(() => {
-      fitMapToGeoFenceAndWarningMeters(
-        map,
-        selectedGeoFence,
-        includeWarningMetersInFit ? noGeofenceMeters : [],
-        88,
-      );
+      fitMapToGeoFence(map, selectedGeoFence, 88);
     }, 120);
 
     return () => clearTimeout(timer);
-  }, [map, selectedGeoFence, noGeofenceMeters, includeWarningMetersInFit]);
+  }, [map, selectedGeoFence]);
 
   return null;
 }
@@ -814,7 +973,7 @@ function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
     linesRef.current = [];
 
     const premiseById = new globalThis.Map();
-    // const premiseById = new Map();
+    // const premiseById = new globalThis.Map();
 
     (premises || []).forEach((premise) => {
       const premiseId = getPremiseMatchId(premise);
@@ -1312,8 +1471,8 @@ export default function GeoFencesPage() {
   const [searchParams] = useSearchParams();
 
   const { activeWorkbase } = useAuth();
-  const { geoState } = useGeo();
-  const { available } = useWarehouse();
+  const { geoState, updateGeo } = useGeo();
+  const { available, all } = useWarehouse();
 
   const selectedLm = geoState?.selectedLm || null;
   const selectedWard = geoState?.selectedWard || null;
@@ -1330,7 +1489,6 @@ export default function GeoFencesPage() {
     searchParams.get("focusGeofenceName"),
   );
   const focusLabel = sanitizeScopeValue(searchParams.get("focusLabel"));
-  const fitGeofence = getBooleanSearchParam(searchParams.get("fitGeofence"));
   const focusPoint = parseFocusPointFromSearchParams(searchParams);
   const focusDisplayLabel = getFocusDisplayLabel({
     focusType,
@@ -1357,25 +1515,45 @@ export default function GeoFencesPage() {
     sanitizeScopeValue(getSelectedWardPcode(selectedWard));
 
   const selectedWardDoc = useMemo(() => {
+    const wards = Array.isArray(available?.wards) ? available.wards : [];
+
     return (
-      (available?.wards || []).find(
-        (ward) => getWardPcode(ward) === wardPcode,
-      ) ||
+      wards.find((ward) => getWardPcode(ward) === wardPcode) ||
       selectedWard ||
       null
     );
-  }, [available?.wards, selectedWard, wardPcode]);
+  }, [available, selectedWard, wardPcode]);
+
+  const wardOptions = useMemo(() => {
+    const wards = Array.isArray(available?.wards) ? available.wards : [];
+
+    return [...wards]
+      .filter((ward) => getWardPcode(ward))
+      .sort((left, right) =>
+        String(getWardLabel(left, getWardPcode(left))).localeCompare(
+          String(getWardLabel(right, getWardPcode(right))),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        ),
+      );
+  }, [available]);
 
   const wardLabel = getWardLabel(selectedWardDoc, wardPcode);
   const mapCenter = getWardCenter(selectedWardDoc);
 
   const [mapTypeId, setMapTypeId] = useState("roadmap");
   const [selectedGeoFence, setSelectedGeoFence] = useState(null);
+  const [manualWardFlight, setManualWardFlight] = useState({
+    key: 0,
+    ward: null,
+  });
 
   const selectedGeoFenceId = selectedGeoFence?.id || "";
 
   const [listModalOpen, setListModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [confirmCreateModalOpen, setConfirmCreateModalOpen] = useState(false);
+  const [createSuccess, setCreateSuccess] = useState(null);
   const [isCreateMode, setIsCreateMode] = useState(false);
 
   const [draftName, setDraftName] = useState("");
@@ -1453,11 +1631,85 @@ export default function GeoFencesPage() {
     selectedGeofenceMeters.length,
   ]);
 
+  const draftPreviewStats = useMemo(() => {
+    return buildDraftGeofencePreviewStats({
+      draftPoints,
+      erfs: all?.erfs || [],
+      premises: all?.prems || [],
+      meters: all?.meters || [],
+      geoLibrary: all?.geoLibrary || {},
+    });
+  }, [all, draftPoints]);
+
+  const scopeReady = Boolean(lmPcode && wardPcode);
+
+  function handleWardChange(event) {
+    const nextWardPcode = sanitizeScopeValue(event?.target?.value);
+
+    if (!nextWardPcode || nextWardPcode === wardPcode) return;
+
+    const nextWard =
+      wardOptions.find((ward) => getWardPcode(ward) === nextWardPcode) || null;
+
+    if (!nextWard) return;
+
+    updateGeo?.({
+      selectedWard: nextWard,
+      lastSelectionType: "WARD",
+    });
+
+    setManualWardFlight((current) => ({
+      key: current.key + 1,
+      ward: nextWard,
+    }));
+
+    setSelectedGeoFence(null);
+    setListModalOpen(false);
+    setCreateModalOpen(false);
+    setConfirmCreateModalOpen(false);
+    setCreateSuccess(null);
+    setIsCreateMode(false);
+    setDraftName("");
+    setDraftDescription("");
+    setDraftPoints([]);
+
+    const nextSearchParams = new URLSearchParams(searchParams);
+
+    nextSearchParams.set("lmPcode", lmPcode);
+    nextSearchParams.set("wardPcode", nextWardPcode);
+
+    // Keep tcId for TC repair flow, but clear one-meter/one-geofence focus.
+    nextSearchParams.delete("focusType");
+    nextSearchParams.delete("focusAstId");
+    nextSearchParams.delete("focusPremiseId");
+    nextSearchParams.delete("focusGeofenceId");
+    nextSearchParams.delete("focusGeofenceName");
+    nextSearchParams.delete("focusLabel");
+    nextSearchParams.delete("focusLat");
+    nextSearchParams.delete("focusLng");
+    nextSearchParams.delete("fitGeofence");
+
+    navigate({
+      pathname: "/operations/geo-fences",
+      search: `?${nextSearchParams.toString()}`,
+    });
+  }
+
   function handleOpenCreateModal() {
+    if (!scopeReady) {
+      alert("Select a ward first.");
+      return;
+    }
+
     setCreateModalOpen(true);
   }
 
   function handleStartDrawing() {
+    if (!scopeReady) {
+      alert("Select a ward first.");
+      return;
+    }
+
     if (!draftName.trim()) {
       alert("Geofence name is required.");
       return;
@@ -1490,13 +1742,38 @@ export default function GeoFencesPage() {
 
   function handleCancelDraft() {
     setIsCreateMode(false);
+    setConfirmCreateModalOpen(false);
     setDraftName("");
     setDraftDescription("");
     setDraftPoints([]);
   }
 
-  async function handleSaveDraft() {
+  function handleOpenCreateConfirm() {
+    if (!scopeReady) {
+      alert("Select a ward first.");
+      return;
+    }
+
     if (!canSaveDraft) return;
+
+    setConfirmCreateModalOpen(true);
+  }
+
+  async function handleConfirmCreate() {
+    if (!scopeReady) {
+      alert("Select a ward first.");
+      return;
+    }
+
+    if (!canSaveDraft) return;
+
+    const successPayload = {
+      name: draftName.trim(),
+      description: draftDescription.trim() || "NAv",
+      wardLabel,
+      stats: draftPreviewStats,
+      isTcContext,
+    };
 
     const payload = {
       name: draftName.trim(),
@@ -1521,13 +1798,8 @@ export default function GeoFencesPage() {
       return;
     }
 
-    alert(
-      isTcContext
-        ? "Geofence created. iREPS will update ERFs, premises, meters and TC readiness automatically."
-        : "Geofence created. iREPS will update ERFs, premises and meters automatically.",
-    );
-
     handleCancelDraft();
+    setCreateSuccess(successPayload);
   }
 
   if (!googleMapsApiKey) {
@@ -1544,41 +1816,6 @@ export default function GeoFencesPage() {
     );
   }
 
-  if (!lmPcode || !wardPcode) {
-    return (
-      <div style={{ padding: 24 }}>
-        <h1>Geo Fences</h1>
-
-        <div
-          style={{
-            border: "1px solid #FDE68A",
-            background: "#FFFBEB",
-            borderRadius: 12,
-            padding: 16,
-            maxWidth: 780,
-          }}
-        >
-          <h2 style={{ marginTop: 0 }}>LM/Ward scope required</h2>
-
-          <p>
-            Select a ward first, then open Geo-Fences again. Geo-Fences is
-            LM/Ward scoped because every polygon must belong to one ward.
-          </p>
-
-          <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-            <button onClick={() => navigate("/ward-scope/map")}>
-              Open Ward Map
-            </button>
-
-            <button onClick={() => navigate("/operations/tc-uploads")}>
-              Open TC Uploads
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <section style={pageStyle}>
       <header style={headerStyle}>
@@ -1590,22 +1827,28 @@ export default function GeoFencesPage() {
           <h1 style={{ margin: 0 }}>Geo Fences</h1>
 
           <p style={{ margin: "6px 0 0", color: "#475569" }}>
-            LM: <strong>{lmPcode}</strong> • Ward: <strong>{wardLabel}</strong>{" "}
-            • Ward PCode: <strong>{wardPcode}</strong>
+            LM: <strong>{lmPcode || "NAv"}</strong> • Ward: {" "}
+            <strong>{scopeReady ? wardLabel : "Select Ward"}</strong>
           </p>
 
           <p style={{ margin: "4px 0 0", color: "#64748B" }}>
-            No-geofence meters: <strong>{noGeofenceMeters.length}</strong>
-            {selectedGeoFence ? (
+            {scopeReady ? (
               <>
-                {" "}
-                • Selected geofence members:{" "}
-                <strong>
-                  {selectedStats.erfs} ERFs, {selectedStats.premises} premises,{" "}
-                  {selectedStats.meters} meters
-                </strong>
+                No-geofence meters: <strong>{noGeofenceMeters.length}</strong>
+                {selectedGeoFence ? (
+                  <>
+                    {" "}
+                    • Selected geofence members:{" "}
+                    <strong>
+                      {selectedStats.erfs} ERFs, {selectedStats.premises} premises,{" "}
+                      {selectedStats.meters} meters
+                    </strong>
+                  </>
+                ) : null}
               </>
-            ) : null}
+            ) : (
+              <>Select a ward to load geofences and start drawing.</>
+            )}
           </p>
 
           {isTcContext ? (
@@ -1621,6 +1864,34 @@ export default function GeoFencesPage() {
         </div>
 
         <div style={headerActionsStyle}>
+          <label style={wardSelectWrapStyle}>
+            <span style={wardSelectLabelStyle}>Select Ward</span>
+            <select
+              value={wardPcode}
+              onChange={handleWardChange}
+              disabled={wardOptions.length === 0}
+              style={wardSelectStyle}
+            >
+              {!wardPcode ? (
+                <option value="">Select ward...</option>
+              ) : null}
+
+              {wardOptions.length === 0 ? (
+                <option value="">No wards available</option>
+              ) : (
+                wardOptions.map((ward) => {
+                  const optionWardPcode = getWardPcode(ward);
+
+                  return (
+                    <option key={optionWardPcode} value={optionWardPcode}>
+                      {getWardLabel(ward, optionWardPcode)}
+                    </option>
+                  );
+                })
+              )}
+            </select>
+          </label>
+
           <div style={countPillStyle}>
             <span>Geofences</span>
             <strong>{geofencesLoading ? "..." : geofences.length}</strong>
@@ -1630,7 +1901,16 @@ export default function GeoFencesPage() {
             Existing Geofences
           </button>
 
-          <button onClick={handleOpenCreateModal} style={primaryButtonStyle}>
+          <button
+            onClick={handleOpenCreateModal}
+            disabled={!scopeReady}
+            title={scopeReady ? "Create Geofence" : "Select a ward first"}
+            style={{
+              ...primaryButtonStyle,
+              opacity: scopeReady ? 1 : 0.45,
+              cursor: scopeReady ? "pointer" : "not-allowed",
+            }}
+          >
             Create Geofence
           </button>
 
@@ -1692,7 +1972,7 @@ export default function GeoFencesPage() {
             </button>
 
             <button
-              onClick={handleSaveDraft}
+              onClick={handleOpenCreateConfirm}
               disabled={!canSaveDraft}
               style={{
                 ...primaryButtonStyle,
@@ -1709,7 +1989,7 @@ export default function GeoFencesPage() {
         ) : null}
 
         <APIProvider apiKey={googleMapsApiKey}>
-          <Map
+          <GoogleMap
             defaultCenter={mapCenter}
             defaultZoom={14}
             mapTypeId={mapTypeId}
@@ -1721,14 +2001,14 @@ export default function GeoFencesPage() {
             <WardBoundaryLayer
               ward={selectedWardDoc}
               shouldFit={!selectedGeoFenceId && !focusAstId && !focusPoint}
+              manualWardFlightKey={manualWardFlight.key}
+              manualWardFlightWard={manualWardFlight.ward}
             />
 
             <ExistingGeoFenceLayer
               geofences={geofences}
               selectedGeoFenceId={selectedGeoFenceId}
               onSelectGeoFence={setSelectedGeoFence}
-              noGeofenceMeters={noGeofenceMeters}
-              includeWarningMetersInFit={!fitGeofence}
             />
 
             {selectedGeoFenceId ? (
@@ -1763,7 +2043,7 @@ export default function GeoFencesPage() {
             ) : null}
 
             <DraftGeoFenceLayer draftPoints={draftPoints} />
-          </Map>
+          </GoogleMap>
         </APIProvider>
       </div>
 
@@ -1874,6 +2154,118 @@ export default function GeoFencesPage() {
           </div>
         </Modal>
       ) : null}
+
+      {confirmCreateModalOpen ? (
+        <Modal
+          title="Confirm Geofence"
+          onClose={() => setConfirmCreateModalOpen(false)}
+          width={760}
+        >
+          <p style={confirmIntroStyle}>
+            You are about to create this geofence. Please confirm the selected
+            coverage.
+          </p>
+
+          <div style={countCardGridStyle}>
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>ERFs</span>
+              <strong style={countValueStyle}>{draftPreviewStats.erfs}</strong>
+            </div>
+
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>Premises</span>
+              <strong style={countValueStyle}>{draftPreviewStats.premises}</strong>
+            </div>
+
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>Meters</span>
+              <strong style={countValueStyle}>{draftPreviewStats.meters}</strong>
+            </div>
+          </div>
+
+          <div style={confirmDetailsStyle}>
+            <div>
+              <span style={confirmFieldLabelStyle}>Geofence Name</span>
+              <strong>{draftName.trim()}</strong>
+            </div>
+
+            <div>
+              <span style={confirmFieldLabelStyle}>Ward</span>
+              <strong>{wardLabel}</strong>
+            </div>
+          </div>
+
+          <div style={modalActionsStyle}>
+            <button
+              onClick={() => setConfirmCreateModalOpen(false)}
+              disabled={createState.isLoading}
+              style={buttonStyle}
+            >
+              Cancel
+            </button>
+
+            <button
+              onClick={handleConfirmCreate}
+              disabled={createState.isLoading}
+              style={{
+                ...primaryButtonStyle,
+                opacity: createState.isLoading ? 0.55 : 1,
+                cursor: createState.isLoading ? "not-allowed" : "pointer",
+              }}
+            >
+              {createState.isLoading ? "Creating..." : "Confirm Create"}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {createSuccess ? (
+        <Modal
+          title="Geofence Created"
+          onClose={() => setCreateSuccess(null)}
+          width={760}
+        >
+          <div style={successBoxStyle}>
+            <strong>{createSuccess.name}</strong> was created successfully in{" "}
+            <strong>{createSuccess.wardLabel}</strong>.
+          </div>
+
+          <div style={countCardGridStyle}>
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>ERFs covered</span>
+              <strong style={countValueStyle}>{createSuccess.stats.erfs}</strong>
+            </div>
+
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>Premises covered</span>
+              <strong style={countValueStyle}>{createSuccess.stats.premises}</strong>
+            </div>
+
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>Meters covered</span>
+              <strong style={countValueStyle}>{createSuccess.stats.meters}</strong>
+            </div>
+          </div>
+
+          <p style={{ color: "#475569", marginTop: 16 }}>
+            iREPS has submitted the geofence creation request. ERFs, premises
+            and meters will update through the normal geofence membership
+            process.
+            {createSuccess.isTcContext
+              ? " TC readiness will also update automatically."
+              : ""}
+          </p>
+
+          <div style={modalActionsStyle}>
+            <button
+              onClick={() => setCreateSuccess(null)}
+              style={primaryButtonStyle}
+            >
+              OK
+            </button>
+          </div>
+        </Modal>
+      ) : null}
     </section>
   );
 }
@@ -1912,6 +2304,32 @@ const headerActionsStyle = {
   gap: 10,
   flexWrap: "wrap",
   justifyContent: "flex-end",
+};
+
+const wardSelectWrapStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  border: "1px solid #CBD5E1",
+  background: "white",
+  borderRadius: 10,
+  padding: "6px 8px",
+};
+
+const wardSelectLabelStyle = {
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 900,
+  whiteSpace: "nowrap",
+};
+
+const wardSelectStyle = {
+  border: "none",
+  outline: "none",
+  background: "transparent",
+  color: "#0F172A",
+  fontWeight: 900,
+  cursor: "pointer",
 };
 
 const countPillStyle = {
@@ -2021,6 +2439,75 @@ const modalCountsRowStyle = {
   color: "#334155",
   fontSize: 13,
   fontWeight: 800,
+};
+
+const confirmIntroStyle = {
+  color: "#475569",
+  marginTop: 0,
+  marginBottom: 16,
+};
+
+const countCardGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 12,
+  marginBottom: 18,
+};
+
+const countCardStyle = {
+  border: "1px solid #E5E7EB",
+  background: "#F8FAFC",
+  borderRadius: 14,
+  padding: "16px 14px",
+  textAlign: "center",
+};
+
+const countLabelStyle = {
+  display: "block",
+  color: "#64748B",
+  fontSize: 12,
+  fontWeight: 900,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+};
+
+const countValueStyle = {
+  display: "block",
+  color: "#0F172A",
+  fontSize: 30,
+  lineHeight: "38px",
+  marginTop: 4,
+};
+
+const confirmDetailsStyle = {
+  display: "grid",
+  gap: 12,
+  borderTop: "1px solid #E5E7EB",
+  paddingTop: 14,
+};
+
+const confirmFieldLabelStyle = {
+  display: "block",
+  color: "#64748B",
+  fontSize: 12,
+  fontWeight: 900,
+  marginBottom: 4,
+};
+
+const modalActionsStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 10,
+  marginTop: 20,
+};
+
+const successBoxStyle = {
+  border: "1px solid #BBF7D0",
+  background: "#F0FDF4",
+  color: "#14532D",
+  borderRadius: 14,
+  padding: 14,
+  marginBottom: 16,
 };
 
 const inputStyle = {
