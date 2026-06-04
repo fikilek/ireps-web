@@ -69,7 +69,11 @@ const getGpsLabel = (meter) => {
 };
 
 const getGeofenceNames = (meter) => {
-  const refs = Array.isArray(meter?.geofenceRefs) ? meter.geofenceRefs : [];
+  const refs = Array.isArray(meter?.geofenceRefs)
+    ? meter.geofenceRefs
+    : Array.isArray(meter?.ast?.geofenceRefs)
+      ? meter.ast.geofenceRefs
+      : [];
 
   if (!refs.length) return "NAv";
 
@@ -80,11 +84,13 @@ const getGeofenceNames = (meter) => {
 };
 
 export default function MetersPage() {
-  const { all, filtered, sync, scope, loading } = useWarehouse();
+  const { all, filtered, sync, loading } = useWarehouse();
+  console.log(`MetersPage all`, all);
 
   const allMeters = all?.meters || [];
   const meters = filtered?.meters || [];
-  const selectedWardPcode = scope?.wardPcode || "";
+  const selectedWardPcode =
+    sync?.scope?.wardPcode || sync?.meters?.wardPcode || "";
 
   return (
     <>

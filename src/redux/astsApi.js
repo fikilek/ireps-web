@@ -21,19 +21,15 @@ function toMillis(value) {
 }
 
 function getAstUpdatedAt(ast) {
-  return (
-    ast?.metadata?.updatedAt ||
-    ast?.metadata?.createdAt ||
-    ast?.accessData?.metadata?.updatedAt ||
-    ast?.accessData?.metadata?.createdAt ||
-    ""
-  );
+  return ast?.metadata?.updatedAt || ast?.metadata?.createdAt;
 }
 
 function sortAstsByUpdatedAtDesc(list) {
   if (!Array.isArray(list)) return;
 
-  list.sort((a, b) => toMillis(getAstUpdatedAt(b)) - toMillis(getAstUpdatedAt(a)));
+  list.sort(
+    (a, b) => toMillis(getAstUpdatedAt(b)) - toMillis(getAstUpdatedAt(a)),
+  );
 }
 
 function mapAstDoc(docSnap) {
@@ -160,7 +156,7 @@ export const astsApi = createApi({
             collection(db, "asts"),
             where("accessData.parents.lmPcode", "==", lmPcode),
             where("accessData.parents.wardPcode", "==", wardPcode),
-            orderBy("accessData.metadata.updatedAt", "desc"),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(
