@@ -2,6 +2,7 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
   doc,
+  limit as firestoreLimit,
   onSnapshot,
   orderBy,
   query,
@@ -10,14 +11,49 @@ import {
 
 import { db } from "../firebase";
 
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getAstUpdatedAt(ast) {
+  return (
+    ast?.metadata?.updatedAt ||
+    ast?.metadata?.createdAt ||
+    ast?.accessData?.metadata?.updatedAt ||
+    ast?.accessData?.metadata?.createdAt ||
+    ""
+  );
+}
+
 function sortAstsByUpdatedAtDesc(list) {
   if (!Array.isArray(list)) return;
 
-  list.sort((a, b) => {
-    const aAt = a?.accessData?.metadata?.updatedAt || "";
-    const bAt = b?.accessData?.metadata?.updatedAt || "";
-    return String(bAt).localeCompare(String(aAt));
-  });
+  list.sort((a, b) => toMillis(getAstUpdatedAt(b)) - toMillis(getAstUpdatedAt(a)));
+}
+
+function mapAstDoc(docSnap) {
+  return {
+    id: docSnap.id,
+    ...docSnap.data(),
+  };
+}
+
+function resolveLmPcode(arg) {
+  return String(typeof arg === "string" ? arg : arg?.lmPcode || "").trim();
+}
+
+function resolveLimit(arg, fallback = 5000) {
+  const rawLimit = typeof arg === "object" ? arg?.limit : null;
+  const numericLimit = Number(rawLimit);
+
+  return Number.isFinite(numericLimit) && numericLimit > 0
+    ? numericLimit
+    : fallback;
 }
 
 export const astsApi = createApi({
@@ -28,9 +64,11 @@ export const astsApi = createApi({
       queryFn: () => ({ data: [] }),
 
       async onCacheEntryAdded(
-        lmPcode,
+        arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
+        const lmPcode = resolveLmPcode(arg);
+        const maxRows = resolveLimit(arg);
         let unsubscribe = () => {};
 
         try {
@@ -38,23 +76,18 @@ export const astsApi = createApi({
 
           if (!lmPcode) return;
 
-          const q = query(
+          const astsQuery = query(
             collection(db, "asts"),
             where("accessData.parents.lmPcode", "==", lmPcode),
-            orderBy("accessData.metadata.updatedAt", "desc"),
+            firestoreLimit(maxRows),
           );
 
           unsubscribe = onSnapshot(
-            q,
+            astsQuery,
             (snapshot) => {
               updateCachedData(() => {
-                const next = snapshot.docs.map((docSnap) => ({
-                  id: docSnap.id,
-                  ...docSnap.data(),
-                }));
-
+                const next = snapshot.docs.map(mapAstDoc);
                 sortAstsByUpdatedAtDesc(next);
-
                 return next;
               });
             },
@@ -93,10 +126,7 @@ export const astsApi = createApi({
               updateCachedData(() => {
                 if (!docSnap.exists()) return null;
 
-                return {
-                  id: docSnap.id,
-                  ...docSnap.data(),
-                };
+                return mapAstDoc(docSnap);
               });
             },
             (error) => {
@@ -137,13 +167,8 @@ export const astsApi = createApi({
             q,
             (snapshot) => {
               updateCachedData(() => {
-                const next = snapshot.docs.map((docSnap) => ({
-                  id: docSnap.id,
-                  ...docSnap.data(),
-                }));
-
+                const next = snapshot.docs.map(mapAstDoc);
                 sortAstsByUpdatedAtDesc(next);
-
                 return next;
               });
             },

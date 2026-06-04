@@ -250,20 +250,43 @@ function getPremiseErfId(premise = {}) {
 }
 
 function getMeterErfId(meter = {}) {
+  const raw = meter.raw || {};
+
   return readFirstString(
     meter.accessData?.erfId,
     meter.accessData?.erf?.id,
+    meter.accessData?.erf?.erfId,
+    meter.accessData?.erf?.pcode,
     meter.erfId,
-    meter.raw?.accessData?.erfId,
+    meter.erf?.id,
+    meter.erf?.erfId,
+    meter.parents?.erfId,
+    meter.links?.erfId,
+    raw.accessData?.erfId,
+    raw.accessData?.erf?.id,
+    raw.accessData?.erf?.erfId,
+    raw.erfId,
+    raw.parents?.erfId,
+    raw.links?.erfId,
   );
 }
 
 function getMeterPremiseId(meter = {}) {
+  const raw = meter.raw || {};
+
   return readFirstString(
     meter.accessData?.premise?.id,
+    meter.accessData?.premiseId,
     meter.premiseId,
-    meter.raw?.accessData?.premise?.id,
-    meter.raw?.premiseId,
+    meter.premise?.id,
+    meter.parents?.premiseId,
+    meter.links?.premiseId,
+    raw.accessData?.premise?.id,
+    raw.accessData?.premiseId,
+    raw.premiseId,
+    raw.premise?.id,
+    raw.parents?.premiseId,
+    raw.links?.premiseId,
   );
 }
 
@@ -999,7 +1022,7 @@ export default function BgoDashboardPage() {
     data: liveMeters = [],
     isLoading: isLoadingLiveMeters,
     isFetching: isFetchingLiveMeters,
-  } = useGetAstsByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+  } = useGetAstsByLmPcodeQuery({ lmPcode, limit: 5000 }, { skip: !lmPcode });
 
   const mdBgoBatches = useMemo(() => {
     return asArray(bgoBatches).filter(isMdBgoBatch).sort(sortBatchesByUpdatedDesc);
