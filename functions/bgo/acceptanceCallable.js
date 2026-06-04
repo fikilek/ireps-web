@@ -375,6 +375,94 @@ function buildBgoBatchReverseReleaseSummaryPatch({ childCount = 0 }) {
   };
 }
 
+function isBmdBgoBatch(batchData = {}) {
+  const batchMode = normalizeUpper(batchData?.bgo?.batchMode);
+  const operationType = normalizeUpper(batchData?.operationType);
+  const sourceModule = normalizeUpper(batchData?.origin?.sourceModule);
+  const createsChildTrnsUpfront = batchData?.bgo?.createsChildTrnsUpfront;
+
+  return (
+    batchMode === "BMD" ||
+    sourceModule === "BULK_METER_DISCOVERY" ||
+    (operationType === "METER_DISCOVERY" && createsChildTrnsUpfront === false)
+  );
+}
+
+function getBmdWorklistTotalRows(batchData = {}) {
+  const worklistCount = Array.isArray(batchData?.worklist?.erfRefs)
+    ? batchData.worklist.erfRefs.length
+    : 0;
+
+  const candidates = [
+    batchData?.summary?.erfCount,
+    batchData?.summary?.totalRows,
+    batchData?.batchReleaseSummary?.totalRows,
+    worklistCount,
+  ];
+
+  for (const value of candidates) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0) return number;
+  }
+
+  return 0;
+}
+
+function buildBmdBgoBatchDecisionPatch({
+  action,
+  now,
+  actor,
+  rejectReason = "",
+  totalRows = 0,
+}) {
+  const isAccept = action === "ACCEPT";
+  const total = Math.max(Number(totalRows || 0), 0);
+
+  return {
+    "workflow.state": isAccept
+      ? BGO_WORKFLOW_STATES.ACCEPTED
+      : BGO_WORKFLOW_STATES.REJECTED,
+    "workflow.acceptedAt": isAccept ? now : null,
+    "workflow.acceptedByUid": isAccept ? actor.uid : null,
+    "workflow.acceptedByUser": isAccept ? actor.name : null,
+    "workflow.rejectedAt": isAccept ? null : now,
+    "workflow.rejectedByUid": isAccept ? null : actor.uid,
+    "workflow.rejectedByUser": isAccept ? null : actor.name,
+    "workflow.rejectReason": isAccept ? "" : rejectReason,
+
+    "bgo.releaseState": isAccept
+      ? BGO_RELEASE_STATES.RELEASED
+      : BGO_RELEASE_STATES.REJECTED,
+    "bgo.acceptanceMode": isAccept ? "BMD_BATCH" : null,
+    "bgo.acceptedAt": isAccept ? now : null,
+    "bgo.acceptedByUid": isAccept ? actor.uid : null,
+    "bgo.acceptedByUser": isAccept ? actor.name : null,
+    "bgo.rejectedAt": isAccept ? null : now,
+    "bgo.rejectedByUid": isAccept ? null : actor.uid,
+    "bgo.rejectedByUser": isAccept ? null : actor.name,
+    "bgo.rejectReason": isAccept ? "" : rejectReason,
+
+    "assignment.acceptedRejectedAt": now,
+    "assignment.acceptedRejectedUid": actor.uid,
+    "assignment.acceptedRejectedUser": actor.name,
+    "assignment.rejectReason": isAccept ? "" : rejectReason,
+
+    "batchReleaseSummary.totalRows": total,
+    "batchReleaseSummary.totalTrnsCreated": 0,
+    "batchReleaseSummary.totalWaitingBatchAcceptance": 0,
+    "batchReleaseSummary.totalReleased": isAccept ? total : 0,
+    "batchReleaseSummary.totalAcceptedForExecution": isAccept ? total : 0,
+    "batchReleaseSummary.totalRejectedAtBatch": isAccept ? 0 : total,
+    "batchReleaseSummary.totalCancelledAtBatch": 0,
+
+    ...buildUpdateMetadataPatch({
+      now,
+      actorUid: actor.uid,
+      actorName: actor.name,
+    }),
+  };
+}
+
 function getBgoBatchTrnIds(batchData = {}) {
   return [
     ...new Set(
@@ -645,6 +733,7 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
     }
 
     const batchData = batchSnap.data() || {};
+    const isBmdBatch = isBmdBgoBatch(batchData);
     const batchWorkflowState = getBatchWorkflowState(batchData);
     const batchReleaseState = getBatchReleaseState(batchData);
 
@@ -653,13 +742,18 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
       batchWorkflowState === BGO_WORKFLOW_STATES.ACCEPTED &&
       batchReleaseState === BGO_RELEASE_STATES.RELEASED
     ) {
-      const derivedExecutionSummaryRefresh =
-        await refreshBgoBatchDerivedExecutionSummary({
-          db,
-          batchId,
-          now,
-          reason: "BGO_ACCEPT_IDEMPOTENT",
-        });
+      const derivedExecutionSummaryRefresh = isBmdBatch
+        ? {
+            updated: false,
+            batchId,
+            reason: "BMD_BATCH_HAS_NO_UPFRONT_CHILD_TRNS",
+          }
+        : await refreshBgoBatchDerivedExecutionSummary({
+            db,
+            batchId,
+            now,
+            reason: "BGO_ACCEPT_IDEMPOTENT",
+          });
 
       return buildSuccessResult("BGO batch already accepted", {
         batchId,
@@ -673,13 +767,18 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
       action === "REJECT" &&
       batchWorkflowState === BGO_WORKFLOW_STATES.REJECTED
     ) {
-      const derivedExecutionSummaryRefresh =
-        await refreshBgoBatchDerivedExecutionSummary({
-          db,
-          batchId,
-          now,
-          reason: "BGO_REJECT_IDEMPOTENT",
-        });
+      const derivedExecutionSummaryRefresh = isBmdBatch
+        ? {
+            updated: false,
+            batchId,
+            reason: "BMD_BATCH_HAS_NO_UPFRONT_CHILD_TRNS",
+          }
+        : await refreshBgoBatchDerivedExecutionSummary({
+            db,
+            batchId,
+            now,
+            reason: "BGO_REJECT_IDEMPOTENT",
+          });
 
       return buildSuccessResult("BGO batch already rejected", {
         batchId,
@@ -730,7 +829,7 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
       batchData,
     });
 
-    if (childSnaps.length === 0) {
+    if (childSnaps.length === 0 && !isBmdBatch) {
       return buildFailureResult(
         "BGO_BATCH_HAS_NO_CHILD_TRNS",
         "No child TRNs were found for this BGO batch",
@@ -740,6 +839,86 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
 
     const trnType = getBgoBatchTrnType(batchData);
     const writeJobs = [];
+
+    if (childSnaps.length === 0 && isBmdBatch) {
+      const bmdWorklistCount = getBmdWorklistTotalRows(batchData);
+
+      writeJobs.push((batch) => {
+        batch.update(
+          batchRef,
+          buildBmdBgoBatchDecisionPatch({
+            action,
+            now,
+            actor,
+            rejectReason,
+            totalRows: bmdWorklistCount,
+          }),
+        );
+      });
+
+      writeJobs.push((batch) => {
+        const historyRef = batchRef.collection("history").doc();
+
+        batch.set(
+          historyRef,
+          buildBgoHistoryEvent({
+            trnId: batchId,
+            trnType,
+            event:
+              action === "ACCEPT"
+                ? "BMD_BGO_BATCH_ACCEPTED"
+                : "BMD_BGO_BATCH_REJECTED",
+            workflowState:
+              action === "ACCEPT"
+                ? BGO_WORKFLOW_STATES.ACCEPTED
+                : BGO_WORKFLOW_STATES.REJECTED,
+            actorUid: actor.uid,
+            actorName: actor.name,
+            now,
+            note:
+              action === "ACCEPT"
+                ? "MD-BGO batch accepted. Discovery TRNs will be created only when field discovery is submitted."
+                : `MD-BGO batch rejected before field discovery started: ${rejectReason}`,
+          }),
+        );
+      });
+
+      const committedWrites = await commitWriteJobsInChunks({
+        db,
+        writeJobs,
+        chunkSize: 380,
+      });
+
+      logger.info("onAcceptRejectBgoBatchCallable -- BMD SUCCESS", {
+        batchId,
+        action,
+        bmdWorklistCount,
+        committedWrites,
+        actorUid: actor.uid,
+      });
+
+      return buildSuccessResult(
+        action === "ACCEPT"
+          ? "MD-BGO batch accepted successfully"
+          : "MD-BGO batch rejected successfully",
+        {
+          batchId,
+          action,
+          childTrnCount: 0,
+          bmdWorklistCount,
+          committedWrites,
+          workflowState:
+            action === "ACCEPT"
+              ? BGO_WORKFLOW_STATES.ACCEPTED
+              : BGO_WORKFLOW_STATES.REJECTED,
+          releaseState:
+            action === "ACCEPT"
+              ? BGO_RELEASE_STATES.RELEASED
+              : BGO_RELEASE_STATES.REJECTED,
+          bmdChildTrnCreationMode: "FIELD_CREATED_ON_DISCOVERY_SUBMIT",
+        },
+      );
+    }
 
     writeJobs.push((batch) => {
       batch.update(

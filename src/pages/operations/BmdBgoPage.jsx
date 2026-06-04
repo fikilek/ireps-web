@@ -13,6 +13,7 @@ import {
 import { useGetGeoFencesByWardQuery } from "../../redux/geofencesApi";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
+import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -188,7 +189,7 @@ function getTargetOptionSubtitle(target = {}) {
       ? `SUBC under ${target.parentServiceProviderName}`
       : "SUBC service provider";
 
-  return parentText;
+  return `${target.memberCount || 0} member(s) • ${parentText}`;
 }
 
 function getTargetOptionMicroText(target = {}) {
@@ -196,7 +197,143 @@ function getTargetOptionMicroText(target = {}) {
     return `Owner: ${target.mncServiceProviderName || "NAv"}`;
   }
 
-  return `SP ID: ${target.id || "NAv"}`;
+  return target.registeredName && target.registeredName !== "NAv"
+    ? `Registered: ${target.registeredName}`
+    : "";
+}
+
+function getUserDisplayName(user = {}) {
+  return (
+    user.displayName ||
+    [user.name, user.surname].filter(Boolean).join(" ") ||
+    user.email ||
+    user.id ||
+    "Unknown user"
+  );
+}
+
+function getUserRoleLabel(user = {}) {
+  const role = valueOrNav(user.role);
+  const accountStatus = valueOrNav(user.accountStatus);
+  const onboardingStatus = valueOrNav(user.onboardingStatus);
+
+  return `${role} • ${accountStatus} • ${onboardingStatus}`;
+}
+
+function buildUsersById(users = []) {
+  const map = new Map();
+
+  asArray(users).forEach((user) => {
+    if (!user?.id) return;
+
+    map.set(user.id, user);
+    if (user.uid) map.set(user.uid, user);
+  });
+
+  return map;
+}
+
+function buildUnknownMember(userId) {
+  return {
+    id: userId,
+    uid: userId,
+    displayName: `Unknown user ${userId}`,
+    name: "Unknown",
+    surname: "",
+    email: "",
+    role: "NAv",
+    accountStatus: "NAv",
+    onboardingStatus: "NAv",
+    serviceProviderId: "NAv",
+    serviceProviderName: "NAv",
+    missing: true,
+  };
+}
+
+function enrichTeamsWithMembers(teams = [], usersById = new Map()) {
+  return asArray(teams).map((team) => {
+    const memberUserIds = asArray(team.memberUserIds)
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+
+    const members = memberUserIds.map((userId) => {
+      const user = usersById.get(userId) || buildUnknownMember(userId);
+
+      return {
+        ...user,
+        id: user.id || userId,
+        uid: user.uid || userId,
+        displayName: getUserDisplayName(user),
+      };
+    });
+
+    return {
+      ...team,
+      members,
+      memberCount: members.length,
+      memberNames: members.map(getUserDisplayName),
+    };
+  });
+}
+
+function enrichServiceProvidersWithMembers(serviceProviders = [], users = []) {
+  return asArray(serviceProviders).map((serviceProvider) => {
+    const members = asArray(users)
+      .filter((user) => user.serviceProviderId === serviceProvider.id)
+      .sort((left, right) =>
+        getUserDisplayName(left).localeCompare(getUserDisplayName(right)),
+      );
+
+    return {
+      ...serviceProvider,
+      members,
+      memberCount: members.length,
+      memberNames: members.map(getUserDisplayName),
+    };
+  });
+}
+
+function getTargetMembers(target = {}) {
+  return asArray(target.members);
+}
+
+function MembersList({ target, maxItems = 6 }) {
+  const members = getTargetMembers(target);
+
+  if (members.length === 0) {
+    return (
+      <div style={styles.memberEmpty}>
+        {target.type === "TEAM"
+          ? "No team members resolved yet."
+          : "No SP members resolved yet."}
+      </div>
+    );
+  }
+
+  const visibleMembers = members.slice(0, maxItems);
+  const hiddenCount = Math.max(members.length - visibleMembers.length, 0);
+
+  return (
+    <div style={styles.memberList}>
+      {visibleMembers.map((member) => (
+        <span
+          key={member.id || member.uid || getUserDisplayName(member)}
+          style={{
+            ...styles.memberChip,
+            ...(member.missing ? styles.memberChipWarning : null),
+          }}
+          title={getUserRoleLabel(member)}
+        >
+          <strong>{getUserDisplayName(member)}</strong>
+          <small>{getUserRoleLabel(member)}</small>
+        </span>
+      ))}
+
+      {hiddenCount > 0 ? (
+        <span style={styles.memberMore}>+{hiddenCount} more</span>
+      ) : null}
+    </div>
+  );
 }
 
 function buildTargetPayload(target = null) {
@@ -214,6 +351,7 @@ function buildTargetPayload(target = null) {
     name,
     memberCount: safeNumber(target.memberCount),
     serviceProviderCount: safeNumber(target.serviceProviderCount),
+    members: asArray(target.members),
   };
 }
 
@@ -438,6 +576,21 @@ function createGeofenceMapRoute({ lmPcode, wardPcode, group }) {
   return `/operations/geo-fences?${params.toString()}`;
 }
 
+function createExistingBmdMapRoute(batch = {}) {
+  const raw = batch?.raw || {};
+  const geofenceId = readFirstString(batch?.geofenceId, batch?.geofenceRef?.id);
+  const geofenceName = readFirstString(batch?.geofenceName, batch?.geofenceRef?.name);
+
+  return createGeofenceMapRoute({
+    lmPcode: readFirstString(raw?.scope?.lmPcode, batch?.lmPcode),
+    wardPcode: readFirstString(raw?.scope?.wardPcode, batch?.wardPcode),
+    group: {
+      geofenceId,
+      geofenceName,
+    },
+  });
+}
+
 function Badge({ tone = "neutral", children }) {
   return <span style={{ ...styles.badge, ...(styles[`badge_${tone}`] || {}) }}>{children}</span>;
 }
@@ -529,8 +682,9 @@ function buildExistingAllocationByGeofenceId(existingBmdBatches = []) {
 function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
   const raw = batch?.raw || {};
   const batchId = getBatchId(batch);
-  const premiseCreatedCount = getBatchBmdCreatedPremiseCount(batch);
-  const meterCreatedCount = getBatchBmdCreatedMeterCount(batch);
+  const totalErfs = safeNumber(raw?.summary?.erfCount ?? raw?.batchReleaseSummary?.totalRows);
+  const totalPremises = safeNumber(raw?.summary?.premiseCount);
+  const totalMeters = safeNumber(raw?.summary?.meterCount);
   const removable = canRemoveBmdBatch(batch) && !isDeleting;
 
   return (
@@ -546,26 +700,30 @@ function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
       </div>
 
       <div style={styles.existingBatchGrid}>
-        <InfoCard label="Target" value={getTargetLabel(batch.target)} />
-        <InfoCard label="ERFs" value={raw?.summary?.erfCount || raw?.batchReleaseSummary?.totalRows || 0} />
-        <InfoCard label="BMD Premises Created" value={premiseCreatedCount} />
-        <InfoCard label="BMD Meters Created" value={meterCreatedCount} />
+        <InfoCard label="Total ERFs" value={totalErfs} />
+        <InfoCard label="Total Premises" value={totalPremises} />
+        <InfoCard label="Total Meters" value={totalMeters} />
       </div>
 
       <div style={styles.existingBatchFooter}>
         <span style={styles.existingBatchReason}>{getRemoveDisabledReason(batch)}</span>
-        <button
-          type="button"
-          style={{
-            ...styles.dangerOutlineButton,
-            ...(removable ? styles.dangerOutlineButtonEnabled : null),
-          }}
-          disabled={!removable}
-          onClick={() => onRemove(batch)}
-          title={getRemoveDisabledReason(batch)}
-        >
-          Remove
-        </button>
+        <div style={styles.existingBatchActions}>
+          <Link to={createExistingBmdMapRoute(batch)} style={styles.openMapLink}>
+            Open map
+          </Link>
+          <button
+            type="button"
+            style={{
+              ...styles.dangerOutlineButton,
+              ...(removable ? styles.dangerOutlineButtonEnabled : null),
+            }}
+            disabled={!removable}
+            onClick={() => onRemove(batch)}
+            title={getRemoveDisabledReason(batch)}
+          >
+            Remove
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -586,55 +744,6 @@ function Th({ children }) {
 
 function Td({ children, strong = false }) {
   return <td style={{ ...styles.td, ...(strong ? styles.tdStrong : null) }}>{children}</td>;
-}
-
-function getFeedbackTone(feedback = {}) {
-  if (feedback?.tone) return feedback.tone;
-  return feedback?.success ? "success" : "danger";
-}
-
-function FeedbackModal({ feedback, onClose }) {
-  if (!feedback) return null;
-
-  const tone = getFeedbackTone(feedback);
-  const details = asArray(feedback.details).filter(Boolean);
-
-  return (
-    <div style={styles.modalOverlay}>
-      <div style={styles.modalCard}>
-        <div style={styles.modalHeader}>
-          <div>
-            <p style={styles.eyebrow}>{feedback.eyebrow || "MD BGO Feedback"}</p>
-            <h3 style={styles.modalTitle}>{feedback.title || "MD BGO result"}</h3>
-            {feedback.message ? (
-              <p style={styles.modalSubtitle}>{feedback.message}</p>
-            ) : null}
-          </div>
-          <Badge tone={tone}>{feedback.badgeLabel || (feedback.success ? "SUCCESS" : "FAILED")}</Badge>
-        </div>
-
-        {details.length > 0 ? (
-          <div style={styles.feedbackDetailList}>
-            {details.map((detail, index) => (
-              <div key={`${detail}-${index}`} style={styles.feedbackDetailItem}>
-                {detail}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {feedback.code ? (
-          <div style={styles.feedbackCode}>Code: {feedback.code}</div>
-        ) : null}
-
-        <div style={styles.modalActions}>
-          <button type="button" style={styles.modalPrimaryButton} onClick={onClose}>
-            {feedback.closeLabel || "Close"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function BmdBgoPage() {
@@ -669,7 +778,6 @@ export default function BmdBgoPage() {
   const [createResult, setCreateResult] = useState(null);
   const [removeResult, setRemoveResult] = useState(null);
   const [removeCandidate, setRemoveCandidate] = useState(null);
-  const [feedbackModal, setFeedbackModal] = useState(null);
   const [isCreateConfirmOpen, setIsCreateConfirmOpen] = useState(false);
 
   useEffect(() => {
@@ -706,6 +814,9 @@ export default function BmdBgoPage() {
 
   const { data: availableServiceProviders = [], isLoading: serviceProvidersLoading } =
     useGetAvailableServiceProvidersQuery({ limit: 500 });
+
+  const { data: usersDirectory = [], isLoading: usersLoading } =
+    useGetUsersDirectoryQuery({ limit: 1000 });
 
   const [createBgo, createBgoState] = useCreateBgoMutation();
   const [deleteUnacceptedBgo, deleteBgoState] = useDeleteUnacceptedBgoMutation();
@@ -775,14 +886,29 @@ export default function BmdBgoPage() {
     allocatableReadyGroups[0] ||
     null;
 
+  const usersById = useMemo(
+    () => buildUsersById(usersDirectory),
+    [usersDirectory],
+  );
+
+  const availableTeamsWithMembers = useMemo(
+    () => enrichTeamsWithMembers(availableTeams, usersById),
+    [availableTeams, usersById],
+  );
+
+  const availableServiceProvidersWithMembers = useMemo(
+    () => enrichServiceProvidersWithMembers(availableServiceProviders, usersDirectory),
+    [availableServiceProviders, usersDirectory],
+  );
+
   const targetOptions = useMemo(
     () =>
       buildTargetOptions({
-        teams: availableTeams,
-        serviceProviders: availableServiceProviders,
+        teams: availableTeamsWithMembers,
+        serviceProviders: availableServiceProvidersWithMembers,
         targetType,
       }),
-    [availableTeams, availableServiceProviders, targetType],
+    [availableTeamsWithMembers, availableServiceProvidersWithMembers, targetType],
   );
 
   const selectedTargetOption =
@@ -803,9 +929,11 @@ export default function BmdBgoPage() {
     0,
   );
 
-  const totalSummary = useMemo(
+  const totalGeofenceCount = allocatableReadyGroups.length + activeAllocatedGeofenceCount;
+
+  const wardGeofenceSummary = useMemo(
     () =>
-      allocatableReadyGroups.reduce(
+      readyGroups.reduce(
         (acc, group) => ({
           erfs: acc.erfs + safeNumber(group.erfCount),
           premises: acc.premises + safeNumber(group.premiseCount),
@@ -813,7 +941,7 @@ export default function BmdBgoPage() {
         }),
         { erfs: 0, premises: 0, meters: 0 },
       ),
-    [allocatableReadyGroups],
+    [readyGroups],
   );
 
   const allocatedSummary = useMemo(
@@ -867,7 +995,6 @@ export default function BmdBgoPage() {
     setCreateResult(null);
     setRemoveResult(null);
     setRemoveCandidate(null);
-    setFeedbackModal(null);
 
     if (nextWard && typeof updateGeo === "function") {
       updateGeo({
@@ -902,7 +1029,6 @@ export default function BmdBgoPage() {
       [group.geofenceId]: cleanTarget,
     }));
     setCreateResult(null);
-    setFeedbackModal(null);
   }
 
   function clearTargetFromGeofenceGroup(geofenceId) {
@@ -988,7 +1114,6 @@ export default function BmdBgoPage() {
 
   function handleOpenCreateConfirm() {
     if (!canCreate) return;
-    setFeedbackModal(null);
     setIsCreateConfirmOpen(true);
   }
 
@@ -1006,7 +1131,6 @@ export default function BmdBgoPage() {
     const failedResults = [];
 
     setCreateResult(null);
-    setFeedbackModal(null);
     setIsCreateConfirmOpen(false);
 
     for (const group of allocatedReadyGroups) {
@@ -1043,30 +1167,6 @@ export default function BmdBgoPage() {
       batchIds,
     });
 
-    const createHasFailures = failedResults.length > 0;
-    const createHasSuccess = createdResults.length > 0;
-
-    setFeedbackModal({
-      success: !createHasFailures,
-      tone: createHasFailures ? (createHasSuccess ? "warning" : "danger") : "success",
-      eyebrow: "MD BGO Allocation",
-      title: createHasFailures
-        ? createHasSuccess
-          ? "MD BGO allocation partially completed"
-          : "MD BGO allocation failed"
-        : "MD BGO allocation created",
-      badgeLabel: createHasFailures ? (createHasSuccess ? "PARTIAL" : "FAILED") : "SUCCESS",
-      message: `Created: ${createdResults.length} • Failed: ${failedResults.length}`,
-      details: [
-        ...batchIds.map((batchId) => `Created batch: ${batchId}`),
-        ...failedResults.map(
-          (failure) =>
-            `${failure.group?.geofenceName || "NAv"}: ${failure.code || "ERROR"} — ${failure.message || "Could not create MD BGO allocation."}`,
-        ),
-      ],
-      code: createHasFailures ? "BMD_BGO_CREATE_REVIEW_REQUIRED" : "SUCCESS",
-    });
-
     if (createdResults.length > 0) {
       setAllocationsByGeofenceId((current) => {
         const next = { ...current };
@@ -1095,7 +1195,6 @@ export default function BmdBgoPage() {
     if (!batch || !canRemoveBmdBatch(batch)) return;
     setRemoveCandidate(batch);
     setRemoveResult(null);
-    setFeedbackModal(null);
   }
 
   async function handleConfirmRemoveBmdBatch() {
@@ -1103,61 +1202,37 @@ export default function BmdBgoPage() {
 
     const batchId = getBatchId(removeCandidate);
 
-    setFeedbackModal(null);
-
     try {
       const response = await deleteUnacceptedBgo({
         bgoBatchId: batchId,
         batchId,
       }).unwrap();
 
-      const successMessage = response?.message || "MD BGO allocation removed successfully.";
-
       setRemoveResult({
         success: true,
-        message: successMessage,
+        message: response?.message || "MD BGO allocation removed successfully.",
         batchId,
-      });
-      setFeedbackModal({
-        success: true,
-        tone: "success",
-        eyebrow: "MD BGO Removal",
-        title: "MD BGO allocation removed",
-        badgeLabel: "SUCCESS",
-        message: successMessage,
-        details: [`Removed batch: ${batchId}`],
-        code: response?.code || "SUCCESS",
       });
       setRemoveCandidate(null);
     } catch (error) {
-      const failureMessage =
-        error?.data?.message ||
-        error?.message ||
-        "Could not remove MD BGO allocation.";
-      const failureCode = error?.status || error?.data?.code || "BMD_BGO_REMOVE_FAILED";
-
       setRemoveResult({
         success: false,
-        message: failureMessage,
-        code: failureCode,
+        message:
+          error?.data?.message ||
+          error?.message ||
+          "Could not remove MD BGO allocation.",
+        code: error?.status || error?.data?.code || "BMD_BGO_REMOVE_FAILED",
         batchId,
       });
-      setFeedbackModal({
-        success: false,
-        tone: "danger",
-        eyebrow: "MD BGO Removal",
-        title: "MD BGO remove failed or blocked",
-        badgeLabel: "FAILED",
-        message: failureMessage,
-        details: [`Batch: ${batchId}`],
-        code: failureCode,
-      });
-      setRemoveCandidate(null);
     }
   }
 
   const isLoading =
-    geofencesLoading || teamsLoading || serviceProvidersLoading || existingBmdBatchesLoading;
+    geofencesLoading ||
+    teamsLoading ||
+    serviceProvidersLoading ||
+    usersLoading ||
+    existingBmdBatchesLoading;
   const errorMessage =
     geofencesErrorData?.message ||
     geofencesErrorData?.data?.message ||
@@ -1218,12 +1293,17 @@ export default function BmdBgoPage() {
           </div>
         </div>
 
-        <div style={styles.summaryMetricGrid}>
-          <InfoCard label="Ready Geofences" value={allocatableReadyGroups.length} />
-          <InfoCard label="Allocated Geofences" value={activeAllocatedGeofenceCount} />
-          <InfoCard label="ERFs" value={totalSummary.erfs} />
-          <InfoCard label="Premises" value={totalSummary.premises} />
-          <InfoCard label="Meters" value={totalSummary.meters} />
+        <div style={styles.summaryMetricStack}>
+          <div style={styles.summaryMetricGridThree}>
+            <InfoCard label="Total Geofences" value={totalGeofenceCount} />
+            <InfoCard label="Available" value={allocatableReadyGroups.length} />
+            <InfoCard label="Allocated" value={activeAllocatedGeofenceCount} />
+          </div>
+          <div style={styles.summaryMetricGridThree}>
+            <InfoCard label="ERFs" value={wardGeofenceSummary.erfs} />
+            <InfoCard label="Premises" value={wardGeofenceSummary.premises} />
+            <InfoCard label="Meters" value={wardGeofenceSummary.meters} />
+          </div>
         </div>
       </div>
 
@@ -1307,7 +1387,10 @@ export default function BmdBgoPage() {
                         <strong style={styles.targetTitle}>{target.name}</strong>
                       </div>
                       <p style={styles.targetSub}>{getTargetOptionSubtitle(target)}</p>
-                      <span style={styles.targetMicro}>{getTargetOptionMicroText(target)}</span>
+                      {getTargetOptionMicroText(target) ? (
+                        <span style={styles.targetMicro}>{getTargetOptionMicroText(target)}</span>
+                      ) : null}
+                      <MembersList target={target} maxItems={5} />
                     </button>
                   );
                 })}
@@ -1315,18 +1398,6 @@ export default function BmdBgoPage() {
             )}
           </div>
 
-          <div style={styles.panel}>
-            <h3 style={styles.panelTitle}>Selected Target</h3>
-            {selectedTargetPayload ? (
-              <div style={styles.selectedTargetCard}>
-                <span style={styles.targetType}>{selectedTargetPayload.type}</span>
-                <strong>{selectedTargetPayload.name}</strong>
-                <span style={styles.targetMicro}>{selectedTargetPayload.id}</span>
-              </div>
-            ) : (
-              <div style={styles.emptyState}>Select or drag a TEAM/SP target.</div>
-            )}
-          </div>
         </section>
 
         <section style={styles.panel}>
@@ -1540,7 +1611,37 @@ export default function BmdBgoPage() {
 
         <div style={styles.createReason}>{createDisabledReason}</div>
 
-        {/* Create feedback is shown in the outcome modal after submission. */}
+        {createResult ? (
+          <div
+            style={{
+              ...styles.resultBox,
+              ...(createResult.success ? styles.resultSuccess : styles.resultError),
+            }}
+          >
+            <strong>
+              {createResult.success ? "MD BGO allocation created" : "MD BGO allocation has errors"}
+            </strong>
+            <p style={styles.resultText}>
+              Created: {createResult.createdResults.length} • Failed: {createResult.failedResults.length}
+            </p>
+            {createResult.batchIds.length > 0 ? (
+              <div style={styles.resultList}>
+                {createResult.batchIds.map((batchId) => (
+                  <span key={batchId}>{batchId}</span>
+                ))}
+              </div>
+            ) : null}
+            {createResult.failedResults.length > 0 ? (
+              <div style={styles.resultList}>
+                {createResult.failedResults.map((failure) => (
+                  <span key={failure.group.geofenceId}>
+                    {failure.group.geofenceName}: {failure.code} — {failure.message}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section style={styles.panel}>
@@ -1574,7 +1675,19 @@ export default function BmdBgoPage() {
           </div>
         )}
 
-        {/* Remove feedback is shown in the outcome modal after the backend responds. */}
+        {removeResult ? (
+          <div
+            style={{
+              ...styles.resultBox,
+              ...(removeResult.success ? styles.resultSuccess : styles.resultError),
+            }}
+          >
+            <strong>{removeResult.success ? "MD BGO removed" : "MD BGO remove blocked"}</strong>
+            <p style={styles.resultText}>
+              {removeResult.message} {removeResult.code ? `(${removeResult.code})` : ""}
+            </p>
+          </div>
+        ) : null}
       </section>
 
 
@@ -1692,11 +1805,6 @@ export default function BmdBgoPage() {
           </div>
         </div>
       ) : null}
-
-      <FeedbackModal
-        feedback={feedbackModal}
-        onClose={() => setFeedbackModal(null)}
-      />
     </section>
   );
 }
@@ -1822,9 +1930,13 @@ const styles = {
     fontSize: 13,
     fontWeight: 800,
   },
-  summaryMetricGrid: {
+  summaryMetricStack: {
     display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 10,
+  },
+  summaryMetricGridThree: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: 10,
   },
   infoCard: {
@@ -1968,6 +2080,48 @@ const styles = {
     fontWeight: 800,
     marginTop: 6,
     wordBreak: "break-word",
+  },
+  memberList: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  memberChip: {
+    display: "grid",
+    gap: 2,
+    border: "1px solid #cbd5e1",
+    borderRadius: 999,
+    background: "#f8fafc",
+    padding: "5px 8px",
+    color: "#0f172a",
+    maxWidth: "100%",
+    fontSize: 11,
+  },
+  memberChipWarning: {
+    borderColor: "#f59e0b",
+    background: "#fffbeb",
+  },
+  memberMore: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #e2e8f0",
+    borderRadius: 999,
+    background: "#ffffff",
+    padding: "6px 9px",
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: 900,
+  },
+  memberEmpty: {
+    border: "1px dashed #cbd5e1",
+    borderRadius: 12,
+    background: "#f8fafc",
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 800,
+    padding: 10,
+    marginTop: 8,
   },
   selectedTargetCard: {
     display: "grid",
@@ -2261,27 +2415,6 @@ const styles = {
     fontWeight: 800,
     wordBreak: "break-word",
   },
-  feedbackDetailList: {
-    display: "grid",
-    gap: 8,
-    marginTop: 14,
-  },
-  feedbackDetailItem: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 12,
-    background: "#f8fafc",
-    color: "#334155",
-    padding: "9px 11px",
-    fontSize: 12,
-    fontWeight: 800,
-    wordBreak: "break-word",
-  },
-  feedbackCode: {
-    marginTop: 12,
-    color: "#64748b",
-    fontSize: 12,
-    fontWeight: 900,
-  },
   modalOverlay: {
     position: "fixed",
     inset: 0,
@@ -2408,6 +2541,13 @@ const styles = {
     alignItems: "center",
     gap: 12,
     marginTop: 12,
+  },
+  existingBatchActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
   },
   existingBatchReason: {
     color: "#64748b",

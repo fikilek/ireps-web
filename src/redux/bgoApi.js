@@ -168,6 +168,8 @@ function normalizeBgoBatchDoc(docSnap) {
     targetName: target.name,
     workflowState: getWorkflowState(data),
     releaseState: getReleaseState(data),
+    batchMode: valueOrNav(data.bgo?.batchMode),
+    scope: getBatchScope(data),
     summary: {
       ...summary,
       totalRows: safeNumber(summary.totalRows ?? batchReleaseSummary.totalRows ?? data.totalRows),
@@ -190,7 +192,7 @@ function normalizeBgoBatchDoc(docSnap) {
     metadata: {
       ...metadata,
       createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
-      updatedAt: normalizeDateValue(metadata.updatedAt || data.updatedAt),
+      updatedAt: getBatchUpdatedAt(data),
     },
     raw: data,
   };
@@ -327,6 +329,61 @@ function isBmdBatchForScope(batch = {}, lmPcode = "", wardPcode = "") {
   return batchLmPcode === lmPcode && batchWardPcode === wardPcode;
 }
 
+function extractWardPcodeFromTrnIds(trnIds = []) {
+  for (const trnId of asArray(trnIds)) {
+    const match = String(trnId || "").match(/_(ZA\d{7})_/i);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  return "";
+}
+
+function getBatchScope(data = {}) {
+  const scope = data.scope || {};
+  const trnIds = data.refs?.trnIds || data.trnIds || data.bgo?.trnIds || [];
+
+  return {
+    lmPcode: valueOrNav(
+      scope.lmPcode ||
+        data.lmPcode ||
+        data.sourceUpload?.lmPcode ||
+        data.origin?.lmPcode,
+    ),
+    lmName: valueOrNav(scope.lmName || data.lmName || data.sourceUpload?.lmName),
+    wardPcode: valueOrNav(
+      scope.wardPcode ||
+        data.wardPcode ||
+        data.sourceUpload?.wardPcode ||
+        data.origin?.wardPcode ||
+        extractWardPcodeFromTrnIds(trnIds),
+    ),
+    wardName: valueOrNav(scope.wardName || data.wardName || data.sourceUpload?.wardName),
+  };
+}
+
+function getBatchUpdatedAt(data = {}) {
+  return normalizeDateValue(
+    data.metadata?.updatedAt ||
+      data.workflow?.completedAt ||
+      data.workflow?.acceptedAt ||
+      data.workflow?.rejectedAt ||
+      data.workflow?.cancelledAt ||
+      data.workflow?.issuedAt ||
+      data.metadata?.createdAt ||
+      data.updatedAt ||
+      data.createdAt,
+  );
+}
+
+function sortByUpdatedDesc(left, right) {
+  const leftDate = String(left?.metadata?.updatedAt || left?.metadata?.createdAt || "");
+  const rightDate = String(right?.metadata?.updatedAt || right?.metadata?.createdAt || "");
+
+  if (leftDate !== rightDate) return rightDate.localeCompare(leftDate);
+
+  return String(left?.id || "").localeCompare(String(right?.id || ""));
+}
+
 export const bgoApi = createApi({
   reducerPath: "bgoApi",
   baseQuery: fakeBaseQuery(),
@@ -387,6 +444,64 @@ export const bgoApi = createApi({
               message: error?.message || "Failed to delete BGO",
             },
           };
+        }
+      },
+    }),
+
+    getBgoBatchesByLm: builder.query({
+      queryFn: () => ({ data: [] }),
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = String(arg?.lmPcode || "").trim();
+        if (!lmPcode) return;
+
+        const maxResults = resolveLimit(arg, 1000);
+        const latestSnapshots = new globalThis.Map();
+        const unsubscribes = [];
+
+        try {
+          await cacheDataLoaded;
+
+          const collectionRef = collection(db, BGO_BATCHES_COLLECTION);
+          const queries = [
+            query(collectionRef, where("scope.lmPcode", "==", lmPcode), limitQuery(maxResults)),
+            query(
+              collectionRef,
+              where("sourceUpload.lmPcode", "==", lmPcode),
+              limitQuery(maxResults),
+            ),
+            query(collectionRef, where("origin.lmPcode", "==", lmPcode), limitQuery(maxResults)),
+            query(collectionRef, where("lmPcode", "==", lmPcode), limitQuery(maxResults)),
+          ];
+
+          queries.forEach((bgoQuery, index) => {
+            const unsubscribe = onSnapshot(
+              bgoQuery,
+              (snapshot) => {
+                latestSnapshots.set(index, snapshot);
+
+                const batches = mergeUniqueDocs(
+                  Array.from(latestSnapshots.values()),
+                  normalizeBgoBatchDoc,
+                ).sort(sortByUpdatedDesc);
+
+                updateCachedData((draft) => {
+                  draft.splice(0, draft.length, ...batches);
+                });
+              },
+              (error) => {
+                console.error("bgoApi getBgoBatchesByLm stream error:", error);
+              },
+            );
+
+            unsubscribes.push(unsubscribe);
+          });
+
+          await cacheEntryRemoved;
+        } finally {
+          unsubscribes.forEach((unsubscribe) => unsubscribe());
         }
       },
     }),
@@ -616,6 +731,7 @@ export const {
   useCreateBgoMutation,
   useDeleteUnacceptedBgoMutation,
   useGetBmdBgoBatchesByWardQuery,
+  useGetBgoBatchesByLmQuery,
   useGetBgoBatchesByTcIdQuery,
   useGetBgoRowsByTcIdQuery,
   useGetBgoRowsByBatchIdQuery,

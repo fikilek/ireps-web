@@ -1,13 +1,287 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { useAuth } from "../../auth/useAuth";
+import { useGeo } from "@/context/GeoContext";
+import { useWarehouse } from "@/context/WarehouseContext";
 import { useGetTcUploadsQuery } from "../../redux/tcApi";
 import {
+  useGetBgoBatchesByLmQuery,
   useGetBgoBatchesByTcIdQuery,
   useGetBgoRowsByTcIdQuery,
 } from "../../redux/bgoApi";
 
 const FILTER_ALL = "ALL";
+
+const MD_BGO_MODE = "MD_BGO";
+
+function readFirstString(...values) {
+  for (const value of values) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
+
+  return "";
+}
+
+function toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === "function") return value.toDate();
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateTime(value) {
+  const date = toDate(value);
+  if (!date) return "NAv";
+
+  return date.toLocaleString("en-ZA", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getActiveLmPcode(activeWorkbase, selectedLm) {
+  return readFirstString(
+    selectedLm?.pcode,
+    selectedLm?.id,
+    activeWorkbase?.lmPcode,
+    activeWorkbase?.pcode,
+    activeWorkbase?.id,
+    activeWorkbase?.localMunicipalityId,
+  );
+}
+
+function getLmName(activeWorkbase, selectedLm) {
+  return valueOrNav(
+    readFirstString(
+      selectedLm?.name,
+      selectedLm?.lmName,
+      activeWorkbase?.name,
+      activeWorkbase?.lmName,
+      activeWorkbase?.id,
+    ),
+  );
+}
+
+function getWardPcode(ward = {}) {
+  return readFirstString(ward?.pcode, ward?.id, ward?.wardPcode, ward?.code);
+}
+
+function getWardNo(ward = {}) {
+  const explicit = readFirstString(ward?.wardNo, ward?.no, ward?.number, ward?.code);
+  if (explicit) return explicit;
+
+  const pcode = getWardPcode(ward);
+  const match = pcode.match(/(\d{3})$/);
+  if (!match) return "NAv";
+
+  return String(Number(match[1]) || match[1]);
+}
+
+function getWardLabel(ward = {}, fallbackPcode = "") {
+  const pcode = getWardPcode(ward) || fallbackPcode;
+  const name = readFirstString(ward?.name, ward?.wardName, ward?.label);
+
+  if (name && pcode && !name.includes(pcode)) return `${name} (${pcode})`;
+  if (name) return name;
+
+  const wardNo = getWardNo({ ...ward, id: pcode });
+  if (wardNo !== "NAv" && pcode) return `Ward ${wardNo} (${pcode})`;
+  if (pcode) return pcode;
+
+  return "NAv";
+}
+
+function extractWardPcodeFromTrnIds(trnIds = []) {
+  for (const trnId of asArray(trnIds)) {
+    const match = String(trnId || "").match(/_(ZA\d{7})_/i);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  return "";
+}
+
+function getBatchRaw(batch = {}) {
+  return batch.raw || batch;
+}
+
+function getBatchId(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return readFirstString(batch.bgoBatchId, batch.batchId, batch.id, raw.id, raw.bgo?.batchId);
+}
+
+function getBatchScope(batch = {}) {
+  const raw = getBatchRaw(batch);
+  const trnIds = raw.refs?.trnIds || raw.trnIds || raw.bgo?.trnIds || [];
+
+  return {
+    lmPcode: readFirstString(batch.scope?.lmPcode, raw.scope?.lmPcode, raw.sourceUpload?.lmPcode, raw.origin?.lmPcode),
+    lmName: readFirstString(batch.scope?.lmName, raw.scope?.lmName, raw.sourceUpload?.lmName),
+    wardPcode: readFirstString(
+      batch.scope?.wardPcode,
+      raw.scope?.wardPcode,
+      raw.sourceUpload?.wardPcode,
+      raw.origin?.wardPcode,
+      extractWardPcodeFromTrnIds(trnIds),
+    ),
+    wardName: readFirstString(batch.scope?.wardName, raw.scope?.wardName, raw.sourceUpload?.wardName),
+  };
+}
+
+function getBatchWardPcode(batch = {}) {
+  return getBatchScope(batch).wardPcode;
+}
+
+function isMdBgoBatch(batch = {}) {
+  const raw = getBatchRaw(batch);
+
+  return (
+    normalizeUpper(batch.batchMode || raw.bgo?.batchMode) === "BMD" ||
+    (normalizeUpper(raw.operationType || batch.operationType) === "METER_DISCOVERY" &&
+      normalizeUpper(raw.origin?.sourceModule) === "BULK_METER_DISCOVERY")
+  );
+}
+
+function getBatchOperationType(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return valueOrNav(batch.operationType || raw.operationType || raw.trnType);
+}
+
+function getBatchWorkflowState(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return valueOrNav(batch.workflowState || raw.workflow?.state || raw.workflowState || raw.state);
+}
+
+function getBatchReleaseState(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return valueOrNav(batch.releaseState || raw.bgo?.releaseState || raw.releaseState);
+}
+
+function getBatchTarget(batch = {}) {
+  const raw = getBatchRaw(batch);
+  const target =
+    batch.target ||
+    asArray(raw.assignment?.targets)[0] ||
+    raw.target ||
+    raw.bgo?.target ||
+    {};
+
+  return {
+    type: valueOrNav(target.type || batch.targetType || raw.bgo?.targetType),
+    name: valueOrNav(target.name || batch.targetName || raw.bgo?.targetName || target.id),
+  };
+}
+
+function getBatchGeofence(batch = {}) {
+  const raw = getBatchRaw(batch);
+  const geofenceRef = batch.geofenceRef || raw.geofenceRef || raw.geofence || {};
+
+  return {
+    id: valueOrNav(geofenceRef.id || batch.geofenceId || raw.bgo?.geofenceId),
+    name: valueOrNav(geofenceRef.name || batch.geofenceName || raw.bgo?.geofenceName),
+  };
+}
+
+function getBatchUpdatedAt(batch = {}) {
+  const raw = getBatchRaw(batch);
+
+  return readFirstString(
+    batch.metadata?.updatedAt,
+    raw.metadata?.updatedAt,
+    raw.workflow?.completedAt,
+    raw.workflow?.acceptedAt,
+    raw.workflow?.rejectedAt,
+    raw.workflow?.cancelledAt,
+    raw.workflow?.issuedAt,
+    batch.metadata?.createdAt,
+    raw.metadata?.createdAt,
+  );
+}
+
+function getBatchSummary(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return raw.summary || batch.summary || {};
+}
+
+function getBatchReleaseSummary(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return raw.batchReleaseSummary || batch.batchReleaseSummary || {};
+}
+
+function getBatchDerivedSummary(batch = {}) {
+  const raw = getBatchRaw(batch);
+  return raw.derivedExecutionSummary || batch.derivedExecutionSummary || {};
+}
+
+function getMdBgoMetrics(batch = {}) {
+  const summary = getBatchSummary(batch);
+  const releaseSummary = getBatchReleaseSummary(batch);
+  const derivedSummary = getBatchDerivedSummary(batch);
+
+  return {
+    totalErfs: asNumber(summary.erfCount ?? releaseSummary.totalRows),
+    totalPremises: asNumber(summary.premiseCount),
+    totalMeters: asNumber(summary.meterCount),
+    totalChildTrns: asNumber(derivedSummary.totalChildTrns),
+    totalCompleted: asNumber(derivedSummary.totalCompleted),
+  };
+}
+
+function sortBatchesByUpdatedDesc(left, right) {
+  const leftDate = String(getBatchUpdatedAt(left) || "");
+  const rightDate = String(getBatchUpdatedAt(right) || "");
+
+  if (leftDate !== rightDate) return rightDate.localeCompare(leftDate);
+
+  return String(getBatchId(left)).localeCompare(String(getBatchId(right)));
+}
+
+function buildWardOptions({ availableWards = [], batches = [] }) {
+  const byPcode = new Map();
+
+  asArray(availableWards).forEach((ward) => {
+    const pcode = getWardPcode(ward);
+    if (pcode) byPcode.set(pcode, ward);
+  });
+
+  asArray(batches).forEach((batch) => {
+    const scope = getBatchScope(batch);
+    if (scope.wardPcode && !byPcode.has(scope.wardPcode)) {
+      byPcode.set(scope.wardPcode, {
+        id: scope.wardPcode,
+        pcode: scope.wardPcode,
+        name: scope.wardName,
+      });
+    }
+  });
+
+  return Array.from(byPcode.values()).sort((left, right) =>
+    getWardLabel(left).localeCompare(getWardLabel(right), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+}
+
+function createGeofenceMapRoute({ lmPcode, batch }) {
+  const scope = getBatchScope(batch);
+  const geofence = getBatchGeofence(batch);
+  const params = new URLSearchParams({
+    lmPcode: lmPcode || scope.lmPcode || "",
+    wardPcode: scope.wardPcode || "",
+    focusGeofenceId: geofence.id !== "NAv" ? geofence.id : "",
+    focusGeofenceName: geofence.name !== "NAv" ? geofence.name : "",
+    fitGeofence: "true",
+  });
+
+  return `/operations/geo-fences?${params.toString()}`;
+}
 
 function asNumber(value, fallback = 0) {
   const numericValue = Number(value);
@@ -523,14 +797,109 @@ function UploadDashboardCard({ upload }) {
   );
 }
 
+function MiniMetric({ label, value }) {
+  return (
+    <div style={styles.metricBarShell}>
+      <div style={styles.metricBarHeader}>
+        <span>{label}</span>
+        <strong>{formatNumber(value)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [] }) {
+  const batchId = getBatchId(batch);
+  const geofence = getBatchGeofence(batch);
+  const target = getBatchTarget(batch);
+  const scope = getBatchScope(batch);
+  const wardDoc = wardOptions.find((ward) => getWardPcode(ward) === scope.wardPcode) || null;
+  const wardLabel = getWardLabel(
+    wardDoc || { pcode: scope.wardPcode, name: scope.wardName },
+    scope.wardPcode,
+  );
+  const workflowState = getBatchWorkflowState(batch);
+  const releaseState = getBatchReleaseState(batch);
+  const operationType = getBatchOperationType(batch);
+  const updatedAt = getBatchUpdatedAt(batch);
+  const metrics = getMdBgoMetrics(batch);
+  const hasMapScope =
+    hasMeaningfulValue(scope.wardPcode) && hasMeaningfulValue(geofence.id);
+
+  return (
+    <article style={styles.uploadCard}>
+      <div style={styles.cardTop}>
+        <div>
+          <p style={styles.eyebrow}>MD BGO dashboard</p>
+          <h3 style={styles.cardTitle}>{geofence.name}</h3>
+          <p style={styles.cardSubtitle}>
+            {operationType} • {wardLabel} • {formatNumber(metrics.totalErfs)} ERFs
+          </p>
+          <p style={styles.fileName}>{batchId}</p>
+          <p style={styles.fileName}>
+            Target: {target.type} • {target.name}
+          </p>
+          <p style={styles.fileName}>Updated: {formatDateTime(updatedAt)}</p>
+        </div>
+
+        <div style={styles.cardStatusStack}>
+          <span style={styles.statusPill}>{workflowState}</span>
+          <span style={styles.attentionPill}>{releaseState}</span>
+        </div>
+      </div>
+
+      <div style={styles.metricsGrid}>
+        <MiniMetric label="Total ERFs" value={metrics.totalErfs} />
+        <MiniMetric label="Total Premises" value={metrics.totalPremises} />
+        <MiniMetric label="Total Meters" value={metrics.totalMeters} />
+        <MiniMetric label="Discovery TRNs" value={metrics.totalChildTrns} />
+      </div>
+
+      <div style={styles.attentionBlock}>
+        <p style={styles.sectionMiniTitle}>Discovery campaign status</p>
+        <div style={styles.reasonList}>
+          <span style={styles.goodPill}>FIELD TRNS CREATED ON DISCOVERY SUBMIT</span>
+          {metrics.totalCompleted > 0 ? (
+            <span style={styles.goodPill}>
+              {formatNumber(metrics.totalCompleted)} completed discovery TRN(s)
+            </span>
+          ) : (
+            <span style={styles.warningPill}>No discovery TRNs completed yet</span>
+          )}
+        </div>
+      </div>
+
+      <div style={styles.cardActions}>
+        {hasMapScope ? (
+          <Link to={createGeofenceMapRoute({ lmPcode, batch })} style={styles.primaryButton}>
+            Open Map
+          </Link>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 function matchesFilter(value, selectedValue) {
   if (selectedValue === FILTER_ALL) return true;
   return String(valueOrNav(value)) === selectedValue;
 }
 
 export default function BgoDashboardPage() {
+  const authContext = useAuth();
+  const { activeWorkbase } = authContext || {};
+  const { geoState } = useGeo();
+  const warehouse = useWarehouse();
+  const { available = {} } = warehouse || {};
+
+  const selectedLm = geoState?.selectedLm || null;
+  const lmPcode = getActiveLmPcode(activeWorkbase, selectedLm);
+  const lmName = getLmName(activeWorkbase, selectedLm);
+
   const [selectedTrnType, setSelectedTrnType] = useState(FILTER_ALL);
   const [selectedAttention, setSelectedAttention] = useState(FILTER_ALL);
+  const [selectedWardPcode, setSelectedWardPcode] = useState(FILTER_ALL);
+  const [selectedDashboardType, setSelectedDashboardType] = useState(FILTER_ALL);
 
   const {
     data: uploads = [],
@@ -539,11 +908,29 @@ export default function BgoDashboardPage() {
     isError,
   } = useGetTcUploadsQuery({ limit: 100 });
 
+  const {
+    data: bgoBatches = [],
+    isLoading: isLoadingBgoBatches,
+    isFetching: isFetchingBgoBatches,
+    isError: isBgoBatchesError,
+  } = useGetBgoBatchesByLmQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode });
+
+  const mdBgoBatches = useMemo(() => {
+    return asArray(bgoBatches).filter(isMdBgoBatch).sort(sortBatchesByUpdatedDesc);
+  }, [bgoBatches]);
+
+  const wardOptions = useMemo(
+    () => buildWardOptions({ availableWards: available?.wards, batches: mdBgoBatches }),
+    [available?.wards, mdBgoBatches],
+  );
+
   const trnTypeOptions = useMemo(() => {
     return Array.from(new Set(uploads.map((upload) => upload.trnType).filter(Boolean))).sort();
   }, [uploads]);
 
   const visibleUploads = useMemo(() => {
+    if (selectedDashboardType === MD_BGO_MODE) return [];
+
     return uploads.filter((upload) => {
       const metrics = calculateUploadMetrics(upload);
       const attentionReasons = getAttentionReasons(upload, metrics);
@@ -557,7 +944,22 @@ export default function BgoDashboardPage() {
 
       return trnTypeMatches && attentionMatches;
     });
-  }, [uploads, selectedTrnType, selectedAttention]);
+  }, [uploads, selectedTrnType, selectedAttention, selectedDashboardType]);
+
+  const visibleMdBgoBatches = useMemo(() => {
+    if (selectedDashboardType === "AST_BGO") return [];
+
+    return mdBgoBatches.filter((batch) => {
+      return (
+        selectedWardPcode === FILTER_ALL ||
+        getBatchWardPcode(batch) === selectedWardPcode
+      );
+    });
+  }, [mdBgoBatches, selectedWardPcode, selectedDashboardType]);
+
+  const isConnecting = isFetching || isFetchingBgoBatches;
+  const isPageLoading = isLoading || isLoadingBgoBatches;
+  const hasVisibleCards = visibleMdBgoBatches.length > 0 || visibleUploads.length > 0;
 
   return (
     <section style={styles.page}>
@@ -568,11 +970,12 @@ export default function BgoDashboardPage() {
           <p style={styles.description}>
             TC upload control view for validation quality, BGO readiness,
             allocation progress, field execution, and management attention.
+            MD-BGO allocation cards are added without changing the existing TC dashboard cards.
           </p>
         </div>
 
         <div style={styles.heroBadge}>
-          {isFetching ? "CONNECTING STREAM" : "LIVE TC UPLOADS"}
+          {isConnecting ? "CONNECTING STREAM" : "LIVE BGO DASHBOARD"}
         </div>
       </div>
 
@@ -580,15 +983,44 @@ export default function BgoDashboardPage() {
         <div>
           <p style={styles.sectionMiniTitle}>Filters</p>
           <p style={styles.mutedText}>
-            Landing cards stream lightweight summaries from tc_uploads. Full row/TRN drill-down remains inside each upload dashboard.
+            LM: <strong>{lmName}</strong> ({lmPcode || "NAv"}) • Ward defaults to All.
+            Existing TC upload cards keep their previous layout.
           </p>
         </div>
 
         <div style={styles.filterControls}>
           <select
+            value={selectedDashboardType}
+            onChange={(event) => setSelectedDashboardType(event.target.value)}
+            style={styles.filterInput}
+          >
+            <option value={FILTER_ALL}>All Dashboard Cards</option>
+            <option value="AST_BGO">AST BGO / TC Upload Cards</option>
+            <option value={MD_BGO_MODE}>MD BGO Cards</option>
+          </select>
+
+          <select
+            value={selectedWardPcode}
+            onChange={(event) => setSelectedWardPcode(event.target.value)}
+            style={styles.filterInput}
+            disabled={!lmPcode || selectedDashboardType === "AST_BGO"}
+          >
+            <option value={FILTER_ALL}>All Wards</option>
+            {wardOptions.map((ward) => {
+              const pcode = getWardPcode(ward);
+              return (
+                <option key={pcode} value={pcode}>
+                  {getWardLabel(ward, pcode)}
+                </option>
+              );
+            })}
+          </select>
+
+          <select
             value={selectedTrnType}
             onChange={(event) => setSelectedTrnType(event.target.value)}
             style={styles.filterInput}
+            disabled={selectedDashboardType === MD_BGO_MODE}
           >
             <option value={FILTER_ALL}>All TRN Types</option>
             {trnTypeOptions.map((trnType) => (
@@ -602,6 +1034,7 @@ export default function BgoDashboardPage() {
             value={selectedAttention}
             onChange={(event) => setSelectedAttention(event.target.value)}
             style={styles.filterInput}
+            disabled={selectedDashboardType === MD_BGO_MODE}
           >
             <option value={FILTER_ALL}>All Attention States</option>
             <option value="ATTENTION">Attention required</option>
@@ -616,24 +1049,41 @@ export default function BgoDashboardPage() {
         </div>
       ) : null}
 
+      {isBgoBatchesError ? (
+        <div style={styles.errorPanel}>
+          Could not stream bgo_batches for MD-BGO cards. Check the browser console and Firestore rules.
+        </div>
+      ) : null}
+
       <div style={styles.uploadGrid}>
-        {isLoading ? (
+        {isPageLoading ? (
           <article style={styles.emptyCard}>
             <p style={styles.eyebrow}>Loading</p>
-            <h3 style={styles.emptyTitle}>Connecting to tc_uploads stream...</h3>
-            <p style={styles.mutedText}>The dashboard will show one card per TC upload file.</p>
+            <h3 style={styles.emptyTitle}>Connecting to BGO dashboard streams...</h3>
+            <p style={styles.mutedText}>The dashboard will show TC upload cards and MD-BGO allocation cards.</p>
           </article>
         ) : null}
 
-        {!isLoading && visibleUploads.length === 0 ? (
+        {!isPageLoading && !hasVisibleCards ? (
           <article style={styles.emptyCard}>
             <p style={styles.eyebrow}>No dashboard cards</p>
-            <h3 style={styles.emptyTitle}>No TC uploads match the current filter.</h3>
-            <p style={styles.mutedText}>Upload TC files or clear the filters to see BGO dashboard cards.</p>
+            <h3 style={styles.emptyTitle}>No BGO dashboard cards match the current filter.</h3>
+            <p style={styles.mutedText}>Create BGO allocations or clear the filters to see cards.</p>
           </article>
         ) : null}
 
-        {!isLoading
+        {!isPageLoading
+          ? visibleMdBgoBatches.map((batch) => (
+              <MdBgoDashboardCard
+                key={getBatchId(batch)}
+                batch={batch}
+                lmPcode={lmPcode}
+                wardOptions={wardOptions}
+              />
+            ))
+          : null}
+
+        {!isPageLoading
           ? visibleUploads.map((upload) => (
               <UploadDashboardCard key={upload.id || upload.tcId} upload={upload} />
             ))
