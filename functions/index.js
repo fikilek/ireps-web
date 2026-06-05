@@ -87,6 +87,12 @@ import {
   onIrepsSelectLookupAdminCallable,
 } from "./lookups/index.js";
 
+import { onCreateAccountDataCallable } from "./dataCleansing/callables.js";
+import {
+  onFieldAccountDataWritten,
+  onAccountMasterWritten,
+} from "./dataCleansing/triggers.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -124,6 +130,9 @@ export {
   onReverseBgoBatchAcceptanceCallable,
   onDeleteUnacceptedBgoCallable,
   onBgoChildTrnExecutionSummaryWritten,
+  onCreateAccountDataCallable,
+  onFieldAccountDataWritten,
+  onAccountMasterWritten,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
