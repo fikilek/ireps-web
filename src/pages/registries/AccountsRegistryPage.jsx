@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -39,18 +39,6 @@ function formatUpdatedAt(value) {
   return "NAv";
 }
 
-function getUpdatedAtMs(value) {
-  if (!value || value === "NAv") return 0;
-
-  if (typeof value?.toDate === "function") {
-    const ms = value.toDate().getTime();
-    return Number.isFinite(ms) ? ms : 0;
-  }
-
-  const ms = new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
 function getWardLabel(ward) {
   if (!ward) return "NAv";
   return `Ward ${ward.wardNumber}`;
@@ -84,12 +72,7 @@ function getWardNumberDisplay(wardPcode = "") {
 function getSelectedWardPcodeFromGeo(geoState) {
   const selectedWard = geoState?.selectedWard || null;
 
-  return (
-    selectedWard?.id ||
-    selectedWard?.pcode ||
-    selectedWard?.wardPcode ||
-    ""
-  );
+  return selectedWard?.id || selectedWard?.pcode || selectedWard?.wardPcode || "";
 }
 
 function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
@@ -137,7 +120,6 @@ function getSortValue(row, key) {
   if (key === "accounts") return row.accountCount || 0;
   if (key === "meters") return row.meterCount || 0;
   if (key === "history") return row.historySortValue || 0;
-  if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
 
   return "";
 }
@@ -154,10 +136,6 @@ function compareNatural(a, b) {
 }
 
 function compareDefaultRows(a, b) {
-  const updatedCompare = getUpdatedAtMs(b.updatedAt) - getUpdatedAtMs(a.updatedAt);
-
-  if (updatedCompare !== 0) return updatedCompare;
-
   const wardCompare = compareNatural(
     getWardNumberFromPcode(a.wardPcode),
     getWardNumberFromPcode(b.wardPcode),
@@ -412,7 +390,6 @@ export default function AccountsRegistryPage() {
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const previousWardPcodeRef = useRef(selectedWardPcode);
   const [sortConfig, setSortConfig] = useState({ key: "default", direction: "asc" });
   const [filters, setFilters] = useState(EMPTY_ACCOUNT_FILTERS);
   const [modalState, setModalState] = useState({ type: "", row: null });
@@ -432,24 +409,11 @@ export default function AccountsRegistryPage() {
     useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
 
   const selectedWard = useMemo(() => {
-    const registryWard =
-      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
-
+    const registryWard = wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
     return buildRegistryWardSelection(registryWard, selectedWardPcode);
   }, [wardRows, selectedWardPcode]);
 
   const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
-
-  useEffect(() => {
-    if (previousWardPcodeRef.current === effectiveSelectedWardPcode) return;
-
-    previousWardPcodeRef.current = effectiveSelectedWardPcode;
-    setFilters(EMPTY_ACCOUNT_FILTERS);
-    setModalState({ type: "", row: null });
-    setHistoryRows([]);
-    setHistoryError("");
-    setHistoryLoading(false);
-  }, [effectiveSelectedWardPcode]);
 
   const {
     data: accountRows = [],
@@ -459,6 +423,11 @@ export default function AccountsRegistryPage() {
   } = useGetRegistryAccountsByWardQuery(effectiveSelectedWardPcode || skipToken);
 
   const [getHistoryByPremise] = useLazyGetFieldAccountDataHistoryByPremiseQuery();
+
+  useEffect(() => {
+    setFilters(EMPTY_ACCOUNT_FILTERS);
+    setSortConfig({ key: "default", direction: "asc" });
+  }, [effectiveSelectedWardPcode]);
 
   const totals = accountRows.reduce(
     (accumulator, row) => {
@@ -543,14 +512,12 @@ export default function AccountsRegistryPage() {
     });
   }
 
-  function handleWardChange(valueOrEvent) {
-    const nextWardPcode = valueOrEvent?.target?.value ?? valueOrEvent;
-    const nextWard =
-      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+  function handleWardChange(value) {
+    const nextWard = wardRows.find((ward) => ward.wardPcode === value) || null;
 
     updateGeo({
-      selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
-      lastSelectionType: nextWardPcode ? "WARD" : null,
+      selectedWard: buildRegistryWardSelection(nextWard, value),
+      lastSelectionType: value ? "WARD" : null,
     });
   }
 
@@ -867,7 +834,14 @@ export default function AccountsRegistryPage() {
               </thead>
 
               <tbody>
-                {sortedRows.map((row) => (
+                {sortedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="muted">
+                      No account registry rows match the current filters. Clear or adjust a column filter above.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedRows.map((row) => (
                   <tr key={row.id}>
                     <td>
                       <strong>{row.premiseAddress}</strong>
@@ -914,7 +888,8 @@ export default function AccountsRegistryPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>

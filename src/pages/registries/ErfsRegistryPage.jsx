@@ -14,6 +14,19 @@ import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
 const ERF_PAGE_SIZE = 200;
 const ERF_SEARCH_LIMIT = 50;
 
+const EMPTY_ERF_BROWSE_FILTERS = {
+  erfNo: "",
+  erfType: "ALL",
+  premiseCount: "",
+  electricityMeterCount: "",
+  waterMeterCount: "",
+  meterCount: "",
+  trnsAccessCount: "",
+  trnsNaCount: "",
+  trnsTotalCount: "",
+  updatedAt: "",
+};
+
 function getActiveLmPcode(activeWorkbase) {
   return (
     activeWorkbase?.lmPcode ||
@@ -55,17 +68,6 @@ function getUpdatedAtMs(value) {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function sortErfRows(a, b) {
-  const updatedCompare = getUpdatedAtMs(b.updatedAt) - getUpdatedAtMs(a.updatedAt);
-
-  if (updatedCompare !== 0) return updatedCompare;
-
-  return String(a.erfNo).localeCompare(String(b.erfNo), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
 function getWardLabel(ward) {
   if (!ward) return "NAv";
   return `Ward ${ward.wardNumber}`;
@@ -98,12 +100,7 @@ function getWardNumberFromPcode(wardPcode = "") {
 function getSelectedWardPcodeFromGeo(geoState) {
   const selectedWard = geoState?.selectedWard || null;
 
-  return (
-    selectedWard?.id ||
-    selectedWard?.pcode ||
-    selectedWard?.wardPcode ||
-    ""
-  );
+  return selectedWard?.id || selectedWard?.pcode || selectedWard?.wardPcode || "";
 }
 
 function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
@@ -124,18 +121,41 @@ function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
   };
 }
 
-const EMPTY_ERF_BROWSE_FILTERS = {
-  erfNo: "",
-  erfType: "ALL",
-  premiseCount: "",
-  electricityMeterCount: "",
-  waterMeterCount: "",
-  meterCount: "",
-  trnsAccessCount: "",
-  trnsNaCount: "",
-  trnsTotalCount: "",
-  updatedAt: "",
-};
+function compareNatural(a, b) {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+
+  return String(a || "").localeCompare(String(b || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function getSortValue(row, key) {
+  if (key === "erfNo") return row.erfNo || "";
+  if (key === "erfType") return row.erfType || "";
+  if (key === "premiseCount") return row.premiseCount || 0;
+  if (key === "electricityMeterCount") return row.electricityMeterCount || 0;
+  if (key === "waterMeterCount") return row.waterMeterCount || 0;
+  if (key === "meterCount") return row.meterCount || 0;
+  if (key === "trnsAccessCount") return row.trnsAccessCount || 0;
+  if (key === "trnsNaCount") return row.trnsNaCount || 0;
+  if (key === "trnsTotalCount") return row.trnsTotalCount || 0;
+  if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
+
+  return "";
+}
+
+function SortButton({ label, sortKey, sortConfig, onSort }) {
+  const isActive = sortConfig.key === sortKey;
+  const directionLabel = isActive ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕";
+
+  return (
+    <button type="button" style={styles.sortButton} onClick={() => onSort(sortKey)}>
+      <span>{label}</span>
+      <span>{directionLabel}</span>
+    </button>
+  );
+}
 
 function FilterInput({ value, onChange, placeholder }) {
   return (
@@ -167,6 +187,7 @@ export default function ErfsRegistryPage() {
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
   const previousWardPcodeRef = useRef(selectedWardPcode);
   const [browseFilters, setBrowseFilters] = useState(EMPTY_ERF_BROWSE_FILTERS);
+  const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
 
   const [extraBrowseRows, setExtraBrowseRows] = useState([]);
   const [extraBrowseWardPcode, setExtraBrowseWardPcode] = useState("");
@@ -195,9 +216,7 @@ export default function ErfsRegistryPage() {
     useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
 
   const selectedWard = useMemo(() => {
-    const registryWard =
-      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
-
+    const registryWard = wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
     return buildRegistryWardSelection(registryWard, selectedWardPcode);
   }, [wardRows, selectedWardPcode]);
 
@@ -208,6 +227,7 @@ export default function ErfsRegistryPage() {
 
     previousWardPcodeRef.current = effectiveSelectedWardPcode;
     setBrowseFilters(EMPTY_ERF_BROWSE_FILTERS);
+    setSortConfig({ key: "updatedAt", direction: "desc" });
     setExtraBrowseRows([]);
     setExtraBrowseWardPcode(effectiveSelectedWardPcode);
     setNextCursorId(null);
@@ -216,11 +236,7 @@ export default function ErfsRegistryPage() {
   }, [effectiveSelectedWardPcode]);
 
   const firstPageQueryArg = effectiveSelectedWardPcode
-    ? {
-        wardPcode: effectiveSelectedWardPcode,
-        cursorId: null,
-        pageSize: ERF_PAGE_SIZE,
-      }
+    ? { wardPcode: effectiveSelectedWardPcode, cursorId: null, pageSize: ERF_PAGE_SIZE }
     : skipToken;
 
   const {
@@ -237,35 +253,27 @@ export default function ErfsRegistryPage() {
 
   const wardLookup = useMemo(() => {
     const lookup = new Map();
-
-    wardRows.forEach((ward) => {
-      lookup.set(ward.wardPcode, ward);
-    });
-
+    wardRows.forEach((ward) => lookup.set(ward.wardPcode, ward));
     return lookup;
   }, [wardRows]);
 
   const firstPageRows = firstPageData?.rows || [];
-
   const activeExtraBrowseRows =
     extraBrowseWardPcode === effectiveSelectedWardPcode ? extraBrowseRows : [];
 
-  const sortedBrowseRows = useMemo(() => {
-    return [...firstPageRows, ...activeExtraBrowseRows].sort(sortErfRows);
+  const browseRows = useMemo(() => {
+    return [...firstPageRows, ...activeExtraBrowseRows];
   }, [firstPageRows, activeExtraBrowseRows]);
 
   const filteredBrowseRows = useMemo(() => {
-    return sortedBrowseRows.filter((row) => {
+    return browseRows.filter((row) => {
+      const erfType = String(row.erfType || "NAv").toUpperCase();
+
       return (
         includesText(row.erfNo, browseFilters.erfNo) &&
-        (browseFilters.erfType === "ALL" ||
-          String(row.erfType || "NAv").toUpperCase() ===
-            browseFilters.erfType) &&
+        (browseFilters.erfType === "ALL" || erfType === browseFilters.erfType) &&
         includesText(getCountText(row.premiseCount), browseFilters.premiseCount) &&
-        includesText(
-          getCountText(row.electricityMeterCount),
-          browseFilters.electricityMeterCount,
-        ) &&
+        includesText(getCountText(row.electricityMeterCount), browseFilters.electricityMeterCount) &&
         includesText(getCountText(row.waterMeterCount), browseFilters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), browseFilters.meterCount) &&
         includesText(getCountText(row.trnsAccessCount), browseFilters.trnsAccessCount) &&
@@ -274,11 +282,20 @@ export default function ErfsRegistryPage() {
         includesText(formatUpdatedAt(row.updatedAt), browseFilters.updatedAt)
       );
     });
-  }, [sortedBrowseRows, browseFilters]);
+  }, [browseRows, browseFilters]);
 
-  const hasActiveBrowseFilters = Object.values(browseFilters).some((value) => {
-    return value && value !== "ALL";
-  });
+  const sortedBrowseRows = useMemo(() => {
+    const rows = [...filteredBrowseRows];
+
+    rows.sort((a, b) => {
+      const comparison = compareNatural(getSortValue(a, sortConfig.key), getSortValue(b, sortConfig.key));
+      return sortConfig.direction === "asc" ? comparison : -comparison;
+    });
+
+    return rows;
+  }, [filteredBrowseRows, sortConfig]);
+
+  const hasActiveBrowseFilters = Object.values(browseFilters).some((value) => value && value !== "ALL");
 
   const activeNextCursorId =
     extraBrowseWardPcode === effectiveSelectedWardPcode && nextCursorId
@@ -286,17 +303,27 @@ export default function ErfsRegistryPage() {
       : firstPageData?.nextCursorId || null;
 
   const activeHasMore =
-    extraBrowseWardPcode === effectiveSelectedWardPcode &&
-    hasMoreOverride !== null
+    extraBrowseWardPcode === effectiveSelectedWardPcode && hasMoreOverride !== null
       ? hasMoreOverride
       : Boolean(firstPageData?.hasMore);
 
   const isBrowseFetching = isFirstPageFetching || isLoadMoreFetching;
 
+  function updateBrowseFilter(key, value) {
+    setBrowseFilters((currentFilters) => ({ ...currentFilters, [key]: value }));
+  }
+
+  function handleSort(sortKey) {
+    setSortConfig((current) => {
+      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
+      if (current.direction === "asc") return { key: sortKey, direction: "desc" };
+      return { key: "updatedAt", direction: "desc" };
+    });
+  }
+
   function handleBrowseWardChange(event) {
     const nextWardPcode = event.target.value;
-    const nextWard =
-      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+    const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
 
     updateGeo({
       selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
@@ -304,17 +331,8 @@ export default function ErfsRegistryPage() {
     });
   }
 
-  function updateBrowseFilter(key, value) {
-    setBrowseFilters((currentFilters) => ({
-      ...currentFilters,
-      [key]: value,
-    }));
-  }
-
   async function handleLoadMore() {
-    if (!effectiveSelectedWardPcode || !activeHasMore || isBrowseFetching) {
-      return;
-    }
+    if (!effectiveSelectedWardPcode || !activeHasMore || isBrowseFetching) return;
 
     try {
       const result = await loadErfsPage({
@@ -329,10 +347,7 @@ export default function ErfsRegistryPage() {
           ...currentRows.map((row) => row.id),
         ]);
 
-        const newRows = (result.rows || []).filter(
-          (row) => !existingIds.has(row.id),
-        );
-
+        const newRows = (result.rows || []).filter((row) => !existingIds.has(row.id));
         return [...currentRows, ...newRows];
       });
 
@@ -404,14 +419,11 @@ export default function ErfsRegistryPage() {
   function getWardDisplay(wardPcode) {
     const ward = wardLookup.get(wardPcode);
 
-    if (ward?.wardNumber) {
-      return `Ward ${ward.wardNumber}`;
-    }
-
+    if (ward?.wardNumber) return `Ward ${ward.wardNumber}`;
     return wardPcode || "NAv";
   }
 
-  const browseTotals = filteredBrowseRows.reduce(
+  const browseTotals = sortedBrowseRows.reduce(
     (accumulator, row) => {
       accumulator.premises += row.premiseCount;
       accumulator.electricityMeters += row.electricityMeterCount;
@@ -422,15 +434,7 @@ export default function ErfsRegistryPage() {
       accumulator.trnsTotal += row.trnsTotalCount;
       return accumulator;
     },
-    {
-      premises: 0,
-      electricityMeters: 0,
-      waterMeters: 0,
-      meters: 0,
-      trnsAccess: 0,
-      trnsNa: 0,
-      trnsTotal: 0,
-    },
+    { premises: 0, electricityMeters: 0, waterMeters: 0, meters: 0, trnsAccess: 0, trnsNa: 0, trnsTotal: 0 },
   );
 
   const selectedWardTotalErfs = selectedWard?.totalErfCount || 0;
@@ -444,8 +448,7 @@ export default function ErfsRegistryPage() {
           <h1>ERF Registry</h1>
 
           <p className="muted">
-            Browse ERFs by ward, or find a specific ERF across{" "}
-            {activeWorkbaseName}.
+            Browse ERFs by ward, or find a specific ERF across {activeWorkbaseName}.
           </p>
 
           <Link className="text-link" to="/registries">
@@ -454,18 +457,12 @@ export default function ErfsRegistryPage() {
         </div>
 
         <div className="topbar-right">
-          <button
-            className="primary-button"
-            type="button"
-            onClick={handleOpenSearchModal}
-          >
+          <button className="primary-button" type="button" onClick={handleOpenSearchModal}>
             Find ERF
           </button>
 
           <div className="role-pill">
-            {isBrowseFetching
-              ? "Loading..."
-              : `${formatNumber(sortedBrowseRows.length)} loaded`}
+            {isBrowseFetching ? "Loading..." : `${formatNumber(browseRows.length)} loaded`}
           </div>
         </div>
       </header>
@@ -482,7 +479,7 @@ export default function ErfsRegistryPage() {
 
             {wardRows.map((ward) => (
               <option key={ward.wardPcode} value={ward.wardPcode}>
-                Ward {ward.wardNumber}
+                Ward {ward.wardNumber} · {formatNumber(ward.totalErfCount)} ERFs
               </option>
             ))}
           </select>
@@ -497,12 +494,12 @@ export default function ErfsRegistryPage() {
       <section className="dashboard-grid">
         <div className="stat-card">
           <span>Loaded ERFs</span>
-          <strong>{formatNumber(sortedBrowseRows.length)}</strong>
+          <strong>{formatNumber(browseRows.length)}</strong>
         </div>
 
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(filteredBrowseRows.length)}</strong>
+          <strong>{formatNumber(sortedBrowseRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -541,14 +538,6 @@ export default function ErfsRegistryPage() {
         </div>
       </section>
 
-      <section className="notice-panel">
-        <strong>Browse and search are separate</strong>
-        <p className="muted">
-          Browsing is ward-scoped and lazy-loaded. Find ERF searches across the
-          full active LM, even if the ERF is not loaded in the current table.
-        </p>
-      </section>
-
       <section className="table-panel">
         {!effectiveSelectedWardPcode ? (
           <div className="empty-state">
@@ -562,159 +551,101 @@ export default function ErfsRegistryPage() {
         {hasBrowseError ? (
           <div className="empty-state error-box">
             <h2>Could not load ERF registry</h2>
-            <p className="muted">
-              {browseError || "Failed to load ERF registry rows."}
-            </p>
+            <p className="muted">{browseError || "Failed to load ERF registry rows."}</p>
           </div>
         ) : null}
 
-        {isBrowseFetching && sortedBrowseRows.length === 0 ? (
+        {isBrowseFetching && browseRows.length === 0 ? (
           <div className="empty-state">
             <h2>Loading ERF registry...</h2>
             <p className="muted">Loading first page.</p>
           </div>
         ) : null}
 
-        {!isBrowseFetching &&
-        effectiveSelectedWardPcode &&
-        sortedBrowseRows.length === 0 &&
-        !hasBrowseError ? (
+        {!isBrowseFetching && effectiveSelectedWardPcode && browseRows.length === 0 && !hasBrowseError ? (
           <div className="empty-state">
             <h2>No ERF registry rows found</h2>
-            <p className="muted">
-              No rows were returned for ward {effectiveSelectedWardPcode}.
-            </p>
+            <p className="muted">No rows were returned for ward {effectiveSelectedWardPcode}.</p>
           </div>
         ) : null}
 
-        {sortedBrowseRows.length > 0 && filteredBrowseRows.length === 0 ? (
-          <div className="empty-state">
-            <h2>No ERFs match the current filters</h2>
-            <p className="muted">
-              Clear or adjust the column filters to see more rows.
-            </p>
-          </div>
-        ) : null}
-
-        {filteredBrowseRows.length > 0 ? (
+        {browseRows.length > 0 ? (
           <>
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
                     <th>
-                      <div>ERF No</div>
-                      <FilterInput
-                        value={browseFilters.erfNo}
-                        onChange={(value) => updateBrowseFilter("erfNo", value)}
-                        placeholder="Filter ERF"
-                      />
+                      <SortButton label="ERF No" sortKey="erfNo" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.erfNo} onChange={(value) => updateBrowseFilter("erfNo", value)} placeholder="Filter ERF" />
                     </th>
-
                     <th>
-                      <div>Type</div>
-                      <FilterSelect
-                        value={browseFilters.erfType}
-                        onChange={(value) => updateBrowseFilter("erfType", value)}
-                      >
+                      <SortButton label="Type" sortKey="erfType" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterSelect value={browseFilters.erfType} onChange={(value) => updateBrowseFilter("erfType", value)}>
                         <option value="ALL">All</option>
                         <option value="FORMAL">Formal</option>
                         <option value="INFORMAL">Informal</option>
                         <option value="NAV">NAv</option>
                       </FilterSelect>
                     </th>
-
                     <th>
-                      <div>Premises</div>
-                      <FilterInput
-                        value={browseFilters.premiseCount}
-                        onChange={(value) => updateBrowseFilter("premiseCount", value)}
-                        placeholder="Filter"
-                      />
+                      <SortButton label="Premises" sortKey="premiseCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.premiseCount} onChange={(value) => updateBrowseFilter("premiseCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>Electricity</div>
-                      <FilterInput
-                        value={browseFilters.electricityMeterCount}
-                        onChange={(value) =>
-                          updateBrowseFilter("electricityMeterCount", value)
-                        }
-                        placeholder="Filter"
-                      />
+                      <SortButton label="Electricity" sortKey="electricityMeterCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.electricityMeterCount} onChange={(value) => updateBrowseFilter("electricityMeterCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>Water</div>
-                      <FilterInput
-                        value={browseFilters.waterMeterCount}
-                        onChange={(value) => updateBrowseFilter("waterMeterCount", value)}
-                        placeholder="Filter"
-                      />
+                      <SortButton label="Water" sortKey="waterMeterCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.waterMeterCount} onChange={(value) => updateBrowseFilter("waterMeterCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>Total Meters</div>
-                      <FilterInput
-                        value={browseFilters.meterCount}
-                        onChange={(value) => updateBrowseFilter("meterCount", value)}
-                        placeholder="Filter"
-                      />
+                      <SortButton label="Total Meters" sortKey="meterCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.meterCount} onChange={(value) => updateBrowseFilter("meterCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>Access TRNs</div>
-                      <FilterInput
-                        value={browseFilters.trnsAccessCount}
-                        onChange={(value) => updateBrowseFilter("trnsAccessCount", value)}
-                        placeholder="Filter"
-                      />
+                      <SortButton label="Access TRNs" sortKey="trnsAccessCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.trnsAccessCount} onChange={(value) => updateBrowseFilter("trnsAccessCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>No Access</div>
-                      <FilterInput
-                        value={browseFilters.trnsNaCount}
-                        onChange={(value) => updateBrowseFilter("trnsNaCount", value)}
-                        placeholder="Filter"
-                      />
+                      <SortButton label="No Access" sortKey="trnsNaCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.trnsNaCount} onChange={(value) => updateBrowseFilter("trnsNaCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>Total TRNs</div>
-                      <FilterInput
-                        value={browseFilters.trnsTotalCount}
-                        onChange={(value) => updateBrowseFilter("trnsTotalCount", value)}
-                        placeholder="Filter"
-                      />
+                      <SortButton label="Total TRNs" sortKey="trnsTotalCount" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.trnsTotalCount} onChange={(value) => updateBrowseFilter("trnsTotalCount", value)} placeholder="Filter" />
                     </th>
-
                     <th>
-                      <div>Updated</div>
-                      <FilterInput
-                        value={browseFilters.updatedAt}
-                        onChange={(value) => updateBrowseFilter("updatedAt", value)}
-                        placeholder="YYYY-MM-DD"
-                      />
+                      <SortButton label="Updated" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
+                      <FilterInput value={browseFilters.updatedAt} onChange={(value) => updateBrowseFilter("updatedAt", value)} placeholder="YYYY-MM-DD" />
                     </th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredBrowseRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.erfNo}</td>
-                      <td>{row.erfType}</td>
-                      <td>{formatNumber(row.premiseCount)}</td>
-                      <td>{formatNumber(row.electricityMeterCount)}</td>
-                      <td>{formatNumber(row.waterMeterCount)}</td>
-                      <td>{formatNumber(row.meterCount)}</td>
-                      <td>{formatNumber(row.trnsAccessCount)}</td>
-                      <td>{formatNumber(row.trnsNaCount)}</td>
-                      <td>{formatNumber(row.trnsTotalCount)}</td>
-                      <td>{formatUpdatedAt(row.updatedAt)}</td>
+                  {sortedBrowseRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="muted">
+                        No ERFs match the current filters. Clear or adjust a column filter above.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    sortedBrowseRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.erfNo}</td>
+                        <td>{row.erfType}</td>
+                        <td>{formatNumber(row.premiseCount)}</td>
+                        <td>{formatNumber(row.electricityMeterCount)}</td>
+                        <td>{formatNumber(row.waterMeterCount)}</td>
+                        <td>{formatNumber(row.meterCount)}</td>
+                        <td>{formatNumber(row.trnsAccessCount)}</td>
+                        <td>{formatNumber(row.trnsNaCount)}</td>
+                        <td>{formatNumber(row.trnsTotalCount)}</td>
+                        <td>{formatUpdatedAt(row.updatedAt)}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -723,27 +654,16 @@ export default function ErfsRegistryPage() {
               <div>
                 <strong>
                   {hasActiveBrowseFilters
-                    ? `${formatNumber(filteredBrowseRows.length)} filtered from ${formatNumber(sortedBrowseRows.length)} loaded`
-                    : `${formatNumber(sortedBrowseRows.length)} of ${formatNumber(selectedWardTotalErfs)} ward ERFs loaded`}
+                    ? `${formatNumber(sortedBrowseRows.length)} filtered from ${formatNumber(browseRows.length)} loaded`
+                    : `${formatNumber(browseRows.length)} of ${formatNumber(selectedWardTotalErfs)} ward ERFs loaded`}
                 </strong>
                 <p className="muted">
-                  {activeHasMore
-                    ? "More ERFs are available."
-                    : "All loaded pages are complete."}
+                  {activeHasMore ? "More ERFs are available." : "All loaded pages are complete."}
                 </p>
               </div>
 
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={handleLoadMore}
-                disabled={!activeHasMore || isBrowseFetching}
-              >
-                {isBrowseFetching
-                  ? "Loading..."
-                  : activeHasMore
-                    ? "Load More"
-                    : "All Loaded"}
+              <button className="secondary-button" type="button" onClick={handleLoadMore} disabled={!activeHasMore || isBrowseFetching}>
+                {isBrowseFetching ? "Loading..." : activeHasMore ? "Load More" : "All Loaded"}
               </button>
             </div>
           </>
@@ -758,16 +678,11 @@ export default function ErfsRegistryPage() {
                 <p className="eyebrow">Find ERF</p>
                 <h2>Search across {activeWorkbaseName}</h2>
                 <p className="muted">
-                  This search is active-LM-wide. It is not restricted to the
-                  selected browse ward.
+                  This search is active-LM-wide. It is not restricted to the selected browse ward.
                 </p>
               </div>
 
-              <button
-                className="icon-button"
-                type="button"
-                onClick={handleCloseSearchModal}
-              >
+              <button className="icon-button" type="button" onClick={handleCloseSearchModal}>
                 ×
               </button>
             </div>
@@ -775,19 +690,12 @@ export default function ErfsRegistryPage() {
             <form className="modal-search-form" onSubmit={handleSearchSubmit}>
               <label>
                 ERF No
-                <input
-                  value={searchText}
-                  onChange={(event) => setSearchText(event.target.value)}
-                  placeholder="Example: 203 or 203/2"
-                />
+                <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Example: 203 or 203/2" />
               </label>
 
               <label>
                 Type
-                <select
-                  value={searchType}
-                  onChange={(event) => setSearchType(event.target.value)}
-                >
+                <select value={searchType} onChange={(event) => setSearchType(event.target.value)}>
                   <option value="">All</option>
                   <option value="FORMAL">Formal</option>
                   <option value="INFORMAL">Informal</option>
@@ -799,11 +707,7 @@ export default function ErfsRegistryPage() {
                   {isSearchFetching ? "Searching..." : "Search"}
                 </button>
 
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={handleClearSearch}
-                >
+                <button type="button" className="ghost-button" onClick={handleClearSearch}>
                   Clear
                 </button>
               </div>
@@ -820,8 +724,7 @@ export default function ErfsRegistryPage() {
               <div className="notice-panel">
                 <strong>Many matches found</strong>
                 <p className="muted">
-                  Showing the first {formatNumber(ERF_SEARCH_LIMIT)} matches.
-                  Refine the ERF number if you need fewer results.
+                  Showing the first {formatNumber(ERF_SEARCH_LIMIT)} matches. Refine the ERF number if you need fewer results.
                 </p>
               </div>
             ) : null}
@@ -829,21 +732,14 @@ export default function ErfsRegistryPage() {
             {!searchError && !lastSearchLabel && searchRows.length === 0 ? (
               <div className="empty-state">
                 <h2>Search for an ERF</h2>
-                <p className="muted">
-                  Enter an ERF number. The search will check the full active LM.
-                </p>
+                <p className="muted">Enter an ERF number. The search will check the full active LM.</p>
               </div>
             ) : null}
 
-            {!isSearchFetching &&
-            lastSearchLabel &&
-            searchRows.length === 0 &&
-            !searchError ? (
+            {!isSearchFetching && lastSearchLabel && searchRows.length === 0 && !searchError ? (
               <div className="empty-state">
                 <h2>No ERFs found</h2>
-                <p className="muted">
-                  No registry rows matched {lastSearchLabel}.
-                </p>
+                <p className="muted">No registry rows matched {lastSearchLabel}.</p>
               </div>
             ) : null}
 
@@ -873,20 +769,22 @@ export default function ErfsRegistryPage() {
                   </thead>
 
                   <tbody>
-                    {[...searchRows].sort(sortErfRows).map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.erfNo}</td>
-                        <td>{getWardDisplay(row.wardPcode)}</td>
-                        <td>{row.erfType}</td>
-                        <td>{formatNumber(row.premiseCount)}</td>
-                        <td>{formatNumber(row.electricityMeterCount)}</td>
-                        <td>{formatNumber(row.waterMeterCount)}</td>
-                        <td>{formatNumber(row.meterCount)}</td>
-                        <td>{formatNumber(row.trnsNaCount)}</td>
-                        <td>{formatNumber(row.trnsTotalCount)}</td>
-                        <td>{formatUpdatedAt(row.updatedAt)}</td>
-                      </tr>
-                    ))}
+                    {[...searchRows]
+                      .sort((a, b) => compareNatural(a.erfNo, b.erfNo))
+                      .map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.erfNo}</td>
+                          <td>{getWardDisplay(row.wardPcode)}</td>
+                          <td>{row.erfType}</td>
+                          <td>{formatNumber(row.premiseCount)}</td>
+                          <td>{formatNumber(row.electricityMeterCount)}</td>
+                          <td>{formatNumber(row.waterMeterCount)}</td>
+                          <td>{formatNumber(row.meterCount)}</td>
+                          <td>{formatNumber(row.trnsNaCount)}</td>
+                          <td>{formatNumber(row.trnsTotalCount)}</td>
+                          <td>{formatUpdatedAt(row.updatedAt)}</td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -898,8 +796,21 @@ export default function ErfsRegistryPage() {
   );
 }
 
-
 const styles = {
+  sortButton: {
+    width: "100%",
+    border: 0,
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "0.4rem",
+    padding: 0,
+    fontWeight: 900,
+    textAlign: "left",
+  },
   headerInput: {
     width: "100%",
     minWidth: "7.5rem",
