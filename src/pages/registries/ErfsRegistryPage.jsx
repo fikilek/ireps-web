@@ -42,7 +42,23 @@ function formatUpdatedAt(value) {
   return "NAv";
 }
 
+function getUpdatedAtMs(value) {
+  if (!value || value === "NAv") return 0;
+
+  if (typeof value?.toDate === "function") {
+    const ms = value.toDate().getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function sortErfRows(a, b) {
+  const updatedCompare = getUpdatedAtMs(b.updatedAt) - getUpdatedAtMs(a.updatedAt);
+
+  if (updatedCompare !== 0) return updatedCompare;
+
   return String(a.erfNo).localeCompare(String(b.erfNo), undefined, {
     numeric: true,
     sensitivity: "base",
@@ -54,10 +70,62 @@ function getWardLabel(ward) {
   return `Ward ${ward.wardNumber}`;
 }
 
+function normalizeFilterText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function includesText(value, filterValue) {
+  const filterText = normalizeFilterText(filterValue);
+  if (!filterText) return true;
+
+  return normalizeFilterText(value).includes(filterText);
+}
+
+function getCountText(value) {
+  return String(Number(value) || 0);
+}
+
+function FilterInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      style={styles.headerInput}
+    />
+  );
+}
+
+function FilterSelect({ value, onChange, children }) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      style={styles.headerSelect}
+    >
+      {children}
+    </select>
+  );
+}
+
 export default function ErfsRegistryPage() {
   const { activeWorkbase } = useAuth();
 
   const [selectedWardPcode, setSelectedWardPcode] = useState("");
+  const [browseFilters, setBrowseFilters] = useState({
+    erfNo: "",
+    erfType: "ALL",
+    premiseCount: "",
+    electricityMeterCount: "",
+    waterMeterCount: "",
+    meterCount: "",
+    trnsAccessCount: "",
+    trnsNaCount: "",
+    trnsTotalCount: "",
+    updatedAt: "",
+  });
 
   const [extraBrowseRows, setExtraBrowseRows] = useState([]);
   const [extraBrowseWardPcode, setExtraBrowseWardPcode] = useState("");
@@ -141,6 +209,32 @@ export default function ErfsRegistryPage() {
     return [...firstPageRows, ...activeExtraBrowseRows].sort(sortErfRows);
   }, [firstPageRows, activeExtraBrowseRows]);
 
+  const filteredBrowseRows = useMemo(() => {
+    return sortedBrowseRows.filter((row) => {
+      return (
+        includesText(row.erfNo, browseFilters.erfNo) &&
+        (browseFilters.erfType === "ALL" ||
+          String(row.erfType || "NAv").toUpperCase() ===
+            browseFilters.erfType) &&
+        includesText(getCountText(row.premiseCount), browseFilters.premiseCount) &&
+        includesText(
+          getCountText(row.electricityMeterCount),
+          browseFilters.electricityMeterCount,
+        ) &&
+        includesText(getCountText(row.waterMeterCount), browseFilters.waterMeterCount) &&
+        includesText(getCountText(row.meterCount), browseFilters.meterCount) &&
+        includesText(getCountText(row.trnsAccessCount), browseFilters.trnsAccessCount) &&
+        includesText(getCountText(row.trnsNaCount), browseFilters.trnsNaCount) &&
+        includesText(getCountText(row.trnsTotalCount), browseFilters.trnsTotalCount) &&
+        includesText(formatUpdatedAt(row.updatedAt), browseFilters.updatedAt)
+      );
+    });
+  }, [sortedBrowseRows, browseFilters]);
+
+  const hasActiveBrowseFilters = Object.values(browseFilters).some((value) => {
+    return value && value !== "ALL";
+  });
+
   const activeNextCursorId =
     extraBrowseWardPcode === effectiveSelectedWardPcode && nextCursorId
       ? nextCursorId
@@ -158,11 +252,30 @@ export default function ErfsRegistryPage() {
     const nextWardPcode = event.target.value;
 
     setSelectedWardPcode(nextWardPcode);
+    setBrowseFilters({
+      erfNo: "",
+      erfType: "ALL",
+      premiseCount: "",
+      electricityMeterCount: "",
+      waterMeterCount: "",
+      meterCount: "",
+      trnsAccessCount: "",
+      trnsNaCount: "",
+      trnsTotalCount: "",
+      updatedAt: "",
+    });
     setExtraBrowseRows([]);
     setExtraBrowseWardPcode(nextWardPcode);
     setNextCursorId(null);
     setHasMoreOverride(null);
     setBrowseError("");
+  }
+
+  function updateBrowseFilter(key, value) {
+    setBrowseFilters((currentFilters) => ({
+      ...currentFilters,
+      [key]: value,
+    }));
   }
 
   async function handleLoadMore() {
@@ -265,7 +378,7 @@ export default function ErfsRegistryPage() {
     return wardPcode || "NAv";
   }
 
-  const browseTotals = sortedBrowseRows.reduce(
+  const browseTotals = filteredBrowseRows.reduce(
     (accumulator, row) => {
       accumulator.premises += row.premiseCount;
       accumulator.electricityMeters += row.electricityMeterCount;
@@ -336,7 +449,7 @@ export default function ErfsRegistryPage() {
 
             {wardRows.map((ward) => (
               <option key={ward.wardPcode} value={ward.wardPcode}>
-                Ward {ward.wardNumber} · {formatNumber(ward.totalErfCount)} ERFs
+                Ward {ward.wardNumber}
               </option>
             ))}
           </select>
@@ -352,6 +465,11 @@ export default function ErfsRegistryPage() {
         <div className="stat-card">
           <span>Loaded ERFs</span>
           <strong>{formatNumber(sortedBrowseRows.length)}</strong>
+        </div>
+
+        <div className="stat-card">
+          <span>Filtered Rows</span>
+          <strong>{formatNumber(filteredBrowseRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -436,27 +554,121 @@ export default function ErfsRegistryPage() {
           </div>
         ) : null}
 
-        {sortedBrowseRows.length > 0 ? (
+        {sortedBrowseRows.length > 0 && filteredBrowseRows.length === 0 ? (
+          <div className="empty-state">
+            <h2>No ERFs match the current filters</h2>
+            <p className="muted">
+              Clear or adjust the column filters to see more rows.
+            </p>
+          </div>
+        ) : null}
+
+        {filteredBrowseRows.length > 0 ? (
           <>
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>ERF No</th>
-                    <th>Type</th>
-                    <th>Premises</th>
-                    <th>Electricity</th>
-                    <th>Water</th>
-                    <th>Total Meters</th>
-                    <th>Access TRNs</th>
-                    <th>No Access</th>
-                    <th>Total TRNs</th>
-                    <th>Updated</th>
+                    <th>
+                      <div>ERF No</div>
+                      <FilterInput
+                        value={browseFilters.erfNo}
+                        onChange={(value) => updateBrowseFilter("erfNo", value)}
+                        placeholder="Filter ERF"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Type</div>
+                      <FilterSelect
+                        value={browseFilters.erfType}
+                        onChange={(value) => updateBrowseFilter("erfType", value)}
+                      >
+                        <option value="ALL">All</option>
+                        <option value="FORMAL">Formal</option>
+                        <option value="INFORMAL">Informal</option>
+                        <option value="NAV">NAv</option>
+                      </FilterSelect>
+                    </th>
+
+                    <th>
+                      <div>Premises</div>
+                      <FilterInput
+                        value={browseFilters.premiseCount}
+                        onChange={(value) => updateBrowseFilter("premiseCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Electricity</div>
+                      <FilterInput
+                        value={browseFilters.electricityMeterCount}
+                        onChange={(value) =>
+                          updateBrowseFilter("electricityMeterCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Water</div>
+                      <FilterInput
+                        value={browseFilters.waterMeterCount}
+                        onChange={(value) => updateBrowseFilter("waterMeterCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Total Meters</div>
+                      <FilterInput
+                        value={browseFilters.meterCount}
+                        onChange={(value) => updateBrowseFilter("meterCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Access TRNs</div>
+                      <FilterInput
+                        value={browseFilters.trnsAccessCount}
+                        onChange={(value) => updateBrowseFilter("trnsAccessCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>No Access</div>
+                      <FilterInput
+                        value={browseFilters.trnsNaCount}
+                        onChange={(value) => updateBrowseFilter("trnsNaCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Total TRNs</div>
+                      <FilterInput
+                        value={browseFilters.trnsTotalCount}
+                        onChange={(value) => updateBrowseFilter("trnsTotalCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+
+                    <th>
+                      <div>Updated</div>
+                      <FilterInput
+                        value={browseFilters.updatedAt}
+                        onChange={(value) => updateBrowseFilter("updatedAt", value)}
+                        placeholder="YYYY-MM-DD"
+                      />
+                    </th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {sortedBrowseRows.map((row) => (
+                  {filteredBrowseRows.map((row) => (
                     <tr key={row.id}>
                       <td>{row.erfNo}</td>
                       <td>{row.erfType}</td>
@@ -477,8 +689,9 @@ export default function ErfsRegistryPage() {
             <div className="load-more-row">
               <div>
                 <strong>
-                  {formatNumber(sortedBrowseRows.length)} of{" "}
-                  {formatNumber(selectedWardTotalErfs)} ward ERFs loaded
+                  {hasActiveBrowseFilters
+                    ? `${formatNumber(filteredBrowseRows.length)} filtered from ${formatNumber(sortedBrowseRows.length)} loaded`
+                    : `${formatNumber(sortedBrowseRows.length)} of ${formatNumber(selectedWardTotalErfs)} ward ERFs loaded`}
                 </strong>
                 <p className="muted">
                   {activeHasMore
@@ -627,7 +840,7 @@ export default function ErfsRegistryPage() {
                   </thead>
 
                   <tbody>
-                    {searchRows.map((row) => (
+                    {[...searchRows].sort(sortErfRows).map((row) => (
                       <tr key={row.id}>
                         <td>{row.erfNo}</td>
                         <td>{getWardDisplay(row.wardPcode)}</td>
@@ -651,3 +864,26 @@ export default function ErfsRegistryPage() {
     </>
   );
 }
+
+
+const styles = {
+  headerInput: {
+    width: "100%",
+    minWidth: "7.5rem",
+    marginTop: "0.4rem",
+    border: "1px solid #cbd5e1",
+    borderRadius: "0.45rem",
+    padding: "0.36rem 0.45rem",
+    fontSize: "0.72rem",
+  },
+  headerSelect: {
+    width: "100%",
+    minWidth: "7.5rem",
+    marginTop: "0.4rem",
+    border: "1px solid #cbd5e1",
+    borderRadius: "0.45rem",
+    padding: "0.36rem 0.45rem",
+    fontSize: "0.72rem",
+    background: "#ffffff",
+  },
+};

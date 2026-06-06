@@ -6,6 +6,19 @@ import { useAuth } from "../../auth/useAuth";
 import { useGetRegistryMetersByWardQuery } from "../../redux/registryMetersApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
 
+const EMPTY_METER_FILTERS = {
+  meterNo: "",
+  meterType: "ALL",
+  statusState: "ALL",
+  visibility: "ALL",
+  erfNo: "",
+  premiseAddress: "",
+  premisePropertyType: "",
+  premiseId: "",
+  createdByUser: "",
+  updatedAt: "",
+};
+
 function getActiveLmPcode(activeWorkbase) {
   return (
     activeWorkbase?.lmPcode ||
@@ -35,6 +48,18 @@ function formatUpdatedAt(value) {
   return "NAv";
 }
 
+function getUpdatedAtMs(value) {
+  if (!value || value === "NAv") return 0;
+
+  if (typeof value?.toDate === "function") {
+    const ms = value.toDate().getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function getWardLabel(ward) {
   if (!ward) return "NAv";
   return `Ward ${ward.wardNumber}`;
@@ -57,10 +82,135 @@ function getMeterStatusLabel(statusState) {
   return normalizedStatus || "NAv";
 }
 
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function rowMatchesText(rowValue, filterValue) {
+  const filterText = normalizeText(filterValue);
+
+  if (!filterText) return true;
+
+  return normalizeText(rowValue).includes(filterText);
+}
+
+function rowMatchesSelect(rowValue, filterValue) {
+  if (!filterValue || filterValue === "ALL") return true;
+
+  return String(rowValue || "NAv").toUpperCase() === String(filterValue).toUpperCase();
+}
+
+function sortByUpdatedAtDesc(a, b) {
+  const updatedCompare = getUpdatedAtMs(b.updatedAt) - getUpdatedAtMs(a.updatedAt);
+
+  if (updatedCompare !== 0) return updatedCompare;
+
+  return String(a.meterNo || "").localeCompare(String(b.meterNo || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function buildUniqueOptions(rows = [], field) {
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => String(row?.[field] || "NAv").trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  }));
+}
+
+
+function HeaderLabel({ children }) {
+  return <span style={styles.headerLabel}>{children}</span>;
+}
+
+function FilterInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      style={styles.headerInput}
+    />
+  );
+}
+
+function FilterSelect({ value, onChange, children }) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      style={styles.headerSelect}
+    >
+      {children}
+    </select>
+  );
+}
+
+function applyMeterFilters(rows = [], filters = EMPTY_METER_FILTERS) {
+  return rows.filter((row) => {
+    return (
+      rowMatchesText(row.meterNo, filters.meterNo) &&
+      rowMatchesSelect(row.meterType, filters.meterType) &&
+      rowMatchesSelect(row.statusState, filters.statusState) &&
+      rowMatchesSelect(row.visibility, filters.visibility) &&
+      rowMatchesText(row.erfNo, filters.erfNo) &&
+      rowMatchesText(row.premiseAddress, filters.premiseAddress) &&
+      rowMatchesText(row.premisePropertyType, filters.premisePropertyType) &&
+      rowMatchesText(row.premiseId, filters.premiseId) &&
+      rowMatchesText(row.createdByUser, filters.createdByUser) &&
+      rowMatchesText(formatUpdatedAt(row.updatedAt), filters.updatedAt)
+    );
+  });
+}
+
+
+const styles = {
+  headerLabel: {
+    display: "block",
+    width: "100%",
+    marginBottom: "0.4rem",
+    fontWeight: 900,
+    lineHeight: 1.15,
+    whiteSpace: "normal",
+  },
+  headerInput: {
+    display: "block",
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: "8rem",
+    marginTop: 0,
+    border: "1px solid #cbd5e1",
+    borderRadius: "0.45rem",
+    padding: "0.36rem 0.45rem",
+    fontSize: "0.72rem",
+  },
+  headerSelect: {
+    display: "block",
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: "7.5rem",
+    marginTop: 0,
+    border: "1px solid #cbd5e1",
+    borderRadius: "0.45rem",
+    padding: "0.36rem 0.45rem",
+    fontSize: "0.72rem",
+    background: "#ffffff",
+  },
+};
+
 export default function MetersRegistryPage() {
   const { activeWorkbase } = useAuth();
 
   const [selectedWardPcode, setSelectedWardPcode] = useState("");
+  const [meterFilters, setMeterFilters] = useState(EMPTY_METER_FILTERS);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -95,6 +245,33 @@ export default function MetersRegistryPage() {
     isFetching,
     error,
   } = useGetRegistryMetersByWardQuery(effectiveSelectedWardPcode || skipToken);
+
+  const filteredMeterRows = useMemo(() => {
+    return applyMeterFilters(meterRows, meterFilters);
+  }, [meterRows, meterFilters]);
+
+  const sortedMeterRows = useMemo(() => {
+    return [...filteredMeterRows].sort(sortByUpdatedAtDesc);
+  }, [filteredMeterRows]);
+
+  const meterTypeOptions = useMemo(() => {
+    return buildUniqueOptions(meterRows, "meterType");
+  }, [meterRows]);
+
+  const statusOptions = useMemo(() => {
+    return buildUniqueOptions(meterRows, "statusState");
+  }, [meterRows]);
+
+  const visibilityOptions = useMemo(() => {
+    return buildUniqueOptions(meterRows, "visibility");
+  }, [meterRows]);
+
+  const hasActiveFilters = useMemo(() => {
+    return Object.entries(meterFilters).some(([key, value]) => {
+      const defaultValue = EMPTY_METER_FILTERS[key];
+      return value !== defaultValue;
+    });
+  }, [meterFilters]);
 
   const totals = meterRows.reduce(
     (accumulator, row) => {
@@ -131,6 +308,18 @@ export default function MetersRegistryPage() {
 
   function handleWardChange(event) {
     setSelectedWardPcode(event.target.value);
+    setMeterFilters(EMPTY_METER_FILTERS);
+  }
+
+  function handleFilterChange(field, value) {
+    setMeterFilters((currentFilters) => ({
+      ...currentFilters,
+      [field]: value,
+    }));
+  }
+
+  function handleClearFilters() {
+    setMeterFilters(EMPTY_METER_FILTERS);
   }
 
   return (
@@ -152,7 +341,9 @@ export default function MetersRegistryPage() {
         <div className="role-pill">
           {isFetching
             ? "Streaming..."
-            : `${formatNumber(meterRows.length)} meters`}
+            : hasActiveFilters
+              ? `${formatNumber(sortedMeterRows.length)} of ${formatNumber(meterRows.length)} meters`
+              : `${formatNumber(meterRows.length)} meters`}
         </div>
       </header>
 
@@ -168,7 +359,7 @@ export default function MetersRegistryPage() {
 
             {wardRows.map((ward) => (
               <option key={ward.wardPcode} value={ward.wardPcode}>
-                Ward {ward.wardNumber} · {formatNumber(ward.meterCount)} meters
+                Ward {ward.wardNumber}
               </option>
             ))}
           </select>
@@ -187,8 +378,8 @@ export default function MetersRegistryPage() {
         </div>
 
         <div className="stat-card">
-          <span>Ward Meter Count</span>
-          <strong>{formatNumber(selectedWard?.meterCount || 0)}</strong>
+          <span>Filtered Rows</span>
+          <strong>{formatNumber(sortedMeterRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -266,26 +457,135 @@ export default function MetersRegistryPage() {
           </div>
         ) : null}
 
-        {meterRows.length > 0 ? (
+        {!isLoading && meterRows.length > 0 && sortedMeterRows.length === 0 ? (
+          <div className="empty-state">
+            <h2>No rows match the current filters</h2>
+            <p className="muted">
+              Clear one or more column filters to show meter registry rows again.
+            </p>
+            <button type="button" className="secondary-button" onClick={handleClearFilters}>
+              Clear Filters
+            </button>
+          </div>
+        ) : null}
+
+        {sortedMeterRows.length > 0 ? (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Meter No</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Visibility</th>
-                  <th>ERF No</th>
-                  <th>Premise Address</th>
-                  <th>Premise Type</th>
-                  <th>Premise ID</th>
-                  <th>Created By</th>
-                  <th>Updated</th>
+                  <th>
+                    <HeaderLabel>Meter No</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.meterNo}
+                      onChange={(value) => handleFilterChange("meterNo", value)}
+                      placeholder="Filter"
+                    />
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Type</HeaderLabel>
+                    <FilterSelect
+                      value={meterFilters.meterType}
+                      onChange={(value) => handleFilterChange("meterType", value)}
+                    >
+                      <option value="ALL">Any</option>
+                      {meterTypeOptions.map((meterType) => (
+                        <option key={meterType} value={meterType}>
+                          {getMeterTypeLabel(meterType)}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Status</HeaderLabel>
+                    <FilterSelect
+                      value={meterFilters.statusState}
+                      onChange={(value) => handleFilterChange("statusState", value)}
+                    >
+                      <option value="ALL">Any</option>
+                      {statusOptions.map((statusState) => (
+                        <option key={statusState} value={statusState}>
+                          {getMeterStatusLabel(statusState)}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Visibility</HeaderLabel>
+                    <FilterSelect
+                      value={meterFilters.visibility}
+                      onChange={(value) => handleFilterChange("visibility", value)}
+                    >
+                      <option value="ALL">Any</option>
+                      {visibilityOptions.map((visibility) => (
+                        <option key={visibility} value={visibility}>
+                          {visibility}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </th>
+
+                  <th>
+                    <HeaderLabel>ERF No</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.erfNo}
+                      onChange={(value) => handleFilterChange("erfNo", value)}
+                      placeholder="Filter"
+                    />
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Premise Address</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.premiseAddress}
+                      onChange={(value) => handleFilterChange("premiseAddress", value)}
+                      placeholder="Filter"
+                    />
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Premise Type</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.premisePropertyType}
+                      onChange={(value) => handleFilterChange("premisePropertyType", value)}
+                      placeholder="Filter"
+                    />
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Premise ID</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.premiseId}
+                      onChange={(value) => handleFilterChange("premiseId", value)}
+                      placeholder="Filter"
+                    />
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Created By</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.createdByUser}
+                      onChange={(value) => handleFilterChange("createdByUser", value)}
+                      placeholder="Filter"
+                    />
+                  </th>
+
+                  <th>
+                    <HeaderLabel>Updated</HeaderLabel>
+                    <FilterInput
+                      value={meterFilters.updatedAt}
+                      onChange={(value) => handleFilterChange("updatedAt", value)}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {meterRows.map((row) => (
+                {sortedMeterRows.map((row) => (
                   <tr key={row.id}>
                     <td>{row.meterNo}</td>
                     <td>{getMeterTypeLabel(row.meterType)}</td>

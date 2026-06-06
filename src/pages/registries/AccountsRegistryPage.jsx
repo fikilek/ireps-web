@@ -38,6 +38,18 @@ function formatUpdatedAt(value) {
   return "NAv";
 }
 
+function getUpdatedAtMs(value) {
+  if (!value || value === "NAv") return 0;
+
+  if (typeof value?.toDate === "function") {
+    const ms = value.toDate().getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function getWardLabel(ward) {
   if (!ward) return "NAv";
   return `Ward ${ward.wardNumber}`;
@@ -63,20 +75,15 @@ function getWardNumberFromPcode(wardPcode = "") {
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
 
+function getWardNumberDisplay(wardPcode = "") {
+  const wardNumber = getWardNumberFromPcode(wardPcode);
+  return wardNumber > 0 ? wardNumber : "NAv";
+}
+
 function getOwnerTypeLabel(ownerType) {
   if (ownerType === "NATURAL_PERSON") return "Natural Person";
   if (ownerType === "JURISTIC_PERSON") return "Juristic Person";
   return ownerType || "NAv";
-}
-
-function getStatusRank(status) {
-  const normalized = String(status || "").toUpperCase();
-
-  if (normalized === "ERROR") return 3;
-  if (normalized === "WARNING") return 2;
-  if (normalized === "BALANCED") return 1;
-
-  return 0;
 }
 
 function getSortValue(row, key) {
@@ -87,8 +94,8 @@ function getSortValue(row, key) {
   if (key === "ownerType") return row.ownerType || "";
   if (key === "accounts") return row.accountCount || 0;
   if (key === "meters") return row.meterCount || 0;
-  if (key === "reconciliation") return getStatusRank(row.reconciliationStatus);
   if (key === "history") return row.historySortValue || 0;
+  if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
 
   return "";
 }
@@ -105,6 +112,10 @@ function compareNatural(a, b) {
 }
 
 function compareDefaultRows(a, b) {
+  const updatedCompare = getUpdatedAtMs(b.updatedAt) - getUpdatedAtMs(a.updatedAt);
+
+  if (updatedCompare !== 0) return updatedCompare;
+
   const wardCompare = compareNatural(
     getWardNumberFromPcode(a.wardPcode),
     getWardNumberFromPcode(b.wardPcode),
@@ -166,23 +177,23 @@ function SortButton({ label, sortKey, sortConfig, onSort }) {
   );
 }
 
-function FilterInput({ value, onChange, placeholder }) {
+function FilterInput({ value, onChange, placeholder, style = null }) {
   return (
     <input
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
-      style={styles.headerInput}
+      style={{ ...styles.headerInput, ...(style || {}) }}
     />
   );
 }
 
-function FilterSelect({ value, onChange, children }) {
+function FilterSelect({ value, onChange, children, style = null }) {
   return (
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      style={styles.headerSelect}
+      style={{ ...styles.headerSelect, ...(style || {}) }}
     >
       {children}
     </select>
@@ -191,8 +202,14 @@ function FilterSelect({ value, onChange, children }) {
 
 function CountPill({ count, label, onClick }) {
   return (
-    <button type="button" style={styles.countPill} onClick={onClick}>
-      {formatNumber(count)} {label}
+    <button
+      type="button"
+      style={styles.countPill}
+      onClick={onClick}
+      title={label || "View linked records"}
+      aria-label={label || "View linked records"}
+    >
+      {formatNumber(count)}
     </button>
   );
 }
@@ -362,7 +379,6 @@ export default function AccountsRegistryPage() {
     accountCountMode: "ALL",
     meterSearch: "",
     meterCountMode: "ALL",
-    reconciliationStatus: "ALL",
     historyStatus: "ALL",
   });
   const [modalState, setModalState] = useState({ type: "", row: null });
@@ -411,10 +427,6 @@ export default function AccountsRegistryPage() {
 
       if (row.ownerType === "NATURAL_PERSON") accumulator.naturalOwners += 1;
       if (row.ownerType === "JURISTIC_PERSON") accumulator.juristicOwners += 1;
-      if (row.reconciliationStatus === "BALANCED") accumulator.balanced += 1;
-      if (row.reconciliationStatus === "WARNING") accumulator.warning += 1;
-      if (row.reconciliationStatus === "ERROR") accumulator.error += 1;
-
       return accumulator;
     },
     {
@@ -422,9 +434,6 @@ export default function AccountsRegistryPage() {
       meters: 0,
       naturalOwners: 0,
       juristicOwners: 0,
-      balanced: 0,
-      warning: 0,
-      error: 0,
     },
   );
 
@@ -453,8 +462,6 @@ export default function AccountsRegistryPage() {
         countFilterMatches(row.accountCount, filters.accountCountMode) &&
         meterSearchMatch &&
         countFilterMatches(row.meterCount, filters.meterCountMode) &&
-        (filters.reconciliationStatus === "ALL" ||
-          row.reconciliationStatus === filters.reconciliationStatus) &&
         (filters.historyStatus === "ALL" ||
           row.historyStatus === filters.historyStatus)
       );
@@ -532,6 +539,12 @@ export default function AccountsRegistryPage() {
 
   const selectedRow = modalState.row;
 
+  const visiblePremiseSummary = !effectiveSelectedWardPcode
+    ? "No ward selected"
+    : sortedRows.length === accountRows.length
+      ? `Showing ${formatNumber(accountRows.length)} account registry premise(s)`
+      : `Showing ${formatNumber(sortedRows.length)} of ${formatNumber(accountRows.length)} account registry premise(s)`;
+
   return (
     <>
       <header className="console-header">
@@ -567,7 +580,7 @@ export default function AccountsRegistryPage() {
 
             {wardRows.map((ward) => (
               <option key={ward.wardPcode} value={ward.wardPcode}>
-                Ward {ward.wardNumber} · {formatNumber(ward.premiseCount)} premises
+                Ward {ward.wardNumber}
               </option>
             ))}
           </select>
@@ -575,7 +588,7 @@ export default function AccountsRegistryPage() {
 
         <div className="filter-summary">
           <strong>{getWardLabel(selectedWard)}</strong>
-          <span>{effectiveSelectedWardPcode || "No ward selected"}</span>
+          <span>{visiblePremiseSummary}</span>
         </div>
       </section>
 
@@ -601,18 +614,13 @@ export default function AccountsRegistryPage() {
         </div>
 
         <div className="stat-card">
-          <span>Natural Owners</span>
+          <span>Natural Person Owners</span>
           <strong>{formatNumber(totals.naturalOwners)}</strong>
         </div>
 
         <div className="stat-card">
-          <span>Juristic Owners</span>
+          <span>Juristic Person Owners</span>
           <strong>{formatNumber(totals.juristicOwners)}</strong>
-        </div>
-
-        <div className="stat-card">
-          <span>Balanced</span>
-          <strong>{formatNumber(totals.balanced)}</strong>
         </div>
 
         <div className="stat-card">
@@ -746,20 +754,24 @@ export default function AccountsRegistryPage() {
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
-                    <FilterInput
-                      value={filters.accountSearch}
-                      onChange={(value) => updateFilter("accountSearch", value)}
-                      placeholder="Account no"
-                    />
-                    <FilterSelect
-                      value={filters.accountCountMode}
-                      onChange={(value) => updateFilter("accountCountMode", value)}
-                    >
-                      <option value="ALL">Any count</option>
-                      <option value="ZERO">0</option>
-                      <option value="ONE">1</option>
-                      <option value="MULTIPLE">2+</option>
-                    </FilterSelect>
+                    <div style={styles.pairedFilters}>
+                      <FilterInput
+                        value={filters.accountSearch}
+                        onChange={(value) => updateFilter("accountSearch", value)}
+                        placeholder="Account no"
+                        style={styles.pairedFilterInput}
+                      />
+                      <FilterSelect
+                        value={filters.accountCountMode}
+                        onChange={(value) => updateFilter("accountCountMode", value)}
+                        style={styles.pairedFilterSelect}
+                      >
+                        <option value="ALL">Any</option>
+                        <option value="ZERO">0</option>
+                        <option value="ONE">1</option>
+                        <option value="MULTIPLE">2+</option>
+                      </FilterSelect>
+                    </div>
                   </th>
                   <th>
                     <SortButton
@@ -768,39 +780,24 @@ export default function AccountsRegistryPage() {
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
-                    <FilterInput
-                      value={filters.meterSearch}
-                      onChange={(value) => updateFilter("meterSearch", value)}
-                      placeholder="Meter no"
-                    />
-                    <FilterSelect
-                      value={filters.meterCountMode}
-                      onChange={(value) => updateFilter("meterCountMode", value)}
-                    >
-                      <option value="ALL">Any count</option>
-                      <option value="ZERO">0</option>
-                      <option value="ONE">1</option>
-                      <option value="MULTIPLE">2+</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Reconciliation"
-                      sortKey="reconciliation"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.reconciliationStatus}
-                      onChange={(value) =>
-                        updateFilter("reconciliationStatus", value)
-                      }
-                    >
-                      <option value="ALL">All</option>
-                      <option value="BALANCED">Balanced</option>
-                      <option value="WARNING">Warning</option>
-                      <option value="ERROR">Error</option>
-                    </FilterSelect>
+                    <div style={styles.pairedFilters}>
+                      <FilterInput
+                        value={filters.meterSearch}
+                        onChange={(value) => updateFilter("meterSearch", value)}
+                        placeholder="Meter no"
+                        style={styles.pairedFilterInput}
+                      />
+                      <FilterSelect
+                        value={filters.meterCountMode}
+                        onChange={(value) => updateFilter("meterCountMode", value)}
+                        style={styles.pairedFilterSelect}
+                      >
+                        <option value="ALL">Any</option>
+                        <option value="ZERO">0</option>
+                        <option value="ONE">1</option>
+                        <option value="MULTIPLE">2+</option>
+                      </FilterSelect>
+                    </div>
                   </th>
                   <th>
                     <SortButton
@@ -831,7 +828,7 @@ export default function AccountsRegistryPage() {
                         {row.premiseId}
                       </div>
                     </td>
-                    <td>{row.wardPcode}</td>
+                    <td>{getWardNumberDisplay(row.wardPcode)}</td>
                     <td>{row.erfNo}</td>
                     <td>{row.ownerLabel}</td>
                     <td>{getOwnerTypeLabel(row.ownerType)}</td>
@@ -848,9 +845,6 @@ export default function AccountsRegistryPage() {
                         label={row.meterCount === 1 ? "Meter" : "Meters"}
                         onClick={() => openModal("meters", row)}
                       />
-                    </td>
-                    <td>
-                      <span style={styles.statusPill}>{row.reconciliationStatus}</span>
                     </td>
                     <td>
                       <button
@@ -1112,6 +1106,21 @@ const styles = {
     padding: "0.36rem 0.45rem",
     fontSize: "0.72rem",
     background: "#ffffff",
+  },
+  pairedFilters: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 7fr) minmax(0, 3fr)",
+    gap: "0.35rem",
+    alignItems: "end",
+    marginTop: "0.4rem",
+  },
+  pairedFilterInput: {
+    minWidth: 0,
+    marginTop: 0,
+  },
+  pairedFilterSelect: {
+    minWidth: 0,
+    marginTop: 0,
   },
   countPill: {
     border: "1px solid #bfdbfe",
