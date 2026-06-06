@@ -4,6 +4,10 @@ import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+import {
+  DatetimeFilterButton,
+  DatetimeFilterModal,
+} from "../../components/DatetimeFilter";
 
 const EMPTY_WARD_FILTERS = {
   wardNumber: "",
@@ -15,7 +19,6 @@ const EMPTY_WARD_FILTERS = {
   waterMeterCount: "",
   meterCount: "",
   trnCount: "",
-  updatedAt: "",
 };
 
 function getActiveLmPcode(activeWorkbase) {
@@ -123,10 +126,124 @@ function FilterInput({ value, onChange, placeholder }) {
   );
 }
 
+
+const EMPTY_UPDATED_AT_FILTER = {
+  mode: "ALL",
+  startDate: "",
+  endDate: "",
+};
+
+function buildUpdatedAtFilter(mode) {
+  return {
+    mode,
+    startDate: "",
+    endDate: "",
+  };
+}
+
+function getUpdatedAtDate(value) {
+  if (!value || value === "NAv") return null;
+
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value?.seconds === "number") {
+    const date = new Date(value.seconds * 1000);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function endOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+
+  const [year, month, day] = String(value).split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
+  const mode = filter?.mode || "ALL";
+  const now = new Date();
+  const todayStart = startOfDay(now);
+
+  if (mode === "TODAY") {
+    return { start: todayStart, end: endOfDay(now) };
+  }
+
+  if (mode === "YESTERDAY") {
+    const yesterday = addDays(todayStart, -1);
+    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
+  }
+
+  if (mode === "PAST_3_DAYS") {
+    return { start: addDays(todayStart, -2), end: endOfDay(now) };
+  }
+
+  if (mode === "THIS_WEEK") {
+    const sunday = addDays(todayStart, -todayStart.getDay());
+    const saturday = addDays(sunday, 6);
+    return { start: startOfDay(sunday), end: endOfDay(saturday) };
+  }
+
+  if (mode === "THIS_MONTH") {
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    return { start: firstDay, end: lastDay };
+  }
+
+  if (mode === "CUSTOM") {
+    const startDate = parseDateOnly(filter?.startDate);
+    const endDate = parseDateOnly(filter?.endDate);
+
+    return {
+      start: startDate ? startOfDay(startDate) : null,
+      end: endDate ? endOfDay(endDate) : null,
+    };
+  }
+
+  return { start: null, end: null };
+}
+
+function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
+  if (!filter || filter.mode === "ALL") return true;
+
+  const rowDate = getUpdatedAtDate(value);
+  if (!rowDate) return false;
+
+  const { start, end } = getUpdatedAtFilterRange(filter);
+
+  if (start && rowDate < start) return false;
+  if (end && rowDate > end) return false;
+
+  return true;
+}
+
 export default function WardsRegistryPage() {
-  const { activeWorkbase } = useAuth();
+  const { activeWorkbase, role } = useAuth();
   const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
   const [filters, setFilters] = useState(EMPTY_WARD_FILTERS);
+  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
+  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -156,10 +273,10 @@ export default function WardsRegistryPage() {
         includesText(getCountText(row.waterMeterCount), filters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), filters.meterCount) &&
         includesText(getCountText(row.trnCount), filters.trnCount) &&
-        includesText(formatUpdatedAt(row.updatedAt), filters.updatedAt)
+        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
-  }, [wardRows, filters]);
+  }, [wardRows, filters, updatedAtFilter]);
 
   const sortedWardRows = useMemo(() => {
     const rows = [...filteredWardRows];
@@ -201,19 +318,20 @@ export default function WardsRegistryPage() {
     <>
       <header className="console-header">
         <div>
-          <p className="eyebrow">Registry</p>
           <h1>Ward Registry</h1>
-          <p className="muted">
-            Showing backend-shaped ward registry rows for {activeWorkbaseName}.
-          </p>
+          <p className="muted">Showing backend-shaped ward registry rows.</p>
 
           <Link className="text-link" to="/registries">
             ← Back to Registries
           </Link>
         </div>
 
-        <div className="role-pill">
-          {isFetching ? "Streaming..." : `${formatNumber(sortedWardRows.length)} wards`}
+        <div className="topbar-right">
+          <div className="workbase-pill">{activeWorkbaseName}</div>
+          <div className="role-pill">{role || "NAv"}</div>
+          <div className="role-pill">
+            {isFetching ? "Streaming..." : `${formatNumber(sortedWardRows.length)} wards`}
+          </div>
         </div>
       </header>
 
@@ -336,8 +454,8 @@ export default function WardsRegistryPage() {
                     <FilterInput value={filters.trnCount} onChange={(value) => updateFilter("trnCount", value)} placeholder="Filter" />
                   </th>
                   <th>
-                    <SortButton label="Updated" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.updatedAt} onChange={(value) => updateFilter("updatedAt", value)} placeholder="YYYY-MM-DD" />
+                    <SortButton label="updatedAt" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
+                    <DatetimeFilterButton filter={updatedAtFilter} onClick={() => setIsUpdatedAtFilterOpen(true)} />
                   </th>
                 </tr>
               </thead>
@@ -361,7 +479,7 @@ export default function WardsRegistryPage() {
                       <td>{formatNumber(row.waterMeterCount)}</td>
                       <td>{formatNumber(row.meterCount)}</td>
                       <td>{formatNumber(row.trnCount)}</td>
-                      <td>{formatUpdatedAt(row.updatedAt)}</td>
+                        <td>{formatUpdatedAt(row.updatedAt)}</td>
                     </tr>
                   ))
                 )}
@@ -370,6 +488,21 @@ export default function WardsRegistryPage() {
           </div>
         ) : null}
       </section>
+
+      {isUpdatedAtFilterOpen ? (
+        <DatetimeFilterModal
+          filter={updatedAtFilter}
+          onApply={(nextFilter) => {
+            setUpdatedAtFilter(nextFilter);
+            setIsUpdatedAtFilterOpen(false);
+          }}
+          onClear={() => {
+            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+            setIsUpdatedAtFilterOpen(false);
+          }}
+          onClose={() => setIsUpdatedAtFilterOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

@@ -6,6 +6,30 @@ import { db } from "../firebase";
 const METER_REGISTRY_COLLECTION = "registry_meters";
 const METER_REGISTRY_WARD_FIELD = "parents.wardPcode";
 
+function serializeRegistryDateValue(value) {
+  if (!value || value === "NAv") return "NAv";
+
+  if (typeof value === "string") return value;
+
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+  }
+
+  if (typeof value?.toMillis === "function") {
+    const date = new Date(value.toMillis());
+    return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+  }
+
+  if (typeof value?.seconds === "number") {
+    const date = new Date(value.seconds * 1000);
+    return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+}
+
 function normalizeMeterRegistryRow(id, data) {
   return {
     id,
@@ -14,9 +38,6 @@ function normalizeMeterRegistryRow(id, data) {
     meterNo: data?.meterNo || "NAv",
     meterType: data?.meterType || "NAv",
     visibility: data?.visibility || "NAv",
-    status: data?.status || { state: data?.statusState || "NAv", detail: data?.statusDetail || "NAv", id: "NAv" },
-    statusState: data?.statusState || data?.status?.state || "NAv",
-    statusDetail: data?.statusDetail || data?.status?.detail || "NAv",
 
     erfId: data?.erfId || "NAv",
     erfNo: data?.erfNo || "NAv",
@@ -29,7 +50,8 @@ function normalizeMeterRegistryRow(id, data) {
     wardPcode: data?.parents?.wardPcode || "NAv",
 
     createdByUser: data?.metadata?.createdByUser || "NAv",
-    updatedAt: data?.metadata?.updatedAt || data?.metadata?.createdAt || "NAv",
+    updatedByUser: data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
+    updatedAt: serializeRegistryDateValue(data?.metadata?.updatedAt || data?.metadata?.createdAt),
   };
 }
 

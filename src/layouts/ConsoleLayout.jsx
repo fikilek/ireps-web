@@ -59,11 +59,6 @@ const navSections = [
             path: "/registries/meters",
             allowedRoles: MANAGEMENT_ROLES,
           },
-          {
-            label: "Account Registry",
-            path: "/registries/accounts",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
         ],
       },
       {
@@ -307,6 +302,9 @@ export default function ConsoleLayout() {
   const visibleNavItems = getFlatNavItems(visibleSections);
 
   const activeNavItem = getActiveNavItem(visibleNavItems, location.pathname);
+  const hideTopbarForRegistryRoutes =
+    location.pathname === "/registries" ||
+    location.pathname.startsWith("/registries/");
 
   function handleToggleGroup(groupLabel) {
     const key = buildToggleKey(groupLabel);
@@ -431,17 +429,19 @@ export default function ConsoleLayout() {
       </aside>
 
       <main className="console-main">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">iREPS Desktop</p>
-            <h1>{activeNavItem?.label || "Dashboard"}</h1>
-          </div>
+        {!hideTopbarForRegistryRoutes ? (
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">iREPS Desktop</p>
+              <h1>{activeNavItem?.label || "Dashboard"}</h1>
+            </div>
 
-          <div className="topbar-right">
-            <div className="workbase-pill">{activeWorkbaseName}</div>
-            <div className="role-pill">{role || "NAv"}</div>
-          </div>
-        </header>
+            <div className="topbar-right">
+              <div className="workbase-pill">{activeWorkbaseName}</div>
+              <div className="role-pill">{role || "NAv"}</div>
+            </div>
+          </header>
+        ) : null}
 
         <Outlet />
       </main>

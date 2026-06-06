@@ -6,9 +6,12 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
 import { useGetRegistryPremisesByWardQuery } from "../../redux/registryPremisesApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+import {
+  DatetimeFilterButton,
+  DatetimeFilterModal,
+} from "../../components/DatetimeFilter";
 
 const EMPTY_PREMISE_FILTERS = {
-  premiseId: "",
   erfNo: "",
   addressText: "",
   propertyTypeType: "",
@@ -18,8 +21,6 @@ const EMPTY_PREMISE_FILTERS = {
   electricityMeterCount: "",
   waterMeterCount: "",
   meterCount: "",
-  createdByUser: "",
-  updatedAt: "",
 };
 
 function getActiveLmPcode(activeWorkbase) {
@@ -126,7 +127,6 @@ function compareNatural(a, b) {
 }
 
 function getSortValue(row, key) {
-  if (key === "premiseId") return row.premiseId || "";
   if (key === "erfNo") return row.erfNo || "";
   if (key === "addressText") return row.addressText || "";
   if (key === "propertyTypeType") return row.propertyTypeType || "";
@@ -136,7 +136,6 @@ function getSortValue(row, key) {
   if (key === "electricityMeterCount") return row.electricityMeterCount || 0;
   if (key === "waterMeterCount") return row.waterMeterCount || 0;
   if (key === "meterCount") return row.meterCount || 0;
-  if (key === "createdByUser") return row.createdByUser || "";
   if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
 
   return "";
@@ -177,13 +176,127 @@ function FilterSelect({ value, onChange, children }) {
   );
 }
 
+
+const EMPTY_UPDATED_AT_FILTER = {
+  mode: "ALL",
+  startDate: "",
+  endDate: "",
+};
+
+function buildUpdatedAtFilter(mode) {
+  return {
+    mode,
+    startDate: "",
+    endDate: "",
+  };
+}
+
+function getUpdatedAtDate(value) {
+  if (!value || value === "NAv") return null;
+
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value?.seconds === "number") {
+    const date = new Date(value.seconds * 1000);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function endOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+
+  const [year, month, day] = String(value).split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
+  const mode = filter?.mode || "ALL";
+  const now = new Date();
+  const todayStart = startOfDay(now);
+
+  if (mode === "TODAY") {
+    return { start: todayStart, end: endOfDay(now) };
+  }
+
+  if (mode === "YESTERDAY") {
+    const yesterday = addDays(todayStart, -1);
+    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
+  }
+
+  if (mode === "PAST_3_DAYS") {
+    return { start: addDays(todayStart, -2), end: endOfDay(now) };
+  }
+
+  if (mode === "THIS_WEEK") {
+    const sunday = addDays(todayStart, -todayStart.getDay());
+    const saturday = addDays(sunday, 6);
+    return { start: startOfDay(sunday), end: endOfDay(saturday) };
+  }
+
+  if (mode === "THIS_MONTH") {
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    return { start: firstDay, end: lastDay };
+  }
+
+  if (mode === "CUSTOM") {
+    const startDate = parseDateOnly(filter?.startDate);
+    const endDate = parseDateOnly(filter?.endDate);
+
+    return {
+      start: startDate ? startOfDay(startDate) : null,
+      end: endDate ? endOfDay(endDate) : null,
+    };
+  }
+
+  return { start: null, end: null };
+}
+
+function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
+  if (!filter || filter.mode === "ALL") return true;
+
+  const rowDate = getUpdatedAtDate(value);
+  if (!rowDate) return false;
+
+  const { start, end } = getUpdatedAtFilterRange(filter);
+
+  if (start && rowDate < start) return false;
+  if (end && rowDate > end) return false;
+
+  return true;
+}
+
 export default function PremisesRegistryPage() {
-  const { activeWorkbase } = useAuth();
+  const { activeWorkbase, role } = useAuth();
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
   const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
   const [filters, setFilters] = useState(EMPTY_PREMISE_FILTERS);
+  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
+  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -213,15 +326,15 @@ export default function PremisesRegistryPage() {
 
   useEffect(() => {
     setFilters(EMPTY_PREMISE_FILTERS);
+    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
     setSortConfig({ key: "updatedAt", direction: "desc" });
   }, [effectiveSelectedWardPcode]);
 
   const filteredPremiseRows = useMemo(() => {
     return premiseRows.filter((row) => {
       return (
-        includesText(row.premiseId, filters.premiseId) &&
         includesText(row.erfNo, filters.erfNo) &&
-        includesText(row.addressText, filters.addressText) &&
+        includesText(`${row.addressText || ""} ${row.premiseId || ""}`, filters.addressText) &&
         includesText(row.propertyTypeType, filters.propertyTypeType) &&
         includesText(row.propertyTypeName, filters.propertyTypeName) &&
         includesText(row.unitNo, filters.unitNo) &&
@@ -229,11 +342,10 @@ export default function PremisesRegistryPage() {
         includesText(getCountText(row.electricityMeterCount), filters.electricityMeterCount) &&
         includesText(getCountText(row.waterMeterCount), filters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), filters.meterCount) &&
-        includesText(row.createdByUser, filters.createdByUser) &&
-        includesText(formatUpdatedAt(row.updatedAt), filters.updatedAt)
+        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
-  }, [premiseRows, filters]);
+  }, [premiseRows, filters, updatedAtFilter]);
 
   const sortedPremiseRows = useMemo(() => {
     const rows = [...filteredPremiseRows];
@@ -284,20 +396,21 @@ export default function PremisesRegistryPage() {
     <>
       <header className="console-header">
         <div>
-          <p className="eyebrow">Registry</p>
           <h1>Premise Registry</h1>
 
-          <p className="muted">
-            Showing backend-shaped premise registry rows for {activeWorkbaseName}.
-          </p>
+          <p className="muted">Showing backend-shaped premise registry rows.</p>
 
           <Link className="text-link" to="/registries">
             ← Back to Registries
           </Link>
         </div>
 
-        <div className="role-pill">
-          {isFetching ? "Streaming..." : `${formatNumber(sortedPremiseRows.length)} premises`}
+        <div className="topbar-right">
+          <div className="workbase-pill">{activeWorkbaseName}</div>
+          <div className="role-pill">{role || "NAv"}</div>
+          <div className="role-pill">
+            {isFetching ? "Streaming..." : `${formatNumber(sortedPremiseRows.length)} premises`}
+          </div>
         </div>
       </header>
 
@@ -408,16 +521,12 @@ export default function PremisesRegistryPage() {
               <thead>
                 <tr>
                   <th>
-                    <SortButton label="Premise" sortKey="premiseId" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.premiseId} onChange={(value) => updateFilter("premiseId", value)} placeholder="Premise ID" />
+                    <SortButton label="Premise Address" sortKey="addressText" sortConfig={sortConfig} onSort={handleSort} />
+                    <FilterInput value={filters.addressText} onChange={(value) => updateFilter("addressText", value)} placeholder="Address / ID" />
                   </th>
                   <th>
                     <SortButton label="ERF No" sortKey="erfNo" sortConfig={sortConfig} onSort={handleSort} />
                     <FilterInput value={filters.erfNo} onChange={(value) => updateFilter("erfNo", value)} placeholder="ERF" />
-                  </th>
-                  <th>
-                    <SortButton label="Address" sortKey="addressText" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.addressText} onChange={(value) => updateFilter("addressText", value)} placeholder="Address" />
                   </th>
                   <th>
                     <SortButton label="Property Type" sortKey="propertyTypeType" sortConfig={sortConfig} onSort={handleSort} />
@@ -454,12 +563,8 @@ export default function PremisesRegistryPage() {
                     <FilterInput value={filters.meterCount} onChange={(value) => updateFilter("meterCount", value)} placeholder="Filter" />
                   </th>
                   <th>
-                    <SortButton label="Created By" sortKey="createdByUser" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.createdByUser} onChange={(value) => updateFilter("createdByUser", value)} placeholder="User" />
-                  </th>
-                  <th>
-                    <SortButton label="Updated" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.updatedAt} onChange={(value) => updateFilter("updatedAt", value)} placeholder="YYYY-MM-DD" />
+                    <SortButton label="updatedAt" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
+                    <DatetimeFilterButton filter={updatedAtFilter} onClick={() => setIsUpdatedAtFilterOpen(true)} />
                   </th>
                 </tr>
               </thead>
@@ -467,16 +572,20 @@ export default function PremisesRegistryPage() {
               <tbody>
                 {sortedPremiseRows.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="muted">
+                    <td colSpan={10} className="muted">
                       No premises match the current filters. Clear or adjust a column filter above.
                     </td>
                   </tr>
                 ) : (
                   sortedPremiseRows.map((row) => (
                     <tr key={row.id}>
-                      <td>{row.premiseId}</td>
+                      <td>
+                        <strong>{row.addressText || "NAv"}</strong>
+                        <div className="muted" style={styles.smallMuted}>
+                          {row.premiseId || "NAv"}
+                        </div>
+                      </td>
                       <td>{row.erfNo}</td>
-                      <td>{row.addressText}</td>
                       <td>{row.propertyTypeType}</td>
                       <td>{row.propertyTypeName}</td>
                       <td>{row.unitNo}</td>
@@ -484,8 +593,7 @@ export default function PremisesRegistryPage() {
                       <td>{formatNumber(row.electricityMeterCount)}</td>
                       <td>{formatNumber(row.waterMeterCount)}</td>
                       <td>{formatNumber(row.meterCount)}</td>
-                      <td>{row.createdByUser}</td>
-                      <td>{formatUpdatedAt(row.updatedAt)}</td>
+                        <td>{formatUpdatedAt(row.updatedAt)}</td>
                     </tr>
                   ))
                 )}
@@ -494,6 +602,21 @@ export default function PremisesRegistryPage() {
           </div>
         ) : null}
       </section>
+
+      {isUpdatedAtFilterOpen ? (
+        <DatetimeFilterModal
+          filter={updatedAtFilter}
+          onApply={(nextFilter) => {
+            setUpdatedAtFilter(nextFilter);
+            setIsUpdatedAtFilterOpen(false);
+          }}
+          onClear={() => {
+            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+            setIsUpdatedAtFilterOpen(false);
+          }}
+          onClose={() => setIsUpdatedAtFilterOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
@@ -531,5 +654,9 @@ const styles = {
     padding: "0.36rem 0.45rem",
     fontSize: "0.72rem",
     background: "#ffffff",
+  },
+  smallMuted: {
+    fontSize: "0.72rem",
+    marginTop: "0.25rem",
   },
 };

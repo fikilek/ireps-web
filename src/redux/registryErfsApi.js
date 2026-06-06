@@ -29,6 +29,30 @@ function safeNumber(value) {
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
 
+function serializeRegistryDateValue(value) {
+  if (!value || value === "NAv") return "NAv";
+
+  if (typeof value === "string") return value;
+
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+  }
+
+  if (typeof value?.toMillis === "function") {
+    const date = new Date(value.toMillis());
+    return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+  }
+
+  if (typeof value?.seconds === "number") {
+    const date = new Date(value.seconds * 1000);
+    return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "NAv" : date.toISOString();
+}
+
 function normalizeSearchText(value) {
   return String(value || "")
     .trim()
@@ -61,7 +85,8 @@ function normalizeErfRegistryRow(id, data) {
     trnsNaCount: safeNumber(counts?.trnsNa),
     trnsTotalCount: safeNumber(counts?.trnsTotal),
 
-    updatedAt: data?.metadata?.updatedAt || data?.metadata?.createdAt || "NAv",
+    updatedByUser: data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
+    updatedAt: serializeRegistryDateValue(data?.metadata?.updatedAt || data?.metadata?.createdAt),
   };
 }
 

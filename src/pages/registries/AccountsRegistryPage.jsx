@@ -9,6 +9,10 @@ import {
   useLazyGetFieldAccountDataHistoryByPremiseQuery,
 } from "../../redux/registryAccountsApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+import {
+  DatetimeFilterButton,
+  DatetimeFilterModal,
+} from "../../components/DatetimeFilter";
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -37,6 +41,18 @@ function formatUpdatedAt(value) {
   }
 
   return "NAv";
+}
+
+function getUpdatedAtMs(value) {
+  if (!value || value === "NAv") return 0;
+
+  if (typeof value?.toDate === "function") {
+    const ms = value.toDate().getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function getWardLabel(ward) {
@@ -120,6 +136,7 @@ function getSortValue(row, key) {
   if (key === "accounts") return row.accountCount || 0;
   if (key === "meters") return row.meterCount || 0;
   if (key === "history") return row.historySortValue || 0;
+  if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
 
   return "";
 }
@@ -385,13 +402,127 @@ function HistoryCard({ historyRow }) {
   );
 }
 
+
+const EMPTY_UPDATED_AT_FILTER = {
+  mode: "ALL",
+  startDate: "",
+  endDate: "",
+};
+
+function buildUpdatedAtFilter(mode) {
+  return {
+    mode,
+    startDate: "",
+    endDate: "",
+  };
+}
+
+function getUpdatedAtDate(value) {
+  if (!value || value === "NAv") return null;
+
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value?.seconds === "number") {
+    const date = new Date(value.seconds * 1000);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function endOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+
+  const [year, month, day] = String(value).split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
+  const mode = filter?.mode || "ALL";
+  const now = new Date();
+  const todayStart = startOfDay(now);
+
+  if (mode === "TODAY") {
+    return { start: todayStart, end: endOfDay(now) };
+  }
+
+  if (mode === "YESTERDAY") {
+    const yesterday = addDays(todayStart, -1);
+    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
+  }
+
+  if (mode === "PAST_3_DAYS") {
+    return { start: addDays(todayStart, -2), end: endOfDay(now) };
+  }
+
+  if (mode === "THIS_WEEK") {
+    const sunday = addDays(todayStart, -todayStart.getDay());
+    const saturday = addDays(sunday, 6);
+    return { start: startOfDay(sunday), end: endOfDay(saturday) };
+  }
+
+  if (mode === "THIS_MONTH") {
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    return { start: firstDay, end: lastDay };
+  }
+
+  if (mode === "CUSTOM") {
+    const startDate = parseDateOnly(filter?.startDate);
+    const endDate = parseDateOnly(filter?.endDate);
+
+    return {
+      start: startDate ? startOfDay(startDate) : null,
+      end: endDate ? endOfDay(endDate) : null,
+    };
+  }
+
+  return { start: null, end: null };
+}
+
+function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
+  if (!filter || filter.mode === "ALL") return true;
+
+  const rowDate = getUpdatedAtDate(value);
+  if (!rowDate) return false;
+
+  const { start, end } = getUpdatedAtFilterRange(filter);
+
+  if (start && rowDate < start) return false;
+  if (end && rowDate > end) return false;
+
+  return true;
+}
+
 export default function AccountsRegistryPage() {
-  const { activeWorkbase } = useAuth();
+  const { activeWorkbase, role } = useAuth();
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const [sortConfig, setSortConfig] = useState({ key: "default", direction: "asc" });
+  const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
   const [filters, setFilters] = useState(EMPTY_ACCOUNT_FILTERS);
+  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
+  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
   const [modalState, setModalState] = useState({ type: "", row: null });
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -426,7 +557,8 @@ export default function AccountsRegistryPage() {
 
   useEffect(() => {
     setFilters(EMPTY_ACCOUNT_FILTERS);
-    setSortConfig({ key: "default", direction: "asc" });
+    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+    setSortConfig({ key: "updatedAt", direction: "desc" });
   }, [effectiveSelectedWardPcode]);
 
   const totals = accountRows.reduce(
@@ -472,10 +604,11 @@ export default function AccountsRegistryPage() {
         meterSearchMatch &&
         countFilterMatches(row.meterCount, filters.meterCountMode) &&
         (filters.historyStatus === "ALL" ||
-          row.historyStatus === filters.historyStatus)
+          row.historyStatus === filters.historyStatus) &&
+        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
-  }, [accountRows, filters]);
+  }, [accountRows, filters, updatedAtFilter]);
 
   const sortedRows = useMemo(() => {
     const rows = [...filteredRows];
@@ -508,7 +641,7 @@ export default function AccountsRegistryPage() {
         return { key: sortKey, direction: "desc" };
       }
 
-      return { key: "default", direction: "asc" };
+      return { key: "updatedAt", direction: "desc" };
     });
   }
 
@@ -563,22 +696,23 @@ export default function AccountsRegistryPage() {
     <>
       <header className="console-header">
         <div>
-          <p className="eyebrow">Registry</p>
           <h1>Account Registry</h1>
 
-          <p className="muted">
-            Showing read-only registry_accounts rows for {activeWorkbaseName}.
-          </p>
+          <p className="muted">Showing read-only registry_accounts rows.</p>
 
           <Link className="text-link" to="/registries">
             ← Back to Registries
           </Link>
         </div>
 
-        <div className="role-pill">
-          {isFetching
-            ? "Streaming..."
-            : `${formatNumber(sortedRows.length)} account registry rows`}
+        <div className="topbar-right">
+          <div className="workbase-pill">{activeWorkbaseName}</div>
+          <div className="role-pill">{role || "NAv"}</div>
+          <div className="role-pill">
+            {isFetching
+              ? "Streaming..."
+              : `${formatNumber(sortedRows.length)} account registry rows`}
+          </div>
         </div>
       </header>
 
@@ -830,13 +964,25 @@ export default function AccountsRegistryPage() {
                     </FilterSelect>
                   </th>
                   <th>Actions</th>
+                  <th>
+                    <SortButton
+                      label="updatedAt"
+                      sortKey="updatedAt"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <DatetimeFilterButton
+                      filter={updatedAtFilter}
+                      onClick={() => setIsUpdatedAtFilterOpen(true)}
+                    />
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
                 {sortedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="muted">
+                    <td colSpan={10} className="muted">
                       No account registry rows match the current filters. Clear or adjust a column filter above.
                     </td>
                   </tr>
@@ -887,6 +1033,7 @@ export default function AccountsRegistryPage() {
                         View Details
                       </button>
                     </td>
+                    <td>{formatUpdatedAt(row.updatedAt)}</td>
                   </tr>
                   ))
                 )}
@@ -1090,6 +1237,21 @@ export default function AccountsRegistryPage() {
             </>
           ) : null}
         </ModalShell>
+      ) : null}
+
+      {isUpdatedAtFilterOpen ? (
+        <DatetimeFilterModal
+          filter={updatedAtFilter}
+          onApply={(nextFilter) => {
+            setUpdatedAtFilter(nextFilter);
+            setIsUpdatedAtFilterOpen(false);
+          }}
+          onClear={() => {
+            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+            setIsUpdatedAtFilterOpen(false);
+          }}
+          onClose={() => setIsUpdatedAtFilterOpen(false)}
+        />
       ) : null}
     </>
   );
