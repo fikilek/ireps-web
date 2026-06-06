@@ -261,77 +261,6 @@ export function buildFieldAccountDataDoc({
   });
 }
 
-
-const ACCOUNT_MASTER_MEDIA_TAGS = [
-  "accountDocumentPhoto",
-  "ownerIdPhoto",
-  "occupantIdPhoto",
-  "proofOfResidencePhoto",
-  "otherAccountEvidencePhoto",
-];
-
-function sanitizeAccountMasterMediaItem(item = {}) {
-  const tag = String(item?.tag || "").trim();
-  const url = String(item?.url || "").trim();
-
-  if (!ACCOUNT_MASTER_MEDIA_TAGS.includes(tag) || !url) {
-    return null;
-  }
-
-  return cleanJson({
-    tag,
-    type: item?.type || "image",
-    url,
-    gps: item?.gps || null,
-    created: item?.created || null,
-    updated: item?.updated || null,
-  });
-}
-
-export function cleanAccountMasterMedia(media = []) {
-  const byTag = new Map();
-
-  for (const item of Array.isArray(media) ? media : []) {
-    const cleanItem = sanitizeAccountMasterMediaItem(item);
-    if (!cleanItem) continue;
-
-    byTag.set(cleanItem.tag, cleanItem);
-  }
-
-  return ACCOUNT_MASTER_MEDIA_TAGS
-    .map((tag) => byTag.get(tag))
-    .filter(Boolean);
-}
-
-export function mergeAccountMasterMedia({ existingMedia = [], incomingMedia = [] } = {}) {
-  const existingCleanMedia = cleanAccountMasterMedia(existingMedia);
-  const incomingCleanMedia = cleanAccountMasterMedia(incomingMedia);
-
-  if (incomingCleanMedia.length === 0) {
-    return {
-      media: existingCleanMedia,
-      hasIncomingMedia: false,
-    };
-  }
-
-  const byTag = new Map();
-
-  existingCleanMedia.forEach((item) => {
-    byTag.set(item.tag, item);
-  });
-
-  incomingCleanMedia.forEach((item) => {
-    byTag.set(item.tag, item);
-  });
-
-  return {
-    media: ACCOUNT_MASTER_MEDIA_TAGS
-      .map((tag) => byTag.get(tag))
-      .filter(Boolean),
-    hasIncomingMedia: true,
-  };
-}
-
 export function buildAccountMasterDoc({
   accountMasterId,
   accountNoNormalized,
@@ -341,11 +270,6 @@ export function buildAccountMasterDoc({
 } = {}) {
   const existingMetadata = existingAccountMaster?.metadata || {};
   const fieldMetadata = fieldData?.metadata || {};
-  const existingRefs = existingAccountMaster?.refs || {};
-  const mergedMediaResult = mergeAccountMasterMedia({
-    existingMedia: existingAccountMaster?.media || [],
-    incomingMedia: fieldData?.media || [],
-  });
 
   return cleanJson({
     id: accountMasterId,
@@ -357,13 +281,9 @@ export function buildAccountMasterDoc({
     geography: fieldData?.geography || {},
     owner: fieldData?.owner || cleanOwner({}),
     occupant: fieldData?.occupant || cleanOccupant({}),
-    media: mergedMediaResult.media,
     refs: {
       latestFieldAccountDataId: fieldData?.id || "NAv",
-      latestMediaFieldAccountDataId: mergedMediaResult.hasIncomingMedia
-        ? fieldData?.id || "NAv"
-        : existingRefs?.latestMediaFieldAccountDataId || "NAv",
-      billingMasterId: existingRefs?.billingMasterId || "NAv",
+      billingMasterId: "NAv",
     },
     metadata: buildMetadata({
       createdAt: existingMetadata?.createdAt || now,
@@ -388,6 +308,22 @@ function getAstMeterNo(astData = {}) {
   );
 }
 
+function getAstStatusState(astData = {}) {
+  return String(astData?.status?.state || astData?.status || "FIELD").toUpperCase();
+}
+
+function isRemovedAstMeter(astData = {}) {
+  return getAstStatusState(astData) === "REMOVED";
+}
+
+function getRegistryMeterStatusState(row = {}) {
+  return String(row?.statusState || row?.status?.state || "FIELD").toUpperCase();
+}
+
+function isRemovedRegistryMeter(row = {}) {
+  return getRegistryMeterStatusState(row) === "REMOVED";
+}
+
 function getRegistryMeterNo(row = {}) {
   return normalizeAccountNo(row?.meterNo || row?.master?.id || "");
 }
@@ -404,6 +340,7 @@ export async function getAstMetersForPremise({ db, premiseId }) {
       const meterNo = getAstMeterNo(data);
 
       if (!meterNo) return null;
+      if (isRemovedAstMeter(data)) return null;
 
       return {
         meterId: doc.id,
@@ -426,6 +363,7 @@ export async function getRegistryMetersForPremise({ db, premiseId }) {
       const meterNo = getRegistryMeterNo(data);
 
       if (!meterNo) return null;
+      if (isRemovedRegistryMeter(data)) return null;
 
       return {
         meterId: data?.meterId || doc.id,

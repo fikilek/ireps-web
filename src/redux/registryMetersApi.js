@@ -14,6 +14,9 @@ function normalizeMeterRegistryRow(id, data) {
     meterNo: data?.meterNo || "NAv",
     meterType: data?.meterType || "NAv",
     visibility: data?.visibility || "NAv",
+    status: data?.status || { state: data?.statusState || "NAv", detail: data?.statusDetail || "NAv", id: "NAv" },
+    statusState: data?.statusState || data?.status?.state || "NAv",
+    statusDetail: data?.statusDetail || data?.status?.detail || "NAv",
 
     erfId: data?.erfId || "NAv",
     erfNo: data?.erfNo || "NAv",

@@ -42,6 +42,14 @@ export default function RegistryLandingPage() {
             visibility.
           </p>
         </Link>
+
+        <Link className="module-card" to="/registries/accounts">
+          <h3>Account Registry</h3>
+          <p className="muted">
+            Premise-linked municipal account rows with owner, occupant,
+            accounts, meters, reconciliation, and field history.
+          </p>
+        </Link>
       </div>
     </section>
   );

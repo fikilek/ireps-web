@@ -59,6 +59,11 @@ const navSections = [
             path: "/registries/meters",
             allowedRoles: MANAGEMENT_ROLES,
           },
+          {
+            label: "Account Registry",
+            path: "/registries/accounts",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
         ],
       },
       {

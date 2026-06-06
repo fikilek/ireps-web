@@ -15,6 +15,7 @@ import WardsRegistryPage from "../pages/registries/WardsRegistryPage";
 import ErfsRegistryPage from "../pages/registries/ErfsRegistryPage";
 import PremisesRegistryPage from "../pages/registries/PremisesRegistryPage";
 import MetersRegistryPage from "../pages/registries/MetersRegistryPage";
+import AccountsRegistryPage from "../pages/registries/AccountsRegistryPage";
 
 import ReportsLandingPage from "../pages/reports/ReportsLandingPage";
 import NoAccessReportPage from "../pages/reports/NoAccessReportPage";
@@ -114,6 +115,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MetersRegistryPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/registries/accounts"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <AccountsRegistryPage />
               </RoleRoute>
             }
           />

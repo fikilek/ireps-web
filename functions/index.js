@@ -88,6 +88,7 @@ import {
 } from "./lookups/index.js";
 
 import { onCreateAccountDataCallable } from "./dataCleansing/callables.js";
+import { rebuildRegistryAccountsForPremise } from "./dataCleansing/helpers.js";
 import {
   onFieldAccountDataWritten,
   onAccountMasterWritten,
@@ -234,9 +235,12 @@ async function syncPremiseServiceSnapshotFromMeter({ astId, astData }) {
   const updatedByUser =
     metadata?.updatedByUser || metadata?.createdByUser || "SYSTEM";
 
+  const nextStatus = getMeterStatusState(astData);
+  const shouldRemoveFromPremiseServices = nextStatus === "REMOVED";
+
   const nextServiceItem = {
     trnId: astId,
-    status: getMeterStatusState(astData),
+    status: nextStatus,
     updatedAt,
   };
 
@@ -264,21 +268,16 @@ async function syncPremiseServiceSnapshotFromMeter({ astId, astData }) {
       .map(normalizePremiseServiceSnapshotItem)
       .filter((item) => item?.trnId && item.trnId !== "NAv");
 
-    const existingIndex = normalizedBucket.findIndex(
-      (item) => item.trnId === astId,
+    const nextBucket = normalizedBucket.filter(
+      (item) => item.trnId !== astId,
     );
 
-    if (existingIndex >= 0) {
-      normalizedBucket[existingIndex] = {
-        ...normalizedBucket[existingIndex],
-        ...nextServiceItem,
-      };
-    } else {
-      normalizedBucket.push(nextServiceItem);
+    if (!shouldRemoveFromPremiseServices) {
+      nextBucket.push(nextServiceItem);
     }
 
     tx.update(premiseRef, {
-      [`services.${serviceBucket}`]: normalizedBucket,
+      [`services.${serviceBucket}`]: nextBucket,
       "metadata.updatedAt": updatedAt,
       "metadata.updatedByUid": updatedByUid,
       "metadata.updatedByUser": updatedByUser,
@@ -290,6 +289,7 @@ async function syncPremiseServiceSnapshotFromMeter({ astId, astData }) {
     astId,
     serviceBucket,
     status: nextServiceItem.status,
+    removedFromPremiseServices: shouldRemoveFromPremiseServices,
   });
 
   return {
@@ -297,7 +297,61 @@ async function syncPremiseServiceSnapshotFromMeter({ astId, astData }) {
     astId,
     serviceBucket,
     status: nextServiceItem.status,
+    removedFromPremiseServices: shouldRemoveFromPremiseServices,
   };
+}
+
+function getPremiseIdFromAstData(astData = {}) {
+  return astData?.accessData?.premise?.id || "NAv";
+}
+
+function isValidPremiseId(value) {
+  return Boolean(value && value !== "NAv");
+}
+
+async function rebuildAccountRegistryForPremiseIfExists({
+  premiseId,
+  latestFieldAccountDataId = "NAv",
+} = {}) {
+  if (!isValidPremiseId(premiseId)) {
+    logger.warn("rebuildAccountRegistryForPremiseIfExists -- missing premiseId", {
+      premiseId: premiseId || "NAv",
+    });
+    return null;
+  }
+
+  const registryRef = db.collection("registry_accounts").doc(premiseId);
+  const registrySnap = await registryRef.get();
+
+  if (!registrySnap.exists) {
+    logger.info(
+      "rebuildAccountRegistryForPremiseIfExists -- no registry_accounts row yet",
+      { premiseId },
+    );
+    return null;
+  }
+
+  const registryData = registrySnap.data() || {};
+  const resolvedLatestFieldAccountDataId =
+    latestFieldAccountDataId && latestFieldAccountDataId !== "NAv"
+      ? latestFieldAccountDataId
+      : registryData?.refs?.latestFieldAccountDataId || "NAv";
+
+  return rebuildRegistryAccountsForPremise({
+    premiseId,
+    latestFieldAccountDataId: resolvedLatestFieldAccountDataId,
+  });
+}
+
+async function rebuildAccountRegistryForMeterIfExists({ astId, astData } = {}) {
+  const premiseId = getPremiseIdFromAstData(astData);
+
+  logger.info("rebuildAccountRegistryForMeterIfExists -- START", {
+    astId,
+    premiseId,
+  });
+
+  return rebuildAccountRegistryForPremiseIfExists({ premiseId });
 }
 
 /* ------------------------------------------------
@@ -3318,6 +3372,13 @@ export const onMeterCreated = onDocumentCreated(
       await rebuildMeterRegistryRow(astId);
     });
 
+    await safeRun("onMeterCreated account registry rebuild", astId, async () => {
+      await rebuildAccountRegistryForMeterIfExists({
+        astId,
+        astData: data,
+      });
+    });
+
     console.log("onMeterCreated ---- END", { astId });
 
     return null;
@@ -3342,6 +3403,10 @@ export const onMeterUpdated = onDocumentUpdated(
 
     const beforeAstNo = getAstMeterNo(dataBefore);
     const afterAstNo = getAstMeterNo(dataAfter);
+
+    const beforePremiseId = getPremiseIdFromAstData(dataBefore);
+    const afterPremiseId = getPremiseIdFromAstData(dataAfter);
+    const premiseChanged = beforePremiseId !== afterPremiseId;
 
     const beforeActiveLifecycleSignature = JSON.stringify(
       dataBefore?.trnActiveLifecycle || {},
@@ -3370,6 +3435,7 @@ export const onMeterUpdated = onDocumentUpdated(
       !geofenceRefsChanged &&
       !meterTypeChanged &&
       !astNoChanged &&
+      !premiseChanged &&
       !activeLifecycleChanged
     ) {
       return null;
@@ -3385,6 +3451,9 @@ export const onMeterUpdated = onDocumentUpdated(
       geofenceRefsChanged,
       meterTypeChanged,
       astNoChanged,
+      premiseChanged,
+      beforePremiseId,
+      afterPremiseId,
       activeLifecycleChanged,
     });
 
@@ -3422,7 +3491,7 @@ export const onMeterUpdated = onDocumentUpdated(
       await rebuildMeterRegistryRow(astId);
     });
 
-    if (statusChanged) {
+    if (statusChanged || premiseChanged) {
       await safeRun(
         "onMeterUpdated premise service snapshot sync",
         astId,
@@ -3431,6 +3500,25 @@ export const onMeterUpdated = onDocumentUpdated(
             astId,
             astData: dataAfter,
           });
+        },
+      );
+    }
+
+    const accountRegistryImpactChanged =
+      statusChanged || meterTypeChanged || astNoChanged || premiseChanged;
+
+    if (accountRegistryImpactChanged) {
+      await safeRun(
+        "onMeterUpdated account registry rebuild",
+        astId,
+        async () => {
+          const affectedPremiseIds = [
+            ...new Set([beforePremiseId, afterPremiseId].filter(isValidPremiseId)),
+          ];
+
+          for (const premiseId of affectedPremiseIds) {
+            await rebuildAccountRegistryForPremiseIfExists({ premiseId });
+          }
         },
       );
     }

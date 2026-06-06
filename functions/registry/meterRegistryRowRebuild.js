@@ -53,6 +53,17 @@ function resolveMeterVisibility(data = {}) {
   return data?.master?.visibility || data?.visibility || "NAv";
 }
 
+function resolveMeterStatus(data = {}) {
+  const rawStatus = data?.status && typeof data.status === "object" ? data.status : {};
+  const state = String(rawStatus?.state || data?.status || "NAv").toUpperCase();
+
+  return {
+    state: state || "NAv",
+    detail: rawStatus?.detail || "NAv",
+    id: rawStatus?.id || "NAv",
+  };
+}
+
 function buildMeterRegistryRow(astId, data = {}) {
   const sourceMetadata = getStandardMetadata(data?.metadata || {});
 
@@ -61,6 +72,7 @@ function buildMeterRegistryRow(astId, data = {}) {
   const meterKind = resolveMeterKind(data);
   const meterPhase = resolveMeterPhase(data);
   const visibility = resolveMeterVisibility(data);
+  const status = resolveMeterStatus(data);
 
   return {
     id: astId,
@@ -72,6 +84,9 @@ function buildMeterRegistryRow(astId, data = {}) {
     meterPhase,
 
     visibility,
+    status,
+    statusState: status.state,
+    statusDetail: status.detail,
 
     premiseId: data?.accessData?.premise?.id || "NAv",
     premiseAddress: data?.accessData?.premise?.address || "NAv",
@@ -143,6 +158,7 @@ export async function rebuildMeterRegistryRow(astId) {
       meterKind: row.meterKind,
       meterPhase: row.meterPhase,
       visibility: row.visibility,
+      statusState: row.statusState,
       lmPcode: row?.parents?.lmPcode || "NAv",
       wardPcode: row?.parents?.wardPcode || "NAv",
     });

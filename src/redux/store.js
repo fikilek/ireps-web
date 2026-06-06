@@ -7,6 +7,7 @@ import { registryErfsApi } from "./registryErfsApi";
 import { registryMetersApi } from "./registryMetersApi";
 import { registryPremisesApi } from "./registryPremisesApi";
 import { registryWardsApi } from "./registryWardsApi";
+import { registryAccountsApi } from "./registryAccountsApi";
 import { reportAnomalyApi } from "./reportAnomalyApi";
 import { reportNoAccessApi } from "./reportNoAccessApi";
 import { reportNormalisationApi } from "./reportNormalisationApi";
@@ -32,6 +33,7 @@ export const store = configureStore({
     [registryErfsApi.reducerPath]: registryErfsApi.reducer,
     [registryPremisesApi.reducerPath]: registryPremisesApi.reducer,
     [registryMetersApi.reducerPath]: registryMetersApi.reducer,
+    [registryAccountsApi.reducerPath]: registryAccountsApi.reducer,
 
     [reportNoAccessApi.reducerPath]: reportNoAccessApi.reducer,
     [reportUserActivityApi.reducerPath]: reportUserActivityApi.reducer,
@@ -61,6 +63,7 @@ export const store = configureStore({
       .concat(registryErfsApi.middleware)
       .concat(registryPremisesApi.middleware)
       .concat(registryMetersApi.middleware)
+      .concat(registryAccountsApi.middleware)
       .concat(reportNoAccessApi.middleware)
       .concat(reportUserActivityApi.middleware)
       .concat(reportAnomalyApi.middleware)

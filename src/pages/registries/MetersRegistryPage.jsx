@@ -46,6 +46,17 @@ function getMeterTypeLabel(meterType) {
   return meterType || "NAv";
 }
 
+function getMeterStatusLabel(statusState) {
+  const normalizedStatus = String(statusState || "NAv").toUpperCase();
+
+  if (normalizedStatus === "REMOVED") return "REMOVED";
+  if (normalizedStatus === "CONNECTED") return "CONNECTED";
+  if (normalizedStatus === "DISCONNECTED") return "DISCONNECTED";
+  if (normalizedStatus === "FIELD") return "FIELD";
+
+  return normalizedStatus || "NAv";
+}
+
 export default function MetersRegistryPage() {
   const { activeWorkbase } = useAuth();
 
@@ -103,6 +114,10 @@ export default function MetersRegistryPage() {
         accumulator.invisible += 1;
       }
 
+      if (String(row.statusState || "").toUpperCase() === "REMOVED") {
+        accumulator.removed += 1;
+      }
+
       return accumulator;
     },
     {
@@ -110,6 +125,7 @@ export default function MetersRegistryPage() {
       water: 0,
       visible: 0,
       invisible: 0,
+      removed: 0,
     },
   );
 
@@ -196,6 +212,11 @@ export default function MetersRegistryPage() {
         </div>
 
         <div className="stat-card">
+          <span>Removed</span>
+          <strong>{formatNumber(totals.removed)}</strong>
+        </div>
+
+        <div className="stat-card">
           <span>LM PCode</span>
           <strong>{activeLmPcode || "NAv"}</strong>
         </div>
@@ -252,6 +273,7 @@ export default function MetersRegistryPage() {
                 <tr>
                   <th>Meter No</th>
                   <th>Type</th>
+                  <th>Status</th>
                   <th>Visibility</th>
                   <th>ERF No</th>
                   <th>Premise Address</th>
@@ -267,6 +289,7 @@ export default function MetersRegistryPage() {
                   <tr key={row.id}>
                     <td>{row.meterNo}</td>
                     <td>{getMeterTypeLabel(row.meterType)}</td>
+                    <td>{getMeterStatusLabel(row.statusState)}</td>
                     <td>{row.visibility}</td>
                     <td>{row.erfNo}</td>
                     <td>{row.premiseAddress}</td>
