@@ -14,6 +14,138 @@ import {
   computeWardOperationalStatus,
 } from "./wardCounters.js";
 
+const buildWardRegistryRow = async ({
+  db,
+  lmPcode,
+  wardPcode,
+  wardData = null,
+  existingDoc = null,
+}) => {
+  if (!db) {
+    throw new Error("db is required");
+  }
+
+  if (!lmPcode) {
+    throw new Error("lmPcode is required");
+  }
+
+  if (!wardPcode) {
+    throw new Error("wardPcode is required");
+  }
+
+  let ward = wardData;
+
+  if (!ward) {
+    const wardSnap = await db.collection("wards").doc(wardPcode).get();
+
+    if (!wardSnap.exists) {
+      throw new Error(`Ward not found: ${wardPcode}`);
+    }
+
+    ward = {
+      id: wardSnap.id,
+      ...wardSnap.data(),
+    };
+  }
+
+  const counts = await loadWardCounts({
+    db,
+    lmPcode,
+    wardPcode,
+  });
+
+  const isOperationallyActive = computeWardOperationalStatus({
+    totalErfs: counts.totalErfs,
+    premises: counts.premises,
+    totalMeters: counts.totalMeters,
+    trns: counts.trns,
+  });
+
+  const id = buildWardRegistryId(lmPcode, wardPcode);
+  const metadata = buildWardRegistryMetadata(existingDoc);
+
+  return {
+    id,
+
+    province: {
+      pcode: ward?.parents?.provinceId || "NAv",
+      name: "NAv",
+    },
+
+    district: {
+      pcode: ward?.parents?.districtId || "NAv",
+      name: "NAv",
+    },
+
+    localMunicipality: {
+      pcode: ward?.parents?.localMunicipalityId || lmPcode || "NAv",
+      name: "NAv",
+    },
+
+    ward: {
+      pcode: ward?.id || wardPcode || "NAv",
+      name: safeText(ward?.name),
+      number: ward?.code || "NAv",
+    },
+
+    counts,
+
+    status: {
+      isOperationallyActive,
+    },
+
+    metadata,
+  };
+};
+
+/**
+ * Rebuild Ward Registry for one specific ward only.
+ */
+export const rebuildWardRegistryRow = async ({
+  lmPcode,
+  wardPcode,
+  reason = "WARD_REGISTRY_ROW_REBUILD",
+} = {}) => {
+  const db = getFirestore();
+
+  if (!lmPcode) {
+    throw new Error("lmPcode is required");
+  }
+
+  if (!wardPcode) {
+    throw new Error("wardPcode is required");
+  }
+
+  const id = buildWardRegistryId(lmPcode, wardPcode);
+  const existingSnap = await db.collection("registry_wards").doc(id).get();
+  const existingDoc = existingSnap.exists ? existingSnap.data() : null;
+
+  logger.info("rebuildWardRegistryRow -- START", {
+    lmPcode,
+    wardPcode,
+    reason,
+  });
+
+  const row = await buildWardRegistryRow({
+    db,
+    lmPcode,
+    wardPcode,
+    existingDoc,
+  });
+
+  await db.collection("registry_wards").doc(row.id).set(row, { merge: true });
+
+  logger.info("rebuildWardRegistryRow -- SUCCESS", {
+    id: row.id,
+    lmPcode,
+    wardPcode,
+    reason,
+    counts: row.counts,
+  });
+
+  return row;
+};
+
 /**
  * Rebuild Ward Registry for a single LM
  */
@@ -72,55 +204,16 @@ export const rebuildWardRegistryForLm = async (lmPcode) => {
 
       console.log(`Building ward row for ward: ${wardPcode}`);
 
-      const counts = await loadWardCounts({
+      const id = buildWardRegistryId(lmPcode, wardPcode);
+      const existingDoc = existingDocsMap[id];
+
+      const row = await buildWardRegistryRow({
         db,
         lmPcode,
         wardPcode,
+        wardData: ward,
+        existingDoc,
       });
-
-      const isOperationallyActive = computeWardOperationalStatus({
-        totalErfs: counts.totalErfs,
-        premises: counts.premises,
-        totalMeters: counts.totalMeters,
-        trns: counts.trns,
-      });
-
-      const id = buildWardRegistryId(lmPcode, wardPcode);
-      const existingDoc = existingDocsMap[id];
-      const metadata = buildWardRegistryMetadata(existingDoc);
-
-      const row = {
-        id,
-
-        province: {
-          pcode: ward?.parents?.provinceId || "NAv",
-          name: "NAv",
-        },
-
-        district: {
-          pcode: ward?.parents?.districtId || "NAv",
-          name: "NAv",
-        },
-
-        localMunicipality: {
-          pcode: ward?.parents?.localMunicipalityId || "NAv",
-          name: "NAv",
-        },
-
-        ward: {
-          pcode: ward?.id || "NAv",
-          name: safeText(ward?.name),
-          number: ward?.code || "NAv",
-        },
-
-        counts,
-
-        status: {
-          isOperationallyActive,
-        },
-
-        metadata,
-      };
 
       rows.push(row);
     }

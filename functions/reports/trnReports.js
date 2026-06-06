@@ -2,6 +2,8 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
 
+import { rebuildWardRegistryRow } from "../registry/wardBuilder.js";
+
 import {
   isNoAccessTrn,
   getActivityDate,
@@ -22,6 +24,7 @@ export const onTrnWritten = onDocumentWritten("trns/{trnId}", async (event) => {
     await syncNormalisationReport(db, before, after, trnId);
     await syncAnomalyReport(db, before, after, trnId);
     await syncUserActivityReport(db, before, after, trnId);
+    await syncWardRegistryForTrnChange(before, after, trnId);
   } catch (error) {
     logger.error("TRN reports sync failed", {
       trnId,
@@ -29,6 +32,60 @@ export const onTrnWritten = onDocumentWritten("trns/{trnId}", async (event) => {
     });
   }
 });
+
+
+const getTrnWardScope = (trn = {}) => {
+  return {
+    lmPcode: trn?.accessData?.parents?.lmPcode || null,
+    wardPcode: trn?.accessData?.parents?.wardPcode || null,
+  };
+};
+
+const isValidWardScope = (scope = {}) => {
+  return Boolean(
+    scope?.lmPcode &&
+      scope.lmPcode !== "NAv" &&
+      scope?.wardPcode &&
+      scope.wardPcode !== "NAv",
+  );
+};
+
+const getWardScopeKey = (scope = {}) => {
+  return `${scope?.lmPcode || "NAv"}__${scope?.wardPcode || "NAv"}`;
+};
+
+const syncWardRegistryForTrnChange = async (before, after, trnId) => {
+  const candidateScopes = [getTrnWardScope(before), getTrnWardScope(after)];
+  const seenKeys = new Set();
+  const uniqueScopes = [];
+
+  for (const scope of candidateScopes) {
+    if (!isValidWardScope(scope)) continue;
+
+    const key = getWardScopeKey(scope);
+
+    if (seenKeys.has(key)) continue;
+
+    seenKeys.add(key);
+    uniqueScopes.push(scope);
+  }
+
+  for (const scope of uniqueScopes) {
+    await rebuildWardRegistryRow({
+      lmPcode: scope.lmPcode,
+      wardPcode: scope.wardPcode,
+      reason: "TRN_WRITTEN",
+    });
+
+    logger.info("syncWardRegistryForTrnChange -- refreshed", {
+      trnId,
+      lmPcode: scope.lmPcode,
+      wardPcode: scope.wardPcode,
+    });
+  }
+
+  return { refreshedRows: uniqueScopes.length };
+};
 
 const syncNoAccessReport = async (db, before, after, trnId) => {
   const ref = db.collection("report_trn_no_access").doc(trnId);

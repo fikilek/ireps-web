@@ -25,6 +25,7 @@ import { rebuildErfMeterCounts } from "./registry/erfMeterCountsRebuild.js";
 import { rebuildErfTrnCount } from "./registry/erfTrnCountRebuild.js";
 
 import { rebuildWardRegistryForLmCallable } from "./registry/wardCallable.js";
+import { rebuildWardRegistryRow } from "./registry/wardBuilder.js";
 import { startWardRegistrySyncCallable } from "./registry/wardSyncCallable.js";
 import { onWardRegistryJobCreated } from "./registry/wardSyncTrigger.js";
 
@@ -307,6 +308,63 @@ function getPremiseIdFromAstData(astData = {}) {
 
 function isValidPremiseId(value) {
   return Boolean(value && value !== "NAv");
+}
+
+function getPremiseWardScope(premiseData = {}) {
+  return {
+    lmPcode: premiseData?.parents?.lmPcode || null,
+    wardPcode: premiseData?.parents?.wardPcode || null,
+  };
+}
+
+function isValidWardScope(scope = {}) {
+  return Boolean(
+    scope?.lmPcode &&
+      scope.lmPcode !== "NAv" &&
+      scope?.wardPcode &&
+      scope.wardPcode !== "NAv",
+  );
+}
+
+function getWardScopeKey(scope = {}) {
+  return `${scope?.lmPcode || "NAv"}__${scope?.wardPcode || "NAv"}`;
+}
+
+async function rebuildAffectedWardRegistryRows({
+  scopes = [],
+  reason = "WARD_REGISTRY_REFRESH",
+  entityId = "NAv",
+} = {}) {
+  const uniqueScopes = [];
+  const seenKeys = new Set();
+
+  for (const scope of scopes) {
+    if (!isValidWardScope(scope)) continue;
+
+    const key = getWardScopeKey(scope);
+
+    if (seenKeys.has(key)) continue;
+
+    seenKeys.add(key);
+    uniqueScopes.push(scope);
+  }
+
+  for (const scope of uniqueScopes) {
+    await rebuildWardRegistryRow({
+      lmPcode: scope.lmPcode,
+      wardPcode: scope.wardPcode,
+      reason,
+    });
+
+    logger.info("rebuildAffectedWardRegistryRows -- refreshed", {
+      entityId,
+      reason,
+      lmPcode: scope.lmPcode,
+      wardPcode: scope.wardPcode,
+    });
+  }
+
+  return { refreshedRows: uniqueScopes.length };
 }
 
 async function rebuildAccountRegistryForPremiseIfExists({
@@ -722,6 +780,14 @@ export const onPremiseCreated = onDocumentCreated(
         totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
       });
 
+      await safeRun("onPremiseCreated ward registry refresh", premiseId, async () => {
+        await rebuildAffectedWardRegistryRows({
+          scopes: [getPremiseWardScope(data)],
+          reason: "PREMISE_CREATED",
+          entityId: premiseId,
+        });
+      });
+
       /* ------------------------------------------------
          2. KEEP EXISTING ERF BUBBLING BEHAVIOR
          ------------------------------------------------ */
@@ -945,6 +1011,17 @@ export const onPremiseUpdated = onDocumentUpdated(
 
     try {
       await rebuildPremiseRegistryRow(premiseId);
+
+      await safeRun("onPremiseUpdated ward registry refresh", premiseId, async () => {
+        await rebuildAffectedWardRegistryRows({
+          scopes: [
+            getPremiseWardScope(dataBefore),
+            getPremiseWardScope(dataAfter),
+          ],
+          reason: "PREMISE_UPDATED",
+          entityId: premiseId,
+        });
+      });
 
       if (!erfId) return null;
 
@@ -3379,6 +3456,14 @@ export const onMeterCreated = onDocumentCreated(
       });
     });
 
+    await safeRun("onMeterCreated ward registry refresh", astId, async () => {
+      await rebuildAffectedWardRegistryRows({
+        scopes: [getAstScope(data)],
+        reason: "METER_CREATED",
+        entityId: astId,
+      });
+    });
+
     console.log("onMeterCreated ---- END", { astId });
 
     return null;
@@ -3550,6 +3635,19 @@ export const onMeterUpdated = onDocumentUpdated(
           });
         },
       );
+    }
+
+    const wardRegistryImpactChanged =
+      statusChanged || spatialChanged || meterTypeChanged || premiseChanged;
+
+    if (wardRegistryImpactChanged) {
+      await safeRun("onMeterUpdated ward registry refresh", astId, async () => {
+        await rebuildAffectedWardRegistryRows({
+          scopes: [getAstScope(dataBefore), getAstScope(dataAfter)],
+          reason: "METER_UPDATED",
+          entityId: astId,
+        });
+      });
     }
 
     console.log("onMeterUpdated ---- END", { astId });
