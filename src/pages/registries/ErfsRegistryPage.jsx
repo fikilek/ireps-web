@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
+import { useGeo } from "../../context/GeoContext";
 import {
   useGetRegistryErfsPageByWardQuery,
   useLazyGetRegistryErfsPageByWardQuery,
@@ -87,6 +88,55 @@ function getCountText(value) {
   return String(Number(value) || 0);
 }
 
+function getWardNumberFromPcode(wardPcode = "") {
+  const match = String(wardPcode || "").match(/(\d{1,3})$/);
+  const numberValue = Number(match?.[1] || 0);
+
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function getSelectedWardPcodeFromGeo(geoState) {
+  const selectedWard = geoState?.selectedWard || null;
+
+  return (
+    selectedWard?.id ||
+    selectedWard?.pcode ||
+    selectedWard?.wardPcode ||
+    ""
+  );
+}
+
+function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
+  const wardPcode = ward?.wardPcode || ward?.pcode || ward?.id || fallbackWardPcode || "";
+
+  if (!wardPcode) return null;
+
+  const wardNumber = ward?.wardNumber || ward?.code || getWardNumberFromPcode(wardPcode) || "NAv";
+
+  return {
+    ...(ward || {}),
+    id: wardPcode,
+    pcode: wardPcode,
+    wardPcode,
+    code: wardNumber,
+    wardNumber,
+    name: ward?.wardName || ward?.name || `Ward ${wardNumber}`,
+  };
+}
+
+const EMPTY_ERF_BROWSE_FILTERS = {
+  erfNo: "",
+  erfType: "ALL",
+  premiseCount: "",
+  electricityMeterCount: "",
+  waterMeterCount: "",
+  meterCount: "",
+  trnsAccessCount: "",
+  trnsNaCount: "",
+  trnsTotalCount: "",
+  updatedAt: "",
+};
+
 function FilterInput({ value, onChange, placeholder }) {
   return (
     <input
@@ -112,20 +162,11 @@ function FilterSelect({ value, onChange, children }) {
 
 export default function ErfsRegistryPage() {
   const { activeWorkbase } = useAuth();
+  const { geoState, updateGeo } = useGeo();
 
-  const [selectedWardPcode, setSelectedWardPcode] = useState("");
-  const [browseFilters, setBrowseFilters] = useState({
-    erfNo: "",
-    erfType: "ALL",
-    premiseCount: "",
-    electricityMeterCount: "",
-    waterMeterCount: "",
-    meterCount: "",
-    trnsAccessCount: "",
-    trnsNaCount: "",
-    trnsTotalCount: "",
-    updatedAt: "",
-  });
+  const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
+  const previousWardPcodeRef = useRef(selectedWardPcode);
+  const [browseFilters, setBrowseFilters] = useState(EMPTY_ERF_BROWSE_FILTERS);
 
   const [extraBrowseRows, setExtraBrowseRows] = useState([]);
   const [extraBrowseWardPcode, setExtraBrowseWardPcode] = useState("");
@@ -153,22 +194,26 @@ export default function ErfsRegistryPage() {
   const { data: wardRows = [], isLoading: wardsLoading } =
     useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
 
-  const defaultWard = useMemo(() => {
-    return (
-      wardRows.find((ward) => ward.totalErfCount > 0) || wardRows[0] || null
-    );
-  }, [wardRows]);
+  const selectedWard = useMemo(() => {
+    const registryWard =
+      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
 
-  const userSelectedWard = useMemo(() => {
-    return (
-      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null
-    );
+    return buildRegistryWardSelection(registryWard, selectedWardPcode);
   }, [wardRows, selectedWardPcode]);
 
-  const effectiveSelectedWardPcode =
-    userSelectedWard?.wardPcode || defaultWard?.wardPcode || "";
+  const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
 
-  const selectedWard = userSelectedWard || defaultWard;
+  useEffect(() => {
+    if (previousWardPcodeRef.current === effectiveSelectedWardPcode) return;
+
+    previousWardPcodeRef.current = effectiveSelectedWardPcode;
+    setBrowseFilters(EMPTY_ERF_BROWSE_FILTERS);
+    setExtraBrowseRows([]);
+    setExtraBrowseWardPcode(effectiveSelectedWardPcode);
+    setNextCursorId(null);
+    setHasMoreOverride(null);
+    setBrowseError("");
+  }, [effectiveSelectedWardPcode]);
 
   const firstPageQueryArg = effectiveSelectedWardPcode
     ? {
@@ -250,25 +295,13 @@ export default function ErfsRegistryPage() {
 
   function handleBrowseWardChange(event) {
     const nextWardPcode = event.target.value;
+    const nextWard =
+      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
 
-    setSelectedWardPcode(nextWardPcode);
-    setBrowseFilters({
-      erfNo: "",
-      erfType: "ALL",
-      premiseCount: "",
-      electricityMeterCount: "",
-      waterMeterCount: "",
-      meterCount: "",
-      trnsAccessCount: "",
-      trnsNaCount: "",
-      trnsTotalCount: "",
-      updatedAt: "",
+    updateGeo({
+      selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
+      lastSelectionType: nextWardPcode ? "WARD" : null,
     });
-    setExtraBrowseRows([]);
-    setExtraBrowseWardPcode(nextWardPcode);
-    setNextCursorId(null);
-    setHasMoreOverride(null);
-    setBrowseError("");
   }
 
   function updateBrowseFilter(key, value) {

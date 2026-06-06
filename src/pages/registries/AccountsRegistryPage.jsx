@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
+import { useGeo } from "../../context/GeoContext";
 import {
   useGetRegistryAccountsByWardQuery,
   useLazyGetFieldAccountDataHistoryByPremiseQuery,
@@ -79,6 +80,47 @@ function getWardNumberDisplay(wardPcode = "") {
   const wardNumber = getWardNumberFromPcode(wardPcode);
   return wardNumber > 0 ? wardNumber : "NAv";
 }
+
+function getSelectedWardPcodeFromGeo(geoState) {
+  const selectedWard = geoState?.selectedWard || null;
+
+  return (
+    selectedWard?.id ||
+    selectedWard?.pcode ||
+    selectedWard?.wardPcode ||
+    ""
+  );
+}
+
+function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
+  const wardPcode = ward?.wardPcode || ward?.pcode || ward?.id || fallbackWardPcode || "";
+
+  if (!wardPcode) return null;
+
+  const wardNumber = ward?.wardNumber || ward?.code || getWardNumberFromPcode(wardPcode) || "NAv";
+
+  return {
+    ...(ward || {}),
+    id: wardPcode,
+    pcode: wardPcode,
+    wardPcode,
+    code: wardNumber,
+    wardNumber,
+    name: ward?.wardName || ward?.name || `Ward ${wardNumber}`,
+  };
+}
+
+const EMPTY_ACCOUNT_FILTERS = {
+  premiseAddress: "",
+  erfNo: "",
+  owner: "",
+  ownerType: "ALL",
+  accountSearch: "",
+  accountCountMode: "ALL",
+  meterSearch: "",
+  meterCountMode: "ALL",
+  historyStatus: "ALL",
+};
 
 function getOwnerTypeLabel(ownerType) {
   if (ownerType === "NATURAL_PERSON") return "Natural Person";
@@ -367,20 +409,12 @@ function HistoryCard({ historyRow }) {
 
 export default function AccountsRegistryPage() {
   const { activeWorkbase } = useAuth();
+  const { geoState, updateGeo } = useGeo();
 
-  const [selectedWardPcode, setSelectedWardPcode] = useState("");
+  const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
+  const previousWardPcodeRef = useRef(selectedWardPcode);
   const [sortConfig, setSortConfig] = useState({ key: "default", direction: "asc" });
-  const [filters, setFilters] = useState({
-    premiseAddress: "",
-    erfNo: "",
-    owner: "",
-    ownerType: "ALL",
-    accountSearch: "",
-    accountCountMode: "ALL",
-    meterSearch: "",
-    meterCountMode: "ALL",
-    historyStatus: "ALL",
-  });
+  const [filters, setFilters] = useState(EMPTY_ACCOUNT_FILTERS);
   const [modalState, setModalState] = useState({ type: "", row: null });
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -397,19 +431,25 @@ export default function AccountsRegistryPage() {
   const { data: wardRows = [], isLoading: wardsLoading } =
     useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
 
-  const defaultWard = useMemo(() => {
-    return (
-      wardRows.find((ward) => ward.premiseCount > 0) || wardRows[0] || null
-    );
-  }, [wardRows]);
+  const selectedWard = useMemo(() => {
+    const registryWard =
+      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
 
-  const userSelectedWard = useMemo(() => {
-    return wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
+    return buildRegistryWardSelection(registryWard, selectedWardPcode);
   }, [wardRows, selectedWardPcode]);
 
-  const effectiveSelectedWardPcode =
-    userSelectedWard?.wardPcode || defaultWard?.wardPcode || "";
-  const selectedWard = userSelectedWard || defaultWard;
+  const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
+
+  useEffect(() => {
+    if (previousWardPcodeRef.current === effectiveSelectedWardPcode) return;
+
+    previousWardPcodeRef.current = effectiveSelectedWardPcode;
+    setFilters(EMPTY_ACCOUNT_FILTERS);
+    setModalState({ type: "", row: null });
+    setHistoryRows([]);
+    setHistoryError("");
+    setHistoryLoading(false);
+  }, [effectiveSelectedWardPcode]);
 
   const {
     data: accountRows = [],
@@ -503,8 +543,15 @@ export default function AccountsRegistryPage() {
     });
   }
 
-  function handleWardChange(value) {
-    setSelectedWardPcode(value);
+  function handleWardChange(valueOrEvent) {
+    const nextWardPcode = valueOrEvent?.target?.value ?? valueOrEvent;
+    const nextWard =
+      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+
+    updateGeo({
+      selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
+      lastSelectionType: nextWardPcode ? "WARD" : null,
+    });
   }
 
   function openModal(type, row) {

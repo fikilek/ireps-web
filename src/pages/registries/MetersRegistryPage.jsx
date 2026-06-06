@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
+import { useGeo } from "../../context/GeoContext";
 import { useGetRegistryMetersByWardQuery } from "../../redux/registryMetersApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
 
@@ -18,6 +19,42 @@ const EMPTY_METER_FILTERS = {
   createdByUser: "",
   updatedAt: "",
 };
+
+function getWardNumberFromPcode(wardPcode = "") {
+  const match = String(wardPcode || "").match(/(\d{1,3})$/);
+  const numberValue = Number(match?.[1] || 0);
+
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function getSelectedWardPcodeFromGeo(geoState) {
+  const selectedWard = geoState?.selectedWard || null;
+
+  return (
+    selectedWard?.id ||
+    selectedWard?.pcode ||
+    selectedWard?.wardPcode ||
+    ""
+  );
+}
+
+function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
+  const wardPcode = ward?.wardPcode || ward?.pcode || ward?.id || fallbackWardPcode || "";
+
+  if (!wardPcode) return null;
+
+  const wardNumber = ward?.wardNumber || ward?.code || getWardNumberFromPcode(wardPcode) || "NAv";
+
+  return {
+    ...(ward || {}),
+    id: wardPcode,
+    pcode: wardPcode,
+    wardPcode,
+    code: wardNumber,
+    wardNumber,
+    name: ward?.wardName || ward?.name || `Ward ${wardNumber}`,
+  };
+}
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -208,8 +245,10 @@ const styles = {
 
 export default function MetersRegistryPage() {
   const { activeWorkbase } = useAuth();
+  const { geoState, updateGeo } = useGeo();
 
-  const [selectedWardPcode, setSelectedWardPcode] = useState("");
+  const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
+  const previousWardPcodeRef = useRef(selectedWardPcode);
   const [meterFilters, setMeterFilters] = useState(EMPTY_METER_FILTERS);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
@@ -224,20 +263,21 @@ export default function MetersRegistryPage() {
   const { data: wardRows = [], isLoading: wardsLoading } =
     useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
 
-  const defaultWard = useMemo(() => {
-    return wardRows.find((ward) => ward.meterCount > 0) || wardRows[0] || null;
-  }, [wardRows]);
+  const selectedWard = useMemo(() => {
+    const registryWard =
+      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
 
-  const userSelectedWard = useMemo(() => {
-    return (
-      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null
-    );
+    return buildRegistryWardSelection(registryWard, selectedWardPcode);
   }, [wardRows, selectedWardPcode]);
 
-  const effectiveSelectedWardPcode =
-    userSelectedWard?.wardPcode || defaultWard?.wardPcode || "";
+  const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
 
-  const selectedWard = userSelectedWard || defaultWard;
+  useEffect(() => {
+    if (previousWardPcodeRef.current === effectiveSelectedWardPcode) return;
+
+    previousWardPcodeRef.current = effectiveSelectedWardPcode;
+    setMeterFilters(EMPTY_METER_FILTERS);
+  }, [effectiveSelectedWardPcode]);
 
   const {
     data: meterRows = [],
@@ -307,8 +347,14 @@ export default function MetersRegistryPage() {
   );
 
   function handleWardChange(event) {
-    setSelectedWardPcode(event.target.value);
-    setMeterFilters(EMPTY_METER_FILTERS);
+    const nextWardPcode = event.target.value;
+    const nextWard =
+      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+
+    updateGeo({
+      selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
+      lastSelectionType: nextWardPcode ? "WARD" : null,
+    });
   }
 
   function handleFilterChange(field, value) {
