@@ -10,6 +10,7 @@ import {
   DatetimeFilterButton,
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
+import DownloadButtons from "../../components/DownloadButtons";
 
 const EMPTY_PREMISE_FILTERS = {
   erfNo: "",
@@ -370,6 +371,66 @@ export default function PremisesRegistryPage() {
     { electricityMeters: 0, waterMeters: 0, meters: 0, accessed: 0, occupied: 0 },
   );
 
+  const quickDownloadColumns = useMemo(
+    () => [
+      {
+        header: "Premise Address",
+        value: (row) => {
+          const address = row.addressText || "NAv";
+          const premiseId = row.premiseId || "NAv";
+          return `${address}\n${premiseId}`;
+        },
+      },
+      {
+        header: "ERF No",
+        value: (row) => row.erfNo || "NAv",
+      },
+      {
+        header: "Property Type",
+        value: (row) => row.propertyTypeType || "NAv",
+      },
+      {
+        header: "Name",
+        value: (row) => row.propertyTypeName || "NAv",
+      },
+      {
+        header: "Unit",
+        value: (row) => row.unitNo || "NAv",
+      },
+      {
+        header: "Occupancy",
+        value: (row) => row.occupancyStatus || "NAv",
+      },
+      {
+        header: "Electricity",
+        value: (row) => row.electricityMeterCount || 0,
+      },
+      {
+        header: "Water",
+        value: (row) => row.waterMeterCount || 0,
+      },
+      {
+        header: "Total Meters",
+        value: (row) => row.meterCount || 0,
+      },
+      {
+        header: "updatedAt",
+        value: (row) => formatUpdatedAt(row.updatedAt),
+      },
+    ],
+    [],
+  );
+
+  const quickDownloadScope = useMemo(
+    () => ({
+      lmName: activeWorkbaseName,
+      lmPcode: activeLmPcode || "NAv",
+      wardLabel: getWardLabel(selectedWard),
+      wardPcode: effectiveSelectedWardPcode || "NAv",
+    }),
+    [activeWorkbaseName, activeLmPcode, selectedWard, effectiveSelectedWardPcode],
+  );
+
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
@@ -394,7 +455,7 @@ export default function PremisesRegistryPage() {
 
   return (
     <>
-      <header className="console-header">
+      <header className="console-header" style={styles.fixedRegistryHeader}>
         <div>
           <h1>Premise Registry</h1>
 
@@ -411,6 +472,14 @@ export default function PremisesRegistryPage() {
           <div className="role-pill">
             {isFetching ? "Streaming..." : `${formatNumber(sortedPremiseRows.length)} premises`}
           </div>
+          <DownloadButtons
+            registryName="Premise Registry"
+            rowsLabel="premises"
+            visibleRows={sortedPremiseRows}
+            columns={quickDownloadColumns}
+            fileBaseName="premises_registry"
+            scope={quickDownloadScope}
+          />
         </div>
       </header>
 
@@ -622,6 +691,15 @@ export default function PremisesRegistryPage() {
 }
 
 const styles = {
+  fixedRegistryHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    background: "#f8fafc",
+    paddingTop: "0.35rem",
+    paddingBottom: "0.85rem",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
   sortButton: {
     width: "100%",
     border: 0,

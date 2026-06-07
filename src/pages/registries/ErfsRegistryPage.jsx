@@ -14,6 +14,7 @@ import {
   DatetimeFilterButton,
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
+import DownloadButtons from "../../components/DownloadButtons";
 
 const ERF_PAGE_SIZE = 200;
 const ERF_SEARCH_LIMIT = 50;
@@ -555,12 +556,68 @@ export default function ErfsRegistryPage() {
     { premises: 0, electricityMeters: 0, waterMeters: 0, meters: 0, trnsAccess: 0, trnsNa: 0, trnsTotal: 0 },
   );
 
+  const quickDownloadColumns = useMemo(
+    () => [
+      {
+        header: "ERF No",
+        value: (row) => row.erfNo || "NAv",
+      },
+      {
+        header: "Type",
+        value: (row) => row.erfType || "NAv",
+      },
+      {
+        header: "Premises",
+        value: (row) => row.premiseCount || 0,
+      },
+      {
+        header: "Electricity",
+        value: (row) => row.electricityMeterCount || 0,
+      },
+      {
+        header: "Water",
+        value: (row) => row.waterMeterCount || 0,
+      },
+      {
+        header: "Total Meters",
+        value: (row) => row.meterCount || 0,
+      },
+      {
+        header: "Access TRNs",
+        value: (row) => row.trnsAccessCount || 0,
+      },
+      {
+        header: "No Access",
+        value: (row) => row.trnsNaCount || 0,
+      },
+      {
+        header: "Total TRNs",
+        value: (row) => row.trnsTotalCount || 0,
+      },
+      {
+        header: "updatedAt",
+        value: (row) => formatUpdatedAt(row.updatedAt),
+      },
+    ],
+    [],
+  );
+
+  const quickDownloadScope = useMemo(
+    () => ({
+      lmName: activeWorkbaseName,
+      lmPcode: activeLmPcode || "NAv",
+      wardLabel: getWardLabel(selectedWard),
+      wardPcode: effectiveSelectedWardPcode || "NAv",
+    }),
+    [activeWorkbaseName, activeLmPcode, selectedWard, effectiveSelectedWardPcode],
+  );
+
   const selectedWardTotalErfs = selectedWard?.totalErfCount || 0;
   const hasBrowseError = Boolean(browseError || firstPageError);
 
   return (
     <>
-      <header className="console-header">
+      <header className="console-header" style={styles.fixedRegistryHeader}>
         <div>
           <h1>ERF Registry</h1>
 
@@ -581,6 +638,14 @@ export default function ErfsRegistryPage() {
           <div className="role-pill">
             {isBrowseFetching ? "Loading..." : `${formatNumber(browseRows.length)} loaded`}
           </div>
+          <DownloadButtons
+            registryName="ERF Registry"
+            rowsLabel="ERFs"
+            visibleRows={sortedBrowseRows}
+            columns={quickDownloadColumns}
+            fileBaseName="erfs_registry"
+            scope={quickDownloadScope}
+          />
         </div>
       </header>
 
@@ -929,6 +994,15 @@ export default function ErfsRegistryPage() {
 }
 
 const styles = {
+  fixedRegistryHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    background: "#f8fafc",
+    paddingTop: "0.35rem",
+    paddingBottom: "0.85rem",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
   sortButton: {
     width: "100%",
     border: 0,

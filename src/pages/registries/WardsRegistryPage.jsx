@@ -8,6 +8,7 @@ import {
   DatetimeFilterButton,
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
+import DownloadButtons from "../../components/DownloadButtons";
 
 const EMPTY_WARD_FILTERS = {
   wardNumber: "",
@@ -302,6 +303,62 @@ export default function WardsRegistryPage() {
     { totalErfs: 0, premises: 0, electricityMeters: 0, waterMeters: 0, meters: 0, trns: 0 },
   );
 
+  const quickDownloadColumns = useMemo(
+    () => [
+      {
+        header: "Ward",
+        value: (row) => row.wardNumber || "NAv",
+      },
+      {
+        header: "Formal ERFs",
+        value: (row) => row.formalErfCount || 0,
+      },
+      {
+        header: "Informal ERFs",
+        value: (row) => row.informalErfCount || 0,
+      },
+      {
+        header: "Total ERFs",
+        value: (row) => row.totalErfCount || 0,
+      },
+      {
+        header: "Premises",
+        value: (row) => row.premiseCount || 0,
+      },
+      {
+        header: "Electricity",
+        value: (row) => row.electricityMeterCount || 0,
+      },
+      {
+        header: "Water",
+        value: (row) => row.waterMeterCount || 0,
+      },
+      {
+        header: "Total Meters",
+        value: (row) => row.meterCount || 0,
+      },
+      {
+        header: "TRNs",
+        value: (row) => row.trnCount || 0,
+      },
+      {
+        header: "updatedAt",
+        value: (row) => formatUpdatedAt(row.updatedAt),
+      },
+    ],
+    [],
+  );
+
+  const quickDownloadScope = useMemo(
+    () => ({
+      lmName: activeWorkbaseName,
+      lmPcode: activeLmPcode || "NAv",
+      wardLabel: "All wards",
+      wardPcode: "NAv",
+    }),
+    [activeWorkbaseName, activeLmPcode],
+  );
+
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
@@ -316,7 +373,7 @@ export default function WardsRegistryPage() {
 
   return (
     <>
-      <header className="console-header">
+      <header className="console-header" style={styles.fixedRegistryHeader}>
         <div>
           <h1>Ward Registry</h1>
           <p className="muted">Showing backend-shaped ward registry rows.</p>
@@ -332,6 +389,14 @@ export default function WardsRegistryPage() {
           <div className="role-pill">
             {isFetching ? "Streaming..." : `${formatNumber(sortedWardRows.length)} wards`}
           </div>
+          <DownloadButtons
+            registryName="Ward Registry"
+            rowsLabel="wards"
+            visibleRows={sortedWardRows}
+            columns={quickDownloadColumns}
+            fileBaseName="wards_registry"
+            scope={quickDownloadScope}
+          />
         </div>
       </header>
 
@@ -508,6 +573,15 @@ export default function WardsRegistryPage() {
 }
 
 const styles = {
+  fixedRegistryHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    background: "#f8fafc",
+    paddingTop: "0.35rem",
+    paddingBottom: "0.85rem",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
   sortButton: {
     width: "100%",
     border: 0,

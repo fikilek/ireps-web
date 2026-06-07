@@ -319,12 +319,21 @@ p {
   color: #0e7490;
 }
 
+/* .console-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+} */
+
 .console-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
   margin-bottom: 28px;
+  padding: 10px 16px;
 }
 
 .dashboard-grid,

@@ -10,6 +10,7 @@ import {
   DatetimeFilterButton,
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
+import DownloadButtons from "../../components/DownloadButtons";
 
 const EMPTY_METER_FILTERS = {
   meterNo: "",
@@ -367,6 +368,59 @@ export default function MetersRegistryPage() {
     { electricity: 0, water: 0, visible: 0, invisible: 0 },
   );
 
+  const quickDownloadColumns = useMemo(
+    () => [
+      {
+        header: "Meter No",
+        value: (row) => row.meterNo || "NAv",
+      },
+      {
+        header: "Type",
+        value: (row) => getMeterTypeLabel(row.meterType),
+      },
+      {
+        header: "Visibility",
+        value: (row) => row.visibility || "NAv",
+      },
+      {
+        header: "Status",
+        value: (row) => row.statusState || row.status || "NAv",
+      },
+      {
+        header: "ERF No",
+        value: (row) => row.erfNo || "NAv",
+      },
+      {
+        header: "Premise Address",
+        value: (row) => {
+          const address = row.premiseAddress || "NAv";
+          const premiseId = row.premiseId || "NAv";
+          return `${address}
+${premiseId}`;
+        },
+      },
+      {
+        header: "Premise Type",
+        value: (row) => row.premisePropertyType || "NAv",
+      },
+      {
+        header: "updatedAt",
+        value: (row) => formatUpdatedAt(row.updatedAt),
+      },
+    ],
+    [],
+  );
+
+  const quickDownloadScope = useMemo(
+    () => ({
+      lmName: activeWorkbaseName,
+      lmPcode: activeLmPcode || "NAv",
+      wardLabel: getWardLabel(selectedWard),
+      wardPcode: effectiveSelectedWardPcode || "NAv",
+    }),
+    [activeWorkbaseName, activeLmPcode, selectedWard, effectiveSelectedWardPcode],
+  );
+
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
@@ -391,7 +445,7 @@ export default function MetersRegistryPage() {
 
   return (
     <>
-      <header className="console-header">
+      <header className="console-header" style={styles.fixedRegistryHeader}>
         <div>
           <h1>Meter Registry</h1>
 
@@ -408,6 +462,14 @@ export default function MetersRegistryPage() {
           <div className="role-pill">
             {isFetching ? "Streaming..." : `${formatNumber(sortedMeterRows.length)} meters`}
           </div>
+          <DownloadButtons
+            registryName="Meter Registry"
+            rowsLabel="meters"
+            visibleRows={sortedMeterRows}
+            columns={quickDownloadColumns}
+            fileBaseName="meters_registry"
+            scope={quickDownloadScope}
+          />
         </div>
       </header>
 
@@ -618,6 +680,18 @@ export default function MetersRegistryPage() {
 }
 
 const styles = {
+  fixedRegistryHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    background: "#f8fafc",
+    paddingTop: "0.35rem",
+    paddingRight: "1.25rem",
+    paddingBottom: "0.85rem",
+    paddingLeft: "1.25rem",
+    boxSizing: "border-box",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
   sortButton: {
     width: "100%",
     border: 0,

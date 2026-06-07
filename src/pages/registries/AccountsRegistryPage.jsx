@@ -13,6 +13,7 @@ import {
   DatetimeFilterButton,
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
+import DownloadButtons from "../../components/DownloadButtons";
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -627,6 +628,62 @@ export default function AccountsRegistryPage() {
     });
   }, [filteredRows, sortConfig]);
 
+  const quickDownloadColumns = useMemo(
+    () => [
+      {
+        header: "Premise Address",
+        value: (row) => {
+          const address = row.premiseAddress || "NAv";
+          const premiseId = row.premiseId || "NAv";
+          return `${address}\n${premiseId}`;
+        },
+      },
+      {
+        header: "Ward",
+        value: (row) => getWardNumberDisplay(row.wardPcode),
+      },
+      {
+        header: "ERF No",
+        value: (row) => row.erfNo || "NAv",
+      },
+      {
+        header: "Owner",
+        value: (row) => row.ownerLabel || "NAv",
+      },
+      {
+        header: "Owner Type",
+        value: (row) => getOwnerTypeLabel(row.ownerType),
+      },
+      {
+        header: "Accounts",
+        value: (row) => row.accountCount || 0,
+      },
+      {
+        header: "Meters",
+        value: (row) => row.meterCount || 0,
+      },
+      {
+        header: "History",
+        value: (row) => row.historyStatus === "HAS_HISTORY" ? "Has history" : "No history",
+      },
+      {
+        header: "updatedAt",
+        value: (row) => formatUpdatedAt(row.updatedAt),
+      },
+    ],
+    [],
+  );
+
+  const quickDownloadScope = useMemo(
+    () => ({
+      lmName: activeWorkbaseName,
+      lmPcode: activeLmPcode || "NAv",
+      wardLabel: getWardLabel(selectedWard),
+      wardPcode: effectiveSelectedWardPcode || "NAv",
+    }),
+    [activeWorkbaseName, activeLmPcode, selectedWard, effectiveSelectedWardPcode],
+  );
+
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
@@ -694,7 +751,7 @@ export default function AccountsRegistryPage() {
 
   return (
     <>
-      <header className="console-header">
+      <header className="console-header" style={styles.fixedRegistryHeader}>
         <div>
           <h1>Account Registry</h1>
 
@@ -713,6 +770,14 @@ export default function AccountsRegistryPage() {
               ? "Streaming..."
               : `${formatNumber(sortedRows.length)} account registry rows`}
           </div>
+          <DownloadButtons
+            registryName="Account Registry"
+            rowsLabel="account registry rows"
+            visibleRows={sortedRows}
+            columns={quickDownloadColumns}
+            fileBaseName="accounts_registry"
+            scope={quickDownloadScope}
+          />
         </div>
       </header>
 
@@ -1258,6 +1323,15 @@ export default function AccountsRegistryPage() {
 }
 
 const styles = {
+  fixedRegistryHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    background: "#f8fafc",
+    paddingTop: "0.35rem",
+    paddingBottom: "0.85rem",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+  },
   sortButton: {
     width: "100%",
     border: 0,

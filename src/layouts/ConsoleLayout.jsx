@@ -428,7 +428,7 @@ export default function ConsoleLayout() {
         </div>
       </aside>
 
-      <main className="console-main">
+      <main className="console-main" style={{ paddingTop: 0 }}>
         {!hideTopbarForRegistryRoutes ? (
           <header className="topbar">
             <div>
