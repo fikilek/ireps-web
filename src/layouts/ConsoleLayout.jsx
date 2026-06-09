@@ -59,6 +59,11 @@ const navSections = [
             path: "/registries/meters",
             allowedRoles: MANAGEMENT_ROLES,
           },
+          {
+            label: "Account Registry",
+            path: "/registries/accounts",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
         ],
       },
       {
@@ -285,7 +290,10 @@ function isGroupActive(group, pathname) {
 }
 
 function buildToggleKey(groupLabel) {
-  return String(groupLabel || "").trim().toLowerCase().replace(/\s+/g, "-");
+  return String(groupLabel || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
 }
 
 export default function ConsoleLayout() {
