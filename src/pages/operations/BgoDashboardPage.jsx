@@ -381,18 +381,45 @@ function buildWardOptions({ availableWards = [], batches = [] }) {
   );
 }
 
-function createGeofenceMapRoute({ lmPcode, batch }) {
+function buildMdBgoNavigationParams({ lmPcode, batch }) {
   const scope = getBatchScope(batch);
   const geofence = getBatchGeofence(batch);
-  const params = new URLSearchParams({
+  const batchId = getBatchId(batch);
+
+  return new URLSearchParams({
     lmPcode: lmPcode || scope.lmPcode || "",
     wardPcode: scope.wardPcode || "",
+    bgoBatchId: batchId || "",
     focusGeofenceId: geofence.id !== "NAv" ? geofence.id : "",
     focusGeofenceName: geofence.name !== "NAv" ? geofence.name : "",
-    fitGeofence: "true",
   });
+}
+
+function createGeofenceMapRoute({ lmPcode, batch }) {
+  const params = buildMdBgoNavigationParams({ lmPcode, batch });
+  params.set("fitGeofence", "true");
 
   return `/operations/geo-fences?${params.toString()}`;
+}
+
+function createMdBgoRoute({ lmPcode, batch }) {
+  const params = buildMdBgoNavigationParams({ lmPcode, batch });
+
+  return `/operations/bgo?${params.toString()}`;
+}
+
+function createMdBgoRowsRoute({ lmPcode, batch }) {
+  const params = buildMdBgoNavigationParams({ lmPcode, batch });
+  params.set("mode", MD_BGO_MODE);
+
+  return `/operations/md-bgo-rows?${params.toString()}`;
+}
+
+function createMdBgoFinalReportRoute({ lmPcode, batch }) {
+  const params = buildMdBgoNavigationParams({ lmPcode, batch });
+  params.set("mode", MD_BGO_MODE);
+
+  return `/operations/bgo-final-report?${params.toString()}`;
 }
 
 function asNumber(value, fallback = 0) {
@@ -949,6 +976,43 @@ function CoverageMetric({ label, fromValue, toValue }) {
   );
 }
 
+function BmdFunnel({ totalErfs, totalPremises, totalMeters }) {
+  const rows = [
+    { label: "ERFs", value: totalErfs },
+    { label: "Premises", value: totalPremises },
+    { label: "Meters", value: totalMeters },
+  ];
+
+  return (
+    <div style={styles.bmdFunnelShell}>
+      <p style={styles.bmdFunnelTitle}>BMD Funnel</p>
+
+      <div style={styles.bmdFunnelRows}>
+        {rows.map((row) => (
+          <div key={row.label} style={styles.bmdFunnelRow}>
+            <span style={styles.bmdFunnelLabel}>{row.label}</span>
+            <strong style={styles.bmdFunnelValue}>{formatNumber(row.value)}</strong>
+            <span style={styles.bmdFunnelBar}>
+              {buildCoverageBar(row.value, totalErfs)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.bmdFunnelFooter}>
+        <span>
+          Premise coverage:{" "}
+          <strong>{formatCoveragePercent(totalPremises, totalErfs)}</strong>
+        </span>
+        <span>
+          Meter coverage:{" "}
+          <strong>{formatCoveragePercent(totalMeters, totalPremises)}</strong>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [], liveStats = null }) {
   const batchId = getBatchId(batch);
   const geofence = getBatchGeofence(batch);
@@ -1002,12 +1066,36 @@ function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [], liveStats = null
         />
       </div>
 
+      <BmdFunnel
+        totalErfs={metrics.totalErfs}
+        totalPremises={metrics.totalPremises}
+        totalMeters={metrics.totalMeters}
+      />
+
       <div style={styles.cardActions}>
         {hasMapScope ? (
           <Link to={createGeofenceMapRoute({ lmPcode, batch })} style={styles.primaryButton}>
             Open Map
           </Link>
         ) : null}
+
+        <Link to={createMdBgoRoute({ lmPcode, batch })} style={styles.secondaryButton}>
+          Open MD BGO
+        </Link>
+
+        <Link
+          to={createMdBgoRowsRoute({ lmPcode, batch })}
+          style={styles.secondaryButton}
+        >
+          Open mdBgo Rows
+        </Link>
+
+        <Link
+          to={createMdBgoFinalReportRoute({ lmPcode, batch })}
+          style={styles.secondaryButton}
+        >
+          Open Final Report
+        </Link>
       </div>
     </article>
   );
@@ -1512,6 +1600,64 @@ const styles = {
     color: "#0F172A",
     fontSize: 14,
     whiteSpace: "nowrap",
+  },
+  bmdFunnelShell: {
+    display: "grid",
+    gap: 10,
+    minWidth: 0,
+    padding: 14,
+    borderRadius: 18,
+    background: "#F8FAFC",
+    border: "1px solid #E2E8F0",
+  },
+  bmdFunnelTitle: {
+    margin: 0,
+    color: "#0F172A",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+  bmdFunnelRows: {
+    display: "grid",
+    gap: 8,
+    minWidth: 0,
+  },
+  bmdFunnelRow: {
+    display: "grid",
+    gridTemplateColumns: "82px 52px minmax(0, 1fr)",
+    gap: 10,
+    alignItems: "center",
+    minWidth: 0,
+  },
+  bmdFunnelLabel: {
+    color: "#334155",
+    fontSize: 13,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  bmdFunnelValue: {
+    color: "#0F172A",
+    fontSize: 13,
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  },
+  bmdFunnelBar: {
+    minWidth: 0,
+    color: "#2563EB",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: 15,
+    fontWeight: 900,
+    letterSpacing: "0.02em",
+    overflow: "hidden",
+    textOverflow: "clip",
+    whiteSpace: "nowrap",
+  },
+  bmdFunnelFooter: {
+    display: "flex",
+    gap: 14,
+    flexWrap: "wrap",
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: 800,
   },
   metricBarShell: {
     minWidth: 0,
