@@ -909,12 +909,41 @@ function UploadDashboardCard({ upload }) {
   );
 }
 
-function MiniMetric({ label, value }) {
+function formatCoveragePercent(value, total) {
+  const totalNumber = asNumber(total);
+  if (!totalNumber) return "0%";
+
+  const percent = Math.max(0, Math.min(100, (asNumber(value) / totalNumber) * 100));
+  const rounded = Math.round(percent * 10) / 10;
+
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`;
+}
+
+function buildCoverageBar(value, total, slots = 10) {
+  const totalNumber = asNumber(total);
+  if (!totalNumber) return "░".repeat(slots);
+
+  const ratio = Math.max(0, Math.min(1, asNumber(value) / totalNumber));
+  const filledSlots = Math.max(
+    ratio > 0 ? 1 : 0,
+    Math.min(slots, Math.round(ratio * slots)),
+  );
+
+  return `${"█".repeat(filledSlots)}${"░".repeat(slots - filledSlots)}`;
+}
+
+function CoverageMetric({ label, fromValue, toValue }) {
   return (
-    <div style={styles.metricBarShell}>
-      <div style={styles.metricBarHeader}>
-        <span>{label}</span>
-        <strong>{formatNumber(value)}</strong>
+    <div style={styles.coverageMetricShell}>
+      <div style={styles.coverageMetricTitle}>{label}</div>
+      <div style={styles.coverageMetricRow}>
+        <strong style={styles.coverageFlow}>
+          {formatNumber(fromValue)} → {formatNumber(toValue)}
+        </strong>
+        <span style={styles.coverageBar}>{buildCoverageBar(toValue, fromValue)}</span>
+        <strong style={styles.coveragePercent}>
+          {formatCoveragePercent(toValue, fromValue)}
+        </strong>
       </div>
     </div>
   );
@@ -960,10 +989,17 @@ function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [], liveStats = null
         </div>
       </div>
 
-      <div style={styles.metricsGrid}>
-        <MiniMetric label="Total ERFs" value={metrics.totalErfs} />
-        <MiniMetric label="Total Premises" value={metrics.totalPremises} />
-        <MiniMetric label="Total Meters" value={metrics.totalMeters} />
+      <div style={styles.coverageGrid}>
+        <CoverageMetric
+          label="ERFs → Premises"
+          fromValue={metrics.totalErfs}
+          toValue={metrics.totalPremises}
+        />
+        <CoverageMetric
+          label="Premises → Meters"
+          fromValue={metrics.totalPremises}
+          toValue={metrics.totalMeters}
+        />
       </div>
 
       <div style={styles.cardActions}>
@@ -1428,6 +1464,54 @@ const styles = {
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: 12,
     minWidth: 0,
+  },
+  coverageGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 12,
+    minWidth: 0,
+  },
+  coverageMetricShell: {
+    minWidth: 0,
+    padding: 14,
+    borderRadius: 18,
+    background: "#F8FAFC",
+    border: "1px solid #E2E8F0",
+  },
+  coverageMetricTitle: {
+    margin: 0,
+    color: "#0F172A",
+    fontSize: 13,
+    fontWeight: 900,
+  },
+  coverageMetricRow: {
+    display: "grid",
+    gridTemplateColumns: "auto minmax(90px, 1fr) auto",
+    gap: 10,
+    alignItems: "center",
+    marginTop: 10,
+    minWidth: 0,
+  },
+  coverageFlow: {
+    color: "#0F172A",
+    fontSize: 14,
+    whiteSpace: "nowrap",
+  },
+  coverageBar: {
+    minWidth: 0,
+    color: "#2563EB",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: 15,
+    fontWeight: 900,
+    letterSpacing: "0.02em",
+    overflow: "hidden",
+    textOverflow: "clip",
+    whiteSpace: "nowrap",
+  },
+  coveragePercent: {
+    color: "#0F172A",
+    fontSize: 14,
+    whiteSpace: "nowrap",
   },
   metricBarShell: {
     minWidth: 0,

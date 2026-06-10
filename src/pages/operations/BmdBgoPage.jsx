@@ -526,12 +526,57 @@ function buildExistingAllocationByGeofenceId(existingBmdBatches = []) {
   }, {});
 }
 
-function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
+function buildReadyGroupByGeofenceId(readyGroups = []) {
+  return asArray(readyGroups).reduce((acc, group) => {
+    const geofenceId = readFirstString(group?.geofenceId, group?.geofenceRef?.id);
+
+    if (geofenceId) {
+      acc[geofenceId] = group;
+    }
+
+    return acc;
+  }, {});
+}
+
+function getBatchSnapshotErfCount(batch = {}) {
   const raw = batch?.raw || {};
+
+  return safeNumber(
+    raw?.summary?.erfCount ??
+      raw?.summary?.totalRows ??
+      raw?.batchReleaseSummary?.totalRows,
+  );
+}
+
+function getBatchSnapshotPremiseCount(batch = {}) {
+  const raw = batch?.raw || {};
+
+  return safeNumber(raw?.summary?.premiseCount);
+}
+
+function getBatchSnapshotMeterCount(batch = {}) {
+  const raw = batch?.raw || {};
+
+  return safeNumber(raw?.summary?.meterCount);
+}
+
+function ExistingBmdAllocationCard({
+  batch,
+  geofenceGroup,
+  onRemove,
+  isDeleting,
+}) {
   const batchId = getBatchId(batch);
-  const premiseCreatedCount = getBatchBmdCreatedPremiseCount(batch);
-  const meterCreatedCount = getBatchBmdCreatedMeterCount(batch);
   const removable = canRemoveBmdBatch(batch) && !isDeleting;
+  const erfCount = geofenceGroup
+    ? safeNumber(geofenceGroup.erfCount)
+    : getBatchSnapshotErfCount(batch);
+  const premiseCount = geofenceGroup
+    ? safeNumber(geofenceGroup.premiseCount)
+    : getBatchSnapshotPremiseCount(batch);
+  const meterCount = geofenceGroup
+    ? safeNumber(geofenceGroup.meterCount)
+    : getBatchSnapshotMeterCount(batch);
 
   return (
     <div style={styles.existingBatchCard}>
@@ -547,9 +592,9 @@ function ExistingBmdAllocationCard({ batch, onRemove, isDeleting }) {
 
       <div style={styles.existingBatchGrid}>
         <InfoCard label="Target" value={getTargetLabel(batch.target)} />
-        <InfoCard label="ERFs" value={raw?.summary?.erfCount || raw?.batchReleaseSummary?.totalRows || 0} />
-        <InfoCard label="BMD Premises Created" value={premiseCreatedCount} />
-        <InfoCard label="BMD Meters Created" value={meterCreatedCount} />
+        <InfoCard label="ERFs" value={erfCount} />
+        <InfoCard label="Premises" value={premiseCount} />
+        <InfoCard label="Meters" value={meterCount} />
       </div>
 
       <div style={styles.existingBatchFooter}>
@@ -677,6 +722,11 @@ export default function BmdBgoPage() {
   const readyGroups = useMemo(
     () => buildGeofenceGroups({ geofences, all }),
     [geofences, all],
+  );
+
+  const readyGroupByGeofenceId = useMemo(
+    () => buildReadyGroupByGeofenceId(readyGroups),
+    [readyGroups],
   );
 
   const activeAllocatedGeofenceCount = useMemo(
@@ -1496,6 +1546,11 @@ export default function BmdBgoPage() {
               <ExistingBmdAllocationCard
                 key={getBatchId(batch)}
                 batch={batch}
+                geofenceGroup={
+                  readyGroupByGeofenceId[
+                    readFirstString(batch?.geofenceId, batch?.geofenceRef?.id)
+                  ]
+                }
                 isDeleting={deleteBgoState.isLoading}
                 onRemove={handleOpenRemoveConfirm}
               />
