@@ -350,7 +350,58 @@ export const trnsApi = createApi({
         }
       },
     }),
+
+    getTrnsByLmPcodeWardPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = String(arg?.lmPcode || "").trim();
+        const wardPcode = String(arg?.wardPcode || "").trim();
+
+        if (!lmPcode || !wardPcode) return;
+
+        const maxResults = resolveLimit(arg, 2000);
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          const trnsQuery = query(
+            collection(db, TRNS_COLLECTION),
+            where("accessData.parents.lmPcode", "==", lmPcode),
+            where("accessData.parents.wardPcode", "==", wardPcode),
+            limitQuery(maxResults),
+          );
+
+          unsubscribe = onSnapshot(
+            trnsQuery,
+            (snapshot) => {
+              const trns = mergeUniqueDocs([snapshot], normalizeTrnDoc).sort(sortTrns);
+
+              updateCachedData((draft) => {
+                draft.splice(0, draft.length, ...trns);
+              });
+            },
+            (error) => {
+              console.error(
+                "trnsApi getTrnsByLmPcodeWardPcode stream error:",
+                error,
+              );
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          unsubscribe();
+        }
+      },
+    }),
   }),
 });
 
-export const { useGetTrnsByTcIdQuery } = trnsApi;
+export const {
+  useGetTrnsByTcIdQuery,
+  useGetTrnsByLmPcodeWardPcodeQuery,
+} = trnsApi;

@@ -384,7 +384,10 @@ function buildWardOptions({ availableWards = [], batches = [] }) {
 function buildMdBgoNavigationParams({ lmPcode, batch }) {
   const scope = getBatchScope(batch);
   const geofence = getBatchGeofence(batch);
+  const target = getBatchTarget(batch);
   const batchId = getBatchId(batch);
+  const workflowState = getBatchWorkflowState(batch);
+  const releaseState = getBatchReleaseState(batch);
 
   return new URLSearchParams({
     lmPcode: lmPcode || scope.lmPcode || "",
@@ -392,6 +395,10 @@ function buildMdBgoNavigationParams({ lmPcode, batch }) {
     bgoBatchId: batchId || "",
     focusGeofenceId: geofence.id !== "NAv" ? geofence.id : "",
     focusGeofenceName: geofence.name !== "NAv" ? geofence.name : "",
+    targetType: target.type !== "NAv" ? target.type : "",
+    targetName: target.name !== "NAv" ? target.name : "",
+    workflowState: workflowState !== "NAv" ? workflowState : "",
+    releaseState: releaseState !== "NAv" ? releaseState : "",
   });
 }
 
@@ -408,9 +415,15 @@ function createMdBgoRoute({ lmPcode, batch }) {
   return `/operations/bgo?${params.toString()}`;
 }
 
-function createMdBgoRowsRoute({ lmPcode, batch }) {
+function createMdBgoRowsRoute({ lmPcode, batch, metrics = null }) {
   const params = buildMdBgoNavigationParams({ lmPcode, batch });
   params.set("mode", MD_BGO_MODE);
+
+  if (metrics) {
+    params.set("totalErfs", String(asNumber(metrics.totalErfs)));
+    params.set("totalPremises", String(asNumber(metrics.totalPremises)));
+    params.set("totalMeters", String(asNumber(metrics.totalMeters)));
+  }
 
   return `/operations/md-bgo-rows?${params.toString()}`;
 }
@@ -1084,7 +1097,7 @@ function MdBgoDashboardCard({ batch, lmPcode, wardOptions = [], liveStats = null
         </Link>
 
         <Link
-          to={createMdBgoRowsRoute({ lmPcode, batch })}
+          to={createMdBgoRowsRoute({ lmPcode, batch, metrics })}
           style={styles.secondaryButton}
         >
           Open mdBgo Rows
