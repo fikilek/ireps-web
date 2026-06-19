@@ -1,6 +1,8 @@
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
+
+import { writeRegistryMreadFromTrn } from "../registry/mread/writeRegistryMreadFromTrn.js";
 
 import {
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
@@ -8,7 +10,6 @@ import {
   buildLifecycleTrnPayload,
   buildPremiseServiceSnapshotPatch,
   buildSuccessResult,
-  buildTrnActiveLifecycle,
   getActorNameFromRequest,
   getAstMeterType,
   normalizeUpper,
@@ -33,6 +34,65 @@ function readTrnType(trnData = {}) {
 }
 
 const INSTRUCTION_MEDIA_TAG = "instructionMedia";
+
+function isMeaningfulLifecycleText(value) {
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim();
+  if (!text) return false;
+
+  return !["nav", "n/av", "n/a", "na", "null", "undefined"].includes(
+    text.toLowerCase(),
+  );
+}
+
+function firstMeaningfulLifecycleText(...values) {
+  for (const value of values) {
+    if (isMeaningfulLifecycleText(value)) return String(value).trim();
+  }
+
+  return "NAv";
+}
+
+function withResolvedNoAccessReason({ executionOutcome = {}, access = {} } = {}) {
+  if (executionOutcome?.outcome !== "NO_ACCESS") return executionOutcome;
+
+  const noAccessReason = firstMeaningfulLifecycleText(
+    executionOutcome?.noAccessReason,
+    executionOutcome?.reasonText,
+    executionOutcome?.reason,
+    access?.noAccessReason,
+    access?.reasonText,
+    access?.reason,
+  );
+
+  return {
+    ...executionOutcome,
+    noAccessReason,
+    reasonText: noAccessReason,
+    reason: noAccessReason,
+  };
+}
+
+function withResolvedNoAccessAccessBlock(access = {}, executionOutcome = {}) {
+  if (executionOutcome?.outcome !== "NO_ACCESS") return access;
+
+  const noAccessReason = firstMeaningfulLifecycleText(
+    access?.noAccessReason,
+    access?.reasonText,
+    access?.reason,
+    executionOutcome?.noAccessReason,
+    executionOutcome?.reasonText,
+    executionOutcome?.reason,
+  );
+
+  return {
+    ...access,
+    hasAccess: "no",
+    reason: noAccessReason,
+    noAccessReason,
+  };
+}
+
 
 function readMediaUniqueKey(mediaItem = {}) {
   return [
@@ -135,7 +195,7 @@ function buildUpdateMetadataPatch({ now, actorUid, actorName }) {
   };
 }
 
-function getActionCheck({ trnType, data, astDoc }) {
+function getActionCheck({ trnType, data, astDoc, actorUid = "NAv", actorName = "NAv" }) {
   if (trnType === "METER_COMMISSIONING") {
     return validateMeterCommissioning({
       data,
@@ -161,6 +221,8 @@ function getActionCheck({ trnType, data, astDoc }) {
     return validateMeterReading({
       data,
       astDoc,
+      actorUid,
+      actorName,
     });
   }
 
@@ -370,7 +432,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
               astDataChanged: false,
               executionOutcome: existingTrn?.executionOutcome || {
                 outcome: existingOutcome,
-                success: existingOutcome === "SUCCESS",
+                success: ["SUCCESS", "SUCCESSFUL_READING"].includes(existingOutcome),
               },
               idempotent: true,
             },
@@ -413,6 +475,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           trnType,
           data,
           astDoc,
+          actorUid,
+          actorName,
         });
 
         if (!actionCheck?.ok) {
@@ -481,11 +545,29 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
                     ? actionCheck.readingPassed === true
                     : false;
 
-        const executionOutcome = actionCheck.executionOutcome ||
+        const baseExecutionOutcome = actionCheck.executionOutcome ||
           cleanExecution?.executionOutcome || {
-            outcome: passed ? "SUCCESS" : "NO_ACCESS",
+            outcome:
+              trnType === "METER_READING" && passed
+                ? "SUCCESSFUL_READING"
+                : passed
+                  ? "SUCCESS"
+                  : "NO_ACCESS",
             success: passed,
           };
+
+        const executionOutcome = withResolvedNoAccessReason({
+          executionOutcome: baseExecutionOutcome,
+          access: cleanExecution?.accessData?.access || {},
+        });
+
+        const completedAccessBlock = withResolvedNoAccessAccessBlock(
+          cleanExecution?.accessData?.access || {
+            hasAccess: "yes",
+            reason: "NAv",
+          },
+          executionOutcome,
+        );
 
         const completedMedia = buildWmsCompletedMedia({
           existingTrn,
@@ -528,10 +610,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             detail: astDoc?.status?.detail || "NAv",
           },
 
-          "accessData.access": cleanExecution?.accessData?.access || {
-            hasAccess: "yes",
-            reason: "NAv",
-          },
+          "accessData.access": completedAccessBlock,
 
           ...buildUpdateMetadataPatch({
             now,
@@ -545,35 +624,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         const astPatch = actionCheck?.astPatch || {};
         const astDataChanged = Object.keys(astPatch).length > 0;
 
-        const existingTargets = Array.isArray(existingTrn?.assignment?.targets)
-          ? existingTrn.assignment.targets
-          : [];
-
-        const executionTargets = Array.isArray(
-          cleanExecution?.assignment?.targets,
-        )
-          ? cleanExecution.assignment.targets
-          : [];
-
-        const payloadTargets = Array.isArray(data?.assignment?.targets)
-          ? data.assignment.targets
-          : [];
-
-        const assignedTo =
-          existingTargets[0] || executionTargets[0] || payloadTargets[0] || {};
-
         const astUpdatePatch = {
           ...astPatch,
 
-          trnActiveLifecycle: buildTrnActiveLifecycle({
-            trnId,
-            trnType,
-            workflowState: "COMPLETED",
-            outcome: executionOutcome?.outcome || "NAv",
-            assignedTo,
-            updatedAt: now,
-            updatedByUser: actorName,
-          }),
+          trnActiveLifecycle: FieldValue.delete(),
 
           ...buildUpdateMetadataPatch({
             now,
@@ -626,9 +680,12 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
           executionOutcome?.outcome === "NO_ACCESS"
             ? `${trnType} completed with NO ACCESS. AST status unchanged.`
-            : trnType === "METER_INSPECTION"
-              ? `${trnType} completed successfully. AST status unchanged.`
-              : `${trnType} completed and AST updated successfully`,
+            : trnType === "METER_READING" &&
+                executionOutcome?.outcome === "UNSUCCESSFUL_READING"
+              ? `${trnType} completed with UNSUCCESSFUL_READING. AST reading cache unchanged.`
+              : trnType === "METER_INSPECTION"
+                ? `${trnType} completed successfully. AST status unchanged.`
+                : `${trnType} completed and AST updated successfully`,
 
           {
             trnType,
@@ -673,6 +730,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         trnType,
         data,
         astDoc,
+        actorUid,
+        actorName,
       });
 
       if (!actionCheck?.ok) {
@@ -728,12 +787,21 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         premiseServicePatch = servicePatchResult.patch;
       }
 
+      const trnToCreate =
+        trnType === "METER_READING"
+          ? {
+              ...cleanTrn,
+              executionOutcome:
+                actionCheck.executionOutcome || cleanTrn?.executionOutcome,
+            }
+          : cleanTrn;
+
       // ------------------------------------------------------------
       // WRITES
       // Audit TRN first, then AST, then premise snapshot.
       // All writes commit together or all fail together.
       // ------------------------------------------------------------
-      tx.create(trnRef, cleanTrn);
+      tx.create(trnRef, trnToCreate);
 
       const astPatch = actionCheck?.astPatch || {};
       const astDataChanged = Object.keys(astPatch).length > 0;
@@ -784,6 +852,24 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         },
       );
     });
+
+    if (trnType === "METER_READING" && responsePayload?.success === true) {
+      try {
+        await writeRegistryMreadFromTrn({
+          db,
+          trnId,
+          source: "MREAD_COMPLETION",
+        });
+      } catch (registryError) {
+        logger.error("onMeterLifecycleTrnCallable -- registry_mread write failed", {
+          trnId,
+          trnType,
+          astId,
+          message: registryError?.message || String(registryError),
+          stack: registryError?.stack || "NAv",
+        });
+      }
+    }
 
     return (
       responsePayload ||

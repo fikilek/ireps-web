@@ -16,7 +16,7 @@ export function normalizeAccountNo(value) {
 export function sanitizeIdSegment(value, fallback = "NAv") {
   const cleaned = String(value || "")
     .trim()
-    .replace(/[^A-Za-z0-9_\-]/g, "_")
+    .replace(/[^A-Za-z0-9_-]/g, "_")
     .slice(0, 180);
 
   return cleaned || fallback;

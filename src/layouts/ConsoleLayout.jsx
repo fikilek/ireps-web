@@ -8,6 +8,7 @@ import { auth } from "../firebase";
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
 const ADMIN_ROLES = ["SPU", "ADM", "MNG"];
+const MREAD_STAGING_CONTROLLER_ROLES = ["SPU", "MNG", "SPV"];
 
 const navSections = [
   {
@@ -57,6 +58,11 @@ const navSections = [
           {
             label: "Meter Registry",
             path: "/registries/meters",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "MREAD Registry",
+            path: "/registries/mread",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
@@ -148,6 +154,11 @@ const navSections = [
             label: "Teams",
             path: "/admin/teams",
             allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "MREAD Staging Controller",
+            path: "/admin/mread-staging-controller",
+            allowedRoles: MREAD_STAGING_CONTROLLER_ROLES,
           },
           {
             label: "Settings",

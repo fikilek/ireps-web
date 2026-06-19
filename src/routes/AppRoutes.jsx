@@ -15,6 +15,7 @@ import WardsRegistryPage from "../pages/registries/WardsRegistryPage";
 import ErfsRegistryPage from "../pages/registries/ErfsRegistryPage";
 import PremisesRegistryPage from "../pages/registries/PremisesRegistryPage";
 import MetersRegistryPage from "../pages/registries/MetersRegistryPage";
+import MreadRegistryPage from "../pages/registries/MreadRegistryPage";
 import AccountsRegistryPage from "../pages/registries/AccountsRegistryPage";
 
 import ReportsLandingPage from "../pages/reports/ReportsLandingPage";
@@ -39,12 +40,14 @@ import PremisesPage from "@/pages/ward-scope/PremisesPage";
 import MetersPage from "../pages/ward-scope/MetersPage";
 
 import ProfilePage from "../pages/profile/ProfilePage";
+import MreadStagingControllerPage from "../pages/admin/MreadStagingControllerPage";
 
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
 const ADMIN_ROLES = ["SPU", "ADM", "MNG"];
+const MREAD_STAGING_CONTROLLER_ROLES = ["SPU", "MNG", "SPV"];
 
 export default function AppRoutes() {
   return (
@@ -116,6 +119,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MetersRegistryPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/registries/mread"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MreadRegistryPage />
               </RoleRoute>
             }
           />
@@ -369,6 +381,15 @@ export default function AppRoutes() {
                   title="Teams"
                   description="LM-wide team visibility and management."
                 />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/mread-staging-controller"
+            element={
+              <RoleRoute allowedRoles={MREAD_STAGING_CONTROLLER_ROLES}>
+                <MreadStagingControllerPage />
               </RoleRoute>
             }
           />

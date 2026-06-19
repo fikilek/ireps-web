@@ -849,15 +849,95 @@ function calculateDistanceMeters(pointA = {}, pointB = {}) {
   return earthRadiusMeters * centralAngle;
 }
 
-function buildLatestMreadingsCache({ astDoc = {}, reading, readingAt, trnId }) {
+
+function getTimestampMillis(value) {
+  if (!value) return null;
+
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    const millis = date.getTime();
+    return Number.isFinite(millis) ? millis : null;
+  }
+
+  if (typeof value?.seconds === "number") {
+    const millis = value.seconds * 1000;
+    return Number.isFinite(millis) ? millis : null;
+  }
+
+  const millis = Date.parse(String(value));
+  return Number.isFinite(millis) ? millis : null;
+}
+
+function buildSincePreviousReading({ readingAt, previousReadingAt } = {}) {
+  const currentMillis = getTimestampMillis(readingAt);
+  const previousMillis = getTimestampMillis(previousReadingAt);
+
+  if (currentMillis === null || previousMillis === null) {
+    return null;
+  }
+
+  const diffMinutesRaw = (currentMillis - previousMillis) / 60000;
+
+  if (!Number.isFinite(diffMinutesRaw) || diffMinutesRaw < 0) {
+    return null;
+  }
+
+  const totalMinutes = Math.floor(diffMinutesRaw);
+  let value = totalMinutes;
+  let unit = "MINUTES";
+  let display = `${value} min`;
+
+  if (totalMinutes >= 1440) {
+    value = Math.floor(totalMinutes / 1440);
+    unit = "DAYS";
+    display = `${value} ${value === 1 ? "day" : "days"}`;
+  } else if (totalMinutes >= 60) {
+    value = Math.floor(totalMinutes / 60);
+    unit = "HOURS";
+    display = `${value} ${value === 1 ? "hr" : "hrs"}`;
+  }
+
+  return {
+    totalMinutes,
+    value,
+    unit,
+    display,
+  };
+}
+
+function buildLatestMreadingsCache({
+  astDoc = {},
+  reading,
+  readingAt,
+  trnId,
+  source,
+  capturedByUid = "NAv",
+  capturedByName = "NAv",
+  previousReading = null,
+  previousReadingAt = null,
+  previousReadingTrnId = "NAv",
+  consumption = null,
+  sincePreviousReading = null,
+}) {
   const currentReadings = Array.isArray(astDoc?.mreadings)
-    ? astDoc.mreadings
+    ? astDoc.mreadings.map((item) => ({
+        ...item,
+        source: String(item?.source || "LEGACY_CACHE").trim(),
+      }))
     : [];
 
   const nextReading = {
-    reading: String(reading || "").trim(),
+    reading: String(reading ?? "").trim(),
     readingAt: String(readingAt || "").trim(),
     trnId: String(trnId || "NAv").trim(),
+    source: String(source || "").trim(),
+    capturedByUid: String(capturedByUid || "NAv").trim() || "NAv",
+    capturedByName: String(capturedByName || "NAv").trim() || "NAv",
+    previousReading,
+    previousReadingAt,
+    previousReadingTrnId: String(previousReadingTrnId || "NAv").trim() || "NAv",
+    consumption,
+    sincePreviousReading,
   };
 
   const merged = [
@@ -866,13 +946,117 @@ function buildLatestMreadingsCache({ astDoc = {}, reading, readingAt, trnId }) {
       (item) => String(item?.trnId || "") !== nextReading.trnId,
     ),
   ]
-    .filter((item) => item?.reading && item?.readingAt && item?.trnId)
+    .filter(
+      (item) =>
+        String(item?.reading ?? "").trim() !== "" &&
+        item?.readingAt &&
+        item?.trnId &&
+        item?.source,
+    )
     .sort((a, b) => String(b.readingAt).localeCompare(String(a.readingAt)));
 
   return merged.slice(0, 100);
 }
 
-export function validateMeterReading({ data, astDoc }) {
+function readPreviousMreadSnapshot({ astDoc = {}, currentTrnId = "" } = {}) {
+  const readings = Array.isArray(astDoc?.mreadings) ? astDoc.mreadings : [];
+
+  const validReadings = readings
+    .map((item) => {
+      const readingValue = Number(item?.reading);
+      const readingAt = String(item?.readingAt || "").trim();
+      const trnId = String(item?.trnId || "").trim();
+
+      return {
+        reading: Number.isFinite(readingValue) ? readingValue : null,
+        readingAt,
+        trnId,
+        source: String(item?.source || "NAv").trim() || "NAv",
+      };
+    })
+    .filter((item) => {
+      if (item.reading === null || !item.readingAt) return false;
+      if (currentTrnId && item.trnId === currentTrnId) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.readingAt).localeCompare(String(a.readingAt)));
+
+  return validReadings[0] || null;
+}
+
+function buildMreadReadingOutcomeSnapshot({
+  astDoc = {},
+  reading,
+  readingAt,
+  currentTrnId = "",
+} = {}) {
+  const currentReading = Number(reading);
+  const previousSnapshot = readPreviousMreadSnapshot({ astDoc, currentTrnId });
+  const previousReading = previousSnapshot?.reading ?? null;
+  const previousReadingAt = previousSnapshot?.readingAt || null;
+  const sincePreviousReading = buildSincePreviousReading({
+    readingAt,
+    previousReadingAt,
+  });
+
+  return {
+    currentReading: Number.isFinite(currentReading) ? currentReading : null,
+    previousReading,
+    previousReadingAt,
+    previousReadingTrnId: previousSnapshot?.trnId || "NAv",
+    consumption:
+      Number.isFinite(currentReading) && previousReading !== null
+        ? currentReading - previousReading
+        : null,
+    sincePreviousReading,
+  };
+}
+
+function buildLatestTreadingsCache({
+  astDoc = {},
+  tokenReading,
+  readingAt,
+  trnId,
+  source,
+}) {
+  const currentReadings = Array.isArray(astDoc?.treadings)
+    ? astDoc.treadings.map((item) => ({
+        ...item,
+        source: String(item?.source || "LEGACY_CACHE").trim(),
+      }))
+    : [];
+  const nextReading = {
+    tokenReading: String(tokenReading || "").trim(),
+    readingAt: String(readingAt || "").trim(),
+    trnId: String(trnId || "NAv").trim(),
+    source: String(source || "").trim(),
+  };
+
+  const merged = [
+    nextReading,
+    ...currentReadings.filter(
+      (item) => String(item?.trnId || "") !== nextReading.trnId,
+    ),
+  ]
+    .filter(
+      (item) =>
+        item?.tokenReading && item?.readingAt && item?.trnId && item?.source,
+    )
+    .sort((a, b) => String(b.readingAt).localeCompare(String(a.readingAt)));
+
+  return merged.slice(0, 100);
+}
+
+function getLifecycleReadingAt(data = {}, key) {
+  return String(
+    data?.[key]?.readingAt ||
+      data?.workflow?.completedAt ||
+      data?.metadata?.updatedAt ||
+      new Date().toISOString(),
+  ).trim();
+}
+
+export function validateMeterReading({ data, astDoc, actorUid = "NAv", actorName = "NAv" }) {
   const currentState = getAstCurrentState(astDoc);
   const meterType = getAstMeterType(astDoc, data);
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
@@ -956,7 +1140,10 @@ export function validateMeterReading({ data, astDoc }) {
       executionOutcome: {
         outcome: "NO_ACCESS",
         success: false,
+        noAccessReason,
+        reasonText: noAccessReason,
       },
+      noAccessReason,
       nextAstState: currentState,
       astPatch: {},
       astStatusChanged: false,
@@ -986,6 +1173,25 @@ export function validateMeterReading({ data, astDoc }) {
       ok: false,
       code: "INVALID_METER_READING",
       message: "Meter reading must be numeric",
+    };
+  }
+
+  if (noReadingReason) {
+    return {
+      ok: true,
+      currentState,
+      meterType,
+      isPrepaidMeter,
+      readingPassed: false,
+      executionOutcome: {
+        outcome: "UNSUCCESSFUL_READING",
+        success: false,
+      },
+      nextAstState: currentState,
+      astPatch: {},
+      astStatusChanged: false,
+      astDataChanged: false,
+      distanceMeters,
     };
   }
 
@@ -1036,24 +1242,12 @@ export function validateMeterReading({ data, astDoc }) {
     };
   }
 
-  if (noReadingReason) {
-    return {
-      ok: true,
-      currentState,
-      meterType,
-      isPrepaidMeter,
-      readingPassed: false,
-      executionOutcome: {
-        outcome: "NO_READING",
-        success: false,
-      },
-      nextAstState: currentState,
-      astPatch: {},
-      astStatusChanged: false,
-      astDataChanged: false,
-      distanceMeters,
-    };
-  }
+  const readingSnapshot = buildMreadReadingOutcomeSnapshot({
+    astDoc,
+    reading,
+    readingAt,
+    currentTrnId: data?.id,
+  });
 
   const astPatch = {
     mreadings: buildLatestMreadingsCache({
@@ -1061,6 +1255,14 @@ export function validateMeterReading({ data, astDoc }) {
       reading,
       readingAt,
       trnId: data?.id,
+      source: "METER_READING",
+      capturedByUid: actorUid,
+      capturedByName: actorName,
+      previousReading: readingSnapshot.previousReading,
+      previousReadingAt: readingSnapshot.previousReadingAt,
+      previousReadingTrnId: readingSnapshot.previousReadingTrnId,
+      consumption: readingSnapshot.consumption,
+      sincePreviousReading: readingSnapshot.sincePreviousReading,
     }),
   };
 
@@ -1071,8 +1273,14 @@ export function validateMeterReading({ data, astDoc }) {
     isPrepaidMeter,
     readingPassed: true,
     executionOutcome: {
-      outcome: "SUCCESS",
+      outcome: "SUCCESSFUL_READING",
       success: true,
+      currentReading: readingSnapshot.currentReading,
+      previousReading: readingSnapshot.previousReading,
+      previousReadingAt: readingSnapshot.previousReadingAt,
+      previousReadingTrnId: readingSnapshot.previousReadingTrnId,
+      consumption: readingSnapshot.consumption,
+      sincePreviousReading: readingSnapshot.sincePreviousReading,
     },
     nextAstState: currentState,
     astPatch,
@@ -1684,6 +1892,7 @@ export function validateMeterInspection({ data, astDoc }) {
       reading,
       readingAt,
       trnId: data?.id,
+      source: "INSPECTION",
     });
   }
 
@@ -1941,11 +2150,23 @@ export function validateMeterRemoval({ data, astDoc }) {
   const astPatch = {};
 
   if (!isPrepaidMeter && meterReading) {
-    astPatch["ast.meterReading"] = meterReading;
+    astPatch.mreadings = buildLatestMreadingsCache({
+      astDoc,
+      reading: meterReading,
+      readingAt: getLifecycleReadingAt(data, "removal"),
+      trnId: data?.id,
+      source: "REMOVAL",
+    });
   }
 
   if (isPrepaidMeter && tokenReading) {
-    astPatch["ast.tokenReading"] = tokenReading;
+    astPatch.treadings = buildLatestTreadingsCache({
+      astDoc,
+      tokenReading,
+      readingAt: getLifecycleReadingAt(data, "removal"),
+      trnId: data?.id,
+      source: "REMOVAL",
+    });
   }
 
   return {
@@ -1982,6 +2203,7 @@ export function buildLifecycleTrnPayload({
   const meterType = getAstMeterType(astDoc, data);
 
   const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
 
   const sanitizedOrigin = sanitizeOrigin(data?.origin || {}, {
     channel: data?.instructionTrnId ? "OFFICE" : "FIELD",
@@ -1995,7 +2217,11 @@ export function buildLifecycleTrnPayload({
     accessData: {
       access: {
         hasAccess: data?.accessData?.access?.hasAccess || "yes",
-        reason: data?.accessData?.access?.reason || "NAv",
+        reason: noAccess
+          ? noAccessReason
+          : data?.accessData?.access?.reason || "NAv",
+        reasonSelect: getNoAccessReasonSelect(data),
+        noAccessReason: noAccess ? noAccessReason : undefined,
       },
 
       erfId: astDoc?.accessData?.erfId || data?.accessData?.erfId || "NAv",
@@ -2240,26 +2466,65 @@ function isNoAccessExecution(data = {}) {
   return getAccessOutcome(data) === "no";
 }
 
-function getNoAccessReason(data = {}) {
-  const reasonText = String(data?.accessData?.access?.reason || "").trim();
+function isMeaningfulLifecycleText(value) {
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim();
+  if (!text) return false;
 
-  if (reasonText && reasonText !== "NAv") {
-    return reasonText;
+  return !["nav", "n/av", "n/a", "na", "null", "undefined"].includes(
+    text.toLowerCase(),
+  );
+}
+
+function firstMeaningfulLifecycleText(...values) {
+  for (const value of values) {
+    if (isMeaningfulLifecycleText(value)) return String(value).trim();
   }
 
-  return selectValueToText(data?.accessData?.access?.reasonSelect);
+  return "NAv";
+}
+
+function getNoAccessReasonSelect(data = {}) {
+  return (
+    data?.accessData?.access?.reasonSelect ||
+    data?.accessData?.access?.noAccessReasonSelect ||
+    data?.executionOutcome?.reasonSelect ||
+    data?.executionOutcome?.noAccessReasonSelect ||
+    null
+  );
+}
+
+function getNoAccessReason(data = {}) {
+  const access = data?.accessData?.access || {};
+
+  return firstMeaningfulLifecycleText(
+    access.reason,
+    access.noAccessReason,
+    access.reasonText,
+    access.noAccessReasonText,
+    selectValueToText(getNoAccessReasonSelect(data)),
+    data?.executionOutcome?.noAccessReason,
+    data?.executionOutcome?.reasonText,
+    data?.executionOutcome?.reason,
+  );
 }
 
 export function sanitizeLifecycleExecutionOutcome(outcome = {}) {
   const cleanOutcome = normalizeUpper(outcome?.outcome || "");
-  const allowedOutcomes = ["SUCCESS", "NO_ACCESS", "NO_READING"];
+  const allowedOutcomes = [
+    "SUCCESS",
+    "SUCCESSFUL_READING",
+    "NO_ACCESS",
+    "NO_READING",
+    "UNSUCCESSFUL_READING",
+  ];
   const finalOutcome = allowedOutcomes.includes(cleanOutcome)
     ? cleanOutcome
     : "SUCCESS";
 
   return {
     outcome: finalOutcome,
-    success: finalOutcome === "SUCCESS",
+    success: ["SUCCESS", "SUCCESSFUL_READING"].includes(finalOutcome),
   };
 }
 
@@ -2601,11 +2866,23 @@ export function validateMeterDisconnection({ data, astDoc }) {
   const astPatch = {};
 
   if (!isPrepaidMeter && meterReading) {
-    astPatch["ast.meterReading"] = meterReading;
+    astPatch.mreadings = buildLatestMreadingsCache({
+      astDoc,
+      reading: meterReading,
+      readingAt: getLifecycleReadingAt(data, "disconnection"),
+      trnId: data?.id,
+      source: "DISCONNECTION",
+    });
   }
 
   if (isPrepaidMeter && tokenReading) {
-    astPatch["ast.tokenReading"] = tokenReading;
+    astPatch.treadings = buildLatestTreadingsCache({
+      astDoc,
+      tokenReading,
+      readingAt: getLifecycleReadingAt(data, "disconnection"),
+      trnId: data?.id,
+      source: "DISCONNECTION",
+    });
   }
 
   return {
@@ -2872,11 +3149,23 @@ export function validateMeterReconnection({ data, astDoc }) {
   const astPatch = {};
 
   if (!isPrepaidMeter && meterReading) {
-    astPatch["ast.meterReading"] = meterReading;
+    astPatch.mreadings = buildLatestMreadingsCache({
+      astDoc,
+      reading: meterReading,
+      readingAt: getLifecycleReadingAt(data, "reconnection"),
+      trnId: data?.id,
+      source: "RECONNECTION",
+    });
   }
 
   if (isPrepaidMeter && tokenReading) {
-    astPatch["ast.tokenReading"] = tokenReading;
+    astPatch.treadings = buildLatestTreadingsCache({
+      astDoc,
+      tokenReading,
+      readingAt: getLifecycleReadingAt(data, "reconnection"),
+      trnId: data?.id,
+      source: "RECONNECTION",
+    });
   }
 
   return {
@@ -3121,6 +3410,8 @@ export function buildLifecycleInstructionTrnPayload({
   const astId = String(data?.astId || data?.ast?.astData?.astId || "").trim();
   const serverAstData = getAstData(astDoc);
   const geofenceRefs = sanitizeGeofenceRefs(data?.geofenceRefs || []);
+  const noAccess = isNoAccessExecution(data);
+  const noAccessReason = getNoAccessReason(data);
 
   return removeUndefinedDeep({
     id: data.id,
@@ -3128,7 +3419,11 @@ export function buildLifecycleInstructionTrnPayload({
     accessData: {
       access: {
         hasAccess: data?.accessData?.access?.hasAccess || "yes",
-        reason: data?.accessData?.access?.reason || "NAv",
+        reason: noAccess
+          ? noAccessReason
+          : data?.accessData?.access?.reason || "NAv",
+        reasonSelect: getNoAccessReasonSelect(data),
+        noAccessReason: noAccess ? noAccessReason : undefined,
       },
 
       erfId: astDoc?.accessData?.erfId || premiseData?.erfId || "NAv",

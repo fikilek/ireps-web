@@ -95,6 +95,13 @@ import {
   onAccountMasterWritten,
 } from "./dataCleansing/triggers.js";
 
+import {
+  rebuildRegistryMreadCallable,
+  rebuildRegistryMreadRowCallable,
+  listMreadStagingCycles,
+  generateMreadStaging,
+} from "./registry/mread/index.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -135,6 +142,10 @@ export {
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,
+  rebuildRegistryMreadCallable,
+  rebuildRegistryMreadRowCallable,
+  listMreadStagingCycles,
+  generateMreadStaging,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
@@ -269,9 +280,7 @@ async function syncPremiseServiceSnapshotFromMeter({ astId, astData }) {
       .map(normalizePremiseServiceSnapshotItem)
       .filter((item) => item?.trnId && item.trnId !== "NAv");
 
-    const nextBucket = normalizedBucket.filter(
-      (item) => item.trnId !== astId,
-    );
+    const nextBucket = normalizedBucket.filter((item) => item.trnId !== astId);
 
     if (!shouldRemoveFromPremiseServices) {
       nextBucket.push(nextServiceItem);
@@ -320,9 +329,9 @@ function getPremiseWardScope(premiseData = {}) {
 function isValidWardScope(scope = {}) {
   return Boolean(
     scope?.lmPcode &&
-      scope.lmPcode !== "NAv" &&
-      scope?.wardPcode &&
-      scope.wardPcode !== "NAv",
+    scope.lmPcode !== "NAv" &&
+    scope?.wardPcode &&
+    scope.wardPcode !== "NAv",
   );
 }
 
@@ -372,9 +381,12 @@ async function rebuildAccountRegistryForPremiseIfExists({
   latestFieldAccountDataId = "NAv",
 } = {}) {
   if (!isValidPremiseId(premiseId)) {
-    logger.warn("rebuildAccountRegistryForPremiseIfExists -- missing premiseId", {
-      premiseId: premiseId || "NAv",
-    });
+    logger.warn(
+      "rebuildAccountRegistryForPremiseIfExists -- missing premiseId",
+      {
+        premiseId: premiseId || "NAv",
+      },
+    );
     return null;
   }
 
@@ -780,13 +792,17 @@ export const onPremiseCreated = onDocumentCreated(
         totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
       });
 
-      await safeRun("onPremiseCreated ward registry refresh", premiseId, async () => {
-        await rebuildAffectedWardRegistryRows({
-          scopes: [getPremiseWardScope(data)],
-          reason: "PREMISE_CREATED",
-          entityId: premiseId,
-        });
-      });
+      await safeRun(
+        "onPremiseCreated ward registry refresh",
+        premiseId,
+        async () => {
+          await rebuildAffectedWardRegistryRows({
+            scopes: [getPremiseWardScope(data)],
+            reason: "PREMISE_CREATED",
+            entityId: premiseId,
+          });
+        },
+      );
 
       /* ------------------------------------------------
          2. KEEP EXISTING ERF BUBBLING BEHAVIOR
@@ -1012,16 +1028,20 @@ export const onPremiseUpdated = onDocumentUpdated(
     try {
       await rebuildPremiseRegistryRow(premiseId);
 
-      await safeRun("onPremiseUpdated ward registry refresh", premiseId, async () => {
-        await rebuildAffectedWardRegistryRows({
-          scopes: [
-            getPremiseWardScope(dataBefore),
-            getPremiseWardScope(dataAfter),
-          ],
-          reason: "PREMISE_UPDATED",
-          entityId: premiseId,
-        });
-      });
+      await safeRun(
+        "onPremiseUpdated ward registry refresh",
+        premiseId,
+        async () => {
+          await rebuildAffectedWardRegistryRows({
+            scopes: [
+              getPremiseWardScope(dataBefore),
+              getPremiseWardScope(dataAfter),
+            ],
+            reason: "PREMISE_UPDATED",
+            entityId: premiseId,
+          });
+        },
+      );
 
       if (!erfId) return null;
 
@@ -1049,6 +1069,333 @@ function normalizeMeterNo(value) {
     .replace(/\s+/g, "")
     .trim()
     .toUpperCase();
+}
+
+function hasRequiredText(value) {
+  const text = String(value || "").trim();
+  return text && text !== "NAv";
+}
+
+function hasTaggedMedia(media = [], tag) {
+  return (
+    Array.isArray(media) &&
+    media.some(
+      (item) => item?.tag === tag && hasRequiredText(item?.url || item?.uri),
+    )
+  );
+}
+
+function buildFailureResult(code, message) {
+  return {
+    success: false,
+    code: code || "UNKNOWN_ERROR",
+    message: message || "Unknown error",
+    trnId: "NAv",
+  };
+}
+
+function validateMeterCreationPayload({
+  data = {},
+  expectedTrnType,
+  expectedTrnPrefix,
+  allowedStatuses,
+}) {
+  const trnId = String(data?.id || "").trim();
+  const hasAccess = data?.accessData?.access?.hasAccess;
+  const meterType = data?.meterType;
+
+  if (!trnId.startsWith(expectedTrnPrefix)) {
+    return buildFailureResult(
+      "INVALID_TRN_ID",
+      `TRN id must start with ${expectedTrnPrefix}`,
+    );
+  }
+
+  if (data?.accessData?.trnType !== expectedTrnType) {
+    return buildFailureResult(
+      "INVALID_TRN_TYPE",
+      `trnType must be ${expectedTrnType}`,
+    );
+  }
+
+  if (!["yes", "no"].includes(hasAccess)) {
+    return buildFailureResult(
+      "INVALID_ACCESS_VALUE",
+      "accessData.access.hasAccess must be yes or no",
+    );
+  }
+
+  if (hasAccess === "no") {
+    if (meterType !== "NA") {
+      return buildFailureResult(
+        "INVALID_NO_ACCESS_METER_TYPE",
+        "No-access submissions must use meterType NA",
+      );
+    }
+
+    if (!hasRequiredText(data?.accessData?.access?.reason)) {
+      return buildFailureResult(
+        "NO_ACCESS_REASON_REQUIRED",
+        "No-access reason is required",
+      );
+    }
+
+    if (!hasTaggedMedia(data?.media, "noAccessPhoto")) {
+      return buildFailureResult(
+        "NO_ACCESS_PHOTO_REQUIRED",
+        "No-access photo is required",
+      );
+    }
+
+    return null;
+  }
+
+  if (!["water", "electricity"].includes(meterType)) {
+    return buildFailureResult(
+      "INVALID_METER_TYPE",
+      "Access submissions must use water or electricity meterType",
+    );
+  }
+
+  const accessData = data?.accessData || {};
+  const ast = data?.ast || {};
+  const astData = ast?.astData || {};
+  const meter = astData?.meter || {};
+  const media = data?.media || [];
+
+  const requiredTextFields = [
+    ["accessData.erfId", accessData?.erfId],
+    ["accessData.erfNo", accessData?.erfNo],
+    ["accessData.premise.id", accessData?.premise?.id],
+    ["accessData.premise.address", accessData?.premise?.address],
+    ["accessData.premise.propertyType", accessData?.premise?.propertyType],
+    ["ast.astData.astNo", astData?.astNo],
+    ["ast.astData.astManufacturer", astData?.astManufacturer],
+    ["ast.astData.astName", astData?.astName],
+    ["ast.anomalies.anomaly", ast?.anomalies?.anomaly],
+    ["ast.anomalies.anomalyDetail", ast?.anomalies?.anomalyDetail],
+    ["serviceProvider.id", data?.serviceProvider?.id],
+    ["serviceProvider.name", data?.serviceProvider?.name],
+  ];
+
+  const missingField = requiredTextFields.find(
+    ([, value]) => !hasRequiredText(value),
+  );
+
+  if (missingField) {
+    return buildFailureResult(
+      "MISSING_REQUIRED_FIELD",
+      `${missingField[0]} is required`,
+    );
+  }
+
+  const requiredParentFields = [
+    "countryPcode",
+    "provincePcode",
+    "dmPcode",
+    "lmPcode",
+    "wardPcode",
+  ];
+  const missingParent = requiredParentFields.find(
+    (key) => !hasRequiredText(accessData?.parents?.[key]),
+  );
+
+  if (missingParent) {
+    return buildFailureResult(
+      "MISSING_REQUIRED_PARENT",
+      `accessData.parents.${missingParent} is required`,
+    );
+  }
+
+  const rawLat = ast?.location?.gps?.lat;
+  const rawLng = ast?.location?.gps?.lng;
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+  if (
+    rawLat == null ||
+    rawLng == null ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180 ||
+    (lat === 0 && lng === 0)
+  ) {
+    return buildFailureResult(
+      "INVALID_METER_GPS",
+      "ast.location.gps must contain valid numeric lat and lng",
+    );
+  }
+
+  if (!["Normal", "Bulk"].includes(meter?.category)) {
+    return buildFailureResult(
+      "INVALID_METER_CATEGORY",
+      "Meter category must be Normal or Bulk",
+    );
+  }
+
+  if (!["prepaid", "conventional"].includes(meter?.type)) {
+    return buildFailureResult(
+      "INVALID_METER_SUBTYPE",
+      "Meter type must be prepaid or conventional",
+    );
+  }
+
+  if (
+    allowedStatuses.length > 0 &&
+    !allowedStatuses.includes(data?.status?.state)
+  ) {
+    return buildFailureResult(
+      "INVALID_METER_STATUS",
+      `status.state must be one of ${allowedStatuses.join(", ")}`,
+    );
+  }
+
+  if (!hasTaggedMedia(media, "astNoPhoto")) {
+    return buildFailureResult(
+      "METER_PHOTO_REQUIRED",
+      "Meter number photo is required",
+    );
+  }
+
+  const anomaly = String(ast?.anomalies?.anomaly || "").trim();
+  if (anomaly !== "Meter Ok" && !hasTaggedMedia(media, "anomalyPhoto")) {
+    return buildFailureResult(
+      "ANOMALY_PHOTO_REQUIRED",
+      "Anomaly photo is required",
+    );
+  }
+
+  if (meterType === "electricity") {
+    if (!hasRequiredText(ast?.location?.placement)) {
+      return buildFailureResult(
+        "METER_PLACEMENT_REQUIRED",
+        "Electricity meter placement is required",
+      );
+    }
+
+    if (!["single", "three"].includes(meter?.phase)) {
+      return buildFailureResult(
+        "INVALID_METER_PHASE",
+        "Electricity meter phase must be single or three",
+      );
+    }
+
+    if (
+      !hasRequiredText(meter?.seal?.sealNo) ||
+      !hasTaggedMedia(media, "sealPhoto")
+    ) {
+      return buildFailureResult(
+        "SEAL_EVIDENCE_REQUIRED",
+        "Electricity meter seal number and photo are required",
+      );
+    }
+
+    if (
+      !hasRequiredText(meter?.cb?.size) ||
+      !hasTaggedMedia(media, "astCbPhoto")
+    ) {
+      return buildFailureResult(
+        "CB_EVIDENCE_REQUIRED",
+        "Electricity meter circuit breaker size and photo are required",
+      );
+    }
+
+    if (
+      meter?.type === "prepaid" &&
+      (!hasRequiredText(meter?.keypad?.serialNo) ||
+        !hasTaggedMedia(media, "keypadPhoto"))
+    ) {
+      return buildFailureResult(
+        "KEYPAD_EVIDENCE_REQUIRED",
+        "Prepaid electricity meters require keypad details and photo",
+      );
+    }
+  }
+
+  const creationReading =
+    data?.mreadings?.[0]?.reading || ast?.meterReading || "";
+  const creationTokenReading =
+    data?.treadings?.[0]?.tokenReading || ast?.tokenReading || "";
+  if (
+    meter?.type === "conventional" &&
+    hasRequiredText(creationReading) &&
+    !hasTaggedMedia(media, "meterReadingPhoto")
+  ) {
+    return buildFailureResult(
+      "METER_READING_PHOTO_REQUIRED",
+      "Meter reading photo is required",
+    );
+  }
+
+  if (
+    meter?.type === "prepaid" &&
+    hasRequiredText(creationTokenReading) &&
+    !hasTaggedMedia(media, "tokenReadingPhoto")
+  ) {
+    return buildFailureResult(
+      "TOKEN_READING_PHOTO_REQUIRED",
+      "Token reading photo is required",
+    );
+  }
+
+  return null;
+}
+
+function buildBaselineSincePreviousReading() {
+  return {
+    display: "0",
+    totalMinutes: 0,
+    unit: "MINUTES",
+    value: 0,
+  };
+}
+
+function normalizeCreationReadings({ data = {}, trnId, now }) {
+  const ast = { ...(data?.ast || {}) };
+  const meterSubtype = ast?.astData?.meter?.type;
+  const legacyMeterReading = String(ast?.meterReading || "").trim();
+  const legacyTokenReading = String(ast?.tokenReading || "").trim();
+
+  delete ast.meterReading;
+  delete ast.tokenReading;
+
+  const submittedMreading = data?.mreadings?.[0] || {};
+  const submittedTreading = data?.treadings?.[0] || {};
+  const reading = String(
+    submittedMreading?.reading || legacyMeterReading,
+  ).trim();
+  const tokenReading = String(
+    submittedTreading?.tokenReading || legacyTokenReading,
+  ).trim();
+
+  return {
+    ast,
+    mreadings:
+      meterSubtype === "conventional" && reading
+        ? [
+            {
+              reading,
+              readingAt: String(submittedMreading?.readingAt || now),
+              trnId,
+              source: "AST_CREATION",
+              sincePreviousReading: buildBaselineSincePreviousReading(),
+            },
+          ]
+        : [],
+    treadings:
+      meterSubtype === "prepaid" && tokenReading
+        ? [
+            {
+              tokenReading,
+              readingAt: String(submittedTreading?.readingAt || now),
+              trnId,
+              source: "AST_CREATION",
+            },
+          ]
+        : [],
+  };
 }
 
 function buildFlatRootMetadataFromSource({
@@ -1182,6 +1529,27 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
 
     const agentUid = updatedByUid;
     const agentName = updatedByUser;
+    const validationError = validateMeterCreationPayload({
+      data: trnData,
+      expectedTrnType: "METER_DISCOVERY",
+      expectedTrnPrefix: "TRN_MDIS_",
+      allowedStatuses: ["CONNECTED", "DISCONNECTED"],
+    });
+
+    if (validationError) {
+      logger.error("onMeterDiscoveryCreated ---- invalid payload", {
+        trnId,
+        code: validationError.code,
+        message: validationError.message,
+      });
+      return null;
+    }
+
+    const creationData = normalizeCreationReadings({
+      data: trnData,
+      trnId,
+      now: createdAt,
+    });
 
     const astId = trnId;
     const astRef = db.collection("asts").doc(astId);
@@ -1278,9 +1646,9 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         const statusPayload = trnData?.status || null;
 
         const astPayload = {
-          ...(ast || {}),
+          ...creationData.ast,
           astData: {
-            ...(ast?.astData || {}),
+            ...(creationData.ast?.astData || {}),
             astId,
           },
         };
@@ -1289,6 +1657,12 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         tx.set(astRef, {
           accessData,
           ast: astPayload,
+          ...(creationData.mreadings.length
+            ? { mreadings: creationData.mreadings }
+            : {}),
+          ...(creationData.treadings.length
+            ? { treadings: creationData.treadings }
+            : {}),
           media: trnData.media || [],
           meterType,
           trnId,
@@ -2546,13 +2920,6 @@ export const authorizeFieldWorker = onCall(async (request) => {
   }
 });
 
-const buildFailureResult = (code, message) => ({
-  success: false,
-  code: code || "UNKNOWN_ERROR",
-  message: message || "Unknown error",
-  trnId: "NAv",
-});
-
 const buildSuccessResult = (trnId, message = "TRN created successfully") => ({
   success: true,
   code: "SUCCESS",
@@ -2563,6 +2930,12 @@ const buildSuccessResult = (trnId, message = "TRN created successfully") => ({
 export const onMeterDiscoveryCallable = onCall(async (request) => {
   try {
     const data = request?.data || {};
+    const caller = request.auth;
+
+    if (!caller) {
+      throw new HttpsError("unauthenticated", "User must be signed in.");
+    }
+
     const trnId = data?.id || "NAv";
     const meterType = data?.meterType || "NAv";
     const hasAccess = data?.accessData?.access?.hasAccess || "no";
@@ -2577,59 +2950,13 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       meterNoNormalized,
     });
 
-    if (!data?.id) {
-      return buildFailureResult("INVALID_TRN_ID", "TRN id is required");
-    }
-
-    if (!data?.accessData) {
-      return buildFailureResult(
-        "INVALID_ACCESS_DATA",
-        "accessData is required",
-      );
-    }
-
-    if (data?.accessData?.trnType !== "METER_DISCOVERY") {
-      return buildFailureResult(
-        "INVALID_TRN_TYPE",
-        "trnType must be METER_DISCOVERY",
-      );
-    }
-
-    if (!["water", "electricity", "NA"].includes(meterType)) {
-      return buildFailureResult("INVALID_METER_TYPE", "Invalid meterType");
-    }
-
-    if (!["yes", "no"].includes(hasAccess)) {
-      return buildFailureResult(
-        "INVALID_ACCESS_VALUE",
-        "accessData.access.hasAccess must be yes or no",
-      );
-    }
-
-    if (hasAccess === "no" && meterType !== "NA") {
-      return buildFailureResult(
-        "INVALID_NO_ACCESS_METER_TYPE",
-        "No-access submissions must use meterType NA",
-      );
-    }
-
-    if (hasAccess === "yes" && !["water", "electricity"].includes(meterType)) {
-      return buildFailureResult(
-        "INVALID_ACCESS_METER_TYPE",
-        "Access submissions must use water or electricity meterType",
-      );
-    }
-
-    if (hasAccess === "yes" && !meterNoNormalized) {
-      logger.info("onMeterDiscoveryCallable -- INVALID_METER_NUMBER", {
-        trnId: data.id,
-      });
-
-      return buildFailureResult(
-        "INVALID_METER_NUMBER",
-        "Meter number is required when access is yes",
-      );
-    }
+    const validationError = validateMeterCreationPayload({
+      data,
+      expectedTrnType: "METER_DISCOVERY",
+      expectedTrnPrefix: "TRN_MDIS_",
+      allowedStatuses: ["CONNECTED", "DISCONNECTED"],
+    });
+    if (validationError) return validationError;
 
     // ------------------------------------------------------------
     // 0. PREMISE EXISTENCE GATEKEEPER
@@ -2722,8 +3049,25 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       ),
     );
 
+    delete safePayload.metadata;
+    const now = new Date().toISOString();
+    const actorName =
+      caller.token?.name ||
+      caller.token?.email ||
+      caller.displayName ||
+      caller.uid ||
+      "SYSTEM";
+
     const finalPayload = {
       ...safePayload,
+      metadata: {
+        createdAt: now,
+        createdByUid: caller.uid,
+        createdByUser: actorName,
+        updatedAt: now,
+        updatedByUid: caller.uid,
+        updatedByUser: actorName,
+      },
     };
 
     await trnRef.set(finalPayload, { merge: true });
@@ -3005,8 +3349,6 @@ async function syncAstGeoFenceMembership({
   };
 }
 
-
-
 /* ------------------------------------------------
    TC ROW UPDATE AFTER METER GEOFENCE CHANGED
    ------------------------------------------------ */
@@ -3054,7 +3396,10 @@ function getTcRowTrnType(rowData = {}) {
   );
 }
 
-function getTcBackendErrorsAfterEligibility({ rowData = {}, eligibility = {} }) {
+function getTcBackendErrorsAfterEligibility({
+  rowData = {},
+  eligibility = {},
+}) {
   const currentErrors = Array.isArray(rowData?.backend?.errors)
     ? rowData.backend.errors
     : [];
@@ -3190,7 +3535,9 @@ async function updateTcRowsAfterMeterTruthChanged({
 }) {
   const db = getFirestore();
   const now = new Date().toISOString();
-  const nextGeoFenceRefs = normalizeTcGeoFenceRefs(afterAstData?.geofenceRefs || []);
+  const nextGeoFenceRefs = normalizeTcGeoFenceRefs(
+    afterAstData?.geofenceRefs || [],
+  );
   const afterAstNo = getAstMeterNo(afterAstData);
   const afterMeterType = getAstMeterTypeForTc(afterAstData);
 
@@ -3449,12 +3796,16 @@ export const onMeterCreated = onDocumentCreated(
       await rebuildMeterRegistryRow(astId);
     });
 
-    await safeRun("onMeterCreated account registry rebuild", astId, async () => {
-      await rebuildAccountRegistryForMeterIfExists({
-        astId,
-        astData: data,
-      });
-    });
+    await safeRun(
+      "onMeterCreated account registry rebuild",
+      astId,
+      async () => {
+        await rebuildAccountRegistryForMeterIfExists({
+          astId,
+          astData: data,
+        });
+      },
+    );
 
     await safeRun("onMeterCreated ward registry refresh", astId, async () => {
       await rebuildAffectedWardRegistryRows({
@@ -3598,7 +3949,9 @@ export const onMeterUpdated = onDocumentUpdated(
         astId,
         async () => {
           const affectedPremiseIds = [
-            ...new Set([beforePremiseId, afterPremiseId].filter(isValidPremiseId)),
+            ...new Set(
+              [beforePremiseId, afterPremiseId].filter(isValidPremiseId),
+            ),
           ];
 
           for (const premiseId of affectedPremiseIds) {
@@ -4249,61 +4602,13 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     const meterNoRaw = astPayload?.astData?.astNo || "";
     const meterNoNormalized = String(meterNoRaw).trim().toUpperCase();
 
-    if (!trnId || trnId === "NAv" || !trnId.startsWith("TRN_MINST_")) {
-      return {
-        success: false,
-        code: "INVALID_TRN_ID",
-        message: "Valid meter installation TRN id is required",
-      };
-    }
-
-    if (accessData?.trnType !== "METER_INSTALLATION") {
-      return {
-        success: false,
-        code: "INVALID_TRN_TYPE",
-        message: "trnType must be METER_INSTALLATION",
-      };
-    }
-
-    if (!["water", "electricity", "NA"].includes(meterType)) {
-      return {
-        success: false,
-        code: "INVALID_METER_TYPE",
-        message: "Invalid meterType",
-      };
-    }
-
-    if (!["yes", "no"].includes(hasAccess)) {
-      return {
-        success: false,
-        code: "INVALID_ACCESS_VALUE",
-        message: "accessData.access.hasAccess must be yes or no",
-      };
-    }
-
-    if (hasAccess === "no" && meterType !== "NA") {
-      return {
-        success: false,
-        code: "INVALID_NO_ACCESS_METER_TYPE",
-        message: "No-access submissions must use meterType NA",
-      };
-    }
-
-    if (hasAccess === "yes" && !["water", "electricity"].includes(meterType)) {
-      return {
-        success: false,
-        code: "INVALID_ACCESS_METER_TYPE",
-        message: "Access submissions must use water or electricity meterType",
-      };
-    }
-
-    if (hasAccess === "yes" && !meterNoNormalized) {
-      return {
-        success: false,
-        code: "INVALID_METER_NUMBER",
-        message: "Meter number is required when access is yes",
-      };
-    }
+    const validationError = validateMeterCreationPayload({
+      data,
+      expectedTrnType: "METER_INSTALLATION",
+      expectedTrnPrefix: "TRN_MINST_",
+      allowedStatuses: [],
+    });
+    if (validationError) return validationError;
 
     const premiseId = accessData?.premise?.id || "NAv";
 
@@ -4431,10 +4736,16 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       detail: finalAccessData?.parents?.lmPcode || "NAv",
     };
 
+    const creationData = normalizeCreationReadings({
+      data: safePayload,
+      trnId,
+      now,
+    });
+
     const finalAstPayload = {
-      ...(safePayload?.ast || {}),
+      ...creationData.ast,
       astData: {
-        ...(safePayload?.ast?.astData || {}),
+        ...(creationData.ast?.astData || {}),
         astId: trnId,
       },
     };
@@ -4455,6 +4766,12 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     const astDoc = {
       accessData: finalAccessData,
       ast: finalAstPayload,
+      ...(creationData.mreadings.length
+        ? { mreadings: creationData.mreadings }
+        : {}),
+      ...(creationData.treadings.length
+        ? { treadings: creationData.treadings }
+        : {}),
 
       master: {
         id: meterNoNormalized,
@@ -4492,77 +4809,115 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       };
     }
 
-    const premiseData = premiseSnap.data() || {};
-    const premiseServices = premiseData?.services || {};
-
-    const currentServiceItems = Array.isArray(
-      premiseServices?.[serviceMeterBucket],
-    )
-      ? premiseServices[serviceMeterBucket]
-      : [];
-
     const nextServiceItem = {
       trnId,
       status: finalMeterStatus.state,
       updatedAt: now,
     };
 
-    const nextServiceItems = currentServiceItems
-      .map(normalizePremiseServiceSnapshotItem)
-      .filter((item) => item?.trnId && item.trnId !== "NAv");
+    const transactionResult = await db.runTransaction(async (tx) => {
+      const [liveTrnSnap, liveAstSnap, liveMasterSnap, livePremiseSnap] =
+        await Promise.all([
+          tx.get(trnRef),
+          tx.get(astRef),
+          tx.get(masterRef),
+          tx.get(premiseRef),
+        ]);
 
-    const existingServiceIndex = nextServiceItems.findIndex(
-      (item) => item.trnId === trnId,
-    );
+      if (liveTrnSnap.exists && liveAstSnap.exists) {
+        return { alreadyExists: true };
+      }
 
-    if (existingServiceIndex >= 0) {
-      nextServiceItems[existingServiceIndex] = {
-        ...nextServiceItems[existingServiceIndex],
-        ...nextServiceItem,
-      };
-    } else {
-      nextServiceItems.push(nextServiceItem);
-    }
+      if (!livePremiseSnap.exists) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Parent premise no longer exists",
+        );
+      }
 
-    const batch = db.batch();
+      const existingAstId = liveMasterSnap.data()?.refs?.asts?.id || "";
+      if (existingAstId && existingAstId !== trnId) {
+        throw new HttpsError(
+          "already-exists",
+          `Meter already linked to AST ${existingAstId}`,
+        );
+      }
 
-    batch.set(trnRef, trnDoc, { merge: true });
-    batch.set(astRef, astDoc, { merge: true });
+      if (liveAstSnap.exists && liveAstSnap.id !== trnId) {
+        throw new HttpsError(
+          "already-exists",
+          "Meter already exists in AST collection",
+        );
+      }
 
-    batch.set(
-      masterRef,
-      {
-        id: meterNoNormalized,
-        meterNo: meterNoNormalized,
-        meterType,
-        status: finalMeterStatus,
-        refs: {
-          asts: { id: trnId },
-          trns: { id: trnId },
-          premise: { id: premiseId },
+      const premiseServices = livePremiseSnap.data()?.services || {};
+      const currentServiceItems = Array.isArray(
+        premiseServices?.[serviceMeterBucket],
+      )
+        ? premiseServices[serviceMeterBucket]
+        : [];
+      const nextServiceItems = currentServiceItems
+        .map(normalizePremiseServiceSnapshotItem)
+        .filter((item) => item?.trnId && item.trnId !== "NAv");
+      const existingServiceIndex = nextServiceItems.findIndex(
+        (item) => item.trnId === trnId,
+      );
+
+      if (existingServiceIndex >= 0) {
+        nextServiceItems[existingServiceIndex] = {
+          ...nextServiceItems[existingServiceIndex],
+          ...nextServiceItem,
+        };
+      } else {
+        nextServiceItems.push(nextServiceItem);
+      }
+
+      tx.create(trnRef, trnDoc);
+      tx.create(astRef, astDoc);
+      tx.set(
+        masterRef,
+        {
+          id: meterNoNormalized,
+          meterNo: meterNoNormalized,
+          meterType,
+          status: finalMeterStatus,
+          refs: {
+            asts: { id: trnId },
+            trns: { id: trnId },
+            premise: { id: premiseId },
+          },
+          parents: finalAccessData?.parents || {},
+          metadata,
         },
-        parents: finalAccessData?.parents || {},
-        metadata,
-      },
-      { merge: true },
-    );
-
-    batch.update(premiseRef, {
-      [`services.${serviceMeterBucket}`]: nextServiceItems,
-      "metadata.updatedAt": now,
-      "metadata.updatedByUid": metadata.updatedByUid,
-      "metadata.updatedByUser": metadata.updatedByUser,
-    });
-
-    if (erfRef) {
-      batch.update(erfRef, {
+        { merge: true },
+      );
+      tx.update(premiseRef, {
+        [`services.${serviceMeterBucket}`]: nextServiceItems,
         "metadata.updatedAt": now,
         "metadata.updatedByUid": metadata.updatedByUid,
         "metadata.updatedByUser": metadata.updatedByUser,
       });
-    }
 
-    await batch.commit();
+      if (erfRef) {
+        tx.update(erfRef, {
+          "metadata.updatedAt": now,
+          "metadata.updatedByUid": metadata.updatedByUid,
+          "metadata.updatedByUser": metadata.updatedByUser,
+        });
+      }
+
+      return { alreadyExists: false };
+    });
+
+    if (transactionResult?.alreadyExists) {
+      return {
+        success: true,
+        code: "TRN_ALREADY_EXISTS",
+        message: "TRN already exists and is treated as successful",
+        trnId,
+        astId: trnId,
+      };
+    }
 
     return {
       success: true,
