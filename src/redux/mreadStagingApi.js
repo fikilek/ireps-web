@@ -84,6 +84,7 @@ export const mreadStagingApi = createApi({
           const functions = getFunctions();
           const callable = httpsCallable(functions, "listMreadStagingRows");
           const payload = {
+            lmPcode: normalizeText(args?.lmPcode, ""),
             stagingId: normalizeText(args?.stagingId, ""),
             wardPcode: normalizeOptionalFilter(args?.wardPcode),
             geofence: normalizeOptionalFilter(args?.geofence),

@@ -6,11 +6,22 @@ import {
   useListMreadStagingSessionsQuery,
   useListMreadStagingRowsQuery,
 } from "../../redux/mreadStagingApi";
+import { useListMreadStagingCyclesQuery } from "../../redux/mreadStagingCyclesApi";
+import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
+import { useGeo } from "../../context/GeoContext";
 import DownloadButtons from "../../components/DownloadButtons";
 
 const DEFAULT_PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const NAv = "NAv";
+const DEFAULT_FILTERS = {
+  geofence: "ALL",
+  meterKind: "ALL",
+  meterType: "ALL",
+  phase: "ALL",
+  premiseType: "ALL",
+};
 
 function safeText(value, fallback = NAv) {
   if (value === null || value === undefined) return fallback;
@@ -35,6 +46,105 @@ function formatDateTime(value) {
 
 function markJsxOnlyComponentUsage(...components) {
   return components.length;
+}
+
+function isMeaningfulText(value) {
+  const text = safeText(value, "");
+  return Boolean(text && text !== NAv && text.toUpperCase() !== "ALL");
+}
+
+function getActiveLmPcode(activeWorkbase) {
+  return (
+    activeWorkbase?.lmPcode ||
+    activeWorkbase?.pcode ||
+    activeWorkbase?.id ||
+    activeWorkbase?.localMunicipalityId ||
+    ""
+  );
+}
+
+function getWardLabel(ward) {
+  if (!ward) return NAv;
+
+  const wardNumber = safeText(ward.wardNumber || ward.code, "");
+  if (wardNumber && wardNumber !== NAv) return `Ward ${wardNumber}`;
+
+  return safeText(ward.wardName || ward.name || ward.wardPcode);
+}
+
+function getWardPcode(ward) {
+  return safeText(ward?.wardPcode || ward?.pcode || ward?.id || ward?.code, "");
+}
+
+function mergeWardOptions(...wardSources) {
+  const byPcode = new Map();
+
+  wardSources.flat().forEach((ward) => {
+    const wardPcode = getWardPcode(ward);
+    if (!wardPcode || wardPcode === NAv) return;
+
+    byPcode.set(wardPcode, {
+      ...(byPcode.get(wardPcode) || {}),
+      ...ward,
+      id: wardPcode,
+      pcode: wardPcode,
+      wardPcode,
+    });
+  });
+
+  return Array.from(byPcode.values()).sort((left, right) => {
+    const leftNumber = Number(left.wardNumber || left.code || 0);
+    const rightNumber = Number(right.wardNumber || right.code || 0);
+
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+      return leftNumber - rightNumber;
+    }
+
+    return getWardLabel(left).localeCompare(getWardLabel(right));
+  });
+}
+
+function readCycleGeneratedAt(cycle) {
+  return (
+    cycle?.lastGenerated?.generatedAt ||
+    cycle?.lastGenerated?.at ||
+    cycle?.metadata?.updatedAt ||
+    null
+  );
+}
+
+function buildSessionFromCycle(cycle) {
+  const stagingId = safeText(cycle?.activeStagingId, "");
+  if (!isMeaningfulText(stagingId)) return null;
+
+  const summary = cycle?.summary || {};
+
+  return {
+    id: stagingId,
+    stagingId,
+    tableId: stagingId,
+    tableStatus: safeText(cycle?.status),
+    cycleId: safeText(cycle?.cycleId),
+    lmPcode: safeText(cycle?.lmPcode),
+    windowDisplay: safeText(cycle?.window?.display),
+    generatedAt: readCycleGeneratedAt(cycle),
+    generatedByUser: safeText(cycle?.lastGenerated?.generatedByUser),
+    generationIteration: Number(cycle?.lastGenerated?.iteration || 0),
+    rowCount: Number(summary?.totalRows || 0),
+    successfulReads: Number(summary?.successfulReads || 0),
+    noAccess: Number(summary?.noAccess || 0),
+    unsuccessful: Number(summary?.unsuccessful || 0),
+    mediaEvidence: Number(summary?.mediaEvidence || 0),
+    source: "cycle",
+  };
+}
+
+function sortSessions(left, right) {
+  const leftDate = safeText(left?.generatedAt, "");
+  const rightDate = safeText(right?.generatedAt, "");
+
+  if (leftDate !== rightDate) return rightDate.localeCompare(leftDate);
+  return safeText(left?.tableId, "").localeCompare(safeText(right?.tableId, ""));
 }
 
 function normalizeFilterValue(value) {
@@ -70,48 +180,86 @@ const TABLE_COLUMNS = [
 ];
 
 export default function MreadStagingPage() {
-  const { activeWorkbase, role } = useAuth();
+  const { activeWorkbase } = useAuth();
+  const { geoState, updateGeo } = useGeo();
   const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [selectedWardPcode, setSelectedWardPcode] = useState("");
   const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState({
-    wardPcode: "ALL",
-    geofence: "ALL",
-    meterKind: "ALL",
-    meterType: "ALL",
-    phase: "ALL",
-    premiseType: "ALL",
-  });
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [pageHistory, setPageHistory] = useState([null]);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
+  const activeLmPcode = safeText(getActiveLmPcode(activeWorkbase), "");
+
+  const { data: registryWardRows = [], isLoading: registryWardsLoading } =
+    useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
+  const { data: boundaryWardRows = [], isLoading: boundaryWardsLoading } =
+    useGetWardBoundariesByLmQuery(activeLmPcode || skipToken);
+  const wardRows = useMemo(
+    () => mergeWardOptions(registryWardRows, boundaryWardRows),
+    [registryWardRows, boundaryWardRows],
+  );
+  const wardsLoading = registryWardsLoading && boundaryWardsLoading;
+
   const sessionsArgs = useMemo(() => {
-    const lmPcode = safeText(activeWorkbase?.lmPcode, "");
-    if (role !== "SPU" && (!lmPcode || lmPcode === NAv)) {
-      return skipToken;
-    }
-    return { lmPcode: lmPcode === NAv ? "" : lmPcode };
-  }, [activeWorkbase?.lmPcode, role]);
+    if (!activeLmPcode || activeLmPcode === NAv) return skipToken;
+    return { lmPcode: activeLmPcode };
+  }, [activeLmPcode]);
 
   const sessionsQuery = useListMreadStagingSessionsQuery(sessionsArgs);
-  const sessions = useMemo(
+  const cyclesQuery = useListMreadStagingCyclesQuery(sessionsArgs);
+  const callableSessions = useMemo(
     () => sessionsQuery.data?.rows || [],
     [sessionsQuery.data?.rows],
   );
+  const cycleSessions = useMemo(
+    () =>
+      (cyclesQuery.data?.rows || [])
+        .map(buildSessionFromCycle)
+        .filter(Boolean),
+    [cyclesQuery.data?.rows],
+  );
+  const sessions = useMemo(() => {
+    const byId = new Map();
 
-  const selectedSessionIdEffective = selectedSessionId || sessions[0]?.id || "";
+    cycleSessions.forEach((session) => {
+      byId.set(session.id, session);
+    });
+    callableSessions.forEach((session) => {
+      byId.set(session.id, session);
+    });
+
+    return Array.from(byId.values()).sort(sortSessions);
+  }, [callableSessions, cycleSessions]);
+  const sessionsErrorMessage = sessionsQuery.error?.message || null;
+  const cyclesErrorMessage = cyclesQuery.error?.message || null;
+  const sessionsLoading = sessionsQuery.isLoading && cyclesQuery.isLoading;
+  const isUsingCycleSessionFallback =
+    callableSessions.length === 0 && cycleSessions.length > 0;
+
   const selectedSession =
-    sessions.find((session) => session.id === selectedSessionIdEffective) || null;
+    sessions.find((session) => session.id === selectedSessionId) ||
+    sessions[0] ||
+    null;
+  const selectedSessionIdEffective = selectedSession?.id || "";
+  const geoSelectedWardPcode = getWardPcode(geoState?.selectedWard);
+  const effectiveSelectedWardPcode = selectedWardPcode || geoSelectedWardPcode;
+  const selectedWard =
+    wardRows.find((ward) => ward.wardPcode === effectiveSelectedWardPcode) ||
+    geoState?.selectedWard ||
+    null;
 
   markJsxOnlyComponentUsage(DownloadButtons);
 
   const cursor = pageHistory[pageHistory.length - 1];
   const rowsQuery = useListMreadStagingRowsQuery(
-    selectedSessionIdEffective
+    selectedSessionIdEffective && effectiveSelectedWardPcode
       ? {
+          lmPcode: activeLmPcode,
           stagingId: selectedSessionIdEffective,
           pageSize,
           cursor,
-          wardPcode: filters.wardPcode,
+          wardPcode: effectiveSelectedWardPcode,
           geofence: filters.geofence,
           meterKind: filters.meterKind,
           meterType: filters.meterType,
@@ -127,9 +275,15 @@ export default function MreadStagingPage() {
     [rowsQuery.data?.rows],
   );
   const nextCursor = rowsQuery.data?.nextCursor || null;
-  const totalRows = Number(rowsQuery.data?.totalRows || rows.length);
+  const totalRows = Number(rowsQuery.data?.totalRows ?? rows.length);
+  const rowsErrorMessage = rowsQuery.error?.message || null;
+  const canLoadRows = Boolean(selectedSession && effectiveSelectedWardPcode);
+  const rowsSummaryText = !selectedSession
+    ? "Choose a staging session to begin."
+    : !effectiveSelectedWardPcode
+      ? "Select a ward scope to load staging rows."
+      : `${formatNumber(totalRows)} row(s) matching current filters`;
 
-  const wardOptions = useMemo(() => buildOptions(rows, "wardPcode"), [rows]);
   const geofenceOptions = useMemo(() => buildOptions(rows, "geofence"), [rows]);
   const meterKindOptions = useMemo(
     () => buildOptions(rows, "meterKind"),
@@ -147,6 +301,29 @@ export default function MreadStagingPage() {
 
   const handleSessionChange = (event) => {
     setSelectedSessionId(event.target.value);
+    setFilters(DEFAULT_FILTERS);
+    setSearch("");
+    setPageHistory([null]);
+  };
+
+  const handleWardChange = (event) => {
+    const nextWardPcode = event.target.value || "";
+    const nextWard =
+      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+
+    setSelectedWardPcode(nextWardPcode);
+    updateGeo({
+      selectedWard: nextWard
+        ? {
+            ...nextWard,
+            id: nextWard.wardPcode,
+            pcode: nextWard.wardPcode,
+          }
+        : null,
+      lastSelectionType: nextWardPcode ? "WARD" : null,
+    });
+    setFilters(DEFAULT_FILTERS);
+    setSearch("");
     setPageHistory([null]);
   };
 
@@ -215,8 +392,8 @@ export default function MreadStagingPage() {
               maxWidth: "54rem",
             }}
           >
-            View and inspect MREAD staging sessions. Select a session to display
-            prepared staging rows in a registry-style table.
+            View and inspect MREAD staging sessions. Select a ward scope before
+            loading prepared staging rows.
           </p>
         </div>
 
@@ -230,8 +407,8 @@ export default function MreadStagingPage() {
           }))}
           fileBaseName="mread_staging"
           scope={{
-            lmPcode: selectedSession?.lmPcode,
-            wardPcode: filters.wardPcode,
+            lmPcode: activeLmPcode || selectedSession?.lmPcode,
+            wardPcode: effectiveSelectedWardPcode,
           }}
         />
       </div>
@@ -250,10 +427,45 @@ export default function MreadStagingPage() {
           style={{
             display: "grid",
             gap: "1rem",
-            gridTemplateColumns: "minmax(200px, 1fr) 1.5fr",
+            gridTemplateColumns: "minmax(180px, 0.85fr) minmax(220px, 1fr) 1.5fr",
             alignItems: "end",
           }}
         >
+          <div>
+            <label
+              htmlFor="ward-select"
+              style={{
+                display: "block",
+                marginBottom: "0.5rem",
+                color: "#475569",
+                fontWeight: 700,
+              }}
+            >
+              Ward Scope
+            </label>
+            <select
+              id="ward-select"
+              value={effectiveSelectedWardPcode}
+              onChange={handleWardChange}
+              disabled={!activeLmPcode || wardsLoading || wardRows.length === 0}
+              style={{
+                width: "100%",
+                minWidth: "180px",
+                padding: "0.75rem 0.9rem",
+                borderRadius: "0.75rem",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+              }}
+            >
+              <option value="">Select ward</option>
+              {wardRows.map((ward) => (
+                <option key={ward.wardPcode} value={ward.wardPcode}>
+                  {getWardLabel(ward)} ({ward.wardPcode})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label
               htmlFor="session-select"
@@ -270,7 +482,7 @@ export default function MreadStagingPage() {
               id="session-select"
               value={selectedSessionIdEffective}
               onChange={handleSessionChange}
-              disabled={sessionsQuery.isLoading || sessions.length === 0}
+              disabled={sessionsLoading || sessions.length === 0}
               style={{
                 width: "100%",
                 minWidth: "220px",
@@ -287,6 +499,20 @@ export default function MreadStagingPage() {
                 </option>
               ))}
             </select>
+            {isUsingCycleSessionFallback && sessionsErrorMessage ? (
+              <p style={{ margin: "0.5rem 0 0", color: "#92400e" }}>
+                Using controller active staging IDs. Session callable returned:{" "}
+                {sessionsErrorMessage}
+              </p>
+            ) : sessionsErrorMessage ? (
+              <p style={{ margin: "0.5rem 0 0", color: "#b91c1c" }}>
+                {sessionsErrorMessage}
+              </p>
+            ) : cyclesErrorMessage ? (
+              <p style={{ margin: "0.5rem 0 0", color: "#b91c1c" }}>
+                {cyclesErrorMessage}
+              </p>
+            ) : null}
           </div>
 
           <div
@@ -393,6 +619,22 @@ export default function MreadStagingPage() {
                   marginBottom: "0.4rem",
                 }}
               >
+                Ward Scope
+              </span>
+              <span>
+                {effectiveSelectedWardPcode
+                  ? `${getWardLabel(selectedWard)} (${effectiveSelectedWardPcode})`
+                  : "No ward selected"}
+              </span>
+            </div>
+            <div style={{ color: "#475569" }}>
+              <span
+                style={{
+                  display: "block",
+                  fontWeight: 700,
+                  marginBottom: "0.4rem",
+                }}
+              >
                 Status
               </span>
               <span>{safeText(selectedSession.tableStatus)}</span>
@@ -434,28 +676,9 @@ export default function MreadStagingPage() {
             style={{
               display: "grid",
               gap: "0.75rem",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
             }}
           >
-            <label style={{ display: "grid", gap: "0.5rem" }}>
-              <span style={{ fontWeight: 700, color: "#475569" }}>Ward</span>
-              <select
-                value={filters.wardPcode}
-                onChange={handleFilterChange("wardPcode")}
-                style={{
-                  width: "100%",
-                  padding: "0.75rem 0.9rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #cbd5e1",
-                }}
-              >
-                {wardOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label style={{ display: "grid", gap: "0.5rem" }}>
               <span style={{ fontWeight: 700, color: "#475569" }}>
                 Geofence
@@ -463,6 +686,7 @@ export default function MreadStagingPage() {
               <select
                 value={filters.geofence}
                 onChange={handleFilterChange("geofence")}
+                disabled={!canLoadRows}
                 style={{
                   width: "100%",
                   padding: "0.75rem 0.9rem",
@@ -484,6 +708,7 @@ export default function MreadStagingPage() {
               <select
                 value={filters.meterType}
                 onChange={handleFilterChange("meterType")}
+                disabled={!canLoadRows}
                 style={{
                   width: "100%",
                   padding: "0.75rem 0.9rem",
@@ -505,6 +730,7 @@ export default function MreadStagingPage() {
               <select
                 value={filters.meterKind}
                 onChange={handleFilterChange("meterKind")}
+                disabled={!canLoadRows}
                 style={{
                   width: "100%",
                   padding: "0.75rem 0.9rem",
@@ -524,6 +750,7 @@ export default function MreadStagingPage() {
               <select
                 value={filters.phase}
                 onChange={handleFilterChange("phase")}
+                disabled={!canLoadRows}
                 style={{
                   width: "100%",
                   padding: "0.75rem 0.9rem",
@@ -545,6 +772,7 @@ export default function MreadStagingPage() {
               <select
                 value={filters.premiseType}
                 onChange={handleFilterChange("premiseType")}
+                disabled={!canLoadRows}
                 style={{
                   width: "100%",
                   padding: "0.75rem 0.9rem",
@@ -570,6 +798,7 @@ export default function MreadStagingPage() {
                 type="search"
                 value={search}
                 onChange={handleSearchChange}
+                disabled={!canLoadRows}
                 placeholder="Search meter, address, or geofence"
                 style={{
                   width: "100%",
@@ -588,6 +817,7 @@ export default function MreadStagingPage() {
               <select
                 value={pageSize}
                 onChange={handlePageSizeChange}
+                disabled={!canLoadRows}
                 style={{
                   minWidth: "120px",
                   padding: "0.75rem 0.9rem",
@@ -628,9 +858,7 @@ export default function MreadStagingPage() {
               Staging rows
             </p>
             <p style={{ margin: "0.35rem 0 0", color: "#64748b" }}>
-              {selectedSession
-                ? `${formatNumber(totalRows)} row(s) matching current filters`
-                : "Choose a staging session to begin."}
+              {rowsSummaryText}
             </p>
           </div>
           <div
@@ -639,7 +867,7 @@ export default function MreadStagingPage() {
             <button
               type="button"
               onClick={handlePreviousPage}
-              disabled={pageHistory.length <= 1 || rowsQuery.isLoading}
+              disabled={!canLoadRows || pageHistory.length <= 1 || rowsQuery.isLoading}
               style={{
                 padding: "0.65rem 0.95rem",
                 borderRadius: "0.85rem",
@@ -653,7 +881,7 @@ export default function MreadStagingPage() {
             <button
               type="button"
               onClick={handleNextPage}
-              disabled={!nextCursor || rowsQuery.isLoading}
+              disabled={!canLoadRows || !nextCursor || rowsQuery.isLoading}
               style={{
                 padding: "0.65rem 0.95rem",
                 borderRadius: "0.85rem",
@@ -670,6 +898,20 @@ export default function MreadStagingPage() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
+          {rowsErrorMessage ? (
+            <div
+              style={{
+                marginBottom: "1rem",
+                padding: "1rem",
+                background: "#fee2e2",
+                border: "1px solid #fca5a5",
+                borderRadius: "0.75rem",
+                color: "#991b1b",
+              }}
+            >
+              Failed to load staging rows: {rowsErrorMessage}
+            </div>
+          ) : null}
           <table
             style={{
               width: "100%",
@@ -697,7 +939,7 @@ export default function MreadStagingPage() {
               </tr>
             </thead>
             <tbody>
-              {selectedSession ? (
+              {canLoadRows ? (
                 rows.length > 0 ? (
                   rows.map((row) => (
                     <tr
@@ -755,7 +997,9 @@ export default function MreadStagingPage() {
                       textAlign: "center",
                     }}
                   >
-                    Select a staging session above to view table rows.
+                    {selectedSession
+                      ? "Select a ward scope above to view table rows."
+                      : "Select a staging session above to view table rows."}
                   </td>
                 </tr>
               )}

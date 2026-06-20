@@ -91,17 +91,6 @@ function SummaryCard({ label, value, helper }) {
   );
 }
 
-function DetailRow({ label, value }) {
-  const displayValue = value === null || value === undefined || value === "" ? "NAv" : value;
-
-  return (
-    <div style={styles.detailRow}>
-      <div style={styles.detailLabel}>{label}</div>
-      <div style={styles.detailValue}>{displayValue}</div>
-    </div>
-  );
-}
-
 export default function MreadStagingControllerPage() {
   const { role, activeWorkbase } = useAuth();
 
@@ -109,7 +98,6 @@ export default function MreadStagingControllerPage() {
   const [billingPeriod, setBillingPeriod] = useState("ALL");
   const [status, setStatus] = useState("ALL");
   const [search, setSearch] = useState("");
-  const [selectedCycle, setSelectedCycle] = useState(null);
 
   useEffect(() => {
     setLmPcode(readWorkbaseId(activeWorkbase));
@@ -162,14 +150,6 @@ export default function MreadStagingControllerPage() {
     [rows],
   );
 
-  useEffect(() => {
-    setSelectedCycle((current) => {
-      if (!rows.length) return null;
-      if (!current) return rows[0];
-      return rows.find((row) => row.cycleId === current.cycleId) || rows[0];
-    });
-  }, [rows]);
-
   const billingPeriodOptions = useMemo(() => {
     const periods = Array.from(
       new Set(rows.map((row) => row.billingPeriod).filter(Boolean)),
@@ -217,10 +197,7 @@ export default function MreadStagingControllerPage() {
     : "No DRAFT cycle returned";
 
   const errorMessage =
-    queryError?.message ||
-    queryError?.data?.message ||
-    queryError?.error ||
-    "";
+    queryError?.message || queryError?.data?.message || queryError?.error || "";
 
   return (
     <div style={styles.page}>
@@ -237,7 +214,9 @@ export default function MreadStagingControllerPage() {
       </section>
 
       <section style={styles.notice}>
-        Cycle windows are configured setup data. CLOSED / DRAFT / OPEN is computed by the backend controller from the current date. This page does not create, edit, close, delete, or generate MREAD staging rows.
+        Cycle windows are configured setup data. CLOSED / DRAFT / OPEN is
+        computed by the backend controller from the current date. This page does
+        not create, edit, close, delete, or generate MREAD staging rows.
       </section>
 
       <section style={styles.filtersCard}>
@@ -301,17 +280,35 @@ export default function MreadStagingControllerPage() {
         </button>
       </section>
 
-      {errorMessage ? <section style={styles.errorBox}>{errorMessage}</section> : null}
+      {errorMessage ? (
+        <section style={styles.errorBox}>{errorMessage}</section>
+      ) : null}
 
       <section style={styles.summaryGrid}>
-        <SummaryCard label="Total Cycles" value={summary?.total ?? rows.length} />
-        <SummaryCard label="Closed" value={summary?.closed ?? rowStatusCounts.closed} />
-        <SummaryCard label="Draft" value={summary?.draft ?? rowStatusCounts.draft} />
-        <SummaryCard label="Open" value={summary?.open ?? rowStatusCounts.open} />
-        <SummaryCard label="Active Draft" value={activeDraft?.cycleLabel || "NAv"} helper={activeDraftText} />
+        <SummaryCard
+          label="Total Cycles"
+          value={summary?.total ?? rows.length}
+        />
+        <SummaryCard
+          label="Closed"
+          value={summary?.closed ?? rowStatusCounts.closed}
+        />
+        <SummaryCard
+          label="Draft"
+          value={summary?.draft ?? rowStatusCounts.draft}
+        />
+        <SummaryCard
+          label="Open"
+          value={summary?.open ?? rowStatusCounts.open}
+        />
+        <SummaryCard
+          label="Active Draft"
+          value={activeDraft?.cycleLabel || "NAv"}
+          helper={activeDraftText}
+        />
       </section>
 
-      <section style={styles.contentGrid}>
+      <section>
         <div style={styles.tableCard}>
           <div style={styles.cardHeader}>
             <div>
@@ -333,48 +330,36 @@ export default function MreadStagingControllerPage() {
                   <th style={styles.th}>Iteration</th>
                   <th style={styles.th}>Active Staging</th>
                   <th style={styles.th}>Rows</th>
-                  <th style={styles.th}>Last Generated</th>
-                  <th style={styles.th}>Action</th>
                 </tr>
               </thead>
 
               <tbody>
                 {filteredRows.map((row) => {
-                  const selected = selectedCycle?.cycleId === row.cycleId;
-
                   return (
-                    <tr
-                      key={row.cycleId}
-                      style={selected ? styles.selectedTr : styles.tr}
-                    >
+                    <tr key={row.cycleId} style={styles.tr}>
                       <td style={styles.tdStrong}>{row.cycleLabel}</td>
                       <td style={styles.td}>{row.billingPeriod}</td>
                       <td style={styles.td}>{row.window?.display || "NAv"}</td>
                       <td style={styles.td}>
-                        <span style={{ ...styles.statusBadge, ...statusStyle(row.status) }}>
+                        <span
+                          style={{
+                            ...styles.statusBadge,
+                            ...statusStyle(row.status),
+                          }}
+                        >
                           {row.status}
                         </span>
                       </td>
                       <td style={styles.td}>{row.currentIteration}</td>
                       <td style={styles.td}>{row.activeStagingId || "NAv"}</td>
                       <td style={styles.td}>{row.summary?.totalRows ?? 0}</td>
-                      <td style={styles.td}>{formatDateTime(row.lastGenerated?.generatedAt || row.lastGenerated?.at)}</td>
-                      <td style={styles.td}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCycle(row)}
-                          style={styles.secondaryButton}
-                        >
-                          View
-                        </button>
-                      </td>
                     </tr>
                   );
                 })}
 
                 {!filteredRows.length && !isFetching ? (
                   <tr>
-                    <td colSpan="9" style={styles.emptyTd}>
+                    <td colSpan="7" style={styles.emptyTd}>
                       No MREAD staging cycles found for the selected filters.
                     </td>
                   </tr>
@@ -383,40 +368,6 @@ export default function MreadStagingControllerPage() {
             </table>
           </div>
         </div>
-
-        <aside style={styles.detailCard}>
-          <div style={styles.cardHeaderCompact}>
-            <h2 style={styles.cardTitle}>Cycle Detail</h2>
-          </div>
-
-          {selectedCycle ? (
-            <div style={styles.detailStack}>
-              <DetailRow label="Cycle ID" value={selectedCycle.cycleId} />
-              <DetailRow label="LM" value={selectedCycle.lmPcode} />
-              <DetailRow label="Billing Period" value={selectedCycle.billingPeriod} />
-              <DetailRow label="Cycle No" value={selectedCycle.cycleNoText || selectedCycle.cycleNo} />
-              <DetailRow label="Cycle Code" value={selectedCycle.cycleCode} />
-              <DetailRow label="Window" value={selectedCycle.window?.display} />
-              <DetailRow label="Start Date" value={selectedCycle.window?.startDate} />
-              <DetailRow label="End Date" value={selectedCycle.window?.endDate} />
-              <DetailRow label="Computed Status" value={normalizeCycleStatus(selectedCycle.status)} />
-              <DetailRow label="Stored Status" value={selectedCycle.storedStatus} />
-              <DetailRow label="Current Iteration" value={selectedCycle.currentIteration} />
-              <DetailRow label="Active Staging ID" value={selectedCycle.activeStagingId} />
-              <DetailRow label="Total Rows" value={selectedCycle.summary?.totalRows ?? 0} />
-              <DetailRow label="Successful Reads" value={selectedCycle.summary?.successfulReads ?? 0} />
-              <DetailRow label="No Access" value={selectedCycle.summary?.noAccess ?? 0} />
-              <DetailRow label="Unsuccessful" value={selectedCycle.summary?.unsuccessful ?? 0} />
-              <DetailRow label="Script" value={selectedCycle.metadata?.source?.scriptName} />
-              <DetailRow label="Script Version" value={selectedCycle.metadata?.source?.scriptVersion} />
-              <DetailRow label="Controller As Of Date" value={summary?.asOfDate || selectedCycle.metadata?.source?.asOfDate} />
-              <DetailRow label="Updated At" value={formatDateTime(selectedCycle.metadata?.updatedAt)} />
-              <DetailRow label="Updated By" value={selectedCycle.metadata?.updatedByUser} />
-            </div>
-          ) : (
-            <p style={styles.emptyDetail}>Select a cycle to inspect its controller metadata.</p>
-          )}
-        </aside>
       </section>
     </div>
   );
@@ -559,32 +510,8 @@ const styles = {
     fontSize: "0.78rem",
     lineHeight: 1.4,
   },
-  contentGrid: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 360px",
-    gap: "1rem",
-    alignItems: "start",
-  },
-  tableCard: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "1.25rem",
-    overflow: "hidden",
-  },
-  detailCard: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "1.25rem",
-    padding: "1rem",
-    position: "sticky",
-    top: "1rem",
-  },
   cardHeader: {
     padding: "1rem",
-    borderBottom: "1px solid #e2e8f0",
-  },
-  cardHeaderCompact: {
-    paddingBottom: "0.75rem",
     borderBottom: "1px solid #e2e8f0",
   },
   cardTitle: {
@@ -619,10 +546,6 @@ const styles = {
   tr: {
     borderBottom: "1px solid #f1f5f9",
   },
-  selectedTr: {
-    borderBottom: "1px solid #bfdbfe",
-    background: "#eff6ff",
-  },
   td: {
     padding: "0.75rem",
     color: "#334155",
@@ -649,37 +572,5 @@ const styles = {
     textAlign: "center",
     color: "#64748b",
     fontWeight: 700,
-  },
-  detailStack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.55rem",
-    paddingTop: "0.75rem",
-  },
-  detailRow: {
-    display: "grid",
-    gridTemplateColumns: "130px 1fr",
-    gap: "0.65rem",
-    alignItems: "start",
-    borderBottom: "1px solid #f1f5f9",
-    paddingBottom: "0.45rem",
-  },
-  detailLabel: {
-    color: "#64748b",
-    fontSize: "0.76rem",
-    fontWeight: 850,
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
-  },
-  detailValue: {
-    color: "#0f172a",
-    fontSize: "0.85rem",
-    fontWeight: 650,
-    overflowWrap: "anywhere",
-  },
-  emptyDetail: {
-    color: "#64748b",
-    fontSize: "0.9rem",
-    lineHeight: 1.5,
   },
 };

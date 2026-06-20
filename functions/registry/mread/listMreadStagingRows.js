@@ -103,6 +103,7 @@ export const listMreadStagingRows = onCall(async (request) => {
   const db = getFirestore();
   const data = request?.data || {};
 
+  const requestedLmPcode = normalizeText(data?.lmPcode, "");
   const stagingId = normalizeText(data?.stagingId, "");
   const wardPcode = normalizeOptionalFilter(data?.wardPcode);
   const geofence = normalizeOptionalFilter(data?.geofence);
@@ -120,6 +121,13 @@ export const listMreadStagingRows = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "stagingId is required");
   }
 
+  if (!wardPcode) {
+    throw new HttpsError(
+      "invalid-argument",
+      "wardPcode is required for MREAD staging row reads",
+    );
+  }
+
   const stagingSnap = await db
     .collection(MREAD_STAGING_COLLECTION)
     .doc(stagingId)
@@ -131,6 +139,18 @@ export const listMreadStagingRows = onCall(async (request) => {
 
   const stagingDoc = stagingSnap.data() || {};
   const lmPcode = normalizeText(stagingDoc?.lmPcode, "");
+
+  if (
+    requestedLmPcode &&
+    requestedLmPcode !== SYSTEM_NA &&
+    lmPcode &&
+    requestedLmPcode !== lmPcode
+  ) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Staging session does not match requested LM scope",
+    );
+  }
 
   const caller = await loadCallerContext({ db, request });
   await assertCanReadMreadStagingCycles({ db, caller, lmPcode });
@@ -184,6 +204,7 @@ export const listMreadStagingRows = onCall(async (request) => {
       role: caller.role,
     },
     filters: {
+      lmPcode: requestedLmPcode || null,
       wardPcode: wardPcode || null,
       geofence: geofence || null,
       meterKind: meterKind || null,

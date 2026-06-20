@@ -826,22 +826,20 @@ function getCycleAction(row = {}) {
   }
 
   const status = getCycleStatus(row);
-  if (status === "DRAFT") return "GENERATE_OPEN";
-  if (status === "CLOSED") return "VIEW";
+  if (status === "DRAFT") return "STAGING";
+  if (status === "CLOSED") return "STAGING";
   return "DISABLED";
 }
 
 function getCycleActionLabel(row = {}) {
   const action = getCycleAction(row);
-  if (action === "GENERATE_OPEN") return "Generate / Open";
-  if (action === "VIEW") return "View";
+  if (action === "STAGING") return "Staging";
   return "Disabled";
 }
 
 function getCycleActionTone(row = {}) {
   const action = getCycleAction(row);
-  if (action === "GENERATE_OPEN") return "primary";
-  if (action === "VIEW") return "secondary";
+  if (action === "STAGING") return "primary";
   return "disabled";
 }
 
@@ -1787,7 +1785,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     const action = getCycleAction(row);
     setSelectedCycle(row);
 
-    if (action === "GENERATE_OPEN") {
+    if (action === "STAGING") {
       const cycleId = row?.cycleId || row?.id;
 
       if (!cycleId) {
@@ -1828,23 +1826,9 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
           error?.message ||
           error?.error ||
           "Could not generate MREAD staging.";
-        setPhaseNotice(`Generate / Open failed for ${getCycleLabel(row)}: ${message}`);
+        setPhaseNotice(`Staging failed for ${getCycleLabel(row)}: ${message}`);
         return;
       }
-    }
-
-    if (action === "VIEW") {
-      if (row.activeStagingId) {
-        setPhaseNotice(
-          `View selected for ${getCycleLabel(row)}. Active staging pack: ${row.activeStagingId}. Staging table route/viewer is wired in the next UI step.`,
-        );
-        return;
-      }
-
-      setPhaseNotice(
-        `View selected for ${getCycleLabel(row)}, but this cycle has no activeStagingId yet.`,
-      );
-      return;
     }
 
     setPhaseNotice(getCycleActionHelp(row));
@@ -2062,7 +2046,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                                 title={getCycleActionHelp(row)}
                               >
                                 {isGenerating && actionTone === "primary"
-                                  ? "Generating..."
+                                  ? "Staging..."
                                   : getCycleActionLabel(row)}
                               </button>
                             </td>
@@ -3175,6 +3159,7 @@ export default function MreadRegistryPage() {
           <strong>{formatNumber(totals.withEvidence)}</strong>
         </div>
       </section>
+
 
       <section className="table-panel">
         {!effectiveSelectedWardPcode ? (

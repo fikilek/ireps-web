@@ -109,53 +109,74 @@ function serializeSession(docSnap) {
 }
 
 export const listMreadStagingSessions = onCall(async (request) => {
-  const db = getFirestore();
-  const data = request?.data || {};
+  try {
+    const db = getFirestore();
+    const data = request?.data || {};
 
-  const lmPcode = normalizeText(data?.lmPcode, "");
-  const rawLimit = Number(data?.limit || 200);
-  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
+    const lmPcode = normalizeText(data?.lmPcode, "");
+    const rawLimit = Number(data?.limit || 200);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
 
-  const caller = await loadCallerContext({ db, request });
-  await assertCanReadMreadStagingCycles({ db, caller, lmPcode });
+    const caller = await loadCallerContext({ db, request });
+    await assertCanReadMreadStagingCycles({ db, caller, lmPcode });
 
-  let query = db.collection(MREAD_STAGING_COLLECTION);
-  if (isMeaningful(lmPcode)) {
-    query = query.where("lmPcode", "==", lmPcode);
-  } else if (caller.role !== "SPU") {
-    throw new HttpsError(
-      "invalid-argument",
-      "lmPcode is required for non-SPU users",
-    );
-  }
+    let query = db.collection(MREAD_STAGING_COLLECTION);
+    if (isMeaningful(lmPcode)) {
+      query = query.where("lmPcode", "==", lmPcode);
+    } else if (caller.role !== "SPU") {
+      throw new HttpsError(
+        "invalid-argument",
+        "lmPcode is required for non-SPU users",
+      );
+    }
 
-  if (limit > 0) {
-    query = query.limit(limit);
-  }
+    if (limit > 0) {
+      query = query.limit(limit);
+    }
 
-  const snap = await query.get();
-  const sessions = snap.docs.map(serializeSession).sort(sortSessions);
+    const snap = await query.get();
+    const sessions = snap.docs.map(serializeSession).sort(sortSessions);
 
-  logger.info("listMreadStagingSessions -- SUCCESS", {
-    requestedByUid: caller.uid,
-    requestedByUser: caller.actorName,
-    role: caller.role,
-    auLmPcode: lmPcode || "ALL",
-    sessionCount: sessions.length,
-  });
-
-  return {
-    ok: true,
-    collection: MREAD_STAGING_COLLECTION,
-    filters: {
-      lmPcode: lmPcode || null,
-    },
-    access: {
+    logger.info("listMreadStagingSessions -- SUCCESS", {
+      requestedByUid: caller.uid,
+      requestedByUser: caller.actorName,
       role: caller.role,
-    },
-    rows: sessions,
-    summary: {
-      totalSessions: sessions.length,
-    },
-  };
+      auLmPcode: lmPcode || "ALL",
+      sessionCount: sessions.length,
+    });
+
+    return {
+      ok: true,
+      collection: MREAD_STAGING_COLLECTION,
+      filters: {
+        lmPcode: lmPcode || null,
+      },
+      access: {
+        role: caller.role,
+      },
+      rows: sessions,
+      summary: {
+        totalSessions: sessions.length,
+      },
+    };
+  } catch (error) {
+    logger.error("listMreadStagingSessions -- FAILED", {
+      code: error?.code || "LIST_MREAD_STAGING_SESSIONS_FAILED",
+      message: error?.message || String(error),
+    });
+
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+
+    return {
+      ok: false,
+      code: "LIST_MREAD_STAGING_SESSIONS_FAILED",
+      message: error?.message || "Could not load MREAD staging sessions",
+      rows: [],
+      summary: {
+        totalSessions: 0,
+      },
+    };
+  }
 });

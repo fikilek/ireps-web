@@ -95,7 +95,8 @@ export const mreadStagingCyclesApi = createApi({
               error: {
                 status: result?.code || "MREAD_STAGING_CYCLES_ERROR",
                 data: result,
-                message: result?.message || "Could not load MREAD staging cycles",
+                message:
+                  result?.message || "Could not load MREAD staging cycles",
               },
             };
           }
@@ -143,6 +144,7 @@ export const mreadStagingCyclesApi = createApi({
 
           const payload = {
             cycleId,
+            manualMode: true,
           };
 
           if (args?.dryRun === true) {
