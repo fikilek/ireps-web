@@ -28,6 +28,7 @@ import { usersApi } from "./usersApi";
 import { geofencesApi } from "./geofencesApi";
 import { registryMreadApi } from "./registryMreadApi";
 import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
+import { mreadStagingApi } from "./mreadStagingApi";
 
 export const store = configureStore({
   reducer: {
@@ -38,6 +39,7 @@ export const store = configureStore({
     [registryAccountsApi.reducerPath]: registryAccountsApi.reducer,
     [registryMreadApi.reducerPath]: registryMreadApi.reducer,
     [mreadStagingCyclesApi.reducerPath]: mreadStagingCyclesApi.reducer,
+    [mreadStagingApi.reducerPath]: mreadStagingApi.reducer,
 
     [reportNoAccessApi.reducerPath]: reportNoAccessApi.reducer,
     [reportUserActivityApi.reducerPath]: reportUserActivityApi.reducer,
@@ -70,6 +72,7 @@ export const store = configureStore({
       .concat(registryAccountsApi.middleware)
       .concat(registryMreadApi.middleware)
       .concat(mreadStagingCyclesApi.middleware)
+      .concat(mreadStagingApi.middleware)
       .concat(reportNoAccessApi.middleware)
       .concat(reportUserActivityApi.middleware)
       .concat(reportAnomalyApi.middleware)

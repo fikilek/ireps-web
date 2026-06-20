@@ -66,6 +66,11 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            label: "MREAD Staging",
+            path: "/registries/mread-staging",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "Account Registry",
             path: "/registries/accounts",
             allowedRoles: MANAGEMENT_ROLES,

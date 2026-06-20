@@ -17,6 +17,7 @@ import PremisesRegistryPage from "../pages/registries/PremisesRegistryPage";
 import MetersRegistryPage from "../pages/registries/MetersRegistryPage";
 import MreadRegistryPage from "../pages/registries/MreadRegistryPage";
 import AccountsRegistryPage from "../pages/registries/AccountsRegistryPage";
+import MreadStagingPage from "../pages/registries/MreadStagingPage";
 
 import ReportsLandingPage from "../pages/reports/ReportsLandingPage";
 import NoAccessReportPage from "../pages/reports/NoAccessReportPage";
@@ -128,6 +129,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MreadRegistryPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/registries/mread-staging"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MreadStagingPage />
               </RoleRoute>
             }
           />

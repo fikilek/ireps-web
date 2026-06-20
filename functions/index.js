@@ -99,6 +99,8 @@ import {
   rebuildRegistryMreadCallable,
   rebuildRegistryMreadRowCallable,
   listMreadStagingCycles,
+  listMreadStagingSessions,
+  listMreadStagingRows,
   generateMreadStaging,
 } from "./registry/mread/index.js";
 
@@ -145,6 +147,8 @@ export {
   rebuildRegistryMreadCallable,
   rebuildRegistryMreadRowCallable,
   listMreadStagingCycles,
+  listMreadStagingSessions,
+  listMreadStagingRows,
   generateMreadStaging,
 };
 
