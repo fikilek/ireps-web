@@ -1,4 +1,4 @@
-// functions/src/mread/generateMreadStaging.js
+// functions/registry/mread/generateMreadStaging.js
 // iREPS MREAD Staging v2 — Phase 1 backend generator
 // ES module version for functions/package.json "type": "module".
 
@@ -6,6 +6,7 @@ import admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
+import { computeMreadStagingCycleControllerState } from "./mreadStagingCycleController.v2.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -23,8 +24,16 @@ const COLLECTIONS = {
 const NAv = "NAv";
 const BATCH_LIMIT = 450;
 const GENERATION_LOCK_MINUTES = 15;
-const ALLOWED_GENERATION_STATUSES = new Set(["DRAFT"]);
-const BLOCKED_GENERATION_STATUSES = new Set(["CLOSED", "FUTURE"]);
+const LOCKED_STAGING_STATUSES = new Set([
+  "LOCKED",
+  "FINAL",
+  "FINALISED",
+  "FINALIZED",
+  "CLOSED",
+  "APPROVED",
+  "APPROVED_FIELD_PACK",
+  "AUTO_LOCKED",
+]);
 const SUCCESSFUL_OUTCOME = "SUCCESSFUL_READING";
 const NO_ACCESS_OUTCOME = "NO_ACCESS";
 const UNSUCCESSFUL_OUTCOME = "UNSUCCESSFUL_READING";
@@ -61,6 +70,34 @@ function firstValue(...values) {
 function firstText(...values) {
   const value = firstValue(...values);
   return isMeaningfulText(value) ? String(value).trim() : NAv;
+}
+
+function normalizeToken(value) {
+  return normalizeText(value, "")
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function normalizeStagingMeterKind(...values) {
+  for (const value of values) {
+    const token = normalizeToken(value);
+    if (["WATER", "WTR"].includes(token)) return "WATER";
+    if (["ELECTRICITY", "ELECTRIC", "ELEC", "ELC"].includes(token)) {
+      return "ELECTRICITY";
+    }
+  }
+
+  return NAv;
+}
+
+function normalizeStagingMeterType(...values) {
+  for (const value of values) {
+    const token = normalizeToken(value);
+    if (["CONVENTIONAL", "CONV"].includes(token)) return "CONVENTIONAL";
+    if (["PREPAID", "PRE_PAID"].includes(token)) return "PREPAID";
+  }
+
+  return NAv;
 }
 
 function toNumberOrNull(value) {
@@ -128,6 +165,11 @@ function safeDocId(value) {
     .replace(/[\\/]/g, "_")
     .replace(/[^a-zA-Z0-9_.:-]/g, "_")
     .slice(0, 900);
+}
+
+function stableKey(value) {
+  const text = firstText(value);
+  return text === NAv ? "" : text.toUpperCase();
 }
 
 function getCycleWindow(cycle = {}) {
@@ -219,6 +261,26 @@ function getMeterKey(row = {}) {
   );
 }
 
+function getMeterIndexKeys(row = {}) {
+  return [
+    row?.refs?.astId,
+    row?.astId,
+    row?.sourceAstId,
+    row?.meter?.astId,
+    row?.refs?.meterId,
+    row?.meter?.meterId,
+    row?.meterId,
+    row?.meterNo,
+    row?.meter?.astNo,
+    row?.meter?.meterNo,
+    row?.astNo,
+    row?.rowId,
+    row?.id,
+  ]
+    .map(stableKey)
+    .filter(Boolean);
+}
+
 function getMeterNo(row = {}) {
   return firstText(row?.meter?.astNo, row?.meter?.meterNo, row?.meterNo, row?.astNo);
 }
@@ -226,28 +288,6 @@ function getMeterNo(row = {}) {
 function getCurrentReadingValue(row = {}) {
   return toNumberOrNull(
     firstValue(row?.reading?.currentReading, row?.currentReading, row?.reading),
-  );
-}
-
-function getPreviousReadingValue(row = {}) {
-  return toNumberOrNull(
-    firstValue(
-      row?.reading?.previousReading,
-      row?.reading?.prevReading,
-      row?.previousReading,
-      row?.prevReading,
-    ),
-  );
-}
-
-function getPreviousReadingDate(row = {}) {
-  return firstValue(
-    row?.reading?.previousReadingDate,
-    row?.reading?.prevReadingDate,
-    row?.previousReadingDate,
-    row?.prevReadingDate,
-    row?.reading?.previousReadingAt,
-    row?.previousReadingAt,
   );
 }
 
@@ -346,8 +386,22 @@ function getPremiseAddress(row = {}) {
 function readContext(row = {}) {
   return {
     meterNo: getMeterNo(row),
-    meterKind: firstText(row?.meter?.meterKind, row?.meterKind),
-    meterType: firstText(row?.meter?.meterType, row?.meterType),
+    meterKind: normalizeStagingMeterKind(
+      row?.meter?.meterType,
+      row?.meter?.serviceType,
+      row?.serviceType,
+      row?.meterType,
+      row?.meter?.meterKind,
+      row?.meterKind,
+    ),
+    meterType: normalizeStagingMeterType(
+      row?.meter?.meterKind,
+      row?.meterKind,
+      row?.meter?.installationType,
+      row?.installationType,
+      row?.meter?.meterType,
+      row?.meterType,
+    ),
     phase: firstText(row?.meter?.phase, row?.meter?.meterPhase, row?.phase),
     category: firstText(row?.meter?.category, row?.meter?.meterCategory, row?.category),
     premiseAddress: getPremiseAddress(row),
@@ -381,54 +435,137 @@ function pickLatest(rows = []) {
 function selectCurrentReading(rowsInWindow = []) {
   return pickLatest(
     rowsInWindow.filter(
-      (row) => isSuccessfulReading(row) && !isFakeSeed(row) && getCurrentReadingValue(row) !== null,
+      (row) => isSuccessfulReading(row) && getCurrentReadingValue(row) !== null,
     ),
   );
 }
 
-function selectPreviousReading({ allRowsForMeter = [], currentRow = null }) {
-  if (!currentRow) return { value: null, date: null, sourceId: NAv, sourceType: "NONE" };
+function getStagingRowUsedReadingValue(row = {}) {
+  return toNumberOrNull(
+    firstValue(
+      row?.readingUse?.usedReading,
+      row?.readingUse?.reading,
+      row?.finalReading?.reading,
+      row?.finalReading?.currentReading,
+      row?.billing?.usedReading,
+      row?.billing?.readingUsed,
+      row?.usedReading?.value,
+      row?.currentReading,
+    ),
+  );
+}
 
-  const directPrevious = getPreviousReadingValue(currentRow);
-  if (directPrevious !== null) {
-    return {
-      value: directPrevious,
-      date: toTimestampOrNull(getPreviousReadingDate(currentRow)),
-      sourceId: firstText(
-        currentRow?.reading?.previousReadingSourceId,
-        currentRow?.refs?.previousReadingSourceId,
-        currentRow?.previousReadingSourceId,
-      ),
-      sourceType: "CURRENT_ROW_PREVIOUS_READING",
-    };
+function getStagingRowUsedReadingDate(row = {}) {
+  return firstValue(
+    row?.readingUse?.usedReadingDate,
+    row?.readingUse?.readingDate,
+    row?.finalReading?.readingDate,
+    row?.finalReading?.currentReadingDate,
+    row?.billing?.usedReadingDate,
+    row?.usedReading?.date,
+    row?.currentReadingDate,
+  );
+}
+
+function findBaselineStagingEntry({ baselineReadingIndex, meterKey, context }) {
+  if (!baselineReadingIndex?.rowsByKey) return null;
+
+  const keys = [
+    stableKey(meterKey),
+    ...getMeterIndexKeys({
+      rowId: meterKey,
+      meterNo: context?.meterNo,
+      refs: context?.refs,
+    }),
+  ].filter(Boolean);
+
+  for (const key of keys) {
+    const entry = baselineReadingIndex.rowsByKey.get(key);
+    if (entry) return entry;
   }
 
-  const currentMs = getRegistryRowDateMs(currentRow);
+  return null;
+}
+
+function selectPreviousReading({
+  meterKey,
+  context,
+  baselineReadingIndex,
+  baselineRowsInWindow = [],
+}) {
+  const baselineEntry = findBaselineStagingEntry({
+    baselineReadingIndex,
+    meterKey,
+    context,
+  });
+
+  if (baselineEntry) {
+    const value = getStagingRowUsedReadingValue(baselineEntry.row);
+    if (value !== null) {
+      return {
+        value,
+        date: toTimestampOrNull(getStagingRowUsedReadingDate(baselineEntry.row)),
+        sourceId: firstText(
+          baselineEntry.row?.refs?.currentRegistryMreadId,
+          baselineEntry.row?.readingUse?.sourceRegistryMreadId,
+          baselineEntry.rowId,
+        ),
+        sourceType: "LOCKED_MREAD_STAGING",
+        sourceStatus: baselineEntry.tableStatus,
+        stagingId: baselineEntry.stagingId,
+        stagingRowId: baselineEntry.rowId,
+        cycleId: baselineEntry.cycleId,
+        usedForBilling: baselineEntry.usedForBilling,
+      };
+    }
+  }
+
   const previousRow = pickLatest(
-    allRowsForMeter.filter((row) => {
-      if (row === currentRow) return false;
-      if (!isSuccessfulReading(row)) return false;
-      if (getCurrentReadingValue(row) === null) return false;
-      const rowMs = getRegistryRowDateMs(row);
-      return rowMs > 0 && rowMs < currentMs;
-    }),
+    baselineRowsInWindow.filter(
+      (row) => isSuccessfulReading(row) && getCurrentReadingValue(row) !== null,
+    ),
   );
 
-  if (!previousRow) return { value: null, date: null, sourceId: NAv, sourceType: "NONE" };
+  if (!previousRow) {
+    return { value: null, date: null, sourceId: NAv, sourceType: "NONE" };
+  }
 
   return {
     value: getCurrentReadingValue(previousRow),
     date: toTimestampOrNull(getRegistryRowDate(previousRow)),
     sourceId: previousRow.__id || previousRow.id || NAv,
-    sourceType: isFakeSeed(previousRow) ? "FAKE_SEED_BASELINE" : "REGISTRY_MREAD",
+    registryMreadId: previousRow.__id || previousRow.id || NAv,
+    sourceType: isFakeSeed(previousRow)
+      ? "REGISTRY_MREAD_BASELINE_FAKE_SEED"
+      : "REGISTRY_MREAD_BASELINE",
+    cycleId: baselineReadingIndex?.cycleId || NAv,
   };
 }
 
-function buildStagingRow({ meterKey, rowsInWindow, allRowsForMeter, window }) {
+function buildStagingRow({
+  meterKey,
+  rowsInWindow,
+  allRowsForMeter,
+  window,
+  baselineWindow,
+  baselineReadingIndex,
+  cycleId,
+  baselineCycleId,
+}) {
   const currentRow = selectCurrentReading(rowsInWindow);
   const contextRow = currentRow || pickLatest(rowsInWindow) || pickLatest(allRowsForMeter) || {};
   const context = readContext(contextRow);
-  const previous = selectPreviousReading({ allRowsForMeter, currentRow });
+  const baselineRowsInWindow = baselineWindow
+    ? allRowsForMeter.filter((row) =>
+        isRowInsideWindow(row, baselineWindow.startDate, baselineWindow.endDate),
+      )
+    : [];
+  const previous = selectPreviousReading({
+    meterKey,
+    context,
+    baselineReadingIndex,
+    baselineRowsInWindow,
+  });
 
   const currentReading = currentRow ? getCurrentReadingValue(currentRow) : null;
   const currentReadingDate = currentRow ? toTimestampOrNull(getRegistryRowDate(currentRow)) : null;
@@ -449,6 +586,9 @@ function buildStagingRow({ meterKey, rowsInWindow, allRowsForMeter, window }) {
   if (consumption !== null && consumption < 0) warnings.push("NEGATIVE_CONSUMPTION_READING_WENT_BACKWARDS");
   if (!currentRow && rowsInWindow.length > 0) warnings.push("NO_SUCCESSFUL_READING_IN_WINDOW");
   if (currentRow && prevReading === null) warnings.push("NO_PREVIOUS_READING_AVAILABLE");
+  if (previous.sourceType?.startsWith("REGISTRY_MREAD_BASELINE")) {
+    warnings.push("PREVIOUS_READING_USED_REGISTRY_BASELINE_FALLBACK");
+  }
 
   return {
     rowId,
@@ -484,6 +624,10 @@ function buildStagingRow({ meterKey, rowsInWindow, allRowsForMeter, window }) {
       erfId: context.refs.erfId,
       currentRegistryMreadId,
       previousReadingSourceId: previous.sourceId,
+      previousStagingId: previous.stagingId || NAv,
+      previousStagingRowId: previous.stagingRowId || NAv,
+      previousCycleId: previous.cycleId || baselineCycleId || NAv,
+      previousRegistryMreadId: previous.registryMreadId || previous.sourceId || NAv,
       registryMreadIdsInCycle,
     },
 
@@ -506,9 +650,33 @@ function buildStagingRow({ meterKey, rowsInWindow, allRowsForMeter, window }) {
       end: window.endTimestamp,
     },
 
+    readingUse: {
+      usedForBilling: false,
+      usedReading: currentReading,
+      usedReadingDate: currentReadingDate,
+      sourceRegistryMreadId: currentRegistryMreadId,
+      cycleId,
+      lockedAt: null,
+      lockedByUid: null,
+      lockedByUser: null,
+      lockSource: null,
+    },
+
+    readingLineage: {
+      currentCycleId: cycleId,
+      baselineCycleId: baselineCycleId || NAv,
+      previousReadingSourceType: previous.sourceType,
+      previousReadingSourceStatus: previous.sourceStatus || NAv,
+      previousStagingId: previous.stagingId || NAv,
+      previousStagingRowId: previous.stagingRowId || NAv,
+      previousRegistryMreadId: previous.registryMreadId || previous.sourceId || NAv,
+    },
+
     dataQuality: {
       warnings,
       previousReadingSourceType: previous.sourceType,
+      previousReadingSourceStatus: previous.sourceStatus || NAv,
+      currentReadingIsFakeSeed: currentRow ? isFakeSeed(currentRow) : false,
       hasCurrentReading: currentReading !== null,
       hasPreviousReading: prevReading !== null,
       hasConsumption: consumption !== null,
@@ -555,6 +723,7 @@ function readRole(auth, userDoc) {
   return firstText(
     auth?.token?.role,
     auth?.token?.userRole,
+    userDoc?.employment?.role,
     userDoc?.role,
     userDoc?.userRole,
     userDoc?.profile?.role,
@@ -563,36 +732,69 @@ function readRole(auth, userDoc) {
 
 function roleCanGenerate(role) {
   const cleanRole = normalizeUpper(role, "").replace(/\s+/g, "");
+
+  // Use the existing iREPS role codes. Keep ADMIN aliases only as backward-compatible
+  // aliases, but do not rely on them as the canonical role names.
   return new Set([
+    "ADM",
     "ADMIN",
     "SUPER_ADMIN",
     "SUPERADMIN",
-    "MNG",
     "SPU",
+    "MNG",
     "SPV(MNC)",
     "SPV_MNC",
     "MNC",
   ]).has(cleanRole);
 }
 
+function pushWorkbaseScopeValues(values, workbase) {
+  if (!workbase) return;
+
+  if (typeof workbase === "string") {
+    values.push(workbase);
+    return;
+  }
+
+  values.push(
+    workbase?.lmPcode,
+    workbase?.pcode,
+    workbase?.id,
+    workbase?.localMunicipalityId,
+  );
+}
+
 function userHasLmScope(auth, userDoc, lmPcode) {
   const values = [
     auth?.token?.lmPcode,
     auth?.token?.pcode,
-    auth?.token?.activeWorkbase,
     userDoc?.lmPcode,
     userDoc?.pcode,
-    userDoc?.activeWorkbase?.lmPcode,
-    userDoc?.activeWorkbase?.pcode,
-    userDoc?.activeWorkbase?.id,
   ];
 
-  const workbases = Array.isArray(userDoc?.workbases) ? userDoc.workbases : [];
-  for (const workbase of workbases) {
-    values.push(workbase?.lmPcode, workbase?.pcode, workbase?.id, workbase?.localMunicipalityId);
+  pushWorkbaseScopeValues(values, auth?.token?.activeWorkbase);
+  pushWorkbaseScopeValues(values, userDoc?.activeWorkbase);
+  pushWorkbaseScopeValues(values, userDoc?.access?.activeWorkbase);
+
+  const claimWorkbases = Array.isArray(auth?.token?.workbases)
+    ? auth.token.workbases
+    : [];
+  const rootWorkbases = Array.isArray(userDoc?.workbases) ? userDoc.workbases : [];
+  const accessWorkbases = Array.isArray(userDoc?.access?.workbases)
+    ? userDoc.access.workbases
+    : [];
+
+  for (const workbase of [
+    ...claimWorkbases,
+    ...rootWorkbases,
+    ...accessWorkbases,
+  ]) {
+    pushWorkbaseScopeValues(values, workbase);
   }
 
-  const meaningfulValues = values.map((value) => normalizeText(value, "")).filter(Boolean);
+  const meaningfulValues = values
+    .map((value) => normalizeText(value, ""))
+    .filter(Boolean);
 
   // If the user document does not expose workbase fields yet, do not hard-fail here.
   // Firestore/Callable security can be tightened later once the canonical user claims are locked.
@@ -637,6 +839,71 @@ async function fetchRegistryRowsForLm(lmPcode) {
   return snapshot.docs.map((doc) => ({ __id: doc.id, ...doc.data() }));
 }
 
+async function fetchCycleRowsForLm(lmPcode) {
+  const snapshot = await db
+    .collection(COLLECTIONS.stagingCycles)
+    .where("lmPcode", "==", lmPcode)
+    .get();
+
+  return snapshot.docs.map((doc) => ({ id: doc.id, cycleId: doc.id, ...doc.data() }));
+}
+
+async function fetchCycleForGeneration(cycleRef) {
+  const cycleSnap = await cycleRef.get();
+  if (!cycleSnap.exists) {
+    throw new HttpsError("not-found", "MREAD staging cycle not found.", {
+      code: "CYCLE_NOT_FOUND",
+    });
+  }
+
+  const cycle = { id: cycleSnap.id, cycleId: cycleSnap.id, ...cycleSnap.data() };
+  const lmPcode = firstText(cycle.lmPcode);
+  if (!isMeaningfulText(lmPcode)) {
+    throw new HttpsError("failed-precondition", "Cycle LM is missing.", {
+      code: "CYCLE_LM_MISSING",
+    });
+  }
+
+  return { cycle, lmPcode };
+}
+
+async function resolveControllerStateForLm(lmPcode) {
+  const cycleRows = await fetchCycleRowsForLm(lmPcode);
+
+  try {
+    return computeMreadStagingCycleControllerState(cycleRows);
+  } catch (error) {
+    throw new HttpsError(
+      "failed-precondition",
+      error?.message || "Unable to compute MREAD staging draft cycle.",
+      {
+        code: error?.message?.split(":")[0] || "MREAD_STAGING_CONTROLLER_FAILED",
+        lmPcode,
+      },
+    );
+  }
+}
+
+function assertRequestedCycleIsComputedDraft(cycleId, controllerState) {
+  const activeDraftId = controllerState?.activeDraft?.cycleId;
+
+  if (cycleId !== activeDraftId) {
+    throw new HttpsError(
+      "failed-precondition",
+      `Requested cycle ${cycleId || NAv} is not the computed MREAD DRAFT cycle ${activeDraftId || NAv}.`,
+      {
+        code: "MREAD_STAGING_NOT_COMPUTED_DRAFT",
+        requestedCycleId: cycleId || null,
+        activeDraftCycleId: activeDraftId || null,
+        liveCycleId: controllerState?.liveCycle?.cycleId || null,
+        baselineCycleId: controllerState?.baselineCycle?.cycleId || null,
+        asOfDate: controllerState?.asOfDate || null,
+        rule: controllerState?.rule || "LIVE_MINUS_ONE_DRAFT",
+      },
+    );
+  }
+}
+
 function groupRowsByMeter(rows = []) {
   const groups = new Map();
 
@@ -650,7 +917,14 @@ function groupRowsByMeter(rows = []) {
   return groups;
 }
 
-function buildRowsForCycle({ registryRows, window }) {
+function buildRowsForCycle({
+  registryRows,
+  window,
+  baselineWindow,
+  baselineReadingIndex,
+  cycleId,
+  baselineCycleId,
+}) {
   const groups = groupRowsByMeter(registryRows);
   const stagingRows = [];
 
@@ -662,7 +936,16 @@ function buildRowsForCycle({ registryRows, window }) {
     if (!rowsInWindow.length) continue;
 
     stagingRows.push(
-      buildStagingRow({ meterKey, rowsInWindow, allRowsForMeter, window }),
+      buildStagingRow({
+        meterKey,
+        rowsInWindow,
+        allRowsForMeter,
+        window,
+        baselineWindow,
+        baselineReadingIndex,
+        cycleId,
+        baselineCycleId,
+      }),
     );
   }
 
@@ -683,6 +966,174 @@ async function commitOpsInBatches(ops = []) {
   }
 }
 
+function getStagingPackStatus(data = {}) {
+  return normalizeUpper(
+    firstValue(
+      data?.tableStatus,
+      data?.status,
+      data?.generation?.status,
+      data?.readingUseLock?.status,
+      data?.finalization?.status,
+    ),
+    "",
+  );
+}
+
+function isLockedStagingPack(data = {}) {
+  const status = getStagingPackStatus(data);
+  return (
+    LOCKED_STAGING_STATUSES.has(status) ||
+    data?.readingUseLock?.locked === true ||
+    data?.finalization?.locked === true ||
+    data?.locked === true
+  );
+}
+
+function getStagingPackDateMs(data = {}) {
+  return dateMs(
+    firstValue(
+      data?.readingUseLock?.lockedAt,
+      data?.finalization?.finalizedAt,
+      data?.finalization?.lockedAt,
+      data?.closedAt,
+      data?.lockedAt,
+      data?.generation?.generatedAt,
+      data?.metadata?.updatedAt,
+      data?.metadata?.createdAt,
+    ),
+  );
+}
+
+async function loadLockedStagingPackById(stagingId, expectedCycleId) {
+  if (!isMeaningfulText(stagingId)) return null;
+
+  const stagingRef = db.collection(COLLECTIONS.staging).doc(stagingId);
+  const stagingSnap = await stagingRef.get();
+  if (!stagingSnap.exists) return null;
+
+  const staging = { stagingId: stagingSnap.id, ...stagingSnap.data() };
+  if (expectedCycleId && staging.cycleId !== expectedCycleId) return null;
+  if (!isLockedStagingPack(staging)) return null;
+
+  const rowsSnap = await stagingRef.collection("rows").get();
+  return {
+    stagingId: stagingSnap.id,
+    data: staging,
+    tableStatus: getStagingPackStatus(staging),
+    rows: rowsSnap.docs.map((doc) => ({ rowId: doc.id, ...doc.data() })),
+  };
+}
+
+async function findLockedStagingPackForCycle(cycle = {}) {
+  const cycleId = firstText(cycle.cycleId, cycle.id);
+  if (!isMeaningfulText(cycleId)) return null;
+
+  const candidateIds = [
+    cycle?.lockedStagingId,
+    cycle?.finalStagingId,
+    cycle?.finalizedStagingId,
+    cycle?.closed?.stagingId,
+    cycle?.lastLocked?.stagingId,
+    cycle?.lastFinalized?.stagingId,
+    cycle?.activeStagingId,
+    cycle?.lastGenerated?.stagingId,
+  ];
+
+  for (const candidateId of candidateIds) {
+    const lockedPack = await loadLockedStagingPackById(candidateId, cycleId);
+    if (lockedPack) return lockedPack;
+  }
+
+  const stagingSnapshot = await db
+    .collection(COLLECTIONS.staging)
+    .where("cycleId", "==", cycleId)
+    .get();
+
+  const candidates = stagingSnapshot.docs
+    .map((doc) => ({ stagingId: doc.id, ...doc.data() }))
+    .filter(isLockedStagingPack)
+    .sort((left, right) => getStagingPackDateMs(right) - getStagingPackDateMs(left));
+
+  if (!candidates.length) return null;
+
+  return loadLockedStagingPackById(candidates[0].stagingId, cycleId);
+}
+
+function indexBaselineStagingRow(rowsByKey, entry) {
+  for (const key of getMeterIndexKeys(entry.row)) {
+    if (!rowsByKey.has(key)) rowsByKey.set(key, entry);
+  }
+}
+
+async function buildBaselineReadingIndex(baselineCycle = null) {
+  if (!baselineCycle) {
+    return {
+      sourceType: "NONE",
+      rowsByKey: new Map(),
+      rowCount: 0,
+      stagingId: null,
+      tableStatus: NAv,
+      cycleId: NAv,
+    };
+  }
+
+  const lockedPack = await findLockedStagingPackForCycle(baselineCycle);
+  if (!lockedPack) {
+    return {
+      sourceType: "REGISTRY_MREAD_BASELINE_FALLBACK",
+      rowsByKey: new Map(),
+      rowCount: 0,
+      stagingId: null,
+      tableStatus: NAv,
+      cycleId: baselineCycle.cycleId || baselineCycle.id || NAv,
+    };
+  }
+
+  const rowsByKey = new Map();
+  for (const row of lockedPack.rows) {
+    indexBaselineStagingRow(rowsByKey, {
+      row,
+      rowId: row.rowId,
+      stagingId: lockedPack.stagingId,
+      tableStatus: lockedPack.tableStatus,
+      cycleId: lockedPack.data?.cycleId || baselineCycle.cycleId || NAv,
+      usedForBilling: row?.readingUse?.usedForBilling === true,
+    });
+  }
+
+  return {
+    sourceType: "LOCKED_MREAD_STAGING",
+    rowsByKey,
+    rowCount: lockedPack.rows.length,
+    stagingId: lockedPack.stagingId,
+    tableStatus: lockedPack.tableStatus,
+    cycleId: lockedPack.data?.cycleId || baselineCycle.cycleId || NAv,
+  };
+}
+
+function buildControllerTrace(controllerState = {}) {
+  return {
+    asOfDate: controllerState.asOfDate || NAv,
+    timezone: controllerState.timezone || NAv,
+    rule: controllerState.rule || "LIVE_MINUS_ONE_DRAFT",
+    statusSource: controllerState.statusSource || "COMPUTED_FROM_CYCLE_WINDOW",
+    liveCycleId: controllerState?.liveCycle?.cycleId || NAv,
+    draftCycleId: controllerState?.activeDraft?.cycleId || NAv,
+    baselineCycleId: controllerState?.baselineCycle?.cycleId || NAv,
+  };
+}
+
+function buildBaselineTrace(baselineReadingIndex = {}) {
+  return {
+    sourceType: baselineReadingIndex.sourceType || "NONE",
+    cycleId: baselineReadingIndex.cycleId || NAv,
+    stagingId: baselineReadingIndex.stagingId || NAv,
+    tableStatus: baselineReadingIndex.tableStatus || NAv,
+    rowCount: Number(baselineReadingIndex.rowCount || 0),
+    fallbackCollection: COLLECTIONS.registryMread,
+  };
+}
+
 async function lockCycleForGeneration(cycleRef, uid) {
   return db.runTransaction(async (transaction) => {
     const cycleSnap = await transaction.get(cycleRef);
@@ -693,16 +1144,7 @@ async function lockCycleForGeneration(cycleRef, uid) {
       });
     }
 
-    const cycle = cycleSnap.data() || {};
-    const status = normalizeUpper(cycle.status, "");
-
-    if (BLOCKED_GENERATION_STATUSES.has(status) || !ALLOWED_GENERATION_STATUSES.has(status)) {
-      throw new HttpsError(
-        "failed-precondition",
-        `MREAD staging generation is blocked for ${status || "UNKNOWN"} cycles.`,
-        { code: "CYCLE_NOT_GENERATABLE", status },
-      );
-    }
+    const cycle = { id: cycleSnap.id, cycleId: cycleSnap.id, ...cycleSnap.data() };
 
     const lockUntil = toDateOrNull(cycle?.generationLock?.expiresAt);
     if (cycle?.generationLock?.locked === true && lockUntil && lockUntil > new Date()) {
@@ -766,34 +1208,26 @@ async function lockCycleForGeneration(cycleRef, uid) {
 
 
 async function previewDryRun({ cycleRef, cycleId, auth }) {
-  const cycleSnap = await cycleRef.get();
-  if (!cycleSnap.exists) {
-    throw new HttpsError("not-found", "MREAD staging cycle not found.", {
-      code: "CYCLE_NOT_FOUND",
-    });
-  }
-
-  const cycle = cycleSnap.data() || {};
-  const status = normalizeUpper(cycle.status, "");
-  if (BLOCKED_GENERATION_STATUSES.has(status) || !ALLOWED_GENERATION_STATUSES.has(status)) {
-    throw new HttpsError(
-      "failed-precondition",
-      `MREAD staging generation is blocked for ${status || "UNKNOWN"} cycles.`,
-      { code: "CYCLE_NOT_GENERATABLE", status },
-    );
-  }
-
-  const lmPcode = firstText(cycle.lmPcode);
-  if (!isMeaningfulText(lmPcode)) {
-    throw new HttpsError("failed-precondition", "Cycle LM is missing.", {
-      code: "CYCLE_LM_MISSING",
-    });
-  }
-
+  const { cycle, lmPcode } = await fetchCycleForGeneration(cycleRef);
   await assertCanGenerate({ auth, lmPcode });
-  const window = getCycleWindow(cycle);
+
+  const controllerState = await resolveControllerStateForLm(lmPcode);
+  assertRequestedCycleIsComputedDraft(cycleId, controllerState);
+
+  const draftCycle = controllerState.activeDraft || cycle;
+  const baselineCycle = controllerState.baselineCycle || null;
+  const window = getCycleWindow(draftCycle);
+  const baselineWindow = baselineCycle ? getCycleWindow(baselineCycle) : null;
+  const baselineReadingIndex = await buildBaselineReadingIndex(baselineCycle);
   const registryRows = await fetchRegistryRowsForLm(lmPcode);
-  const stagingRows = buildRowsForCycle({ registryRows, window });
+  const stagingRows = buildRowsForCycle({
+    registryRows,
+    window,
+    baselineWindow,
+    baselineReadingIndex,
+    cycleId,
+    baselineCycleId: baselineCycle?.cycleId || null,
+  });
   const summary = buildSummary(stagingRows);
 
   return {
@@ -802,6 +1236,8 @@ async function previewDryRun({ cycleRef, cycleId, auth }) {
     cycleId,
     lmPcode,
     sourceRowsRead: registryRows.length,
+    controller: buildControllerTrace(controllerState),
+    baseline: buildBaselineTrace(baselineReadingIndex),
     summary,
   };
 }
@@ -881,11 +1317,23 @@ export const generateMreadStaging = onCall(
     let lock = null;
 
     try {
+      const precheck = await fetchCycleForGeneration(cycleRef);
+      const actor = await assertCanGenerate({
+        auth: request.auth,
+        lmPcode: precheck.lmPcode,
+      });
+      const controllerState = await resolveControllerStateForLm(precheck.lmPcode);
+      assertRequestedCycleIsComputedDraft(cycleId, controllerState);
+
       lock = await lockCycleForGeneration(cycleRef, uid);
       const { cycle, lmPcode, nextIteration, stagingId, generatedAt, iterationRef } = lock;
-
-      const actor = await assertCanGenerate({ auth: request.auth, lmPcode });
-      const window = getCycleWindow(cycle);
+      const draftCycle = { ...cycle, ...(controllerState.activeDraft || {}) };
+      const baselineCycle = controllerState.baselineCycle || null;
+      const window = getCycleWindow(draftCycle);
+      const baselineWindow = baselineCycle ? getCycleWindow(baselineCycle) : null;
+      const baselineReadingIndex = await buildBaselineReadingIndex(baselineCycle);
+      const controllerTrace = buildControllerTrace(controllerState);
+      const baselineTrace = buildBaselineTrace(baselineReadingIndex);
 
       logger.info("generateMreadStaging started", {
         cycleId,
@@ -894,10 +1342,19 @@ export const generateMreadStaging = onCall(
         iteration: nextIteration,
         uid,
         dryRun,
+        controller: controllerTrace,
+        baseline: baselineTrace,
       });
 
       const registryRows = await fetchRegistryRowsForLm(lmPcode);
-      const stagingRows = buildRowsForCycle({ registryRows, window });
+      const stagingRows = buildRowsForCycle({
+        registryRows,
+        window,
+        baselineWindow,
+        baselineReadingIndex,
+        cycleId,
+        baselineCycleId: baselineCycle?.cycleId || null,
+      });
       const summary = buildSummary(stagingRows);
 
       const stagingRef = db.collection(COLLECTIONS.staging).doc(stagingId);
@@ -918,6 +1375,8 @@ export const generateMreadStaging = onCall(
         cycleId,
         lmPcode,
         tableStatus: "DRAFT",
+        controller: controllerTrace,
+        baseline: baselineTrace,
         window: {
           start: window.startTimestamp,
           end: window.endTimestamp,
@@ -930,6 +1389,8 @@ export const generateMreadStaging = onCall(
           generatedAt: Timestamp.fromDate(generatedAt),
           sourceCollection: COLLECTIONS.registryMread,
           sourceRowsRead: registryRows.length,
+          controller: controllerTrace,
+          baseline: baselineTrace,
         },
         summary: {
           totalRows: summary.totalRows,
@@ -977,6 +1438,8 @@ export const generateMreadStaging = onCall(
             completedAt: FieldValue.serverTimestamp(),
             generatedByUser,
             summary,
+            controller: controllerTrace,
+            baseline: baselineTrace,
             metadata: {
               updatedAt: FieldValue.serverTimestamp(),
               updatedBy: uid,
@@ -996,6 +1459,8 @@ export const generateMreadStaging = onCall(
               iteration: nextIteration,
               generatedAt: Timestamp.fromDate(generatedAt),
               generatedByUser,
+              controller: controllerTrace,
+              baseline: baselineTrace,
             },
             summary,
             generationLock: FieldValue.delete(),
@@ -1013,6 +1478,8 @@ export const generateMreadStaging = onCall(
         stagingId,
         iteration: nextIteration,
         summary,
+        controller: controllerTrace,
+        baseline: baselineTrace,
       });
 
       return {
@@ -1023,6 +1490,8 @@ export const generateMreadStaging = onCall(
         activeStagingId: stagingId,
         iteration: nextIteration,
         sourceRowsRead: registryRows.length,
+        controller: controllerTrace,
+        baseline: baselineTrace,
         summary,
       };
     } catch (error) {

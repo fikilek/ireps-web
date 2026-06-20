@@ -17,6 +17,57 @@ function normalizeOptionalFilter(value) {
   return text;
 }
 
+function normalizeControllerStatus(value) {
+  const status = normalizeText(value, "").toUpperCase();
+
+  if (status === "FUTURE") return "OPEN";
+  if (["CLOSED", "DRAFT", "OPEN"].includes(status)) return status;
+
+  return "NAv";
+}
+
+function normalizeStatusFilter(value) {
+  const status = normalizeOptionalFilter(value);
+
+  if (!status) return null;
+
+  return normalizeControllerStatus(status);
+}
+
+function normalizeControllerResult(result = {}) {
+  const rows = Array.isArray(result?.rows)
+    ? result.rows.map((row) => ({
+        ...row,
+        storedStatus: row?.storedStatus || row?.status || "NAv",
+        status: normalizeControllerStatus(row?.computedStatus || row?.status),
+      }))
+    : [];
+
+  const fallbackCounts = rows.reduce(
+    (acc, row) => {
+      const status = normalizeControllerStatus(row?.status);
+      if (status === "CLOSED") acc.closed += 1;
+      if (status === "DRAFT") acc.draft += 1;
+      if (status === "OPEN") acc.open += 1;
+      return acc;
+    },
+    { closed: 0, draft: 0, open: 0 },
+  );
+
+  const summary = {
+    ...(result?.summary || {}),
+    closed: result?.summary?.closed ?? fallbackCounts.closed,
+    draft: result?.summary?.draft ?? fallbackCounts.draft,
+    open: result?.summary?.open ?? fallbackCounts.open,
+  };
+
+  return {
+    ...result,
+    rows,
+    summary,
+  };
+}
+
 export const mreadStagingCyclesApi = createApi({
   reducerPath: "mreadStagingCyclesApi",
   baseQuery: fakeBaseQuery(),
@@ -31,7 +82,8 @@ export const mreadStagingCyclesApi = createApi({
           const payload = {
             lmPcode: normalizeText(args?.lmPcode, DEFAULT_LM_PCODE),
             billingPeriod: normalizeOptionalFilter(args?.billingPeriod),
-            status: normalizeOptionalFilter(args?.status),
+            // Status is controller-computed. Pass only the normalized public status label.
+            status: normalizeStatusFilter(args?.status),
             limit: Number(args?.limit || 200),
           };
 
@@ -48,7 +100,7 @@ export const mreadStagingCyclesApi = createApi({
             };
           }
 
-          return { data: result };
+          return { data: normalizeControllerResult(result) };
         } catch (error) {
           return {
             error: {

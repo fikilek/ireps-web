@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../auth/useAuth";
 import { useListMreadStagingCyclesQuery } from "../../redux/mreadStagingCyclesApi";
 
-const STATUS_OPTIONS = ["ALL", "DRAFT", "CLOSED", "FUTURE"];
+const STATUS_OPTIONS = ["ALL", "CLOSED", "DRAFT", "OPEN"];
 const DEFAULT_LM_PCODE = "ZA2157";
 
 function normalizeText(value, fallback = "NAv") {
@@ -36,8 +36,19 @@ function formatDateTime(value) {
   });
 }
 
-function statusStyle(status) {
+function normalizeCycleStatus(status) {
   const normalizedStatus = normalizeText(status, "").toUpperCase();
+
+  if (normalizedStatus === "FUTURE") return "OPEN";
+  if (["CLOSED", "DRAFT", "OPEN"].includes(normalizedStatus)) {
+    return normalizedStatus;
+  }
+
+  return "NAv";
+}
+
+function statusStyle(status) {
+  const normalizedStatus = normalizeCycleStatus(status);
 
   if (normalizedStatus === "DRAFT") {
     return {
@@ -52,6 +63,14 @@ function statusStyle(status) {
       background: "#f1f5f9",
       color: "#475569",
       border: "1px solid #cbd5e1",
+    };
+  }
+
+  if (normalizedStatus === "OPEN") {
+    return {
+      background: "#ecfdf5",
+      color: "#047857",
+      border: "1px solid #a7f3d0",
     };
   }
 
@@ -100,10 +119,12 @@ export default function MreadStagingControllerPage() {
     () => ({
       lmPcode: normalizeText(lmPcode, DEFAULT_LM_PCODE),
       billingPeriod: billingPeriod === "ALL" ? null : billingPeriod,
-      status: status === "ALL" ? null : status,
+      // Status is computed by the backend controller and filtered locally here.
+      // Do not trust or push stored Firestore status values as the source of truth.
+      status: null,
       limit: 200,
     }),
-    [billingPeriod, lmPcode, status],
+    [billingPeriod, lmPcode],
   );
 
   const {
@@ -113,8 +134,33 @@ export default function MreadStagingControllerPage() {
     refetch,
   } = useListMreadStagingCyclesQuery(queryArgs);
 
-  const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
+  const rows = useMemo(() => {
+    const rawRows = Array.isArray(data?.rows) ? data.rows : [];
+
+    return rawRows.map((row) => ({
+      ...row,
+      storedStatus: row?.storedStatus || row?.status || "NAv",
+      status: normalizeCycleStatus(row?.computedStatus || row?.status),
+    }));
+  }, [data]);
+
   const summary = data?.summary || null;
+  const activeDraft =
+    summary?.activeDraft || rows.find((row) => row.status === "DRAFT") || null;
+  const rowStatusCounts = useMemo(
+    () =>
+      rows.reduce(
+        (acc, row) => {
+          const rowStatus = normalizeCycleStatus(row?.status);
+          if (rowStatus === "CLOSED") acc.closed += 1;
+          if (rowStatus === "DRAFT") acc.draft += 1;
+          if (rowStatus === "OPEN") acc.open += 1;
+          return acc;
+        },
+        { closed: 0, draft: 0, open: 0 },
+      ),
+    [rows],
+  );
 
   useEffect(() => {
     setSelectedCycle((current) => {
@@ -134,15 +180,21 @@ export default function MreadStagingControllerPage() {
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-
-    if (!term) return rows;
+    const selectedStatus = normalizeCycleStatus(status);
 
     return rows.filter((row) => {
+      const rowStatus = normalizeCycleStatus(row?.status);
+
+      if (status !== "ALL" && rowStatus !== selectedStatus) {
+        return false;
+      }
+
+      if (!term) return true;
       const haystack = [
         row.cycleId,
         row.cycleLabel,
         row.billingPeriod,
-        row.status,
+        normalizeCycleStatus(row.status),
         row.window?.display,
         row.activeStagingId,
       ]
@@ -151,10 +203,17 @@ export default function MreadStagingControllerPage() {
 
       return haystack.includes(term);
     });
-  }, [rows, search]);
+  }, [rows, search, status]);
 
-  const activeDraftText = summary?.activeDraft
-    ? `${summary.activeDraft.cycleLabel} • ${summary.activeDraft.window}`
+  const activeDraftWindow =
+    activeDraft?.window?.display ||
+    (typeof activeDraft?.window === "string" ? activeDraft.window : "") ||
+    [activeDraft?.window?.startDate, activeDraft?.window?.endDate]
+      .filter(Boolean)
+      .join(" - ") ||
+    "NAv";
+  const activeDraftText = activeDraft
+    ? `${activeDraft.cycleLabel} • ${activeDraftWindow}`
     : "No DRAFT cycle returned";
 
   const errorMessage =
@@ -170,7 +229,7 @@ export default function MreadStagingControllerPage() {
           <p style={styles.eyebrow}>Admin / Controller</p>
           <h1 style={styles.title}>MREAD Staging Controller</h1>
           <p style={styles.subtitle}>
-            Read-only view of configured MREAD staging cycles.
+            Read-only view of controller-computed MREAD staging cycle status.
           </p>
         </div>
 
@@ -178,8 +237,7 @@ export default function MreadStagingControllerPage() {
       </section>
 
       <section style={styles.notice}>
-        Controller data is created by backend setup scripts. This page does not
-        create, edit, close, delete, or generate MREAD staging rows.
+        Cycle windows are configured setup data. CLOSED / DRAFT / OPEN is computed by the backend controller from the current date. This page does not create, edit, close, delete, or generate MREAD staging rows.
       </section>
 
       <section style={styles.filtersCard}>
@@ -247,10 +305,10 @@ export default function MreadStagingControllerPage() {
 
       <section style={styles.summaryGrid}>
         <SummaryCard label="Total Cycles" value={summary?.total ?? rows.length} />
-        <SummaryCard label="Closed" value={summary?.closed ?? 0} />
-        <SummaryCard label="Draft" value={summary?.draft ?? 0} />
-        <SummaryCard label="Future" value={summary?.future ?? 0} />
-        <SummaryCard label="Active Draft" value={summary?.activeDraft?.cycleLabel || "NAv"} helper={activeDraftText} />
+        <SummaryCard label="Closed" value={summary?.closed ?? rowStatusCounts.closed} />
+        <SummaryCard label="Draft" value={summary?.draft ?? rowStatusCounts.draft} />
+        <SummaryCard label="Open" value={summary?.open ?? rowStatusCounts.open} />
+        <SummaryCard label="Active Draft" value={activeDraft?.cycleLabel || "NAv"} helper={activeDraftText} />
       </section>
 
       <section style={styles.contentGrid}>
@@ -341,7 +399,8 @@ export default function MreadStagingControllerPage() {
               <DetailRow label="Window" value={selectedCycle.window?.display} />
               <DetailRow label="Start Date" value={selectedCycle.window?.startDate} />
               <DetailRow label="End Date" value={selectedCycle.window?.endDate} />
-              <DetailRow label="Status" value={selectedCycle.status} />
+              <DetailRow label="Computed Status" value={normalizeCycleStatus(selectedCycle.status)} />
+              <DetailRow label="Stored Status" value={selectedCycle.storedStatus} />
               <DetailRow label="Current Iteration" value={selectedCycle.currentIteration} />
               <DetailRow label="Active Staging ID" value={selectedCycle.activeStagingId} />
               <DetailRow label="Total Rows" value={selectedCycle.summary?.totalRows ?? 0} />
@@ -350,7 +409,7 @@ export default function MreadStagingControllerPage() {
               <DetailRow label="Unsuccessful" value={selectedCycle.summary?.unsuccessful ?? 0} />
               <DetailRow label="Script" value={selectedCycle.metadata?.source?.scriptName} />
               <DetailRow label="Script Version" value={selectedCycle.metadata?.source?.scriptVersion} />
-              <DetailRow label="As Of Date" value={selectedCycle.metadata?.source?.asOfDate} />
+              <DetailRow label="Controller As Of Date" value={summary?.asOfDate || selectedCycle.metadata?.source?.asOfDate} />
               <DetailRow label="Updated At" value={formatDateTime(selectedCycle.metadata?.updatedAt)} />
               <DetailRow label="Updated By" value={selectedCycle.metadata?.updatedByUser} />
             </div>

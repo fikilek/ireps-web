@@ -1,0 +1,23 @@
+{
+  "scriptName": "delete_fake_mread_registry_rows.js",
+  "scriptVersion": "1.0.0",
+  "startedAt": "2026-06-19T15:51:10.562Z",
+  "completedAt": "2026-06-19T15:51:12.979Z",
+  "mode": "DRY_RUN",
+  "collection": "registry_mread",
+  "lmGuard": "ZA2157",
+  "filters": {
+    "fake": true,
+    "fakeSeedSafeToDelete": true,
+    "fakeSeedTypePrefix": "FAKE_MREAD"
+  },
+  "counts": {
+    "scannedFakeRows": 0,
+    "matchedSafeFakeMreadRows": 0,
+    "skippedFakeRows": 0,
+    "deletedRows": 0
+  },
+  "matchedRowsByCycle": {},
+  "matchedRows": [],
+  "skippedRows": []
+}

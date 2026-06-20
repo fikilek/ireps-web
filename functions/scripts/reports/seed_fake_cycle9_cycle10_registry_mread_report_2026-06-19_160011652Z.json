@@ -1,0 +1,651 @@
+{
+  "scriptName": "seed_fake_cycle9_cycle10_registry_mread_from_real_later_readings.js",
+  "scriptVersion": "1.0.0",
+  "startedAt": "2026-06-19T16:00:08.545Z",
+  "completedAt": "2026-06-19T16:00:11.652Z",
+  "mode": "DRY_RUN",
+  "collection": "registry_mread",
+  "lmGuard": "ZA2157",
+  "wardGuard": null,
+  "cycles": {
+    "cycle9": {
+      "cycleId": "ZA2157_2025_2026_CYCLE_09",
+      "cycleLabel": "Cycle 9 - 2025/26",
+      "readingDate": "2026-04-10",
+      "windowStart": "2026-03-16",
+      "windowEnd": "2026-04-15"
+    },
+    "cycle10": {
+      "cycleId": "ZA2157_2025_2026_CYCLE_10",
+      "cycleLabel": "Cycle 10 - 2025/26",
+      "readingDate": "2026-05-10",
+      "windowStart": "2026-04-16",
+      "windowEnd": "2026-05-15"
+    },
+    "laterAnchorStartDate": "2026-05-16T00:00:00.000Z"
+  },
+  "counts": {
+    "scannedLmRegistryRows": 36,
+    "candidateLaterRealReadingRows": 32,
+    "uniqueMeterAnchorsSelected": 15,
+    "skippedAnchors": 0,
+    "plannedFakeRows": 30,
+    "existingTargetRowsSkipped": 0,
+    "rowsToCreate": 30,
+    "createdRows": 0
+  },
+  "plannedRowsByCycle": {
+    "ZA2157_2025_2026_CYCLE_09": 15,
+    "ZA2157_2025_2026_CYCLE_10": 15
+  },
+  "rowsToCreateByCycle": {
+    "ZA2157_2025_2026_CYCLE_09": 15,
+    "ZA2157_2025_2026_CYCLE_10": 15
+  },
+  "anchors": [
+    {
+      "id": "TRN_MREAD_1781717387653_WTR_ZA2157008_8256",
+      "meterKey": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+      "meterNo": "W034794",
+      "astId": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+      "premiseId": "PRM_1781578341788_754_W008_8256",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T17:29:56.144Z",
+      "currentReading": 2986
+    },
+    {
+      "id": "TRN_MREAD_1781715750501_WTR_ZA2157008_8257",
+      "meterKey": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+      "meterNo": "W9525847",
+      "astId": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+      "premiseId": "PRM_1781578175991_996_W008_8257",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T17:02:38.775Z",
+      "currentReading": 6348
+    },
+    {
+      "id": "TRN_MREAD_1781713918735_WTR_ZA2157008_8258",
+      "meterKey": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+      "meterNo": "W1234",
+      "astId": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+      "premiseId": "PRM_1781578115069_824_W008_8258",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:32:07.889Z",
+      "currentReading": 785
+    },
+    {
+      "id": "TRN_MREAD_1781706105988_WTR_ZA2157008_8259",
+      "meterKey": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+      "meterNo": "W2395",
+      "astId": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+      "premiseId": "PRM_1781578052713_582_W008_8259",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T14:22:01.012Z",
+      "currentReading": 3697
+    },
+    {
+      "id": "TRN_MREAD_1781729674594_WTR_ZA2157008_8260",
+      "meterKey": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+      "meterNo": "W5678",
+      "astId": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+      "premiseId": "PRM_1781577987963_487_W008_8260",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T20:54:41.772Z",
+      "currentReading": 4537
+    },
+    {
+      "id": "TRN_MREAD_1781717624421_WTR_ZA2157008_8261",
+      "meterKey": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+      "meterNo": "E3697",
+      "astId": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+      "premiseId": "PRM_1781560940666_712_W008_8261",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T17:33:53.798Z",
+      "currentReading": 357
+    },
+    {
+      "id": "TRN_MREAD_1781713454029_WTR_ZA2157008_8262",
+      "meterKey": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+      "meterNo": "W5790",
+      "astId": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+      "premiseId": "PRM_1781560871594_595_W008_8262",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:25:47.675Z",
+      "currentReading": 2753
+    },
+    {
+      "id": "TRN_MREAD_1781701664038_WTR_ZA2157008_8263",
+      "meterKey": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+      "meterNo": "W4799",
+      "astId": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+      "premiseId": "PRM_1781560799726_300_W008_8263",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T13:08:02.624Z",
+      "currentReading": 4533
+    },
+    {
+      "id": "TRN_MREAD_1781713303052_WTR_ZA2157008_8264",
+      "meterKey": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+      "meterNo": "W74147",
+      "astId": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+      "premiseId": "PRM_1781560729570_638_W008_8264",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:21:50.160Z",
+      "currentReading": 2751
+    },
+    {
+      "id": "TRN_MREAD_1781654671276_WTR_ZA2157008_8265",
+      "meterKey": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+      "meterNo": "W5789",
+      "astId": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+      "premiseId": "PRM_1781560632487_517_W008_8265",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T00:04:49.591Z",
+      "currentReading": 266789
+    },
+    {
+      "id": "TRN_MREAD_1781712825394_WTR_ZA2157008_8266",
+      "meterKey": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+      "meterNo": "W753Y89",
+      "astId": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+      "premiseId": "PRM_1781552533059_89_W008_8266",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:13:53.089Z",
+      "currentReading": 487999
+    },
+    {
+      "id": "TRN_MREAD_1781713379679_WTR_ZA2157008_8267",
+      "meterKey": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+      "meterNo": "WR468",
+      "astId": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+      "premiseId": "PRM_1781552367485_179_W008_8267",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:23:07.228Z",
+      "currentReading": 133
+    },
+    {
+      "id": "TRN_MREAD_1781713338453_WTR_ZA2157008_8268",
+      "meterKey": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+      "meterNo": "W86R356",
+      "astId": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+      "premiseId": "PRM_1781551411973_553_W008_8268",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:22:25.943Z",
+      "currentReading": 5264
+    },
+    {
+      "id": "TRN_MREAD_1781713259212_WTR_ZA2157008_8269",
+      "meterKey": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+      "meterNo": "W468426",
+      "astId": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+      "premiseId": "PRM_1781550304853_52_W008_8269",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:21:13.421Z",
+      "currentReading": 12945
+    },
+    {
+      "id": "TRN_MREAD_1781712888670_WTR_ZA2157008_1339",
+      "meterKey": "TRN_MDIS_1781486904880_WTR_ZA2157008_1339",
+      "meterNo": "W357965",
+      "astId": "TRN_MDIS_1781486904880_WTR_ZA2157008_1339",
+      "premiseId": "PRM_1781484459959_649_W008_1339",
+      "wardPcode": "ZA2157008",
+      "readingAt": "2026-06-17T16:14:58.036Z",
+      "currentReading": 8862
+    }
+  ],
+  "skippedAnchors": [],
+  "existingRows": [],
+  "plannedChains": [
+    {
+      "meterKey": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+      "meterNo": "W034794",
+      "astId": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+      "premiseId": "PRM_1781578341788_754_W008_8256",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W034794_PRM_1781578341788_754_W008_8256_ZA2157008_8256",
+        "readingAt": "2026-04-10T08:00:00.000Z",
+        "currentReading": 2724
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W034794_PRM_1781578341788_754_W008_8256_ZA2157008_8256",
+        "readingAt": "2026-05-10T08:00:00.000Z",
+        "previousReading": 2724,
+        "currentReading": 2884,
+        "consumption": 160,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781717387653_WTR_ZA2157008_8256",
+        "trnId": "TRN_MREAD_1781717387653_WTR_ZA2157008_8256",
+        "readingAt": "2026-06-17T17:29:56.144Z",
+        "currentReading": 2986
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+      "meterNo": "W9525847",
+      "astId": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+      "premiseId": "PRM_1781578175991_996_W008_8257",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W9525847_PRM_1781578175991_996_W008_8257_ZA2157008_8257",
+        "readingAt": "2026-04-10T08:19:00.000Z",
+        "currentReading": 6156
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W9525847_PRM_1781578175991_996_W008_8257_ZA2157008_8257",
+        "readingAt": "2026-05-10T08:10:00.000Z",
+        "previousReading": 6156,
+        "currentReading": 6263,
+        "consumption": 107,
+        "daysSinceLastReading": 29.99
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781715750501_WTR_ZA2157008_8257",
+        "trnId": "TRN_MREAD_1781715750501_WTR_ZA2157008_8257",
+        "readingAt": "2026-06-17T17:02:38.775Z",
+        "currentReading": 6348
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+      "meterNo": "W1234",
+      "astId": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+      "premiseId": "PRM_1781578115069_824_W008_8258",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W1234_PRM_1781578115069_824_W008_8258_ZA2157008_8258",
+        "readingAt": "2026-04-10T08:26:00.000Z",
+        "currentReading": 612
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W1234_PRM_1781578115069_824_W008_8258_ZA2157008_8258",
+        "readingAt": "2026-05-10T08:27:00.000Z",
+        "previousReading": 612,
+        "currentReading": 749,
+        "consumption": 137,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781713918735_WTR_ZA2157008_8258",
+        "trnId": "TRN_MREAD_1781713918735_WTR_ZA2157008_8258",
+        "readingAt": "2026-06-17T16:32:07.889Z",
+        "currentReading": 785
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+      "meterNo": "W2395",
+      "astId": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+      "premiseId": "PRM_1781578052713_582_W008_8259",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W2395_PRM_1781578052713_582_W008_8259_ZA2157008_8259",
+        "readingAt": "2026-04-10T08:33:00.000Z",
+        "currentReading": 3539
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W2395_PRM_1781578052713_582_W008_8259_ZA2157008_8259",
+        "readingAt": "2026-05-10T08:47:00.000Z",
+        "previousReading": 3539,
+        "currentReading": 3569,
+        "consumption": 30,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781706105988_WTR_ZA2157008_8259",
+        "trnId": "TRN_MREAD_1781706105988_WTR_ZA2157008_8259",
+        "readingAt": "2026-06-17T14:22:01.012Z",
+        "currentReading": 3697
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+      "meterNo": "W5678",
+      "astId": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+      "premiseId": "PRM_1781577987963_487_W008_8260",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W5678_PRM_1781577987963_487_W008_8260_ZA2157008_8260",
+        "readingAt": "2026-04-10T08:43:00.000Z",
+        "currentReading": 4302
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W5678_PRM_1781577987963_487_W008_8260_ZA2157008_8260",
+        "readingAt": "2026-05-10T08:57:00.000Z",
+        "previousReading": 4302,
+        "currentReading": 4480,
+        "consumption": 178,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781729674594_WTR_ZA2157008_8260",
+        "trnId": "TRN_MREAD_1781729674594_WTR_ZA2157008_8260",
+        "readingAt": "2026-06-17T20:54:41.772Z",
+        "currentReading": 4537
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+      "meterNo": "E3697",
+      "astId": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+      "premiseId": "PRM_1781560940666_712_W008_8261",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_E3697_PRM_1781560940666_712_W008_8261_ZA2157008_8261",
+        "readingAt": "2026-04-10T08:53:00.000Z",
+        "currentReading": 246
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_E3697_PRM_1781560940666_712_W008_8261_ZA2157008_8261",
+        "readingAt": "2026-05-10T09:11:00.000Z",
+        "previousReading": 246,
+        "currentReading": 308,
+        "consumption": 62,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781717624421_WTR_ZA2157008_8261",
+        "trnId": "TRN_MREAD_1781717624421_WTR_ZA2157008_8261",
+        "readingAt": "2026-06-17T17:33:53.798Z",
+        "currentReading": 357
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+      "meterNo": "W5790",
+      "astId": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+      "premiseId": "PRM_1781560871594_595_W008_8262",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W5790_PRM_1781560871594_595_W008_8262_ZA2157008_8262",
+        "readingAt": "2026-04-10T08:58:00.000Z",
+        "currentReading": 2541
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W5790_PRM_1781560871594_595_W008_8262_ZA2157008_8262",
+        "readingAt": "2026-05-10T09:24:00.000Z",
+        "previousReading": 2541,
+        "currentReading": 2614,
+        "consumption": 73,
+        "daysSinceLastReading": 30.02
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781713454029_WTR_ZA2157008_8262",
+        "trnId": "TRN_MREAD_1781713454029_WTR_ZA2157008_8262",
+        "readingAt": "2026-06-17T16:25:47.675Z",
+        "currentReading": 2753
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+      "meterNo": "W4799",
+      "astId": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+      "premiseId": "PRM_1781560799726_300_W008_8263",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W4799_PRM_1781560799726_300_W008_8263_ZA2157008_8263",
+        "readingAt": "2026-04-10T09:16:00.000Z",
+        "currentReading": 4354
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W4799_PRM_1781560799726_300_W008_8263_ZA2157008_8263",
+        "readingAt": "2026-05-10T09:32:00.000Z",
+        "previousReading": 4354,
+        "currentReading": 4492,
+        "consumption": 138,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781701664038_WTR_ZA2157008_8263",
+        "trnId": "TRN_MREAD_1781701664038_WTR_ZA2157008_8263",
+        "readingAt": "2026-06-17T13:08:02.624Z",
+        "currentReading": 4533
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+      "meterNo": "W74147",
+      "astId": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+      "premiseId": "PRM_1781560729570_638_W008_8264",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W74147_PRM_1781560729570_638_W008_8264_ZA2157008_8264",
+        "readingAt": "2026-04-10T09:26:00.000Z",
+        "currentReading": 2563
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W74147_PRM_1781560729570_638_W008_8264_ZA2157008_8264",
+        "readingAt": "2026-05-10T09:38:00.000Z",
+        "previousReading": 2563,
+        "currentReading": 2713,
+        "consumption": 150,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781713303052_WTR_ZA2157008_8264",
+        "trnId": "TRN_MREAD_1781713303052_WTR_ZA2157008_8264",
+        "readingAt": "2026-06-17T16:21:50.160Z",
+        "currentReading": 2751
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+      "meterNo": "W5789",
+      "astId": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+      "premiseId": "PRM_1781560632487_517_W008_8265",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W5789_PRM_1781560632487_517_W008_8265_ZA2157008_8265",
+        "readingAt": "2026-04-10T09:46:00.000Z",
+        "currentReading": 266647
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W5789_PRM_1781560632487_517_W008_8265_ZA2157008_8265",
+        "readingAt": "2026-05-10T09:43:00.000Z",
+        "previousReading": 266647,
+        "currentReading": 266693,
+        "consumption": 46,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781654671276_WTR_ZA2157008_8265",
+        "trnId": "TRN_MREAD_1781654671276_WTR_ZA2157008_8265",
+        "readingAt": "2026-06-17T00:04:49.591Z",
+        "currentReading": 266789
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+      "meterNo": "W753Y89",
+      "astId": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+      "premiseId": "PRM_1781552533059_89_W008_8266",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W753Y89_PRM_1781552533059_89_W008_8266_ZA2157008_8266",
+        "readingAt": "2026-04-10T09:55:00.000Z",
+        "currentReading": 487770
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W753Y89_PRM_1781552533059_89_W008_8266_ZA2157008_8266",
+        "readingAt": "2026-05-10T10:02:00.000Z",
+        "previousReading": 487770,
+        "currentReading": 487878,
+        "consumption": 108,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781712825394_WTR_ZA2157008_8266",
+        "trnId": "TRN_MREAD_1781712825394_WTR_ZA2157008_8266",
+        "readingAt": "2026-06-17T16:13:53.089Z",
+        "currentReading": 487999
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+      "meterNo": "WR468",
+      "astId": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+      "premiseId": "PRM_1781552367485_179_W008_8267",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_WR468_PRM_1781552367485_179_W008_8267_ZA2157008_8267",
+        "readingAt": "2026-04-10T10:15:00.000Z",
+        "currentReading": 87
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_WR468_PRM_1781552367485_179_W008_8267_ZA2157008_8267",
+        "readingAt": "2026-05-10T10:12:00.000Z",
+        "previousReading": 87,
+        "currentReading": 110,
+        "consumption": 23,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781713379679_WTR_ZA2157008_8267",
+        "trnId": "TRN_MREAD_1781713379679_WTR_ZA2157008_8267",
+        "readingAt": "2026-06-17T16:23:07.228Z",
+        "currentReading": 133
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+      "meterNo": "W86R356",
+      "astId": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+      "premiseId": "PRM_1781551411973_553_W008_8268",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W86R356_PRM_1781551411973_553_W008_8268_ZA2157008_8268",
+        "readingAt": "2026-04-10T10:25:00.000Z",
+        "currentReading": 5089
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W86R356_PRM_1781551411973_553_W008_8268_ZA2157008_8268",
+        "readingAt": "2026-05-10T10:21:00.000Z",
+        "previousReading": 5089,
+        "currentReading": 5138,
+        "consumption": 49,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781713338453_WTR_ZA2157008_8268",
+        "trnId": "TRN_MREAD_1781713338453_WTR_ZA2157008_8268",
+        "readingAt": "2026-06-17T16:22:25.943Z",
+        "currentReading": 5264
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+      "meterNo": "W468426",
+      "astId": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+      "premiseId": "PRM_1781550304853_52_W008_8269",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W468426_PRM_1781550304853_52_W008_8269_ZA2157008_8269",
+        "readingAt": "2026-04-10T10:33:00.000Z",
+        "currentReading": 12812
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W468426_PRM_1781550304853_52_W008_8269_ZA2157008_8269",
+        "readingAt": "2026-05-10T10:29:00.000Z",
+        "previousReading": 12812,
+        "currentReading": 12882,
+        "consumption": 70,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781713259212_WTR_ZA2157008_8269",
+        "trnId": "TRN_MREAD_1781713259212_WTR_ZA2157008_8269",
+        "readingAt": "2026-06-17T16:21:13.421Z",
+        "currentReading": 12945
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "meterKey": "TRN_MDIS_1781486904880_WTR_ZA2157008_1339",
+      "meterNo": "W357965",
+      "astId": "TRN_MDIS_1781486904880_WTR_ZA2157008_1339",
+      "premiseId": "PRM_1781484459959_649_W008_1339",
+      "wardPcode": "ZA2157008",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W357965_PRM_1781484459959_649_W008_1339_ZA2157008_1339",
+        "readingAt": "2026-04-10T10:45:00.000Z",
+        "currentReading": 8616
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W357965_PRM_1781484459959_649_W008_1339_ZA2157008_1339",
+        "readingAt": "2026-05-10T10:46:00.000Z",
+        "previousReading": 8616,
+        "currentReading": 8733,
+        "consumption": 117,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "registryMreadId": "TRN_MREAD_1781712888670_WTR_ZA2157008_1339",
+        "trnId": "TRN_MREAD_1781712888670_WTR_ZA2157008_1339",
+        "readingAt": "2026-06-17T16:14:58.036Z",
+        "currentReading": 8862
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    }
+  ]
+}

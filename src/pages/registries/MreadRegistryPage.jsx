@@ -805,8 +805,19 @@ function getCycleLastGeneratedAt(row = {}) {
   );
 }
 
+function normalizeCycleStatus(status) {
+  const normalizedStatus = firstMeaningfulText(status, "").toUpperCase();
+
+  if (normalizedStatus === "FUTURE") return "OPEN";
+  if (["CLOSED", "DRAFT", "OPEN"].includes(normalizedStatus)) {
+    return normalizedStatus;
+  }
+
+  return "NAv";
+}
+
 function getCycleStatus(row = {}) {
-  return firstMeaningfulText(row.status).toUpperCase();
+  return normalizeCycleStatus(row?.computedStatus || row?.status);
 }
 
 function getCycleAction(row = {}) {
@@ -877,8 +888,8 @@ function getCycleActionHelp(row = {}) {
       : "CLOSED cycle: view only, but no active staging pack exists yet.";
   }
 
-  if (status === "FUTURE") {
-    return "FUTURE cycle: staging is blocked until the cycle window has ended.";
+  if (status === "OPEN") {
+    return "OPEN cycle: readings may still be active, so staging generation is blocked until this cycle becomes DRAFT.";
   }
 
   return "Action unavailable for this cycle status.";
@@ -1855,7 +1866,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
             </h2>
             <p className="muted">
               Select the controlled cycle before generating or viewing an MREAD
-              field-evidence staging pack.
+              field-evidence staging pack. DRAFT is supplied by the backend controller, not by the UI.
             </p>
           </div>
 
@@ -1866,7 +1877,8 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
 
         <div style={styles.modalBody}>
           <section style={styles.stagingControllerNotice}>
-            Phase 1 launch is active. DRAFT cycles call
+            Phase 1 launch is active. The backend controller calculates the
+            current DRAFT cycle from the date. Only that DRAFT cycle may call
             <strong> generateMreadStaging</strong>, write a controlled
             <strong> mread_staging</strong> pack, and update
             <strong> mread_staging_cycles.activeStagingId</strong>. This modal
@@ -1888,8 +1900,8 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
               <strong>{formatNumber(summary?.closed ?? cycleRows.filter((row) => getCycleStatus(row) === "CLOSED").length)}</strong>
             </div>
             <div style={styles.stagingSummaryTile}>
-              <span>FUTURE</span>
-              <strong>{formatNumber(summary?.future ?? cycleRows.filter((row) => getCycleStatus(row) === "FUTURE").length)}</strong>
+              <span>OPEN</span>
+              <strong>{formatNumber(summary?.open ?? cycleRows.filter((row) => getCycleStatus(row) === "OPEN").length)}</strong>
             </div>
             <div style={styles.stagingSummaryTileWide}>
               <span>Active Draft</span>
@@ -1933,7 +1945,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                 <option value="ALL">ALL</option>
                 <option value="DRAFT">DRAFT</option>
                 <option value="CLOSED">CLOSED</option>
-                <option value="FUTURE">FUTURE</option>
+                <option value="OPEN">OPEN</option>
               </select>
             </label>
 
@@ -2063,33 +2075,6 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
               ) : null}
             </section>
 
-            <aside style={styles.stagingCycleDetailPanel}>
-              <h3>Selected Cycle</h3>
-              {selectedCycle ? (
-                <div style={styles.stagingDetailStack}>
-                  <CompactDetailLine label="Cycle ID" value={selectedCycle.cycleId} />
-                  <CompactDetailLine label="Billing Period" value={selectedCycle.billingPeriod} />
-                  <CompactDetailLine label="Cycle" value={getCycleLabel(selectedCycle)} />
-                  <CompactDetailLine label="Window" value={getCycleWindowDisplay(selectedCycle)} />
-                  <CompactDetailLine label="Status" value={getCycleStatus(selectedCycle)} />
-                  <CompactDetailLine label="Iteration" value={formatNumber(getCycleIteration(selectedCycle))} />
-                  <CompactDetailLine label="Active Staging ID" value={selectedCycle.activeStagingId || NAv} />
-                  <CompactDetailLine label="Rows" value={formatNumber(getCycleRowsCount(selectedCycle))} />
-                  <CompactDetailLine label="Action" value={getCycleActionLabel(selectedCycle)} />
-                  <CompactDetailLine label="Rule" value={getCycleActionHelp(selectedCycle)} />
-                  <CompactDetailLine
-                    label="Write Target"
-                    value={
-                      getCycleAction(selectedCycle) === "GENERATE_OPEN"
-                        ? "mread_staging"
-                        : selectedCycle.activeStagingId || NAv
-                    }
-                  />
-                </div>
-              ) : (
-                <p className="muted">Select a cycle to inspect the controller row.</p>
-              )}
-            </aside>
           </div>
         </div>
       </div>
@@ -2101,7 +2086,7 @@ function getOutcomeToneForCycle(row = {}) {
   const status = getCycleStatus(row);
   if (status === "DRAFT") return "warning";
   if (status === "CLOSED") return "default";
-  if (status === "FUTURE") return "default";
+  if (status === "OPEN") return "default";
   return "default";
 }
 
@@ -3803,7 +3788,7 @@ const styles = {
   },
   stagingControllerGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 320px",
+    gridTemplateColumns: "minmax(0, 1fr)",
     gap: "1rem",
     alignItems: "start",
   },
@@ -3820,19 +3805,6 @@ const styles = {
   },
   selectedStagingCycleRow: {
     background: "#eff6ff",
-  },
-  stagingCycleDetailPanel: {
-    background: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    borderRadius: "1rem",
-    padding: "1rem",
-    position: "sticky",
-    top: "1rem",
-  },
-  stagingDetailStack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.4rem",
   },
   primaryMiniButton: {
     border: 0,

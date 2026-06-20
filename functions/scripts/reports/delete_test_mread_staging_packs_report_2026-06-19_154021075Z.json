@@ -1,0 +1,71 @@
+{
+  "scriptName": "delete_test_mread_staging_packs.js",
+  "scriptVersion": "1.0.0",
+  "startedAt": "2026-06-19T15:40:14.309Z",
+  "completedAt": "2026-06-19T15:40:21.074Z",
+  "mode": "DRY_RUN",
+  "stagingCollection": "mread_staging",
+  "cyclesCollection": "mread_staging_cycles",
+  "lmPcode": "ZA2157",
+  "target": {
+    "idPrefix": "ZA2157_MREAD_STAGING_"
+  },
+  "resetCyclePointers": true,
+  "safety": {
+    "mreadStagingCyclesDocumentsDeleted": 0,
+    "registryMreadRowsDeleted": 0,
+    "trnsDeleted": 0,
+    "astsDeleted": 0,
+    "billingRecordsDeleted": 0
+  },
+  "counts": {
+    "matchedStagingPacks": 2,
+    "matchedChildRows": 0,
+    "matchedCyclePointerDocsToReset": 1,
+    "deletedChildRows": 0,
+    "deletedStagingParentDocs": 0,
+    "resetCyclePointerDocs": 0
+  },
+  "matchedStagingPacks": [
+    {
+      "id": "ZA2157_MREAD_STAGING_20260619_082516",
+      "stagingId": "ZA2157_MREAD_STAGING_20260619_082516",
+      "tableId": "ZA2157_MREAD_STAGING_20260619_082516",
+      "lmPcode": "NAv",
+      "cycleId": "NAv",
+      "tableStatus": "FAILED",
+      "generationStatus": "FAILED",
+      "generatedAt": "NAv",
+      "failedAt": "2026-06-19T08:25:17.064Z",
+      "sourceRowsRead": null,
+      "totalRows": null,
+      "childRows": 0
+    },
+    {
+      "id": "ZA2157_MREAD_STAGING_20260619_084229",
+      "stagingId": "ZA2157_MREAD_STAGING_20260619_084229",
+      "tableId": "ZA2157_MREAD_STAGING_20260619_084229",
+      "lmPcode": "ZA2157",
+      "cycleId": "ZA2157_2025_2026_CYCLE_11",
+      "tableStatus": "DRAFT",
+      "generationStatus": "COMPLETED",
+      "generatedAt": "2026-06-19T08:42:29.021Z",
+      "failedAt": "NAv",
+      "sourceRowsRead": 58,
+      "totalRows": 0,
+      "childRows": 0
+    }
+  ],
+  "affectedCycles": [
+    {
+      "id": "ZA2157_2025_2026_CYCLE_11",
+      "cycleId": "ZA2157_2025_2026_CYCLE_11",
+      "cycleLabel": "Cycle 11 - 2025/26",
+      "status": "DRAFT",
+      "activeStagingId": "ZA2157_MREAD_STAGING_20260619_084229",
+      "currentIteration": 1,
+      "lastGeneratedStagingId": "ZA2157_MREAD_STAGING_20260619_084229",
+      "summaryTotalRows": 0
+    }
+  ]
+}

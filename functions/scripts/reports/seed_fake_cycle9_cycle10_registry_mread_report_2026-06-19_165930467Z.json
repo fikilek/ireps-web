@@ -1,0 +1,1195 @@
+{
+  "scriptName": "seed_fake_cycle9_cycle10_registry_mread_from_real_later_readings.js",
+  "scriptVersion": "1.2.0",
+  "startedAt": "2026-06-19T16:59:21.309Z",
+  "completedAt": "2026-06-19T16:59:30.467Z",
+  "mode": "EXECUTE",
+  "registryCollection": "registry_mread",
+  "astsCollection": "asts",
+  "astExportPath": null,
+  "scope": {
+    "lmPcode": "ZA2157",
+    "wardPcode": "ZA2157008",
+    "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+    "geofenceName": "Gf Maninjwa",
+    "expectedCount": 22,
+    "allowCountMismatch": false
+  },
+  "cycles": {
+    "cycle9": {
+      "cycleId": "ZA2157_2025_2026_CYCLE_09",
+      "cycleLabel": "Cycle 9 - 2025/26",
+      "readingDate": "2026-04-10",
+      "windowStart": "2026-03-16",
+      "windowEnd": "2026-04-15"
+    },
+    "cycle10": {
+      "cycleId": "ZA2157_2025_2026_CYCLE_10",
+      "cycleLabel": "Cycle 10 - 2025/26",
+      "readingDate": "2026-05-10",
+      "windowStart": "2026-04-16",
+      "windowEnd": "2026-05-15"
+    },
+    "laterAnchorStartDate": "2026-05-16T00:00:00.000Z"
+  },
+  "counts": {
+    "scannedAstRows": 23,
+    "scopedAstRows": 22,
+    "uniqueMeterAnchorsSelected": 22,
+    "skippedScopeAnchors": 0,
+    "skippedCalculationAnchors": 0,
+    "plannedFakeRows": 44,
+    "existingTargetRowsSkipped": 0,
+    "rowsToCreate": 44,
+    "createdRows": 44
+  },
+  "plannedRowsByCycle": {
+    "ZA2157_2025_2026_CYCLE_09": 22,
+    "ZA2157_2025_2026_CYCLE_10": 22
+  },
+  "rowsToCreateByCycle": {
+    "ZA2157_2025_2026_CYCLE_09": 22,
+    "ZA2157_2025_2026_CYCLE_10": 22
+  },
+  "plannedMeterChainsByScenario": {
+    "NORMAL_CONTINUATION": 18,
+    "METER_REPLACEMENT_OLD_REMOVED_METER": 4
+  },
+  "rowsToCreateByScenario": {
+    "NORMAL_CONTINUATION": 36,
+    "METER_REPLACEMENT_OLD_REMOVED_METER": 8
+  },
+  "anchors": [
+    {
+      "astId": "TRN_MDIS_1781745182508_WTR_ZA2157008_8252",
+      "meterNo": "W7162",
+      "premiseId": "PRM_1781723557929_984_W008_8252",
+      "address": "20 Maninjwa Street",
+      "erfNo": "8252",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:14:15.188Z",
+      "laterReading": 852,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781745182508_WTR_ZA2157008_8252"
+    },
+    {
+      "astId": "TRN_MDIS_1781745071252_WTR_ZA2157008_8253",
+      "meterNo": "W543",
+      "premiseId": "PRM_1781723773043_780_W008_8253",
+      "address": "22 Maninjwa Street",
+      "erfNo": "8253",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:12:27.315Z",
+      "laterReading": 97,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781745071252_WTR_ZA2157008_8253"
+    },
+    {
+      "astId": "TRN_MDIS_1781744969125_WTR_ZA2157008_8254",
+      "meterNo": "W96090",
+      "premiseId": "PRM_1781723836193_264_W008_8254",
+      "address": "24 Maninjwa Street",
+      "erfNo": "8254",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:10:34.118Z",
+      "laterReading": 452,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781744969125_WTR_ZA2157008_8254"
+    },
+    {
+      "astId": "TRN_MINST_1781723988791_WTR_ZA2157008_8255",
+      "meterNo": "WW46778",
+      "premiseId": "PRM_1781723926654_346_W008_8255",
+      "address": "26 Maninjwa Street",
+      "erfNo": "8255",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T19:20:55.588Z",
+      "laterReading": 0,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MINST_1781723988791_WTR_ZA2157008_8255"
+    },
+    {
+      "astId": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+      "meterNo": "W034794",
+      "premiseId": "PRM_1781578341788_754_W008_8256",
+      "address": "28 Maninjwa Street",
+      "erfNo": "8256",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T17:29:16.340Z",
+      "laterReading": 2985,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256"
+    },
+    {
+      "astId": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+      "meterNo": "W9525847",
+      "premiseId": "PRM_1781578175991_996_W008_8257",
+      "address": "30 Maninjwa Street",
+      "erfNo": "8257",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T17:02:08.137Z",
+      "laterReading": 6248,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257"
+    },
+    {
+      "astId": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+      "meterNo": "W1234",
+      "premiseId": "PRM_1781578115069_824_W008_8258",
+      "address": "32 Maninjwa Street",
+      "erfNo": "8258",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T16:30:49.746Z",
+      "laterReading": 685,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258"
+    },
+    {
+      "astId": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+      "meterNo": "W2395",
+      "premiseId": "PRM_1781578052713_582_W008_8259",
+      "address": "34 Maninjwa Street",
+      "erfNo": "8259",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T14:01:20.177Z",
+      "laterReading": 3597,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259"
+    },
+    {
+      "astId": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+      "meterNo": "W5678",
+      "premiseId": "PRM_1781577987963_487_W008_8260",
+      "address": "36 Maninjwa Street",
+      "erfNo": "8260",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T13:59:56.808Z",
+      "laterReading": 4536,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260"
+    },
+    {
+      "astId": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+      "meterNo": "E3697",
+      "premiseId": "PRM_1781560940666_712_W008_8261",
+      "address": "38 Maninjwa Street",
+      "erfNo": "8261",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T13:58:37.579Z",
+      "laterReading": 356,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261"
+    },
+    {
+      "astId": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+      "meterNo": "W5790",
+      "premiseId": "PRM_1781560871594_595_W008_8262",
+      "address": "40 Maninjwa Street",
+      "erfNo": "8262",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T13:57:10.798Z",
+      "laterReading": 2653,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262"
+    },
+    {
+      "astId": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+      "meterNo": "W4799",
+      "premiseId": "PRM_1781560799726_300_W008_8263",
+      "address": "42 Maninjwa Street",
+      "erfNo": "8263",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-17T13:07:10.782Z",
+      "laterReading": 4523,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263"
+    },
+    {
+      "astId": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+      "meterNo": "W74147",
+      "premiseId": "PRM_1781560729570_638_W008_8264",
+      "address": "44 Maninjwa Street",
+      "erfNo": "8264",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-16T02:23:52.259Z",
+      "laterReading": 2651,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264"
+    },
+    {
+      "astId": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+      "meterNo": "W5789",
+      "premiseId": "PRM_1781560632487_517_W008_8265",
+      "address": "46 Maninjwa Street",
+      "erfNo": "8265",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-15T22:05:12.973Z",
+      "laterReading": 26589,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265"
+    },
+    {
+      "astId": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+      "meterNo": "W753Y89",
+      "premiseId": "PRM_1781552533059_89_W008_8266",
+      "address": "49 Maninjwa Street",
+      "erfNo": "8266",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-15T19:51:21.872Z",
+      "laterReading": 485932,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266"
+    },
+    {
+      "astId": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+      "meterNo": "WR468",
+      "premiseId": "PRM_1781552367485_179_W008_8267",
+      "address": "50 Maninjwa Street",
+      "erfNo": "8267",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-15T19:43:33.389Z",
+      "laterReading": 63259,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267"
+    },
+    {
+      "astId": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+      "meterNo": "W86R356",
+      "premiseId": "PRM_1781551411973_553_W008_8268",
+      "address": "52 Mainjwa Street",
+      "erfNo": "8268",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-15T19:24:56.068Z",
+      "laterReading": 52368,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268"
+    },
+    {
+      "astId": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+      "meterNo": "W468426",
+      "premiseId": "PRM_1781550304853_52_W008_8269",
+      "address": "54 Maninjwa Street",
+      "erfNo": "8269",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-15T19:18:07.214Z",
+      "laterReading": 12845,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269"
+    },
+    {
+      "astId": "TRN_MDIS_1781744840116_WTR_ZA2157008_7338",
+      "meterNo": "W6543",
+      "premiseId": "PRM_1781723309359_922_W008_7338",
+      "address": "71 John Beer Drive",
+      "erfNo": "7338",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:08:32.859Z",
+      "laterReading": 0,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781744840116_WTR_ZA2157008_7338"
+    },
+    {
+      "astId": "TRN_MDIS_1781744547362_WTR_ZA2157008_7337",
+      "meterNo": "W533",
+      "premiseId": "PRM_1781723188738_908_W008_7337",
+      "address": "73 John Beer Drive",
+      "erfNo": "7337",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:03:22.080Z",
+      "laterReading": 12,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MDIS_1781744547362_WTR_ZA2157008_7337"
+    },
+    {
+      "astId": "TRN_MINST_1781744756353_WTR_ZA2157008_7336",
+      "meterNo": "W5623",
+      "premiseId": "PRM_1781723079598_218_W008_7336",
+      "address": "75 John Beer Drive",
+      "erfNo": "7336",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:06:49.276Z",
+      "laterReading": 0,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MINST_1781744756353_WTR_ZA2157008_7336"
+    },
+    {
+      "astId": "TRN_MINST_1781744653513_WTR_ZA2157008_7335",
+      "meterNo": "W12964",
+      "premiseId": "PRM_1781722993342_264_W008_7335",
+      "address": "77 John Beer Drive",
+      "erfNo": "7335",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "laterReadingAt": "2026-06-18T01:05:11.480Z",
+      "laterReading": 0,
+      "laterReadingSource": "AST_CREATION",
+      "laterReadingTrnId": "TRN_MINST_1781744653513_WTR_ZA2157008_7335"
+    }
+  ],
+  "skippedAnchors": [],
+  "calculationSkips": [],
+  "existingRows": [],
+  "plannedChains": [
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781745182508_WTR_ZA2157008_8252",
+      "meterNo": "W7162",
+      "premiseId": "PRM_1781723557929_984_W008_8252",
+      "address": "20 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W7162_PRM_1781723557929_984_W008_8252_ZA2157008_8252",
+        "readingAt": "2026-04-10T08:00:00.000Z",
+        "currentReading": 675
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W7162_PRM_1781723557929_984_W008_8252_ZA2157008_8252",
+        "readingAt": "2026-05-10T08:00:00.000Z",
+        "previousReading": 675,
+        "currentReading": 824,
+        "consumption": 149,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781745182508_WTR_ZA2157008_8252",
+        "readingAt": "2026-06-18T01:14:15.188Z",
+        "currentReading": 852
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781745071252_WTR_ZA2157008_8253",
+      "meterNo": "W543",
+      "premiseId": "PRM_1781723773043_780_W008_8253",
+      "address": "22 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W543_PRM_1781723773043_780_W008_8253_ZA2157008_8253",
+        "readingAt": "2026-04-10T08:05:00.000Z",
+        "currentReading": 65
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W543_PRM_1781723773043_780_W008_8253_ZA2157008_8253",
+        "readingAt": "2026-05-10T08:17:00.000Z",
+        "previousReading": 65,
+        "currentReading": 81,
+        "consumption": 16,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781745071252_WTR_ZA2157008_8253",
+        "readingAt": "2026-06-18T01:12:27.315Z",
+        "currentReading": 97
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781744969125_WTR_ZA2157008_8254",
+      "meterNo": "W96090",
+      "premiseId": "PRM_1781723836193_264_W008_8254",
+      "address": "24 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W96090_PRM_1781723836193_264_W008_8254_ZA2157008_8254",
+        "readingAt": "2026-04-10T08:12:00.000Z",
+        "currentReading": 350
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W96090_PRM_1781723836193_264_W008_8254_ZA2157008_8254",
+        "readingAt": "2026-05-10T08:23:00.000Z",
+        "previousReading": 350,
+        "currentReading": 373,
+        "consumption": 23,
+        "daysSinceLastReading": 30.01
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781744969125_WTR_ZA2157008_8254",
+        "readingAt": "2026-06-18T01:10:34.118Z",
+        "currentReading": 452
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+      "replacement": {
+        "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+        "oldMeterWasFaked": true,
+        "oldMeter": {
+          "astId": "FAKE_REMOVED_AST_PRM_1781723926654_346_W008_8255_8255",
+          "astNo": "OLD_WW46778",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "REMOVED",
+          "visibility": "INVISIBLE"
+        },
+        "newMeter": {
+          "astId": "TRN_MINST_1781723988791_WTR_ZA2157008_8255",
+          "astNo": "WW46778",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "FIELD",
+          "visibility": "VISIBLE",
+          "openingReading": 0,
+          "openingReadingAt": "2026-06-17T19:20:55.588Z",
+          "openingReadingSource": "AST_CREATION",
+          "openingReadingTrnId": "TRN_MINST_1781723988791_WTR_ZA2157008_8255"
+        }
+      },
+      "astId": "TRN_MINST_1781723988791_WTR_ZA2157008_8255",
+      "meterNo": "WW46778",
+      "premiseId": "PRM_1781723926654_346_W008_8255",
+      "address": "26 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_OLD_WW46778_PRM_1781723926654_346_W008_8255_ZA2157008_8255",
+        "readingAt": "2026-04-10T08:30:00.000Z",
+        "currentReading": 1109
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_OLD_WW46778_PRM_1781723926654_346_W008_8255_ZA2157008_8255",
+        "readingAt": "2026-05-10T08:31:00.000Z",
+        "previousReading": 1109,
+        "currentReading": 1275,
+        "consumption": 166,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MINST_1781723988791_WTR_ZA2157008_8255",
+        "readingAt": "2026-06-17T19:20:55.588Z",
+        "currentReading": 0
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": "N/A_REPLACEMENT_NEW_METER_STARTS_AT_ZERO"
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+      "meterNo": "W034794",
+      "premiseId": "PRM_1781578341788_754_W008_8256",
+      "address": "28 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W034794_PRM_1781578341788_754_W008_8256_ZA2157008_8256",
+        "readingAt": "2026-04-10T08:48:00.000Z",
+        "currentReading": 2805
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W034794_PRM_1781578341788_754_W008_8256_ZA2157008_8256",
+        "readingAt": "2026-05-10T08:47:00.000Z",
+        "previousReading": 2805,
+        "currentReading": 2911,
+        "consumption": 106,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781717296512_WTR_ZA2157008_8256",
+        "readingAt": "2026-06-17T17:29:16.340Z",
+        "currentReading": 2985
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+      "meterNo": "W9525847",
+      "premiseId": "PRM_1781578175991_996_W008_8257",
+      "address": "30 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W9525847_PRM_1781578175991_996_W008_8257_ZA2157008_8257",
+        "readingAt": "2026-04-10T09:03:00.000Z",
+        "currentReading": 6030
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W9525847_PRM_1781578175991_996_W008_8257_ZA2157008_8257",
+        "readingAt": "2026-05-10T09:01:00.000Z",
+        "previousReading": 6030,
+        "currentReading": 6192,
+        "consumption": 162,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781715663675_WTR_ZA2157008_8257",
+        "readingAt": "2026-06-17T17:02:08.137Z",
+        "currentReading": 6248
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+      "meterNo": "W1234",
+      "premiseId": "PRM_1781578115069_824_W008_8258",
+      "address": "32 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W1234_PRM_1781578115069_824_W008_8258_ZA2157008_8258",
+        "readingAt": "2026-04-10T09:11:00.000Z",
+        "currentReading": 571
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W1234_PRM_1781578115069_824_W008_8258_ZA2157008_8258",
+        "readingAt": "2026-05-10T09:06:00.000Z",
+        "previousReading": 571,
+        "currentReading": 659,
+        "consumption": 88,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781713792934_WTR_ZA2157008_8258",
+        "readingAt": "2026-06-17T16:30:49.746Z",
+        "currentReading": 685
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+      "meterNo": "W2395",
+      "premiseId": "PRM_1781578052713_582_W008_8259",
+      "address": "34 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W2395_PRM_1781578052713_582_W008_8259_ZA2157008_8259",
+        "readingAt": "2026-04-10T09:27:00.000Z",
+        "currentReading": 3389
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W2395_PRM_1781578052713_582_W008_8259_ZA2157008_8259",
+        "readingAt": "2026-05-10T09:22:00.000Z",
+        "previousReading": 3389,
+        "currentReading": 3512,
+        "consumption": 123,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781704824549_WTR_ZA2157008_8259",
+        "readingAt": "2026-06-17T14:01:20.177Z",
+        "currentReading": 3597
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+      "meterNo": "W5678",
+      "premiseId": "PRM_1781577987963_487_W008_8260",
+      "address": "36 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W5678_PRM_1781577987963_487_W008_8260_ZA2157008_8260",
+        "readingAt": "2026-04-10T09:46:00.000Z",
+        "currentReading": 4438
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W5678_PRM_1781577987963_487_W008_8260_ZA2157008_8260",
+        "readingAt": "2026-05-10T09:27:00.000Z",
+        "previousReading": 4438,
+        "currentReading": 4486,
+        "consumption": 48,
+        "daysSinceLastReading": 29.99
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781704741884_WTR_ZA2157008_8260",
+        "readingAt": "2026-06-17T13:59:56.808Z",
+        "currentReading": 4536
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+      "meterNo": "E3697",
+      "premiseId": "PRM_1781560940666_712_W008_8261",
+      "address": "38 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_E3697_PRM_1781560940666_712_W008_8261_ZA2157008_8261",
+        "readingAt": "2026-04-10T10:06:00.000Z",
+        "currentReading": 263
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_E3697_PRM_1781560940666_712_W008_8261_ZA2157008_8261",
+        "readingAt": "2026-05-10T09:42:00.000Z",
+        "previousReading": 263,
+        "currentReading": 325,
+        "consumption": 62,
+        "daysSinceLastReading": 29.98
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781704662207_WTR_ZA2157008_8261",
+        "readingAt": "2026-06-17T13:58:37.579Z",
+        "currentReading": 356
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+      "meterNo": "W5790",
+      "premiseId": "PRM_1781560871594_595_W008_8262",
+      "address": "40 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W5790_PRM_1781560871594_595_W008_8262_ZA2157008_8262",
+        "readingAt": "2026-04-10T10:11:00.000Z",
+        "currentReading": 2592
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W5790_PRM_1781560871594_595_W008_8262_ZA2157008_8262",
+        "readingAt": "2026-05-10T09:48:00.000Z",
+        "previousReading": 2592,
+        "currentReading": 2629,
+        "consumption": 37,
+        "daysSinceLastReading": 29.98
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781704579628_WTR_ZA2157008_8262",
+        "readingAt": "2026-06-17T13:57:10.798Z",
+        "currentReading": 2653
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+      "meterNo": "W4799",
+      "premiseId": "PRM_1781560799726_300_W008_8263",
+      "address": "42 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W4799_PRM_1781560799726_300_W008_8263_ZA2157008_8263",
+        "readingAt": "2026-04-10T10:31:00.000Z",
+        "currentReading": 4450
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W4799_PRM_1781560799726_300_W008_8263_ZA2157008_8263",
+        "readingAt": "2026-05-10T10:08:00.000Z",
+        "previousReading": 4450,
+        "currentReading": 4507,
+        "consumption": 57,
+        "daysSinceLastReading": 29.98
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781701567010_WTR_ZA2157008_8263",
+        "readingAt": "2026-06-17T13:07:10.782Z",
+        "currentReading": 4523
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+      "meterNo": "W74147",
+      "premiseId": "PRM_1781560729570_638_W008_8264",
+      "address": "44 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W74147_PRM_1781560729570_638_W008_8264_ZA2157008_8264",
+        "readingAt": "2026-04-10T10:42:00.000Z",
+        "currentReading": 2592
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W74147_PRM_1781560729570_638_W008_8264_ZA2157008_8264",
+        "readingAt": "2026-05-10T10:28:00.000Z",
+        "previousReading": 2592,
+        "currentReading": 2633,
+        "consumption": 41,
+        "daysSinceLastReading": 29.99
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781576574079_WTR_ZA2157008_8264",
+        "readingAt": "2026-06-16T02:23:52.259Z",
+        "currentReading": 2651
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+      "meterNo": "W5789",
+      "premiseId": "PRM_1781560632487_517_W008_8265",
+      "address": "46 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W5789_PRM_1781560632487_517_W008_8265_ZA2157008_8265",
+        "readingAt": "2026-04-10T10:55:00.000Z",
+        "currentReading": 26419
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W5789_PRM_1781560632487_517_W008_8265_ZA2157008_8265",
+        "readingAt": "2026-05-10T10:42:00.000Z",
+        "previousReading": 26419,
+        "currentReading": 26480,
+        "consumption": 61,
+        "daysSinceLastReading": 29.99
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781561042613_WTR_ZA2157008_8265",
+        "readingAt": "2026-06-15T22:05:12.973Z",
+        "currentReading": 26589
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+      "meterNo": "W753Y89",
+      "premiseId": "PRM_1781552533059_89_W008_8266",
+      "address": "49 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W753Y89_PRM_1781552533059_89_W008_8266_ZA2157008_8266",
+        "readingAt": "2026-04-10T11:02:00.000Z",
+        "currentReading": 485729
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W753Y89_PRM_1781552533059_89_W008_8266_ZA2157008_8266",
+        "readingAt": "2026-05-10T10:57:00.000Z",
+        "previousReading": 485729,
+        "currentReading": 485857,
+        "consumption": 128,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781552816356_WTR_ZA2157008_8266",
+        "readingAt": "2026-06-15T19:51:21.872Z",
+        "currentReading": 485932
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+      "meterNo": "WR468",
+      "premiseId": "PRM_1781552367485_179_W008_8267",
+      "address": "50 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_WR468_PRM_1781552367485_179_W008_8267_ZA2157008_8267",
+        "readingAt": "2026-04-10T11:11:00.000Z",
+        "currentReading": 63037
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_WR468_PRM_1781552367485_179_W008_8267_ZA2157008_8267",
+        "readingAt": "2026-05-10T11:11:00.000Z",
+        "previousReading": 63037,
+        "currentReading": 63158,
+        "consumption": 121,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781552559018_WTR_ZA2157008_8267",
+        "readingAt": "2026-06-15T19:43:33.389Z",
+        "currentReading": 63259
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+      "meterNo": "W86R356",
+      "premiseId": "PRM_1781551411973_553_W008_8268",
+      "address": "52 Mainjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W86R356_PRM_1781551411973_553_W008_8268_ZA2157008_8268",
+        "readingAt": "2026-04-10T11:30:00.000Z",
+        "currentReading": 52196
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W86R356_PRM_1781551411973_553_W008_8268_ZA2157008_8268",
+        "readingAt": "2026-05-10T11:23:00.000Z",
+        "previousReading": 52196,
+        "currentReading": 52345,
+        "consumption": 149,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781551436829_WTR_ZA2157008_8268",
+        "readingAt": "2026-06-15T19:24:56.068Z",
+        "currentReading": 52368
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+      "meterNo": "W468426",
+      "premiseId": "PRM_1781550304853_52_W008_8269",
+      "address": "54 Maninjwa Street",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W468426_PRM_1781550304853_52_W008_8269_ZA2157008_8269",
+        "readingAt": "2026-04-10T11:35:00.000Z",
+        "currentReading": 12596
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W468426_PRM_1781550304853_52_W008_8269_ZA2157008_8269",
+        "readingAt": "2026-05-10T11:39:00.000Z",
+        "previousReading": 12596,
+        "currentReading": 12727,
+        "consumption": 131,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781550354463_WTR_ZA2157008_8269",
+        "readingAt": "2026-06-15T19:18:07.214Z",
+        "currentReading": 12845
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+      "replacement": {
+        "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+        "oldMeterWasFaked": true,
+        "oldMeter": {
+          "astId": "FAKE_REMOVED_AST_PRM_1781723309359_922_W008_7338_7338",
+          "astNo": "OLD_W6543",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "REMOVED",
+          "visibility": "INVISIBLE"
+        },
+        "newMeter": {
+          "astId": "TRN_MDIS_1781744840116_WTR_ZA2157008_7338",
+          "astNo": "W6543",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "CONNECTED",
+          "visibility": "INVISIBLE",
+          "openingReading": 0,
+          "openingReadingAt": "2026-06-18T01:08:32.859Z",
+          "openingReadingSource": "AST_CREATION",
+          "openingReadingTrnId": "TRN_MDIS_1781744840116_WTR_ZA2157008_7338"
+        }
+      },
+      "astId": "TRN_MDIS_1781744840116_WTR_ZA2157008_7338",
+      "meterNo": "W6543",
+      "premiseId": "PRM_1781723309359_922_W008_7338",
+      "address": "71 John Beer Drive",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_OLD_W6543_PRM_1781723309359_922_W008_7338_ZA2157008_7338",
+        "readingAt": "2026-04-10T11:53:00.000Z",
+        "currentReading": 8781
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_OLD_W6543_PRM_1781723309359_922_W008_7338_ZA2157008_7338",
+        "readingAt": "2026-05-10T11:54:00.000Z",
+        "previousReading": 8781,
+        "currentReading": 8966,
+        "consumption": 185,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781744840116_WTR_ZA2157008_7338",
+        "readingAt": "2026-06-18T01:08:32.859Z",
+        "currentReading": 0
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": "N/A_REPLACEMENT_NEW_METER_STARTS_AT_ZERO"
+      }
+    },
+    {
+      "scenario": "NORMAL_CONTINUATION",
+      "replacement": null,
+      "astId": "TRN_MDIS_1781744547362_WTR_ZA2157008_7337",
+      "meterNo": "W533",
+      "premiseId": "PRM_1781723188738_908_W008_7337",
+      "address": "73 John Beer Drive",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_W533_PRM_1781723188738_908_W008_7337_ZA2157008_7337",
+        "readingAt": "2026-04-10T12:00:00.000Z",
+        "currentReading": 8
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_W533_PRM_1781723188738_908_W008_7337_ZA2157008_7337",
+        "readingAt": "2026-05-10T12:00:00.000Z",
+        "previousReading": 8,
+        "currentReading": 10,
+        "consumption": 2,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MDIS_1781744547362_WTR_ZA2157008_7337",
+        "readingAt": "2026-06-18T01:03:22.080Z",
+        "currentReading": 12
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": true
+      }
+    },
+    {
+      "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+      "replacement": {
+        "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+        "oldMeterWasFaked": true,
+        "oldMeter": {
+          "astId": "FAKE_REMOVED_AST_PRM_1781723079598_218_W008_7336_7336",
+          "astNo": "OLD_W5623",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "REMOVED",
+          "visibility": "INVISIBLE"
+        },
+        "newMeter": {
+          "astId": "TRN_MINST_1781744756353_WTR_ZA2157008_7336",
+          "astNo": "W5623",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "FIELD",
+          "visibility": "VISIBLE",
+          "openingReading": 0,
+          "openingReadingAt": "2026-06-18T01:06:49.276Z",
+          "openingReadingSource": "AST_CREATION",
+          "openingReadingTrnId": "TRN_MINST_1781744756353_WTR_ZA2157008_7336"
+        }
+      },
+      "astId": "TRN_MINST_1781744756353_WTR_ZA2157008_7336",
+      "meterNo": "W5623",
+      "premiseId": "PRM_1781723079598_218_W008_7336",
+      "address": "75 John Beer Drive",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_OLD_W5623_PRM_1781723079598_218_W008_7336_ZA2157008_7336",
+        "readingAt": "2026-04-10T12:20:00.000Z",
+        "currentReading": 2366
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_OLD_W5623_PRM_1781723079598_218_W008_7336_ZA2157008_7336",
+        "readingAt": "2026-05-10T12:14:00.000Z",
+        "previousReading": 2366,
+        "currentReading": 2505,
+        "consumption": 139,
+        "daysSinceLastReading": 30
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MINST_1781744756353_WTR_ZA2157008_7336",
+        "readingAt": "2026-06-18T01:06:49.276Z",
+        "currentReading": 0
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": "N/A_REPLACEMENT_NEW_METER_STARTS_AT_ZERO"
+      }
+    },
+    {
+      "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+      "replacement": {
+        "scenario": "METER_REPLACEMENT_OLD_REMOVED_METER",
+        "oldMeterWasFaked": true,
+        "oldMeter": {
+          "astId": "FAKE_REMOVED_AST_PRM_1781722993342_264_W008_7335_7335",
+          "astNo": "OLD_W12964",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "REMOVED",
+          "visibility": "INVISIBLE"
+        },
+        "newMeter": {
+          "astId": "TRN_MINST_1781744653513_WTR_ZA2157008_7335",
+          "astNo": "W12964",
+          "meterKind": "CONVENTIONAL",
+          "meterType": "water",
+          "statusState": "FIELD",
+          "visibility": "VISIBLE",
+          "openingReading": 0,
+          "openingReadingAt": "2026-06-18T01:05:11.480Z",
+          "openingReadingSource": "AST_CREATION",
+          "openingReadingTrnId": "TRN_MINST_1781744653513_WTR_ZA2157008_7335"
+        }
+      },
+      "astId": "TRN_MINST_1781744653513_WTR_ZA2157008_7335",
+      "meterNo": "W12964",
+      "premiseId": "PRM_1781722993342_264_W008_7335",
+      "address": "77 John Beer Drive",
+      "wardPcode": "ZA2157008",
+      "geofenceId": "Mvtjb8Jlgd02CmfnGjTQ",
+      "geofenceName": "Gf Maninjwa",
+      "cycle9": {
+        "docId": "FAKE_MREAD_CYCLE09_OLD_W12964_PRM_1781722993342_264_W008_7335_ZA2157008_7335",
+        "readingAt": "2026-04-10T12:37:00.000Z",
+        "currentReading": 8639
+      },
+      "cycle10": {
+        "docId": "FAKE_MREAD_CYCLE10_OLD_W12964_PRM_1781722993342_264_W008_7335_ZA2157008_7335",
+        "readingAt": "2026-05-10T12:25:00.000Z",
+        "previousReading": 8639,
+        "currentReading": 8751,
+        "consumption": 112,
+        "daysSinceLastReading": 29.99
+      },
+      "laterReal": {
+        "source": "AST_CREATION",
+        "trnId": "TRN_MINST_1781744653513_WTR_ZA2157008_7335",
+        "readingAt": "2026-06-18T01:05:11.480Z",
+        "currentReading": 0
+      },
+      "consistency": {
+        "cycle9LessThanOrEqualCycle10": true,
+        "cycle10LessThanOrEqualLaterReal": "N/A_REPLACEMENT_NEW_METER_STARTS_AT_ZERO"
+      }
+    }
+  ]
+}
