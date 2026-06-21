@@ -1,5 +1,9 @@
 {
   "projects": {
-    "default": "ireps2"
-  }
+    "default": "ireps2",
+    "test": "ireps-test",
+    "dev": "ireps2"
+  },
+  "targets": {},
+  "etags": {}
 }
