@@ -1,10 +1,9 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
-import { computeMreadStagingCycleControllerState } from "./mreadStagingCycleController.v2.js";
+import { annotateMreadStagingCycles } from "./mreadStagingCycleController.v2.js";
 
 const MREAD_STAGING_CYCLES_COLLECTION = "mread_staging_cycles";
-const ALLOWED_STATUSES = new Set(["CLOSED", "DRAFT", "OPEN", "FUTURE"]);
 const SYSTEM_NA = "NAv";
 
 function normalizeText(value, fallback = "") {
@@ -16,12 +15,6 @@ function normalizeText(value, fallback = "") {
 function normalizeUpper(value, fallback = "") {
   const text = normalizeText(value, fallback);
   return text ? text.toUpperCase() : fallback;
-}
-
-function normalizeStatusFilter(value) {
-  const status = normalizeUpper(value, "");
-  if (status === "FUTURE") return "OPEN";
-  return status;
 }
 
 function isMeaningful(value) {
@@ -260,7 +253,6 @@ function serializeCycle(docSnap) {
     cycleNo: readNumber(data?.cycleNo, 0),
     cycleNoText: normalizeText(data?.cycleNoText, SYSTEM_NA),
 
-    status: normalizeUpper(data?.status, SYSTEM_NA),
     currentIteration: readNumber(data?.currentIteration, 0),
     activeStagingId: normalizeText(data?.activeStagingId, SYSTEM_NA),
     lastGenerated: data?.lastGenerated || null,
@@ -318,64 +310,37 @@ function buildSummary(rows = []) {
   return rows.reduce(
     (acc, row) => {
       acc.total += 1;
-
-      const status = normalizeUpper(row.status, "UNKNOWN");
-      if (status === "CLOSED") acc.closed += 1;
-      else if (status === "DRAFT") acc.draft += 1;
-      else if (status === "OPEN") acc.open += 1;
-      else acc.other += 1;
-
-      if (status === "DRAFT") {
-        acc.activeDraft = {
+      if (row.isFuture) acc.future += 1;
+      else acc.available += 1;
+      if (row.isCurrentCycle) {
+        acc.currentCycle = {
           cycleId: row.cycleId,
           cycleLabel: row.cycleLabel,
           billingPeriod: row.billingPeriod,
           window: row.window?.display || SYSTEM_NA,
         };
       }
-
       return acc;
     },
     {
       total: 0,
-      closed: 0,
-      draft: 0,
-      open: 0,
-      other: 0,
-      activeDraft: null,
+      available: 0,
+      future: 0,
+      currentCycle: null,
     },
   );
 }
 
-function computeControllerRowsByLm(rows = []) {
-  const rowsByLm = rows.reduce((acc, row) => {
-    const key = normalizeText(row.lmPcode, SYSTEM_NA);
-    if (!acc.has(key)) acc.set(key, []);
-    acc.get(key).push(row);
-    return acc;
-  }, new Map());
-  const controllerStates = [];
-  const computedRows = [];
+function sortCyclesDesc(left, right) {
+  const leftStart = normalizeText(left?.window?.startDate, "");
+  const rightStart = normalizeText(right?.window?.startDate, "");
 
-  for (const rowsForLm of rowsByLm.values()) {
-    const controllerState = computeMreadStagingCycleControllerState(rowsForLm);
-    controllerStates.push(controllerState);
-    computedRows.push(...controllerState.rows);
-  }
-
-  return { controllerStates, computedRows };
-}
-
-function sortCycles(left, right) {
-  const leftStartYear = readNumber(left.billingPeriodStartYear, 0);
-  const rightStartYear = readNumber(right.billingPeriodStartYear, 0);
-
-  if (leftStartYear !== rightStartYear) return leftStartYear - rightStartYear;
+  if (leftStart !== rightStart) return rightStart.localeCompare(leftStart);
 
   const leftCycleNo = readNumber(left.cycleNo, 0);
   const rightCycleNo = readNumber(right.cycleNo, 0);
 
-  return leftCycleNo - rightCycleNo;
+  return rightCycleNo - leftCycleNo;
 }
 
 export const listMreadStagingCycles = onCall(async (request) => {
@@ -384,18 +349,11 @@ export const listMreadStagingCycles = onCall(async (request) => {
 
   const lmPcode = normalizeText(data?.lmPcode, "");
   const billingPeriod = normalizeText(data?.billingPeriod, "");
-  const status = normalizeStatusFilter(data?.status);
+  const includeFuture = data?.includeFuture === true;
   const rawLimit = Number(data?.limit || 100);
   const limit = Number.isFinite(rawLimit) && rawLimit > 0
     ? Math.min(rawLimit, 500)
     : 100;
-
-  if (status && !ALLOWED_STATUSES.has(status)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "status must be CLOSED, DRAFT, OPEN, FUTURE, or empty",
-    );
-  }
 
   const caller = await loadCallerContext({ db, request });
   const access = await assertCanReadMreadStagingCycles({
@@ -416,15 +374,14 @@ export const listMreadStagingCycles = onCall(async (request) => {
   }
 
   const snap = await query.get();
-  const sourceRows = snap.docs.map(serializeCycle).sort(sortCycles);
-  const { controllerStates, computedRows } = computeControllerRowsByLm(sourceRows);
-  const filteredRows = computedRows
+  const sourceRows = snap.docs.map(serializeCycle);
+  const cycleState = annotateMreadStagingCycles(sourceRows);
+  const filteredRows = cycleState.rows
+    .filter((row) => includeFuture || !row.isFuture)
     .filter((row) => !isMeaningful(billingPeriod) || row.billingPeriod === billingPeriod)
-    .filter((row) => !isMeaningful(status) || row.status === status)
-    .sort(sortCycles);
+    .sort(sortCyclesDesc);
   const rows = filteredRows.slice(0, limit);
-  const summary = buildSummary(rows);
-  const primaryControllerState = controllerStates[0] || null;
+  const visibleSummary = buildSummary(rows);
 
   logger.info("listMreadStagingCycles -- SUCCESS", {
     requestedByUid: caller.uid,
@@ -433,7 +390,7 @@ export const listMreadStagingCycles = onCall(async (request) => {
     accessLevel: access.accessLevel,
     lmPcode: lmPcode || "ALL",
     billingPeriod: billingPeriod || "ALL",
-    status: status || "ALL",
+    includeFuture,
     rowCount: rows.length,
     sourceRowCount: sourceRows.length,
   });
@@ -444,7 +401,7 @@ export const listMreadStagingCycles = onCall(async (request) => {
     filters: {
       lmPcode: lmPcode || null,
       billingPeriod: billingPeriod || null,
-      status: status || null,
+      includeFuture,
       limit,
     },
     access: {
@@ -453,16 +410,11 @@ export const listMreadStagingCycles = onCall(async (request) => {
     },
     rows,
     summary: {
-      ...summary,
-      activeDraft: primaryControllerState?.summary?.activeDraft || summary.activeDraft,
-      liveCycle: primaryControllerState?.summary?.liveCycle || null,
-      baselineCycle: primaryControllerState?.summary?.baselineCycle || null,
-      asOfDate: primaryControllerState?.summary?.asOfDate || null,
-      timezone: primaryControllerState?.summary?.timezone || null,
-      rule: primaryControllerState?.summary?.rule || null,
-      statusSource: primaryControllerState?.summary?.statusSource || null,
+      ...cycleState.summary,
+      visibleAvailable: visibleSummary.available,
+      visibleRows: rows.length,
+      currentCycle: visibleSummary.currentCycle || cycleState.summary.currentCycle,
     },
   };
 });
-
 export { loadCallerContext, assertCanReadMreadStagingCycles };

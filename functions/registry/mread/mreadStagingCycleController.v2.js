@@ -1,13 +1,9 @@
-// functions/src/mreadStagingCycleController.v2.js
-// Pure controller helpers for MREAD staging cycle status.
-// Source of truth: cycle windows + backend/current date. Stored status is not trusted.
+// functions/registry/mread/mreadStagingCycleController.v2.js
+// Pure cycle-calendar helpers for MREAD staging snapshot generation.
+// Source of truth: configured cycle windows + selected cycleId.
 
 const DEFAULT_TIMEZONE = "Africa/Johannesburg";
-const PUBLIC_STATUSES = Object.freeze({
-  CLOSED: "CLOSED",
-  DRAFT: "DRAFT",
-  OPEN: "OPEN",
-});
+const SYSTEM_NA = "NAv";
 
 function pad2(value) {
   return String(value).padStart(2, "0");
@@ -17,13 +13,13 @@ function isDateOnlyString(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
-function toLocalDateKey(value = new Date(), timezone = DEFAULT_TIMEZONE) {
+export function toLocalDateKey(value = new Date(), timezone = DEFAULT_TIMEZONE) {
   if (isDateOnlyString(value)) return String(value);
 
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid date value supplied to MREAD controller: ${value}`);
+    throw new Error(`Invalid date value supplied to MREAD cycle helper: ${value}`);
   }
 
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -42,7 +38,7 @@ function toLocalDateKey(value = new Date(), timezone = DEFAULT_TIMEZONE) {
 }
 
 function compareDateKeys(left, right) {
-  return String(left).localeCompare(String(right));
+  return String(left || "").localeCompare(String(right || ""));
 }
 
 function getCycleStartDate(cycle = {}) {
@@ -53,25 +49,24 @@ function getCycleEndDate(cycle = {}) {
   return cycle?.window?.endDate || cycle?.endDate || null;
 }
 
-function getCycleSortKey(cycle = {}) {
-  const startDate = getCycleStartDate(cycle) || "9999-12-31";
-  const cycleId = cycle?.cycleId || cycle?.id || "";
-  return `${startDate}__${cycleId}`;
+function getCycleId(cycle = {}) {
+  return cycle?.cycleId || cycle?.id || SYSTEM_NA;
 }
 
-function normalizeCycleForController(cycle = {}) {
+export function normalizeMreadStagingCycle(cycle = {}) {
   const startDate = getCycleStartDate(cycle);
   const endDate = getCycleEndDate(cycle);
+  const cycleId = getCycleId(cycle);
 
   if (!startDate || !endDate) {
     throw new Error(
-      `Cycle ${cycle?.cycleId || cycle?.id || "UNKNOWN"} is missing window.startDate or window.endDate`,
+      `MREAD_CYCLE_WINDOW_MISSING: ${cycleId} is missing window.startDate or window.endDate`,
     );
   }
 
   return {
     ...cycle,
-    cycleId: cycle?.cycleId || cycle?.id,
+    cycleId,
     window: {
       ...(cycle?.window || {}),
       startDate,
@@ -80,13 +75,36 @@ function normalizeCycleForController(cycle = {}) {
   };
 }
 
-function isDateInsideCycle(dateKey, cycle = {}) {
+export function sortCyclesByWindowStartAsc(cycles = []) {
+  return [...cycles].sort((left, right) => {
+    const leftStart = getCycleStartDate(left) || "9999-12-31";
+    const rightStart = getCycleStartDate(right) || "9999-12-31";
+    const byStart = compareDateKeys(leftStart, rightStart);
+    if (byStart !== 0) return byStart;
+    return String(getCycleId(left)).localeCompare(String(getCycleId(right)));
+  });
+}
+
+export function sortCyclesByWindowStartDesc(cycles = []) {
+  return sortCyclesByWindowStartAsc(cycles).reverse();
+}
+
+export function isCycleFuture(cycle = {}, options = {}) {
+  const timezone = options.timezone || DEFAULT_TIMEZONE;
+  const asOfDate = toLocalDateKey(options.asOfDate || new Date(), timezone);
+  const startDate = getCycleStartDate(cycle);
+  return compareDateKeys(startDate, asOfDate) > 0;
+}
+
+export function isDateInsideCycle(cycle = {}, options = {}) {
+  const timezone = options.timezone || DEFAULT_TIMEZONE;
+  const asOfDate = toLocalDateKey(options.asOfDate || new Date(), timezone);
   const startDate = getCycleStartDate(cycle);
   const endDate = getCycleEndDate(cycle);
 
   return (
-    compareDateKeys(startDate, dateKey) <= 0 &&
-    compareDateKeys(dateKey, endDate) <= 0
+    compareDateKeys(startDate, asOfDate) <= 0 &&
+    compareDateKeys(asOfDate, endDate) <= 0
   );
 }
 
@@ -94,135 +112,95 @@ function summarizeRows(rows = []) {
   return rows.reduce(
     (acc, row) => {
       acc.total += 1;
-      if (row.status === PUBLIC_STATUSES.CLOSED) acc.closed += 1;
-      if (row.status === PUBLIC_STATUSES.DRAFT) acc.draft += 1;
-      if (row.status === PUBLIC_STATUSES.OPEN) acc.open += 1;
+      if (row.isFuture) acc.future += 1;
+      else acc.available += 1;
+      if (row.isCurrentCycle) acc.current += 1;
       return acc;
     },
-    { total: 0, closed: 0, draft: 0, open: 0 },
+    { total: 0, available: 0, future: 0, current: 0 },
   );
 }
 
-export function computeMreadStagingCycleControllerState(
-  cycles = [],
-  { asOfDate = new Date(), timezone = DEFAULT_TIMEZONE } = {},
-) {
-  const asOfDateKey = toLocalDateKey(asOfDate, timezone);
-  const sortedCycles = cycles
-    .map(normalizeCycleForController)
-    .sort((left, right) => getCycleSortKey(left).localeCompare(getCycleSortKey(right)));
-
-  const liveIndex = sortedCycles.findIndex((cycle) =>
-    isDateInsideCycle(asOfDateKey, cycle),
+export function annotateMreadStagingCycles(cycles = [], options = {}) {
+  const timezone = options.timezone || DEFAULT_TIMEZONE;
+  const asOfDate = toLocalDateKey(options.asOfDate || new Date(), timezone);
+  const sortedAsc = sortCyclesByWindowStartAsc(
+    cycles.map(normalizeMreadStagingCycle),
   );
 
-  if (liveIndex < 0) {
-    throw new Error(
-      `MREAD_LIVE_CYCLE_NOT_FOUND: no configured cycle window contains ${asOfDateKey}`,
-    );
-  }
-
-  const draftIndex = liveIndex - 1;
-
-  if (draftIndex < 0) {
-    throw new Error(
-      `MREAD_DRAFT_CYCLE_NOT_AVAILABLE: live cycle ${sortedCycles[liveIndex]?.cycleId} has no previous configured cycle`,
-    );
-  }
-
-  const baselineIndex = draftIndex - 1;
-  const liveCycle = sortedCycles[liveIndex];
-  const activeDraft = sortedCycles[draftIndex];
-  const baselineCycle = baselineIndex >= 0 ? sortedCycles[baselineIndex] : null;
-
-  const rows = sortedCycles.map((cycle, index) => {
-    const status =
-      index < draftIndex
-        ? PUBLIC_STATUSES.CLOSED
-        : index === draftIndex
-          ? PUBLIC_STATUSES.DRAFT
-          : PUBLIC_STATUSES.OPEN;
+  const rowsAsc = sortedAsc.map((cycle, index) => {
+    const baseCycle = index > 0 ? sortedAsc[index - 1] : null;
+    const future = isCycleFuture(cycle, { asOfDate, timezone });
+    const current = isDateInsideCycle(cycle, { asOfDate, timezone });
 
     return {
       ...cycle,
-      storedStatus: cycle?.storedStatus || cycle?.status || "NAv",
-      computedStatus: status,
-      status,
-      controller: {
-        asOfDate: asOfDateKey,
+      isFuture: future,
+      isCurrentCycle: current,
+      availability: future ? "FUTURE" : "AVAILABLE",
+      selectedCycle: {
+        cycleId: cycle.cycleId,
+        cycleLabel: cycle.cycleLabel || cycle.cycleId,
+        billingPeriod: cycle.billingPeriod || SYSTEM_NA,
+        window: cycle.window || null,
+      },
+      baseCycle: baseCycle
+        ? {
+            cycleId: baseCycle.cycleId,
+            cycleLabel: baseCycle.cycleLabel || baseCycle.cycleId,
+            billingPeriod: baseCycle.billingPeriod || SYSTEM_NA,
+            window: baseCycle.window || null,
+          }
+        : null,
+      cycleController: {
+        asOfDate,
         timezone,
-        rule: "LIVE_MINUS_ONE_DRAFT",
-        statusSource: "COMPUTED_FROM_CYCLE_WINDOW",
+        rule: "SELECTED_CYCLE_BASE_CYCLE",
+        availabilitySource: "COMPUTED_FROM_CYCLE_WINDOW",
       },
     };
   });
 
-  const counts = summarizeRows(rows);
+  const rows = sortCyclesByWindowStartDesc(rowsAsc);
+  const currentCycle = rows.find((row) => row.isCurrentCycle) || null;
 
   return {
-    asOfDate: asOfDateKey,
+    asOfDate,
     timezone,
-    rule: "LIVE_MINUS_ONE_DRAFT",
-    statusSource: "COMPUTED_FROM_CYCLE_WINDOW",
-    liveCycle: rows[liveIndex],
-    activeDraft: rows[draftIndex],
-    baselineCycle: baselineIndex >= 0 ? rows[baselineIndex] : null,
+    rule: "SELECTED_CYCLE_BASE_CYCLE",
+    availabilitySource: "COMPUTED_FROM_CYCLE_WINDOW",
     rows,
     summary: {
-      ...counts,
-      activeDraft: activeDraft
+      ...summarizeRows(rows),
+      currentCycle: currentCycle
         ? {
-            cycleId: activeDraft.cycleId,
-            cycleLabel: activeDraft.cycleLabel,
-            window: activeDraft.window,
+            cycleId: currentCycle.cycleId,
+            cycleLabel: currentCycle.cycleLabel,
+            window: currentCycle.window,
           }
         : null,
-      liveCycle: liveCycle
-        ? {
-            cycleId: liveCycle.cycleId,
-            cycleLabel: liveCycle.cycleLabel,
-            window: liveCycle.window,
-          }
-        : null,
-      baselineCycle: baselineCycle
-        ? {
-            cycleId: baselineCycle.cycleId,
-            cycleLabel: baselineCycle.cycleLabel,
-            window: baselineCycle.window,
-          }
-        : null,
-      asOfDate: asOfDateKey,
+      asOfDate,
       timezone,
-      rule: "LIVE_MINUS_ONE_DRAFT",
-      statusSource: "COMPUTED_FROM_CYCLE_WINDOW",
+      rule: "SELECTED_CYCLE_BASE_CYCLE",
+      availabilitySource: "COMPUTED_FROM_CYCLE_WINDOW",
     },
   };
 }
 
-export function assertMreadStagingDraftCycle(
-  cycleId,
-  cycles = [],
-  options = {},
-) {
-  const controllerState = computeMreadStagingCycleControllerState(cycles, options);
-  const activeDraftId = controllerState?.activeDraft?.cycleId;
+export function findSelectedAndBaseCycle(cycleId, cycles = []) {
+  const sortedAsc = sortCyclesByWindowStartAsc(
+    cycles.map(normalizeMreadStagingCycle),
+  );
+  const selectedIndex = sortedAsc.findIndex(
+    (cycle) => cycle.cycleId === cycleId || cycle.id === cycleId,
+  );
 
-  if (!cycleId || cycleId !== activeDraftId) {
-    const error = new Error(
-      `MREAD_STAGING_NOT_DRAFT: requested cycle ${cycleId || "NAv"} is not the current controller DRAFT cycle ${activeDraftId || "NAv"}`,
-    );
-    error.code = "MREAD_STAGING_NOT_DRAFT";
-    error.controller = {
-      requestedCycleId: cycleId || null,
-      activeDraftCycleId: activeDraftId || null,
-      asOfDate: controllerState.asOfDate,
-      liveCycleId: controllerState?.liveCycle?.cycleId || null,
-      baselineCycleId: controllerState?.baselineCycle?.cycleId || null,
-    };
-    throw error;
+  if (selectedIndex < 0) {
+    throw new Error(`MREAD_SELECTED_CYCLE_NOT_FOUND: ${cycleId || SYSTEM_NA}`);
   }
 
-  return controllerState;
+  return {
+    selectedCycle: sortedAsc[selectedIndex],
+    baseCycle: selectedIndex > 0 ? sortedAsc[selectedIndex - 1] : null,
+  };
 }
-
-export { DEFAULT_TIMEZONE, PUBLIC_STATUSES };

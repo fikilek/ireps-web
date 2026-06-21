@@ -14,6 +14,7 @@ import {
 import { DatetimeFilterButton } from "../../components/DatetimeFilter";
 import DownloadButtons from "../../components/DownloadButtons";
 import RegistryIdText from "../../components/RegistryIdText";
+import SharedMeterHistoryModal from "../../components/mread/MeterHistoryModal";
 
 const EMPTY_MREAD_FILTERS = {
   meterNo: "",
@@ -805,36 +806,26 @@ function getCycleLastGeneratedAt(row = {}) {
   );
 }
 
-function normalizeCycleStatus(status) {
-  const normalizedStatus = firstMeaningfulText(status, "").toUpperCase();
-
-  if (normalizedStatus === "FUTURE") return "OPEN";
-  if (["CLOSED", "DRAFT", "OPEN"].includes(normalizedStatus)) {
-    return normalizedStatus;
-  }
-
-  return "NAv";
+function getCycleAvailability(row = {}) {
+  return row?.isFuture === true ? "FUTURE" : "AVAILABLE";
 }
 
-function getCycleStatus(row = {}) {
-  return normalizeCycleStatus(row?.computedStatus || row?.status);
+function getBaseCycleLabel(row = {}) {
+  return firstMeaningfulText(
+    row?.baseCycle?.cycleLabel,
+    row?.baseCycle?.cycleId,
+    "NAv",
+  );
 }
 
 function getCycleAction(row = {}) {
-  if (isMeaningfulText(row.action)) {
-    return String(row.action).trim().toUpperCase();
-  }
-
-  const status = getCycleStatus(row);
-  if (status === "DRAFT") return "STAGING";
-  if (status === "CLOSED") return "STAGING";
-  return "DISABLED";
+  return row?.isFuture === true ? "DISABLED" : "STAGING";
 }
 
 function getCycleActionLabel(row = {}) {
   const action = getCycleAction(row);
   if (action === "STAGING") return "Staging";
-  return "Disabled";
+  return "Unavailable";
 }
 
 function getCycleActionTone(row = {}) {
@@ -843,15 +834,10 @@ function getCycleActionTone(row = {}) {
   return "disabled";
 }
 
-function cycleMatchesFilter(row = {}, { search = "", billingPeriod = "ALL", status = "ALL" } = {}) {
-  const rowStatus = getCycleStatus(row);
+function cycleMatchesFilter(row = {}, { search = "", billingPeriod = "ALL" } = {}) {
   const rowBillingPeriod = firstMeaningfulText(row.billingPeriod, "");
 
   if (billingPeriod !== "ALL" && rowBillingPeriod !== billingPeriod) {
-    return false;
-  }
-
-  if (status !== "ALL" && rowStatus !== status) {
     return false;
   }
 
@@ -862,8 +848,9 @@ function cycleMatchesFilter(row = {}, { search = "", billingPeriod = "ALL", stat
     row.cycleId,
     getCycleLabel(row),
     row.billingPeriod,
-    rowStatus,
+    getCycleAvailability(row),
     getCycleWindowDisplay(row),
+    getBaseCycleLabel(row),
     row.activeStagingId,
   ]
     .map((value) => normalizeText(value))
@@ -873,24 +860,11 @@ function cycleMatchesFilter(row = {}, { search = "", billingPeriod = "ALL", stat
 }
 
 function getCycleActionHelp(row = {}) {
-  const status = getCycleStatus(row);
-  const action = getCycleAction(row);
-
-  if (action === "GENERATE_OPEN") {
-    return "DRAFT cycle: Generate / Open will run generateMreadStaging and write the active mread_staging pack.";
+  if (row?.isFuture === true) {
+    return "This configured cycle starts after today, so it is hidden from normal staging generation.";
   }
 
-  if (action === "VIEW") {
-    return row.activeStagingId
-      ? "CLOSED cycle: view existing generated staging pack only."
-      : "CLOSED cycle: view only, but no active staging pack exists yet.";
-  }
-
-  if (status === "OPEN") {
-    return "OPEN cycle: readings may still be active, so staging generation is blocked until this cycle becomes DRAFT.";
-  }
-
-  return "Action unavailable for this cycle status.";
+  return "Generate a preserved mread_staging snapshot for this selected cycle. The base cycle is the immediately previous configured cycle.";
 }
 
 
@@ -1707,7 +1681,6 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
   const [generateMreadStaging, { isLoading: isGenerating }] =
     useGenerateMreadStagingMutation();
   const [billingPeriod, setBillingPeriod] = useState("ALL");
-  const [status, setStatus] = useState("ALL");
   const [search, setSearch] = useState("");
   const [selectedCycle, setSelectedCycle] = useState(null);
   const [phaseNotice, setPhaseNotice] = useState("");
@@ -1716,7 +1689,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     () => ({
       lmPcode: safeLmPcode,
       billingPeriod: null,
-      status: null,
+      includeFuture: false,
       limit: 200,
     }),
     [safeLmPcode],
@@ -1746,11 +1719,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
         if (stillExists) return stillExists;
       }
 
-      return (
-        cycleRows.find((row) => getCycleStatus(row) === "DRAFT") ||
-        cycleRows.find((row) => getCycleStatus(row) === "CLOSED") ||
-        cycleRows[0]
-      );
+      return cycleRows[0];
     });
   }, [cycleRows]);
 
@@ -1765,13 +1734,13 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
   const filteredCycleRows = useMemo(
     () =>
       cycleRows.filter((row) =>
-        cycleMatchesFilter(row, { billingPeriod, status, search }),
+        cycleMatchesFilter(row, { billingPeriod, search }),
       ),
-    [cycleRows, billingPeriod, status, search],
+    [cycleRows, billingPeriod, search],
   );
 
-  const draftCycle = useMemo(
-    () => cycleRows.find((row) => getCycleStatus(row) === "DRAFT") || null,
+  const currentCycle = useMemo(
+    () => cycleRows.find((row) => row.isCurrentCycle === true) || null,
     [cycleRows],
   );
 
@@ -1785,53 +1754,52 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     const action = getCycleAction(row);
     setSelectedCycle(row);
 
-    if (action === "STAGING") {
-      const cycleId = row?.cycleId || row?.id;
-
-      if (!cycleId) {
-        setPhaseNotice("Cannot generate staging because this cycle row has no cycleId.");
-        return;
-      }
-
-      setPhaseNotice(
-        `Generating ${getCycleLabel(row)}. This writes a new mread_staging pack and updates the cycle activeStagingId.`,
-      );
-
-      try {
-        const result = await generateMreadStaging({ cycleId }).unwrap();
-        const stagingId =
-          result?.stagingId || result?.activeStagingId || result?.tableId || NAv;
-        const totalRows = firstValue(
-          result?.summary?.totalRows,
-          result?.rowsWritten,
-          result?.totalRows,
-          0,
-        );
-        const iteration = firstValue(
-          result?.iteration,
-          result?.currentIteration,
-          result?.generation?.iteration,
-          row?.currentIteration,
-        );
-
-        setPhaseNotice(
-          `Generated ${getCycleLabel(row)} successfully. Staging ID: ${stagingId}. Rows: ${formatNumber(totalRows)}. Iteration: ${formatNumber(iteration)}.`,
-        );
-
-        await refetch();
-        return;
-      } catch (error) {
-        const message =
-          error?.data?.message ||
-          error?.message ||
-          error?.error ||
-          "Could not generate MREAD staging.";
-        setPhaseNotice(`Staging failed for ${getCycleLabel(row)}: ${message}`);
-        return;
-      }
+    if (action !== "STAGING") {
+      setPhaseNotice(getCycleActionHelp(row));
+      return;
     }
 
-    setPhaseNotice(getCycleActionHelp(row));
+    const cycleId = row?.cycleId || row?.id;
+
+    if (!cycleId) {
+      setPhaseNotice("Cannot generate staging because this cycle row has no cycleId.");
+      return;
+    }
+
+    setPhaseNotice(
+      `Generating staging for selected cycle ${getCycleLabel(row)}. Base cycle: ${getBaseCycleLabel(row)}.`,
+    );
+
+    try {
+      const result = await generateMreadStaging({ cycleId }).unwrap();
+      const stagingId =
+        result?.stagingId || result?.activeStagingId || result?.tableId || NAv;
+      const totalRows = firstValue(
+        result?.summary?.totalRows,
+        result?.rowsWritten,
+        result?.totalRows,
+        0,
+      );
+      const iteration = firstValue(
+        result?.iteration,
+        result?.currentIteration,
+        result?.generation?.iteration,
+        row?.currentIteration,
+      );
+
+      setPhaseNotice(
+        `Generated staging for ${getCycleLabel(row)} successfully. Staging ID: ${stagingId}. Rows: ${formatNumber(totalRows)}. Iteration: ${formatNumber(iteration)}.`,
+      );
+
+      await refetch();
+    } catch (error) {
+      const message =
+        error?.data?.message ||
+        error?.message ||
+        error?.error ||
+        "Could not generate MREAD staging.";
+      setPhaseNotice(`Staging failed for ${getCycleLabel(row)}: ${message}`);
+    }
   }
 
   return (
@@ -1846,11 +1814,10 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
           <div>
             <p className="eyebrow">MREAD Staging</p>
             <h2 id="mread-staging-controller-title">
-              Launch Staging Process
+              Generate MREAD Staging Snapshot
             </h2>
             <p className="muted">
-              Select the controlled cycle before generating or viewing an MREAD
-              field-evidence staging pack. DRAFT is supplied by the backend controller, not by the UI.
+              Select any available configured MREAD cycle. The selected cycle is processed as the staging cycle, and the immediately previous configured cycle is used as the base cycle.
             </p>
           </div>
 
@@ -1861,36 +1828,28 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
 
         <div style={styles.modalBody}>
           <section style={styles.stagingControllerNotice}>
-            Phase 1 launch is active. The backend controller calculates the
-            current DRAFT cycle from the date. Only that DRAFT cycle may call
-            <strong> generateMreadStaging</strong>, write a controlled
-            <strong> mread_staging</strong> pack, and update
-            <strong> mread_staging_cycles.activeStagingId</strong>. This modal
-            still does not create cycle config, estimate readings, apply tariffs,
-            or make billing decisions.
+            iREPS does not close, approve, or bill these cycles. This action creates a new preserved
+            <strong> mread_staging</strong> parent document with its own <strong>rows</strong> subcollection every time it is clicked.
+            Future configured cycles are hidden because they do not yet have useful field-reading data.
           </section>
 
           <section style={styles.stagingControllerSummaryGrid}>
             <div style={styles.stagingSummaryTile}>
-              <span>Total Cycles</span>
-              <strong>{formatNumber(summary?.total ?? cycleRows.length)}</strong>
+              <span>Visible Cycles</span>
+              <strong>{formatNumber(summary?.visibleRows ?? cycleRows.length)}</strong>
             </div>
             <div style={styles.stagingSummaryTile}>
-              <span>DRAFT</span>
-              <strong>{formatNumber(summary?.draft ?? cycleRows.filter((row) => getCycleStatus(row) === "DRAFT").length)}</strong>
+              <span>Available</span>
+              <strong>{formatNumber(summary?.available ?? cycleRows.length)}</strong>
             </div>
             <div style={styles.stagingSummaryTile}>
-              <span>CLOSED</span>
-              <strong>{formatNumber(summary?.closed ?? cycleRows.filter((row) => getCycleStatus(row) === "CLOSED").length)}</strong>
-            </div>
-            <div style={styles.stagingSummaryTile}>
-              <span>OPEN</span>
-              <strong>{formatNumber(summary?.open ?? cycleRows.filter((row) => getCycleStatus(row) === "OPEN").length)}</strong>
+              <span>Hidden Future</span>
+              <strong>{formatNumber(summary?.future ?? 0)}</strong>
             </div>
             <div style={styles.stagingSummaryTileWide}>
-              <span>Active Draft</span>
-              <strong>{draftCycle ? getCycleLabel(draftCycle) : "NAv"}</strong>
-              <small>{draftCycle ? getCycleWindowDisplay(draftCycle) : "No DRAFT cycle returned"}</small>
+              <span>Current Cycle</span>
+              <strong>{currentCycle ? getCycleLabel(currentCycle) : "NAv"}</strong>
+              <small>{currentCycle ? getCycleWindowDisplay(currentCycle) : "No current configured cycle returned"}</small>
             </div>
           </section>
 
@@ -1920,26 +1879,12 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
             </label>
 
             <label style={styles.stagingFilterLabel}>
-              Status
-              <select
-                value={status}
-                onChange={(event) => setStatus(event.target.value)}
-                style={styles.stagingInput}
-              >
-                <option value="ALL">ALL</option>
-                <option value="DRAFT">DRAFT</option>
-                <option value="CLOSED">CLOSED</option>
-                <option value="OPEN">OPEN</option>
-              </select>
-            </label>
-
-            <label style={styles.stagingFilterLabel}>
               Search
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 style={styles.stagingInput}
-                placeholder="Cycle, window, status..."
+                placeholder="Cycle, window, base cycle..."
               />
             </label>
 
@@ -1967,7 +1912,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                 <div>
                   <h3>Available Staging Cycles</h3>
                   <p className="muted">
-                    Showing {formatNumber(filteredCycleRows.length)} of {formatNumber(cycleRows.length)} controller rows.
+                    Showing {formatNumber(filteredCycleRows.length)} of {formatNumber(cycleRows.length)} available cycle rows, sorted newest first.
                   </p>
                 </div>
               </div>
@@ -1975,7 +1920,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
               {isFetching && !cycleRows.length ? (
                 <LoadingSpinner
                   title="Loading staging cycles..."
-                  message="Reading the mread_staging_cycles controller collection."
+                  message="Reading the mread_staging_cycles configuration collection."
                 />
               ) : null}
 
@@ -1983,7 +1928,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                 <div className="empty-state">
                   <h2>No staging cycles found</h2>
                   <p className="muted">
-                    No controller rows matched this LM and filter selection.
+                    No configured cycles matched this LM and filter selection.
                   </p>
                 </div>
               ) : null}
@@ -1995,11 +1940,11 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                       <tr>
                         <th>Cycle</th>
                         <th>Window</th>
-                        <th>Status</th>
+                        <th>Base Cycle</th>
                         <th>Iteration</th>
                         <th>Last Generated</th>
                         <th>Rows</th>
-                        <th>Action</th>
+                        <th>Staging</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2018,13 +1963,12 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                               <div style={styles.secondaryId}>
                                 <RegistryIdText value={row.cycleId} />
                               </div>
+                              {row.isCurrentCycle ? (
+                                <div style={styles.secondaryId}>Current cycle</div>
+                              ) : null}
                             </td>
                             <td>{getCycleWindowDisplay(row)}</td>
-                            <td>
-                              <StatusPill tone={getOutcomeToneForCycle(row)}>
-                                {getCycleStatus(row)}
-                              </StatusPill>
-                            </td>
+                            <td>{getBaseCycleLabel(row)}</td>
                             <td>{formatNumber(getCycleIteration(row))}</td>
                             <td>{formatDateTime(getCycleLastGeneratedAt(row))}</td>
                             <td>{formatNumber(getCycleRowsCount(row))}</td>
@@ -2034,9 +1978,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                                 style={
                                   actionTone === "primary"
                                     ? styles.primaryMiniButton
-                                    : actionTone === "secondary"
-                                      ? styles.secondaryMiniButton
-                                      : styles.disabledMiniButton
+                                    : styles.disabledMiniButton
                                 }
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -2058,7 +2000,6 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                 </div>
               ) : null}
             </section>
-
           </div>
         </div>
       </div>
@@ -2066,13 +2007,6 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
   );
 }
 
-function getOutcomeToneForCycle(row = {}) {
-  const status = getCycleStatus(row);
-  if (status === "DRAFT") return "warning";
-  if (status === "CLOSED") return "default";
-  if (status === "OPEN") return "default";
-  return "default";
-}
 
 function HelpModal({ onClose }) {
   return (
@@ -3060,7 +2994,7 @@ export default function MreadRegistryPage() {
         <div>
           <h1>MREAD Registry</h1>
           <p className="muted">
-            Showing completed meter-reading registry rows captured in iREPS.
+            View completed MREAD field records and generate preserved staging snapshots.
           </p>
           <Link className="text-link" to="/registries">
             ← Back to Registries
@@ -3075,7 +3009,7 @@ export default function MreadRegistryPage() {
               ? "Opening registry..."
               : isFetching
                 ? "Streaming..."
-                : `${formatNumber(sortedMreadRows.length)} MREADs`}
+                : `${formatNumber(sortedMreadRows.length)} MREAD rows`}
           </div>
           <button
             type="button"
@@ -3638,7 +3572,7 @@ export default function MreadRegistryPage() {
         />
       ) : null}
       {selectedMeterRow ? (
-        <MeterHistoryModal
+        <SharedMeterHistoryModal
           row={selectedMeterRow}
           registryRows={mreadRows}
           onClose={() => setSelectedMeterRow(null)}
@@ -3663,6 +3597,16 @@ export default function MreadRegistryPage() {
 
 const styles = {
   fixedRegistryHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    background: "#f8fafc",
+    paddingTop: "0.35rem",
+    paddingRight: "1.25rem",
+    paddingBottom: "0.85rem",
+    paddingLeft: "1.25rem",
+    boxSizing: "border-box",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
     alignItems: "flex-start",
     gap: "1rem",
   },

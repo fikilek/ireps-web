@@ -17,54 +17,52 @@ function normalizeOptionalFilter(value) {
   return text;
 }
 
-function normalizeControllerStatus(value) {
-  const status = normalizeText(value, "").toUpperCase();
-
-  if (status === "FUTURE") return "OPEN";
-  if (["CLOSED", "DRAFT", "OPEN"].includes(status)) return status;
-
-  return "NAv";
+function getCycleStartDate(row = {}) {
+  return normalizeText(row?.window?.startDate, "");
 }
 
-function normalizeStatusFilter(value) {
-  const status = normalizeOptionalFilter(value);
+function sortCyclesByStartDateDesc(left = {}, right = {}) {
+  const leftStart = getCycleStartDate(left);
+  const rightStart = getCycleStartDate(right);
 
-  if (!status) return null;
+  if (leftStart !== rightStart) return rightStart.localeCompare(leftStart);
 
-  return normalizeControllerStatus(status);
+  return String(right?.cycleId || "").localeCompare(String(left?.cycleId || ""));
+}
+
+function normalizeCycleRow(row = {}) {
+  return {
+    ...row,
+    availability: row?.isFuture === true ? "FUTURE" : "AVAILABLE",
+    isFuture: row?.isFuture === true,
+    isCurrentCycle: row?.isCurrentCycle === true,
+  };
 }
 
 function normalizeControllerResult(result = {}) {
   const rows = Array.isArray(result?.rows)
-    ? result.rows.map((row) => ({
-        ...row,
-        storedStatus: row?.storedStatus || row?.status || "NAv",
-        status: normalizeControllerStatus(row?.computedStatus || row?.status),
-      }))
+    ? result.rows.map(normalizeCycleRow).sort(sortCyclesByStartDateDesc)
     : [];
 
   const fallbackCounts = rows.reduce(
     (acc, row) => {
-      const status = normalizeControllerStatus(row?.status);
-      if (status === "CLOSED") acc.closed += 1;
-      if (status === "DRAFT") acc.draft += 1;
-      if (status === "OPEN") acc.open += 1;
+      if (row.isFuture) acc.future += 1;
+      else acc.available += 1;
+      if (row.isCurrentCycle) acc.current += 1;
       return acc;
     },
-    { closed: 0, draft: 0, open: 0 },
+    { available: 0, future: 0, current: 0 },
   );
-
-  const summary = {
-    ...(result?.summary || {}),
-    closed: result?.summary?.closed ?? fallbackCounts.closed,
-    draft: result?.summary?.draft ?? fallbackCounts.draft,
-    open: result?.summary?.open ?? fallbackCounts.open,
-  };
 
   return {
     ...result,
     rows,
-    summary,
+    summary: {
+      ...(result?.summary || {}),
+      available: result?.summary?.available ?? fallbackCounts.available,
+      future: result?.summary?.future ?? fallbackCounts.future,
+      current: result?.summary?.current ?? fallbackCounts.current,
+    },
   };
 }
 
@@ -82,8 +80,7 @@ export const mreadStagingCyclesApi = createApi({
           const payload = {
             lmPcode: normalizeText(args?.lmPcode, DEFAULT_LM_PCODE),
             billingPeriod: normalizeOptionalFilter(args?.billingPeriod),
-            // Status is controller-computed. Pass only the normalized public status label.
-            status: normalizeStatusFilter(args?.status),
+            includeFuture: args?.includeFuture === true,
             limit: Number(args?.limit || 200),
           };
 
@@ -142,10 +139,7 @@ export const mreadStagingCyclesApi = createApi({
           const functions = getFunctions();
           const callable = httpsCallable(functions, "generateMreadStaging");
 
-          const payload = {
-            cycleId,
-            manualMode: true,
-          };
+          const payload = { cycleId };
 
           if (args?.dryRun === true) {
             payload.dryRun = true;

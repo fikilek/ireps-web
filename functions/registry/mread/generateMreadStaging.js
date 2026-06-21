@@ -6,7 +6,7 @@ import admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { computeMreadStagingCycleControllerState } from "./mreadStagingCycleController.v2.js";
+import { findSelectedAndBaseCycle } from "./mreadStagingCycleController.v2.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -19,6 +19,7 @@ const COLLECTIONS = {
   stagingCycles: "mread_staging_cycles",
   staging: "mread_staging",
   users: "users",
+  asts: "asts",
 };
 
 const NAv = "NAv";
@@ -29,7 +30,6 @@ const LOCKED_STAGING_STATUSES = new Set([
   "FINAL",
   "FINALISED",
   "FINALIZED",
-  "CLOSED",
   "APPROVED",
   "APPROVED_FIELD_PACK",
   "AUTO_LOCKED",
@@ -206,57 +206,7 @@ function getCycleWindow(cycle = {}) {
   };
 }
 
-function getCycleWindowEndDateMs(cycle = {}) {
-  const start = firstValue(
-    cycle?.window?.end,
-    cycle?.window?.endDate,
-    cycle?.endDate,
-    cycle?.windowEnd,
-  );
-  const endDate = toDateOrNull(start);
-  return endDate ? endDate.getTime() : 0;
-}
 
-function getCycleWindowStartDateMs(cycle = {}) {
-  const start = firstValue(
-    cycle?.window?.start,
-    cycle?.window?.startDate,
-    cycle?.startDate,
-    cycle?.windowStart,
-  );
-  const startDate = toDateOrNull(start);
-  return startDate ? startDate.getTime() : 0;
-}
-
-async function fetchAllCyclesForLm(lmPcode) {
-  const snapshot = await db
-    .collection(COLLECTIONS.stagingCycles)
-    .where("lmPcode", "==", lmPcode)
-    .get();
-
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    cycleId: doc.id,
-    ...doc.data(),
-  }));
-}
-
-async function findPreviousCycleByWindowDates(stagingCycle, lmPcode) {
-  const stagingStartMs = getCycleWindowStartDateMs(stagingCycle);
-  const allCycles = await fetchAllCyclesForLm(lmPcode);
-
-  const candidates = allCycles
-    .filter((cycle) => {
-      const cycleEndMs = getCycleWindowEndDateMs(cycle);
-      return cycleEndMs > 0 && cycleEndMs < stagingStartMs;
-    })
-    .sort(
-      (left, right) =>
-        getCycleWindowEndDateMs(right) - getCycleWindowEndDateMs(left),
-    );
-
-  return candidates.length > 0 ? candidates[0] : null;
-}
 
 function getRegistryRowDate(row = {}) {
   return firstValue(
@@ -340,6 +290,206 @@ function getMeterNo(row = {}) {
     row?.meterNo,
     row?.astNo,
   );
+}
+
+function chunkArray(values = [], size = 30) {
+  const chunks = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function getAstLookupKeys(astDoc = {}) {
+  return [
+    astDoc?.id,
+    astDoc?.astId,
+    astDoc?.meterId,
+    astDoc?.astNo,
+    astDoc?.meterNo,
+    astDoc?.master?.id,
+    astDoc?.ast?.astData?.astNo,
+    astDoc?.ast?.astData?.meterNo,
+    astDoc?.ast?.astData?.meter?.astNo,
+    astDoc?.ast?.astData?.meter?.meterNo,
+    astDoc?.accessData?.meterNo,
+    astDoc?.accessData?.astNo,
+  ]
+    .map(stableKey)
+    .filter(Boolean);
+}
+
+function buildAstIndexEntry(astId, data = {}) {
+  return {
+    astId,
+    meterId: firstText(data?.meterId, data?.ast?.astData?.meterId),
+    meterNo: firstText(
+      data?.astNo,
+      data?.meterNo,
+      data?.master?.id,
+      data?.ast?.astData?.astNo,
+      data?.ast?.astData?.meterNo,
+      data?.ast?.astData?.meter?.astNo,
+      data?.ast?.astData?.meter?.meterNo,
+      data?.accessData?.meterNo,
+      data?.accessData?.astNo,
+    ),
+    meterKind: normalizeStagingMeterKind(
+      data?.meterKind,
+      data?.ast?.astData?.meter?.serviceType,
+      data?.ast?.astData?.meter?.kind,
+      data?.ast?.astData?.meter?.type,
+    ),
+    meterType: normalizeStagingMeterType(
+      data?.meterType,
+      data?.ast?.astData?.meter?.kind,
+      data?.ast?.astData?.meter?.type,
+      data?.ast?.astData?.meter?.installationType,
+    ),
+    phase: firstText(
+      data?.phase,
+      data?.meterPhase,
+      data?.ast?.astData?.meter?.phase,
+      data?.ast?.astData?.meter?.meterPhase,
+    ),
+    premiseId: firstText(data?.premiseId, data?.accessData?.premise?.id),
+    erfId: firstText(data?.erfId, data?.accessData?.erfId),
+    wardPcode: firstText(data?.wardPcode, data?.accessData?.parents?.wardPcode),
+    premiseAddress: getPremiseAddress(data),
+    raw: data,
+  };
+}
+
+function addAstDocToIndex(index, docSnap) {
+  if (!docSnap?.exists) return;
+
+  const data = { id: docSnap.id, ...docSnap.data() };
+  const entry = buildAstIndexEntry(docSnap.id, data);
+
+  for (const key of getAstLookupKeys(data)) {
+    if (!index.has(key)) index.set(key, entry);
+  }
+}
+
+function getRegistryMeterLookupValues(rows = []) {
+  const values = new Set();
+
+  rows.forEach((row) => {
+    [
+      row?.meter?.astId,
+      row?.astId,
+      row?.sourceAstId,
+      row?.meter?.meterId,
+      row?.meterId,
+      row?.meter?.astNo,
+      row?.meter?.meterNo,
+      row?.meterNo,
+      row?.astNo,
+    ].forEach((value) => {
+      if (isMeaningfulText(value)) values.add(String(value).trim());
+    });
+  });
+
+  return Array.from(values);
+}
+
+async function fetchAstIndexForRegistryRows(registryRows = []) {
+  const lookupValues = getRegistryMeterLookupValues(registryRows);
+  const astIndex = new Map();
+
+  if (!lookupValues.length) return astIndex;
+
+  const lookupFields = [
+    admin.firestore.FieldPath.documentId(),
+    "astNo",
+    "meterNo",
+    "master.id",
+    "ast.astData.astNo",
+    "ast.astData.meterNo",
+    "ast.astData.meter.astNo",
+    "ast.astData.meter.meterNo",
+    "accessData.meterNo",
+    "accessData.astNo",
+  ];
+
+  for (const field of lookupFields) {
+    for (const chunk of chunkArray(lookupValues, 30)) {
+      try {
+        const snapshot = await db
+          .collection(COLLECTIONS.asts)
+          .where(field, "in", chunk)
+          .get();
+
+        snapshot.docs.forEach((docSnap) => addAstDocToIndex(astIndex, docSnap));
+      } catch (error) {
+        logger.warn("generateMreadStaging AST lookup query skipped", {
+          field: typeof field === "string" ? field : "__name__",
+          message: error?.message,
+        });
+      }
+    }
+  }
+
+  return astIndex;
+}
+
+function findAstEntryForRow(row = {}, context = {}, meterKey = NAv, astIndex) {
+  if (!astIndex?.size) return null;
+
+  const keys = [
+    context?.refs?.astId,
+    context?.refs?.meterId,
+    context?.meterNo,
+    meterKey,
+    ...getMeterIndexKeys(row),
+  ]
+    .map(stableKey)
+    .filter(Boolean);
+
+  for (const key of keys) {
+    const entry = astIndex.get(key);
+    if (entry) return entry;
+  }
+
+  return null;
+}
+
+function mergeContextWithAstEntry(context = {}, astEntry = null) {
+  if (!astEntry) return context;
+
+  return {
+    ...context,
+    meterNo: isMeaningfulText(context.meterNo) ? context.meterNo : astEntry.meterNo,
+    meterKind: isMeaningfulText(context.meterKind)
+      ? context.meterKind
+      : astEntry.meterKind,
+    meterType: isMeaningfulText(context.meterType)
+      ? context.meterType
+      : astEntry.meterType,
+    phase: isMeaningfulText(context.phase) ? context.phase : astEntry.phase,
+    premiseAddress: isMeaningfulText(context.premiseAddress)
+      ? context.premiseAddress
+      : astEntry.premiseAddress,
+    wardPcode: isMeaningfulText(context.wardPcode)
+      ? context.wardPcode
+      : astEntry.wardPcode,
+    refs: {
+      ...context.refs,
+      astId: isMeaningfulText(context.refs?.astId)
+        ? context.refs.astId
+        : astEntry.astId,
+      meterId: isMeaningfulText(context.refs?.meterId)
+        ? context.refs.meterId
+        : astEntry.meterId,
+      premiseId: isMeaningfulText(context.refs?.premiseId)
+        ? context.refs.premiseId
+        : astEntry.premiseId,
+      erfId: isMeaningfulText(context.refs?.erfId)
+        ? context.refs.erfId
+        : astEntry.erfId,
+      astLookupSource: "AST_LOOKUP_BY_METER_NUMBER",
+    },
+  };
 }
 
 function getCurrentReadingValue(row = {}) {
@@ -620,11 +770,19 @@ function buildStagingRow({
   baselineReadingIndex,
   cycleId,
   baselineCycleId,
+  astIndex,
 }) {
   const currentRow = selectCurrentReading(rowsInWindow);
   const contextRow =
     currentRow || pickLatest(rowsInWindow) || pickLatest(allRowsForMeter) || {};
-  const context = readContext(contextRow);
+  const rawContext = readContext(contextRow);
+  const astEntry = findAstEntryForRow(
+    contextRow,
+    rawContext,
+    meterKey,
+    astIndex,
+  );
+  const context = mergeContextWithAstEntry(rawContext, astEntry);
   const baselineRowsInWindow = baselineWindow
     ? allRowsForMeter.filter((row) =>
         isRowInsideWindow(
@@ -678,6 +836,10 @@ function buildStagingRow({
   return {
     rowId,
     meterNo: context.meterNo,
+    astId: context.refs.astId,
+    meterId: context.refs.meterId,
+    premiseId: context.refs.premiseId,
+    erfId: context.refs.erfId,
 
     currentReading,
     currentReadingDate,
@@ -707,6 +869,7 @@ function buildStagingRow({
       meterId: context.refs.meterId,
       premiseId: context.refs.premiseId,
       erfId: context.refs.erfId,
+      astLookupSource: context.refs.astLookupSource || NAv,
       currentRegistryMreadId,
       previousReadingSourceId: previous.sourceId,
       previousStagingId: previous.stagingId || NAv,
@@ -935,80 +1098,6 @@ async function fetchRegistryRowsForLm(lmPcode) {
   return snapshot.docs.map((doc) => ({ __id: doc.id, ...doc.data() }));
 }
 
-async function fetchCycleRowsForLm(lmPcode) {
-  const snapshot = await db
-    .collection(COLLECTIONS.stagingCycles)
-    .where("lmPcode", "==", lmPcode)
-    .get();
-
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    cycleId: doc.id,
-    ...doc.data(),
-  }));
-}
-
-async function fetchCycleForGeneration(cycleRef) {
-  const cycleSnap = await cycleRef.get();
-  if (!cycleSnap.exists) {
-    throw new HttpsError("not-found", "MREAD staging cycle not found.", {
-      code: "CYCLE_NOT_FOUND",
-    });
-  }
-
-  const cycle = {
-    id: cycleSnap.id,
-    cycleId: cycleSnap.id,
-    ...cycleSnap.data(),
-  };
-  const lmPcode = firstText(cycle.lmPcode);
-  if (!isMeaningfulText(lmPcode)) {
-    throw new HttpsError("failed-precondition", "Cycle LM is missing.", {
-      code: "CYCLE_LM_MISSING",
-    });
-  }
-
-  return { cycle, lmPcode };
-}
-
-async function resolveControllerStateForLm(lmPcode) {
-  const cycleRows = await fetchCycleRowsForLm(lmPcode);
-
-  try {
-    return computeMreadStagingCycleControllerState(cycleRows);
-  } catch (error) {
-    throw new HttpsError(
-      "failed-precondition",
-      error?.message || "Unable to compute MREAD staging draft cycle.",
-      {
-        code:
-          error?.message?.split(":")[0] || "MREAD_STAGING_CONTROLLER_FAILED",
-        lmPcode,
-      },
-    );
-  }
-}
-
-function assertRequestedCycleIsComputedDraft(cycleId, controllerState) {
-  const activeDraftId = controllerState?.activeDraft?.cycleId;
-
-  if (cycleId !== activeDraftId) {
-    throw new HttpsError(
-      "failed-precondition",
-      `Requested cycle ${cycleId || NAv} is not the computed MREAD DRAFT cycle ${activeDraftId || NAv}.`,
-      {
-        code: "MREAD_STAGING_NOT_COMPUTED_DRAFT",
-        requestedCycleId: cycleId || null,
-        activeDraftCycleId: activeDraftId || null,
-        liveCycleId: controllerState?.liveCycle?.cycleId || null,
-        baselineCycleId: controllerState?.baselineCycle?.cycleId || null,
-        asOfDate: controllerState?.asOfDate || null,
-        rule: controllerState?.rule || "LIVE_MINUS_ONE_DRAFT",
-      },
-    );
-  }
-}
-
 function groupRowsByMeter(rows = []) {
   const groups = new Map();
 
@@ -1029,6 +1118,7 @@ function buildRowsForCycle({
   baselineReadingIndex,
   cycleId,
   baselineCycleId,
+  astIndex,
 }) {
   const groups = groupRowsByMeter(registryRows);
   const stagingRows = [];
@@ -1050,6 +1140,7 @@ function buildRowsForCycle({
         baselineReadingIndex,
         cycleId,
         baselineCycleId,
+        astIndex,
       }),
     );
   }
@@ -1222,18 +1313,6 @@ async function buildBaselineReadingIndex(baselineCycle = null) {
   };
 }
 
-function buildControllerTrace(controllerState = {}) {
-  return {
-    asOfDate: controllerState.asOfDate || NAv,
-    timezone: controllerState.timezone || NAv,
-    rule: controllerState.rule || "LIVE_MINUS_ONE_DRAFT",
-    statusSource: controllerState.statusSource || "COMPUTED_FROM_CYCLE_WINDOW",
-    liveCycleId: controllerState?.liveCycle?.cycleId || NAv,
-    draftCycleId: controllerState?.activeDraft?.cycleId || NAv,
-    baselineCycleId: controllerState?.baselineCycle?.cycleId || NAv,
-  };
-}
-
 function buildBaselineTrace(baselineReadingIndex = {}) {
   return {
     sourceType: baselineReadingIndex.sourceType || "NONE",
@@ -1243,6 +1322,80 @@ function buildBaselineTrace(baselineReadingIndex = {}) {
     rowCount: Number(baselineReadingIndex.rowCount || 0),
     fallbackCollection: COLLECTIONS.registryMread,
   };
+}
+
+function buildCycleTrace(cycle = null) {
+  if (!cycle) return null;
+
+  return {
+    cycleId: firstText(cycle?.cycleId, cycle?.id),
+    cycleLabel: firstText(cycle?.cycleLabel),
+    billingPeriod: firstText(cycle?.billingPeriod),
+    cycleNo: Number.isFinite(Number(cycle?.cycleNo)) ? Number(cycle.cycleNo) : null,
+    window: {
+      display: firstText(cycle?.window?.display),
+      startDate: firstText(cycle?.window?.startDate),
+      endDate: firstText(cycle?.window?.endDate),
+    },
+  };
+}
+
+async function fetchAllCyclesForLm(lmPcode) {
+  const snapshot = await db
+    .collection(COLLECTIONS.stagingCycles)
+    .where("lmPcode", "==", lmPcode)
+    .get();
+
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    cycleId: doc.id,
+    ...doc.data(),
+  }));
+}
+
+async function resolveSelectedCycleContext({ cycleId, lmPcode }) {
+  const allCycles = await fetchAllCyclesForLm(lmPcode);
+
+  try {
+    return findSelectedAndBaseCycle(cycleId, allCycles);
+  } catch (error) {
+    throw new HttpsError(
+      "failed-precondition",
+      error?.message || "Unable to resolve selected MREAD staging cycle.",
+      {
+        code: error?.message?.split(":")[0] || "MREAD_SELECTED_CYCLE_FAILED",
+        cycleId,
+        lmPcode,
+      },
+    );
+  }
+}
+
+
+async function fetchCycleForGeneration(cycleRef) {
+  const cycleSnap = await cycleRef.get();
+
+  if (!cycleSnap.exists) {
+    throw new HttpsError("not-found", "MREAD staging cycle not found.", {
+      code: "CYCLE_NOT_FOUND",
+    });
+  }
+
+  const cycle = {
+    id: cycleSnap.id,
+    cycleId: cycleSnap.id,
+    ...cycleSnap.data(),
+  };
+
+  const lmPcode = firstText(cycle.lmPcode);
+
+  if (!isMeaningfulText(lmPcode)) {
+    throw new HttpsError("failed-precondition", "Cycle LM is missing.", {
+      code: "CYCLE_LM_MISSING",
+    });
+  }
+
+  return { cycle, lmPcode };
 }
 
 async function lockCycleForGeneration(cycleRef, uid) {
@@ -1334,59 +1487,43 @@ async function lockCycleForGeneration(cycleRef, uid) {
   });
 }
 
-async function previewDryRun({ cycleRef, cycleId, auth, manualMode }) {
-  const { cycle, lmPcode } = await fetchCycleForGeneration(cycleRef);
+async function previewDryRun({ cycleRef, cycleId, auth }) {
+  const { lmPcode } = await fetchCycleForGeneration(cycleRef);
   await assertCanGenerate({ auth, lmPcode });
 
-  let stagingCycle;
-  let baselineCycle;
-  let window;
-  let baselineWindow;
-  let baselineReadingIndex;
-  let controllerState = null;
-
-  if (manualMode) {
-    stagingCycle = cycle;
-    baselineCycle = await findPreviousCycleByWindowDates(stagingCycle, lmPcode);
-    window = getCycleWindow(stagingCycle);
-    baselineWindow = baselineCycle ? getCycleWindow(baselineCycle) : null;
-    baselineReadingIndex = await buildBaselineReadingIndex(baselineCycle);
-  } else {
-    controllerState = await resolveControllerStateForLm(lmPcode);
-    assertRequestedCycleIsComputedDraft(cycleId, controllerState);
-    stagingCycle = controllerState.activeDraft || cycle;
-    baselineCycle = controllerState.baselineCycle || null;
-    window = getCycleWindow(stagingCycle);
-    baselineWindow = baselineCycle ? getCycleWindow(baselineCycle) : null;
-    baselineReadingIndex = await buildBaselineReadingIndex(baselineCycle);
-  }
+  const { selectedCycle, baseCycle } = await resolveSelectedCycleContext({
+    cycleId,
+    lmPcode,
+  });
+  const window = getCycleWindow(selectedCycle);
+  const baselineWindow = baseCycle ? getCycleWindow(baseCycle) : null;
+  const baselineReadingIndex = await buildBaselineReadingIndex(baseCycle);
 
   const registryRows = await fetchRegistryRowsForLm(lmPcode);
+  const astIndex = await fetchAstIndexForRegistryRows(registryRows);
   const stagingRows = buildRowsForCycle({
     registryRows,
     window,
     baselineWindow,
     baselineReadingIndex,
-    cycleId,
-    baselineCycleId: baselineCycle?.cycleId || null,
+    cycleId: selectedCycle.cycleId,
+    baselineCycleId: baseCycle?.cycleId || null,
+    astIndex,
   });
   const summary = buildSummary(stagingRows);
 
-  const result = {
+  return {
     ok: true,
     dryRun: true,
-    cycleId,
+    cycleId: selectedCycle.cycleId,
     lmPcode,
+    generationMode: "SELECTED_CYCLE",
+    selectedCycle: buildCycleTrace(selectedCycle),
+    baseCycle: buildCycleTrace(baseCycle),
     sourceRowsRead: registryRows.length,
     baseline: buildBaselineTrace(baselineReadingIndex),
     summary,
   };
-
-  if (controllerState) {
-    result.controller = buildControllerTrace(controllerState);
-  }
-
-  return result;
 }
 
 async function markGenerationFailed({
@@ -1461,8 +1598,6 @@ export const generateMreadStaging = onCall(
     const uid = request.auth?.uid || null;
     const cycleId = normalizeText(request.data?.cycleId, "");
     const dryRun = request.data?.dryRun === true;
-    const manualMode = request.data?.manualMode === true;
-
     if (!cycleId) {
       throw new HttpsError("invalid-argument", "cycleId is required.", {
         code: "CYCLE_ID_REQUIRED",
@@ -1476,7 +1611,6 @@ export const generateMreadStaging = onCall(
         cycleRef,
         cycleId,
         auth: request.auth,
-        manualMode,
       });
     }
 
@@ -1488,41 +1622,18 @@ export const generateMreadStaging = onCall(
         auth: request.auth,
         lmPcode: precheck.lmPcode,
       });
-      let stagingCycle;
-      let baselineCycle;
-      let window;
-      let baselineWindow;
-      let baselineReadingIndex;
-      let controllerState = null;
-      let controllerTrace = null;
-
-      if (manualMode) {
-        stagingCycle = precheck.cycle;
-        baselineCycle = await findPreviousCycleByWindowDates(
-          stagingCycle,
-          precheck.lmPcode,
-        );
-        window = getCycleWindow(stagingCycle);
-        baselineWindow = baselineCycle ? getCycleWindow(baselineCycle) : null;
-        baselineReadingIndex = await buildBaselineReadingIndex(baselineCycle);
-      } else {
-        controllerState = await resolveControllerStateForLm(precheck.lmPcode);
-        assertRequestedCycleIsComputedDraft(cycleId, controllerState);
-
-        stagingCycle = {
-          ...precheck.cycle,
-          ...(controllerState.activeDraft || {}),
-        };
-        baselineCycle = controllerState.baselineCycle || null;
-        window = getCycleWindow(stagingCycle);
-        baselineWindow = baselineCycle ? getCycleWindow(baselineCycle) : null;
-        baselineReadingIndex = await buildBaselineReadingIndex(baselineCycle);
-        controllerTrace = buildControllerTrace(controllerState);
-      }
+      const { selectedCycle, baseCycle } = await resolveSelectedCycleContext({
+        cycleId,
+        lmPcode: precheck.lmPcode,
+      });
+      const window = getCycleWindow(selectedCycle);
+      const baselineWindow = baseCycle ? getCycleWindow(baseCycle) : null;
+      const baselineReadingIndex = await buildBaselineReadingIndex(baseCycle);
+      const selectedCycleTrace = buildCycleTrace(selectedCycle);
+      const baseCycleTrace = buildCycleTrace(baseCycle);
 
       lock = await lockCycleForGeneration(cycleRef, uid);
       const {
-        cycle,
         lmPcode,
         nextIteration,
         stagingId,
@@ -1532,27 +1643,28 @@ export const generateMreadStaging = onCall(
       const baselineTrace = buildBaselineTrace(baselineReadingIndex);
 
       logger.info("generateMreadStaging started", {
-        cycleId,
+        cycleId: selectedCycle.cycleId,
         lmPcode,
         stagingId,
         iteration: nextIteration,
         uid,
         dryRun,
-        manualMode,
-        stagingCycleId: stagingCycle?.cycleId || cycleId,
-        baselineCycleId: baselineCycle?.cycleId || null,
-        controller: controllerTrace,
+        generationMode: "SELECTED_CYCLE",
+        selectedCycleId: selectedCycle?.cycleId || cycleId,
+        baseCycleId: baseCycle?.cycleId || null,
         baseline: baselineTrace,
       });
 
       const registryRows = await fetchRegistryRowsForLm(lmPcode);
+      const astIndex = await fetchAstIndexForRegistryRows(registryRows);
       const stagingRows = buildRowsForCycle({
         registryRows,
         window,
         baselineWindow,
         baselineReadingIndex,
-        cycleId,
-        baselineCycleId: baselineCycle?.cycleId || null,
+        cycleId: selectedCycle.cycleId,
+        baselineCycleId: baseCycle?.cycleId || null,
+        astIndex,
       });
       const summary = buildSummary(stagingRows);
 
@@ -1571,10 +1683,12 @@ export const generateMreadStaging = onCall(
       const parentDoc = {
         stagingId,
         tableId: stagingId,
-        cycleId,
+        cycleId: selectedCycle.cycleId,
         lmPcode,
-        tableStatus: "DRAFT",
-        ...(controllerTrace ? { controller: controllerTrace } : {}),
+        tableStatus: "GENERATED",
+        generationMode: "SELECTED_CYCLE",
+        selectedCycle: selectedCycleTrace,
+        baseCycle: baseCycleTrace,
         baseline: baselineTrace,
         window: {
           start: window.startTimestamp,
@@ -1586,9 +1700,11 @@ export const generateMreadStaging = onCall(
           iteration: nextIteration,
           generatedByUser,
           generatedAt: Timestamp.fromDate(generatedAt),
+          generationMode: "SELECTED_CYCLE",
           sourceCollection: COLLECTIONS.registryMread,
           sourceRowsRead: registryRows.length,
-          ...(controllerTrace ? { controller: controllerTrace } : {}),
+          selectedCycle: selectedCycleTrace,
+          baseCycle: baseCycleTrace,
           baseline: baselineTrace,
         },
         summary: {
@@ -1618,7 +1734,7 @@ export const generateMreadStaging = onCall(
         data: {
           ...row,
           stagingId,
-          cycleId,
+          cycleId: selectedCycle.cycleId,
           generation: {
             iteration: nextIteration,
             generatedAt: Timestamp.fromDate(generatedAt),
@@ -1637,7 +1753,9 @@ export const generateMreadStaging = onCall(
             completedAt: FieldValue.serverTimestamp(),
             generatedByUser,
             summary,
-            ...(controllerTrace ? { controller: controllerTrace } : {}),
+            generationMode: "SELECTED_CYCLE",
+            selectedCycle: selectedCycleTrace,
+            baseCycle: baseCycleTrace,
             baseline: baselineTrace,
             metadata: {
               updatedAt: FieldValue.serverTimestamp(),
@@ -1658,7 +1776,9 @@ export const generateMreadStaging = onCall(
               iteration: nextIteration,
               generatedAt: Timestamp.fromDate(generatedAt),
               generatedByUser,
-              ...(controllerTrace ? { controller: controllerTrace } : {}),
+              generationMode: "SELECTED_CYCLE",
+              selectedCycle: selectedCycleTrace,
+              baseCycle: baseCycleTrace,
               baseline: baselineTrace,
             },
             summary,
@@ -1672,24 +1792,28 @@ export const generateMreadStaging = onCall(
       await commitOpsInBatches(completionOps);
 
       logger.info("generateMreadStaging completed", {
-        cycleId,
+        cycleId: selectedCycle.cycleId,
         lmPcode,
         stagingId,
         iteration: nextIteration,
         summary,
-        ...(controllerTrace ? { controller: controllerTrace } : {}),
+        generationMode: "SELECTED_CYCLE",
+        selectedCycleId: selectedCycle?.cycleId || cycleId,
+        baseCycleId: baseCycle?.cycleId || null,
         baseline: baselineTrace,
       });
 
       return {
         ok: true,
-        cycleId,
+        cycleId: selectedCycle.cycleId,
         lmPcode,
         stagingId,
         activeStagingId: stagingId,
         iteration: nextIteration,
+        generationMode: "SELECTED_CYCLE",
         sourceRowsRead: registryRows.length,
-        ...(controllerTrace ? { controller: controllerTrace } : {}),
+        selectedCycle: selectedCycleTrace,
+        baseCycle: baseCycleTrace,
         baseline: baselineTrace,
         summary,
       };
