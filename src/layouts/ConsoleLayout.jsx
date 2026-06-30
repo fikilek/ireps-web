@@ -10,6 +10,72 @@ const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
 const ADMIN_ROLES = ["SPU", "ADM", "MNG"];
 const MREAD_STAGING_CONTROLLER_ROLES = ["SPU", "MNG", "SPV"];
 
+const APP_ENV_VALUE =
+  import.meta.env.VITE_APP_ENV || import.meta.env.MODE || "dev";
+
+const ENVIRONMENT_BADGE_CONFIG = {
+  dev: {
+    label: "DEV",
+    background: "#dbeafe",
+    color: "#1e40af",
+    borderColor: "rgba(37, 99, 235, 0.32)",
+  },
+  development: {
+    label: "DEV",
+    background: "#dbeafe",
+    color: "#1e40af",
+    borderColor: "rgba(37, 99, 235, 0.32)",
+  },
+  local: {
+    label: "DEV",
+    background: "#dbeafe",
+    color: "#1e40af",
+    borderColor: "rgba(37, 99, 235, 0.32)",
+  },
+  test: {
+    label: "TEST",
+    background: "#fef3c7",
+    color: "#92400e",
+    borderColor: "rgba(245, 158, 11, 0.34)",
+  },
+  testing: {
+    label: "TEST",
+    background: "#fef3c7",
+    color: "#92400e",
+    borderColor: "rgba(245, 158, 11, 0.34)",
+  },
+  trial: {
+    label: "TRIAL",
+    background: "#ede9fe",
+    color: "#5b21b6",
+    borderColor: "rgba(124, 58, 237, 0.34)",
+  },
+  trials: {
+    label: "TRIAL",
+    background: "#ede9fe",
+    color: "#5b21b6",
+    borderColor: "rgba(124, 58, 237, 0.34)",
+  },
+  prod: {
+    label: "LIVE",
+    background: "#dcfce7",
+    color: "#166534",
+    borderColor: "rgba(34, 197, 94, 0.32)",
+  },
+  production: {
+    label: "LIVE",
+    background: "#dcfce7",
+    color: "#166534",
+    borderColor: "rgba(34, 197, 94, 0.32)",
+  },
+  live: {
+    label: "LIVE",
+    background: "#dcfce7",
+    color: "#166534",
+    borderColor: "rgba(34, 197, 94, 0.32)",
+  },
+};
+
 const navSections = [
   {
     items: [
@@ -214,6 +280,22 @@ const sidebarStyles = {
     fontSize: "0.88rem",
     fontWeight: 650,
   },
+  brandText: {
+    minWidth: 0,
+  },
+  envBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    width: "fit-content",
+    marginTop: "0.12rem",
+    padding: "0.08rem 0.38rem",
+    borderRadius: "999px",
+    fontSize: "0.58rem",
+    fontWeight: 900,
+    letterSpacing: "0.08em",
+    lineHeight: 1.25,
+    textTransform: "uppercase",
+  },
 };
 
 function getDisplayName(profile, email) {
@@ -238,6 +320,21 @@ function getActiveWorkbaseName(activeWorkbase) {
     activeWorkbase?.id ||
     activeWorkbase?.pcode ||
     "NAv"
+  );
+}
+
+function getEnvironmentBadgeConfig(appEnvValue) {
+  const key = String(appEnvValue || "dev")
+    .trim()
+    .toLowerCase();
+
+  return (
+    ENVIRONMENT_BADGE_CONFIG[key] || {
+      label: key ? key.toUpperCase() : "DEV",
+      background: "rgba(148, 163, 184, 0.16)",
+      color: "#334155",
+      borderColor: "rgba(148, 163, 184, 0.35)",
+    }
   );
 }
 
@@ -326,6 +423,7 @@ export default function ConsoleLayout() {
   const visibleNavItems = getFlatNavItems(visibleSections);
 
   const activeNavItem = getActiveNavItem(visibleNavItems, location.pathname);
+  const appEnvBadge = getEnvironmentBadgeConfig(APP_ENV_VALUE);
   const hideTopbarForRegistryRoutes =
     location.pathname === "/registries" ||
     location.pathname.startsWith("/registries/");
@@ -355,8 +453,19 @@ export default function ConsoleLayout() {
           <div className="sidebar-brand">
             <div className="brand-mark">iR</div>
 
-            <div>
+            <div style={sidebarStyles.brandText}>
               <h2>iREPS</h2>
+              <span
+                style={{
+                  ...sidebarStyles.envBadge,
+                  background: appEnvBadge.background,
+                  color: appEnvBadge.color,
+                  border: `1px solid ${appEnvBadge.borderColor}`,
+                }}
+                title={`iREPS Web environment: ${appEnvBadge.label}`}
+              >
+                {appEnvBadge.label}
+              </span>
             </div>
           </div>
 

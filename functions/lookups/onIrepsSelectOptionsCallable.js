@@ -17,6 +17,30 @@ import {
   sortLookupOptions,
 } from "./serializers.js";
 
+function getMobileOptionAvailability(doc) {
+  const option = doc.data() || {};
+  const optionStatus = String(option.status || "").toUpperCase();
+
+  if (optionStatus === OPTION_STATUSES.PUBLISHED) {
+    return {
+      available: true,
+      reason: "PUBLISHED",
+    };
+  }
+
+  if (!optionStatus && option.enabled !== false) {
+    return {
+      available: true,
+      reason: "LEGACY_ENABLED",
+    };
+  }
+
+  return {
+    available: false,
+    reason: optionStatus || "LEGACY_DISABLED",
+  };
+}
+
 export const onIrepsSelectOptionsCallable = onCall(async (request) => {
   assertAuthenticated(request);
 
@@ -55,13 +79,15 @@ export const onIrepsSelectOptionsCallable = onCall(async (request) => {
     );
   }
 
-  const optionsSnap = await lookupRef
-    .collection("options")
-    .where("status", "==", OPTION_STATUSES.PUBLISHED)
-    .get();
+  const optionsSnap = await lookupRef.collection("options").get();
+  const optionAvailability = optionsSnap.docs.map((doc) => ({
+    doc,
+    ...getMobileOptionAvailability(doc),
+  }));
 
-  const options = optionsSnap.docs
-    .map(normalizeOptionForForm)
+  const options = optionAvailability
+    .filter((item) => item.available)
+    .map((item) => normalizeOptionForForm(item.doc))
     .filter(Boolean)
     .filter((option) => option.code !== DEFAULT_OTHER_CODE)
     .sort(sortLookupOptions);
@@ -75,6 +101,12 @@ export const onIrepsSelectOptionsCallable = onCall(async (request) => {
   logger.info("onIrepsSelectOptionsCallable -- SUCCESS", {
     lookupKey,
     optionCount: options.length,
+    totalOptionCount: optionsSnap.size,
+    legacyEnabledCount: optionAvailability.filter(
+      (item) => item.reason === "LEGACY_ENABLED",
+    ).length,
+    filteredOptionCount: optionAvailability.filter((item) => !item.available)
+      .length,
     version: response.version,
     allowOther: response.allowOther,
   });

@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
-import { collection, doc, getDoc, getDocs, getFirestore, limit, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  limit,
+  query,
+  where,
+} from "firebase/firestore";
 
 import { useAuth } from "../../auth/useAuth";
 import {
@@ -116,13 +125,16 @@ function getWardLabelForPcode(wardPcode, wardRows = []) {
   const directWardLabel = formatWardLabelFromNumber(cleanWardPcode);
   if (directWardLabel) return directWardLabel;
 
-  const matchedWard = wardRows.find((ward) => getWardPcode(ward) === cleanWardPcode);
+  const matchedWard = wardRows.find(
+    (ward) => getWardPcode(ward) === cleanWardPcode,
+  );
   if (matchedWard) return getWardLabel(matchedWard);
 
   const wardNumberMatch = cleanWardPcode.match(/(\d{1,3})$/);
   if (wardNumberMatch?.[1]) {
     const wardNumber = Number(wardNumberMatch[1]);
-    if (Number.isFinite(wardNumber) && wardNumber > 0) return `Ward ${wardNumber}`;
+    if (Number.isFinite(wardNumber) && wardNumber > 0)
+      return `Ward ${wardNumber}`;
   }
 
   return cleanWardPcode;
@@ -198,7 +210,8 @@ function formatReading(value) {
 
 function getTableFilterValue(row, key) {
   if (key === "meterNo") return getMeterNo(row);
-  if (key === "premiseType") return safeText(row?.premiseType || row?.propertyType, "");
+  if (key === "premiseType")
+    return safeText(row?.premiseType || row?.propertyType, "");
 
   if (["currentReading", "prevReading", "consumption"].includes(key)) {
     const rawValue = row?.[key];
@@ -222,7 +235,9 @@ function getUniqueFilterOptions(rows, key) {
         .map((row) => getTableFilterValue(row, key))
         .filter((value) => value && value !== NAv),
     ),
-  ).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+  ).sort((left, right) =>
+    left.localeCompare(right, undefined, { numeric: true }),
+  );
 }
 
 function formatTableValue(row, key, actions = {}) {
@@ -315,7 +330,8 @@ function getTableSortValue(row, key) {
 
   if (key === "meterNo") return getMeterNo(row);
   if (key === "wardLabel") return getWardSortValue(row?.wardLabel);
-  if (key === "premiseType") return safeText(row?.premiseType || row?.propertyType, "");
+  if (key === "premiseType")
+    return safeText(row?.premiseType || row?.propertyType, "");
 
   return safeText(row?.[key], "");
 }
@@ -330,8 +346,16 @@ function sortTableRows(rows, sortConfig) {
     .sort((left, right) => {
       const leftValue = getTableSortValue(left.row, sortConfig.key);
       const rightValue = getTableSortValue(right.row, sortConfig.key);
-      const leftMissing = leftValue === null || leftValue === undefined || leftValue === "" || leftValue === NAv;
-      const rightMissing = rightValue === null || rightValue === undefined || rightValue === "" || rightValue === NAv;
+      const leftMissing =
+        leftValue === null ||
+        leftValue === undefined ||
+        leftValue === "" ||
+        leftValue === NAv;
+      const rightMissing =
+        rightValue === null ||
+        rightValue === undefined ||
+        rightValue === "" ||
+        rightValue === NAv;
 
       if (leftMissing && rightMissing) return left.index - right.index;
       if (leftMissing) return 1;
@@ -354,7 +378,11 @@ function SortButton({ label, sortKey, sortConfig, onSort }) {
     : "↕";
 
   return (
-    <button type="button" style={sortButtonStyle} onClick={() => onSort(sortKey)}>
+    <button
+      type="button"
+      style={sortButtonStyle}
+      onClick={() => onSort(sortKey)}
+    >
       <span>{label}</span>
       <span aria-hidden="true">{directionLabel}</span>
     </button>
@@ -634,7 +662,11 @@ async function fetchAstByMeterNo(db, meterNo) {
 }
 
 function getOutcome(row = {}) {
-  return firstText(row?.outcome?.outcome, row.outcome, row.executionOutcome?.outcome);
+  return firstText(
+    row?.outcome?.outcome,
+    row.outcome,
+    row.executionOutcome?.outcome,
+  );
 }
 
 function getOutcomeLabel(outcome) {
@@ -645,12 +677,19 @@ function getOutcomeLabel(outcome) {
 }
 
 function getCompletedAt(row = {}) {
-  return firstValue(row.completedAt, row?.source?.completedAt, row?.metadata?.completedAt);
+  return firstValue(
+    row.completedAt,
+    row?.source?.completedAt,
+    row?.metadata?.completedAt,
+  );
 }
 
 function getReadingAt(row = {}) {
   const outcome = getOutcome(row);
-  const readingAt = firstMeaningfulValue(row.readingAt, row?.reading?.readingAt);
+  const readingAt = firstMeaningfulValue(
+    row.readingAt,
+    row?.reading?.readingAt,
+  );
 
   if (outcome === "SUCCESSFUL_READING") {
     return firstMeaningfulValue(readingAt, getCompletedAt(row));
@@ -690,11 +729,19 @@ function getReasonText(row = {}) {
 }
 
 function getCurrentReading(row = {}) {
-  return firstValue(row.currentReading, row?.reading?.currentReading, row.reading);
+  return firstValue(
+    row.currentReading,
+    row?.reading?.currentReading,
+    row.reading,
+  );
 }
 
 function getPreviousReading(row = {}) {
-  return firstValue(row.previousReading, row.prevReading, row?.reading?.previousReading);
+  return firstValue(
+    row.previousReading,
+    row.prevReading,
+    row?.reading?.previousReading,
+  );
 }
 
 function getConsumption(row = {}) {
@@ -865,12 +912,18 @@ function getAstMreadings(astDoc = {}) {
         raw: item,
         index,
         key: `${item?.trnId || "mread"}-${item?.readingAt || index}`,
-        readingAt: firstValue(item?.readingAt, item?.completedAt, item?.createdAt),
+        readingAt: firstValue(
+          item?.readingAt,
+          item?.completedAt,
+          item?.createdAt,
+        ),
         reading: readingValue,
         readingNumber: Number.isFinite(readingNumber) ? readingNumber : null,
         trnId: firstText(item?.trnId, item?.sourceTrnId),
         source,
-        outcomeLabel: isBaselineReading ? "Baseline Reading" : "Successful Reading",
+        outcomeLabel: isBaselineReading
+          ? "Baseline Reading"
+          : "Successful Reading",
         reason: NAv,
         capturedBy: firstText(
           item?.capturedByName,
@@ -892,7 +945,9 @@ function getAstMreadings(astDoc = {}) {
             : isBaselineReading
               ? "0"
               : NAv,
-        sincePreviousReadingMinutes: Number.isFinite(rawSincePreviousReadingMinutes)
+        sincePreviousReadingMinutes: Number.isFinite(
+          rawSincePreviousReadingMinutes,
+        )
           ? rawSincePreviousReadingMinutes
           : isBaselineReading
             ? 0
@@ -900,7 +955,9 @@ function getAstMreadings(astDoc = {}) {
       };
     })
     .filter((item) => item.readingAt || item.readingNumber !== null)
-    .sort((a, b) => String(b.readingAt || "").localeCompare(String(a.readingAt || "")));
+    .sort((a, b) =>
+      String(b.readingAt || "").localeCompare(String(a.readingAt || "")),
+    );
 
   return sortedReadings.map((item, index) => {
     const previousRow = sortedReadings[index + 1] || null;
@@ -942,7 +999,11 @@ function getRegistryMreadHistoryRows(registryRows = [], selectedRow = {}) {
     .map((registryRow, index) => {
       const outcome = getOutcome(registryRow);
       const isSuccessfulReading = outcome === "SUCCESSFUL_READING";
-      const trnId = firstText(registryRow.trnId, registryRow?.source?.trnId, registryRow.id);
+      const trnId = firstText(
+        registryRow.trnId,
+        registryRow?.source?.trnId,
+        registryRow.id,
+      );
       const currentReading = getCurrentReading(registryRow);
       const currentReadingNumber = Number(currentReading);
       const previousReading = getPreviousReading(registryRow);
@@ -1010,7 +1071,11 @@ function getReadingAtMs(value) {
   return Number.isFinite(millis) ? millis : null;
 }
 
-function mergeMeterHistoryRows({ astRows = [], registryRows = [], selectedRow = {} } = {}) {
+function mergeMeterHistoryRows({
+  astRows = [],
+  registryRows = [],
+  selectedRow = {},
+} = {}) {
   const mergedRows = [];
   const seenTrnIds = new Set();
 
@@ -1112,12 +1177,14 @@ function buildMeterReadingSummary(historyRows = []) {
 }
 
 function CompactDetailLine({ label, value }) {
-  const displayValue = value === null || value === undefined || value === "" ? NAv : String(value);
+  const displayValue =
+    value === null || value === undefined || value === "" ? NAv : String(value);
 
   return (
     <div style={detailLineStyle}>
       <span style={detailLabelStyle}>{label}</span>
-      {label.toLowerCase().includes("id") || label.toLowerCase().includes("pcode") ? (
+      {label.toLowerCase().includes("id") ||
+      label.toLowerCase().includes("pcode") ? (
         <RegistryIdText value={displayValue} />
       ) : (
         <strong>{displayValue}</strong>
@@ -1231,7 +1298,9 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
               <span style={spinnerStyle} aria-hidden="true" />
               <div>
                 <h2 style={{ margin: 0 }}>Loading meter details...</h2>
-                <p style={mutedTextStyle}>Reading the AST and meter-reading history.</p>
+                <p style={mutedTextStyle}>
+                  Reading the AST and meter-reading history.
+                </p>
               </div>
             </div>
           ) : null}
@@ -1249,19 +1318,49 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
                 <h3 style={{ marginTop: 0 }}>Meter Details</h3>
                 <div style={detailsTwoColumnGridStyle}>
                   <div>
-                    <CompactDetailLine label="Meter No" value={getAstMeterNo(astDoc)} />
-                    <CompactDetailLine label="AST ID" value={astDoc.id || astId} />
-                    <CompactDetailLine label="Meter Type" value={getMeterTypeLabel(getAstMeterType(astDoc))} />
-                    <CompactDetailLine label="Meter Kind" value={getAstMeterKind(astDoc)} />
-                    <CompactDetailLine label="Status" value={getAstStatus(astDoc)} />
+                    <CompactDetailLine
+                      label="Meter No"
+                      value={getAstMeterNo(astDoc)}
+                    />
+                    <CompactDetailLine
+                      label="AST ID"
+                      value={astDoc.id || astId}
+                    />
+                    <CompactDetailLine
+                      label="Meter Type"
+                      value={getMeterTypeLabel(getAstMeterType(astDoc))}
+                    />
+                    <CompactDetailLine
+                      label="Meter Kind"
+                      value={getAstMeterKind(astDoc)}
+                    />
+                    <CompactDetailLine
+                      label="Status"
+                      value={getAstStatus(astDoc)}
+                    />
                   </div>
 
                   <div>
-                    <CompactDetailLine label="Premise Address" value={getAstPremiseAddress(astDoc)} />
-                    <CompactDetailLine label="Premise ID" value={getAstPremiseId(astDoc)} />
-                    <CompactDetailLine label="ERF No" value={getAstErfNo(astDoc)} />
-                    <CompactDetailLine label="Ward Pcode" value={getAstWardPcode(astDoc)} />
-                    <CompactDetailLine label="Updated At" value={formatDateTime(getAstUpdatedAt(astDoc))} />
+                    <CompactDetailLine
+                      label="Premise Address"
+                      value={getAstPremiseAddress(astDoc)}
+                    />
+                    <CompactDetailLine
+                      label="Premise ID"
+                      value={getAstPremiseId(astDoc)}
+                    />
+                    <CompactDetailLine
+                      label="ERF No"
+                      value={getAstErfNo(astDoc)}
+                    />
+                    <CompactDetailLine
+                      label="Ward Pcode"
+                      value={getAstWardPcode(astDoc)}
+                    />
+                    <CompactDetailLine
+                      label="Updated At"
+                      value={formatDateTime(getAstUpdatedAt(astDoc))}
+                    />
                   </div>
                 </div>
               </section>
@@ -1270,31 +1369,45 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
                 <div style={readingSummaryGridStyle}>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>First Reading</span>
-                    <strong>{formatSummaryMetric(readingSummary.firstReading)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.firstReading)}
+                    </strong>
                   </div>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>Last Reading</span>
-                    <strong>{formatSummaryMetric(readingSummary.lastReading)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.lastReading)}
+                    </strong>
                   </div>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>Total Consumption</span>
-                    <strong>{formatSummaryMetric(readingSummary.totalConsumption)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.totalConsumption)}
+                    </strong>
                   </div>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>Avg / Day</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerDay)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerDay)}
+                    </strong>
                   </div>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>Avg / Week</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerWeek)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerWeek)}
+                    </strong>
                   </div>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>Avg / Month</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerMonth)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerMonth)}
+                    </strong>
                   </div>
                   <div style={readingSummaryTileStyle}>
                     <span style={mutedTextStyle}>Avg / Year</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerYear)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerYear)}
+                    </strong>
                   </div>
                 </div>
               </section>
@@ -1302,21 +1415,32 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
               <section style={detailsSectionStyle}>
                 <div style={sectionHeaderRowStyle}>
                   <div>
-                    <h3 style={{ margin: 0 }}>Meter Reading / Attempt History</h3>
-                    <p style={mutedTextStyle}>Registry attempts and cached readings for this meter.</p>
+                    <h3 style={{ margin: 0 }}>
+                      Meter Reading / Attempt History
+                    </h3>
+                    <p style={mutedTextStyle}>
+                      Registry attempts and cached readings for this meter.
+                    </p>
                   </div>
-                  <span style={statusPillStyle}>{formatNumber(historyRows.length)} attempt(s)</span>
+                  <span style={statusPillStyle}>
+                    {formatNumber(historyRows.length)} attempt(s)
+                  </span>
                 </div>
 
                 {historyRows.length === 0 ? (
-                  <p style={mutedTextStyle}>No registry attempts or cached meter readings found for this meter.</p>
+                  <p style={mutedTextStyle}>
+                    No registry attempts or cached meter readings found for this
+                    meter.
+                  </p>
                 ) : (
                   <div style={historyTableWrapStyle}>
                     <table style={historyTableStyle}>
                       <thead>
                         <tr>
                           <th style={historyHeaderCellStyle}>Date/Time</th>
-                          <th style={historyHeaderCellStyle}>Days Since Last Reading</th>
+                          <th style={historyHeaderCellStyle}>
+                            Days Since Last Reading
+                          </th>
                           <th style={historyHeaderCellStyle}>Outcome</th>
                           <th style={historyHeaderCellStyle}>Reason</th>
                           <th style={historyHeaderCellStyle}>Reading</th>
@@ -1330,15 +1454,31 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
                       <tbody>
                         {historyRows.map((item) => (
                           <tr key={item.key}>
-                            <td style={historyCellStyle}>{formatDateTime(item.readingAt)}</td>
-                            <td style={historyCellStyle}>{item.sincePreviousReadingDisplay}</td>
-                            <td style={historyCellStyle}>{item.outcomeLabel || NAv}</td>
-                            <td style={historyCellStyle}>{item.reason || NAv}</td>
-                            <td style={historyCellStyle}><strong>{formatReading(item.reading)}</strong></td>
-                            <td style={historyCellStyle}>{formatReading(item.previousReading)}</td>
-                            <td style={historyCellStyle}><strong>{formatReading(item.consumption)}</strong></td>
+                            <td style={historyCellStyle}>
+                              {formatDateTime(item.readingAt)}
+                            </td>
+                            <td style={historyCellStyle}>
+                              {item.sincePreviousReadingDisplay}
+                            </td>
+                            <td style={historyCellStyle}>
+                              {item.outcomeLabel || NAv}
+                            </td>
+                            <td style={historyCellStyle}>
+                              {item.reason || NAv}
+                            </td>
+                            <td style={historyCellStyle}>
+                              <strong>{formatReading(item.reading)}</strong>
+                            </td>
+                            <td style={historyCellStyle}>
+                              {formatReading(item.previousReading)}
+                            </td>
+                            <td style={historyCellStyle}>
+                              <strong>{formatReading(item.consumption)}</strong>
+                            </td>
                             <td style={historyCompactCellStyle}>
-                              <strong style={historyCompactStrongStyle}>{item.capturedBy}</strong>
+                              <strong style={historyCompactStrongStyle}>
+                                {item.capturedBy}
+                              </strong>
                               <div style={secondaryIdCompactStyle}>
                                 <RegistryIdText value={item.capturedByUid} />
                               </div>
@@ -1348,7 +1488,9 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
                                 <RegistryIdText value={item.trnId} />
                               </div>
                             </td>
-                            <td style={historySourceCellStyle}>{item.source}</td>
+                            <td style={historySourceCellStyle}>
+                              {item.source}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1412,8 +1554,22 @@ function mergeSession(existing, incoming) {
     ...base,
     ...next,
     id: pickValue(next.id, base.id),
-    stagingId: pickValue(next.stagingId, next.tableId, next.id, base.stagingId, base.tableId, base.id),
-    tableId: pickValue(next.tableId, next.stagingId, next.id, base.tableId, base.stagingId, base.id),
+    stagingId: pickValue(
+      next.stagingId,
+      next.tableId,
+      next.id,
+      base.stagingId,
+      base.tableId,
+      base.id,
+    ),
+    tableId: pickValue(
+      next.tableId,
+      next.stagingId,
+      next.id,
+      base.tableId,
+      base.stagingId,
+      base.id,
+    ),
     tableStatus: pickValue(next.tableStatus, base.tableStatus),
     cycleId: pickValue(next.cycleId, base.cycleId),
     lmPcode: pickValue(next.lmPcode, base.lmPcode),
@@ -1470,7 +1626,10 @@ function parseGeneratedTime(value) {
 }
 
 function getSessionGeneratedStamp(session) {
-  const tableId = safeText(session?.tableId || session?.stagingId || session?.id, "");
+  const tableId = safeText(
+    session?.tableId || session?.stagingId || session?.id,
+    "",
+  );
   const stampMatch = tableId.match(/(\d{8}_\d{6})$/);
 
   return stampMatch?.[1] || "";
@@ -1517,8 +1676,14 @@ function sortSessions(left, right) {
 
   if (leftTime !== rightTime) return rightTime - leftTime;
 
-  const leftTableId = safeText(left?.tableId || left?.stagingId || left?.id, "");
-  const rightTableId = safeText(right?.tableId || right?.stagingId || right?.id, "");
+  const leftTableId = safeText(
+    left?.tableId || left?.stagingId || left?.id,
+    "",
+  );
+  const rightTableId = safeText(
+    right?.tableId || right?.stagingId || right?.id,
+    "",
+  );
 
   return rightTableId.localeCompare(leftTableId);
 }
@@ -1539,13 +1704,17 @@ function getSessionCycleLabel(session) {
     "",
   );
 
-  return isMeaningfulText(cycleLabel) ? cycleLabel.replace(/\s+/g, "_") : "Cycle";
+  return isMeaningfulText(cycleLabel)
+    ? cycleLabel.replace(/\s+/g, "_")
+    : "Cycle";
 }
 
 function getStagingSessionLabel(session) {
   const cycleLabel = getSessionCycleLabel(session);
   const generatedStamp = getSessionGeneratedStamp(session);
-  const sessionLabel = generatedStamp ? `${cycleLabel}_${generatedStamp}` : cycleLabel;
+  const sessionLabel = generatedStamp
+    ? `${cycleLabel}_${generatedStamp}`
+    : cycleLabel;
   const windowLabel = safeText(session?.windowDisplay || session?.lmPcode, "");
 
   return windowLabel ? `${sessionLabel} (${windowLabel})` : sessionLabel;
@@ -1565,11 +1734,36 @@ const EMPTY_TABLE_FILTERS = {
 };
 
 const TABLE_COLUMNS = [
-  { key: "meterNo", header: "Meter No", filterType: "text", placeholder: "Meter no" },
-  { key: "currentReading", header: "Current", filterType: "text", placeholder: "Current" },
-  { key: "prevReading", header: "Previous", filterType: "text", placeholder: "Previous" },
-  { key: "consumption", header: "Consumption", filterType: "text", placeholder: "Consumption" },
-  { key: "premiseAddress", header: "Address", filterType: "text", placeholder: "Address" },
+  {
+    key: "meterNo",
+    header: "Meter No",
+    filterType: "text",
+    placeholder: "Meter no",
+  },
+  {
+    key: "currentReading",
+    header: "Current",
+    filterType: "text",
+    placeholder: "Current",
+  },
+  {
+    key: "prevReading",
+    header: "Previous",
+    filterType: "text",
+    placeholder: "Previous",
+  },
+  {
+    key: "consumption",
+    header: "Consumption",
+    filterType: "text",
+    placeholder: "Consumption",
+  },
+  {
+    key: "premiseAddress",
+    header: "Address",
+    filterType: "text",
+    placeholder: "Address",
+  },
   { key: "premiseType", header: "Property type", filterType: "select" },
   { key: "wardLabel", header: "Ward", filterType: "select" },
   { key: "geofence", header: "Geofence", filterType: "select" },
@@ -1612,7 +1806,8 @@ function PaginationControls({
   return (
     <div style={paginationBarStyle}>
       <div style={{ color: "#64748b", whiteSpace: "nowrap" }}>
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of {formatNumber(totalRows)} rows
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)} rows
       </div>
 
       <div style={paginationControlsStyle}>
@@ -1713,9 +1908,7 @@ export default function MreadStagingPage() {
   );
   const cycleSessions = useMemo(
     () =>
-      (cyclesQuery.data?.rows || [])
-        .map(buildSessionFromCycle)
-        .filter(Boolean),
+      (cyclesQuery.data?.rows || []).map(buildSessionFromCycle).filter(Boolean),
     [cyclesQuery.data?.rows],
   );
   const sessions = useMemo(() => {
@@ -1724,12 +1917,18 @@ export default function MreadStagingPage() {
     cycleSessions.forEach((session) => {
       const normalized = normalizeSession(session);
       if (!normalized?.id) return;
-      byId.set(normalized.id, mergeSession(byId.get(normalized.id), normalized));
+      byId.set(
+        normalized.id,
+        mergeSession(byId.get(normalized.id), normalized),
+      );
     });
     callableSessions.forEach((session) => {
       const normalized = normalizeSession(session);
       if (!normalized?.id) return;
-      byId.set(normalized.id, mergeSession(byId.get(normalized.id), normalized));
+      byId.set(
+        normalized.id,
+        mergeSession(byId.get(normalized.id), normalized),
+      );
     });
 
     return Array.from(byId.values()).sort(sortSessions);
@@ -1811,7 +2010,11 @@ export default function MreadStagingPage() {
           const rowValue = getTableFilterValue(row, column.key);
 
           if (column.filterType === "select") {
-            return !selectedValue || selectedValue === "ALL" || rowValue === selectedValue;
+            return (
+              !selectedValue ||
+              selectedValue === "ALL" ||
+              rowValue === selectedValue
+            );
           }
 
           return includesText(rowValue, selectedValue);
@@ -1847,7 +2050,6 @@ export default function MreadStagingPage() {
       setSelectedSessionId("");
     }
   }, [hasWardSelection, sessions.length]);
-
 
   const handleSessionChange = (event) => {
     setSelectedSessionId(event.target.value);
@@ -1942,323 +2144,335 @@ export default function MreadStagingPage() {
 
       <div style={{ display: "grid", gap: "1.5rem" }}>
         <section
-        style={{
-          display: "grid",
-          gap: "1rem",
-          background: "#ffffff",
-          border: "1px solid #e2e8f0",
-          borderRadius: "1rem",
-          padding: "1.25rem",
-        }}
-      >
-        <div
           style={{
             display: "grid",
             gap: "1rem",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-            alignItems: "start",
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: "1rem",
+            padding: "1.25rem",
           }}
         >
-          <div style={{ display: "grid", gap: "0.75rem" }}>
-            <div>
-              <label
-                htmlFor="ward-select"
-                style={{
-                  display: "block",
-                  marginBottom: "0.5rem",
-                  color: "#475569",
-                  fontWeight: 700,
-                }}
-              >
-                Ward Scope
-              </label>
-              <select
-                id="ward-select"
-                value={effectiveSelectedWardPcode}
-                onChange={handleWardChange}
-                disabled={!activeLmPcode || wardsLoading || wardRows.length === 0}
-                style={{
-                  width: "100%",
-                  minWidth: "180px",
-                  padding: "0.75rem 0.9rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #cbd5e1",
-                  background: "#ffffff",
-                }}
-              >
-                <option value="">Select ward</option>
-                {wardRows.map((ward) => (
-                  <option key={ward.wardPcode} value={ward.wardPcode}>
-                    {getWardLabel(ward)} ({ward.wardPcode})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedSession ? (
-              <div style={{ color: "#475569" }}>
-                <span
+          <div
+            style={{
+              display: "grid",
+              gap: "1rem",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              alignItems: "start",
+            }}
+          >
+            <div style={{ display: "grid", gap: "0.75rem" }}>
+              <div>
+                <label
+                  htmlFor="ward-select"
                   style={{
                     display: "block",
+                    marginBottom: "0.5rem",
+                    color: "#475569",
                     fontWeight: 700,
-                    marginBottom: "0.4rem",
                   }}
                 >
-                  Cycle ID
-                </span>
-                <span>{safeText(selectedSession.cycleId)}</span>
+                  Ward Scope
+                </label>
+                <select
+                  id="ward-select"
+                  value={effectiveSelectedWardPcode}
+                  onChange={handleWardChange}
+                  disabled={
+                    !activeLmPcode || wardsLoading || wardRows.length === 0
+                  }
+                  style={{
+                    width: "100%",
+                    minWidth: "180px",
+                    padding: "0.75rem 0.9rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                  }}
+                >
+                  <option value="">Select ward</option>
+                  {wardRows.map((ward) => (
+                    <option key={ward.wardPcode} value={ward.wardPcode}>
+                      {getWardLabel(ward)} ({ward.wardPcode})
+                    </option>
+                  ))}
+                </select>
               </div>
-            ) : null}
-          </div>
 
-          <div style={{ display: "grid", gap: "0.75rem" }}>
-            <div>
-              <label
-                htmlFor="session-select"
-                style={{
-                  display: "block",
-                  marginBottom: "0.5rem",
-                  color: "#475569",
-                  fontWeight: 700,
-                }}
-              >
-                Staging Session
-              </label>
-              <select
-                id="session-select"
-                value={hasWardSelection ? selectedSessionIdEffective : ""}
-                onChange={handleSessionChange}
-                disabled={!hasWardSelection || sessionsLoading || sessions.length === 0}
-                style={{
-                  width: "100%",
-                  minWidth: "220px",
-                  padding: "0.75rem 0.9rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #cbd5e1",
-                  background: "#ffffff",
-                }}
-              >
-                <option value="">
-                  {!hasWardSelection
-                    ? "Select ward first"
-                    : sessions.length === 0
-                      ? "No staging sessions"
-                      : "-- Select a session --"}
-                </option>
-                {hasWardSelection
-                  ? sessions.map((session) => (
-                      <option key={session.id} value={session.id}>
-                        {getStagingSessionLabel(session)}
-                      </option>
-                    ))
-                  : null}
-              </select>
-              {isUsingCycleSessionFallback && sessionsErrorMessage ? (
-                <p style={{ margin: "0.5rem 0 0", color: "#92400e" }}>
-                  Using controller active staging IDs. Session callable returned:{" "}
-                  {sessionsErrorMessage}
-                </p>
-              ) : sessionsErrorMessage ? (
-                <p style={{ margin: "0.5rem 0 0", color: "#b91c1c" }}>
-                  {sessionsErrorMessage}
-                </p>
-              ) : cyclesErrorMessage ? (
-                <p style={{ margin: "0.5rem 0 0", color: "#b91c1c" }}>
-                  {cyclesErrorMessage}
-                </p>
+              {selectedSession ? (
+                <div style={{ color: "#475569" }}>
+                  <span
+                    style={{
+                      display: "block",
+                      fontWeight: 700,
+                      marginBottom: "0.4rem",
+                    }}
+                  >
+                    Cycle ID
+                  </span>
+                  <span>{safeText(selectedSession.cycleId)}</span>
+                </div>
               ) : null}
             </div>
 
-            {selectedSession ? (
-              <div style={{ color: "#475569" }}>
-                <span
+            <div style={{ display: "grid", gap: "0.75rem" }}>
+              <div>
+                <label
+                  htmlFor="session-select"
                   style={{
                     display: "block",
+                    marginBottom: "0.5rem",
+                    color: "#475569",
                     fontWeight: 700,
-                    marginBottom: "0.4rem",
                   }}
                 >
-                  Date Generated
-                </span>
-                <span>{formatSessionGeneratedAt(selectedSession)}</span>
+                  Staging Session
+                </label>
+                <select
+                  id="session-select"
+                  value={hasWardSelection ? selectedSessionIdEffective : ""}
+                  onChange={handleSessionChange}
+                  disabled={
+                    !hasWardSelection ||
+                    sessionsLoading ||
+                    sessions.length === 0
+                  }
+                  style={{
+                    width: "100%",
+                    minWidth: "220px",
+                    padding: "0.75rem 0.9rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                  }}
+                >
+                  <option value="">
+                    {!hasWardSelection
+                      ? "Select ward first"
+                      : sessions.length === 0
+                        ? "No staging sessions"
+                        : "-- Select a session --"}
+                  </option>
+                  {hasWardSelection
+                    ? sessions.map((session) => (
+                        <option key={session.id} value={session.id}>
+                          {getStagingSessionLabel(session)}
+                        </option>
+                      ))
+                    : null}
+                </select>
+                {isUsingCycleSessionFallback && sessionsErrorMessage ? (
+                  <p style={{ margin: "0.5rem 0 0", color: "#92400e" }}>
+                    Using controller active staging IDs. Session callable
+                    returned: {sessionsErrorMessage}
+                  </p>
+                ) : sessionsErrorMessage ? (
+                  <p style={{ margin: "0.5rem 0 0", color: "#b91c1c" }}>
+                    {sessionsErrorMessage}
+                  </p>
+                ) : cyclesErrorMessage ? (
+                  <p style={{ margin: "0.5rem 0 0", color: "#b91c1c" }}>
+                    {cyclesErrorMessage}
+                  </p>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-        </div>
-      </section>
 
-      <section
-        style={{
-          background: "#ffffff",
-          border: "1px solid #e2e8f0",
-          borderRadius: "1rem",
-          overflow: "hidden",
-        }}
-      >
-        <div
+              {selectedSession ? (
+                <div style={{ color: "#475569" }}>
+                  <span
+                    style={{
+                      display: "block",
+                      fontWeight: 700,
+                      marginBottom: "0.4rem",
+                    }}
+                  >
+                    Date Generated
+                  </span>
+                  <span>{formatSessionGeneratedAt(selectedSession)}</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        <section
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "1rem 1.25rem",
-            borderBottom: "1px solid #e2e8f0",
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: "1rem",
+            overflow: "hidden",
           }}
         >
-          <div>
-            <p style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>
-              Staging rows
-            </p>
-            <p style={{ margin: "0.35rem 0 0", color: "#64748b" }}>
-              {rowsSummaryText}
-            </p>
-          </div>
-          <PaginationControls
-            currentPage={safeCurrentPage}
-            pageSize={pageSize}
-            totalPages={totalPages}
-            totalRows={totalFilteredRows}
-            onPageChange={handlePageChange}
-            onPageSizeChange={handlePageSizeChange}
-          />
-        </div>
-
-
-        <div style={{ overflowX: rowsOpening ? "hidden" : "auto" }}>
-          {rowsErrorMessage ? (
-            <div
-              style={{
-                margin: "1rem",
-                padding: "1rem",
-                background: "#fee2e2",
-                border: "1px solid #fca5a5",
-                borderRadius: "0.75rem",
-                color: "#991b1b",
-              }}
-            >
-              Failed to load staging rows: {rowsErrorMessage}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "1rem 1.25rem",
+              borderBottom: "1px solid #e2e8f0",
+            }}
+          >
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>
+                Staging rows
+              </p>
+              <p style={{ margin: "0.35rem 0 0", color: "#64748b" }}>
+                {rowsSummaryText}
+              </p>
             </div>
-          ) : null}
-
-          {rowsOpening ? (
-            <LoadingSpinner
-              title="Opening MREAD staging..."
-              message="Waiting for the mread_staging rows Firestore stream."
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalFilteredRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
             />
-          ) : null}
+          </div>
 
-          {!rowsOpening ? (
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: "1120px",
-              }}
-            >
-            <thead style={{ background: "#f8fafc" }}>
-              <tr>
-                {TABLE_COLUMNS.map((column) => (
-                  <th
-                    key={column.key}
-                    style={{
-                      textAlign: "left",
-                      padding: "0.85rem 1rem",
-                      borderBottom: "1px solid #e2e8f0",
-                      color: "#475569",
-                      fontWeight: 700,
-                      fontSize: "0.9rem",
-                      verticalAlign: "top",
-                    }}
-                  >
-                    <div style={{ display: "grid", gap: "0.45rem" }}>
-                      <SortButton
-                        label={column.header}
-                        sortKey={column.key}
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      {column.filterType === "text" ? (
-                        <input
-                          aria-label={`Filter by ${column.header}`}
-                          value={tableFilters[column.key] || ""}
-                          onChange={handleTableFilterChange(column.key)}
-                          placeholder={column.placeholder || column.header}
-                          disabled={!canLoadRows || rowsQuery.isLoading}
-                          style={columnFilterInputStyle}
-                        />
-                      ) : null}
-                      {column.filterType === "select" ? (
-                        <select
-                          aria-label={`Filter by ${column.header}`}
-                          value={tableFilters[column.key] || "ALL"}
-                          onChange={handleTableFilterChange(column.key)}
-                          disabled={!canLoadRows || rowsQuery.isLoading}
-                          style={columnFilterSelectStyle}
-                        >
-                          <option value="ALL">All</option>
-                          {(tableFilterOptions[column.key] || []).map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {canLoadRows ? (
-                visibleRows.length > 0 ? (
-                  visibleRows.map((row) => (
-                    <tr
-                      key={row.rowId}
-                      style={{ borderBottom: "1px solid #e2e8f0" }}
-                    >
-                      {TABLE_COLUMNS.map((column) => (
-                        <td key={`${row.rowId}-${column.key}`} style={cellStyle}>
-                          {formatTableValue(row, column.key, { onMeterClick: setSelectedMeterRow })}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                ) : (
+          <div style={{ overflowX: rowsOpening ? "hidden" : "auto" }}>
+            {rowsErrorMessage ? (
+              <div
+                style={{
+                  margin: "1rem",
+                  padding: "1rem",
+                  background: "#fee2e2",
+                  border: "1px solid #fca5a5",
+                  borderRadius: "0.75rem",
+                  color: "#991b1b",
+                }}
+              >
+                Failed to load staging rows: {rowsErrorMessage}
+              </div>
+            ) : null}
+
+            {rowsOpening ? (
+              <LoadingSpinner
+                title="Opening MREAD staging..."
+                message="Waiting for the mread_staging rows Firestore stream."
+              />
+            ) : null}
+
+            {!rowsOpening ? (
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  minWidth: "1120px",
+                }}
+              >
+                <thead style={{ background: "#f8fafc" }}>
                   <tr>
-                    <td
-                      colSpan={TABLE_COLUMNS.length}
-                      style={{
-                        padding: "1.5rem",
-                        color: "#64748b",
-                        textAlign: "center",
-                      }}
-                    >
-                      {rows.length > 0
-                        ? "No rows match the current column filters."
-                        : "No rows match the current filter settings."}
-                    </td>
+                    {TABLE_COLUMNS.map((column) => (
+                      <th
+                        key={column.key}
+                        style={{
+                          textAlign: "left",
+                          padding: "0.85rem 1rem",
+                          borderBottom: "1px solid #e2e8f0",
+                          color: "#475569",
+                          fontWeight: 700,
+                          fontSize: "0.9rem",
+                          verticalAlign: "top",
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: "0.45rem" }}>
+                          <SortButton
+                            label={column.header}
+                            sortKey={column.key}
+                            sortConfig={sortConfig}
+                            onSort={handleSort}
+                          />
+                          {column.filterType === "text" ? (
+                            <input
+                              aria-label={`Filter by ${column.header}`}
+                              value={tableFilters[column.key] || ""}
+                              onChange={handleTableFilterChange(column.key)}
+                              placeholder={column.placeholder || column.header}
+                              disabled={!canLoadRows || rowsQuery.isLoading}
+                              style={columnFilterInputStyle}
+                            />
+                          ) : null}
+                          {column.filterType === "select" ? (
+                            <select
+                              aria-label={`Filter by ${column.header}`}
+                              value={tableFilters[column.key] || "ALL"}
+                              onChange={handleTableFilterChange(column.key)}
+                              disabled={!canLoadRows || rowsQuery.isLoading}
+                              style={columnFilterSelectStyle}
+                            >
+                              <option value="ALL">All</option>
+                              {(tableFilterOptions[column.key] || []).map(
+                                (option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ),
+                              )}
+                            </select>
+                          ) : null}
+                        </div>
+                      </th>
+                    ))}
                   </tr>
-                )
-              ) : (
-                <tr>
-                  <td
-                    colSpan={TABLE_COLUMNS.length}
-                    style={{
-                      padding: "1.5rem",
-                      color: "#64748b",
-                      textAlign: "center",
-                    }}
-                  >
-                    {selectedSession
-                      ? "Select a ward scope above to view table rows."
-                      : "Select a staging session above to view table rows."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            </table>
-          ) : null}
-        </div>
-      </section>
+                </thead>
+                <tbody>
+                  {canLoadRows ? (
+                    visibleRows.length > 0 ? (
+                      visibleRows.map((row) => (
+                        <tr
+                          key={row.rowId}
+                          style={{ borderBottom: "1px solid #e2e8f0" }}
+                        >
+                          {TABLE_COLUMNS.map((column) => (
+                            <td
+                              key={`${row.rowId}-${column.key}`}
+                              style={cellStyle}
+                            >
+                              {formatTableValue(row, column.key, {
+                                onMeterClick: setSelectedMeterRow,
+                              })}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={TABLE_COLUMNS.length}
+                          style={{
+                            padding: "1.5rem",
+                            color: "#64748b",
+                            textAlign: "center",
+                          }}
+                        >
+                          {rows.length > 0
+                            ? "No rows match the current column filters."
+                            : "No rows match the current filter settings."}
+                        </td>
+                      </tr>
+                    )
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={TABLE_COLUMNS.length}
+                        style={{
+                          padding: "1.5rem",
+                          color: "#64748b",
+                          textAlign: "center",
+                        }}
+                      >
+                        {selectedSession
+                          ? "Select a ward scope above to view table rows."
+                          : "Select a staging session above to view table rows."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            ) : null}
+          </div>
+        </section>
       </div>
 
       {selectedMeterRow ? (
@@ -2379,7 +2593,6 @@ const paginationButtonStyle = {
   color: "#0f172a",
   cursor: "pointer",
 };
-
 
 const meterNoButtonStyle = {
   border: 0,

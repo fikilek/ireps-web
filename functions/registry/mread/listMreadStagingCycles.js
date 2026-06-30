@@ -102,19 +102,14 @@ function collectWorkbaseIds(userDoc = {}) {
   const activeWorkbase = userDoc?.access?.activeWorkbase || null;
   const ids = new Set();
 
-  [...workbases, activeWorkbase]
-    .filter(Boolean)
-    .forEach((workbase) => {
-      [
-        workbase?.id,
-        workbase?.pcode,
-        workbase?.lmPcode,
-        workbase?.code,
-      ].forEach((candidate) => {
+  [...workbases, activeWorkbase].filter(Boolean).forEach((workbase) => {
+    [workbase?.id, workbase?.pcode, workbase?.lmPcode, workbase?.code].forEach(
+      (candidate) => {
         const text = normalizeText(candidate, "");
         if (text) ids.add(text);
-      });
-    });
+      },
+    );
+  });
 
   return ids;
 }
@@ -146,7 +141,9 @@ async function loadCallerContext({ db, request }) {
   const role = readRoleFromRequest(request);
   const userSnap = await db.collection("users").doc(uid).get();
   const userDoc = userSnap.exists ? userSnap.data() || {} : {};
-  const fallbackRole = normalizeUpper(userDoc?.employment?.role || userDoc?.role || "");
+  const fallbackRole = normalizeUpper(
+    userDoc?.employment?.role || userDoc?.role || "",
+  );
   const resolvedRole = role || fallbackRole;
   const actorName = getActorName(request, userDoc);
   const serviceProviderId = readServiceProviderId(request, userDoc);
@@ -298,7 +295,10 @@ function serializeCycle(docSnap) {
       source: {
         setupType: normalizeText(metadata?.source?.setupType, SYSTEM_NA),
         scriptName: normalizeText(metadata?.source?.scriptName, SYSTEM_NA),
-        scriptVersion: normalizeText(metadata?.source?.scriptVersion, SYSTEM_NA),
+        scriptVersion: normalizeText(
+          metadata?.source?.scriptVersion,
+          SYSTEM_NA,
+        ),
         asOfDate: normalizeText(metadata?.source?.asOfDate, SYSTEM_NA),
         collection: normalizeText(metadata?.source?.collection, SYSTEM_NA),
       },
@@ -351,9 +351,8 @@ export const listMreadStagingCycles = onCall(async (request) => {
   const billingPeriod = normalizeText(data?.billingPeriod, "");
   const includeFuture = data?.includeFuture === true;
   const rawLimit = Number(data?.limit || 100);
-  const limit = Number.isFinite(rawLimit) && rawLimit > 0
-    ? Math.min(rawLimit, 500)
-    : 100;
+  const limit =
+    Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
 
   const caller = await loadCallerContext({ db, request });
   const access = await assertCanReadMreadStagingCycles({
@@ -378,7 +377,10 @@ export const listMreadStagingCycles = onCall(async (request) => {
   const cycleState = annotateMreadStagingCycles(sourceRows);
   const filteredRows = cycleState.rows
     .filter((row) => includeFuture || !row.isFuture)
-    .filter((row) => !isMeaningful(billingPeriod) || row.billingPeriod === billingPeriod)
+    .filter(
+      (row) =>
+        !isMeaningful(billingPeriod) || row.billingPeriod === billingPeriod,
+    )
     .sort(sortCyclesDesc);
   const rows = filteredRows.slice(0, limit);
   const visibleSummary = buildSummary(rows);
@@ -413,7 +415,8 @@ export const listMreadStagingCycles = onCall(async (request) => {
       ...cycleState.summary,
       visibleAvailable: visibleSummary.available,
       visibleRows: rows.length,
-      currentCycle: visibleSummary.currentCycle || cycleState.summary.currentCycle,
+      currentCycle:
+        visibleSummary.currentCycle || cycleState.summary.currentCycle,
     },
   };
 });

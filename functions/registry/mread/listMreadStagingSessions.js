@@ -115,7 +115,8 @@ export const listMreadStagingSessions = onCall(async (request) => {
 
     const lmPcode = normalizeText(data?.lmPcode, "");
     const rawLimit = Number(data?.limit || 200);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
+    const limit =
+      Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
 
     const caller = await loadCallerContext({ db, request });
     await assertCanReadMreadStagingCycles({ db, caller, lmPcode });

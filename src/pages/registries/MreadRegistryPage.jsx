@@ -65,9 +65,7 @@ function isMeaningfulText(value) {
   if (!text) return false;
 
   const cleanText = text.toLowerCase();
-  return !["nav", "n/av", "n/a", "na", "null", "undefined"].includes(
-    cleanText,
-  );
+  return !["nav", "n/av", "n/a", "na", "null", "undefined"].includes(cleanText);
 }
 
 function firstMeaningfulText(...values) {
@@ -324,7 +322,10 @@ function getCompletedAt(row = {}) {
 
 function getReadingAt(row = {}) {
   const outcome = getOutcome(row);
-  const readingAt = firstMeaningfulValue(row.readingAt, row?.reading?.readingAt);
+  const readingAt = firstMeaningfulValue(
+    row.readingAt,
+    row?.reading?.readingAt,
+  );
 
   if (outcome === "SUCCESSFUL_READING") {
     return firstMeaningfulValue(readingAt, getCompletedAt(row));
@@ -543,7 +544,11 @@ function getGeofenceFilterLabel(value = "") {
 function getFirstGeofenceRef(refs = []) {
   if (!Array.isArray(refs)) return null;
 
-  return refs.find((ref) => isMeaningfulText(ref?.id) || isMeaningfulText(ref?.name)) || null;
+  return (
+    refs.find(
+      (ref) => isMeaningfulText(ref?.id) || isMeaningfulText(ref?.name),
+    ) || null
+  );
 }
 
 function readAstGeofence(astDoc = {}) {
@@ -780,9 +785,7 @@ function getCycleWindowDisplay(row = {}) {
   return firstMeaningfulText(
     row?.window?.display,
     row.window,
-    [row?.window?.startDate, row?.window?.endDate]
-      .filter(Boolean)
-      .join(" - "),
+    [row?.window?.startDate, row?.window?.endDate].filter(Boolean).join(" - "),
   );
 }
 
@@ -834,7 +837,10 @@ function getCycleActionTone(row = {}) {
   return "disabled";
 }
 
-function cycleMatchesFilter(row = {}, { search = "", billingPeriod = "ALL" } = {}) {
+function cycleMatchesFilter(
+  row = {},
+  { search = "", billingPeriod = "ALL" } = {},
+) {
   const rowBillingPeriod = firstMeaningfulText(row.billingPeriod, "");
 
   if (billingPeriod !== "ALL" && rowBillingPeriod !== billingPeriod) {
@@ -867,7 +873,6 @@ function getCycleActionHelp(row = {}) {
   return "Generate a preserved mread_staging snapshot for this selected cycle. The base cycle is the immediately previous configured cycle.";
 }
 
-
 function getMissingFields(row = {}) {
   const value = firstValue(
     row.missingFields,
@@ -898,7 +903,8 @@ function getSortValue(row, key, astGeofenceByAstId = {}) {
     return getSincePreviousReadingMinutes(row);
   if (key === "meterNo") return getMeterNo(row);
   if (key === "outcome") return getOutcomeLabel(getOutcome(row));
-  if (key === "media") return getEvidence(row).photoCount || getEvidencePhotoLinks(row).length;
+  if (key === "media")
+    return getEvidence(row).photoCount || getEvidencePhotoLinks(row).length;
   if (key === "reason") return getReasonText(row);
   if (key === "currentReading") return Number(getCurrentReading(row) || 0);
   if (key === "previousReading") return Number(getPreviousReading(row) || 0);
@@ -1164,7 +1170,9 @@ function getAstMreadings(astDoc = {}) {
         readingNumber: Number.isFinite(readingNumber) ? readingNumber : null,
         trnId: firstText(item?.trnId, item?.sourceTrnId),
         source,
-        outcomeLabel: isBaselineReading ? "Baseline Reading" : "Successful Reading",
+        outcomeLabel: isBaselineReading
+          ? "Baseline Reading"
+          : "Successful Reading",
         reason: NAv,
         capturedBy: firstText(
           item?.capturedByName,
@@ -1215,7 +1223,6 @@ function getAstMreadings(astDoc = {}) {
     };
   });
 }
-
 
 function isSameMeterHistoryTarget(row = {}, selectedRow = {}) {
   const selectedAstId = getAstDocIdFromRow(selectedRow);
@@ -1291,7 +1298,11 @@ function getRegistryMreadHistoryRows(registryRows = [], selectedRow = {}) {
     });
 }
 
-function mergeMeterHistoryRows({ astRows = [], registryRows = [], selectedRow = {} } = {}) {
+function mergeMeterHistoryRows({
+  astRows = [],
+  registryRows = [],
+  selectedRow = {},
+} = {}) {
   const mergedRows = [];
   const seenTrnIds = new Set();
 
@@ -1573,31 +1584,45 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
                 <div style={styles.readingSummaryGrid}>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">First Reading</span>
-                    <strong>{formatSummaryMetric(readingSummary.firstReading)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.firstReading)}
+                    </strong>
                   </div>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">Last Reading</span>
-                    <strong>{formatSummaryMetric(readingSummary.lastReading)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.lastReading)}
+                    </strong>
                   </div>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">Total Consumption</span>
-                    <strong>{formatSummaryMetric(readingSummary.totalConsumption)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.totalConsumption)}
+                    </strong>
                   </div>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">Avg / Day</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerDay)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerDay)}
+                    </strong>
                   </div>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">Avg / Week</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerWeek)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerWeek)}
+                    </strong>
                   </div>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">Avg / Month</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerMonth)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerMonth)}
+                    </strong>
                   </div>
                   <div style={styles.readingSummaryTile}>
                     <span className="muted">Avg / Year</span>
-                    <strong>{formatSummaryMetric(readingSummary.averagePerYear)}</strong>
+                    <strong>
+                      {formatSummaryMetric(readingSummary.averagePerYear)}
+                    </strong>
                   </div>
                 </div>
               </section>
@@ -1617,7 +1642,8 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
 
                 {historyRows.length === 0 ? (
                   <p className="muted">
-                    No registry attempts or cached meter readings found for this meter.
+                    No registry attempts or cached meter readings found for this
+                    meter.
                   </p>
                 ) : (
                   <div style={styles.historyTableWrap}>
@@ -1675,9 +1701,10 @@ function MeterHistoryModal({ row, registryRows = [], onClose }) {
   );
 }
 
-
 function MreadStagingControllerModal({ lmPcode, onClose }) {
-  const safeLmPcode = isMeaningfulText(lmPcode) ? String(lmPcode).trim() : "ZA2157";
+  const safeLmPcode = isMeaningfulText(lmPcode)
+    ? String(lmPcode).trim()
+    : "ZA2157";
   const [generateMreadStaging, { isLoading: isGenerating }] =
     useGenerateMreadStagingMutation();
   const [billingPeriod, setBillingPeriod] = useState("ALL");
@@ -1745,10 +1772,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
   );
 
   const errorMessage =
-    queryError?.message ||
-    queryError?.data?.message ||
-    queryError?.error ||
-    "";
+    queryError?.message || queryError?.data?.message || queryError?.error || "";
 
   async function handleCycleAction(row) {
     const action = getCycleAction(row);
@@ -1762,7 +1786,9 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     const cycleId = row?.cycleId || row?.id;
 
     if (!cycleId) {
-      setPhaseNotice("Cannot generate staging because this cycle row has no cycleId.");
+      setPhaseNotice(
+        "Cannot generate staging because this cycle row has no cycleId.",
+      );
       return;
     }
 
@@ -1817,30 +1843,43 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
               Generate MREAD Staging Snapshot
             </h2>
             <p className="muted">
-              Select any available configured MREAD cycle. The selected cycle is processed as the staging cycle, and the immediately previous configured cycle is used as the base cycle.
+              Select any available configured MREAD cycle. The selected cycle is
+              processed as the staging cycle, and the immediately previous
+              configured cycle is used as the base cycle.
             </p>
           </div>
 
-          <button type="button" style={styles.modalCloseButton} onClick={onClose}>
+          <button
+            type="button"
+            style={styles.modalCloseButton}
+            onClick={onClose}
+          >
             Close
           </button>
         </div>
 
         <div style={styles.modalBody}>
           <section style={styles.stagingControllerNotice}>
-            iREPS does not close, approve, or bill these cycles. This action creates a new preserved
-            <strong> mread_staging</strong> parent document with its own <strong>rows</strong> subcollection every time it is clicked.
-            Future configured cycles are hidden because they do not yet have useful field-reading data.
+            iREPS does not close, approve, or bill these cycles. This action
+            creates a new preserved
+            <strong> mread_staging</strong> parent document with its own{" "}
+            <strong>rows</strong> subcollection every time it is clicked. Future
+            configured cycles are hidden because they do not yet have useful
+            field-reading data.
           </section>
 
           <section style={styles.stagingControllerSummaryGrid}>
             <div style={styles.stagingSummaryTile}>
               <span>Visible Cycles</span>
-              <strong>{formatNumber(summary?.visibleRows ?? cycleRows.length)}</strong>
+              <strong>
+                {formatNumber(summary?.visibleRows ?? cycleRows.length)}
+              </strong>
             </div>
             <div style={styles.stagingSummaryTile}>
               <span>Available</span>
-              <strong>{formatNumber(summary?.available ?? cycleRows.length)}</strong>
+              <strong>
+                {formatNumber(summary?.available ?? cycleRows.length)}
+              </strong>
             </div>
             <div style={styles.stagingSummaryTile}>
               <span>Hidden Future</span>
@@ -1848,19 +1887,21 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
             </div>
             <div style={styles.stagingSummaryTileWide}>
               <span>Current Cycle</span>
-              <strong>{currentCycle ? getCycleLabel(currentCycle) : "NAv"}</strong>
-              <small>{currentCycle ? getCycleWindowDisplay(currentCycle) : "No current configured cycle returned"}</small>
+              <strong>
+                {currentCycle ? getCycleLabel(currentCycle) : "NAv"}
+              </strong>
+              <small>
+                {currentCycle
+                  ? getCycleWindowDisplay(currentCycle)
+                  : "No current configured cycle returned"}
+              </small>
             </div>
           </section>
 
           <section style={styles.stagingControllerFilters}>
             <label style={styles.stagingFilterLabel}>
               LM
-              <input
-                value={safeLmPcode}
-                readOnly
-                style={styles.stagingInput}
-              />
+              <input value={safeLmPcode} readOnly style={styles.stagingInput} />
             </label>
 
             <label style={styles.stagingFilterLabel}>
@@ -1912,7 +1953,9 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                 <div>
                   <h3>Available Staging Cycles</h3>
                   <p className="muted">
-                    Showing {formatNumber(filteredCycleRows.length)} of {formatNumber(cycleRows.length)} available cycle rows, sorted newest first.
+                    Showing {formatNumber(filteredCycleRows.length)} of{" "}
+                    {formatNumber(cycleRows.length)} available cycle rows,
+                    sorted newest first.
                   </p>
                 </div>
               </div>
@@ -1935,7 +1978,10 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
 
               {filteredCycleRows.length ? (
                 <div style={styles.stagingTableWrap}>
-                  <table className="data-table" style={styles.stagingCyclesTable}>
+                  <table
+                    className="data-table"
+                    style={styles.stagingCyclesTable}
+                  >
                     <thead>
                       <tr>
                         <th>Cycle</th>
@@ -1955,7 +2001,9 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                         return (
                           <tr
                             key={row.cycleId || getCycleLabel(row)}
-                            style={selected ? styles.selectedStagingCycleRow : null}
+                            style={
+                              selected ? styles.selectedStagingCycleRow : null
+                            }
                             onClick={() => setSelectedCycle(row)}
                           >
                             <td>
@@ -1964,13 +2012,17 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                                 <RegistryIdText value={row.cycleId} />
                               </div>
                               {row.isCurrentCycle ? (
-                                <div style={styles.secondaryId}>Current cycle</div>
+                                <div style={styles.secondaryId}>
+                                  Current cycle
+                                </div>
                               ) : null}
                             </td>
                             <td>{getCycleWindowDisplay(row)}</td>
                             <td>{getBaseCycleLabel(row)}</td>
                             <td>{formatNumber(getCycleIteration(row))}</td>
-                            <td>{formatDateTime(getCycleLastGeneratedAt(row))}</td>
+                            <td>
+                              {formatDateTime(getCycleLastGeneratedAt(row))}
+                            </td>
                             <td>{formatNumber(getCycleRowsCount(row))}</td>
                             <td>
                               <button
@@ -1984,7 +2036,9 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                                   event.stopPropagation();
                                   handleCycleAction(row);
                                 }}
-                                disabled={actionTone === "disabled" || isGenerating}
+                                disabled={
+                                  actionTone === "disabled" || isGenerating
+                                }
                                 title={getCycleActionHelp(row)}
                               >
                                 {isGenerating && actionTone === "primary"
@@ -2006,7 +2060,6 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     </div>
   );
 }
-
 
 function HelpModal({ onClose }) {
   return (
@@ -2048,8 +2101,8 @@ function HelpModal({ onClose }) {
                 Rows always load newest first by Completed At descending. The
                 visible Completed At column is the TRN completion/submission
                 timestamp for every outcome, including No Access. Days Since
-                Last Reading is calculated by the backend and stored on
-                the registry row.
+                Last Reading is calculated by the backend and stored on the
+                registry row.
               </p>
             </section>
 
@@ -2110,7 +2163,8 @@ function PaginationControls({
   return (
     <div style={styles.paginationBar}>
       <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of {formatNumber(totalRows)} rows
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)} rows
       </div>
 
       <div style={styles.paginationControls}>
@@ -2169,7 +2223,6 @@ function PaginationControls({
   );
 }
 
-
 const COMPLETED_AT_FILTER_OPTIONS = [
   { mode: "TODAY", label: "Today" },
   { mode: "YESTERDAY", label: "Yesterday" },
@@ -2221,7 +2274,11 @@ function CompletedAtFilterModal({ filter, onApply, onClear, onClose }) {
             </p>
           </div>
 
-          <button type="button" style={styles.modalCloseButton} onClick={onClose}>
+          <button
+            type="button"
+            style={styles.modalCloseButton}
+            onClick={onClose}
+          >
             Close
           </button>
         </div>
@@ -2253,7 +2310,9 @@ function CompletedAtFilterModal({ filter, onApply, onClear, onClose }) {
               <input
                 type="date"
                 value={draftFilter.startDate || ""}
-                onChange={(event) => updateDate("startDate", event.target.value)}
+                onChange={(event) =>
+                  updateDate("startDate", event.target.value)
+                }
                 style={styles.headerInput}
               />
             </label>
@@ -2270,10 +2329,18 @@ function CompletedAtFilterModal({ filter, onApply, onClear, onClose }) {
           </div>
 
           <div style={styles.completedAtFilterActions}>
-            <button type="button" style={styles.secondaryButton} onClick={onClear}>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={onClear}
+            >
               Clear
             </button>
-            <button type="button" style={styles.primaryButton} onClick={() => onApply(draftFilter)}>
+            <button
+              type="button"
+              style={styles.primaryButton}
+              onClick={() => onApply(draftFilter)}
+            >
               Apply Filter
             </button>
           </div>
@@ -2302,11 +2369,16 @@ function MediaModal({ row, onClose }) {
             <p className="eyebrow">MREAD Media</p>
             <h2 id="mread-media-title">{getMeterNo(row)}</h2>
             <p className="muted">
-              {formatDateTime(getReadingAt(row))} · {formatNumber(evidence.photoCount)} photo(s)
+              {formatDateTime(getReadingAt(row))} ·{" "}
+              {formatNumber(evidence.photoCount)} photo(s)
             </p>
           </div>
 
-          <button type="button" style={styles.modalCloseButton} onClick={onClose}>
+          <button
+            type="button"
+            style={styles.modalCloseButton}
+            onClick={onClose}
+          >
             Close Media
           </button>
         </div>
@@ -2316,13 +2388,19 @@ function MediaModal({ row, onClose }) {
             <div className="empty-state">
               <h2>No media photo URL available</h2>
               <p className="muted">
-                The row reports {formatNumber(evidence.photoCount)} photo(s), but this registry row does not expose a usable media URL yet. Rebuild registry_mread after the backend media patch so the photo URL is written into the registry row.
+                The row reports {formatNumber(evidence.photoCount)} photo(s),
+                but this registry row does not expose a usable media URL yet.
+                Rebuild registry_mread after the backend media patch so the
+                photo URL is written into the registry row.
               </p>
             </div>
           ) : (
             <div style={styles.evidenceGrid}>
               {photoLinks.map((item, index) => (
-                <article key={`${item.url}-${index}`} style={styles.evidenceCard}>
+                <article
+                  key={`${item.url}-${index}`}
+                  style={styles.evidenceCard}
+                >
                   <a href={item.url} target="_blank" rel="noreferrer">
                     <img
                       src={item.url}
@@ -2330,8 +2408,7 @@ function MediaModal({ row, onClose }) {
                       style={styles.evidenceImage}
                     />
                   </a>
-                  <div style={styles.evidenceMetaGrid}>
-                  </div>
+                  <div style={styles.evidenceMetaGrid}></div>
                 </article>
               ))}
             </div>
@@ -2655,7 +2732,8 @@ export default function MreadRegistryPage() {
     error,
   } = useGetRegistryMreadByWardQuery(effectiveSelectedWardPcode || skipToken);
 
-  const isRegistryOpening = Boolean(effectiveSelectedWardPcode) &&
+  const isRegistryOpening =
+    Boolean(effectiveSelectedWardPcode) &&
     !error &&
     (isLoading || (isFetching && mreadRows.length === 0));
 
@@ -2663,7 +2741,8 @@ export default function MreadRegistryPage() {
     let cancelled = false;
 
     const rowsNeedingAstGeofence = mreadRows.filter((row) => {
-      if (getGeofenceName(row) !== NAv || getGeofenceId(row) !== NAv) return false;
+      if (getGeofenceName(row) !== NAv || getGeofenceId(row) !== NAv)
+        return false;
       const astId = getAstDocIdFromRow(row);
       return astId && !astGeofenceByAstId[astId];
     });
@@ -2702,7 +2781,6 @@ export default function MreadRegistryPage() {
       cancelled = true;
     };
   }, [mreadRows, astGeofenceByAstId]);
-
 
   const filteredMreadRows = useMemo(() => {
     return mreadRows.filter((row) => {
@@ -2745,7 +2823,8 @@ export default function MreadRegistryPage() {
         ) &&
         includesText(getWardNo(row), filters.wardNo) &&
         (filters.geofence === "ALL" ||
-          getGeofenceFilterValue(row, astGeofenceByAstId) === filters.geofence) &&
+          getGeofenceFilterValue(row, astGeofenceByAstId) ===
+            filters.geofence) &&
         includesText(
           `${getCapturedByName(row)} ${getCapturedByUid(row)}`,
           filters.capturedBy,
@@ -2794,7 +2873,6 @@ export default function MreadRegistryPage() {
   const paginatedMreadRows = useMemo(() => {
     return sortedMreadRows.slice(pageStartIndex, pageEndIndex);
   }, [sortedMreadRows, pageStartIndex, pageEndIndex]);
-
 
   const totals = sortedMreadRows.reduce(
     (accumulator, row) => {
@@ -2864,8 +2942,14 @@ export default function MreadRegistryPage() {
       { header: "Property Type", value: (row) => getPropertyType(row) },
       { header: "Ward", value: (row) => getWardNo(row) },
       { header: "Ward Pcode", value: (row) => getWardPcode(row) },
-      { header: "Geofence", value: (row) => getGeofenceName(row, astGeofenceByAstId) },
-      { header: "Geofence ID", value: (row) => getGeofenceId(row, astGeofenceByAstId) },
+      {
+        header: "Geofence",
+        value: (row) => getGeofenceName(row, astGeofenceByAstId),
+      },
+      {
+        header: "Geofence ID",
+        value: (row) => getGeofenceId(row, astGeofenceByAstId),
+      },
       { header: "Captured By", value: (row) => getCapturedByName(row) },
       { header: "Captured By UID", value: (row) => getCapturedByUid(row) },
       { header: "Team", value: (row) => getTeamName(row) },
@@ -2945,7 +3029,10 @@ export default function MreadRegistryPage() {
     const normalizedPage = Number(nextPage);
     const clampedPage = Math.max(
       1,
-      Math.min(Number.isFinite(normalizedPage) ? normalizedPage : 1, totalPages),
+      Math.min(
+        Number.isFinite(normalizedPage) ? normalizedPage : 1,
+        totalPages,
+      ),
     );
     setCurrentPage(clampedPage);
   }
@@ -2994,7 +3081,8 @@ export default function MreadRegistryPage() {
         <div>
           <h1>MREAD Registry</h1>
           <p className="muted">
-            View completed MREAD field records and generate preserved staging snapshots.
+            View completed MREAD field records and generate preserved staging
+            snapshots.
           </p>
           <Link className="text-link" to="/registries">
             ← Back to Registries
@@ -3094,7 +3182,6 @@ export default function MreadRegistryPage() {
         </div>
       </section>
 
-
       <section className="table-panel">
         {!effectiveSelectedWardPcode ? (
           <div className="empty-state">
@@ -3147,390 +3234,405 @@ export default function MreadRegistryPage() {
             />
 
             <div className="table-wrap" style={styles.tableWrap}>
-              <table className="data-table mread-registry-table" style={styles.table}>
-              <thead>
-                <tr>
-                  <HeaderCell minWidth={150}>
-                    <SortButton
-                      label="Meter No"
-                      sortKey="meterNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.meterNo}
-                      onChange={(value) => updateFilter("meterNo", value)}
-                      placeholder="Meter no"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={170}>
-                    <SortButton
-                      label="Completed At"
-                      sortKey="completedAt"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <DatetimeFilterButton
-                      filter={readingDateFilter}
-                      onClick={() => setIsReadingDateFilterOpen(true)}
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={185}>
-                    <SortButton
-                      label="Days Since Last Reading"
-                      sortKey="sincePreviousReading"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.sincePreviousReading}
-                      onChange={(value) =>
-                        updateFilter("sincePreviousReading", value)
-                      }
-                      placeholder="Days / hrs / min"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={170}>
-                    <SortButton
-                      label="Outcome"
-                      sortKey="outcome"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.outcome}
-                      onChange={(value) => updateFilter("outcome", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="SUCCESSFUL_READING">Successful</option>
-                      <option value="UNSUCCESSFUL_READING">Unsuccessful</option>
-                      <option value="NO_ACCESS">No Access</option>
-                    </FilterSelect>
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={150}>
-                    <SortButton
-                      label="Media"
-                      sortKey="media"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.mediaStatus}
-                      onChange={(value) => updateFilter("mediaStatus", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="HAS_MEDIA">Has Media</option>
-                      <option value="NO_MEDIA">No Media</option>
-                    </FilterSelect>
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={180}>
-                    <SortButton
-                      label="Reason"
-                      sortKey="reason"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.reason}
-                      onChange={(value) => updateFilter("reason", value)}
-                      placeholder="Reason"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={145}>
-                    <SortButton
-                      label="Current Reading"
-                      sortKey="currentReading"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.currentReading}
-                      onChange={(value) =>
-                        updateFilter("currentReading", value)
-                      }
-                      placeholder="Current"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={130}>
-                    <SortButton
-                      label="Prev Reading"
-                      sortKey="previousReading"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.previousReading}
-                      onChange={(value) =>
-                        updateFilter("previousReading", value)
-                      }
-                      placeholder="Prev"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={130}>
-                    <SortButton
-                      label="Consumption"
-                      sortKey="consumption"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.consumption}
-                      onChange={(value) => updateFilter("consumption", value)}
-                      placeholder="Use"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={130}>
-                    <SortButton
-                      label="Type"
-                      sortKey="meterType"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterType}
-                      onChange={(value) => updateFilter("meterType", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="electricity">Electricity</option>
-                      <option value="water">Water</option>
-                    </FilterSelect>
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={120}>
-                    <SortButton
-                      label="ERF No"
-                      sortKey="erfNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.erfNo}
-                      onChange={(value) => updateFilter("erfNo", value)}
-                      placeholder="ERF"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={240}>
-                    <SortButton
-                      label="Premise Address"
-                      sortKey="premiseAddress"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.premiseAddress}
-                      onChange={(value) =>
-                        updateFilter("premiseAddress", value)
-                      }
-                      placeholder="Address / ID"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={100}>
-                    <SortButton
-                      label="Ward"
-                      sortKey="wardNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.wardNo}
-                      onChange={(value) => updateFilter("wardNo", value)}
-                      placeholder="No"
-                    />
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={150}>
-                    <SortButton
-                      label="Geofence"
-                      sortKey="geofence"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.geofence}
-                      onChange={(value) => updateFilter("geofence", value)}
-                    >
-                      <option value="ALL">All Geofences</option>
-                      {geofenceOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </FilterSelect>
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={160}>
-                    <SortButton
-                      label="Captured By"
-                      sortKey="capturedBy"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.capturedBy}
-                      onChange={(value) => updateFilter("capturedBy", value)}
-                      placeholder="User"
-                    />
-                  </HeaderCell>
-
-
-                  <HeaderCell minWidth={170}>
-                    <SortButton
-                      label="Billing"
-                      sortKey="billingReadiness"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.billingReadiness}
-                      onChange={(value) =>
-                        updateFilter("billingReadiness", value)
-                      }
-                    >
-                      <option value="ALL">All</option>
-                      <option value="BILLING_READY_CANDIDATE">
-                        Billing Ready
-                      </option>
-                      <option value="BILLING_REVIEW_REQUIRED">Review</option>
-                      <option value="NOT_BILLING_READY">Not Ready</option>
-                    </FilterSelect>
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={150}>
-                    <SortButton
-                      label="Review"
-                      sortKey="reviewStatus"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.reviewStatus}
-                      onChange={(value) => updateFilter("reviewStatus", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="REVIEW_REQUIRED">Required</option>
-                      <option value="NAv">No Review</option>
-                    </FilterSelect>
-                  </HeaderCell>
-
-                  <HeaderCell minWidth={120}>Actions</HeaderCell>
-                </tr>
-              </thead>
-
-              <tbody>
-                {sortedMreadRows.length === 0 ? (
+              <table
+                className="data-table mread-registry-table"
+                style={styles.table}
+              >
+                <thead>
                   <tr>
-                    <td colSpan={18} className="muted">
-                      No MREAD rows match the current filters. Clear or adjust a
-                      column filter above.
-                    </td>
+                    <HeaderCell minWidth={150}>
+                      <SortButton
+                        label="Meter No"
+                        sortKey="meterNo"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.meterNo}
+                        onChange={(value) => updateFilter("meterNo", value)}
+                        placeholder="Meter no"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={170}>
+                      <SortButton
+                        label="Completed At"
+                        sortKey="completedAt"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <DatetimeFilterButton
+                        filter={readingDateFilter}
+                        onClick={() => setIsReadingDateFilterOpen(true)}
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={185}>
+                      <SortButton
+                        label="Days Since Last Reading"
+                        sortKey="sincePreviousReading"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.sincePreviousReading}
+                        onChange={(value) =>
+                          updateFilter("sincePreviousReading", value)
+                        }
+                        placeholder="Days / hrs / min"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={170}>
+                      <SortButton
+                        label="Outcome"
+                        sortKey="outcome"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.outcome}
+                        onChange={(value) => updateFilter("outcome", value)}
+                      >
+                        <option value="ALL">All</option>
+                        <option value="SUCCESSFUL_READING">Successful</option>
+                        <option value="UNSUCCESSFUL_READING">
+                          Unsuccessful
+                        </option>
+                        <option value="NO_ACCESS">No Access</option>
+                      </FilterSelect>
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={150}>
+                      <SortButton
+                        label="Media"
+                        sortKey="media"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.mediaStatus}
+                        onChange={(value) => updateFilter("mediaStatus", value)}
+                      >
+                        <option value="ALL">All</option>
+                        <option value="HAS_MEDIA">Has Media</option>
+                        <option value="NO_MEDIA">No Media</option>
+                      </FilterSelect>
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={180}>
+                      <SortButton
+                        label="Reason"
+                        sortKey="reason"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.reason}
+                        onChange={(value) => updateFilter("reason", value)}
+                        placeholder="Reason"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={145}>
+                      <SortButton
+                        label="Current Reading"
+                        sortKey="currentReading"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.currentReading}
+                        onChange={(value) =>
+                          updateFilter("currentReading", value)
+                        }
+                        placeholder="Current"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={130}>
+                      <SortButton
+                        label="Prev Reading"
+                        sortKey="previousReading"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.previousReading}
+                        onChange={(value) =>
+                          updateFilter("previousReading", value)
+                        }
+                        placeholder="Prev"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={130}>
+                      <SortButton
+                        label="Consumption"
+                        sortKey="consumption"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.consumption}
+                        onChange={(value) => updateFilter("consumption", value)}
+                        placeholder="Use"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={130}>
+                      <SortButton
+                        label="Type"
+                        sortKey="meterType"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.meterType}
+                        onChange={(value) => updateFilter("meterType", value)}
+                      >
+                        <option value="ALL">All</option>
+                        <option value="electricity">Electricity</option>
+                        <option value="water">Water</option>
+                      </FilterSelect>
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={120}>
+                      <SortButton
+                        label="ERF No"
+                        sortKey="erfNo"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.erfNo}
+                        onChange={(value) => updateFilter("erfNo", value)}
+                        placeholder="ERF"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={240}>
+                      <SortButton
+                        label="Premise Address"
+                        sortKey="premiseAddress"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.premiseAddress}
+                        onChange={(value) =>
+                          updateFilter("premiseAddress", value)
+                        }
+                        placeholder="Address / ID"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={100}>
+                      <SortButton
+                        label="Ward"
+                        sortKey="wardNo"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.wardNo}
+                        onChange={(value) => updateFilter("wardNo", value)}
+                        placeholder="No"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={150}>
+                      <SortButton
+                        label="Geofence"
+                        sortKey="geofence"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.geofence}
+                        onChange={(value) => updateFilter("geofence", value)}
+                      >
+                        <option value="ALL">All Geofences</option>
+                        {geofenceOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </FilterSelect>
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={160}>
+                      <SortButton
+                        label="Captured By"
+                        sortKey="capturedBy"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.capturedBy}
+                        onChange={(value) => updateFilter("capturedBy", value)}
+                        placeholder="User"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={170}>
+                      <SortButton
+                        label="Billing"
+                        sortKey="billingReadiness"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.billingReadiness}
+                        onChange={(value) =>
+                          updateFilter("billingReadiness", value)
+                        }
+                      >
+                        <option value="ALL">All</option>
+                        <option value="BILLING_READY_CANDIDATE">
+                          Billing Ready
+                        </option>
+                        <option value="BILLING_REVIEW_REQUIRED">Review</option>
+                        <option value="NOT_BILLING_READY">Not Ready</option>
+                      </FilterSelect>
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={150}>
+                      <SortButton
+                        label="Review"
+                        sortKey="reviewStatus"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.reviewStatus}
+                        onChange={(value) =>
+                          updateFilter("reviewStatus", value)
+                        }
+                      >
+                        <option value="ALL">All</option>
+                        <option value="REVIEW_REQUIRED">Required</option>
+                        <option value="NAv">No Review</option>
+                      </FilterSelect>
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={120}>Actions</HeaderCell>
                   </tr>
-                ) : null}
+                </thead>
 
-                {paginatedMreadRows.map((row) => {
-                  const outcome = getOutcome(row);
-                  const evidence = getEvidence(row);
-                  const mediaLinks = getEvidencePhotoLinks(row);
-                  return (
-                    <tr key={row.id || getTrnId(row)}>
-                      <td>
-                        <button
-                          type="button"
-                          className="text-link"
-                          style={styles.meterNoButton}
-                          onClick={() => setSelectedMeterRow(row)}
-                          title="Open meter details and reading history"
-                        >
-                          {getMeterNo(row)}
-                        </button>
-                      </td>
-                      <td>{formatDateTime(getCompletedAt(row))}</td>
-                      <td>
-                        <strong>{getSincePreviousReadingDisplay(row)}</strong>
-                      </td>
-                      <td>
-                        <StatusPill tone={getOutcomeTone(outcome)}>
-                          {getOutcomeLabel(outcome)}
-                        </StatusPill>
-                      </td>
-                      <td>
-                        {evidence.photoCount > 0 || mediaLinks.length > 0 ? (
-                          <button
-                            type="button"
-                            style={styles.evidenceButton}
-                            onClick={() => setSelectedMediaRow(row)}
-                          >
-                            {formatNumber(evidence.photoCount || mediaLinks.length)} photo(s)
-                          </button>
-                        ) : (
-                          <span className="muted">No media</span>
-                        )}
-                      </td>
-                      <td>{getReasonText(row)}</td>
-                      <td>
-                        <strong>{formatReading(getCurrentReading(row))}</strong>
-                      </td>
-                      <td>{formatReading(getPreviousReading(row))}</td>
-                      <td>
-                        <strong>{formatReading(getConsumption(row))}</strong>
-                      </td>
-                      <td>{getMeterTypeLabel(getMeterType(row))}</td>
-                      <td>{getErfNo(row)}</td>
-                      <td>
-                        <strong>{getPremiseAddress(row)}</strong>
-                        <div style={styles.secondaryId}>
-                          <RegistryIdText value={getPremiseId(row)} />
-                        </div>
-                      </td>
-                      <td>
-                        <strong>{getWardNo(row)}</strong>
-                      </td>
-                      <td>{getGeofenceName(row, astGeofenceByAstId)}</td>
-                      <td>
-                        <strong>{getCapturedByName(row)}</strong>
-                        <div style={styles.secondaryId}>
-                          <RegistryIdText value={getCapturedByUid(row)} />
-                        </div>
-                        {isMeaningfulText(getCapturedByRole(row)) ? (
-                          <div className="muted">{getCapturedByRole(row)}</div>
-                        ) : null}
-                      </td>
-
-                      <td>
-                        <StatusPill
-                          tone={getBillingTone(getBillingReadiness(row))}
-                        >
-                          {getBillingReadinessLabel(getBillingReadiness(row))}
-                        </StatusPill>
-                      </td>
-                      <td>
-                        <StatusPill tone={getReviewTone(getReviewStatus(row))}>
-                          {getReviewStatus(row)}
-                        </StatusPill>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="text-link"
-                          onClick={() => setSelectedRow(row)}
-                        >
-                          View Details
-                        </button>
+                <tbody>
+                  {sortedMreadRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={18} className="muted">
+                        No MREAD rows match the current filters. Clear or adjust
+                        a column filter above.
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
+                  ) : null}
+
+                  {paginatedMreadRows.map((row) => {
+                    const outcome = getOutcome(row);
+                    const evidence = getEvidence(row);
+                    const mediaLinks = getEvidencePhotoLinks(row);
+                    return (
+                      <tr key={row.id || getTrnId(row)}>
+                        <td>
+                          <button
+                            type="button"
+                            className="text-link"
+                            style={styles.meterNoButton}
+                            onClick={() => setSelectedMeterRow(row)}
+                            title="Open meter details and reading history"
+                          >
+                            {getMeterNo(row)}
+                          </button>
+                        </td>
+                        <td>{formatDateTime(getCompletedAt(row))}</td>
+                        <td>
+                          <strong>{getSincePreviousReadingDisplay(row)}</strong>
+                        </td>
+                        <td>
+                          <StatusPill tone={getOutcomeTone(outcome)}>
+                            {getOutcomeLabel(outcome)}
+                          </StatusPill>
+                        </td>
+                        <td>
+                          {evidence.photoCount > 0 || mediaLinks.length > 0 ? (
+                            <button
+                              type="button"
+                              style={styles.evidenceButton}
+                              onClick={() => setSelectedMediaRow(row)}
+                            >
+                              {formatNumber(
+                                evidence.photoCount || mediaLinks.length,
+                              )}{" "}
+                              photo(s)
+                            </button>
+                          ) : (
+                            <span className="muted">No media</span>
+                          )}
+                        </td>
+                        <td>{getReasonText(row)}</td>
+                        <td>
+                          <strong>
+                            {formatReading(getCurrentReading(row))}
+                          </strong>
+                        </td>
+                        <td>{formatReading(getPreviousReading(row))}</td>
+                        <td>
+                          <strong>{formatReading(getConsumption(row))}</strong>
+                        </td>
+                        <td>{getMeterTypeLabel(getMeterType(row))}</td>
+                        <td>{getErfNo(row)}</td>
+                        <td>
+                          <strong>{getPremiseAddress(row)}</strong>
+                          <div style={styles.secondaryId}>
+                            <RegistryIdText value={getPremiseId(row)} />
+                          </div>
+                        </td>
+                        <td>
+                          <strong>{getWardNo(row)}</strong>
+                        </td>
+                        <td>{getGeofenceName(row, astGeofenceByAstId)}</td>
+                        <td>
+                          <strong>{getCapturedByName(row)}</strong>
+                          <div style={styles.secondaryId}>
+                            <RegistryIdText value={getCapturedByUid(row)} />
+                          </div>
+                          {isMeaningfulText(getCapturedByRole(row)) ? (
+                            <div className="muted">
+                              {getCapturedByRole(row)}
+                            </div>
+                          ) : null}
+                        </td>
+
+                        <td>
+                          <StatusPill
+                            tone={getBillingTone(getBillingReadiness(row))}
+                          >
+                            {getBillingReadinessLabel(getBillingReadiness(row))}
+                          </StatusPill>
+                        </td>
+                        <td>
+                          <StatusPill
+                            tone={getReviewTone(getReviewStatus(row))}
+                          >
+                            {getReviewStatus(row)}
+                          </StatusPill>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="text-link"
+                            onClick={() => setSelectedRow(row)}
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
               </table>
             </div>
 
