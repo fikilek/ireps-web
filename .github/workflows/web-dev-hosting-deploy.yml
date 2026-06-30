@@ -1,0 +1,71 @@
+name: Web DEV Hosting Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-dev-hosting:
+    name: Deploy iREPS Web to DEV Hosting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Guard branch
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Run this workflow from main only."
+            exit 1
+          fi
+
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve DEV web environment
+        run: |
+          echo "VITE_APP_ENV=dev" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_API_KEY=${{ secrets.IREPS_WEB_DEV_FIREBASE_API_KEY }}" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.IREPS_WEB_DEV_FIREBASE_AUTH_DOMAIN }}" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_PROJECT_ID=${{ secrets.IREPS_WEB_DEV_FIREBASE_PROJECT_ID }}" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.IREPS_WEB_DEV_FIREBASE_STORAGE_BUCKET }}" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.IREPS_WEB_DEV_FIREBASE_MESSAGING_SENDER_ID }}" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_APP_ID=${{ secrets.IREPS_WEB_DEV_FIREBASE_APP_ID }}" >> "$GITHUB_ENV"
+          echo "VITE_GOOGLE_MAPS_API_KEY=${{ secrets.IREPS_WEB_DEV_GOOGLE_MAPS_API_KEY }}" >> "$GITHUB_ENV"
+
+      - name: Verify DEV web config
+        run: npm run ci:verify-web-env -- dev
+
+      - name: Build DEV web app
+        run: npm run build -- --mode dev
+
+      - name: Write Firebase service account
+        env:
+          IREPS_WEB_DEV_FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.IREPS_WEB_DEV_FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$IREPS_WEB_DEV_FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Missing IREPS_WEB_DEV_FIREBASE_SERVICE_ACCOUNT_JSON repository secret."
+            exit 1
+          fi
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          service_account_path = Path(os.environ["RUNNER_TEMP"]) / "ireps-web-dev-service-account.json"
+          service_account_path.write_text(os.environ["IREPS_WEB_DEV_FIREBASE_SERVICE_ACCOUNT_JSON"])
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"GOOGLE_APPLICATION_CREDENTIALS={service_account_path}\n")
+          PY
+
+      - name: Deploy DEV Firebase Hosting
+        run: npx firebase-tools deploy --only hosting --project ireps2 --non-interactive
