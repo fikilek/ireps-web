@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { loadEnv } from "vite";
 
 const EXPECTED = {
   dev: {
@@ -19,8 +20,18 @@ const envName = process.argv[2];
 const expected = EXPECTED[envName];
 
 if (!expected) {
-  fail(`Unsupported web environment "${envName}". Use one of: ${Object.keys(EXPECTED).join(", ")}`);
+  fail(
+    `Unsupported web environment "${envName}". Use one of: ${Object.keys(
+      EXPECTED,
+    ).join(", ")}`,
+  );
 }
+
+const viteEnv = loadEnv(envName, process.cwd(), "VITE_");
+const resolvedEnv = {
+  ...viteEnv,
+  ...process.env,
+};
 
 const requiredVars = {
   VITE_APP_ENV: envName,
@@ -30,11 +41,15 @@ const requiredVars = {
 };
 
 for (const [key, expectedValue] of Object.entries(requiredVars)) {
-  assertEqual(`process.env.${key}`, process.env[key], expectedValue);
+  assertEqual(`env.${key}`, resolvedEnv[key], expectedValue);
 }
 
 const firebaseRc = JSON.parse(fs.readFileSync(".firebaserc", "utf8"));
-assertEqual(`.firebaserc projects.${envName}`, firebaseRc?.projects?.[envName], expected.firebaseAlias);
+assertEqual(
+  `.firebaserc projects.${envName}`,
+  firebaseRc?.projects?.[envName],
+  expected.firebaseAlias,
+);
 
 const firebaseIndex = fs.readFileSync("src/firebase/index.js", "utf8");
 for (const envVar of [
@@ -50,7 +65,9 @@ for (const envVar of [
   }
 }
 
-console.log(`[iREPS Web CI] ${envName.toUpperCase()} environment verified: Firebase project ${expected.firebaseProjectId}`);
+console.log(
+  `[iREPS Web CI] ${envName.toUpperCase()} environment verified: Firebase project ${expected.firebaseProjectId}`,
+);
 
 function assertEqual(label, actual, expectedValue) {
   if (actual !== expectedValue) {

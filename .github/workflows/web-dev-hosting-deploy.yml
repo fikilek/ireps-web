@@ -46,7 +46,7 @@ jobs:
         run: npm run ci:verify-web-env -- dev
 
       - name: Build DEV web app
-        run: npm run build -- --mode dev
+        run: npm run build:dev
 
       - name: Write Firebase service account
         env:

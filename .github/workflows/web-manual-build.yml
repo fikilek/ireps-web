@@ -72,7 +72,7 @@ jobs:
         run: npm run lint:web
 
       - name: Build web app
-        run: npm run build -- --mode "${{ inputs.build_env }}"
+        run: npm run build:${{ inputs.build_env }}
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v5
