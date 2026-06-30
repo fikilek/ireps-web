@@ -68,4 +68,19 @@ jobs:
           PY
 
       - name: Deploy DEV Firebase Hosting
-        run: npx firebase-tools deploy --only hosting --project ireps2 --non-interactive
+        run: |
+          set +e
+          npx firebase-tools deploy --only hosting --project ireps2 --non-interactive 2>&1 | tee firebase-deploy.log
+          deploy_status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$deploy_status" -eq 0 ]; then
+            exit 0
+          fi
+
+          if grep -q "is the current active version" firebase-deploy.log; then
+            echo "Firebase Hosting already has this version active. Treating as success."
+            exit 0
+          fi
+
+          exit "$deploy_status"
