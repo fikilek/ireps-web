@@ -22,6 +22,9 @@ const EMPTY_WARD_FILTERS = {
   trnCount: "",
 };
 
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 5;
+
 function getActiveLmPcode(activeWorkbase) {
   return (
     activeWorkbase?.lmPcode ||
@@ -127,6 +130,81 @@ function FilterInput({ value, onChange, placeholder }) {
   );
 }
 
+function PaginationControls({
+  currentPage,
+  pageSize,
+  totalPages,
+  totalRows,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  if (totalRows === 0) return null;
+
+  const startRow = (currentPage - 1) * pageSize + 1;
+  const endRow = Math.min(currentPage * pageSize, totalRows);
+
+  return (
+    <div style={styles.paginationBar}>
+      <div className="muted">
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)} rows
+      </div>
+
+      <div style={styles.paginationControls}>
+        <label style={styles.pageSizeLabel}>
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            style={styles.pageSizeSelect}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+        >
+          First
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+        >
+          Previous
+        </button>
+        <span style={styles.pageCountLabel}>
+          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
+        </span>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
+        >
+          Last
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
@@ -245,6 +323,8 @@ export default function WardsRegistryPage() {
   const [filters, setFilters] = useState(EMPTY_WARD_FILTERS);
   const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
   const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -289,6 +369,15 @@ export default function WardsRegistryPage() {
 
     return rows;
   }, [filteredWardRows, sortConfig]);
+
+  const totalRows = sortedWardRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
+  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
+  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
+  const paginatedWardRows = useMemo(() => {
+    return sortedWardRows.slice(pageStartIndex, pageEndIndex);
+  }, [sortedWardRows, pageStartIndex, pageEndIndex]);
 
   const totals = sortedWardRows.reduce(
     (accumulator, row) => {
@@ -360,15 +449,35 @@ export default function WardsRegistryPage() {
   );
 
   function updateFilter(key, value) {
+    setCurrentPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function handleSort(sortKey) {
+    setCurrentPage(1);
     setSortConfig((current) => {
       if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
       if (current.direction === "asc") return { key: sortKey, direction: "desc" };
       return { key: "updatedAt", direction: "desc" };
     });
+  }
+
+  function handlePageChange(nextPage) {
+    const normalizedPage = Number(nextPage);
+    const clampedPage = Math.max(
+      1,
+      Math.min(Number.isFinite(normalizedPage) ? normalizedPage : 1, totalPages),
+    );
+    setCurrentPage(clampedPage);
+  }
+
+  function handlePageSizeChange(nextPageSize) {
+    const normalizedPageSize = Number(nextPageSize);
+    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
+      ? normalizedPageSize
+      : DEFAULT_PAGE_SIZE;
+    setPageSize(nextSize);
+    setCurrentPage(1);
   }
 
   return (
@@ -478,8 +587,18 @@ export default function WardsRegistryPage() {
         ) : null}
 
         {wardRows.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
+          <>
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+
+            <div className="table-wrap">
+              <table className="data-table">
               <thead>
                 <tr>
                   <th>
@@ -533,7 +652,7 @@ export default function WardsRegistryPage() {
                     </td>
                   </tr>
                 ) : (
-                  sortedWardRows.map((row) => (
+                  paginatedWardRows.map((row) => (
                     <tr key={row.id}>
                       <td>{row.wardNumber}</td>
                       <td>{formatNumber(row.formalErfCount)}</td>
@@ -549,8 +668,18 @@ export default function WardsRegistryPage() {
                   ))
                 )}
               </tbody>
-            </table>
-          </div>
+              </table>
+            </div>
+
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+          </>
         ) : null}
       </section>
 
@@ -558,10 +687,12 @@ export default function WardsRegistryPage() {
         <DatetimeFilterModal
           filter={updatedAtFilter}
           onApply={(nextFilter) => {
+            setCurrentPage(1);
             setUpdatedAtFilter(nextFilter);
             setIsUpdatedAtFilterOpen(false);
           }}
           onClear={() => {
+            setCurrentPage(1);
             setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
             setIsUpdatedAtFilterOpen(false);
           }}
@@ -604,5 +735,48 @@ const styles = {
     borderRadius: "0.45rem",
     padding: "0.36rem 0.45rem",
     fontSize: "0.72rem",
+  },
+  paginationBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "0.75rem 0.9rem",
+    flexWrap: "wrap",
+  },
+  paginationControls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    flexWrap: "wrap",
+  },
+  pageSizeLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    color: "#64748b",
+    fontSize: "0.82rem",
+    fontWeight: 700,
+  },
+  pageSizeSelect: {
+    border: "1px solid rgba(148, 163, 184, 0.45)",
+    borderRadius: "0.55rem",
+    padding: "0.34rem 0.45rem",
+    fontSize: "0.82rem",
+  },
+  paginationButton: {
+    border: "1px solid rgba(148, 163, 184, 0.42)",
+    background: "#fff",
+    color: "#0f172a",
+    borderRadius: "0.6rem",
+    padding: "0.36rem 0.58rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  pageCountLabel: {
+    color: "#334155",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    padding: "0 0.2rem",
   },
 };

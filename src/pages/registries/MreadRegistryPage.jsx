@@ -26,6 +26,8 @@ const EMPTY_MREAD_FILTERS = {
   previousReading: "",
   consumption: "",
   meterType: "ALL",
+  meterKind: "",
+  meterPhase: "",
   erfNo: "",
   premiseAddress: "",
   wardNo: "",
@@ -465,6 +467,36 @@ function getMeterTypeLabel(value) {
   return value || NAv;
 }
 
+function getMeterKind(row = {}) {
+  return firstText(
+    row.meterKind,
+    row?.meter?.meterKind,
+    row?.raw?.meter?.meterKind,
+  );
+}
+
+function getMeterPhase(row = {}) {
+  return firstText(
+    row.meterPhase,
+    row?.meter?.meterPhase,
+    row?.meter?.phase,
+    row?.raw?.meter?.meterPhase,
+    row?.raw?.meter?.phase,
+  );
+}
+
+function formatMeterAttribute(value) {
+  const text = safeText(value);
+  if (text === NAv) return NAv;
+
+  return text
+    .toLowerCase()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function getErfNo(row = {}) {
   return firstText(row.erfNo, row?.premise?.erfNo);
 }
@@ -678,24 +710,6 @@ function getEvidencePhotoLinks(row = {}) {
   });
 }
 
-function getMediaCreatedAt(item = {}) {
-  return firstValue(
-    item?.createdAt,
-    item?.created?.at,
-    item?.updatedAt,
-    item?.updated?.at,
-  );
-}
-
-function getMediaGpsText(item = {}) {
-  const gps = item?.gps || item?.location?.gps || {};
-  const lat = Number(gps?.lat ?? gps?.latitude);
-  const lng = Number(gps?.lng ?? gps?.longitude);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return NAv;
-  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-}
-
 function getBillingReadiness(row = {}) {
   return firstText(row.billingReadiness, row?.billingReadiness?.status);
 }
@@ -740,12 +754,6 @@ function getDataQualityLabel(value) {
   if (value === "NEEDS_FIX") return "Needs Fix";
   if (value === "WARNINGS") return "Warnings";
   return "OK";
-}
-
-function getDataQualityTone(value) {
-  if (value === "NEEDS_FIX") return "danger";
-  if (value === "WARNINGS") return "warning";
-  return "success";
 }
 
 function getTrnId(row = {}) {
@@ -910,6 +918,8 @@ function getSortValue(row, key, astGeofenceByAstId = {}) {
   if (key === "previousReading") return Number(getPreviousReading(row) || 0);
   if (key === "consumption") return Number(getConsumption(row) || 0);
   if (key === "meterType") return getMeterTypeLabel(getMeterType(row));
+  if (key === "meterKind") return formatMeterAttribute(getMeterKind(row));
+  if (key === "meterPhase") return formatMeterAttribute(getMeterPhase(row));
   if (key === "erfNo") return getErfNo(row);
   if (key === "premiseAddress") return getPremiseAddress(row);
   if (key === "wardNo") return Number(getWardNo(row) || 0);
@@ -1736,19 +1746,18 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
 
   const summary = data?.summary || null;
 
-  useEffect(() => {
-    setSelectedCycle((current) => {
-      if (!cycleRows.length) return null;
-      if (current) {
-        const stillExists = cycleRows.find(
-          (row) => row.cycleId === current.cycleId,
-        );
-        if (stillExists) return stillExists;
-      }
+  const effectiveSelectedCycle = useMemo(() => {
+    if (!cycleRows.length) return null;
 
-      return cycleRows[0];
-    });
-  }, [cycleRows]);
+    if (selectedCycle) {
+      return (
+        cycleRows.find((row) => row.cycleId === selectedCycle.cycleId) ||
+        cycleRows[0]
+      );
+    }
+
+    return cycleRows[0];
+  }, [cycleRows, selectedCycle]);
 
   const billingPeriodOptions = useMemo(() => {
     const periods = Array.from(
@@ -1995,7 +2004,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                     </thead>
                     <tbody>
                       {filteredCycleRows.map((row) => {
-                        const selected = selectedCycle?.cycleId === row.cycleId;
+                        const selected = effectiveSelectedCycle?.cycleId === row.cycleId;
                         const actionTone = getCycleActionTone(row);
 
                         return (
@@ -2666,6 +2675,7 @@ function RowDetailsModal({ row, onClose, astGeofenceByAstId = {} }) {
 markJsxOnlyComponentUsage(
   Link,
   DatetimeFilterButton,
+  SharedMeterHistoryModal,
   CompletedAtFilterModal,
   DownloadButtons,
   RegistryIdText,
@@ -2816,6 +2826,8 @@ export default function MreadRegistryPage() {
         (filters.meterType === "ALL" ||
           normalizeText(getMeterType(row)) ===
             normalizeText(filters.meterType)) &&
+        includesText(getMeterKind(row), filters.meterKind) &&
+        includesText(getMeterPhase(row), filters.meterPhase) &&
         includesText(getErfNo(row), filters.erfNo) &&
         includesText(
           `${getPremiseAddress(row)} ${getPremiseId(row)}`,
@@ -2934,6 +2946,14 @@ export default function MreadRegistryPage() {
       {
         header: "Meter Type",
         value: (row) => getMeterTypeLabel(getMeterType(row)),
+      },
+      {
+        header: "Meter Kind",
+        value: (row) => formatMeterAttribute(getMeterKind(row)),
+      },
+      {
+        header: "Meter Phase",
+        value: (row) => formatMeterAttribute(getMeterPhase(row)),
       },
       { header: "ERF No", value: (row) => getErfNo(row) },
       { header: "ERF ID", value: (row) => getErfId(row) },
@@ -3397,6 +3417,34 @@ export default function MreadRegistryPage() {
                       </FilterSelect>
                     </HeaderCell>
 
+                    <HeaderCell minWidth={130}>
+                      <SortButton
+                        label="Kind"
+                        sortKey="meterKind"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.meterKind}
+                        onChange={(value) => updateFilter("meterKind", value)}
+                        placeholder="Kind"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell minWidth={130}>
+                      <SortButton
+                        label="Phase"
+                        sortKey="meterPhase"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.meterPhase}
+                        onChange={(value) => updateFilter("meterPhase", value)}
+                        placeholder="Phase"
+                      />
+                    </HeaderCell>
+
                     <HeaderCell minWidth={120}>
                       <SortButton
                         label="ERF No"
@@ -3523,7 +3571,7 @@ export default function MreadRegistryPage() {
                 <tbody>
                   {sortedMreadRows.length === 0 ? (
                     <tr>
-                      <td colSpan={18} className="muted">
+                      <td colSpan={20} className="muted">
                         No MREAD rows match the current filters. Clear or adjust
                         a column filter above.
                       </td>
@@ -3583,6 +3631,8 @@ export default function MreadRegistryPage() {
                           <strong>{formatReading(getConsumption(row))}</strong>
                         </td>
                         <td>{getMeterTypeLabel(getMeterType(row))}</td>
+                        <td>{formatMeterAttribute(getMeterKind(row))}</td>
+                        <td>{formatMeterAttribute(getMeterPhase(row))}</td>
                         <td>{getErfNo(row)}</td>
                         <td>
                           <strong>{getPremiseAddress(row)}</strong>

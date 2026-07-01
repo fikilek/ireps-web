@@ -37,7 +37,12 @@ function normalizeMeterRegistryRow(id, data) {
     meterId: data?.meterId || data?.id || id,
     meterNo: data?.meterNo || "NAv",
     meterType: data?.meterType || "NAv",
+    meterKind: data?.meterKind || "NAv",
+    meterPhase: data?.meterPhase || "NAv",
     visibility: data?.visibility || "NAv",
+    status: data?.status || data?.statusState || "NAv",
+    statusState: data?.statusState || data?.status || "NAv",
+    statusDetail: data?.statusDetail || "NAv",
 
     erfId: data?.erfId || "NAv",
     erfNo: data?.erfNo || "NAv",
@@ -50,8 +55,11 @@ function normalizeMeterRegistryRow(id, data) {
     wardPcode: data?.parents?.wardPcode || "NAv",
 
     createdByUser: data?.metadata?.createdByUser || "NAv",
-    updatedByUser: data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
-    updatedAt: serializeRegistryDateValue(data?.metadata?.updatedAt || data?.metadata?.createdAt),
+    updatedByUser:
+      data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
+    updatedAt: serializeRegistryDateValue(
+      data?.metadata?.updatedAt || data?.metadata?.createdAt,
+    ),
   };
 }
 
@@ -66,6 +74,28 @@ function sortMeterRows(a, b) {
   );
 
   if (typeCompare !== 0) return typeCompare;
+
+  const kindCompare = String(a.meterKind).localeCompare(
+    String(b.meterKind),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
+
+  if (kindCompare !== 0) return kindCompare;
+
+  const phaseCompare = String(a.meterPhase).localeCompare(
+    String(b.meterPhase),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
+
+  if (phaseCompare !== 0) return phaseCompare;
 
   return String(a.meterNo).localeCompare(String(b.meterNo), undefined, {
     numeric: true,

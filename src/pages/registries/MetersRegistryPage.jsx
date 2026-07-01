@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -15,6 +16,8 @@ import DownloadButtons from "../../components/DownloadButtons";
 const EMPTY_METER_FILTERS = {
   meterNo: "",
   meterType: "ALL",
+  meterKind: "ALL",
+  meterPhase: "ALL",
   visibility: "ALL",
   status: "ALL",
   erfNo: "",
@@ -74,6 +77,28 @@ function getMeterTypeLabel(meterType) {
   return meterType || "NAv";
 }
 
+function getRegistryLabel(value) {
+  const text = String(value || "")
+    .trim()
+    .replace(/[_-]+/g, " ");
+
+  if (!text || text === "NAv") return "NAv";
+
+  return text
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function getMeterKindLabel(meterKind) {
+  return getRegistryLabel(meterKind);
+}
+
+function getMeterPhaseLabel(meterPhase) {
+  return getRegistryLabel(meterPhase);
+}
+
 function normalizeFilterText(value) {
   return String(value || "")
     .trim()
@@ -97,15 +122,22 @@ function getWardNumberFromPcode(wardPcode = "") {
 function getSelectedWardPcodeFromGeo(geoState) {
   const selectedWard = geoState?.selectedWard || null;
 
-  return selectedWard?.id || selectedWard?.pcode || selectedWard?.wardPcode || "";
+  return (
+    selectedWard?.id || selectedWard?.pcode || selectedWard?.wardPcode || ""
+  );
 }
 
 function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
-  const wardPcode = ward?.wardPcode || ward?.pcode || ward?.id || fallbackWardPcode || "";
+  const wardPcode =
+    ward?.wardPcode || ward?.pcode || ward?.id || fallbackWardPcode || "";
 
   if (!wardPcode) return null;
 
-  const wardNumber = ward?.wardNumber || ward?.code || getWardNumberFromPcode(wardPcode) || "NAv";
+  const wardNumber =
+    ward?.wardNumber ||
+    ward?.code ||
+    getWardNumberFromPcode(wardPcode) ||
+    "NAv";
 
   return {
     ...(ward || {}),
@@ -127,9 +159,21 @@ function compareNatural(a, b) {
   });
 }
 
+function buildFilterOptions(rows, key) {
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => row?.[key])
+        .filter((value) => value && value !== "NAv"),
+    ),
+  ).sort(compareNatural);
+}
+
 function getSortValue(row, key) {
   if (key === "meterNo") return row.meterNo || "";
   if (key === "meterType") return getMeterTypeLabel(row.meterType);
+  if (key === "meterKind") return getMeterKindLabel(row.meterKind);
+  if (key === "meterPhase") return getMeterPhaseLabel(row.meterPhase);
   if (key === "visibility") return row.visibility || "";
   if (key === "status") return row.statusState || row.status || "";
   if (key === "erfNo") return row.erfNo || "";
@@ -142,10 +186,18 @@ function getSortValue(row, key) {
 
 function SortButton({ label, sortKey, sortConfig, onSort }) {
   const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕";
+  const directionLabel = isActive
+    ? sortConfig.direction === "asc"
+      ? "↑"
+      : "↓"
+    : "↕";
 
   return (
-    <button type="button" style={styles.sortButton} onClick={() => onSort(sortKey)}>
+    <button
+      type="button"
+      style={styles.sortButton}
+      onClick={() => onSort(sortKey)}
+    >
       <span>{label}</span>
       <span>{directionLabel}</span>
     </button>
@@ -175,20 +227,11 @@ function FilterSelect({ value, onChange, children }) {
   );
 }
 
-
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
   startDate: "",
   endDate: "",
 };
-
-function buildUpdatedAtFilter(mode) {
-  return {
-    mode,
-    startDate: "",
-    endDate: "",
-  };
-}
 
 function getUpdatedAtDate(value) {
   if (!value || value === "NAv") return null;
@@ -208,15 +251,39 @@ function getUpdatedAtDate(value) {
 }
 
 function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
 }
 
 function endOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    999,
+  );
 }
 
 function addDays(date, days) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate() + days,
+    0,
+    0,
+    0,
+    0,
+  );
 }
 
 function parseDateOnly(value) {
@@ -256,7 +323,15 @@ function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
 
   if (mode === "THIS_MONTH") {
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const lastDay = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999,
+    );
     return { start: firstDay, end: lastDay };
   }
 
@@ -292,9 +367,14 @@ export default function MetersRegistryPage() {
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
+  const [sortConfig, setSortConfig] = useState({
+    key: "updatedAt",
+    direction: "desc",
+  });
   const [filters, setFilters] = useState(EMPTY_METER_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
+  const [updatedAtFilter, setUpdatedAtFilter] = useState(
+    EMPTY_UPDATED_AT_FILTER,
+  );
   const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
@@ -310,7 +390,8 @@ export default function MetersRegistryPage() {
     useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
 
   const selectedWard = useMemo(() => {
-    const registryWard = wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
+    const registryWard =
+      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
     return buildRegistryWardSelection(registryWard, selectedWardPcode);
   }, [wardRows, selectedWardPcode]);
 
@@ -322,12 +403,15 @@ export default function MetersRegistryPage() {
     isFetching,
     error,
   } = useGetRegistryMetersByWardQuery(effectiveSelectedWardPcode || skipToken);
+  const meterKindOptions = useMemo(
+    () => buildFilterOptions(meterRows, "meterKind"),
+    [meterRows],
+  );
 
-  useEffect(() => {
-    setFilters(EMPTY_METER_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-  }, [effectiveSelectedWardPcode]);
+  const meterPhaseOptions = useMemo(
+    () => buildFilterOptions(meterRows, "meterPhase"),
+    [meterRows],
+  );
 
   const filteredMeterRows = useMemo(() => {
     return meterRows.filter((row) => {
@@ -335,11 +419,24 @@ export default function MetersRegistryPage() {
 
       return (
         includesText(row.meterNo, filters.meterNo) &&
-        (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) &&
-        (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) &&
-        (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) &&
+        (filters.meterType === "ALL" ||
+          String(row.meterType || "").toLowerCase() ===
+            filters.meterType.toLowerCase()) &&
+        (filters.meterKind === "ALL" ||
+          String(row.meterKind || "").toLowerCase() ===
+            filters.meterKind.toLowerCase()) &&
+        (filters.meterPhase === "ALL" ||
+          String(row.meterPhase || "").toLowerCase() ===
+            filters.meterPhase.toLowerCase()) &&
+        (filters.visibility === "ALL" ||
+          String(row.visibility || "").toUpperCase() === filters.visibility) &&
+        (filters.status === "ALL" ||
+          String(statusText || "").toUpperCase() === filters.status) &&
         includesText(row.erfNo, filters.erfNo) &&
-        includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress) &&
+        includesText(
+          `${row.premiseAddress || ""} ${row.premiseId || ""}`,
+          filters.premiseAddress,
+        ) &&
         includesText(row.premisePropertyType, filters.premiseType) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
@@ -350,7 +447,10 @@ export default function MetersRegistryPage() {
     const rows = [...filteredMeterRows];
 
     rows.sort((a, b) => {
-      const comparison = compareNatural(getSortValue(a, sortConfig.key), getSortValue(b, sortConfig.key));
+      const comparison = compareNatural(
+        getSortValue(a, sortConfig.key),
+        getSortValue(b, sortConfig.key),
+      );
       return sortConfig.direction === "asc" ? comparison : -comparison;
     });
 
@@ -377,6 +477,14 @@ export default function MetersRegistryPage() {
       {
         header: "Type",
         value: (row) => getMeterTypeLabel(row.meterType),
+      },
+      {
+        header: "Kind",
+        value: (row) => getMeterKindLabel(row.meterKind),
+      },
+      {
+        header: "Phase",
+        value: (row) => getMeterPhaseLabel(row.meterPhase),
       },
       {
         header: "Visibility",
@@ -418,7 +526,12 @@ ${premiseId}`;
       wardLabel: getWardLabel(selectedWard),
       wardPcode: effectiveSelectedWardPcode || "NAv",
     }),
-    [activeWorkbaseName, activeLmPcode, selectedWard, effectiveSelectedWardPcode],
+    [
+      activeWorkbaseName,
+      activeLmPcode,
+      selectedWard,
+      effectiveSelectedWardPcode,
+    ],
   );
 
   function updateFilter(key, value) {
@@ -428,14 +541,24 @@ ${premiseId}`;
   function handleSort(sortKey) {
     setSortConfig((current) => {
       if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc") return { key: sortKey, direction: "desc" };
+      if (current.direction === "asc")
+        return { key: sortKey, direction: "desc" };
       return { key: "updatedAt", direction: "desc" };
     });
   }
 
+  function resetMeterRegistryControls() {
+    setFilters(EMPTY_METER_FILTERS);
+    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+    setSortConfig({ key: "updatedAt", direction: "desc" });
+  }
+
   function handleWardChange(event) {
     const nextWardPcode = event.target.value;
-    const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+    const nextWard =
+      wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+
+    resetMeterRegistryControls();
 
     updateGeo({
       selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
@@ -460,7 +583,9 @@ ${premiseId}`;
           <div className="workbase-pill">{activeWorkbaseName}</div>
           <div className="role-pill">{role || "NAv"}</div>
           <div className="role-pill">
-            {isFetching ? "Streaming..." : `${formatNumber(sortedMeterRows.length)} meters`}
+            {isFetching
+              ? "Streaming..."
+              : `${formatNumber(sortedMeterRows.length)} meters`}
           </div>
           <DownloadButtons
             registryName="Meter Registry"
@@ -553,7 +678,8 @@ ${premiseId}`;
           <div className="empty-state error-box">
             <h2>Could not load meter registry</h2>
             <p className="muted">
-              Check Firestore rules, registry_meters, or the ward field used by the query.
+              Check Firestore rules, registry_meters, or the ward field used by
+              the query.
             </p>
           </div>
         ) : null}
@@ -565,7 +691,10 @@ ${premiseId}`;
           </div>
         ) : null}
 
-        {!isLoading && effectiveSelectedWardPcode && meterRows.length === 0 && !error ? (
+        {!isLoading &&
+        effectiveSelectedWardPcode &&
+        meterRows.length === 0 &&
+        !error ? (
           <div className="empty-state">
             <h2>No meter registry rows found</h2>
             <p className="muted">
@@ -580,28 +709,99 @@ ${premiseId}`;
               <thead>
                 <tr>
                   <th>
-                    <SortButton label="Meter No" sortKey="meterNo" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.meterNo} onChange={(value) => updateFilter("meterNo", value)} placeholder="Meter no" />
+                    <SortButton
+                      label="Meter No"
+                      sortKey="meterNo"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterInput
+                      value={filters.meterNo}
+                      onChange={(value) => updateFilter("meterNo", value)}
+                      placeholder="Meter no"
+                    />
                   </th>
                   <th>
-                    <SortButton label="Type" sortKey="meterType" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterSelect value={filters.meterType} onChange={(value) => updateFilter("meterType", value)}>
+                    <SortButton
+                      label="Type"
+                      sortKey="meterType"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterSelect
+                      value={filters.meterType}
+                      onChange={(value) => updateFilter("meterType", value)}
+                    >
                       <option value="ALL">All</option>
                       <option value="electricity">Electricity</option>
                       <option value="water">Water</option>
                     </FilterSelect>
                   </th>
                   <th>
-                    <SortButton label="Visibility" sortKey="visibility" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterSelect value={filters.visibility} onChange={(value) => updateFilter("visibility", value)}>
+                    <SortButton
+                      label="Kind"
+                      sortKey="meterKind"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterSelect
+                      value={filters.meterKind}
+                      onChange={(value) => updateFilter("meterKind", value)}
+                    >
+                      <option value="ALL">All</option>
+                      {meterKindOptions.map((meterKind) => (
+                        <option key={meterKind} value={meterKind}>
+                          {getMeterKindLabel(meterKind)}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </th>
+                  <th>
+                    <SortButton
+                      label="Phase"
+                      sortKey="meterPhase"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterSelect
+                      value={filters.meterPhase}
+                      onChange={(value) => updateFilter("meterPhase", value)}
+                    >
+                      <option value="ALL">All</option>
+                      {meterPhaseOptions.map((meterPhase) => (
+                        <option key={meterPhase} value={meterPhase}>
+                          {getMeterPhaseLabel(meterPhase)}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </th>
+                  <th>
+                    <SortButton
+                      label="Visibility"
+                      sortKey="visibility"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterSelect
+                      value={filters.visibility}
+                      onChange={(value) => updateFilter("visibility", value)}
+                    >
                       <option value="ALL">All</option>
                       <option value="VISIBLE">Visible</option>
                       <option value="INVISIBLE">Invisible</option>
                     </FilterSelect>
                   </th>
                   <th>
-                    <SortButton label="Status" sortKey="status" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterSelect value={filters.status} onChange={(value) => updateFilter("status", value)}>
+                    <SortButton
+                      label="Status"
+                      sortKey="status"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterSelect
+                      value={filters.status}
+                      onChange={(value) => updateFilter("status", value)}
+                    >
                       <option value="ALL">All</option>
                       <option value="FIELD">FIELD</option>
                       <option value="CONNECTED">CONNECTED</option>
@@ -611,20 +811,57 @@ ${premiseId}`;
                     </FilterSelect>
                   </th>
                   <th>
-                    <SortButton label="ERF No" sortKey="erfNo" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.erfNo} onChange={(value) => updateFilter("erfNo", value)} placeholder="ERF" />
+                    <SortButton
+                      label="ERF No"
+                      sortKey="erfNo"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterInput
+                      value={filters.erfNo}
+                      onChange={(value) => updateFilter("erfNo", value)}
+                      placeholder="ERF"
+                    />
                   </th>
                   <th>
-                    <SortButton label="Premise Address" sortKey="premiseAddress" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.premiseAddress} onChange={(value) => updateFilter("premiseAddress", value)} placeholder="Address / ID" />
+                    <SortButton
+                      label="Premise Address"
+                      sortKey="premiseAddress"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterInput
+                      value={filters.premiseAddress}
+                      onChange={(value) =>
+                        updateFilter("premiseAddress", value)
+                      }
+                      placeholder="Address / ID"
+                    />
                   </th>
                   <th>
-                    <SortButton label="Premise Type" sortKey="premiseType" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.premiseType} onChange={(value) => updateFilter("premiseType", value)} placeholder="Type" />
+                    <SortButton
+                      label="Premise Type"
+                      sortKey="premiseType"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <FilterInput
+                      value={filters.premiseType}
+                      onChange={(value) => updateFilter("premiseType", value)}
+                      placeholder="Type"
+                    />
                   </th>
                   <th>
-                    <SortButton label="updatedAt" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
-                    <DatetimeFilterButton filter={updatedAtFilter} onClick={() => setIsUpdatedAtFilterOpen(true)} />
+                    <SortButton
+                      label="updatedAt"
+                      sortKey="updatedAt"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <DatetimeFilterButton
+                      filter={updatedAtFilter}
+                      onClick={() => setIsUpdatedAtFilterOpen(true)}
+                    />
                   </th>
                 </tr>
               </thead>
@@ -632,8 +869,9 @@ ${premiseId}`;
               <tbody>
                 {sortedMeterRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="muted">
-                      No meters match the current filters. Clear or adjust a column filter above.
+                    <td colSpan={10} className="muted">
+                      No meters match the current filters. Clear or adjust a
+                      column filter above.
                     </td>
                   </tr>
                 ) : (
@@ -641,6 +879,8 @@ ${premiseId}`;
                     <tr key={row.id}>
                       <td>{row.meterNo}</td>
                       <td>{getMeterTypeLabel(row.meterType)}</td>
+                      <td>{getMeterKindLabel(row.meterKind)}</td>
+                      <td>{getMeterPhaseLabel(row.meterPhase)}</td>
                       <td>{row.visibility}</td>
                       <td>{row.statusState || row.status || "NAv"}</td>
                       <td>{row.erfNo}</td>

@@ -422,22 +422,54 @@ function readReading(trn = {}, outcome) {
   };
 }
 
-function readMeter(trn = {}) {
-  const astData = trn?.ast?.astData || {};
-  const meter = astData?.meter || {};
-  const rawKind = firstString(meter?.type, trn?.meterKind);
+function readMeter(trn = {}, ast = {}) {
+  const trnAstData = trn?.ast?.astData || trn?.astData || {};
+  const astAstData = ast?.ast?.astData || ast?.astData || {};
+  const trnMeter = trnAstData?.meter || {};
+  const astMeter = astAstData?.meter || {};
+  const rawKind = firstString(
+    trnMeter?.type,
+    astMeter?.type,
+    trn?.meterKind,
+    trn?.meter?.meterKind,
+    ast?.meterKind,
+  );
   const meterKind = rawKind === NAv ? NAv : rawKind.toUpperCase();
+  const meterPhase = firstString(
+    trnMeter?.phase,
+    astMeter?.phase,
+    trn?.meterPhase,
+    trn?.meter?.meterPhase,
+    trn?.meter?.phase,
+    ast?.meterPhase,
+  );
 
   return {
-    astId: firstString(astData?.astId, trn?.sourceAstId, trn?.astId),
-    astNo: firstString(astData?.astNo, trn?.astNo, trn?.meterNo),
-    meterType: firstString(trn?.meterType, trn?.ast?.meterType),
+    astId: firstString(
+      trnAstData?.astId,
+      astAstData?.astId,
+      trn?.sourceAstId,
+      trn?.astId,
+    ),
+    astNo: firstString(
+      trnAstData?.astNo,
+      astAstData?.astNo,
+      trn?.astNo,
+      trn?.meterNo,
+    ),
+    meterType: firstString(trn?.meterType, trn?.ast?.meterType, ast?.meterType),
     meterKind,
-    statusState: firstString(trn?.status?.state, trn?.ast?.status?.state),
+    meterPhase,
+    statusState: firstString(
+      trn?.status?.state,
+      trn?.ast?.status?.state,
+      ast?.status?.state,
+    ),
     visibility: firstString(
       trn?.master?.visibility,
       trn?.derived?.master?.visibility,
       trn?.ast?.master?.visibility,
+      ast?.master?.visibility,
     ),
   };
 }
@@ -749,7 +781,7 @@ export function mapTrnMreadToRegistryMread({
     sourceVersion: "v1",
   };
 
-  const meter = readMeter(trn);
+  const meter = readMeter(trn, ast);
   const premise = readPremise(trn);
   const geography = readGeography(trn, ast);
   const reading = readReading(trn, outcome);

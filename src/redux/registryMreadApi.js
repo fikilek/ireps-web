@@ -110,6 +110,7 @@ function normalizeRegistryMediaTags({ mediaRefs = [], evidence = {} } = {}) {
 }
 
 function normalizeRegistryMreadRow(id, data) {
+  console.log("data", data);
   const outcome = data?.outcome?.outcome || data?.outcome || "NAv";
   const reasonText = firstMeaningfulRegistryText(data?.outcome?.reasonText);
   const noAccessReason =
@@ -131,7 +132,9 @@ function normalizeRegistryMreadRow(id, data) {
       : "NAv";
   const billingReadiness = data?.billingReadiness?.status || "NAv";
   const completedAt = serializeRegistryDateValue(
-    data?.source?.completedAt || data?.metadata?.updatedAt || data?.metadata?.createdAt,
+    data?.source?.completedAt ||
+      data?.metadata?.updatedAt ||
+      data?.metadata?.createdAt,
   );
   const sincePreviousReading = data?.reading?.sincePreviousReading || null;
   const sincePreviousReadingDisplay =
@@ -146,7 +149,9 @@ function normalizeRegistryMreadRow(id, data) {
   const mediaRefs = normalizeRegistryMediaRefs(evidence?.mediaRefs);
   const mediaTags = normalizeRegistryMediaTags({ mediaRefs, evidence });
   const photoCount = Number(evidence?.photoCount || mediaRefs.length || 0);
-  const hasPhoto = Boolean(evidence?.hasPhoto || mediaRefs.length > 0 || photoCount > 0);
+  const hasPhoto = Boolean(
+    evidence?.hasPhoto || mediaRefs.length > 0 || photoCount > 0,
+  );
 
   return {
     id,
@@ -182,6 +187,10 @@ function normalizeRegistryMreadRow(id, data) {
     astId: data?.meter?.astId || "NAv",
     meterType: data?.meter?.meterType || "NAv",
     meterKind: data?.meter?.meterKind || "NAv",
+    meterPhase: firstMeaningfulRegistryText(
+      data?.meter?.meterPhase,
+      data?.meter?.phase,
+    ),
     statusState: data?.meter?.statusState || "NAv",
     visibility: data?.meter?.visibility || "NAv",
 
@@ -244,8 +253,11 @@ function normalizeRegistryMreadRow(id, data) {
     warnings: data?.dataQuality?.warnings || [],
 
     completedAt,
-    updatedAt: serializeRegistryDateValue(data?.metadata?.updatedAt || data?.metadata?.createdAt),
-    updatedByUser: data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
+    updatedAt: serializeRegistryDateValue(
+      data?.metadata?.updatedAt || data?.metadata?.createdAt,
+    ),
+    updatedByUser:
+      data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
     raw: data,
   };
 }
@@ -311,7 +323,8 @@ export const registryMreadApi = createApi({
           console.error("registryMreadApi initial load error:", error);
           return {
             error: {
-              message: error?.message || "Failed to open registry_mread stream.",
+              message:
+                error?.message || "Failed to open registry_mread stream.",
             },
           };
         }
