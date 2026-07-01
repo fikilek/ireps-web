@@ -18,6 +18,8 @@ import DownloadButtons from "../../components/DownloadButtons";
 
 const ERF_PAGE_SIZE = 200;
 const ERF_SEARCH_LIMIT = 50;
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 5;
 
 const EMPTY_ERF_BROWSE_FILTERS = {
   erfNo: "",
@@ -184,6 +186,81 @@ function FilterSelect({ value, onChange, children }) {
   );
 }
 
+function PaginationControls({
+  currentPage,
+  pageSize,
+  totalPages,
+  totalRows,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  if (totalRows === 0) return null;
+
+  const startRow = (currentPage - 1) * pageSize + 1;
+  const endRow = Math.min(currentPage * pageSize, totalRows);
+
+  return (
+    <div style={styles.paginationBar}>
+      <div className="muted">
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)} rows
+      </div>
+
+      <div style={styles.paginationControls}>
+        <label style={styles.pageSizeLabel}>
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            style={styles.pageSizeSelect}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+        >
+          First
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+        >
+          Previous
+        </button>
+        <span style={styles.pageCountLabel}>
+          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
+        </span>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
+        >
+          Last
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
@@ -306,6 +383,8 @@ export default function ErfsRegistryPage() {
   const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
   const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const [extraBrowseRows, setExtraBrowseRows] = useState([]);
   const [extraBrowseWardPcode, setExtraBrowseWardPcode] = useState("");
@@ -347,6 +426,7 @@ export default function ErfsRegistryPage() {
     setBrowseFilters(EMPTY_ERF_BROWSE_FILTERS);
     setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
     setSortConfig({ key: "updatedAt", direction: "desc" });
+    setCurrentPage(1);
     setExtraBrowseRows([]);
     setExtraBrowseWardPcode(effectiveSelectedWardPcode);
     setNextCursorId(null);
@@ -414,6 +494,15 @@ export default function ErfsRegistryPage() {
     return rows;
   }, [filteredBrowseRows, sortConfig]);
 
+  const totalRows = sortedBrowseRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
+  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
+  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
+  const paginatedBrowseRows = useMemo(() => {
+    return sortedBrowseRows.slice(pageStartIndex, pageEndIndex);
+  }, [sortedBrowseRows, pageStartIndex, pageEndIndex]);
+
   const hasActiveBrowseFilters = Object.values(browseFilters).some((value) => value && value !== "ALL") || updatedAtFilter.mode !== "ALL";
 
   const activeNextCursorId =
@@ -429,10 +518,12 @@ export default function ErfsRegistryPage() {
   const isBrowseFetching = isFirstPageFetching || isLoadMoreFetching;
 
   function updateBrowseFilter(key, value) {
+    setCurrentPage(1);
     setBrowseFilters((currentFilters) => ({ ...currentFilters, [key]: value }));
   }
 
   function handleSort(sortKey) {
+    setCurrentPage(1);
     setSortConfig((current) => {
       if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
       if (current.direction === "asc") return { key: sortKey, direction: "desc" };
@@ -440,9 +531,32 @@ export default function ErfsRegistryPage() {
     });
   }
 
+  function handlePageChange(nextPage) {
+    const normalizedPage = Number(nextPage);
+    const clampedPage = Math.max(
+      1,
+      Math.min(
+        Number.isFinite(normalizedPage) ? normalizedPage : 1,
+        totalPages,
+      ),
+    );
+    setCurrentPage(clampedPage);
+  }
+
+  function handlePageSizeChange(nextPageSize) {
+    const normalizedPageSize = Number(nextPageSize);
+    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
+      ? normalizedPageSize
+      : DEFAULT_PAGE_SIZE;
+    setPageSize(nextSize);
+    setCurrentPage(1);
+  }
+
   function handleBrowseWardChange(event) {
     const nextWardPcode = event.target.value;
     const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+
+    setCurrentPage(1);
 
     updateGeo({
       selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
@@ -753,6 +867,15 @@ export default function ErfsRegistryPage() {
 
         {browseRows.length > 0 ? (
           <>
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
@@ -813,7 +936,7 @@ export default function ErfsRegistryPage() {
                       </td>
                     </tr>
                   ) : (
-                    sortedBrowseRows.map((row) => (
+                    paginatedBrowseRows.map((row) => (
                       <tr key={row.id}>
                         <td>{row.erfNo}</td>
                         <td>{row.erfType}</td>
@@ -831,6 +954,15 @@ export default function ErfsRegistryPage() {
                 </tbody>
               </table>
             </div>
+
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
 
             <div className="load-more-row">
               <div>
@@ -979,10 +1111,12 @@ export default function ErfsRegistryPage() {
         <DatetimeFilterModal
           filter={updatedAtFilter}
           onApply={(nextFilter) => {
+            setCurrentPage(1);
             setUpdatedAtFilter(nextFilter);
             setIsUpdatedAtFilterOpen(false);
           }}
           onClear={() => {
+            setCurrentPage(1);
             setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
             setIsUpdatedAtFilterOpen(false);
           }}
@@ -1035,5 +1169,48 @@ const styles = {
     padding: "0.36rem 0.45rem",
     fontSize: "0.72rem",
     background: "#ffffff",
+  },
+  paginationBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "0.75rem 0.9rem",
+    flexWrap: "wrap",
+  },
+  paginationControls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    flexWrap: "wrap",
+  },
+  pageSizeLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    color: "#64748b",
+    fontSize: "0.82rem",
+    fontWeight: 700,
+  },
+  pageSizeSelect: {
+    border: "1px solid rgba(148, 163, 184, 0.45)",
+    borderRadius: "0.55rem",
+    padding: "0.34rem 0.45rem",
+    fontSize: "0.82rem",
+  },
+  paginationButton: {
+    border: "1px solid rgba(148, 163, 184, 0.42)",
+    background: "#fff",
+    color: "#0f172a",
+    borderRadius: "0.6rem",
+    padding: "0.36rem 0.58rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  pageCountLabel: {
+    color: "#334155",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    padding: "0 0.2rem",
   },
 };
