@@ -24,9 +24,9 @@ const EMPTY_PREMISE_FILTERS = {
   meterCount: "",
 };
 
+const DEFAULT_SORT = { key: "updatedAt", direction: "desc" };
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
-const DEFAULT_SORT = { key: "updatedAt", direction: "desc" };
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -191,18 +191,14 @@ function PaginationControls({
 }) {
   if (totalRows === 0) return null;
 
-  const safeTotalPages = Math.max(1, Number(totalPages) || 1);
-  const safeCurrentPage = Math.max(
-    1,
-    Math.min(Number(currentPage) || 1, safeTotalPages),
-  );
-  const startRow = (safeCurrentPage - 1) * pageSize + 1;
-  const endRow = Math.min(safeCurrentPage * pageSize, totalRows);
+  const startRow = (currentPage - 1) * pageSize + 1;
+  const endRow = Math.min(currentPage * pageSize, totalRows);
 
   return (
     <div style={styles.paginationBar}>
       <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of {formatNumber(totalRows)} rows
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)} rows
       </div>
 
       <div style={styles.paginationControls}>
@@ -225,34 +221,34 @@ function PaginationControls({
           type="button"
           style={styles.paginationButton}
           onClick={() => onPageChange(1)}
-          disabled={safeCurrentPage <= 1}
+          disabled={currentPage <= 1}
         >
           First
         </button>
         <button
           type="button"
           style={styles.paginationButton}
-          onClick={() => onPageChange(safeCurrentPage - 1)}
-          disabled={safeCurrentPage <= 1}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
         >
           Previous
         </button>
         <span style={styles.pageCountLabel}>
-          Page {formatNumber(safeCurrentPage)} of {formatNumber(safeTotalPages)}
+          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
         </span>
         <button
           type="button"
           style={styles.paginationButton}
-          onClick={() => onPageChange(safeCurrentPage + 1)}
-          disabled={safeCurrentPage >= safeTotalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
         >
           Next
         </button>
         <button
           type="button"
           style={styles.paginationButton}
-          onClick={() => onPageChange(safeTotalPages)}
-          disabled={safeCurrentPage >= safeTotalPages}
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
         >
           Last
         </button>
@@ -410,7 +406,6 @@ export default function PremisesRegistryPage() {
     error,
   } = useGetRegistryPremisesByWardQuery(effectiveSelectedWardPcode || skipToken);
 
-
   const filteredPremiseRows = useMemo(() => {
     return premiseRows.filter((row) => {
       return (
@@ -525,15 +520,6 @@ export default function PremisesRegistryPage() {
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc") return { key: sortKey, direction: "desc" };
-      return DEFAULT_SORT;
-    });
-  }
-
   function resetTableControls() {
     setFilters(EMPTY_PREMISE_FILTERS);
     setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
@@ -541,15 +527,12 @@ export default function PremisesRegistryPage() {
     setCurrentPage(1);
   }
 
-  function handleWardChange(event) {
-    const nextWardPcode = event.target.value;
-    const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
-
-    resetTableControls();
-
-    updateGeo({
-      selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
-      lastSelectionType: nextWardPcode ? "WARD" : null,
+  function handleSort(sortKey) {
+    setCurrentPage(1);
+    setSortConfig((current) => {
+      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
+      if (current.direction === "asc") return { key: sortKey, direction: "desc" };
+      return DEFAULT_SORT;
     });
   }
 
@@ -572,6 +555,18 @@ export default function PremisesRegistryPage() {
       : DEFAULT_PAGE_SIZE;
     setPageSize(nextSize);
     setCurrentPage(1);
+  }
+
+  function handleWardChange(event) {
+    const nextWardPcode = event.target.value;
+    const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
+
+    resetTableControls();
+
+    updateGeo({
+      selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
+      lastSelectionType: nextWardPcode ? "WARD" : null,
+    });
   }
 
   return (
@@ -876,17 +871,13 @@ const styles = {
     fontSize: "0.72rem",
     background: "#ffffff",
   },
-  smallMuted: {
-    fontSize: "0.72rem",
-    marginTop: "0.25rem",
-  },
   paginationBar: {
     display: "flex",
-    alignItems: "center",
     justifyContent: "space-between",
+    alignItems: "center",
     gap: "1rem",
+    padding: "0.75rem 0.9rem",
     flexWrap: "wrap",
-    padding: "0.85rem 0",
   },
   paginationControls: {
     display: "flex",
@@ -895,32 +886,36 @@ const styles = {
     flexWrap: "wrap",
   },
   pageSizeLabel: {
-    display: "flex",
+    display: "inline-flex",
     alignItems: "center",
-    gap: "0.45rem",
+    gap: "0.4rem",
+    color: "#64748b",
     fontSize: "0.82rem",
-    fontWeight: 800,
-    color: "#475569",
+    fontWeight: 700,
   },
   pageSizeSelect: {
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.35rem 0.45rem",
-    background: "#ffffff",
-    fontWeight: 800,
+    border: "1px solid rgba(148, 163, 184, 0.45)",
+    borderRadius: "0.55rem",
+    padding: "0.34rem 0.45rem",
+    fontSize: "0.82rem",
   },
   paginationButton: {
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.5rem",
-    padding: "0.4rem 0.65rem",
-    background: "#ffffff",
+    border: "1px solid rgba(148, 163, 184, 0.42)",
+    background: "#fff",
+    color: "#0f172a",
+    borderRadius: "0.6rem",
+    padding: "0.36rem 0.58rem",
     fontWeight: 800,
     cursor: "pointer",
   },
   pageCountLabel: {
+    color: "#334155",
     fontSize: "0.82rem",
     fontWeight: 800,
-    color: "#334155",
-    padding: "0 0.35rem",
+    padding: "0 0.2rem",
+  },
+  smallMuted: {
+    fontSize: "0.72rem",
+    marginTop: "0.25rem",
   },
 };
