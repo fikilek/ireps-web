@@ -84,24 +84,7 @@ const navSections = [
         path: "/ward-scope/map",
         allowedRoles: MANAGEMENT_ROLES,
       },
-      {
-        label: "ERFs",
-        path: "/ward-scope/erfs",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
-      {
-        label: "Premises",
-        path: "/ward-scope/premises",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
-      {
-        label: "Meters",
-        path: "/ward-scope/meters",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
     ],
-  },
-  {
     groups: [
       {
         label: "Registries",
