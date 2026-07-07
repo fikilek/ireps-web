@@ -4,6 +4,21 @@
     "test": "ireps-test",
     "dev": "ireps2"
   },
-  "targets": {},
+  "targets": {
+    "ireps2": {
+      "hosting": {
+        "ireps-web": [
+          "ireps2"
+        ]
+      }
+    },
+    "ireps-test": {
+      "hosting": {
+        "ireps-web": [
+          "ireps-test"
+        ]
+      }
+    }
+  },
   "etags": {}
 }
