@@ -64,7 +64,7 @@ jobs:
           VITE_GOOGLE_MAPS_API_KEY: ci-google-maps-key
         run: |
           npm run ci:verify-web-env -- dev
-          npm run build -- --mode dev
+          npm run build:dev
 
       - name: Verify TEST web config
         env:
@@ -78,4 +78,4 @@ jobs:
           VITE_GOOGLE_MAPS_API_KEY: ci-google-maps-key
         run: |
           npm run ci:verify-web-env -- test
-          npm run build -- --mode test
+          npm run build:test
