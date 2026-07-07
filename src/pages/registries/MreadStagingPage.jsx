@@ -2045,12 +2045,6 @@ export default function MreadStagingPage() {
       ? "Choose a staging session to begin."
       : `${formatNumber(totalRows)} staging row(s)`;
 
-  useEffect(() => {
-    if (!hasWardSelection || !sessions.length) {
-      setSelectedSessionId("");
-    }
-  }, [hasWardSelection, sessions.length]);
-
   const handleSessionChange = (event) => {
     setSelectedSessionId(event.target.value);
     setTableFilters(EMPTY_TABLE_FILTERS);
@@ -2472,6 +2466,15 @@ export default function MreadStagingPage() {
               </table>
             ) : null}
           </div>
+
+          <PaginationControls
+            currentPage={safeCurrentPage}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            totalRows={totalFilteredRows}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
+          />
         </section>
       </div>
 

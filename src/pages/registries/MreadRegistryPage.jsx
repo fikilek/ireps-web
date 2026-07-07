@@ -1738,6 +1738,7 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     isFetching,
     refetch,
   } = useListMreadStagingCyclesQuery(queryArgs);
+  console.log(`Staging cycles`, data);
 
   const cycleRows = useMemo(
     () => (Array.isArray(data?.rows) ? data.rows : []),
@@ -2004,7 +2005,8 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
                     </thead>
                     <tbody>
                       {filteredCycleRows.map((row) => {
-                        const selected = effectiveSelectedCycle?.cycleId === row.cycleId;
+                        const selected =
+                          effectiveSelectedCycle?.cycleId === row.cycleId;
                         const actionTone = getCycleActionTone(row);
 
                         return (
@@ -2716,6 +2718,7 @@ export default function MreadRegistryPage() {
   const [isStagingControllerOpen, setIsStagingControllerOpen] = useState(false);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
+  console.log(`Active LM Pcode: ${activeLmPcode}`);
 
   const activeWorkbaseName =
     activeWorkbase?.name ||

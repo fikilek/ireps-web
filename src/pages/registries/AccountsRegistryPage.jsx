@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -14,6 +14,10 @@ import {
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
 import DownloadButtons from "../../components/DownloadButtons";
+
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 5;
+const EMPTY_ROWS = [];
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -235,6 +239,82 @@ function FilterSelect({ value, onChange, children, style = null }) {
     >
       {children}
     </select>
+  );
+}
+
+function PaginationControls({
+  currentPage,
+  pageSize,
+  totalPages,
+  totalRows,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  if (totalRows === 0) return null;
+
+  const startRow = (currentPage - 1) * pageSize + 1;
+  const endRow = Math.min(currentPage * pageSize, totalRows);
+
+  return (
+    <div style={styles.paginationBar}>
+      <div className="muted">
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)} rows
+      </div>
+
+      <div style={styles.paginationControls}>
+        <label style={styles.pageSizeLabel}>
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            style={styles.pageSizeSelect}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+        >
+          First
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+        >
+          Previous
+        </button>
+        <span style={styles.pageCountLabel}>
+          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
+        </span>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
+        >
+          Last
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -528,6 +608,8 @@ export default function AccountsRegistryPage() {
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName =
@@ -548,19 +630,13 @@ export default function AccountsRegistryPage() {
   const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
 
   const {
-    data: accountRows = [],
+    data: accountRows = EMPTY_ROWS,
     isLoading,
     isFetching,
     error,
   } = useGetRegistryAccountsByWardQuery(effectiveSelectedWardPcode || skipToken);
 
   const [getHistoryByPremise] = useLazyGetFieldAccountDataHistoryByPremiseQuery();
-
-  useEffect(() => {
-    setFilters(EMPTY_ACCOUNT_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-  }, [effectiveSelectedWardPcode]);
 
   const totals = accountRows.reduce(
     (accumulator, row) => {
@@ -628,6 +704,15 @@ export default function AccountsRegistryPage() {
     });
   }, [filteredRows, sortConfig]);
 
+  const totalRows = sortedRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
+  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
+  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
+  const paginatedRows = useMemo(() => {
+    return sortedRows.slice(pageStartIndex, pageEndIndex);
+  }, [sortedRows, pageStartIndex, pageEndIndex]);
+
   const quickDownloadColumns = useMemo(
     () => [
       {
@@ -685,10 +770,12 @@ export default function AccountsRegistryPage() {
   );
 
   function updateFilter(key, value) {
+    setCurrentPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function handleSort(sortKey) {
+    setCurrentPage(1);
     setSortConfig((current) => {
       if (current.key !== sortKey) {
         return { key: sortKey, direction: "asc" };
@@ -702,8 +789,38 @@ export default function AccountsRegistryPage() {
     });
   }
 
+  function resetAccountRegistryControls() {
+    setFilters(EMPTY_ACCOUNT_FILTERS);
+    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+    setSortConfig({ key: "updatedAt", direction: "desc" });
+    setCurrentPage(1);
+  }
+
+  function handlePageChange(nextPage) {
+    const normalizedPage = Number(nextPage);
+    const clampedPage = Math.max(
+      1,
+      Math.min(
+        Number.isFinite(normalizedPage) ? normalizedPage : 1,
+        totalPages,
+      ),
+    );
+    setCurrentPage(clampedPage);
+  }
+
+  function handlePageSizeChange(nextPageSize) {
+    const normalizedPageSize = Number(nextPageSize);
+    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
+      ? normalizedPageSize
+      : DEFAULT_PAGE_SIZE;
+    setPageSize(nextSize);
+    setCurrentPage(1);
+  }
+
   function handleWardChange(value) {
     const nextWard = wardRows.find((ward) => ward.wardPcode === value) || null;
+
+    resetAccountRegistryControls();
 
     updateGeo({
       selectedWard: buildRegistryWardSelection(nextWard, value),
@@ -882,10 +999,20 @@ export default function AccountsRegistryPage() {
         ) : null}
 
         {accountRows.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
+          <>
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
                   <th>
                     <SortButton
                       label="Premise Address"
@@ -1044,67 +1171,77 @@ export default function AccountsRegistryPage() {
                 </tr>
               </thead>
 
-              <tbody>
-                {sortedRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="muted">
-                      No account registry rows match the current filters. Clear or adjust a column filter above.
-                    </td>
-                  </tr>
-                ) : (
-                  sortedRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <strong>{row.premiseAddress}</strong>
-                      <div className="muted" style={styles.smallMuted}>
-                        {row.premiseId}
-                      </div>
-                    </td>
-                    <td>{getWardNumberDisplay(row.wardPcode)}</td>
-                    <td>{row.erfNo}</td>
-                    <td>{row.ownerLabel}</td>
-                    <td>{getOwnerTypeLabel(row.ownerType)}</td>
-                    <td>
-                      <CountPill
-                        count={row.accountCount}
-                        label={row.accountCount === 1 ? "Account" : "Accounts"}
-                        onClick={() => openModal("accounts", row)}
-                      />
-                    </td>
-                    <td>
-                      <CountPill
-                        count={row.meterCount}
-                        label={row.meterCount === 1 ? "Meter" : "Meters"}
-                        onClick={() => openModal("meters", row)}
-                      />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        style={styles.textButton}
-                        onClick={() => openHistoryModal(row)}
-                      >
-                        {row.historyStatus === "HAS_HISTORY"
-                          ? "View History"
-                          : "No History"}
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        style={styles.actionButton}
-                        onClick={() => openModal("details", row)}
-                      >
-                        View Details
-                      </button>
-                    </td>
-                    <td>{formatUpdatedAt(row.updatedAt)}</td>
-                  </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                <tbody>
+                  {sortedRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="muted">
+                        No account registry rows match the current filters. Clear or adjust a column filter above.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        <strong>{row.premiseAddress}</strong>
+                        <div className="muted" style={styles.smallMuted}>
+                          {row.premiseId}
+                        </div>
+                      </td>
+                      <td>{getWardNumberDisplay(row.wardPcode)}</td>
+                      <td>{row.erfNo}</td>
+                      <td>{row.ownerLabel}</td>
+                      <td>{getOwnerTypeLabel(row.ownerType)}</td>
+                      <td>
+                        <CountPill
+                          count={row.accountCount}
+                          label={row.accountCount === 1 ? "Account" : "Accounts"}
+                          onClick={() => openModal("accounts", row)}
+                        />
+                      </td>
+                      <td>
+                        <CountPill
+                          count={row.meterCount}
+                          label={row.meterCount === 1 ? "Meter" : "Meters"}
+                          onClick={() => openModal("meters", row)}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          style={styles.textButton}
+                          onClick={() => openHistoryModal(row)}
+                        >
+                          {row.historyStatus === "HAS_HISTORY"
+                            ? "View History"
+                            : "No History"}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          style={styles.actionButton}
+                          onClick={() => openModal("details", row)}
+                        >
+                          View Details
+                        </button>
+                      </td>
+                      <td>{formatUpdatedAt(row.updatedAt)}</td>
+                    </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <PaginationControls
+              currentPage={safeCurrentPage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+          </>
         ) : null}
       </section>
 
@@ -1308,10 +1445,12 @@ export default function AccountsRegistryPage() {
         <DatetimeFilterModal
           filter={updatedAtFilter}
           onApply={(nextFilter) => {
+            setCurrentPage(1);
             setUpdatedAtFilter(nextFilter);
             setIsUpdatedAtFilterOpen(false);
           }}
           onClear={() => {
+            setCurrentPage(1);
             setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
             setIsUpdatedAtFilterOpen(false);
           }}
@@ -1567,5 +1706,48 @@ const styles = {
     textDecoration: "none",
     fontSize: "0.8rem",
     fontWeight: 900,
+  },
+  paginationBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "0.75rem 0.9rem",
+    flexWrap: "wrap",
+  },
+  paginationControls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    flexWrap: "wrap",
+  },
+  pageSizeLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    color: "#64748b",
+    fontSize: "0.82rem",
+    fontWeight: 700,
+  },
+  pageSizeSelect: {
+    border: "1px solid rgba(148, 163, 184, 0.45)",
+    borderRadius: "0.55rem",
+    padding: "0.34rem 0.45rem",
+    fontSize: "0.82rem",
+  },
+  paginationButton: {
+    border: "1px solid rgba(148, 163, 184, 0.42)",
+    background: "#fff",
+    color: "#0f172a",
+    borderRadius: "0.6rem",
+    padding: "0.36rem 0.58rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  pageCountLabel: {
+    color: "#334155",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    padding: "0 0.2rem",
   },
 };

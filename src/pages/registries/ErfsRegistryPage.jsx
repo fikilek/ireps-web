@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -20,6 +20,7 @@ const ERF_PAGE_SIZE = 200;
 const ERF_SEARCH_LIMIT = 50;
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
+const EMPTY_ROWS = [];
 
 const EMPTY_ERF_BROWSE_FILTERS = {
   erfNo: "",
@@ -378,7 +379,6 @@ export default function ErfsRegistryPage() {
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const previousWardPcodeRef = useRef(selectedWardPcode);
   const [browseFilters, setBrowseFilters] = useState(EMPTY_ERF_BROWSE_FILTERS);
   const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
   const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
@@ -419,21 +419,6 @@ export default function ErfsRegistryPage() {
 
   const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
 
-  useEffect(() => {
-    if (previousWardPcodeRef.current === effectiveSelectedWardPcode) return;
-
-    previousWardPcodeRef.current = effectiveSelectedWardPcode;
-    setBrowseFilters(EMPTY_ERF_BROWSE_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-    setCurrentPage(1);
-    setExtraBrowseRows([]);
-    setExtraBrowseWardPcode(effectiveSelectedWardPcode);
-    setNextCursorId(null);
-    setHasMoreOverride(null);
-    setBrowseError("");
-  }, [effectiveSelectedWardPcode]);
-
   const firstPageQueryArg = effectiveSelectedWardPcode
     ? { wardPcode: effectiveSelectedWardPcode, cursorId: null, pageSize: ERF_PAGE_SIZE }
     : skipToken;
@@ -456,9 +441,12 @@ export default function ErfsRegistryPage() {
     return lookup;
   }, [wardRows]);
 
-  const firstPageRows = firstPageData?.rows || [];
-  const activeExtraBrowseRows =
-    extraBrowseWardPcode === effectiveSelectedWardPcode ? extraBrowseRows : [];
+  const firstPageRows = firstPageData?.rows || EMPTY_ROWS;
+  const activeExtraBrowseRows = useMemo(() => {
+    return extraBrowseWardPcode === effectiveSelectedWardPcode
+      ? extraBrowseRows
+      : EMPTY_ROWS;
+  }, [effectiveSelectedWardPcode, extraBrowseRows, extraBrowseWardPcode]);
 
   const browseRows = useMemo(() => {
     return [...firstPageRows, ...activeExtraBrowseRows];
@@ -552,11 +540,23 @@ export default function ErfsRegistryPage() {
     setCurrentPage(1);
   }
 
+  function resetBrowseControls(nextWardPcode) {
+    setBrowseFilters(EMPTY_ERF_BROWSE_FILTERS);
+    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
+    setSortConfig({ key: "updatedAt", direction: "desc" });
+    setCurrentPage(1);
+    setExtraBrowseRows([]);
+    setExtraBrowseWardPcode(nextWardPcode || "");
+    setNextCursorId(null);
+    setHasMoreOverride(null);
+    setBrowseError("");
+  }
+
   function handleBrowseWardChange(event) {
     const nextWardPcode = event.target.value;
     const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
 
-    setCurrentPage(1);
+    resetBrowseControls(nextWardPcode);
 
     updateGeo({
       selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),
@@ -964,22 +964,29 @@ export default function ErfsRegistryPage() {
               onPageSizeChange={handlePageSizeChange}
             />
 
-            <div className="load-more-row">
-              <div>
-                <strong>
-                  {hasActiveBrowseFilters
-                    ? `${formatNumber(sortedBrowseRows.length)} filtered from ${formatNumber(browseRows.length)} loaded`
-                    : `${formatNumber(browseRows.length)} of ${formatNumber(selectedWardTotalErfs)} ward ERFs loaded`}
-                </strong>
-                <p className="muted">
-                  {activeHasMore ? "More ERFs are available." : "All loaded pages are complete."}
-                </p>
-              </div>
+            {activeHasMore || isBrowseFetching ? (
+              <div className="load-more-row">
+                <div>
+                  <strong>
+                    {hasActiveBrowseFilters
+                      ? `${formatNumber(sortedBrowseRows.length)} filtered from ${formatNumber(browseRows.length)} loaded`
+                      : `${formatNumber(browseRows.length)} of ${formatNumber(selectedWardTotalErfs)} ward ERFs loaded`}
+                  </strong>
+                  <p className="muted">
+                    {isBrowseFetching ? "Loading ERFs..." : "More ERFs are available."}
+                  </p>
+                </div>
 
-              <button className="secondary-button" type="button" onClick={handleLoadMore} disabled={!activeHasMore || isBrowseFetching}>
-                {isBrowseFetching ? "Loading..." : activeHasMore ? "Load More" : "All Loaded"}
-              </button>
-            </div>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={handleLoadMore}
+                  disabled={!activeHasMore || isBrowseFetching}
+                >
+                  {isBrowseFetching ? "Loading..." : "Load More"}
+                </button>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>
