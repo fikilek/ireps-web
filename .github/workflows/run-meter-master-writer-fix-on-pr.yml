@@ -5,6 +5,8 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened]
+    paths-ignore:
+      - PATCH_DIAGNOSTIC.txt
 
 permissions:
   contents: write
@@ -20,27 +22,51 @@ jobs:
           fetch-depth: 0
 
       - name: Execute governed patch embedded in preparation workflow
+        id: patch
+        continue-on-error: true
         shell: python
         run: |
           from pathlib import Path
           import textwrap
+          import traceback
 
-          workflow = Path('.github/workflows/apply-meter-master-writer-fix.yml')
-          lines = workflow.read_text(encoding='utf-8').splitlines()
+          try:
+              workflow = Path('.github/workflows/apply-meter-master-writer-fix.yml')
+              lines = workflow.read_text(encoding='utf-8').splitlines()
 
-          start_marker = '      - name: Patch canonical Meter Master writers'
-          next_marker = '      - name: Verify governed writer invariants'
-          start = lines.index(start_marker)
-          end = lines.index(next_marker)
-          run_index = next(
-              index for index in range(start, end)
-              if lines[index].strip() == 'run: |'
-          )
-          script_lines = lines[run_index + 1:end]
-          script = textwrap.dedent('\n'.join(script_lines))
-          exec(compile(script, str(workflow), 'exec'), {'__name__': '__main__'})
+              start_marker = '      - name: Patch canonical Meter Master writers'
+              next_marker = '      - name: Verify governed writer invariants'
+              start = lines.index(start_marker)
+              end = lines.index(next_marker)
+              run_index = next(
+                  index for index in range(start, end)
+                  if lines[index].strip() == 'run: |'
+              )
+              script_lines = lines[run_index + 1:end]
+              script = textwrap.dedent('\n'.join(script_lines))
+              exec(compile(script, str(workflow), 'exec'), {'__name__': '__main__'})
+          except Exception:
+              Path('PATCH_DIAGNOSTIC.txt').write_text(
+                  traceback.format_exc(),
+                  encoding='utf-8',
+              )
+              raise
+
+      - name: Commit patch diagnostic
+        if: steps.patch.outcome == 'failure'
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PATCH_DIAGNOSTIC.txt
+          git commit -m "chore: record Meter Master patch diagnostic"
+          git push origin "HEAD:${HEAD_BRANCH}"
+          exit 1
 
       - name: Verify governed writer invariants
+        if: steps.patch.outcome == 'success'
         shell: python
         run: |
           from pathlib import Path
@@ -68,26 +94,31 @@ jobs:
               )
 
       - name: Install function dependencies
+        if: steps.patch.outcome == 'success'
         working-directory: functions
         run: npm ci
 
       - name: Check function syntax
+        if: steps.patch.outcome == 'success'
         working-directory: functions
         run: node --check index.js
 
       - name: Run function lint
+        if: steps.patch.outcome == 'success'
         working-directory: functions
         run: npm run lint
 
       - name: Commit validated writer fix
+        if: steps.patch.outcome == 'success'
         env:
           HEAD_BRANCH: ${{ github.head_ref }}
         shell: bash
         run: |
+          rm -f PATCH_DIAGNOSTIC.txt
           rm .github/workflows/apply-meter-master-writer-fix.yml
           rm .github/workflows/run-meter-master-writer-fix-on-pr.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add functions/index.js .github/workflows/
+          git add functions/index.js .github/workflows/ PATCH_DIAGNOSTIC.txt
           git commit -m "fix: govern Meter Master field writers"
           git push origin "HEAD:${HEAD_BRANCH}"
