@@ -104,6 +104,15 @@ import {
   generateMreadStaging,
 } from "./registry/mread/index.js";
 
+import {
+  METER_MASTER_CLASSIFICATIONS,
+  MeterMasterConflictError,
+  normalizeMeterNo,
+  buildCanonicalFieldOnlyMeterMaster,
+  classifyOperationalAstChange,
+  buildOperationalAstUpdate,
+} from "./meterMaster/helpers.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -1068,13 +1077,6 @@ export const onPremiseUpdated = onDocumentUpdated(
   },
 );
 
-function normalizeMeterNo(value) {
-  return String(value || "")
-    .replace(/\s+/g, "")
-    .trim()
-    .toUpperCase();
-}
-
 function hasRequiredText(value) {
   const text = String(value || "").trim();
   return text && text !== "NAv";
@@ -1485,18 +1487,19 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
     if (!ast) return null;
 
     const rawMeterNo = ast?.astData?.astNo || "";
-    const normalizedMeterNo = normalizeMeterNo(rawMeterNo);
-
-    const premiseId = accessData?.premise?.id || null;
-    const erfId = accessData?.erfId || null;
-    const lmPcode = accessData?.parents?.lmPcode || null;
-
-    if (!normalizedMeterNo) {
+    let normalizedMeterNo = "";
+    try {
+      normalizedMeterNo = normalizeMeterNo(rawMeterNo);
+    } catch {
       logger.warn("onMeterDiscoveryCreated ---- missing meter number", {
         trnId,
       });
       return null;
     }
+
+    const premiseId = accessData?.premise?.id || null;
+    const erfId = accessData?.erfId || null;
+    const lmPcode = accessData?.parents?.lmPcode || null;
 
     if (!premiseId) {
       logger.warn("onMeterDiscoveryCreated ---- missing premiseId", {
@@ -1576,22 +1579,41 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         const masterSnap = await tx.get(masterRef);
         const salesSnap = await tx.get(salesRef);
 
-        if (astSnap.exists) {
-          logger.log("onMeterDiscoveryCreated ---- AST already exists", {
-            trnId,
-            astId,
-          });
-          return;
-        }
-
         const masterBefore = masterSnap.exists ? masterSnap.data() : null;
-        const existingAstId = masterBefore?.refs?.asts?.id || null;
+        const masterDecision = classifyOperationalAstChange({
+          masterId: normalizedMeterNo,
+          existing: masterBefore,
+          incomingAstId: astId,
+          incomingLmPcode: lmPcode,
+          incomingMeterType: meterType,
+          sourceWriter: "onMeterDiscoveryCreated",
+        });
 
-        if (existingAstId && existingAstId !== astId) {
-          throw new Error(
-            `MASTER conflict: meter ${normalizedMeterNo} already linked to AST ${existingAstId}`,
-          );
+        if (
+          masterDecision.classification ===
+          METER_MASTER_CLASSIFICATIONS.CONFLICT
+        ) {
+          logger.error("onMeterDiscoveryCreated ---- Meter Master conflict", {
+            ...masterDecision.conflict,
+            existingValues: undefined,
+          });
+          throw new MeterMasterConflictError(masterDecision.conflict);
         }
+
+        const masterOperationTimestamp = Timestamp.now();
+        const canonicalFieldOnlyMaster =
+          masterDecision.classification ===
+          METER_MASTER_CLASSIFICATIONS.CREATE_FIELD_ONLY
+            ? buildCanonicalFieldOnlyMeterMaster({
+                lmPcode,
+                meterNoRaw: rawMeterNo,
+                meterType,
+                astId,
+                actorUid: agentUid,
+                actorUser: agentName,
+                operationTimestamp: masterOperationTimestamp,
+              })
+            : null;
 
         const serviceProvider = trnData?.serviceProvider || {
           id: "NAv",
@@ -1608,42 +1630,14 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
                   id: astId,
                 },
               },
-              serviceProvider,
               metadata: {
                 ...(masterBefore?.metadata || {}),
-                updatedAt,
+                updatedAt: masterOperationTimestamp,
                 updatedByUid: agentUid,
                 updatedByUser: agentName,
               },
             }
-          : {
-              lmPcode,
-              meterNo: {
-                raw: rawMeterNo,
-                normalized: normalizedMeterNo,
-              },
-              meterType: meterType || null,
-              customerNo: null,
-              accountNo: null,
-              refs: {
-                asts: {
-                  id: astId,
-                },
-                sales: {
-                  id: null,
-                  provider: null,
-                },
-              },
-              serviceProvider,
-              metadata: {
-                createdAt,
-                createdByUid,
-                createdByUser,
-                updatedAt,
-                updatedByUid: agentUid,
-                updatedByUser: agentName,
-              },
-            };
+          : canonicalFieldOnlyMaster;
 
         const visibility = deriveMasterVisibility(nextMasterData);
 
@@ -1657,45 +1651,56 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
           },
         };
 
-        // 1. CREATE AST
-        tx.set(astRef, {
-          accessData,
-          ast: astPayload,
-          ...(creationData.mreadings.length
-            ? { mreadings: creationData.mreadings }
-            : {}),
-          ...(creationData.treadings.length
-            ? { treadings: creationData.treadings }
-            : {}),
-          media: trnData.media || [],
-          meterType,
-          trnId,
-          master: {
-            id: normalizedMeterNo,
-            visibility,
-          },
-          metadata: {
-            createdAt,
-            createdByUid,
-            createdByUser,
-            updatedAt,
-            updatedByUid: agentUid,
-            updatedByUser: agentName,
-          },
-          status: statusPayload,
-          serviceProvider,
-        });
+        // 1. CREATE AST, or preserve the existing idempotent AST.
+        if (!astSnap.exists) {
+          tx.create(astRef, {
+            accessData,
+            ast: astPayload,
+            ...(creationData.mreadings.length
+              ? { mreadings: creationData.mreadings }
+              : {}),
+            ...(creationData.treadings.length
+              ? { treadings: creationData.treadings }
+              : {}),
+            media: trnData.media || [],
+            meterType,
+            trnId,
+            master: {
+              id: normalizedMeterNo,
+              visibility,
+            },
+            metadata: {
+              createdAt,
+              createdByUid,
+              createdByUser,
+              updatedAt,
+              updatedByUid: agentUid,
+              updatedByUser: agentName,
+            },
+            status: statusPayload,
+            serviceProvider,
+          });
+        }
 
         // 2. UPSERT MASTER
-        if (masterSnap.exists) {
-          tx.update(masterRef, {
-            "refs.asts.id": astId,
-            "metadata.updatedAt": updatedAt,
-            "metadata.updatedByUid": agentUid,
-            "metadata.updatedByUser": agentName,
-          });
-        } else {
-          tx.set(masterRef, nextMasterData);
+        if (
+          masterDecision.classification ===
+          METER_MASTER_CLASSIFICATIONS.CREATE_FIELD_ONLY
+        ) {
+          tx.create(masterRef, canonicalFieldOnlyMaster);
+        } else if (
+          masterDecision.classification ===
+          METER_MASTER_CLASSIFICATIONS.UPDATE_AST_LINK
+        ) {
+          tx.update(
+            masterRef,
+            buildOperationalAstUpdate({
+              astId,
+              actorUid: agentUid,
+              actorUser: agentName,
+              operationTimestamp: masterOperationTimestamp,
+            }),
+          );
         }
 
         // 2.5 SYNC SALES-ALL-METERS FROM MASTER TRUTH
@@ -1767,6 +1772,17 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
 
       return { success: true };
     } catch (error) {
+      if (error instanceof MeterMasterConflictError) {
+        logger.error("onMeterDiscoveryCreated ---- governed conflict", {
+          conflictCode: error.conflict.conflictCode,
+          masterId: error.conflict.masterId,
+          documentPath: error.conflict.documentPath,
+          conflictingPaths: error.conflict.conflictingPaths,
+          sourceWriter: error.conflict.sourceWriter,
+          message: error.conflict.message,
+        });
+        return null;
+      }
       logger.error("onMeterDiscoveryCreated ---- FATAL ERROR:", error);
       return null;
     }
@@ -2944,7 +2960,17 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     const meterType = data?.meterType || "NAv";
     const hasAccess = data?.accessData?.access?.hasAccess || "no";
     const meterNoRaw = data?.ast?.astData?.astNo || "";
-    const meterNoNormalized = normalizeMeterNo(meterNoRaw);
+    let meterNoNormalized = "";
+    try {
+      meterNoNormalized = normalizeMeterNo(meterNoRaw);
+    } catch {
+      if (hasAccess === "yes") {
+        return buildFailureResult(
+          "INVALID_METER_NUMBER",
+          "Meter number must contain a non-whitespace value",
+        );
+      }
+    }
 
     logger.info("onMeterDiscoveryCallable --start", {
       trnId,
@@ -3025,18 +3051,31 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
 
       if (masterSnap.exists) {
         const masterData = masterSnap.data() || {};
-        const existingAstId = masterData?.refs?.asts?.id || "";
+        const masterDecision = classifyOperationalAstChange({
+          masterId: meterNoNormalized,
+          existing: masterData,
+          incomingAstId: trnId,
+          incomingLmPcode: data?.accessData?.parents?.lmPcode,
+          incomingMeterType: meterType,
+          sourceWriter: "onMeterDiscoveryCallable",
+        });
 
-        if (existingAstId) {
-          logger.warn("onMeterDiscoveryCallable --duplicate blocked", {
-            trnId,
-            meterNoNormalized,
-            existingAstId,
+        if (
+          masterDecision.classification ===
+          METER_MASTER_CLASSIFICATIONS.CONFLICT
+        ) {
+          logger.warn("onMeterDiscoveryCallable --master conflict", {
+            conflictCode: masterDecision.conflict.conflictCode,
+            masterId: masterDecision.conflict.masterId,
+            documentPath: masterDecision.conflict.documentPath,
+            conflictingPaths: masterDecision.conflict.conflictingPaths,
+            sourceWriter: masterDecision.conflict.sourceWriter,
+            message: masterDecision.conflict.message,
           });
 
           return buildFailureResult(
-            "DUPLICATE_METER",
-            "Meter already linked to an existing AST",
+            masterDecision.conflict.conflictCode,
+            masterDecision.conflict.message,
           );
         }
       }
@@ -4604,7 +4643,20 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     const astPayload = data?.ast || null;
 
     const meterNoRaw = astPayload?.astData?.astNo || "";
-    const meterNoNormalized = String(meterNoRaw).trim().toUpperCase();
+    let meterNoNormalized = "";
+    try {
+      meterNoNormalized = normalizeMeterNo(meterNoRaw);
+    } catch {
+      if (hasAccess === "yes") {
+        return {
+          success: false,
+          code: "INVALID_METER_NUMBER",
+          message: "Meter number must contain a non-whitespace value",
+          trnId,
+          astId: "NAv",
+        };
+      }
+    }
 
     const validationError = validateMeterCreationPayload({
       data,
@@ -4637,44 +4689,18 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     }
 
     const trnRef = db.collection("trns").doc(trnId);
-    const trnSnap = await trnRef.get();
-
-    if (trnSnap.exists) {
-      return {
-        success: true,
-        code: "TRN_ALREADY_EXISTS",
-        message: "TRN already exists and is treated as successful",
-        trnId,
-        astId: hasAccess === "yes" ? trnId : "NAv",
-      };
-    }
 
     if (hasAccess === "yes") {
-      const masterRef = db.collection("meter_master").doc(meterNoNormalized);
-      const masterSnap = await masterRef.get();
-
-      if (masterSnap.exists) {
-        const masterData = masterSnap.data() || {};
-        const existingAstId = masterData?.refs?.asts?.id || "";
-
-        if (existingAstId) {
-          return {
-            success: false,
-            code: "DUPLICATE_METER",
-            message: "Meter already linked to an existing AST",
-            trnId,
-            astId: existingAstId,
-          };
-        }
-      }
-
       const existingAstSnap = await db
         .collection("asts")
         .where("master.id", "==", meterNoNormalized)
         .limit(1)
         .get();
 
-      if (!existingAstSnap.empty) {
+      if (
+        !existingAstSnap.empty &&
+        existingAstSnap.docs[0].id !== trnId
+      ) {
         return {
           success: false,
           code: "DUPLICATE_METER",
@@ -4828,10 +4854,6 @@ export const onMeterInstallationCallable = onCall(async (request) => {
           tx.get(premiseRef),
         ]);
 
-      if (liveTrnSnap.exists && liveAstSnap.exists) {
-        return { alreadyExists: true };
-      }
-
       if (!livePremiseSnap.exists) {
         throw new HttpsError(
           "failed-precondition",
@@ -4839,12 +4861,59 @@ export const onMeterInstallationCallable = onCall(async (request) => {
         );
       }
 
-      const existingAstId = liveMasterSnap.data()?.refs?.asts?.id || "";
-      if (existingAstId && existingAstId !== trnId) {
-        throw new HttpsError(
-          "already-exists",
-          `Meter already linked to AST ${existingAstId}`,
+      const masterBefore = liveMasterSnap.exists
+        ? liveMasterSnap.data() || {}
+        : null;
+      const masterDecision = classifyOperationalAstChange({
+        masterId: meterNoNormalized,
+        existing: masterBefore,
+        incomingAstId: trnId,
+        incomingLmPcode: finalAccessData?.parents?.lmPcode,
+        incomingMeterType: meterType,
+        sourceWriter: "onMeterInstallationCallable",
+      });
+
+      if (
+        masterDecision.classification ===
+        METER_MASTER_CLASSIFICATIONS.CONFLICT
+      ) {
+        throw new MeterMasterConflictError(masterDecision.conflict);
+      }
+
+      const masterOperationTimestamp = Timestamp.now();
+      if (
+        masterDecision.classification ===
+        METER_MASTER_CLASSIFICATIONS.CREATE_FIELD_ONLY
+      ) {
+        tx.create(
+          masterRef,
+          buildCanonicalFieldOnlyMeterMaster({
+            lmPcode: finalAccessData?.parents?.lmPcode,
+            meterNoRaw,
+            meterType,
+            astId: trnId,
+            actorUid: caller.uid,
+            actorUser: actorName,
+            operationTimestamp: masterOperationTimestamp,
+          }),
         );
+      } else if (
+        masterDecision.classification ===
+        METER_MASTER_CLASSIFICATIONS.UPDATE_AST_LINK
+      ) {
+        tx.update(
+          masterRef,
+          buildOperationalAstUpdate({
+            astId: trnId,
+            actorUid: caller.uid,
+            actorUser: actorName,
+            operationTimestamp: masterOperationTimestamp,
+          }),
+        );
+      }
+
+      if (liveTrnSnap.exists && liveAstSnap.exists) {
+        return { alreadyExists: true };
       }
 
       if (liveAstSnap.exists && liveAstSnap.id !== trnId) {
@@ -4878,23 +4947,6 @@ export const onMeterInstallationCallable = onCall(async (request) => {
 
       tx.create(trnRef, trnDoc);
       tx.create(astRef, astDoc);
-      tx.set(
-        masterRef,
-        {
-          id: meterNoNormalized,
-          meterNo: meterNoNormalized,
-          meterType,
-          status: finalMeterStatus,
-          refs: {
-            asts: { id: trnId },
-            trns: { id: trnId },
-            premise: { id: premiseId },
-          },
-          parents: finalAccessData?.parents || {},
-          metadata,
-        },
-        { merge: true },
-      );
       tx.update(premiseRef, {
         [`services.${serviceMeterBucket}`]: nextServiceItems,
         "metadata.updatedAt": now,
@@ -4936,6 +4988,24 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       message: error?.message || String(error),
       stack: error?.stack || "NAv",
     });
+
+    if (error instanceof MeterMasterConflictError) {
+      logger.warn("onMeterInstallationCallable --Meter Master conflict", {
+        conflictCode: error.conflict.conflictCode,
+        masterId: error.conflict.masterId,
+        documentPath: error.conflict.documentPath,
+        conflictingPaths: error.conflict.conflictingPaths,
+        sourceWriter: error.conflict.sourceWriter,
+        message: error.conflict.message,
+      });
+      return {
+        success: false,
+        code: error.conflict.conflictCode,
+        message: error.conflict.message,
+        trnId: "NAv",
+        astId: "NAv",
+      };
+    }
 
     if (error instanceof HttpsError) {
       throw error;
