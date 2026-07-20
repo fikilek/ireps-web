@@ -56,6 +56,9 @@ export function isFirestoreTimestamp(value) {
 export function normalizeMeterNo(value) {
   const normalized = String(value ?? "").replace(/\s+/g, "").toUpperCase();
   if (!normalized) throw new TypeError("Meter number normalizes to an empty value");
+  if (!/^[A-Z0-9]+$/.test(normalized)) {
+    throw new TypeError("Meter number must contain only letters and digits");
+  }
   return normalized;
 }
 

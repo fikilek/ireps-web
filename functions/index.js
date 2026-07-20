@@ -113,6 +113,11 @@ import {
   classifyOperationalAstChange,
   buildOperationalAstUpdate,
 } from "./meterMaster/helpers.js";
+import {
+  SALES_ALL_METERS_OUTCOMES,
+  SalesAllMetersConflictError,
+  classifySalesAllMetersSync,
+} from "./salesAllMeters/helpers.js";
 
 initializeApp();
 const auth = getAuth();
@@ -1448,26 +1453,35 @@ async function syncSalesAllMetersFromMaster({
   const salesId = masterData?.refs?.sales?.id || null;
   const visibility = deriveMasterVisibility(masterData);
 
+  const masterValidation = validateExistingMeterMaster({
+    masterId: normalizedMeterNo,
+    existing: masterData,
+    incomingLmPcode: masterData?.lmPcode,
+    incomingMeterType: masterData?.meterType,
+    sourceWriter,
+  });
+
+  if (
+    masterValidation.classification === METER_MASTER_CLASSIFICATIONS.CONFLICT
+  ) {
+    throw new MeterMasterConflictError(masterValidation.conflict);
+  }
+
   if (salesSnap.exists) {
-    const masterValidation = validateExistingMeterMaster({
-      masterId: normalizedMeterNo,
-      existing: masterData,
-      incomingLmPcode: masterData?.lmPcode,
-      incomingMeterType: masterData?.meterType,
+    const decision = classifySalesAllMetersSync({
+      meterId: normalizedMeterNo,
+      existing: salesSnap.data(),
+      targetExists: true,
+      desiredVisibility: visibility,
       sourceWriter,
     });
-
-    if (
-      masterValidation.classification ===
-      METER_MASTER_CLASSIFICATIONS.CONFLICT
-    ) {
-      throw new MeterMasterConflictError(masterValidation.conflict);
+    if (decision.outcome === SALES_ALL_METERS_OUTCOMES.CONFLICT) {
+      throw new SalesAllMetersConflictError(decision);
     }
-
-    tx.update(salesRef, {
-      "master.id": normalizedMeterNo,
-      "master.visibility": visibility,
-    });
+    if (decision.outcome === SALES_ALL_METERS_OUTCOMES.UPDATED) {
+      tx.update(salesRef, decision.patch);
+    }
+    return decision;
   } else if (salesId) {
     logger.warn(
       "syncSalesAllMetersFromMaster ---- sales link exists but sales-all-meters doc missing",
@@ -1478,7 +1492,13 @@ async function syncSalesAllMetersFromMaster({
     );
   }
 
-  return visibility;
+  return {
+    valid: true,
+    outcome: SALES_ALL_METERS_OUTCOMES.TARGET_MISSING,
+    code: "TARGET_MISSING",
+    meterId: normalizedMeterNo,
+    patch: null,
+  };
 }
 
 export const onMeterDiscoveryCreated = onDocumentCreated(
@@ -1585,7 +1605,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
     }
 
     try {
-      await db.runTransaction(async (tx) => {
+      const syncResult = await db.runTransaction(async (tx) => {
         const astSnap = await tx.get(astRef);
         const masterSnap = await tx.get(masterRef);
         const salesSnap = await tx.get(salesRef);
@@ -1715,7 +1735,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         }
 
         // 2.5 SYNC SALES-ALL-METERS FROM MASTER TRUTH
-        await syncSalesAllMetersFromMaster({
+        const salesSyncResult = await syncSalesAllMetersFromMaster({
           tx,
           normalizedMeterNo,
           masterData: nextMasterData,
@@ -1760,6 +1780,8 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
             "metadata.updatedByUser": agentName,
           });
         }
+
+        return salesSyncResult;
       });
 
       // ✅ Rebuild ONLY ERF meter counts AFTER transaction succeeds
@@ -1777,23 +1799,27 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         trnId,
         astId,
         normalizedMeterNo,
+        salesAllMetersOutcome: syncResult.outcome,
       });
 
-      return { success: true };
+      return { success: true, salesAllMeters: syncResult };
     } catch (error) {
-      if (error instanceof MeterMasterConflictError) {
+      if (error instanceof MeterMasterConflictError ||
+          error instanceof SalesAllMetersConflictError) {
+        const governed = error.conflict;
         logger.error("onMeterDiscoveryCreated ---- governed conflict", {
-          conflictCode: error.conflict.conflictCode,
-          masterId: error.conflict.masterId,
-          documentPath: error.conflict.documentPath,
-          conflictingPaths: error.conflict.conflictingPaths,
-          sourceWriter: error.conflict.sourceWriter,
-          message: error.conflict.message,
+          conflictCode: governed.conflictCode || governed.code,
+          meterId: governed.masterId || governed.meterId,
+          documentPath: governed.documentPath,
+          conflictingPaths: governed.conflictingPaths,
+          evidence: governed.evidence,
+          sourceWriter: governed.sourceWriter,
+          message: governed.message,
         });
-        return null;
+        return { success: false, outcome: "CONFLICT", conflict: governed };
       }
       logger.error("onMeterDiscoveryCreated ---- FATAL ERROR:", error);
-      return null;
+      throw error;
     }
   },
 );
@@ -2539,16 +2565,24 @@ export const onMeterMasterUpdated = onDocumentUpdated(
     }
 
     try {
-      await db.runTransaction(async (tx) => {
+      const syncResult = await db.runTransaction(async (tx) => {
+        const masterRef = db.collection("meter_master").doc(normalizedMeterNo);
         const salesRef = db
           .collection("sales-all-meters")
           .doc(normalizedMeterNo);
+        const masterSnap = await tx.get(masterRef);
         const salesSnap = await tx.get(salesRef);
 
-        await syncSalesAllMetersFromMaster({
+        if (!masterSnap.exists) {
+          throw new Error(
+            `Meter Master disappeared during synchronization: ${normalizedMeterNo}`,
+          );
+        }
+
+        return syncSalesAllMetersFromMaster({
           tx,
           normalizedMeterNo,
-          masterData: after,
+          masterData: masterSnap.data(),
           salesSnap,
           sourceWriter: "onMeterMasterUpdated",
         });
@@ -2557,24 +2591,28 @@ export const onMeterMasterUpdated = onDocumentUpdated(
       logger.log("onMeterMasterUpdated ---- SUCCESS", {
         normalizedMeterNo,
         visibility: afterVisibility,
+        salesAllMetersOutcome: syncResult.outcome,
       });
 
-      return { success: true };
+      return { success: true, salesAllMeters: syncResult };
     } catch (error) {
-      if (error instanceof MeterMasterConflictError) {
+      if (error instanceof MeterMasterConflictError ||
+          error instanceof SalesAllMetersConflictError) {
+        const governed = error.conflict;
         logger.error("onMeterMasterUpdated ---- governed conflict", {
-          conflictCode: error.conflict.conflictCode,
-          masterId: error.conflict.masterId,
-          documentPath: error.conflict.documentPath,
-          conflictingPaths: error.conflict.conflictingPaths,
-          sourceWriter: error.conflict.sourceWriter,
-          message: error.conflict.message,
+          conflictCode: governed.conflictCode || governed.code,
+          meterId: governed.masterId || governed.meterId,
+          documentPath: governed.documentPath,
+          conflictingPaths: governed.conflictingPaths,
+          evidence: governed.evidence,
+          sourceWriter: governed.sourceWriter,
+          message: governed.message,
         });
-        return null;
+        return { success: false, outcome: "CONFLICT", conflict: governed };
       }
 
       logger.error("onMeterMasterUpdated ---- FATAL ERROR:", error);
-      return null;
+      throw error;
     }
   },
 );

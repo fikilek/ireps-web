@@ -56,6 +56,7 @@ test("normalization removes whitespace, uppercases, preserves zeroes and has no 
   assert.equal(normalizeMeterNo("0"), "0");
   assert.equal(normalizeMeterNo("00000000000000000000001"), "00000000000000000000001");
   assert.throws(() => normalizeMeterNo(" \t\r\n "), /empty value/);
+  assert.throws(() => normalizeMeterNo("METER-1"), /only letters and digits/);
 });
 
 test("FIELD_ONLY builder emits the exact canonical shape and one Timestamp", () => {
