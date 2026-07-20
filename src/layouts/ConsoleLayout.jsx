@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
 
 import { useAuth } from "../auth/useAuth";
+import { useWarehouse } from "../context/WarehouseContext";
 import { auth } from "../firebase";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
@@ -210,6 +211,11 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            label: "FWR Monitoring",
+            path: "/admin/fwr-monitoring",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "MREAD Staging Controller",
             path: "/admin/mread-staging-controller",
             allowedRoles: MREAD_STAGING_CONTROLLER_ROLES,
@@ -279,6 +285,18 @@ const sidebarStyles = {
     lineHeight: 1.25,
     textTransform: "uppercase",
   },
+  wardSelector: {
+    minWidth: "150px",
+    minHeight: "2.35rem",
+    padding: "0.45rem 2rem 0.45rem 0.8rem",
+    borderRadius: "999px",
+    border: "1px solid rgba(148, 163, 184, 0.42)",
+    background: "#ffffff",
+    color: "#334155",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
 };
 
 function getDisplayName(profile, email) {
@@ -304,6 +322,31 @@ function getActiveWorkbaseName(activeWorkbase) {
     activeWorkbase?.pcode ||
     "NAv"
   );
+}
+
+
+function getActiveLmPcode(activeWorkbase) {
+  return (
+    activeWorkbase?.lmPcode ||
+    activeWorkbase?.pcode ||
+    activeWorkbase?.id ||
+    activeWorkbase?.localMunicipalityId ||
+    null
+  );
+}
+
+function getWardPcode(ward) {
+  return ward?.id || ward?.pcode || ward?.wardPcode || "";
+}
+
+function getWardNumber(ward) {
+  return ward?.code || ward?.wardNumber || ward?.number || "";
+}
+
+function getWardLabel(ward) {
+  const wardNumber = getWardNumber(ward);
+
+  return ward?.name || (wardNumber ? `Ward ${wardNumber}` : getWardPcode(ward));
 }
 
 function getEnvironmentBadgeConfig(appEnvValue) {
@@ -395,12 +438,39 @@ function buildToggleKey(groupLabel) {
 export default function ConsoleLayout() {
   const location = useLocation();
   const [openGroups, setOpenGroups] = useState({});
+  const [monitoringWardPcode, setMonitoringWardPcode] = useState("");
 
   const { email, profile, role, serviceProvider, activeWorkbase } = useAuth();
+  const { available, scope } = useWarehouse();
 
   const displayName = getDisplayName(profile, email);
   const serviceProviderName = getServiceProviderName(serviceProvider);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+  const activeLmPcode = getActiveLmPcode(activeWorkbase);
+  const isFwrMonitoringRoute =
+    location.pathname === "/admin/fwr-monitoring";
+
+  const warehouseMatchesActiveWorkbase =
+    !scope?.lmPcode || scope.lmPcode === activeLmPcode;
+
+  const monitoringWards = useMemo(() => {
+    if (!warehouseMatchesActiveWorkbase) return [];
+
+    return [...(available?.wards || [])].sort((a, b) => {
+      const aNumber = Number(getWardNumber(a));
+      const bNumber = Number(getWardNumber(b));
+
+      if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) {
+        return aNumber - bNumber;
+      }
+
+      return getWardLabel(a).localeCompare(getWardLabel(b));
+    });
+  }, [available?.wards, warehouseMatchesActiveWorkbase]);
+
+  useEffect(() => {
+    setMonitoringWardPcode("");
+  }, [activeLmPcode]);
 
   const visibleSections = getVisibleSections(role);
   const visibleNavItems = getFlatNavItems(visibleSections);
@@ -554,12 +624,42 @@ export default function ConsoleLayout() {
 
             <div className="topbar-right">
               <div className="workbase-pill">{activeWorkbaseName}</div>
+
+              {isFwrMonitoringRoute ? (
+                <select
+                  aria-label="Select monitoring ward"
+                  value={monitoringWardPcode}
+                  onChange={(event) =>
+                    setMonitoringWardPcode(event.target.value)
+                  }
+                  style={sidebarStyles.wardSelector}
+                  disabled={!monitoringWards.length}
+                >
+                  <option value="">All Wards</option>
+
+                  {monitoringWards.map((ward) => {
+                    const wardPcode = getWardPcode(ward);
+
+                    return (
+                      <option key={wardPcode} value={wardPcode}>
+                        {getWardLabel(ward)}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : null}
+
               <div className="role-pill">{role || "NAv"}</div>
             </div>
           </header>
         ) : null}
 
-        <Outlet />
+        <Outlet
+          context={{
+            monitoringWardPcode,
+            setMonitoringWardPcode,
+          }}
+        />
       </main>
     </div>
   );

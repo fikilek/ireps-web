@@ -42,6 +42,7 @@ import MetersPage from "../pages/ward-scope/MetersPage";
 
 import ProfilePage from "../pages/profile/ProfilePage";
 import MreadStagingControllerPage from "../pages/admin/MreadStagingControllerPage";
+import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
@@ -391,6 +392,15 @@ export default function AppRoutes() {
                   title="Teams"
                   description="LM-wide team visibility and management."
                 />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/fwr-monitoring"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <FwrMonitoringPage />
               </RoleRoute>
             }
           />
