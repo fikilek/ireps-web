@@ -109,6 +109,7 @@ import {
   MeterMasterConflictError,
   normalizeMeterNo,
   buildCanonicalFieldOnlyMeterMaster,
+  validateExistingMeterMaster,
   classifyOperationalAstChange,
   buildOperationalAstUpdate,
 } from "./meterMaster/helpers.js";
@@ -1441,21 +1442,31 @@ async function syncSalesAllMetersFromMaster({
   normalizedMeterNo,
   masterData,
   salesSnap,
-  updatedAt,
-  updatedByUid,
-  updatedByUser,
+  sourceWriter,
 }) {
   const salesRef = db.collection("sales-all-meters").doc(normalizedMeterNo);
   const salesId = masterData?.refs?.sales?.id || null;
   const visibility = deriveMasterVisibility(masterData);
 
   if (salesSnap.exists) {
+    const masterValidation = validateExistingMeterMaster({
+      masterId: normalizedMeterNo,
+      existing: masterData,
+      incomingLmPcode: masterData?.lmPcode,
+      incomingMeterType: masterData?.meterType,
+      sourceWriter,
+    });
+
+    if (
+      masterValidation.classification ===
+      METER_MASTER_CLASSIFICATIONS.CONFLICT
+    ) {
+      throw new MeterMasterConflictError(masterValidation.conflict);
+    }
+
     tx.update(salesRef, {
       "master.id": normalizedMeterNo,
       "master.visibility": visibility,
-      "metadata.updatedAt": updatedAt,
-      "metadata.updatedByUid": updatedByUid,
-      "metadata.updatedByUser": updatedByUser,
     });
   } else if (salesId) {
     logger.warn(
@@ -1709,9 +1720,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
           normalizedMeterNo,
           masterData: nextMasterData,
           salesSnap,
-          updatedAt,
-          updatedByUid: agentUid,
-          updatedByUser: agentName,
+          sourceWriter: "onMeterDiscoveryCreated",
         });
 
         // 3. UPDATE PREMISE
@@ -2529,10 +2538,6 @@ export const onMeterMasterUpdated = onDocumentUpdated(
       return null;
     }
 
-    const updatedAt = after?.metadata?.updatedAt || new Date().toISOString();
-    const updatedByUid = after?.metadata?.updatedByUid || "system";
-    const updatedByUser = after?.metadata?.updatedByUser || "system";
-
     try {
       await db.runTransaction(async (tx) => {
         const salesRef = db
@@ -2545,9 +2550,7 @@ export const onMeterMasterUpdated = onDocumentUpdated(
           normalizedMeterNo,
           masterData: after,
           salesSnap,
-          updatedAt,
-          updatedByUid,
-          updatedByUser,
+          sourceWriter: "onMeterMasterUpdated",
         });
       });
 
@@ -2558,6 +2561,18 @@ export const onMeterMasterUpdated = onDocumentUpdated(
 
       return { success: true };
     } catch (error) {
+      if (error instanceof MeterMasterConflictError) {
+        logger.error("onMeterMasterUpdated ---- governed conflict", {
+          conflictCode: error.conflict.conflictCode,
+          masterId: error.conflict.masterId,
+          documentPath: error.conflict.documentPath,
+          conflictingPaths: error.conflict.conflictingPaths,
+          sourceWriter: error.conflict.sourceWriter,
+          message: error.conflict.message,
+        });
+        return null;
+      }
+
       logger.error("onMeterMasterUpdated ---- FATAL ERROR:", error);
       return null;
     }
