@@ -119,6 +119,9 @@ import {
   classifySalesAllMetersSync,
 } from "./salesAllMeters/helpers.js";
 
+import { submitFwrLocationCallable } from "./fwr-monitoring/submitFwrLocationCallable.js";
+import { updateFwrMonitoringStatusCallable } from "./fwr-monitoring/updateFwrMonitoringStatusCallable.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -165,6 +168,8 @@ export {
   listMreadStagingSessions,
   listMreadStagingRows,
   generateMreadStaging,
+  submitFwrLocationCallable,
+  updateFwrMonitoringStatusCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
