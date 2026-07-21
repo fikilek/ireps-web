@@ -111,6 +111,11 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            label: "TRN Registry",
+            path: "/registries/trns",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "MREAD Registry",
             path: "/registries/mread",
             allowedRoles: MANAGEMENT_ROLES,

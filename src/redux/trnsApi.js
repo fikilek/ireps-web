@@ -192,6 +192,97 @@ function getPrimaryGeofence(data = {}) {
   };
 }
 
+
+function getWardNoFromPcode(wardPcode = "") {
+  const match = String(wardPcode || "").match(/(\d{1,3})$/);
+  if (!match) return "NAv";
+
+  const wardNo = Number(match[1]);
+  return Number.isFinite(wardNo) ? wardNo : "NAv";
+}
+
+function normalizeRegistryCode(value) {
+  const normalized = valueOrNav(value);
+  if (normalized === "NAv") return "NAv";
+  return String(normalized).trim().toUpperCase();
+}
+
+function getRegistryCreatedForName(data = {}) {
+  const directName = data.assignment?.createdFor?.name;
+  if (hasMeaningfulValue(directName)) return directName;
+
+  const targets = asArray(data.assignment?.targets);
+  const firstTarget = targets.find((target) =>
+    hasMeaningfulValue(target?.name || target?.displayName),
+  );
+
+  return valueOrNav(firstTarget?.name || firstTarget?.displayName);
+}
+
+function getRegistryOriginChannel(data = {}) {
+  return normalizeRegistryCode(
+    data.origin?.channel || data.workflow?.createdMode,
+  );
+}
+
+function getRegistryAcceptedRejected(data = {}) {
+  const workflowState = String(getWorkflowState(data) || "")
+    .trim()
+    .toUpperCase();
+  const rejectReason = String(data.assignment?.rejectReason || "").trim();
+  const hasExplicitRejected = Boolean(
+    data.workflow?.rejectedAt ||
+      data.workflow?.rejectedByUid ||
+      data.workflow?.rejectedByUser ||
+      hasMeaningfulValue(rejectReason),
+  );
+  const hasExplicitAccepted = Boolean(
+    data.workflow?.acceptedAt ||
+      data.workflow?.acceptedByUid ||
+      data.workflow?.acceptedByUser ||
+      data.assignment?.acceptedAt ||
+      data.assignment?.acceptedRejectedAt,
+  );
+
+  if (workflowState === "REJECTED" || hasExplicitRejected) return "REJECTED";
+  if (workflowState === "WAITING_BATCH_ACCEPTANCE") return "PENDING";
+  if (workflowState === "ACCEPTED" || hasExplicitAccepted) return "ACCEPTED";
+
+  return "NAv";
+}
+
+function normalizeTrnRegistryDoc(docSnap) {
+  if (!docSnap || !docSnap.exists()) return null;
+
+  const data = docSnap.data() || {};
+  const metadata = data.metadata || {};
+  const trnId = data.trnId || data.id || docSnap.id;
+
+  return {
+    trnId,
+    trnType: normalizeRegistryCode(data.accessData?.trnType || data.trnType),
+    wardNo: getWardNoFromPcode(data.accessData?.parents?.wardPcode),
+    erfNo: valueOrNav(data.accessData?.erfNo),
+    premiseAddress: valueOrNav(data.accessData?.premise?.address),
+    hasAccess: normalizeRegistryCode(data.accessData?.access?.hasAccess),
+    accessReason: valueOrNav(data.accessData?.access?.reason),
+    astNo: valueOrNav(data.ast?.astData?.astNo),
+    meterType: normalizeRegistryCode(data.meterType),
+    astState: normalizeRegistryCode(data.status?.state),
+    mediaCount: asArray(data.media).length,
+    originChannel: getRegistryOriginChannel(data),
+    createdByUser: valueOrNav(metadata.createdByUser),
+    createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
+    createdForName: getRegistryCreatedForName(data),
+    issuedAt: normalizeDateValue(data.workflow?.issuedAt),
+    acceptedRejected: getRegistryAcceptedRejected(data),
+    executionStartedAt: normalizeDateValue(data.workflow?.executionStartedAt),
+    completedAt: normalizeDateValue(data.workflow?.completedAt),
+    completedByUser: valueOrNav(data.workflow?.completedByUser),
+    workflowState: normalizeRegistryCode(getWorkflowState(data)),
+  };
+}
+
 function normalizeTrnDoc(docSnap) {
   if (!docSnap || !docSnap.exists()) return null;
 
@@ -270,8 +361,9 @@ function mergeUniqueDocs(snapshots, normalizer) {
   snapshots.forEach((snapshot) => {
     snapshot.docs.forEach((docSnapshot) => {
       const normalized = normalizer(docSnapshot);
-      if (!normalized?.id) return;
-      byId.set(normalized.id, normalized);
+      const normalizedId = normalized?.id || normalized?.trnId;
+      if (!normalizedId) return;
+      byId.set(normalizedId, normalized);
     });
   });
 
@@ -285,6 +377,15 @@ function sortTrns(left, right) {
   if (leftCreated !== rightCreated) return rightCreated.localeCompare(leftCreated);
 
   return String(left?.id || "").localeCompare(String(right?.id || ""));
+}
+
+function sortRegistryTrns(left, right) {
+  const leftCreated = String(left?.createdAt || "");
+  const rightCreated = String(right?.createdAt || "");
+
+  if (leftCreated !== rightCreated) return rightCreated.localeCompare(leftCreated);
+
+  return String(left?.trnId || "").localeCompare(String(right?.trnId || ""));
 }
 
 function buildTcIdQueries(tcId, maxResults) {
@@ -351,6 +452,55 @@ export const trnsApi = createApi({
       },
     }),
 
+    getRegistryTrnsByLmPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = String(
+          typeof arg === "string" ? arg : arg?.lmPcode || "",
+        ).trim();
+
+        if (!lmPcode) return;
+
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          const trnsQuery = query(
+            collection(db, TRNS_COLLECTION),
+            where("accessData.parents.lmPcode", "==", lmPcode),
+          );
+
+          unsubscribe = onSnapshot(
+            trnsQuery,
+            (snapshot) => {
+              const trns = mergeUniqueDocs(
+                [snapshot],
+                normalizeTrnRegistryDoc,
+              ).sort(sortRegistryTrns);
+
+              updateCachedData((draft) => {
+                draft.splice(0, draft.length, ...trns);
+              });
+            },
+            (error) => {
+              console.error(
+                "trnsApi getRegistryTrnsByLmPcode stream error:",
+                error,
+              );
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          unsubscribe();
+        }
+      },
+    }),
+
     getTrnsByLmPcodeWardPcode: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
@@ -403,5 +553,6 @@ export const trnsApi = createApi({
 
 export const {
   useGetTrnsByTcIdQuery,
+  useGetRegistryTrnsByLmPcodeQuery,
   useGetTrnsByLmPcodeWardPcodeQuery,
 } = trnsApi;

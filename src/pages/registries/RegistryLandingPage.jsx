@@ -8,8 +8,8 @@ export default function RegistryLandingPage() {
       <h1>iREPS Registry Read Models</h1>
 
       <p className="muted">
-        Backend-shaped operational registry data for wards, ERFs, premises, and
-        meters.
+        Backend-shaped operational registry data for wards, ERFs, premises,
+        meters, TRNs, and accounts.
       </p>
 
       <div className="placeholder-grid">
@@ -40,6 +40,14 @@ export default function RegistryLandingPage() {
           <p className="muted">
             Ward-scoped meter rows linked to ERFs, premises, meter type, and
             visibility.
+          </p>
+        </Link>
+
+        <Link className="module-card" to="/registries/trns">
+          <h3>TRN Registry</h3>
+          <p className="muted">
+            LM-scoped transaction rows covering geography, access, assets,
+            evidence, assignment, execution, and workflow.
           </p>
         </Link>
 

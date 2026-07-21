@@ -15,6 +15,7 @@ import WardsRegistryPage from "../pages/registries/WardsRegistryPage";
 import ErfsRegistryPage from "../pages/registries/ErfsRegistryPage";
 import PremisesRegistryPage from "../pages/registries/PremisesRegistryPage";
 import MetersRegistryPage from "../pages/registries/MetersRegistryPage";
+import TrnsRegistryPage from "../pages/registries/TrnsRegistryPage";
 import MreadRegistryPage from "../pages/registries/MreadRegistryPage";
 import AccountsRegistryPage from "../pages/registries/AccountsRegistryPage";
 import MreadStagingPage from "../pages/registries/MreadStagingPage";
@@ -121,6 +122,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MetersRegistryPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/registries/trns"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TrnsRegistryPage />
               </RoleRoute>
             }
           />
