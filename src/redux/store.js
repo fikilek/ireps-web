@@ -29,6 +29,7 @@ import { geofencesApi } from "./geofencesApi";
 import { registryMreadApi } from "./registryMreadApi";
 import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
 import { mreadStagingApi } from "./mreadStagingApi";
+import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
 
 export const store = configureStore({
   reducer: {
@@ -61,6 +62,7 @@ export const store = configureStore({
     [serviceProvidersApi.reducerPath]: serviceProvidersApi.reducer,
     [usersApi.reducerPath]: usersApi.reducer,
     [geofencesApi.reducerPath]: geofencesApi.reducer,
+    [fwrLiveLocationsApi.reducerPath]: fwrLiveLocationsApi.reducer,
   },
 
   middleware: (getDefaultMiddleware) =>
@@ -90,7 +92,8 @@ export const store = configureStore({
       .concat(teamsApi.middleware)
       .concat(serviceProvidersApi.middleware)
       .concat(usersApi.middleware)
-      .concat(geofencesApi.middleware),
+      .concat(geofencesApi.middleware)
+      .concat(fwrLiveLocationsApi.middleware),
 });
 
 setupListeners(store.dispatch);

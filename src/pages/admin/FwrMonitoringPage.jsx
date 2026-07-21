@@ -1,5 +1,15 @@
-import { useEffect, useMemo, useRef } from "react";
-import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  APIProvider,
+  Map as GoogleMap,
+  useMap,
+} from "@vis.gl/react-google-maps";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useOutletContext } from "react-router-dom";
 
@@ -8,6 +18,7 @@ import { useWarehouse } from "@/context/WarehouseContext";
 import { useGetLmBoundaryByIdQuery } from "../../redux/mapLmsApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
+import { useGetFwrLiveLocationsQuery } from "../../redux/fwrLiveLocationsApi";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -18,6 +29,43 @@ const FALLBACK_CENTER = {
 
 const MONITORED_ROLES = new Set(["FWR", "SPV"]);
 const GLOBAL_MONITORING_ROLES = new Set(["ADM", "SPU"]);
+
+const CLOCK_REFRESH_MS = 30 * 1000;
+const USER_FOCUS_ZOOM = 17;
+
+const EMPTY_LIVE_LOCATION_STATE = Object.freeze({
+  locations: [],
+  ready: false,
+  streamError: null,
+});
+
+const MONITORING_VISUALS = Object.freeze({
+  LIVE: {
+    label: "Live",
+    color: "#16a34a",
+    softColor: "#dcfce7",
+  },
+  SIGNED_OUT: {
+    label: "Signed out",
+    color: "#64748b",
+    softColor: "#e2e8f0",
+  },
+  NO_GPS: {
+    label: "No GPS yet",
+    color: "#94a3b8",
+    softColor: "#f1f5f9",
+  },
+  LOADING: {
+    label: "Loading GPS...",
+    color: "#94a3b8",
+    softColor: "#f1f5f9",
+  },
+  UNAVAILABLE: {
+    label: "GPS unavailable",
+    color: "#dc2626",
+    softColor: "#fee2e2",
+  },
+});
 
 function cleanId(value) {
   const result = String(value || "").trim();
@@ -32,6 +80,157 @@ function normalizeRole(value) {
 
 function getRoleLabel(role) {
   return normalizeRole(role) === "SPV" ? "SPV" : normalizeRole(role);
+}
+
+function useMonitoringClock() {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, CLOCK_REFRESH_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  return nowMs;
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function getLocationTimestampMs(locationDocument) {
+  return (
+    toFiniteNumber(locationDocument?.receivedAtMs) ||
+    toFiniteNumber(locationDocument?.capturedAtMs)
+  );
+}
+
+function hasValidGps(locationDocument) {
+  const latitude = toFiniteNumber(locationDocument?.location?.latitude);
+  const longitude = toFiniteNumber(locationDocument?.location?.longitude);
+
+  return (
+    latitude !== null &&
+    longitude !== null &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
+function deriveMonitoringState({
+  locationDocument,
+  streamReady,
+  streamError,
+}) {
+  if (!locationDocument) {
+    if (streamError) return "UNAVAILABLE";
+    if (!streamReady) return "LOADING";
+    return "NO_GPS";
+  }
+
+  const backendStatus = String(
+    locationDocument?.monitoringStatus || "ACTIVE",
+  )
+    .trim()
+    .toUpperCase();
+
+  if (backendStatus === "SIGNED_OUT") return "SIGNED_OUT";
+  if (backendStatus === "ACTIVE") return "LIVE";
+
+  return "UNAVAILABLE";
+}
+
+function getMonitoringVisual(state) {
+  return MONITORING_VISUALS[state] || MONITORING_VISUALS.UNAVAILABLE;
+}
+
+function formatRelativeTime(timestampMs, nowMs) {
+  const normalizedTimestamp = toFiniteNumber(timestampMs);
+  if (!normalizedTimestamp) return "—";
+
+  const elapsedMs = Math.max(0, nowMs - normalizedTimestamp);
+  const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+  if (elapsedSeconds < 10) return "now";
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  return new Date(normalizedTimestamp).toLocaleDateString();
+}
+
+function formatSpeed(speedMps) {
+  const normalizedSpeed = toFiniteNumber(speedMps);
+  if (normalizedSpeed === null) return "Speed NAv";
+
+  const speedKmh = Math.max(0, normalizedSpeed * 3.6);
+  return `${speedKmh.toFixed(speedKmh >= 10 ? 0 : 1)} km/h`;
+}
+
+function formatAccuracy(accuracyM) {
+  const normalizedAccuracy = toFiniteNumber(accuracyM);
+  if (normalizedAccuracy === null) return "NAv";
+
+  return `${Math.round(normalizedAccuracy)} m`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function buildUserMarkerIcon({ initials, color, softColor, selected }) {
+  if (!window.google?.maps) return null;
+
+  const markerInitials = escapeHtml(
+    String(initials || "?")
+      .trim()
+      .slice(0, 2)
+      .toUpperCase(),
+  );
+
+  const cardFill = selected ? softColor : "#ffffff";
+  const cardStroke = selected ? "#0f172a" : "#cbd5e1";
+  const cardStrokeWidth = selected ? 2.5 : 1.25;
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="82" height="56" viewBox="0 0 82 56">
+      <defs>
+        <filter id="shadow" x="-20%" y="-20%" width="150%" height="170%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.24"/>
+        </filter>
+      </defs>
+      <g filter="url(#shadow)">
+        <rect x="13" y="4" width="65" height="39" rx="14" fill="${cardFill}" stroke="${cardStroke}" stroke-width="${cardStrokeWidth}"/>
+        <circle cx="22" cy="23.5" r="17" fill="${color}" stroke="#ffffff" stroke-width="2.5"/>
+        <circle cx="22" cy="18.5" r="5.2" fill="#ffffff"/>
+        <path d="M12.8 34.5c1.2-7.4 17.2-7.4 18.4 0" fill="#ffffff"/>
+        <text x="50" y="28" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="800" fill="#0f172a">${markerInitials}</text>
+        <path d="M17 42l5 10 5-10" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+      </g>
+    </svg>
+  `;
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new window.google.maps.Size(82, 56),
+    anchor: new window.google.maps.Point(22, 52),
+  };
 }
 
 function getUserInitials(displayName) {
@@ -216,13 +415,24 @@ function LmBoundaryLayer({ lmBoundary }) {
   return null;
 }
 
-function MonitoringMapFocus({ lmBoundary, selectedWard }) {
+function MonitoringMapFocus({
+  lmBoundary,
+  selectedWard,
+  selectedUserUid,
+}) {
   const map = useMap();
 
   useEffect(() => {
+    if (selectedUserUid) return;
+
     const bbox = selectedWard?.bbox || lmBoundary?.bbox;
     fitMapToBbox(map, bbox);
-  }, [map, lmBoundary?.bbox, selectedWard?.bbox]);
+  }, [
+    map,
+    lmBoundary?.bbox,
+    selectedUserUid,
+    selectedWard?.bbox,
+  ]);
 
   return null;
 }
@@ -275,6 +485,187 @@ function WardBoundariesLayer({ wardBoundaries, selectedWardPcode }) {
       polygonsRef.current = [];
     };
   }, [map, wardBoundaries, selectedWardPcode]);
+
+  return null;
+}
+
+
+function MonitoringUserFocus({
+  selectedUser,
+  focusRequestId,
+}) {
+  const map = useMap();
+
+  const latitude = toFiniteNumber(
+    selectedUser?.liveLocation?.location?.latitude,
+  );
+  const longitude = toFiniteNumber(
+    selectedUser?.liveLocation?.location?.longitude,
+  );
+
+  useEffect(() => {
+    if (!map || latitude === null || longitude === null) return;
+
+    const position = { lat: latitude, lng: longitude };
+
+    const applyCamera = () => {
+      if (typeof map.moveCamera === "function") {
+        map.moveCamera({
+          center: position,
+          zoom: USER_FOCUS_ZOOM,
+        });
+        return;
+      }
+
+      map.setCenter(position);
+      map.setZoom(USER_FOCUS_ZOOM);
+    };
+
+    applyCamera();
+
+    const animationFrameId = window.requestAnimationFrame(applyCamera);
+    const timeoutId = window.setTimeout(applyCamera, 180);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    focusRequestId,
+    latitude,
+    longitude,
+    map,
+    selectedUser?.uid,
+  ]);
+
+  return null;
+}
+
+function LiveLocationMarkersLayer({
+  markerUsers,
+  nowMs,
+  selectedUserUid,
+  onSelectUser,
+}) {
+  const map = useMap();
+  const markersRef = useRef([]);
+  const infoWindowRef = useRef(null);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+
+    markersRef.current.forEach(({ marker, listener }) => {
+      if (listener) window.google.maps.event.removeListener(listener);
+      marker.setMap(null);
+    });
+    markersRef.current = [];
+
+    if (infoWindowRef.current) {
+      infoWindowRef.current.close();
+      infoWindowRef.current = null;
+    }
+
+    if (!Array.isArray(markerUsers) || markerUsers.length === 0) return;
+
+    const infoWindow = new window.google.maps.InfoWindow();
+    infoWindowRef.current = infoWindow;
+
+    const openUserInfoWindow = ({ user, marker, visual }) => {
+      const lastUpdateText = formatRelativeTime(
+        getLocationTimestampMs(user?.liveLocation),
+        nowMs,
+      );
+      const speedText = formatSpeed(
+        user?.liveLocation?.location?.speedMps,
+      );
+      const accuracyText = formatAccuracy(
+        user?.liveLocation?.location?.accuracyM,
+      );
+
+      infoWindow.setContent(`
+        <div style="min-width:210px;padding:2px 1px;font-family:Arial,sans-serif">
+          <div style="font-size:14px;font-weight:800;color:#0f172a">
+            ${escapeHtml(user?.displayName || "Field user")}
+          </div>
+          <div style="margin-top:3px;font-size:12px;color:#475569">
+            ${escapeHtml(getRoleLabel(user?.role))} ·
+            <strong style="color:${visual.color}">
+              ${escapeHtml(visual.label)}
+            </strong>
+          </div>
+          <div style="margin-top:8px;font-size:12px;color:#475569">
+            Last update: ${escapeHtml(lastUpdateText)}
+          </div>
+          <div style="margin-top:3px;font-size:12px;color:#475569">
+            Accuracy: ${escapeHtml(accuracyText)} ·
+            Speed: ${escapeHtml(speedText)}
+          </div>
+        </div>
+      `);
+      infoWindow.open({
+        anchor: marker,
+        map,
+      });
+    };
+
+    const nextMarkers = markerUsers.map((user) => {
+      const latitude = toFiniteNumber(user?.liveLocation?.location?.latitude);
+      const longitude = toFiniteNumber(user?.liveLocation?.location?.longitude);
+      const visual = getMonitoringVisual(user?.monitoringState);
+      const isSelected = cleanId(user?.uid) === cleanId(selectedUserUid);
+
+      const marker = new window.google.maps.Marker({
+        map,
+        position: {
+          lat: latitude,
+          lng: longitude,
+        },
+        title: `${user?.displayName || "Field user"} · ${visual.label}`,
+        zIndex: isSelected ? 100 : user?.monitoringState === "LIVE" ? 80 : 70,
+        icon: buildUserMarkerIcon({
+          initials: getUserInitials(user?.displayName),
+          color: visual.color,
+          softColor: visual.softColor,
+          selected: isSelected,
+        }),
+      });
+
+      const listener = marker.addListener("click", () => {
+        onSelectUser?.(cleanId(user?.uid));
+        openUserInfoWindow({ user, marker, visual });
+      });
+
+      return {
+        uid: cleanId(user?.uid),
+        user,
+        visual,
+        marker,
+        listener,
+      };
+    });
+
+    markersRef.current = nextMarkers;
+
+    const selectedMarker = nextMarkers.find(
+      (entry) => entry.uid === cleanId(selectedUserUid),
+    );
+
+    if (selectedMarker) {
+      openUserInfoWindow(selectedMarker);
+    }
+
+    return () => {
+      nextMarkers.forEach(({ marker, listener }) => {
+        if (listener) window.google.maps.event.removeListener(listener);
+        marker.setMap(null);
+      });
+      infoWindow.close();
+
+      if (infoWindowRef.current === infoWindow) {
+        infoWindowRef.current = null;
+      }
+    };
+  }, [map, markerUsers, nowMs, onSelectUser, selectedUserUid]);
 
   return null;
 }
@@ -389,11 +780,28 @@ const styles = {
     padding: "0.55rem 0.85rem",
     borderBottom: "1px solid #e2e8f0",
   },
+  userRowInteractive: {
+    cursor: "pointer",
+    transition: "background-color 140ms ease, box-shadow 140ms ease",
+  },
+  userRowSelected: {
+    background: "#eff6ff",
+    boxShadow: "inset 4px 0 0 #2563eb",
+  },
   statusDot: {
     width: "8px",
     height: "8px",
     borderRadius: "50%",
     background: "#94a3b8",
+  },
+  statusText: {
+    flexShrink: 0,
+    fontWeight: 850,
+  },
+  speedText: {
+    flexShrink: 0,
+    color: "#475569",
+    fontWeight: 700,
   },
   userAvatar: {
     width: "38px",
@@ -484,6 +892,12 @@ function ActiveWorkbaseMap({
   wardBoundaries,
   selectedWardPcode,
   selectedWard,
+  markerUsers,
+  nowMs,
+  selectedUser,
+  selectedUserUid,
+  focusRequestId,
+  onSelectUser,
 }) {
   if (!googleMapsApiKey) {
     return (
@@ -508,7 +922,7 @@ function ActiveWorkbaseMap({
   return (
     <div style={styles.mapShell}>
       <APIProvider apiKey={googleMapsApiKey}>
-        <Map
+        <GoogleMap
           defaultCenter={mapCenter}
           defaultZoom={10}
           mapTypeId="roadmap"
@@ -524,14 +938,28 @@ function ActiveWorkbaseMap({
           <MonitoringMapFocus
             lmBoundary={lmBoundary}
             selectedWard={selectedWard}
+            selectedUserUid={selectedUserUid}
           />
-        </Map>
+          <MonitoringUserFocus
+            selectedUser={selectedUser}
+            focusRequestId={focusRequestId}
+          />
+          <LiveLocationMarkersLayer
+            markerUsers={markerUsers}
+            nowMs={nowMs}
+            selectedUserUid={selectedUserUid}
+            onSelectUser={onSelectUser}
+          />
+        </GoogleMap>
       </APIProvider>
     </div>
   );
 }
 
 export default function FwrMonitoringPage() {
+  const nowMs = useMonitoringClock();
+  const [selectedUserUid, setSelectedUserUid] = useState("");
+  const [focusRequestId, setFocusRequestId] = useState(0);
   const { activeWorkbase, profile, role, serviceProvider } = useAuth();
   const { available, scope } = useWarehouse();
   const { monitoringWardPcode = "" } = useOutletContext() || {};
@@ -581,6 +1009,16 @@ export default function FwrMonitoringPage() {
     isLoading: isServiceProvidersLoading,
     isFetching: isServiceProvidersFetching,
   } = useGetAvailableServiceProvidersQuery({ limit: 500 });
+
+  const {
+    data: liveLocationState = EMPTY_LIVE_LOCATION_STATE,
+  } = useGetFwrLiveLocationsQuery({ limit: 5000 });
+
+  const {
+    locations: liveLocations = [],
+    ready: liveLocationsReady = false,
+    streamError: liveLocationsStreamError = null,
+  } = liveLocationState;
 
   const childServiceProviderIds = useMemo(() => {
     if (viewerRole !== "MNG" || !viewerServiceProviderId) return new Set();
@@ -640,14 +1078,111 @@ export default function FwrMonitoringPage() {
     [visibleUsers],
   );
 
+  const liveLocationByUid = useMemo(
+    () =>
+      new Map(
+        liveLocations
+          .map((locationDocument) => [
+            cleanId(locationDocument?.uid),
+            locationDocument,
+          ])
+          .filter(([uid]) => Boolean(uid)),
+      ),
+    [liveLocations],
+  );
+
+  const enrichedUsers = useMemo(
+    () =>
+      monitoredUsers.map((user) => {
+        const uid = cleanId(user?.uid || user?.id);
+        const liveLocation = liveLocationByUid.get(uid) || null;
+        const monitoringState = deriveMonitoringState({
+          locationDocument: liveLocation,
+          streamReady: liveLocationsReady,
+          streamError: liveLocationsStreamError,
+        });
+
+        return {
+          ...user,
+          uid,
+          liveLocation,
+          monitoringState,
+        };
+      }),
+    [
+      liveLocationByUid,
+      liveLocationsReady,
+      liveLocationsStreamError,
+      monitoredUsers,
+    ],
+  );
+
+  const markerUsers = useMemo(
+    () =>
+      enrichedUsers.filter(
+        (user) =>
+          Boolean(user?.liveLocation) && hasValidGps(user?.liveLocation),
+      ),
+    [enrichedUsers],
+  );
+
+  const selectedUser = useMemo(
+    () =>
+      enrichedUsers.find(
+        (user) => cleanId(user?.uid) === cleanId(selectedUserUid),
+      ) || null,
+    [enrichedUsers, selectedUserUid],
+  );
+
+  const selectAndFocusUser = useCallback((uid) => {
+    const cleanUid = cleanId(uid);
+    if (!cleanUid) return;
+
+    setSelectedUserUid(cleanUid);
+    setFocusRequestId((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    // A ward-selector change takes camera priority back from a selected user.
+    setSelectedUserUid("");
+  }, [monitoringWardPcode]);
+
+  useEffect(() => {
+    if (!selectedUserUid) return;
+    if (selectedUser && hasValidGps(selectedUser?.liveLocation)) return;
+
+    setSelectedUserUid("");
+  }, [selectedUser, selectedUserUid]);
+
+  const monitoringCounts = useMemo(
+    () =>
+      enrichedUsers.reduce(
+        (counts, user) => {
+          if (user.monitoringState === "LIVE") counts.live += 1;
+          if (user.monitoringState === "SIGNED_OUT") {
+            counts.signedOut += 1;
+          }
+          if (user.monitoringState === "NO_GPS") counts.noGps += 1;
+
+          return counts;
+        },
+        {
+          live: 0,
+          signedOut: 0,
+          noGps: 0,
+        },
+      ),
+    [enrichedUsers],
+  );
+
   const summaryItems = useMemo(
     () => [
-      { label: "Monitored users", value: monitoredUsers.length },
-      { label: "Live", value: 0 },
-      { label: "Stale", value: 0 },
-      { label: "Offline", value: 0 },
+      { label: "Monitored users", value: enrichedUsers.length },
+      { label: "Live", value: monitoringCounts.live },
+      { label: "Signed out", value: monitoringCounts.signedOut },
+      { label: "No GPS yet", value: monitoringCounts.noGps },
     ],
-    [monitoredUsers.length],
+    [enrichedUsers.length, monitoringCounts],
   );
 
   const mapDescription = !activeLmPcode
@@ -660,13 +1195,17 @@ export default function FwrMonitoringPage() {
           ? `${activeWorkbaseName} · ${
               selectedWard?.name || getWardPcode(selectedWard)
             } selected`
-          : `${activeWorkbaseName} · ${wardBoundaries.length} wards`;
+          : `${activeWorkbaseName} · ${wardBoundaries.length} wards · ${markerUsers.length} GPS markers`;
 
   const usersAreLoading =
     isUsersLoading ||
     isUsersFetching ||
     isServiceProvidersLoading ||
     isServiceProvidersFetching;
+
+  const monitoringDescription = liveLocationsStreamError
+    ? `${mapDescription} · GPS stream unavailable`
+    : mapDescription;
 
   return (
     <section style={styles.page}>
@@ -683,7 +1222,7 @@ export default function FwrMonitoringPage() {
         <section style={styles.panel}>
           <header style={styles.panelHeader}>
             <h3 style={styles.panelTitle}>Live field map</h3>
-            <p style={styles.panelDescription}>{mapDescription}</p>
+            <p style={styles.panelDescription}>{monitoringDescription}</p>
           </header>
 
           <ActiveWorkbaseMap
@@ -691,18 +1230,24 @@ export default function FwrMonitoringPage() {
             wardBoundaries={wardBoundaries}
             selectedWardPcode={monitoringWardPcode}
             selectedWard={selectedWard}
+            markerUsers={markerUsers}
+            nowMs={nowMs}
+            selectedUser={selectedUser}
+            selectedUserUid={selectedUserUid}
+            focusRequestId={focusRequestId}
+            onSelectUser={selectAndFocusUser}
           />
         </section>
 
         <section style={styles.panel}>
           <header style={styles.panelHeader}>
             <div style={styles.panelTitleRow}>
-              <h3 style={styles.panelTitle}>USERS ({monitoredUsers.length})</h3>
+              <h3 style={styles.panelTitle}>USERS ({enrichedUsers.length})</h3>
               <span style={styles.panelChevron}>⌄</span>
             </div>
           </header>
 
-          {usersAreLoading && monitoredUsers.length === 0 ? (
+          {usersAreLoading && enrichedUsers.length === 0 ? (
             <div style={styles.emptyList}>
               <div>
                 <strong>Loading users...</strong>
@@ -716,7 +1261,7 @@ export default function FwrMonitoringPage() {
                 <p>Check the browser console and Firestore access rules.</p>
               </div>
             </div>
-          ) : monitoredUsers.length === 0 ? (
+          ) : enrichedUsers.length === 0 ? (
             <div style={styles.emptyList}>
               <div>
                 <strong>No monitored users found</strong>
@@ -725,13 +1270,66 @@ export default function FwrMonitoringPage() {
             </div>
           ) : (
             <div style={styles.userList}>
-              {monitoredUsers.map((user) => {
+              {enrichedUsers.map((user) => {
                 const userRole = normalizeRole(user?.role);
                 const roleBadgeStyle = getRoleBadgeStyle(userRole);
+                const monitoringVisual = getMonitoringVisual(
+                  user?.monitoringState,
+                );
+                const lastUpdateMs = getLocationTimestampMs(
+                  user?.liveLocation,
+                );
+                const lastUpdateText = formatRelativeTime(lastUpdateMs, nowMs);
+                const speedText = formatSpeed(
+                  user?.liveLocation?.location?.speedMps,
+                );
+                const hasLocation = Boolean(user?.liveLocation);
+                const canFocusUser = hasValidGps(user?.liveLocation);
+                const isSelected =
+                  cleanId(user?.uid) === cleanId(selectedUserUid);
+
+                const focusUser = () => {
+                  if (!canFocusUser) return;
+                  selectAndFocusUser(user?.uid);
+                };
 
                 return (
-                  <article key={user.uid || user.id} style={styles.userRow}>
-                    <span style={styles.statusDot} />
+                  <article
+                    key={user.uid || user.id}
+                    style={{
+                      ...styles.userRow,
+                      ...(canFocusUser ? styles.userRowInteractive : {}),
+                      ...(isSelected ? styles.userRowSelected : {}),
+                    }}
+                    onClick={canFocusUser ? focusUser : undefined}
+                    onKeyDown={
+                      canFocusUser
+                        ? (event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              focusUser();
+                            }
+                          }
+                        : undefined
+                    }
+                    role={canFocusUser ? "button" : undefined}
+                    tabIndex={canFocusUser ? 0 : undefined}
+                    title={
+                      canFocusUser
+                        ? `Zoom to ${user?.displayName || "field user"}`
+                        : "No GPS location available"
+                    }
+                  >
+                    <span
+                      style={{
+                        ...styles.statusDot,
+                        background: monitoringVisual.color,
+                        boxShadow:
+                          user?.monitoringState === "LIVE"
+                            ? `0 0 0 3px ${monitoringVisual.softColor}`
+                            : "none",
+                      }}
+                    />
 
                     <div style={styles.userAvatar}>
                       {getUserInitials(user.displayName)}
@@ -751,13 +1349,30 @@ export default function FwrMonitoringPage() {
                       </div>
 
                       <div style={styles.userMetaRow}>
-                        <span style={styles.gpsPending}>No GPS yet</span>
+                        <span
+                          style={{
+                            ...styles.statusText,
+                            color: monitoringVisual.color,
+                          }}
+                        >
+                          {monitoringVisual.label}
+                        </span>
+
+                        {hasLocation ? (
+                          <>
+                            <span>·</span>
+                            <span style={styles.speedText}>{speedText}</span>
+                          </>
+                        ) : null}
+
                         <span>·</span>
                         <span style={styles.userLm}>{getUserLmName(user)}</span>
                       </div>
                     </div>
 
-                    <span style={styles.userTime}>—</span>
+                    <span style={styles.userTime}>
+                      {hasLocation ? lastUpdateText : "—"}
+                    </span>
                   </article>
                 );
               })}
