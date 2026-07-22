@@ -122,6 +122,8 @@ import {
 import { submitFwrLocationCallable } from "./fwr-monitoring/submitFwrLocationCallable.js";
 import { updateFwrMonitoringStatusCallable } from "./fwr-monitoring/updateFwrMonitoringStatusCallable.js";
 
+import { submitInformalErfCallable } from "./informal-erfs/submitInformalErfCallable.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -170,6 +172,7 @@ export {
   generateMreadStaging,
   submitFwrLocationCallable,
   updateFwrMonitoringStatusCallable,
+  submitInformalErfCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
