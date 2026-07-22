@@ -9,12 +9,16 @@ import {
   assertPositiveEpochMs,
   assertValidDeviceLocation,
   assertValidLatLng,
+  assertPolygonGeometry,
   buildAdminHierarchy,
   buildInformalErfDocument,
+  geometryContainsPointInclusive,
   getActorContext,
+  getBboxPointRelation,
   isPlainObject,
   normalizeReason,
   normalizeSitePhotos,
+  parseGeoJsonGeometry,
 } from "./helpers.js";
 
 function throwInvalidArgument(message) {
@@ -31,10 +35,11 @@ function throwPermissionDenied(message) {
   });
 }
 
-function throwFailedPrecondition(message) {
+function throwFailedPrecondition(message, details = {}) {
   throw new HttpsError("failed-precondition", message, {
     retriable: false,
     errorType: "PERMANENT",
+    ...details,
   });
 }
 
@@ -121,6 +126,175 @@ function assertCanonicalParentDocuments({
   }
 
   return { lmData, wardData };
+}
+
+
+async function assertProposedLocationIsAvailable({
+  db,
+  wardData,
+  wardPcode,
+  proposedErfLocation,
+}) {
+  let wardGeometry;
+
+  try {
+    wardGeometry = assertPolygonGeometry(
+      wardData?.geometry,
+      `wards/${wardPcode}.geometry`,
+    );
+  } catch (error) {
+    throwFailedPrecondition(
+      "The selected ward boundary is unavailable or invalid.",
+      {
+        businessCode: "WARD_GEOMETRY_UNAVAILABLE",
+        wardPcode,
+        validationMessage: error?.message || "Invalid ward geometry.",
+      },
+    );
+  }
+
+  let pointInsideWard = false;
+
+  try {
+    pointInsideWard = geometryContainsPointInclusive(
+      wardGeometry,
+      proposedErfLocation,
+      `wards/${wardPcode}.geometry`,
+    );
+  } catch (error) {
+    throwFailedPrecondition(
+      "The selected ward boundary could not be validated.",
+      {
+        businessCode: "WARD_GEOMETRY_UNAVAILABLE",
+        wardPcode,
+        validationMessage: error?.message || "Ward validation failed.",
+      },
+    );
+  }
+
+  if (!pointInsideWard) {
+    throwFailedPrecondition(
+      "The proposed Informal ERF position is outside the selected ward.",
+      {
+        businessCode: "LOCATION_OUTSIDE_SELECTED_WARD",
+        wardPcode,
+        proposedErfLocation,
+      },
+    );
+  }
+
+  const erfSnapshot = await db
+    .collection("ireps_erfs")
+    .where("admin.ward.pcode", "==", wardPcode)
+    .get();
+
+  let bboxCandidates = 0;
+  let polygonChecks = 0;
+  let pointOnlyInformalErfsSkipped = 0;
+
+  for (const erfDoc of erfSnapshot.docs) {
+    const existingErf = erfDoc.data() || {};
+    const bboxRelation = getBboxPointRelation(
+      existingErf?.bbox,
+      proposedErfLocation,
+    );
+
+    if (bboxRelation === "OUTSIDE") {
+      continue;
+    }
+
+    bboxCandidates += 1;
+
+    let geometry;
+
+    try {
+      geometry = parseGeoJsonGeometry(
+        existingErf?.geometry,
+        `ireps_erfs/${erfDoc.id}.geometry`,
+      );
+    } catch (error) {
+      throwFailedPrecondition(
+        "Existing cadastral geometry could not be validated safely.",
+        {
+          businessCode: "CADASTRAL_VALIDATION_UNAVAILABLE",
+          existingErfId: erfDoc.id,
+          wardPcode,
+          validationMessage:
+            error?.message || "Existing ERF geometry is invalid.",
+        },
+      );
+    }
+
+    const existingErfType = String(
+      existingErf?.erf?.type || "FORMAL",
+    ).toUpperCase();
+
+    if (geometry.type === "Point" && existingErfType === "INFORMAL") {
+      pointOnlyInformalErfsSkipped += 1;
+      continue;
+    }
+
+    if (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon") {
+      throwFailedPrecondition(
+        "Existing cadastral geometry could not be validated safely.",
+        {
+          businessCode: "CADASTRAL_VALIDATION_UNAVAILABLE",
+          existingErfId: erfDoc.id,
+          existingErfType,
+          geometryType: geometry.type || "UNKNOWN",
+          wardPcode,
+        },
+      );
+    }
+
+    polygonChecks += 1;
+
+    let pointInsideExistingErf = false;
+
+    try {
+      pointInsideExistingErf = geometryContainsPointInclusive(
+        geometry,
+        proposedErfLocation,
+        `ireps_erfs/${erfDoc.id}.geometry`,
+      );
+    } catch (error) {
+      throwFailedPrecondition(
+        "Existing cadastral geometry could not be validated safely.",
+        {
+          businessCode: "CADASTRAL_VALIDATION_UNAVAILABLE",
+          existingErfId: erfDoc.id,
+          wardPcode,
+          validationMessage:
+            error?.message || "Existing ERF polygon validation failed.",
+        },
+      );
+    }
+
+    if (pointInsideExistingErf) {
+      throwFailedPrecondition(
+        "An existing ERF already covers the proposed position.",
+        {
+          businessCode: "LOCATION_INSIDE_EXISTING_ERF",
+          existingErfId: erfDoc.id,
+          existingErfType,
+          existingErfNo:
+            existingErf?.sg?.erfNo ||
+            existingErf?.sg?.parcelNo ||
+            "NAv",
+          wardPcode,
+          proposedErfLocation,
+        },
+      );
+    }
+  }
+
+  return {
+    wardPcode,
+    wardErfCount: erfSnapshot.size,
+    bboxCandidates,
+    polygonChecks,
+    pointOnlyInformalErfsSkipped,
+  };
 }
 
 export const submitInformalErfCallable = onCall(
@@ -251,6 +425,20 @@ export const submitInformalErfCallable = onCall(
       } catch (error) {
         throwFailedPrecondition(error.message);
       }
+
+      const spatialValidation = await assertProposedLocationIsAvailable({
+        db,
+        wardData,
+        wardPcode,
+        proposedErfLocation,
+      });
+
+      logger.info("submitInformalErfCallable -- SPATIAL VALIDATION PASSED", {
+        erfId,
+        callerUid,
+        lmPcode,
+        ...spatialValidation,
+      });
 
       await assertStorageObjectsExist(sitePhotos);
 

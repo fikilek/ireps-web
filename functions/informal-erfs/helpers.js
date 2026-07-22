@@ -355,6 +355,243 @@ export function buildAdminHierarchy({
   };
 }
 
+
+const POINT_ON_SEGMENT_EPSILON = 1e-10;
+
+function parseJsonObject(value, fieldName) {
+  if (typeof value === "string") {
+    const text = value.trim();
+
+    if (!text) {
+      throw new Error(`${fieldName} is empty.`);
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`${fieldName} is not valid JSON.`);
+    }
+  }
+
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  throw new Error(`${fieldName} must be a GeoJSON object or JSON string.`);
+}
+
+export function parseGeoJsonGeometry(value, fieldName = "geometry") {
+  const parsed = parseJsonObject(value, fieldName);
+  const geometry = parsed?.type === "Feature" ? parsed.geometry : parsed;
+
+  if (!isPlainObject(geometry) || !geometry.type) {
+    throw new Error(`${fieldName} does not contain a valid GeoJSON geometry.`);
+  }
+
+  return geometry;
+}
+
+export function assertPolygonGeometry(value, fieldName = "geometry") {
+  const geometry = parseGeoJsonGeometry(value, fieldName);
+
+  if (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon") {
+    throw new Error(
+      `${fieldName} must be a GeoJSON Polygon or MultiPolygon.`,
+    );
+  }
+
+  if (!Array.isArray(geometry.coordinates)) {
+    throw new Error(`${fieldName}.coordinates must be an array.`);
+  }
+
+  return geometry;
+}
+
+function normalizeCoordinatePair(value, fieldName) {
+  if (!Array.isArray(value) || value.length < 2) {
+    throw new Error(`${fieldName} must contain [lng, lat].`);
+  }
+
+  const lng = Number(value[0]);
+  const lat = Number(value[1]);
+
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    throw new Error(`${fieldName} must contain finite lng and lat values.`);
+  }
+
+  return [lng, lat];
+}
+
+function pointOnSegmentInclusive(point, start, end) {
+  const [pointLng, pointLat] = point;
+  const [startLng, startLat] = start;
+  const [endLng, endLat] = end;
+
+  const deltaLng = endLng - startLng;
+  const deltaLat = endLat - startLat;
+  const cross =
+    (pointLng - startLng) * deltaLat -
+    (pointLat - startLat) * deltaLng;
+
+  const tolerance =
+    POINT_ON_SEGMENT_EPSILON *
+    Math.max(
+      1,
+      Math.abs(deltaLng),
+      Math.abs(deltaLat),
+      Math.abs(pointLng),
+      Math.abs(pointLat),
+    );
+
+  if (Math.abs(cross) > tolerance) {
+    return false;
+  }
+
+  const dot =
+    (pointLng - startLng) * (pointLng - endLng) +
+    (pointLat - startLat) * (pointLat - endLat);
+
+  return dot <= tolerance;
+}
+
+function classifyPointInRing(ring, point, fieldName) {
+  if (!Array.isArray(ring) || ring.length < 3) {
+    throw new Error(`${fieldName} must contain at least three coordinates.`);
+  }
+
+  const normalizedRing = ring.map((coordinate, index) =>
+    normalizeCoordinatePair(coordinate, `${fieldName}[${index}]`),
+  );
+
+  let isInside = false;
+  const [pointLng, pointLat] = point;
+
+  for (
+    let currentIndex = 0, previousIndex = normalizedRing.length - 1;
+    currentIndex < normalizedRing.length;
+    previousIndex = currentIndex++
+  ) {
+    const current = normalizedRing[currentIndex];
+    const previous = normalizedRing[previousIndex];
+
+    if (pointOnSegmentInclusive(point, previous, current)) {
+      return "BOUNDARY";
+    }
+
+    const [currentLng, currentLat] = current;
+    const [previousLng, previousLat] = previous;
+
+    const crossesLatitude =
+      currentLat > pointLat !== previousLat > pointLat;
+
+    if (!crossesLatitude) continue;
+
+    const intersectionLng =
+      ((previousLng - currentLng) * (pointLat - currentLat)) /
+        (previousLat - currentLat) +
+      currentLng;
+
+    if (pointLng < intersectionLng) {
+      isInside = !isInside;
+    }
+  }
+
+  return isInside ? "INSIDE" : "OUTSIDE";
+}
+
+function polygonContainsPointInclusive(polygonCoordinates, point, fieldName) {
+  if (!Array.isArray(polygonCoordinates) || polygonCoordinates.length === 0) {
+    throw new Error(`${fieldName} must contain at least one linear ring.`);
+  }
+
+  const outerResult = classifyPointInRing(
+    polygonCoordinates[0],
+    point,
+    `${fieldName}[0]`,
+  );
+
+  if (outerResult === "OUTSIDE") return false;
+  if (outerResult === "BOUNDARY") return true;
+
+  for (let index = 1; index < polygonCoordinates.length; index += 1) {
+    const holeResult = classifyPointInRing(
+      polygonCoordinates[index],
+      point,
+      `${fieldName}[${index}]`,
+    );
+
+    if (holeResult === "BOUNDARY") return true;
+    if (holeResult === "INSIDE") return false;
+  }
+
+  return true;
+}
+
+export function geometryContainsPointInclusive(
+  geometry,
+  pointValue,
+  fieldName = "geometry",
+) {
+  const point = [
+    asFiniteNumber(pointValue?.lng, "point.lng"),
+    asFiniteNumber(pointValue?.lat, "point.lat"),
+  ];
+
+  if (geometry?.type === "Polygon") {
+    return polygonContainsPointInclusive(
+      geometry.coordinates,
+      point,
+      `${fieldName}.coordinates`,
+    );
+  }
+
+  if (geometry?.type === "MultiPolygon") {
+    if (!Array.isArray(geometry.coordinates)) {
+      throw new Error(`${fieldName}.coordinates must be an array.`);
+    }
+
+    return geometry.coordinates.some((polygonCoordinates, index) =>
+      polygonContainsPointInclusive(
+        polygonCoordinates,
+        point,
+        `${fieldName}.coordinates[${index}]`,
+      ),
+    );
+  }
+
+  throw new Error(
+    `${fieldName} must be a GeoJSON Polygon or MultiPolygon.`,
+  );
+}
+
+export function getBboxPointRelation(bbox, pointValue) {
+  if (!isPlainObject(bbox)) return "UNAVAILABLE";
+
+  const minLat = Number(bbox.minLat);
+  const minLng = Number(bbox.minLng);
+  const maxLat = Number(bbox.maxLat);
+  const maxLng = Number(bbox.maxLng);
+  const lat = Number(pointValue?.lat);
+  const lng = Number(pointValue?.lng);
+
+  if (
+    !Number.isFinite(minLat) ||
+    !Number.isFinite(minLng) ||
+    !Number.isFinite(maxLat) ||
+    !Number.isFinite(maxLng) ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    minLat > maxLat ||
+    minLng > maxLng
+  ) {
+    return "UNAVAILABLE";
+  }
+
+  return lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng
+    ? "INSIDE"
+    : "OUTSIDE";
+}
+
 export function buildInformalErfDocument({
   erfId,
   admin,
