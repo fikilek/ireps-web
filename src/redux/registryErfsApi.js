@@ -5,6 +5,7 @@ import {
   endAt,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   startAfter,
@@ -120,18 +121,46 @@ export const registryErfsApi = createApi({
 
           const registryErfsRef = collection(db, ERF_REGISTRY_COLLECTION);
 
-          const constraints = [
-            where(ERF_REGISTRY_WARD_FIELD, "==", wardPcode),
-            orderBy(documentId()),
-          ];
+          // The active ward is the registry loading boundary. The first request
+          // loads the complete selected ward so that the frontend can apply the
+          // standard local filters, sorting, downloads and 5/10/25/50/100
+          // pagination over one live dataset.
+          if (!cursorId) {
+            const registryErfsQuery = query(
+              registryErfsRef,
+              where(ERF_REGISTRY_WARD_FIELD, "==", wardPcode),
+            );
+            const snapshot = await getDocs(registryErfsQuery);
 
-          if (cursorId) {
-            constraints.push(startAfter(cursorId));
+            const rows = snapshot.docs
+              .map((documentSnapshot) =>
+                normalizeErfRegistryRow(
+                  documentSnapshot.id,
+                  documentSnapshot.data(),
+                ),
+              )
+              .sort(sortErfRows);
+
+            return {
+              data: {
+                rows,
+                nextCursorId: null,
+                hasMore: false,
+              },
+            };
           }
 
-          constraints.push(limit(pageSize));
-
-          const registryErfsQuery = query(registryErfsRef, ...constraints);
+          // Compatibility fallback for any already-mounted caller that still
+          // supplies an old document-id cursor. New first-page responses set
+          // hasMore=false, so normal registry browsing no longer enters this
+          // branch.
+          const registryErfsQuery = query(
+            registryErfsRef,
+            where(ERF_REGISTRY_WARD_FIELD, "==", wardPcode),
+            orderBy(documentId()),
+            startAfter(cursorId),
+            limit(pageSize),
+          );
           const snapshot = await getDocs(registryErfsQuery);
 
           const rows = snapshot.docs.map((documentSnapshot) =>
@@ -159,6 +188,93 @@ export const registryErfsApi = createApi({
               code: error.code || "unknown",
             },
           };
+        }
+      },
+
+      async onCacheEntryAdded(
+        {
+          wardPcode,
+          cursorId = null,
+        },
+        {
+          updateCachedData,
+          cacheDataLoaded,
+          cacheEntryRemoved,
+        },
+      ) {
+        if (!wardPcode || cursorId) return;
+
+        try {
+          await cacheDataLoaded;
+        } catch (_error) {
+          return;
+        }
+
+        const registryErfsQuery = query(
+          collection(db, ERF_REGISTRY_COLLECTION),
+          where(ERF_REGISTRY_WARD_FIELD, "==", wardPcode),
+        );
+
+        let firstSnapshot = true;
+        let unsubscribe = null;
+
+        console.log("[ERF REGISTRY] Starting ward stream.", {
+          wardPcode,
+        });
+
+        try {
+          unsubscribe = onSnapshot(
+            registryErfsQuery,
+            (snapshot) => {
+              const rows = snapshot.docs
+                .map((documentSnapshot) =>
+                  normalizeErfRegistryRow(
+                    documentSnapshot.id,
+                    documentSnapshot.data(),
+                  ),
+                )
+                .sort(sortErfRows);
+
+              updateCachedData((draft) => {
+                draft.rows = rows;
+                draft.nextCursorId = null;
+                draft.hasMore = false;
+              });
+
+              console.log(
+                firstSnapshot
+                  ? "[ERF REGISTRY] First ward snapshot loaded."
+                  : "[ERF REGISTRY] Ward snapshot updated.",
+                {
+                  wardPcode,
+                  rowCount: rows.length,
+                  changeCount: snapshot.docChanges().length,
+                },
+              );
+
+              firstSnapshot = false;
+            },
+            (error) => {
+              console.error("[ERF REGISTRY] Ward stream failed.", {
+                wardPcode,
+                code: error?.code || "unknown",
+                message:
+                  error?.message ||
+                  "Failed to stream ERF registry rows.",
+                stack: error?.stack || null,
+              });
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          if (typeof unsubscribe === "function") {
+            unsubscribe();
+          }
+
+          console.log("[ERF REGISTRY] Ward stream stopped.", {
+            wardPcode,
+          });
         }
       },
     }),

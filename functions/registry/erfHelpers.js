@@ -4,12 +4,12 @@
 // 🧩 Build ERF Number (STRING)
 // -----------------------------
 export const buildErfNo = (sg = {}) => {
-  const parcelNo = Number(sg?.parcelNo || 0);
-  const portion = Number(sg?.portion || 0);
+  const parcelNo = String(sg?.parcelNo ?? "").trim();
+  const portion = Number(sg?.portion ?? 0);
 
-  if (parcelNo <= 0) return "NAv";
+  if (!parcelNo) return "NAv";
   if (portion > 0) return `${parcelNo}/${portion}`;
-  return `${parcelNo}`;
+  return parcelNo;
 };
 
 // -----------------------------

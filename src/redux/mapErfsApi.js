@@ -21,15 +21,18 @@ function safeNumber(value) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
-function parseErfGeometry(value) {
+function parseErfGeometry(value, erfId) {
   if (!value) return null;
 
   if (typeof value === "string") {
     try {
       return JSON.parse(value);
     } catch (error) {
-      console.error("mapErfsApi -- invalid ERF geometry JSON", {
+      console.error("[MAP ERFS] Invalid ERF geometry JSON.", {
+        erfId,
+        code: error?.code || "INVALID_GEOMETRY_JSON",
         message: error?.message || String(error),
+        stack: error?.stack || null,
       });
       return null;
     }
@@ -47,14 +50,16 @@ function buildErfNo(sg) {
   }
 
   return portion > 0
-    ? `${parcelNo}/${portion}`
-    : String(parcelNo);
+    ? `${String(parcelNo).trim()}/${portion}`
+    : String(parcelNo).trim();
 }
 
 function normalizeErfViewportRow(id, data) {
+  const erfId = data?.erfId || id;
+
   return {
     id,
-    erfId: data?.erfId || id,
+    erfId,
     erfNo: buildErfNo(data?.sg),
 
     wardPcode: data?.admin?.ward?.pcode || "NAv",
@@ -65,7 +70,7 @@ function normalizeErfViewportRow(id, data) {
 
     bbox: data?.bbox || null,
     centroid: data?.centroid || null,
-    geometry: parseErfGeometry(data?.geometry),
+    geometry: parseErfGeometry(data?.geometry, erfId),
 
     premiseIds: Array.isArray(data?.premises) ? data.premises : [],
 
@@ -91,10 +96,14 @@ function isInsideViewport(row, bounds) {
 }
 
 function sortErfs(a, b) {
-  return String(a.erfNo).localeCompare(String(b.erfNo), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return String(a?.erfNo || "").localeCompare(
+    String(b?.erfNo || ""),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
 }
 
 function emptyResult({
@@ -114,6 +123,8 @@ function emptyResult({
       lastSyncAt: 0,
       lastError,
       source: "firestore-stream",
+      size: 0,
+      visibleSize: 0,
     },
   };
 }
@@ -123,10 +134,8 @@ function buildErfViewportQuery({
   bounds,
   maxRows = DEFAULT_MAX_ROWS,
 }) {
-  const erfsRef = collection(db, ERFS_COLLECTION);
-
   return query(
-    erfsRef,
+    collection(db, ERFS_COLLECTION),
     where(ERF_WARD_FIELD, "==", wardPcode),
     where(ERF_CENTROID_LAT_FIELD, ">=", bounds.south),
     where(ERF_CENTROID_LAT_FIELD, "<=", bounds.north),
@@ -214,10 +223,14 @@ export const mapErfsApi = createApi({
 
         if (!wardPcode || !bounds) return;
 
-        await cacheDataLoaded;
+        try {
+          await cacheDataLoaded;
+        } catch (_error) {
+          return;
+        }
 
         let firstSnapshotAt = 0;
-        let unsubscribe = () => {};
+        let unsubscribe = null;
 
         updateCachedData((draft) => {
           draft.rows = Array.isArray(draft.rows) ? draft.rows : [];
@@ -231,16 +244,22 @@ export const mapErfsApi = createApi({
         });
 
         try {
-          const erfsQuery = buildErfViewportQuery({
+          console.log("[MAP ERFS] Starting Firestore viewport stream.", {
             wardPcode,
             bounds,
             maxRows,
           });
 
           unsubscribe = onSnapshot(
-            erfsQuery,
+            buildErfViewportQuery({
+              wardPcode,
+              bounds,
+              maxRows,
+            }),
             (snapshot) => {
-              if (!firstSnapshotAt) {
+              const isFirstSnapshot = !firstSnapshotAt;
+
+              if (isFirstSnapshot) {
                 firstSnapshotAt = Date.now();
               }
 
@@ -251,13 +270,32 @@ export const mapErfsApi = createApi({
                 firstSnapshotAt,
               });
 
-              updateCachedData(() => nextResult);
+              updateCachedData((draft) => {
+                draft.rows = nextResult.rows;
+                draft.wasLimited = nextResult.wasLimited;
+                draft.sync = nextResult.sync;
+              });
+
+              console.log(
+                isFirstSnapshot
+                  ? "[MAP ERFS] First viewport snapshot loaded."
+                  : "[MAP ERFS] Viewport snapshot updated.",
+                {
+                  wardPcode,
+                  firestoreSize: snapshot.size,
+                  visibleSize: nextResult.rows.length,
+                  changeCount: snapshot.docChanges().length,
+                },
+              );
             },
             (error) => {
-              console.error(
-                "mapErfsApi -- getVisibleErfsByWardViewport stream error",
-                error,
-              );
+              console.error("[MAP ERFS] Firestore viewport stream failed.", {
+                wardPcode,
+                bounds,
+                code: error?.code || "UNKNOWN_STREAM_ERROR",
+                message: error?.message || String(error),
+                stack: error?.stack || null,
+              });
 
               updateCachedData((draft) => {
                 draft.rows = Array.isArray(draft.rows) ? draft.rows : [];
@@ -277,10 +315,13 @@ export const mapErfsApi = createApi({
             },
           );
         } catch (error) {
-          console.error(
-            "mapErfsApi -- getVisibleErfsByWardViewport listener setup error",
-            error,
-          );
+          console.error("[MAP ERFS] Failed to start viewport stream.", {
+            wardPcode,
+            bounds,
+            code: error?.code || "STREAM_SETUP_FAILED",
+            message: error?.message || String(error),
+            stack: error?.stack || null,
+          });
 
           updateCachedData((draft) => {
             draft.rows = Array.isArray(draft.rows) ? draft.rows : [];
@@ -300,7 +341,14 @@ export const mapErfsApi = createApi({
         }
 
         await cacheEntryRemoved;
-        unsubscribe();
+
+        if (typeof unsubscribe === "function") {
+          unsubscribe();
+        }
+
+        console.log("[MAP ERFS] Firestore viewport stream stopped.", {
+          wardPcode,
+        });
       },
     }),
   }),

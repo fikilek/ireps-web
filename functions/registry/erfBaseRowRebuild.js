@@ -1,21 +1,10 @@
 import { getFirestore } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 
-const buildErfNo = (sg = {}) => {
-  const parcelNo = Number(sg?.parcelNo || 0);
-  const portion = Number(sg?.portion || 0);
-
-  if (parcelNo <= 0) return "NAv";
-  if (portion > 0) return `${parcelNo}/${portion}`;
-  return `${parcelNo}`;
-};
-
-const buildErfSearchableText = ({ erfNo, type, lmPcode, wardPcode }) => {
-  return [erfNo, type, lmPcode, wardPcode]
-    .filter((value) => value && value !== "NAv")
-    .join(" ")
-    .toLowerCase();
-};
+import {
+  buildErfNo,
+  buildErfSearchableText,
+} from "./erfHelpers.js";
 
 export const rebuildErfBaseRow = async (erfId) => {
   const db = getFirestore();

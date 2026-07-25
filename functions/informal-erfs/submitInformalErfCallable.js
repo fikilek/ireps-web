@@ -4,6 +4,8 @@ import * as logger from "firebase-functions/logger";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { recomputeGeoFenceCounts } from "../geofences/membership.js";
+import { rebuildErfBaseRow } from "../registry/erfBaseRowRebuild.js";
+import { rebuildWardRegistryRow } from "../registry/wardBuilder.js";
 import {
   allocateInformalErfNumber,
   asTrimmedString,
@@ -215,6 +217,144 @@ async function refreshMatchedGeoFenceCountsOrThrow(args) {
   }
 }
 
+async function refreshErfRegistryProjectionOrThrow({
+  erfId,
+  parcelNo,
+}) {
+  logger.info("submitInformalErfCallable -- REGISTRY PROJECTION START", {
+    erfId,
+    parcelNo,
+  });
+
+  try {
+    const registryRow = await rebuildErfBaseRow(erfId);
+
+    if (!registryRow) {
+      throw new Error(
+        "The canonical ERF exists, but no ERF registry row was produced.",
+      );
+    }
+
+    if (registryRow.erfNo !== parcelNo) {
+      throw new Error(
+        `The ERF registry number ${registryRow.erfNo} does not match ${parcelNo}.`,
+      );
+    }
+
+    logger.info(
+      "submitInformalErfCallable -- REGISTRY PROJECTION COMPLETE",
+      {
+        erfId,
+        parcelNo,
+        registryRowId: registryRow.id,
+        erfType: registryRow.type,
+        lmPcode: registryRow.lmPcode,
+        wardPcode: registryRow.wardPcode,
+      },
+    );
+
+    return registryRow;
+  } catch (error) {
+    logger.error(
+      "submitInformalErfCallable -- REGISTRY PROJECTION FAILED",
+      {
+        erfId,
+        parcelNo,
+        errorCode: error?.code || "REGISTRY_PROJECTION_FAILED",
+        errorMessage:
+          error?.message || "Unknown ERF registry projection error.",
+        errorStack: error?.stack || null,
+      },
+    );
+
+    throw new HttpsError(
+      "unavailable",
+      "The Informal ERF exists, but the ERF registry could not be refreshed. Retry safely with the same erfId.",
+      temporaryDetails({
+        erfId,
+        parcelNo,
+        erfCreated: true,
+        registryProjected: false,
+      }),
+    );
+  }
+}
+
+
+async function refreshWardRegistryProjectionOrThrow({
+  lmPcode,
+  wardPcode,
+  erfId,
+  parcelNo,
+}) {
+  logger.info(
+    "submitInformalErfCallable -- WARD REGISTRY PROJECTION START",
+    {
+      erfId,
+      parcelNo,
+      lmPcode,
+      wardPcode,
+    },
+  );
+
+  try {
+    const wardRegistryRow = await rebuildWardRegistryRow({
+      lmPcode,
+      wardPcode,
+      reason: "INFORMAL_ERF_CREATED",
+    });
+
+    if (!wardRegistryRow) {
+      throw new Error(
+        "The canonical ERF exists, but no Ward Registry row was produced.",
+      );
+    }
+
+    logger.info(
+      "submitInformalErfCallable -- WARD REGISTRY PROJECTION COMPLETE",
+      {
+        erfId,
+        parcelNo,
+        lmPcode,
+        wardPcode,
+        wardRegistryRowId: wardRegistryRow.id,
+        formalErfs: wardRegistryRow?.counts?.formalErfs ?? null,
+        informalErfs: wardRegistryRow?.counts?.informalErfs ?? null,
+        totalErfs: wardRegistryRow?.counts?.totalErfs ?? null,
+      },
+    );
+
+    return wardRegistryRow;
+  } catch (error) {
+    logger.error(
+      "submitInformalErfCallable -- WARD REGISTRY PROJECTION FAILED",
+      {
+        erfId,
+        parcelNo,
+        lmPcode,
+        wardPcode,
+        errorCode: error?.code || "WARD_REGISTRY_PROJECTION_FAILED",
+        errorMessage:
+          error?.message || "Unknown Ward Registry projection error.",
+        errorStack: error?.stack || null,
+      },
+    );
+
+    throw new HttpsError(
+      "unavailable",
+      "The Informal ERF exists, but the Ward Registry could not be refreshed. Retry safely with the same erfId.",
+      temporaryDetails({
+        erfId,
+        parcelNo,
+        lmPcode,
+        wardPcode,
+        erfCreated: true,
+        wardRegistryProjected: false,
+      }),
+    );
+  }
+}
+
 function buildSuccessResult({ erfId, parcelNo, duplicate }) {
   return {
     success: true,
@@ -383,6 +523,18 @@ export const submitInformalErfCallable = onCall(
           });
           throwAlreadyExists(error.message, { erfId });
         }
+
+        await refreshErfRegistryProjectionOrThrow({
+          erfId,
+          parcelNo: existingResult.parcelNo,
+        });
+
+        await refreshWardRegistryProjectionOrThrow({
+          lmPcode,
+          wardPcode,
+          erfId,
+          parcelNo: existingResult.parcelNo,
+        });
 
         await refreshMatchedGeoFenceCountsOrThrow({
           db,
@@ -646,6 +798,18 @@ export const submitInformalErfCallable = onCall(
           };
         },
       );
+
+      await refreshErfRegistryProjectionOrThrow({
+        erfId,
+        parcelNo: transactionResult.parcelNo,
+      });
+
+      await refreshWardRegistryProjectionOrThrow({
+        lmPcode,
+        wardPcode,
+        erfId,
+        parcelNo: transactionResult.parcelNo,
+      });
 
       await refreshMatchedGeoFenceCountsOrThrow({
         db,
