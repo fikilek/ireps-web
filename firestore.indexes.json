@@ -1140,6 +1140,37 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "ireps_erfs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "admin.ward.pcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bbox.maxLat",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bbox.maxLng",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bbox.minLat",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bbox.minLng",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "irepsSelectLookups",
       "queryScope": "COLLECTION",
       "fields": [
