@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import MeterLocationModal from "./MeterLocationModal";
+import SalesGpsMapSection from "./SalesGpsMapSection";
 import SalesRangeFilterModal from "./SalesRangeFilterModal";
 import {
   TARGET_FILTERS,
@@ -313,6 +314,8 @@ export default function SalesMetersTable({
     DEFAULT_COLUMN_VISIBILITY,
   );
   const [showColumnControls, setShowColumnControls] = useState(false);
+  const [showGpsMap, setShowGpsMap] = useState(false);
+  const [mapWardNo, setMapWardNo] = useState("");
   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -600,6 +603,14 @@ export default function SalesMetersTable({
           <button
             type="button"
             style={styles.columnsButton}
+            onClick={() => setShowGpsMap((current) => !current)}
+            aria-expanded={showGpsMap}
+          >
+            {showGpsMap ? "Hide GPS Map" : "Show GPS Map"}
+          </button>
+          <button
+            type="button"
+            style={styles.columnsButton}
             onClick={() => setShowColumnControls((current) => !current)}
           >
             {showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}
@@ -632,6 +643,14 @@ export default function SalesMetersTable({
         </div>
       ) : null}
 
+      {showGpsMap ? (
+        <SalesGpsMapSection
+          rows={rows}
+          wardOptions={wardOptions}
+          selectedWardNo={mapWardNo}
+          onSelectedWardNoChange={setMapWardNo}
+        />
+      ) : null}
       <PaginationControls
         currentPage={safeCurrentPage}
         pageSize={pageSize}
