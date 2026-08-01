@@ -115,6 +115,35 @@ function uniqueNonBlank(values = []) {
   );
 }
 
+function normalizeGeofenceRefs(value = []) {
+  const seen = new Set();
+
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      const id = String(item?.id || "").trim();
+      const name = String(item?.name || id).trim();
+
+      if (!id) return null;
+
+      return {
+        id,
+        name: name || id,
+      };
+    })
+    .filter((item) => {
+      if (!item?.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .sort((left, right) =>
+      String(left.name || left.id).localeCompare(
+        String(right.name || right.id),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      ),
+    );
+}
+
 function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
   const monthlySalesC =
     data.monthlySalesC && typeof data.monthlySalesC === "object"
@@ -234,6 +263,9 @@ function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
       data.HasUsableGps === true ||
       data.hasUsableGps === true ||
       erfCandidates.some((candidate) => candidate.hasValidGps),
+    geofenceRefs: normalizeGeofenceRefs(
+      data.geofenceRefs || data.GeoFenceRefs || [],
+    ),
     trnBatchIds: Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
   };
 }

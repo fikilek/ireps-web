@@ -25,6 +25,7 @@ const DEFAULT_SORT = { key: "meterNo", direction: "asc" };
 
 const DEFAULT_COLUMN_VISIBILITY = {
   wardNo: true,
+  geofence: true,
   addressLine1: true,
   town: true,
   standNumber: false,
@@ -37,6 +38,7 @@ const DEFAULT_COLUMN_VISIBILITY = {
 
 const COLUMN_OPTIONS = [
   { key: "wardNo", label: "Ward No" },
+  { key: "geofence", label: "Geofences" },
   { key: "addressLine1", label: "Address" },
   { key: "town", label: "Town" },
   { key: "standNumber", label: "SG Code" },
@@ -51,6 +53,7 @@ const STICKY_COLUMN_WIDTHS = {
   select: 54,
   meterNo: 155,
   wardNo: 105,
+  geofence: 220,
   addressLine1: 260,
   town: 135,
   standNumber: 230,
@@ -64,6 +67,7 @@ const STICKY_COLUMN_WIDTHS = {
 const EMPTY_FILTERS = {
   meterNo: "",
   wardNo: "ALL",
+  geofenceId: "ALL",
   addressLine1: "",
   town: "ALL",
   standNumber: "",
@@ -246,6 +250,20 @@ function getStickyStyle(columnKey, stickyLayout, isHeader = false) {
   };
 }
 
+function getRowGeofenceRefs(row = {}) {
+  return Array.isArray(row?.geofenceRefs)
+    ? row.geofenceRefs.filter((ref) => ref?.id)
+    : [];
+}
+
+function getRowGeofenceLabel(row = {}) {
+  const names = getRowGeofenceRefs(row)
+    .map((ref) => String(ref?.name || ref?.id || "").trim())
+    .filter(Boolean);
+
+  return names.join(", ");
+}
+
 function getSortValue(row, sortKey) {
   if (sortKey.startsWith("month:")) {
     const monthKey = sortKey.slice("month:".length);
@@ -265,6 +283,7 @@ function getSortValue(row, sortKey) {
   }
 
   if (sortKey === "wardNo") return row?.wardNumberLabel || "";
+  if (sortKey === "geofence") return getRowGeofenceLabel(row);
   if (sortKey === "addressLine1") return row?.addressLine1 || "";
   if (sortKey === "town") return row?.town || "";
   if (sortKey === "standNumber") return row?.standNumber || "";
@@ -356,6 +375,25 @@ export default function SalesMetersTable({
     ).sort(compareNatural);
   }, [rows]);
 
+  const geofenceOptions = useMemo(() => {
+    const byId = new Map();
+
+    rows.forEach((row) => {
+      getRowGeofenceRefs(row).forEach((ref) => {
+        if (byId.has(ref.id)) return;
+
+        byId.set(ref.id, {
+          id: ref.id,
+          name: String(ref.name || ref.id),
+        });
+      });
+    });
+
+    return Array.from(byId.values()).sort((left, right) =>
+      compareNatural(left.name, right.name),
+    );
+  }, [rows]);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [targetFilter]);
@@ -369,10 +407,17 @@ export default function SalesMetersTable({
         );
       });
 
+      const rowGeofenceRefs = getRowGeofenceRefs(row);
+      const matchesGeofence =
+        filters.geofenceId === "ALL" ||
+        (filters.geofenceId === "NONE" && rowGeofenceRefs.length === 0) ||
+        rowGeofenceRefs.some((ref) => ref.id === filters.geofenceId);
+
       return (
         matchesTargetFilter(row, targetFilter, latestMonthKey) &&
         includesText(row?.meterNo, filters.meterNo) &&
         (filters.wardNo === "ALL" || row?.wardNumbers?.includes(filters.wardNo)) &&
+        matchesGeofence &&
         includesText(row?.addressLine1, filters.addressLine1) &&
         (filters.town === "ALL" || row?.town === filters.town) &&
         includesText(row?.standNumber, filters.standNumber) &&
@@ -423,6 +468,7 @@ export default function SalesMetersTable({
   const hasActiveColumnFilters =
     Boolean(String(filters.meterNo || "").trim()) ||
     filters.wardNo !== "ALL" ||
+    filters.geofenceId !== "ALL" ||
     Boolean(String(filters.addressLine1 || "").trim()) ||
     filters.town !== "ALL" ||
     Boolean(String(filters.standNumber || "").trim()) ||
@@ -552,6 +598,7 @@ export default function SalesMetersTable({
       return {
         ...current,
         wardNo: columnKey === "wardNo" ? "ALL" : current.wardNo,
+        geofenceId: columnKey === "geofence" ? "ALL" : current.geofenceId,
         addressLine1:
           columnKey === "addressLine1" ? "" : current.addressLine1,
         town: columnKey === "town" ? "ALL" : current.town,
@@ -715,6 +762,37 @@ export default function SalesMetersTable({
                     {wardOptions.map((wardNo) => (
                       <option key={wardNo} value={wardNo}>
                         Ward {wardNo}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+              ) : null}
+
+              {columnVisibility.geofence ? (
+                <th
+                  style={{
+                    ...styles.headerCell,
+                    ...getStickyStyle("geofence", stickyLayout, true),
+                  }}
+                >
+                  <SortButton
+                    label="Geofences"
+                    sortKey="geofence"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <select
+                    value={filters.geofenceId}
+                    onChange={(event) =>
+                      updateFilter("geofenceId", event.target.value)
+                    }
+                    style={styles.headerSelect}
+                  >
+                    <option value="ALL">All geofences</option>
+                    <option value="NONE">No geofence</option>
+                    {geofenceOptions.map((geofence) => (
+                      <option key={geofence.id} value={geofence.id}>
+                        {geofence.name}
                       </option>
                     ))}
                   </select>
@@ -891,6 +969,18 @@ export default function SalesMetersTable({
                   {columnVisibility.wardNo ? (
                     <td style={{ ...styles.bodyCell, ...getStickyStyle("wardNo", stickyLayout) }} title={row.wardNumberLabel || "NAv"}>
                       {row.wardNumberLabel || "NAv"}
+                    </td>
+                  ) : null}
+
+                  {columnVisibility.geofence ? (
+                    <td
+                      style={{
+                        ...styles.bodyCell,
+                        ...getStickyStyle("geofence", stickyLayout),
+                      }}
+                      title={getRowGeofenceLabel(row) || "No geofence"}
+                    >
+                      {getRowGeofenceLabel(row) || "No geofence"}
                     </td>
                   ) : null}
 
