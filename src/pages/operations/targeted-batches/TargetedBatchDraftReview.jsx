@@ -54,6 +54,8 @@ function rowMatchesSearch(row, searchText) {
     row?.town,
     row?.standNumber,
     row?.actionReason,
+    row?.rowDecision,
+    row?.rowDecisionReason,
   ].some((value) => normalizeSearchText(value).includes(query));
 }
 
@@ -83,6 +85,8 @@ export default function TargetedBatchDraftReview({
     [draft],
   );
   const rows = currentDraft?.displayRows || [];
+  const csvSource =
+    currentDraft?.source?.type === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD;
   const integrity = useMemo(
     () => getTargetedBatchDraftIntegrity(currentDraft),
     [currentDraft],
@@ -94,10 +98,14 @@ export default function TargetedBatchDraftReview({
         const matchStatus = String(
           row?.astMatchStatus || "NOT_CHECKED",
         ).toUpperCase();
+        const rowDecision = String(row?.rowDecision || "").toUpperCase();
 
         if (matchStatus === "MATCHED") result.astMatched += 1;
         else if (matchStatus === "NOT_MATCHED") result.astNotMatched += 1;
         else result.astNotChecked += 1;
+
+        if (rowDecision === "ACCEPT") result.acceptedRows += 1;
+        if (rowDecision === "REJECT") result.rejectedRows += 1;
 
         result.totalSalesC += Number(row?.totalSalesC || 0);
         return result;
@@ -106,6 +114,8 @@ export default function TargetedBatchDraftReview({
         astMatched: 0,
         astNotMatched: 0,
         astNotChecked: 0,
+        acceptedRows: 0,
+        rejectedRows: 0,
         totalSalesC: 0,
       },
     );
@@ -128,16 +138,20 @@ export default function TargetedBatchDraftReview({
       const proposedTrnType = String(
         row?.proposedTrnType || "NOT_SET",
       ).toUpperCase();
+      const rowDecision = String(row?.rowDecision || "NOT_SET").toUpperCase();
 
       return (
         rowMatchesSearch(row, filters.searchText) &&
+        (!csvSource ||
+          filters.rowDecision === "ALL" ||
+          rowDecision === filters.rowDecision) &&
         (filters.astMatchStatus === "ALL" ||
           astStatus === filters.astMatchStatus) &&
         (filters.proposedTrnType === "ALL" ||
           proposedTrnType === filters.proposedTrnType)
       );
     });
-  }, [rows, filters]);
+  }, [rows, filters, csvSource]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
@@ -221,6 +235,7 @@ export default function TargetedBatchDraftReview({
         filters={filters}
         totalRows={rows.length}
         filteredRows={filteredRows.length}
+        showRowDecision={csvSource}
         astOptions={astOptions}
         trnOptions={trnOptions}
         onChange={updateFilter}
@@ -233,6 +248,7 @@ export default function TargetedBatchDraftReview({
         currentPage={safeCurrentPage}
         pageSize={pageSize}
         totalPages={totalPages}
+        showRowDecision={csvSource}
         onPageChange={changePage}
         onPageSizeChange={changePageSize}
       />
@@ -247,8 +263,8 @@ export default function TargetedBatchDraftReview({
                 : "Resolve the draft blockers before confirmation"}
           </strong>
           <p style={styles.confirmText}>
-            Confirmation changes Redux draft state only. Package 2 performs no
-            Firestore write and does not create a Targeted Batch, TB rows, TRNs,
+            Confirmation changes Redux draft state only. Package 3 performs no
+            Firestore write and does not create tb_uploads, tb_rows, TRNs,
             premises, meters or allocations.
           </p>
         </div>

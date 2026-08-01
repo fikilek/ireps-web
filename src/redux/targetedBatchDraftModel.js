@@ -23,6 +23,22 @@ export const TARGETED_BATCH_VALIDATION_STATUSES = Object.freeze({
   FAILED: "FAILED",
 });
 
+export const TARGETED_BATCH_FILE_DECISIONS = Object.freeze({
+  ACCEPTED: "ACCEPTED",
+  REJECTED: "REJECTED",
+});
+
+export const TARGETED_BATCH_ROW_DECISIONS = Object.freeze({
+  ACCEPT: "ACCEPT",
+  REJECT: "REJECT",
+});
+
+export const TARGETED_BATCH_UPLOAD_REGISTER_STATUSES = Object.freeze({
+  DRAFT: TARGETED_BATCH_DRAFT_STATUSES.DRAFT,
+  READY_FOR_BACKEND: TARGETED_BATCH_DRAFT_STATUSES.READY_FOR_BACKEND,
+  REJECTED: TARGETED_BATCH_FILE_DECISIONS.REJECTED,
+});
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -58,6 +74,11 @@ function safeCount(value, fallback = 0) {
   return Number.isFinite(numberValue) && numberValue >= 0
     ? Math.floor(numberValue)
     : fallback;
+}
+
+function normalizeUppercase(value, fallback = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  return clean || fallback;
 }
 
 function getSouthAfricanDateTimeParts(date = new Date()) {
@@ -110,15 +131,13 @@ export function buildTargetedBatchDraftId(date = new Date()) {
 }
 
 export function normalizeTargetedBatchSourceType(value) {
-  const normalized = String(value || "")
-    .trim()
-    .toUpperCase();
+  const normalized = normalizeUppercase(value);
 
   if (normalized === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
     return TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES;
   }
 
-  if (["MANUAL_UPLOAD", "CSV", "FILE_UPLOAD"].includes(normalized)) {
+  if (['MANUAL_UPLOAD', 'CSV', 'FILE_UPLOAD'].includes(normalized)) {
     return TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD;
   }
 
@@ -133,6 +152,69 @@ export function getTargetedBatchSourceLabel(sourceType) {
   return sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES
     ? "Prepaid Sales"
     : "CSV Upload";
+}
+
+function normalizeFileDecision(value, passed = null) {
+  const normalized = normalizeUppercase(value);
+
+  if (normalized === TARGETED_BATCH_FILE_DECISIONS.ACCEPTED) {
+    return TARGETED_BATCH_FILE_DECISIONS.ACCEPTED;
+  }
+
+  if (normalized === TARGETED_BATCH_FILE_DECISIONS.REJECTED) {
+    return TARGETED_BATCH_FILE_DECISIONS.REJECTED;
+  }
+
+  if (typeof passed === "boolean") {
+    return passed
+      ? TARGETED_BATCH_FILE_DECISIONS.ACCEPTED
+      : TARGETED_BATCH_FILE_DECISIONS.REJECTED;
+  }
+
+  return null;
+}
+
+function normalizeRowDecision(value) {
+  const normalized = normalizeUppercase(value);
+
+  if (normalized === TARGETED_BATCH_ROW_DECISIONS.ACCEPT) {
+    return TARGETED_BATCH_ROW_DECISIONS.ACCEPT;
+  }
+
+  if (normalized === TARGETED_BATCH_ROW_DECISIONS.REJECT) {
+    return TARGETED_BATCH_ROW_DECISIONS.REJECT;
+  }
+
+  return null;
+}
+
+function normalizeDraftRows(rows = [], sourceType) {
+  return asArray(rows).map((row) => {
+    if (sourceType !== TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD) {
+      return row;
+    }
+
+    const rowDecision = normalizeRowDecision(
+      row?.rowDecision ?? row?.assessmentDecision ?? row?.decision,
+    );
+    const rowDecisionReasons = uniqueStrings(
+      row?.rowDecisionReasons ?? row?.rejectionReasons ?? row?.reasons,
+    );
+    const rowDecisionReason = readFirstString(
+      row?.rowDecisionReason,
+      row?.rejectionReason,
+      rowDecisionReasons.join(" "),
+    );
+
+    return {
+      ...row,
+      rowDecision,
+      rowDecisionReason: rowDecisionReason || null,
+      rowDecisionReasons,
+      assessmentDecision: rowDecision,
+      assessmentStatus: rowDecision,
+    };
+  });
 }
 
 function deriveSalesAllMeterIds(rows = []) {
@@ -175,27 +257,56 @@ function deriveUploadRowIds(rows = []) {
   );
 }
 
-function buildCanonicalValidation(validation = {}, totalRows = 0) {
+function deriveCsvRowCounts(rows = []) {
+  return asArray(rows).reduce(
+    (result, row) => {
+      const decision = normalizeRowDecision(
+        row?.rowDecision ?? row?.assessmentDecision ?? row?.decision,
+      );
+
+      if (decision === TARGETED_BATCH_ROW_DECISIONS.ACCEPT) {
+        result.acceptedRows += 1;
+      } else if (decision === TARGETED_BATCH_ROW_DECISIONS.REJECT) {
+        result.rejectedRows += 1;
+      }
+
+      return result;
+    },
+    { acceptedRows: 0, rejectedRows: 0 },
+  );
+}
+
+function buildCanonicalValidation(validation = {}, rows = [], sourceType) {
+  const totalRows = asArray(rows).length;
   const errors = asArray(validation?.errors);
   const warnings = asArray(validation?.warnings);
   const duplicateRowNos = asArray(validation?.duplicateRowNos);
   const duplicateMeterNos = asArray(validation?.duplicateMeterNos);
   const invalidRowDetails = asArray(validation?.invalidRowDetails);
+  const derivedCounts = deriveCsvRowCounts(rows);
 
   const rejectedRows = safeCount(
     validation?.rejectedRows ?? validation?.invalidRows,
-    invalidRowDetails.length,
+    sourceType === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD
+      ? derivedCounts.rejectedRows
+      : invalidRowDetails.length,
   );
   const acceptedRows = safeCount(
     validation?.acceptedRows ?? validation?.validRows,
-    Math.max(totalRows - rejectedRows, 0),
+    sourceType === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD
+      ? derivedCounts.acceptedRows
+      : Math.max(totalRows - rejectedRows, 0),
   );
 
   const explicitPassed =
     typeof validation?.passed === "boolean" ? validation.passed : null;
   const passed = explicitPassed ?? errors.length === 0;
+  const fileDecision = normalizeFileDecision(
+    validation?.fileDecision ?? validation?.decision,
+    sourceType === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD ? passed : null,
+  );
   const status = readFirstString(validation?.status)
-    ? String(validation.status).trim().toUpperCase()
+    ? normalizeUppercase(validation.status)
     : passed
       ? TARGETED_BATCH_VALIDATION_STATUSES.PASSED
       : TARGETED_BATCH_VALIDATION_STATUSES.FAILED;
@@ -203,11 +314,16 @@ function buildCanonicalValidation(validation = {}, totalRows = 0) {
   return {
     status,
     passed,
+    fileDecision,
     totalRows,
     acceptedRows,
     rejectedRows,
     validRows: acceptedRows,
     invalidRows: rejectedRows,
+    rowAssessmentCompleted:
+      typeof validation?.rowAssessmentCompleted === "boolean"
+        ? validation.rowAssessmentCompleted
+        : sourceType === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD && passed,
     duplicateRowNos,
     duplicateMeterNos,
     invalidRowDetails,
@@ -217,9 +333,12 @@ function buildCanonicalValidation(validation = {}, totalRows = 0) {
 }
 
 export function buildTargetedBatchDraft(payload = {}) {
-  const displayRows = asArray(payload?.displayRows ?? payload?.rows);
   const sourceType = normalizeTargetedBatchSourceType(
     payload?.source?.type ?? payload?.sourceType,
+  );
+  const displayRows = normalizeDraftRows(
+    payload?.displayRows ?? payload?.rows,
+    sourceType,
   );
   const sourceLabel = readFirstString(
     payload?.source?.label,
@@ -281,7 +400,8 @@ export function buildTargetedBatchDraft(payload = {}) {
 
   const validation = buildCanonicalValidation(
     payload?.validation,
-    displayRows.length,
+    displayRows,
+    sourceType,
   );
   const now = new Date().toISOString();
 
@@ -334,9 +454,89 @@ export function buildTargetedBatchDraft(payload = {}) {
   };
 }
 
+export function buildTargetedBatchUploadAudit(payload = {}) {
+  const sourceType = normalizeTargetedBatchSourceType(
+    payload?.source?.type ?? payload?.sourceType,
+  );
+  const totalRowsHint = safeCount(
+    payload?.totalRows ?? payload?.validation?.totalRows,
+    0,
+  );
+  const validationInput = {
+    ...(payload?.validation || {}),
+    totalRows: totalRowsHint,
+    acceptedRows:
+      payload?.acceptedRows ?? payload?.validation?.acceptedRows,
+    rejectedRows:
+      payload?.rejectedRows ?? payload?.validation?.rejectedRows,
+  };
+  const validation = buildCanonicalValidation(
+    validationInput,
+    Array.from({ length: totalRowsHint }),
+    sourceType,
+  );
+  const fileDecision = normalizeFileDecision(
+    payload?.fileDecision ?? validation.fileDecision,
+    validation.passed,
+  );
+  const now = new Date().toISOString();
+
+  return {
+    id: readFirstString(payload?.id) || buildTargetedBatchDraftId(),
+    status:
+      fileDecision === TARGETED_BATCH_FILE_DECISIONS.REJECTED
+        ? TARGETED_BATCH_FILE_DECISIONS.REJECTED
+        : readFirstString(payload?.status) ||
+          TARGETED_BATCH_DRAFT_STATUSES.DRAFT,
+    createdAt: payload?.createdAt || now,
+    source: {
+      type: sourceType,
+      label: readFirstString(
+        payload?.source?.label,
+        payload?.sourceLabel,
+        getTargetedBatchSourceLabel(sourceType),
+      ),
+      sourceId:
+        readFirstString(payload?.source?.sourceId, payload?.sourceId) || null,
+      fileName:
+        readFirstString(payload?.source?.fileName, payload?.fileName) || null,
+    },
+    scope: {
+      lmPcode: readFirstString(payload?.scope?.lmPcode, payload?.lmPcode),
+      lmName: readFirstString(
+        payload?.scope?.lmName,
+        payload?.lmName,
+        "NAv",
+      ),
+    },
+    fileDecision,
+    totalRows: safeCount(
+      payload?.totalRows ?? validation.totalRows,
+      validation.totalRows,
+    ),
+    acceptedRows: safeCount(
+      payload?.acceptedRows ?? validation.acceptedRows,
+      validation.acceptedRows,
+    ),
+    rejectedRows: safeCount(
+      payload?.rejectedRows ?? validation.rejectedRows,
+      validation.rejectedRows,
+    ),
+    rejectionReasons: uniqueStrings(
+      payload?.rejectionReasons ?? validation.errors,
+    ),
+    validation,
+  };
+}
+
 export function getTargetedBatchDraftView(draft) {
   if (!draft || typeof draft !== "object") return null;
   return buildTargetedBatchDraft(draft);
+}
+
+export function getTargetedBatchUploadAuditView(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  return buildTargetedBatchUploadAudit(entry);
 }
 
 export function getTargetedBatchDraftRows(draft) {
@@ -354,6 +554,8 @@ export function getTargetedBatchDraftIntegrity(draft) {
       authoritativeIdCount: 0,
       missingAuthoritativeIdRows: 0,
       duplicateAuthoritativeIds: [],
+      acceptedRows: 0,
+      rejectedRows: 0,
     };
   }
 
@@ -361,6 +563,8 @@ export function getTargetedBatchDraftIntegrity(draft) {
   const blockers = [];
   const isSalesSource =
     currentDraft.source.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES;
+  const isCsvSource =
+    currentDraft.source.type === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD;
   const rowIds = rows.map((row) =>
     normalizeAuthoritativeId(
       row?.salesAllMeterId ||
@@ -380,6 +584,13 @@ export function getTargetedBatchDraftIntegrity(draft) {
     .map(([id]) => id);
   const missingAuthoritativeIdRows = rowIds.filter((id) => !id).length;
   const authoritativeIdCount = new Set(rowIds.filter(Boolean)).size;
+  const csvCounts = deriveCsvRowCounts(rows);
+  const acceptedRows = isCsvSource
+    ? currentDraft.validation.acceptedRows || csvCounts.acceptedRows
+    : rows.length;
+  const rejectedRows = isCsvSource
+    ? currentDraft.validation.rejectedRows || csvCounts.rejectedRows
+    : 0;
 
   if (rows.length === 0) {
     blockers.push("The draft contains no candidate rows.");
@@ -387,6 +598,47 @@ export function getTargetedBatchDraftIntegrity(draft) {
 
   if (!currentDraft.validation?.passed) {
     blockers.push("The draft validation status is not PASSED.");
+  }
+
+  if (
+    isCsvSource &&
+    currentDraft.validation?.fileDecision !==
+      TARGETED_BATCH_FILE_DECISIONS.ACCEPTED
+  ) {
+    blockers.push("The CSV file decision is not ACCEPTED.");
+  }
+
+  if (isCsvSource && !currentDraft.validation?.rowAssessmentCompleted) {
+    blockers.push("CSV row assessment has not completed.");
+  }
+
+  if (isCsvSource && acceptedRows === 0) {
+    blockers.push("The accepted CSV file contains no ACCEPT rows.");
+  }
+
+  if (isCsvSource) {
+    const unassessedRows = rows.filter(
+      (row) => !normalizeRowDecision(row?.rowDecision),
+    ).length;
+    const rejectedWithoutReason = rows.filter(
+      (row) =>
+        normalizeRowDecision(row?.rowDecision) ===
+          TARGETED_BATCH_ROW_DECISIONS.REJECT &&
+        !readFirstString(
+          row?.rowDecisionReason,
+          asArray(row?.rowDecisionReasons).join(" "),
+        ),
+    ).length;
+
+    if (unassessedRows > 0) {
+      blockers.push(`${unassessedRows} CSV row(s) have no ACCEPT/REJECT outcome.`);
+    }
+
+    if (rejectedWithoutReason > 0) {
+      blockers.push(
+        `${rejectedWithoutReason} rejected CSV row(s) have no rejection reason.`,
+      );
+    }
   }
 
   if (isSalesSource && missingAuthoritativeIdRows > 0) {
@@ -417,5 +669,7 @@ export function getTargetedBatchDraftIntegrity(draft) {
     authoritativeIdCount,
     missingAuthoritativeIdRows,
     duplicateAuthoritativeIds,
+    acceptedRows,
+    rejectedRows,
   };
 }

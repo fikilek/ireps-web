@@ -322,4 +322,31 @@ export const draftReviewStyles = {
     fontWeight: 850,
     cursor: "pointer",
   },
+  filtersGridWithDecision: {
+    gridTemplateColumns:
+      "minmax(220px, 2fr) repeat(3, minmax(145px, 1fr)) auto",
+  },
+  rowDecisionBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: "4.4rem",
+    borderRadius: "999px",
+    padding: "0.22rem 0.5rem",
+    fontSize: "0.7rem",
+    fontWeight: 900,
+  },
+  rowAcceptBadge: {
+    background: "#dcfce7",
+    color: "#166534",
+  },
+  rowRejectBadge: {
+    background: "#fee2e2",
+    color: "#991b1b",
+  },
+  rejectionCell: {
+    minWidth: "280px",
+    color: "#991b1b",
+    overflowWrap: "anywhere",
+  },
 };

@@ -4,6 +4,7 @@ import { draftReviewStyles as styles } from "./targetedBatchDraftReviewStyles";
 
 export const EMPTY_DRAFT_FILTERS = Object.freeze({
   searchText: "",
+  rowDecision: "ALL",
   astMatchStatus: "ALL",
   proposedTrnType: "ALL",
 });
@@ -12,6 +13,7 @@ export default function TargetedBatchDraftFilters({
   filters,
   totalRows,
   filteredRows,
+  showRowDecision,
   astOptions,
   trnOptions,
   onChange,
@@ -26,17 +28,37 @@ export default function TargetedBatchDraftFilters({
         </span>
       </div>
 
-      <div style={styles.filtersGrid}>
+      <div
+        style={{
+          ...styles.filtersGrid,
+          ...(showRowDecision ? styles.filtersGridWithDecision : null),
+        }}
+      >
         <label style={styles.filterLabel}>
           Search
           <input
             type="search"
             value={filters.searchText}
             onChange={(event) => onChange("searchText", event.target.value)}
-            placeholder="Meter, Sales ID, account, customer, address, town or SG code"
+            placeholder="Meter, account, customer, address, SG code or rejection reason"
             style={styles.filterInput}
           />
         </label>
+
+        {showRowDecision ? (
+          <label style={styles.filterLabel}>
+            Row Outcome
+            <select
+              value={filters.rowDecision}
+              onChange={(event) => onChange("rowDecision", event.target.value)}
+              style={styles.filterInput}
+            >
+              <option value="ALL">All</option>
+              <option value="ACCEPT">ACCEPT</option>
+              <option value="REJECT">REJECT</option>
+            </select>
+          </label>
+        ) : null}
 
         <label style={styles.filterLabel}>
           AST Match

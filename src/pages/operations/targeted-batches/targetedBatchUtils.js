@@ -1,4 +1,8 @@
-import { getTargetedBatchDraftView } from "../../../redux/targetedBatchDraftModel";
+import {
+  getTargetedBatchDraftView,
+  TARGETED_BATCH_FILE_DECISIONS,
+  TARGETED_BATCH_ROW_DECISIONS,
+} from "../../../redux/targetedBatchDraftModel";
 
 export const TARGETED_BATCH_MIN_ROWS = 1;
 export const TARGETED_BATCH_MAX_ROWS = 1000;
@@ -123,21 +127,34 @@ export function downloadTargetedBatchTemplate() {
   });
 }
 
-
 export function downloadTargetedBatchDraft(draft) {
   const currentDraft = getTargetedBatchDraftView(draft);
   if (!currentDraft) return;
 
+  const csvSource = currentDraft.source?.type === "CSV_UPLOAD";
+  const headers = csvSource
+    ? [...TARGETED_BATCH_COLUMNS, "rowDecision", "rejectionReason"]
+    : TARGETED_BATCH_COLUMNS;
   const csvRows = [
-    TARGETED_BATCH_COLUMNS,
-    ...currentDraft.displayRows.map((row, index) => [
-      row.rowNo || index + 1,
-      row.meterNo || "",
-      row.addressLine1 || "",
-      row.town || "",
-      row.standNumber || "",
-      row.actionReason || currentDraft.selection.reason || "",
-    ]),
+    headers,
+    ...currentDraft.displayRows.map((row, index) => {
+      const sourceValues = [
+        row.rowNo || index + 1,
+        row.meterNo || "",
+        row.addressLine1 || "",
+        row.town || "",
+        row.standNumber || "",
+        row.actionReason || currentDraft.selection.reason || "",
+      ];
+
+      return csvSource
+        ? [
+            ...sourceValues,
+            row.rowDecision || "",
+            row.rowDecisionReason || "",
+          ]
+        : sourceValues;
+    }),
   ];
 
   const csv = csvRows
@@ -151,9 +168,10 @@ export function downloadTargetedBatchDraft(draft) {
   });
 }
 
-export function parseCsvRows(text) {
+function parseCsvDocument(text) {
   const source = String(text || "").replace(/^\uFEFF/, "");
   const rows = [];
+  const errors = [];
   let row = [];
   let value = "";
   let inQuotes = false;
@@ -194,10 +212,18 @@ export function parseCsvRows(text) {
     value += char;
   }
 
+  if (inQuotes) {
+    errors.push("The CSV contains an unclosed quoted value.");
+  }
+
   row.push(value);
   if (row.some((cell) => String(cell).trim() !== "")) rows.push(row);
 
-  return rows;
+  return { rows, errors };
+}
+
+export function parseCsvRows(text) {
+  return parseCsvDocument(text).rows;
 }
 
 function normalizeMeterNo(value) {
@@ -217,47 +243,89 @@ function buildParsedRows(csvRows, headers) {
 
     return {
       sourceLine: index + 2,
+      sourceColumnCount: cells.length,
       raw,
     };
   });
 }
 
+function createRejectedFileResult({ fileName, errors, totalRows = 0 }) {
+  return {
+    passed: false,
+    status: "FAILED",
+    fileDecision: TARGETED_BATCH_FILE_DECISIONS.REJECTED,
+    fileName,
+    headers: [],
+    totalRows,
+    acceptedRows: 0,
+    rejectedRows: 0,
+    validRows: 0,
+    invalidRows: 0,
+    rowAssessmentCompleted: false,
+    invalidRowDetails: [],
+    duplicateRowNos: [],
+    duplicateMeterNos: [],
+    errors: Array.isArray(errors) ? errors : [String(errors || "Unknown error")],
+    warnings: [],
+    rows: [],
+  };
+}
+
+export function buildTargetedBatchReadFailure({ fileName, message }) {
+  return createRejectedFileResult({
+    fileName,
+    errors: [message || "The selected file could not be read."],
+  });
+}
+
 export function validateTargetedBatchCsv({ fileName, text }) {
-  const errors = [];
+  const fileErrors = [];
   const warnings = [];
-  const invalidRowDetails = [];
+  const parsedDocument = parseCsvDocument(text);
+  const csvRows = parsedDocument.rows;
+  const headers = (csvRows[0] || []).map((header) => String(header).trim());
+  const parsedRows = buildParsedRows(csvRows, headers);
 
   if (!String(fileName || "").toLowerCase().endsWith(".csv")) {
-    errors.push("Only CSV files are accepted for Targeted Batch uploads.");
+    fileErrors.push("Only CSV files are accepted for Targeted Batch uploads.");
   }
 
-  const csvRows = parseCsvRows(text);
-  const headers = (csvRows[0] || []).map((header) => String(header).trim());
+  fileErrors.push(...parsedDocument.errors);
+
   const exactHeaders = TARGETED_BATCH_COLUMNS.every(
     (column, index) => headers[index] === column,
   );
 
   if (headers.length === 0) {
-    errors.push("The file has no header row.");
+    fileErrors.push("The file has no header row.");
   } else if (
     headers.length !== TARGETED_BATCH_COLUMNS.length ||
     !exactHeaders
   ) {
-    errors.push(
+    fileErrors.push(
       `CSV headers must match this exact order: ${TARGETED_BATCH_COLUMNS.join(", ")}.`,
     );
   }
 
-  const parsedRows = buildParsedRows(csvRows, headers);
-
   if (parsedRows.length < TARGETED_BATCH_MIN_ROWS) {
-    errors.push("The file must contain at least one data row.");
+    fileErrors.push("The file must contain at least one data row.");
   }
 
   if (parsedRows.length > TARGETED_BATCH_MAX_ROWS) {
-    errors.push(
+    fileErrors.push(
       `The file contains ${parsedRows.length} rows. The maximum is ${TARGETED_BATCH_MAX_ROWS}.`,
     );
+  }
+
+  if (fileErrors.length > 0) {
+    return {
+      ...createRejectedFileResult({
+        fileName,
+        errors: fileErrors,
+        totalRows: parsedRows.length,
+      }),
+      headers,
+    };
   }
 
   const rowNoCounts = new Map();
@@ -266,27 +334,13 @@ export function validateTargetedBatchCsv({ fileName, text }) {
   parsedRows.forEach((row) => {
     const rowNo = String(row.raw.rowNo || "").trim();
     const meterNo = normalizeMeterNo(row.raw.meterNo);
-    const rowErrors = [];
 
-    if (!isPositiveWholeNumber(rowNo)) {
-      rowErrors.push("rowNo must be a positive whole number.");
-    } else {
+    if (isPositiveWholeNumber(rowNo)) {
       rowNoCounts.set(rowNo, (rowNoCounts.get(rowNo) || 0) + 1);
     }
 
-    if (!meterNo) {
-      rowErrors.push("meterNo is required.");
-    } else {
+    if (meterNo) {
       meterNoCounts.set(meterNo, (meterNoCounts.get(meterNo) || 0) + 1);
-    }
-
-    if (rowErrors.length > 0) {
-      invalidRowDetails.push({
-        sourceLine: row.sourceLine,
-        rowNo: rowNo || "NAv",
-        meterNo: meterNo || "NAv",
-        reasons: rowErrors,
-      });
     }
   });
 
@@ -296,51 +350,99 @@ export function validateTargetedBatchCsv({ fileName, text }) {
   const duplicateMeterNos = Array.from(meterNoCounts.entries())
     .filter(([, count]) => count > 1)
     .map(([meterNo]) => meterNo);
+  const duplicateRowNoSet = new Set(duplicateRowNos);
+  const duplicateMeterNoSet = new Set(duplicateMeterNos);
+  const invalidRowDetails = [];
 
-  if (duplicateRowNos.length > 0) {
-    errors.push(
-      `${duplicateRowNos.length} duplicate rowNo value(s) found. rowNo must be unique.`,
+  const normalizedRows = parsedRows.map((row) => {
+    const rowNo = String(row.raw.rowNo || "").trim();
+    const meterNo = normalizeMeterNo(row.raw.meterNo);
+    const rejectionReasons = [];
+
+    if (row.sourceColumnCount !== TARGETED_BATCH_COLUMNS.length) {
+      rejectionReasons.push(
+        `Expected ${TARGETED_BATCH_COLUMNS.length} columns but found ${row.sourceColumnCount}.`,
+      );
+    }
+
+    if (!isPositiveWholeNumber(rowNo)) {
+      rejectionReasons.push("rowNo must be a positive whole number.");
+    } else if (duplicateRowNoSet.has(rowNo)) {
+      rejectionReasons.push(`Duplicate rowNo ${rowNo}.`);
+    }
+
+    if (!meterNo) {
+      rejectionReasons.push("meterNo is required.");
+    } else if (duplicateMeterNoSet.has(meterNo)) {
+      rejectionReasons.push(`Duplicate meterNo ${meterNo}.`);
+    }
+
+    const rowDecision =
+      rejectionReasons.length === 0
+        ? TARGETED_BATCH_ROW_DECISIONS.ACCEPT
+        : TARGETED_BATCH_ROW_DECISIONS.REJECT;
+    const rowDecisionReason = rejectionReasons.join(" ");
+
+    if (rowDecision === TARGETED_BATCH_ROW_DECISIONS.REJECT) {
+      invalidRowDetails.push({
+        sourceLine: row.sourceLine,
+        rowNo: rowNo || "NAv",
+        meterNo: meterNo || "NAv",
+        rowDecision,
+        reasons: rejectionReasons,
+      });
+    }
+
+    return {
+      id: `CSV_${row.sourceLine}_${rowNo || "NO_ROW"}_${meterNo || "NO_METER"}`,
+      rowNo,
+      sourceLine: row.sourceLine,
+      sourceColumnCount: row.sourceColumnCount,
+      meterNo,
+      addressLine1: String(row.raw.premiseAddress || "").trim(),
+      town: String(row.raw.town || "").trim(),
+      standNumber: String(row.raw.sgCode || "").trim(),
+      actionReason: String(row.raw.actionReason || "").trim(),
+      totalSalesC: null,
+      astId: null,
+      astMatchStatus: "NOT_CHECKED",
+      proposedTrnType: null,
+      uploadRowId: null,
+      rowDecision,
+      rowDecisionReason: rowDecisionReason || null,
+      rowDecisionReasons: rejectionReasons,
+      assessmentDecision: rowDecision,
+      assessmentStatus: rowDecision,
+    };
+  });
+
+  const acceptedRows = normalizedRows.filter(
+    (row) => row.rowDecision === TARGETED_BATCH_ROW_DECISIONS.ACCEPT,
+  ).length;
+  const rejectedRows = normalizedRows.length - acceptedRows;
+
+  if (rejectedRows > 0) {
+    warnings.push(
+      `${rejectedRows} row(s) were REJECTED during row assessment. Each rejected row includes a reason.`,
     );
   }
-
-  if (duplicateMeterNos.length > 0) {
-    errors.push(
-      `${duplicateMeterNos.length} duplicate meter number(s) found. Each target meter may appear once only.`,
-    );
-  }
-
-  if (invalidRowDetails.length > 0) {
-    errors.push(
-      `${invalidRowDetails.length} row(s) contain missing or invalid required values.`,
-    );
-  }
-
-  const normalizedRows = parsedRows.map((row) => ({
-    id: `MANUAL_${String(row.raw.rowNo || row.sourceLine).trim()}`,
-    rowNo: String(row.raw.rowNo || "").trim(),
-    sourceLine: row.sourceLine,
-    meterNo: normalizeMeterNo(row.raw.meterNo),
-    addressLine1: String(row.raw.premiseAddress || "").trim(),
-    town: String(row.raw.town || "").trim(),
-    standNumber: String(row.raw.sgCode || "").trim(),
-    actionReason: String(row.raw.actionReason || "").trim(),
-    totalSalesC: null,
-    astId: null,
-    astMatchStatus: "NOT_CHECKED",
-    proposedTrnType: null,
-  }));
 
   return {
-    passed: errors.length === 0,
+    passed: true,
+    status: "PASSED",
+    fileDecision: TARGETED_BATCH_FILE_DECISIONS.ACCEPTED,
     fileName,
     headers,
-    totalRows: parsedRows.length,
-    validRows: Math.max(parsedRows.length - invalidRowDetails.length, 0),
-    invalidRows: invalidRowDetails.length,
-    invalidRowDetails: invalidRowDetails.slice(0, 30),
+    totalRows: normalizedRows.length,
+    acceptedRows,
+    rejectedRows,
+    validRows: acceptedRows,
+    invalidRows: rejectedRows,
+    rowAssessmentCompleted: true,
+    invalidRowDetails,
     duplicateRowNos,
     duplicateMeterNos,
-    errors,
+    errors: [],
     warnings,
     rows: normalizedRows,
   };

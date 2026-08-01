@@ -83,15 +83,38 @@ function PaginationControls({
   );
 }
 
+function RowDecisionBadge({ decision }) {
+  const normalized = String(decision || "").toUpperCase();
+
+  if (!normalized) return "NAv";
+
+  return (
+    <span
+      style={{
+        ...styles.rowDecisionBadge,
+        ...(normalized === "ACCEPT"
+          ? styles.rowAcceptBadge
+          : styles.rowRejectBadge),
+      }}
+    >
+      {normalized}
+    </span>
+  );
+}
+
 export default function TargetedBatchDraftTable({
   rows,
   totalRows,
   currentPage,
   pageSize,
   totalPages,
+  showRowDecision,
   onPageChange,
   onPageSizeChange,
 }) {
+  const baseColumnCount = 12;
+  const columnCount = showRowDecision ? baseColumnCount + 2 : baseColumnCount;
+
   return (
     <>
       <PaginationControls
@@ -104,10 +127,21 @@ export default function TargetedBatchDraftTable({
       />
 
       <div style={styles.tableWrap}>
-        <table style={styles.table}>
+        <table
+          style={{
+            ...styles.table,
+            minWidth: showRowDecision ? "2380px" : styles.table.minWidth,
+          }}
+        >
           <thead>
             <tr>
               <th style={styles.headerCell}>Row</th>
+              {showRowDecision ? (
+                <>
+                  <th style={styles.headerCell}>Row Outcome</th>
+                  <th style={styles.headerCell}>Rejection Reason</th>
+                </>
+              ) : null}
               <th style={styles.headerCell}>Sales All Meter ID</th>
               <th style={styles.headerCell}>Meter Number</th>
               <th style={styles.headerCell}>Account Number</th>
@@ -124,7 +158,7 @@ export default function TargetedBatchDraftTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={12} style={styles.noRowsCell}>
+                <td colSpan={columnCount} style={styles.noRowsCell}>
                   No draft rows match the current filters.
                 </td>
               </tr>
@@ -139,6 +173,18 @@ export default function TargetedBatchDraftTable({
                   }
                 >
                   <td style={styles.bodyCell}>{row.rowNo || index + 1}</td>
+                  {showRowDecision ? (
+                    <>
+                      <td style={styles.bodyCell}>
+                        <RowDecisionBadge decision={row.rowDecision} />
+                      </td>
+                      <td style={{ ...styles.bodyCell, ...styles.rejectionCell }}>
+                        {row.rowDecision === "REJECT"
+                          ? row.rowDecisionReason || "Reason missing"
+                          : "—"}
+                      </td>
+                    </>
+                  ) : null}
                   <td style={{ ...styles.bodyCell, ...styles.idCell }}>
                     {row.salesAllMeterId || row.sourceSalesAllMeterId || "NAv"}
                   </td>

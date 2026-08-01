@@ -7,12 +7,17 @@ import { useAuth } from "../../auth/useAuth";
 import {
   clearTargetedBatchDraft,
   prepareTargetedBatchDraft,
+  recordTargetedBatchUploadAudit,
   selectTargetedBatchDraft,
+  selectTargetedBatchUploadAudit,
 } from "../../redux/targetedBatchDraftSlice";
 import {
+  buildTargetedBatchDraftId,
   getTargetedBatchDraftView,
-  TARGETED_BATCH_DRAFT_STATUSES,
+  getTargetedBatchUploadAuditView,
+  TARGETED_BATCH_FILE_DECISIONS,
   TARGETED_BATCH_SOURCE_TYPES,
+  TARGETED_BATCH_UPLOAD_REGISTER_STATUSES,
 } from "../../redux/targetedBatchDraftModel";
 import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModal";
 import {
@@ -21,7 +26,9 @@ import {
 } from "./targeted-batches/targetedBatchUtils";
 
 const SOURCE_FILTER_OPTIONS = Object.values(TARGETED_BATCH_SOURCE_TYPES);
-const STATUS_FILTER_OPTIONS = Object.values(TARGETED_BATCH_DRAFT_STATUSES);
+const STATUS_FILTER_OPTIONS = Object.values(
+  TARGETED_BATCH_UPLOAD_REGISTER_STATUSES,
+);
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -53,6 +60,19 @@ function getSourceReference(upload) {
   return upload?.source?.fileName || "CSV TB upload";
 }
 
+function getUploadTotal(upload) {
+  return Number(
+    upload?.totalRows ??
+      upload?.validation?.totalRows ??
+      upload?.displayRows?.length ??
+      0,
+  );
+}
+
+function getUploadFileDecision(upload) {
+  return upload?.fileDecision || upload?.validation?.fileDecision || null;
+}
+
 function SummaryCard({ label, value }) {
   return (
     <article style={styles.summaryCard}>
@@ -78,33 +98,37 @@ function HelpModal({ type, onClose }) {
   const content = {
     columns: {
       title: "TB Upload Register columns",
-      body: "TB Rows opens the row-level review page. Final Report remains marked DRAFT. TB ID is the current Targeted Batch identifier and Total is the number of meters in the batch.",
+      body: "TB Rows opens the active row-level review. Final Report remains marked DRAFT. TB ID is the Targeted Batch identifier and Total is the number of rows read from the source file or selected from Prepaid Sales.",
     },
     fileRules: {
       title: "TB file rules",
-      body: "TB Uploads currently accepts the controlled six-column CSV template. The frontend checks file type, exact header order, row count, required rowNo and meterNo values, and duplicate values before preparing the draft.",
+      body: "The complete CSV file receives only ACCEPTED or REJECTED. File checks cover CSV type, readable structure, exact six-column header order, and the allowed row-count range. A rejected file must show its rejection reason and does not prepare TB rows.",
     },
     columnRules: {
-      title: "TB column rules",
-      body: "rowNo and meterNo are required. premiseAddress, town, sgCode and actionReason may be blank. A missing SG Code does not automatically reject the frontend draft.",
+      title: "TB row rules",
+      body: "After a file is ACCEPTED, every row receives ACCEPT or REJECT. rowNo must be a positive whole number, meterNo is required, and duplicate rowNo or meterNo values are rejected. Every rejected row keeps its reason. Optional address, town, SG Code and action reason values may be blank.",
     },
     dictionary: {
       title: "TB Uploads dictionary",
-      body: "TB means Targeted Batch. A TB Upload is a controlled list received from a CSV upload or from selected Prepaid Sales meters. TB Rows are the individual meter rows contained in that batch.",
+      body: "TB means Targeted Batch. A TB Upload is a controlled list received from a CSV upload or selected from Prepaid Sales. The locked future Firestore collections are tb_uploads for the parent and tb_rows for all accepted-file candidate rows.",
     },
     dataFlow: {
       title: "TB Upload data flow",
-      body: "CSV upload or Prepaid Sales selection → frontend draft → TB Upload Register → TB Rows review. Permanent Firestore creation and authoritative backend processing are not part of this frontend stage yet.",
+      body: "CSV selected → complete file ACCEPTED or REJECTED → accepted-file rows assessed ACCEPT or REJECT → frontend Draft Review. This Package 3 register is Redux-only. Permanent tb_uploads and tb_rows writes belong to the later backend creation package.",
     },
   }[type] || {
     title: "TB Uploads help",
-    body: "TB Uploads follows the TC Uploads page pattern with Targeted Batch terminology.",
+    body: "TB Uploads follows the controlled Targeted Batch workflow.",
   };
 
   return (
-    <div style={styles.modalBackdrop} role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
+    <div
+      style={styles.modalBackdrop}
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div style={styles.helpModalCard} role="dialog" aria-modal="true">
         <div style={styles.modalHeader}>
           <div>
@@ -126,6 +150,7 @@ export default function TargetedBatchesPage() {
   const navigate = useNavigate();
   const { activeWorkbase } = useAuth();
   const storedDraft = useSelector(selectTargetedBatchDraft);
+  const storedUploadAudit = useSelector(selectTargetedBatchUploadAudit);
   const draft = useMemo(
     () => getTargetedBatchDraftView(storedDraft),
     [storedDraft],
@@ -139,7 +164,31 @@ export default function TargetedBatchesPage() {
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
 
-  const uploads = useMemo(() => (draft ? [draft] : []), [draft]);
+  const uploads = useMemo(() => {
+    const auditRows = storedUploadAudit
+      .map((entry) => getTargetedBatchUploadAuditView(entry))
+      .filter(Boolean);
+    const byId = new Map(auditRows.map((entry) => [entry.id, entry]));
+
+    if (draft) {
+      const auditEntry = byId.get(draft.id);
+      byId.set(draft.id, {
+        ...auditEntry,
+        ...draft,
+        fileDecision:
+          draft.validation?.fileDecision || auditEntry?.fileDecision || null,
+        totalRows: draft.validation?.totalRows || draft.displayRows.length,
+        acceptedRows:
+          draft.validation?.acceptedRows ?? auditEntry?.acceptedRows ?? 0,
+        rejectedRows:
+          draft.validation?.rejectedRows ?? auditEntry?.rejectedRows ?? 0,
+      });
+    }
+
+    return Array.from(byId.values()).sort((left, right) =>
+      String(right?.createdAt || "").localeCompare(String(left?.createdAt || "")),
+    );
+  }, [storedUploadAudit, draft]);
 
   const filteredUploads = useMemo(() => {
     return uploads.filter((upload) => {
@@ -155,9 +204,13 @@ export default function TargetedBatchesPage() {
     const readyForBackend = uploads.filter(
       (upload) => upload?.status === "READY_FOR_BACKEND",
     ).length;
-    const needsAttention = uploads.filter(
-      (upload) => upload?.validation?.passed === false,
-    ).length;
+    const needsAttention = uploads.filter((upload) => {
+      const fileDecision = getUploadFileDecision(upload);
+      return (
+        fileDecision === TARGETED_BATCH_FILE_DECISIONS.REJECTED ||
+        Number(upload?.rejectedRows || upload?.validation?.rejectedRows || 0) > 0
+      );
+    }).length;
 
     return {
       totalUploads,
@@ -167,19 +220,54 @@ export default function TargetedBatchesPage() {
     };
   }, [uploads]);
 
-  function handlePrepareCsvBatch({ fileName, rows, validation }) {
+  function handleSubmitCsvBatch(result) {
+    const fileAccepted =
+      result?.fileDecision === TARGETED_BATCH_FILE_DECISIONS.ACCEPTED;
+
+    if (fileAccepted && draft) {
+      const replaceConfirmed = window.confirm(
+        `A Targeted Batch draft (${draft.id}) is already active. Replace it with the accepted CSV file ${result.fileName}?`,
+      );
+
+      if (!replaceConfirmed) return;
+    }
+
+    const batchId = buildTargetedBatchDraftId();
+    const source = {
+      type: TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD,
+      label: "CSV Upload",
+      sourceId: null,
+      fileName: result.fileName,
+    };
+    const scope = {
+      lmPcode: activeLmPcode || "",
+      lmName: activeWorkbaseName,
+    };
+
+    dispatch(
+      recordTargetedBatchUploadAudit({
+        id: batchId,
+        source,
+        scope,
+        fileDecision: result.fileDecision,
+        totalRows: result.totalRows,
+        acceptedRows: result.acceptedRows,
+        rejectedRows: result.rejectedRows,
+        rejectionReasons: result.errors,
+        validation: result,
+      }),
+    );
+
+    if (!fileAccepted) {
+      setIsUploadModalOpen(false);
+      return;
+    }
+
     dispatch(
       prepareTargetedBatchDraft({
-        source: {
-          type: TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD,
-          label: "CSV Upload",
-          sourceId: null,
-          fileName,
-        },
-        scope: {
-          lmPcode: activeLmPcode || "",
-          lmName: activeWorkbaseName,
-        },
+        id: batchId,
+        source,
+        scope,
         selection: {
           reason: "CSV targeted batch upload",
           salesPeriodFrom: null,
@@ -189,8 +277,8 @@ export default function TargetedBatchesPage() {
           salesAllMeterIds: [],
           uploadRowIds: [],
         },
-        displayRows: rows,
-        validation,
+        displayRows: result.rows,
+        validation: result,
       }),
     );
 
@@ -244,9 +332,9 @@ export default function TargetedBatchesPage() {
             </div>
           </div>
           <p style={styles.subtitle}>
-            Upload, pre-check, receive, and review targeted meter batch rows.
-            CSV TB files and Prepaid Sales selections use the same TB Upload
-            Register.
+            Upload and assess controlled Targeted Batch CSV files. Complete files
+            receive ACCEPTED or REJECTED; accepted-file rows receive ACCEPT or
+            REJECT with reasons retained for rejected rows.
           </p>
         </div>
 
@@ -303,12 +391,13 @@ export default function TargetedBatchesPage() {
           <div>
             <h3 style={styles.panelTitle}>Upload Register</h3>
             <p style={styles.panelSubtitle}>
-              Current frontend TB Upload register. The existing Redux draft is
-              shown here until permanent Firestore TB storage is implemented.
+              Frontend session register for CSV outcomes and the active Targeted
+              Batch draft. Permanent Firestore audit is introduced by the backend
+              creation package.
             </p>
           </div>
 
-          <div style={styles.draftStreamBadge}>Frontend draft</div>
+          <div style={styles.draftStreamBadge}>Frontend register</div>
         </div>
 
         <div style={styles.filterRow}>
@@ -361,51 +450,94 @@ export default function TargetedBatchesPage() {
                 </tr>
               ) : null}
 
-              {filteredUploads.map((upload) => (
-                <tr key={upload.id}>
-                  <Td>
-                    <Link
-                      to={`/operations/targeted-batches/${encodeURIComponent(upload.id)}`}
-                      style={styles.rowLinkButton}
-                    >
-                      TB Rows
-                    </Link>
-                  </Td>
+              {filteredUploads.map((upload) => {
+                const activeDraftRows = draft?.id === upload.id;
+                const fileDecision = getUploadFileDecision(upload);
+                const fileRejected =
+                  fileDecision === TARGETED_BATCH_FILE_DECISIONS.REJECTED;
+                const rejectionReason =
+                  upload?.rejectionReasons?.[0] ||
+                  upload?.validation?.errors?.[0] ||
+                  null;
 
-                  <Td>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.rowDraftButton,
-                        ...styles.disabledButton,
-                      }}
-                      disabled
-                      title="The TB Final Report page is still a draft."
-                    >
-                      Final Report (DRAFT)
-                    </button>
-                  </Td>
+                return (
+                  <tr key={upload.id}>
+                    <Td>
+                      {activeDraftRows && !fileRejected ? (
+                        <Link
+                          to={`/operations/targeted-batches/${encodeURIComponent(upload.id)}`}
+                          style={styles.rowLinkButton}
+                        >
+                          TB Rows
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.rowDraftButton,
+                            ...styles.disabledButton,
+                          }}
+                          disabled
+                          title={
+                            fileRejected
+                              ? "A rejected file does not prepare TB rows."
+                              : "This frontend audit entry is not the active draft."
+                          }
+                        >
+                          {fileRejected ? "No TB Rows" : "Rows unavailable"}
+                        </button>
+                      )}
+                    </Td>
 
-                  <Td>
-                    <div style={styles.strongCell}>{upload.id || "NAv"}</div>
-                    <div style={styles.secondaryCellText}>
-                      {getSourceReference(upload)}
-                    </div>
-                    <div style={styles.secondaryCellText}>
-                      {upload.scope?.lmPcode || "NAv"} · {upload.scope?.lmName || "NAv"}
-                    </div>
-                    <div style={styles.secondaryCellText}>
-                      {upload.status || "DRAFT"} · {formatDateTime(upload.createdAt)}
-                    </div>
-                  </Td>
+                    <Td>
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.rowDraftButton,
+                          ...styles.disabledButton,
+                        }}
+                        disabled
+                        title="The TB Final Report page is still a draft."
+                      >
+                        Final Report (DRAFT)
+                      </button>
+                    </Td>
 
-                  <Td>
-                    <strong style={styles.totalCell}>
-                      {formatNumber(upload.displayRows?.length || 0)}
-                    </strong>
-                  </Td>
-                </tr>
-              ))}
+                    <Td>
+                      <div style={styles.strongCell}>{upload.id || "NAv"}</div>
+                      <div style={styles.secondaryCellText}>
+                        {getSourceReference(upload)}
+                      </div>
+                      <div style={styles.secondaryCellText}>
+                        {upload.scope?.lmPcode || "NAv"} ·{" "}
+                        {upload.scope?.lmName || "NAv"}
+                      </div>
+                      <div style={styles.secondaryCellText}>
+                        {upload.status || "DRAFT"}
+                        {fileDecision ? ` · File ${fileDecision}` : ""} ·{" "}
+                        {formatDateTime(upload.createdAt)}
+                      </div>
+                      {Number(upload?.rejectedRows || 0) > 0 ? (
+                        <div style={styles.secondaryCellText}>
+                          {formatNumber(upload.acceptedRows)} ACCEPT ·{" "}
+                          {formatNumber(upload.rejectedRows)} REJECT
+                        </div>
+                      ) : null}
+                      {rejectionReason ? (
+                        <div style={styles.secondaryCellText}>
+                          Reason: {rejectionReason}
+                        </div>
+                      ) : null}
+                    </Td>
+
+                    <Td>
+                      <strong style={styles.totalCell}>
+                        {formatNumber(getUploadTotal(upload))}
+                      </strong>
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -413,8 +545,9 @@ export default function TargetedBatchesPage() {
         {draft ? (
           <div style={styles.registerFooter}>
             <p style={styles.registerFooterText}>
-              This row is still held in Redux only. Clearing it removes the
-              current frontend TB draft.
+              Clearing the active draft removes its working rows from Redux. A CSV
+              file outcome already recorded in this frontend session remains in
+              the Upload Register until the page state is reset.
             </p>
             <div style={styles.registerFooterActions}>
               <Link
@@ -438,7 +571,8 @@ export default function TargetedBatchesPage() {
       {isUploadModalOpen ? (
         <TargetedBatchUploadModal
           onClose={() => setIsUploadModalOpen(false)}
-          onPrepare={handlePrepareCsvBatch}
+          onSubmit={handleSubmitCsvBatch}
+          hasExistingDraft={Boolean(draft)}
         />
       ) : null}
 

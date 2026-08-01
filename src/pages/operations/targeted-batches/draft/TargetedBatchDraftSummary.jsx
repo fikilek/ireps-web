@@ -26,18 +26,33 @@ export default function TargetedBatchDraftSummary({
     <>
       <div style={styles.summaryGrid}>
         <SummaryCard label="Draft Rows" value={formatNumber(totalRows)} />
-        <SummaryCard
-          label={salesSource ? "Sales All Meter IDs" : "Source Row IDs"}
-          value={formatNumber(
-            salesSource
-              ? draft?.authoritativeIds?.salesAllMeterIds?.length
-              : draft?.authoritativeIds?.uploadRowIds?.length,
-          )}
-        />
-        <SummaryCard
-          label="Selected Sales Value"
-          value={formatCurrencyFromCents(summary.totalSalesC)}
-        />
+
+        {salesSource ? (
+          <>
+            <SummaryCard
+              label="Sales All Meter IDs"
+              value={formatNumber(
+                draft?.authoritativeIds?.salesAllMeterIds?.length,
+              )}
+            />
+            <SummaryCard
+              label="Selected Sales Value"
+              value={formatCurrencyFromCents(summary.totalSalesC)}
+            />
+          </>
+        ) : (
+          <>
+            <SummaryCard
+              label="Accepted Rows"
+              value={formatNumber(summary.acceptedRows)}
+            />
+            <SummaryCard
+              label="Rejected Rows"
+              value={formatNumber(summary.rejectedRows)}
+            />
+          </>
+        )}
+
         <SummaryCard
           label="AST Matched"
           value={formatNumber(summary.astMatched)}
@@ -47,8 +62,12 @@ export default function TargetedBatchDraftSummary({
           value={formatNumber(summary.astNotMatched)}
         />
         <SummaryCard
-          label="Validation"
-          value={draft?.validation?.status || "DRAFT"}
+          label={salesSource ? "Validation" : "File Decision"}
+          value={
+            salesSource
+              ? draft?.validation?.status || "DRAFT"
+              : draft?.validation?.fileDecision || "DRAFT"
+          }
         />
         <SummaryCard
           label="Selection Reason"
@@ -77,8 +96,13 @@ export default function TargetedBatchDraftSummary({
         <div style={styles.sourceNotice}>
           <strong>CSV-originated Targeted Batch</strong>
           <p style={styles.sourceNoticeParagraph}>
-            Source file: {draft?.source?.fileName || "NAv"}. Whole-file
-            validation status: {draft?.validation?.status || "DRAFT"}.
+            Source file: {draft?.source?.fileName || "NAv"}. Whole-file outcome:{" "}
+            {draft?.validation?.fileDecision || "DRAFT"}.
+          </p>
+          <p style={styles.sourceNoticeParagraph}>
+            Every accepted-file row has an ACCEPT or REJECT outcome. REJECT rows
+            remain visible with reasons for audit, but only ACCEPT rows may continue
+            into the later backend allocation and field-work stages.
           </p>
         </div>
       )}
