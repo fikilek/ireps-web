@@ -516,3 +516,82 @@ export function normalizeSalesTargetRows(rows = [], selectionReason = "NAv") {
     };
   });
 }
+
+export function downloadTargetedBatchRows({ batch, rows = [] }) {
+  const headers = [
+    "tbId",
+    "tbRowId",
+    "rowNo",
+    "sourceType",
+    "sourceReference",
+    "rowOutcome",
+    "rejectionReason",
+    "meterNo",
+    "accountNumber",
+    "customerName",
+    "address",
+    "town",
+    "sgCode",
+    "actionReason",
+    "astMatchStatus",
+    "proposedTrnType",
+    "allocationStatus",
+    "allocationTargetType",
+    "allocationTargetId",
+    "allocationTargetName",
+    "fieldAcceptanceStatus",
+    "premiseStatus",
+    "premiseId",
+    "meterDiscoveryStatus",
+    "meterDiscoveryTrnId",
+    "completionStatus",
+    "astId",
+    "salesAllMeterId",
+    "totalSalesC",
+  ];
+
+  const csvRows = [
+    headers,
+    ...rows.map((row) => [
+      batch?.id || "",
+      row?.tbRowId || "",
+      row?.rowNo || "",
+      row?.sourceType || batch?.source?.type || "",
+      row?.sourceReference || "",
+      row?.outcome || "",
+      row?.rejectionReason || "",
+      row?.meterNo || "",
+      row?.accountNumber || "",
+      row?.customerName || "",
+      row?.address || "",
+      row?.town || "",
+      row?.sgCode || "",
+      row?.actionReason || "",
+      row?.astMatchStatus || "",
+      row?.proposedTrnType || "",
+      row?.allocationStatus || "",
+      row?.allocationTarget?.type || "",
+      row?.allocationTarget?.id || "",
+      row?.allocationTarget?.name || "",
+      row?.fieldAcceptanceStatus || "",
+      row?.premiseStatus || "",
+      row?.premiseId || "",
+      row?.meterDiscoveryStatus || "",
+      row?.meterDiscoveryTrnId || "",
+      row?.completionStatus || "",
+      row?.astId || "",
+      row?.salesAllMeterId || "",
+      row?.totalSalesC ?? "",
+    ]),
+  ];
+
+  const csv = csvRows
+    .map((row) => row.map(escapeCsvValue).join(","))
+    .join("\n");
+
+  downloadTextFile({
+    content: csv,
+    fileName: `${batch?.id || "TARGETED_BATCH"}_TB_ROWS.csv`,
+    type: "text/csv;charset=utf-8;",
+  });
+}
