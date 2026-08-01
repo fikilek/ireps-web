@@ -12,6 +12,9 @@ import {
   commitGeoFenceMembershipUpdates,
   recomputeGeoFenceCounts,
 } from "./membership.js";
+import {
+  collectGeoFenceDemoSalesUpdates,
+} from "./salesMembership.js";
 
 /* =====================================================
    ON GEOFENCE CREATED
@@ -174,15 +177,59 @@ export const onGeoFenceCreated = onDocumentCreated(
       console.log("onGeoFenceCreated ---- ast updates", astCommit);
 
       /* =====================================================
+         DEMO SALES METER PHASE
+         ===================================================== */
+
+      const demoSalesSnapshot = await db
+        .collection("demo_sales_meters")
+        .where("HasUsableGps", "==", true)
+        .get();
+
+      console.log("onGeoFenceCreated ---- demo Sales candidates", {
+        count: demoSalesSnapshot.size,
+      });
+
+      const salesMembership = collectGeoFenceDemoSalesUpdates({
+        salesDocs: demoSalesSnapshot.docs,
+        geoFenceId,
+        geoFenceName,
+        lmPcode,
+        wardPcode,
+        bbox,
+        polygonPoints,
+      });
+
+      console.log("onGeoFenceCreated ---- demo Sales assessed", {
+        candidatePointsChecked: salesMembership.candidatePointsChecked,
+        memberCount: salesMembership.memberCount,
+        updatesRequired: salesMembership.updates.length,
+      });
+
+      const salesCommit = await commitGeoFenceMembershipUpdates({
+        db,
+        updates: salesMembership.updates,
+      });
+
+      console.log("onGeoFenceCreated ---- demo Sales updates", {
+        ...salesCommit,
+        memberCount: salesMembership.memberCount,
+      });
+
+      /* =====================================================
          COUNTS PHASE
          ===================================================== */
 
-      const counts = await recomputeGeoFenceCounts({
+      const baseCounts = await recomputeGeoFenceCounts({
         db,
         geoFenceId,
         lmPcode,
         wardPcode,
       });
+
+      const counts = {
+        ...baseCounts,
+        salesMeters: salesMembership.memberCount,
+      };
 
       await geoFenceSnap.ref.update({
         counts,

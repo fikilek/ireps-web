@@ -75,6 +75,7 @@ export const createGeoFence = onCall(async (request) => {
       erfs: 0,
       premises: 0,
       meters: 0,
+      salesMeters: 0,
     },
 
     metadata: {
@@ -94,6 +95,7 @@ export const createGeoFence = onCall(async (request) => {
       erfs: 0,
       premises: 0,
       meters: 0,
+      salesMeters: 0,
     },
   };
 });
