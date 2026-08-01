@@ -1,6 +1,9 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
+
+import { useWarehouse } from "@/context/WarehouseContext";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
@@ -14,14 +17,107 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function normalizeWardNumber(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const numeric = Number(text.replace(/\D/g, ""));
+  return Number.isFinite(numeric) ? String(numeric) : text.toUpperCase();
+}
+
+function getWardNumber(ward = {}) {
+  return (
+    ward?.code ||
+    ward?.wardNumber ||
+    ward?.wardNo ||
+    ward?.wardNumberLabel ||
+    ""
+  );
+}
+
+function parseGeometry(geometry) {
+  if (!geometry) return null;
+
+  if (typeof geometry === "string") {
+    try {
+      return JSON.parse(geometry);
+    } catch (error) {
+      console.error("Could not parse Sales GPS ward geometry:", error);
+      return null;
+    }
+  }
+
+  return geometry;
+}
+
+function geoJsonPolygonToGooglePaths(geometry) {
+  if (!geometry) return [];
+
+  if (geometry.type === "Polygon") {
+    return geometry.coordinates.map((ring) =>
+      ring.map(([lng, lat]) => ({ lat, lng })),
+    );
+  }
+
+  if (geometry.type === "MultiPolygon") {
+    return geometry.coordinates.flatMap((polygon) =>
+      polygon.map((ring) => ring.map(([lng, lat]) => ({ lat, lng }))),
+    );
+  }
+
+  return [];
+}
+
+function fitMapToBbox(map, bbox) {
+  if (!map || !bbox || !window.google?.maps) return false;
+
+  const minLat = Number(bbox.minLat ?? bbox.minLatitude);
+  const minLng = Number(bbox.minLng ?? bbox.minLongitude);
+  const maxLat = Number(bbox.maxLat ?? bbox.maxLatitude);
+  const maxLng = Number(bbox.maxLng ?? bbox.maxLongitude);
+
+  if (![minLat, minLng, maxLat, maxLng].every(Number.isFinite)) {
+    return false;
+  }
+
+  const bounds = new window.google.maps.LatLngBounds();
+
+  bounds.extend({ lat: minLat, lng: minLng });
+  bounds.extend({ lat: maxLat, lng: maxLng });
+
+  map.fitBounds(bounds, 42);
+  return true;
+}
+
+function fitMapToPaths(map, paths = []) {
+  if (!map || !window.google?.maps || paths.length === 0) return false;
+
+  const bounds = new window.google.maps.LatLngBounds();
+  let pointCount = 0;
+
+  paths.forEach((ring) => {
+    ring.forEach((point) => {
+      if (!Number.isFinite(point?.lat) || !Number.isFinite(point?.lng)) return;
+      bounds.extend(point);
+      pointCount += 1;
+    });
+  });
+
+  if (pointCount === 0) return false;
+
+  map.fitBounds(bounds, 42);
+  return true;
+}
+
 function getWardGpsPoints(rows = [], selectedWardNo = "") {
   if (!selectedWardNo) return [];
 
+  const normalizedSelectedWard = normalizeWardNumber(selectedWardNo);
   const points = [];
 
   rows.forEach((row) => {
     const rowWardNumbers = Array.isArray(row?.wardNumbers)
-      ? row.wardNumbers.map((value) => String(value || "").trim())
+      ? row.wardNumbers.map(normalizeWardNumber)
       : [];
 
     const candidates = Array.isArray(row?.erfCandidates)
@@ -31,10 +127,10 @@ function getWardGpsPoints(rows = [], selectedWardNo = "") {
     candidates.forEach((candidate, candidateIndex) => {
       const latitude = Number(candidate?.latitude);
       const longitude = Number(candidate?.longitude);
-      const candidateWardNo = String(candidate?.wardNumber || "").trim();
+      const candidateWardNo = normalizeWardNumber(candidate?.wardNumber);
       const belongsToWard = candidateWardNo
-        ? candidateWardNo === selectedWardNo
-        : rowWardNumbers.includes(selectedWardNo);
+        ? candidateWardNo === normalizedSelectedWard
+        : rowWardNumbers.includes(normalizedSelectedWard);
 
       if (
         candidate?.hasValidGps !== true ||
@@ -55,7 +151,7 @@ function getWardGpsPoints(rows = [], selectedWardNo = "") {
         customerName: row?.customerName || "NAv",
         addressLine1: row?.addressLine1 || "NAv",
         town: row?.town || "NAv",
-        wardNo: candidateWardNo || selectedWardNo,
+        wardNo: candidate?.wardNumber || selectedWardNo,
         erfNumber: candidate?.erfNumber || "NAv",
         erfId: candidate?.erfId || "NAv",
         latitude,
@@ -67,13 +163,107 @@ function getWardGpsPoints(rows = [], selectedWardNo = "") {
   return points;
 }
 
-function SalesGpsMarkers({ points, fitRequest }) {
+function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
   const map = useMap();
+  const polygonRef = useRef(null);
+
+  const paths = useMemo(() => {
+    return geoJsonPolygonToGooglePaths(
+      parseGeometry(wardBoundary?.geometry),
+    );
+  }, [wardBoundary?.geometry]);
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+
+    if (polygonRef.current) {
+      polygonRef.current.setMap(null);
+      polygonRef.current = null;
+    }
+
+    if (!wardBoundary || paths.length === 0) return undefined;
+
+    const polygon = new window.google.maps.Polygon({
+      paths,
+      strokeColor: "#1d4ed8",
+      strokeOpacity: 1,
+      strokeWeight: 3,
+      fillColor: "#2563eb",
+      fillOpacity: 0.1,
+      clickable: false,
+      zIndex: 10,
+    });
+
+    polygon.setMap(map);
+    polygonRef.current = polygon;
+
+    if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+      fitMapToPaths(map, paths);
+    }
+
+    return () => {
+      if (polygonRef.current) {
+        polygonRef.current.setMap(null);
+        polygonRef.current = null;
+      }
+    };
+  }, [map, paths, wardBoundary]);
+
+  useEffect(() => {
+    if (
+      !map ||
+      !wardBoundary ||
+      paths.length === 0 ||
+      fitRequest === 0
+    ) {
+      return;
+    }
+
+    if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+      fitMapToPaths(map, paths);
+    }
+  }, [fitRequest, map, paths, wardBoundary]);
+
+  return null;
+}
+
+function fitMapToPoints(map, points = []) {
+  if (!map || !window.google?.maps || points.length === 0) return;
+
+  if (points.length === 1) {
+    map.panTo({
+      lat: points[0].latitude,
+      lng: points[0].longitude,
+    });
+    map.setZoom(18);
+    return;
+  }
+
+  const bounds = new window.google.maps.LatLngBounds();
+
+  points.forEach((point) => {
+    bounds.extend({
+      lat: point.latitude,
+      lng: point.longitude,
+    });
+  });
+
+  map.fitBounds(bounds, 48);
+}
+
+function SalesGpsMarkers({ points, fitRequest, fitPointsAutomatically }) {
+  const map = useMap();
+  const clustererRef = useRef(null);
   const markersRef = useRef([]);
   const infoWindowRef = useRef(null);
 
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;
+
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+      clustererRef.current = null;
+    }
 
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
@@ -84,30 +274,26 @@ function SalesGpsMarkers({ points, fitRequest }) {
 
     if (points.length === 0) return undefined;
 
-    const bounds = new window.google.maps.LatLngBounds();
     const infoWindow = new window.google.maps.InfoWindow();
     infoWindowRef.current = infoWindow;
 
     const markers = points.map((point) => {
-      const position = {
-        lat: point.latitude,
-        lng: point.longitude,
-      };
-
-      bounds.extend(position);
-
       const marker = new window.google.maps.Marker({
-        position,
+        position: {
+          lat: point.latitude,
+          lng: point.longitude,
+        },
         map,
         title: `Meter ${point.meterNo}`,
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
           scale: 7,
-          fillColor: "#2563eb",
-          fillOpacity: 0.94,
+          fillColor: "#dc2626",
+          fillOpacity: 0.96,
           strokeColor: "#ffffff",
           strokeWeight: 2,
         },
+        zIndex: 40,
       });
 
       marker.addListener("click", () => {
@@ -136,54 +322,41 @@ function SalesGpsMarkers({ points, fitRequest }) {
     });
 
     markersRef.current = markers;
+    clustererRef.current = new MarkerClusterer({
+      map,
+      markers,
+    });
 
-    if (points.length === 1) {
-      map.panTo({
-        lat: points[0].latitude,
-        lng: points[0].longitude,
-      });
-      map.setZoom(18);
-    } else {
-      map.fitBounds(bounds, 48);
+    if (fitPointsAutomatically) {
+      fitMapToPoints(map, points);
     }
 
     return () => {
       infoWindow.close();
+
+      if (clustererRef.current) {
+        clustererRef.current.clearMarkers();
+        clustererRef.current = null;
+      }
+
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
       infoWindowRef.current = null;
     };
-  }, [map, points]);
+  }, [fitPointsAutomatically, map, points]);
 
   useEffect(() => {
     if (
       !map ||
-      !window.google?.maps ||
       points.length === 0 ||
-      fitRequest === 0
+      fitRequest === 0 ||
+      !fitPointsAutomatically
     ) {
       return;
     }
 
-    const bounds = new window.google.maps.LatLngBounds();
-
-    points.forEach((point) => {
-      bounds.extend({
-        lat: point.latitude,
-        lng: point.longitude,
-      });
-    });
-
-    if (points.length === 1) {
-      map.panTo({
-        lat: points[0].latitude,
-        lng: points[0].longitude,
-      });
-      map.setZoom(18);
-    } else {
-      map.fitBounds(bounds, 48);
-    }
-  }, [fitRequest, map, points]);
+    fitMapToPoints(map, points);
+  }, [fitPointsAutomatically, fitRequest, map, points]);
 
   return null;
 }
@@ -194,7 +367,27 @@ export default function SalesGpsMapSection({
   selectedWardNo = "",
   onSelectedWardNoChange,
 }) {
+  const { available, sync } = useWarehouse();
   const [fitRequest, setFitRequest] = useState(0);
+
+  const wardBoundaries = useMemo(
+    () => available?.wards || [],
+    [available?.wards],
+  );
+
+  const selectedWardBoundary = useMemo(() => {
+    const normalizedSelectedWard = normalizeWardNumber(selectedWardNo);
+
+    if (!normalizedSelectedWard) return null;
+
+    return (
+      wardBoundaries.find(
+        (ward) =>
+          normalizeWardNumber(getWardNumber(ward)) ===
+          normalizedSelectedWard,
+      ) || null
+    );
+  }, [selectedWardNo, wardBoundaries]);
 
   const points = useMemo(
     () => getWardGpsPoints(rows, selectedWardNo),
@@ -210,6 +403,9 @@ export default function SalesGpsMapSection({
     ? { lat: points[0].latitude, lng: points[0].longitude }
     : FALLBACK_CENTER;
 
+  const wardSyncStatus = sync?.wards?.status || "idle";
+  const hasWardBoundary = Boolean(selectedWardBoundary);
+
   return (
     <section style={styles.panel}>
       <div style={styles.header}>
@@ -217,8 +413,8 @@ export default function SalesGpsMapSection({
           <p style={styles.eyebrow}>Sales GPS Map</p>
           <h3 style={styles.title}>Meters with GPS by ward</h3>
           <p style={styles.subtitle}>
-            Select one ward to display every Sales meter with a valid GPS
-            candidate in that ward.
+            Select one ward to draw its authoritative boundary and display all
+            clustered Sales GPS meters in that ward.
           </p>
         </div>
 
@@ -249,29 +445,23 @@ export default function SalesGpsMapSection({
             type="button"
             style={{
               ...styles.fitButton,
-              ...(points.length === 0 ? styles.disabledButton : null),
+              ...(!hasWardBoundary && points.length === 0
+                ? styles.disabledButton
+                : null),
             }}
             onClick={() => setFitRequest((current) => current + 1)}
-            disabled={points.length === 0}
+            disabled={!hasWardBoundary && points.length === 0}
           >
-            Fit Ward Meters
+            Fit Ward
           </button>
         </div>
       </div>
 
       {!selectedWardNo ? (
         <div style={styles.emptyState}>
-          <strong>Select a ward to display GPS meters on the map.</strong>
+          <strong>Select a ward to display its boundary and GPS meters.</strong>
           <span>
             The map remains unloaded until a ward is selected.
-          </span>
-        </div>
-      ) : points.length === 0 ? (
-        <div style={styles.emptyState}>
-          <strong>No usable GPS meters were found for Ward {selectedWardNo}.</strong>
-          <span>
-            Only Sales rows with valid ERF-candidate latitude and longitude are
-            displayed.
           </span>
         </div>
       ) : !googleMapsApiKey ? (
@@ -284,6 +474,19 @@ export default function SalesGpsMapSection({
         </div>
       ) : (
         <>
+          {!hasWardBoundary ? (
+            <div style={styles.warningState}>
+              Ward {selectedWardNo} boundary is not available from the Warehouse
+              ward layer. Ward sync status: {wardSyncStatus}.
+            </div>
+          ) : null}
+
+          {points.length === 0 ? (
+            <div style={styles.warningState}>
+              No usable GPS meters were found for Ward {selectedWardNo}.
+            </div>
+          ) : null}
+
           <div style={styles.mapWrap}>
             <APIProvider apiKey={googleMapsApiKey}>
               <Map
@@ -294,17 +497,26 @@ export default function SalesGpsMapSection({
                 disableDefaultUI={false}
                 style={{ width: "100%", height: "100%" }}
               >
-                <SalesGpsMarkers points={points} fitRequest={fitRequest} />
+                <SalesWardBoundaryLayer
+                  wardBoundary={selectedWardBoundary}
+                  fitRequest={fitRequest}
+                />
+                <SalesGpsMarkers
+                  points={points}
+                  fitRequest={fitRequest}
+                  fitPointsAutomatically={!hasWardBoundary}
+                />
               </Map>
             </APIProvider>
           </div>
 
           <div style={styles.footer}>
             <span>
-              Ward {selectedWardNo}: {gpsMeterCount} GPS meter
-              {gpsMeterCount === 1 ? "" : "s"}
+              Ward {selectedWardNo}:{" "}
+              {hasWardBoundary ? "boundary loaded" : "boundary unavailable"}
             </span>
             <span>
+              {gpsMeterCount} GPS meter{gpsMeterCount === 1 ? "" : "s"} ·{" "}
               {points.length} map point{points.length === 1 ? "" : "s"}
             </span>
           </div>
@@ -409,6 +621,14 @@ const styles = {
     padding: "1.25rem",
     color: "#475569",
     textAlign: "center",
+  },
+  warningState: {
+    padding: "0.65rem 1rem",
+    borderBottom: "1px solid #fde68a",
+    background: "#fffbeb",
+    color: "#92400e",
+    fontSize: "0.78rem",
+    fontWeight: 750,
   },
   footer: {
     display: "flex",
