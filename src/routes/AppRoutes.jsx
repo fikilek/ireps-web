@@ -28,6 +28,13 @@ import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 
 import OperationsLandingPage from "../pages/operations/OperationsLandingPage";
 import TcUploadsPage from "../pages/operations/TcUploadsPage";
+import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
+import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
+import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboardPage";
+import TargetedBatchDetailDashboardPage from "../pages/operations/TargetedBatchDetailDashboardPage";
+import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPage";
+import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
+import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
 import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
@@ -45,6 +52,7 @@ import ProfilePage from "../pages/profile/ProfilePage";
 import MreadStagingControllerPage from "../pages/admin/MreadStagingControllerPage";
 import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 
+import PrepaidSales from "../pages/sales/PrepaidSales";
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
@@ -78,6 +86,17 @@ export default function AppRoutes() {
           />
 
           <Route path="/access-denied" element={<AccessDeniedPage />} />
+
+          {/* SALES */}
+
+          <Route
+            path="/sales"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <PrepaidSales />
+              </RoleRoute>
+            }
+          />
 
           {/* REGISTRIES */}
 
@@ -225,6 +244,69 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TcUploadsPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/targeted-batches"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchesPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/targeted-batches/draft"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchDraftPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/tb-dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/targeted-batches/:tbId"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchDetailsPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/targeted-batches/:tbId/final-report"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchFinalReportPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/targeted-batches/:tbId/allocation"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchAllocationPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/targeted-batches/:tbId/dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchDetailDashboardPage />
               </RoleRoute>
             }
           />

@@ -85,6 +85,11 @@ const navSections = [
         path: "/ward-scope/map",
         allowedRoles: MANAGEMENT_ROLES,
       },
+      {
+        label: "Sales",
+        path: "/sales",
+        allowedRoles: MANAGEMENT_ROLES,
+      },
     ],
     groups: [
       {
@@ -168,6 +173,16 @@ const navSections = [
           {
             label: "TC Uploads",
             path: "/operations/tc-uploads",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "TB Uploads",
+            path: "/operations/targeted-batches",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "TB Dashboard",
+            path: "/operations/tb-dashboard",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
@@ -410,6 +425,20 @@ function getFlatNavItems(sections = []) {
 }
 
 function getActiveNavItem(items = [], pathname) {
+  const isTbDashboardRoute =
+    pathname === "/operations/tb-dashboard" ||
+    /^\/operations\/targeted-batches\/[^/]+\/dashboard$/.test(pathname);
+
+  if (isTbDashboardRoute) {
+    const tbDashboardItem = items.find(
+      (item) => item.path === "/operations/tb-dashboard",
+    );
+
+    if (tbDashboardItem) {
+      return tbDashboardItem;
+    }
+  }
+
   if (pathname.includes("/bgo-dashboard")) {
     const bgoDashboardItem = items.find(
       (item) => item.path === "/operations/bgo-dashboard",
