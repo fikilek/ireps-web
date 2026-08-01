@@ -346,24 +346,71 @@ export function validateTargetedBatchCsv({ fileName, text }) {
   };
 }
 
+function normalizeSalesAllMeterId(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+export function getSalesAllMeterId(row = {}) {
+  return normalizeSalesAllMeterId(
+    row?.salesAllMeterId ||
+      row?.sourceSalesAllMeterId ||
+      row?.master?.id ||
+      row?.meterNoNormalized ||
+      row?.meterNo ||
+      row?.id,
+  );
+}
+
 export function normalizeSalesTargetRows(rows = [], selectionReason = "NAv") {
-  return rows.map((row, index) => ({
-    id: row.id || `SALES_${index + 1}`,
-    rowNo: String(index + 1),
-    sourceLine: null,
-    meterNo: String(row.meterNo || row.meterNoNormalized || "").trim(),
-    addressLine1: String(row.addressLine1 || "").trim(),
-    town: String(row.town || "").trim(),
-    standNumber: String(row.standNumber || "").trim(),
-    actionReason: selectionReason,
-    totalSalesC: Number(row.totalSalesC || 0),
-    sales3MonthsC: Number(row.sales3MonthsC || 0),
-    sales6MonthsC: Number(row.sales6MonthsC || 0),
-    sales12MonthsC: Number(row.sales12MonthsC || 0),
-    monthsWithoutSales: Number(row.monthsWithoutSales || 0),
-    lastPositiveSalesMonth: row.lastPositiveSalesMonth || null,
-    astId: row.astId || null,
-    astMatchStatus: String(row.astMatchStatus || "NOT_CHECKED"),
-    proposedTrnType: row.proposedTrnType || null,
-  }));
+  return rows.map((row, index) => {
+    const salesAllMeterId = getSalesAllMeterId(row);
+    const meterNo = String(
+      row?.meterNo || row?.meterNoNormalized || salesAllMeterId || "",
+    ).trim();
+
+    return {
+      id: salesAllMeterId || row?.id || `SALES_${index + 1}`,
+      rowNo: String(index + 1),
+      sourceLine: null,
+      salesAllMeterId: salesAllMeterId || null,
+      sourceSalesAllMeterId: salesAllMeterId || null,
+      meterNo,
+      meterNoNormalized: salesAllMeterId || meterNo,
+      accountNumber: String(
+        row?.accountNumber || row?.accountNo || row?.customerNo || "",
+      ).trim(),
+      customerName: String(row?.customerName || "").trim(),
+      addressLine1: String(row?.addressLine1 || "").trim(),
+      town: String(row?.town || "").trim(),
+      standNumber: String(row?.standNumber || row?.sgCode || "").trim(),
+      wardNumberLabel: String(row?.wardNumberLabel || "").trim(),
+      wardNumbers: Array.isArray(row?.wardNumbers) ? [...row.wardNumbers] : [],
+      actionReason: selectionReason,
+      totalSalesC: Number(row?.totalSalesC || row?.totalAmountC || 0),
+      latestMonthSalesC: Number(row?.latestMonthSalesC || 0),
+      latest12MonthsSalesC: Number(
+        row?.latest12MonthsSalesC || row?.sales12MonthsC || 0,
+      ),
+      sales3MonthsC: Number(row?.sales3MonthsC || 0),
+      sales6MonthsC: Number(row?.sales6MonthsC || 0),
+      sales12MonthsC: Number(row?.sales12MonthsC || 0),
+      sales2024C: Number(row?.sales2024C || 0),
+      sales2025C: Number(row?.sales2025C || 0),
+      sales2026C: Number(row?.sales2026C || 0),
+      monthlySalesC: { ...(row?.monthlySalesC || row?.monthlyTotalsC || {}) },
+      monthlyUnits: { ...(row?.monthlyUnits || {}) },
+      monthsWithoutSales: Number(row?.monthsWithoutSales || 0),
+      lastPositiveSalesMonth: row?.lastPositiveSalesMonth || null,
+      sourceFileName: String(row?.sourceFileName || "").trim(),
+      sourceRow: Number(row?.sourceRow || 0),
+      astId: row?.astId || null,
+      astMatchStatus: String(row?.astMatchStatus || "NOT_CHECKED").toUpperCase(),
+      proposedTrnType: row?.proposedTrnType || null,
+      masterVisibility:
+        row?.masterVisibility || row?.master?.visibility || null,
+    };
+  });
 }

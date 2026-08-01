@@ -37,6 +37,13 @@ function uniqueStrings(values = []) {
   );
 }
 
+function normalizeAuthoritativeId(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
 function readFirstString(...values) {
   for (const value of values) {
     const clean = String(value || "").trim();
@@ -132,20 +139,25 @@ function deriveSalesAllMeterIds(rows = []) {
   return uniqueStrings(
     asArray(rows)
       .map((row) =>
-        readFirstString(
-          row?.salesAllMeterId,
-          row?.salesAllMetersId,
-          row?.sourceSalesAllMeterId,
-          row?.source?.salesAllMeterId,
-          row?.sourceId,
-          row?.id,
+        normalizeAuthoritativeId(
+          readFirstString(
+            row?.salesAllMeterId,
+            row?.salesAllMetersId,
+            row?.sourceSalesAllMeterId,
+            row?.source?.salesAllMeterId,
+            row?.master?.id,
+            row?.meterNoNormalized,
+            row?.meterNo,
+            row?.sourceId,
+            row?.id,
+          ),
         ),
       )
       .filter(
         (value) =>
           value &&
-          !/^SALES_\d+$/i.test(value) &&
-          !/^MANUAL_/i.test(value),
+          !/^SALES\d+$/i.test(value) &&
+          !/^MANUAL/i.test(value),
       ),
   );
 }
@@ -244,9 +256,11 @@ export function buildTargetedBatchDraft(payload = {}) {
     payload?.selection?.salesPeriodTo ?? payload?.salesPeriodTo ?? null;
 
   const explicitSalesIds = uniqueStrings(
-    payload?.authoritativeIds?.salesAllMeterIds ??
-      payload?.salesAllMeterIds ??
-      payload?.selectedSalesAllMeterIds,
+    asArray(
+      payload?.authoritativeIds?.salesAllMeterIds ??
+        payload?.salesAllMeterIds ??
+        payload?.selectedSalesAllMeterIds,
+    ).map(normalizeAuthoritativeId),
   );
   const explicitUploadRowIds = uniqueStrings(
     payload?.authoritativeIds?.uploadRowIds ?? payload?.uploadRowIds,
@@ -327,4 +341,81 @@ export function getTargetedBatchDraftView(draft) {
 
 export function getTargetedBatchDraftRows(draft) {
   return getTargetedBatchDraftView(draft)?.displayRows || [];
+}
+
+export function getTargetedBatchDraftIntegrity(draft) {
+  const currentDraft = getTargetedBatchDraftView(draft);
+
+  if (!currentDraft) {
+    return {
+      canConfirm: false,
+      blockers: ["No Targeted Batch draft is available."],
+      totalRows: 0,
+      authoritativeIdCount: 0,
+      missingAuthoritativeIdRows: 0,
+      duplicateAuthoritativeIds: [],
+    };
+  }
+
+  const rows = currentDraft.displayRows;
+  const blockers = [];
+  const isSalesSource =
+    currentDraft.source.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES;
+  const rowIds = rows.map((row) =>
+    normalizeAuthoritativeId(
+      row?.salesAllMeterId ||
+        row?.sourceSalesAllMeterId ||
+        row?.master?.id ||
+        row?.meterNoNormalized ||
+        row?.meterNo,
+    ),
+  );
+  const counts = rowIds.reduce((result, id) => {
+    if (!id) return result;
+    result.set(id, (result.get(id) || 0) + 1);
+    return result;
+  }, new Map());
+  const duplicateAuthoritativeIds = Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([id]) => id);
+  const missingAuthoritativeIdRows = rowIds.filter((id) => !id).length;
+  const authoritativeIdCount = new Set(rowIds.filter(Boolean)).size;
+
+  if (rows.length === 0) {
+    blockers.push("The draft contains no candidate rows.");
+  }
+
+  if (!currentDraft.validation?.passed) {
+    blockers.push("The draft validation status is not PASSED.");
+  }
+
+  if (isSalesSource && missingAuthoritativeIdRows > 0) {
+    blockers.push(
+      `${missingAuthoritativeIdRows} sales row(s) have no Sales All Meters identity.`,
+    );
+  }
+
+  if (isSalesSource && duplicateAuthoritativeIds.length > 0) {
+    blockers.push(
+      `${duplicateAuthoritativeIds.length} duplicate Sales All Meters identity value(s) were found.`,
+    );
+  }
+
+  if (
+    isSalesSource &&
+    currentDraft.authoritativeIds.salesAllMeterIds.length !== rows.length
+  ) {
+    blockers.push(
+      "The authoritative Sales All Meters ID count does not match the draft row count.",
+    );
+  }
+
+  return {
+    canConfirm: blockers.length === 0,
+    blockers,
+    totalRows: rows.length,
+    authoritativeIdCount,
+    missingAuthoritativeIdRows,
+    duplicateAuthoritativeIds,
+  };
 }

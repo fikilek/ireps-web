@@ -30,9 +30,12 @@ import { registryMreadApi } from "./registryMreadApi";
 import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
 import { mreadStagingApi } from "./mreadStagingApi";
 import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
+import targetedBatchDraftReducer from "./targetedBatchDraftSlice";
+import { demoSalesApi } from "./demoSalesApi";
 
 export const store = configureStore({
   reducer: {
+    targetedBatchDraft: targetedBatchDraftReducer,
     [registryWardsApi.reducerPath]: registryWardsApi.reducer,
     [registryErfsApi.reducerPath]: registryErfsApi.reducer,
     [registryPremisesApi.reducerPath]: registryPremisesApi.reducer,
@@ -63,6 +66,7 @@ export const store = configureStore({
     [usersApi.reducerPath]: usersApi.reducer,
     [geofencesApi.reducerPath]: geofencesApi.reducer,
     [fwrLiveLocationsApi.reducerPath]: fwrLiveLocationsApi.reducer,
+    [demoSalesApi.reducerPath]: demoSalesApi.reducer,
   },
 
   middleware: (getDefaultMiddleware) =>
@@ -93,7 +97,8 @@ export const store = configureStore({
       .concat(serviceProvidersApi.middleware)
       .concat(usersApi.middleware)
       .concat(geofencesApi.middleware)
-      .concat(fwrLiveLocationsApi.middleware),
+      .concat(fwrLiveLocationsApi.middleware)
+      .concat(demoSalesApi.middleware),
 });
 
 setupListeners(store.dispatch);
