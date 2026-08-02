@@ -275,6 +275,14 @@ export default function TargetedBatchDetailsPage() {
   }
 
   const encodedId = encodeURIComponent(batch.id);
+  const allocationStatus = String(batch?.allocation?.status || "")
+    .trim()
+    .toUpperCase();
+  const batchStatus = String(batch?.status || "")
+    .trim()
+    .toUpperCase();
+  const isPermanentlyAllocated =
+    allocationStatus === "ALLOCATED" || batchStatus === "ALLOCATED";
 
   return (
     <section style={styles.page}>
@@ -294,12 +302,28 @@ export default function TargetedBatchDetailsPage() {
         >
           Final Report
         </Link>
-        <Link
-          to={`/operations/targeted-batches/${encodedId}/allocation`}
-          style={styles.allocationLink}
-        >
-          TB Allocation
-        </Link>
+        {isPermanentlyAllocated ? (
+          <span
+            style={{
+              ...styles.allocationLink,
+              opacity: 0.62,
+              cursor: "not-allowed",
+            }}
+            role="link"
+            aria-disabled="true"
+            tabIndex={0}
+            title="Allocation prohibited: this Targeted Batch is already allocated."
+          >
+            Allocated
+          </span>
+        ) : (
+          <Link
+            to={`/operations/targeted-batches/${encodedId}/allocation`}
+            style={styles.allocationLink}
+          >
+            TB Allocation
+          </Link>
+        )}
       </div>
 
       <div style={styles.header}>

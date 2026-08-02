@@ -108,6 +108,29 @@ function getUploadFileDecision(upload) {
   return upload?.fileDecision || upload?.validation?.fileDecision || null;
 }
 
+function getAllocationState(upload = {}) {
+  const batchStatus = String(upload?.status || "")
+    .trim()
+    .toUpperCase();
+  const allocationStatus = String(upload?.allocation?.status || "")
+    .trim()
+    .toUpperCase();
+  const targetId =
+    upload?.allocation?.targetId ||
+    upload?.allocation?.target?.id ||
+    null;
+
+  const isAllocated =
+    batchStatus === "ALLOCATED" ||
+    allocationStatus === "ALLOCATED" ||
+    Boolean(targetId);
+
+  return {
+    isAllocated,
+    label: isAllocated ? "ALLOCATED" : "NOT ALLOCATED",
+  };
+}
+
 function getDeleteEligibility(upload = {}) {
   const executionStartedRows = Number(
     upload?.counts?.executionStartedRows || 0,
@@ -613,6 +636,7 @@ export default function TargetedBatchesPage() {
             <thead>
               <tr>
                 <Th>TB Rows</Th>
+                <Th>Allocation</Th>
                 <Th>Final Report (DRAFT)</Th>
                 <Th>Delete TB</Th>
                 <Th>TB ID</Th>
@@ -623,7 +647,7 @@ export default function TargetedBatchesPage() {
             <tbody>
               {filteredUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={5}>
+                  <Td colSpan={6}>
                     {isRegisterLoading
                       ? "Loading permanent Targeted Batches..."
                       : uploads.length === 0
@@ -637,6 +661,7 @@ export default function TargetedBatchesPage() {
                 const fileDecision = getUploadFileDecision(upload);
                 const creationReady = upload?.creation?.state === "READY";
                 const deleteEligibility = getDeleteEligibility(upload);
+                const allocationState = getAllocationState(upload);
                 const rejectionReason =
                   upload?.creation?.failureMessage ||
                   upload?.validation?.errors?.[0] ||
@@ -665,6 +690,24 @@ export default function TargetedBatchesPage() {
                           Rows unavailable
                         </button>
                       )}
+                    </Td>
+
+                    <Td>
+                      <span
+                        style={{
+                          ...styles.allocationStatusBadge,
+                          ...(allocationState.isAllocated
+                            ? styles.allocationStatusAllocated
+                            : styles.allocationStatusNotAllocated),
+                        }}
+                        title={
+                          allocationState.isAllocated
+                            ? "This Targeted Batch has a permanent whole-batch allocation."
+                            : "This Targeted Batch has not yet been permanently allocated."
+                        }
+                      >
+                        {allocationState.label}
+                      </span>
                     </Td>
 
                     <Td>
@@ -993,6 +1036,26 @@ const styles = {
     fontSize: 12,
     fontWeight: 900,
     whiteSpace: "nowrap",
+  },
+  allocationStatusBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    padding: "7px 10px",
+    fontSize: 11,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  },
+  allocationStatusAllocated: {
+    border: "1px solid #86efac",
+    background: "#dcfce7",
+    color: "#166534",
+  },
+  allocationStatusNotAllocated: {
+    border: "1px solid #fde68a",
+    background: "#fef3c7",
+    color: "#92400e",
   },
   deleteBatchButton: {
     display: "inline-flex",
