@@ -83,6 +83,10 @@ import {
 import { onDeleteUnacceptedBgoCallable } from "./bgo/deleteCallable.js";
 import { onBgoChildTrnExecutionSummaryWritten } from "./bgo/executionSummaryTrigger.js";
 
+import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
+import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
+import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
+
 import {
   onIrepsSelectOptionsCallable,
   onIrepsSelectLookupAdminCallable,
@@ -161,6 +165,9 @@ export {
   onReverseBgoBatchAcceptanceCallable,
   onDeleteUnacceptedBgoCallable,
   onBgoChildTrnExecutionSummaryWritten,
+  onCreateTargetedBatchCallable,
+  onDeleteTargetedBatchCallable,
+  onAllocateTargetedBatchCallable,
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,

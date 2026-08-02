@@ -1,9 +1,16 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useSelector } from "react-redux";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 
-import { getTargetedBatchDraftView } from "../../redux/targetedBatchDraftModel";
+import { db } from "../../firebase";
 import {
   downloadTargetedBatchRows,
   formatDateTime,
@@ -23,6 +30,70 @@ import { tbRowsStyles as styles } from "./targeted-batches/rows/targetedBatchRow
 
 const DEFAULT_PAGE_SIZE = 25;
 
+function timestampToIso(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value?.toDate === "function") return value.toDate().toISOString();
+  if (typeof value?.seconds === "number") {
+    return new Date(value.seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function mapPermanentTbRow(rowSnapshot) {
+  const data = rowSnapshot.data() || {};
+  const meterId = data?.refs?.meterId || null;
+  const decisionStatus = data?.decision?.status || "ACCEPT";
+  const decisionReasons = Array.isArray(data?.decision?.reasons)
+    ? data.decision.reasons
+    : data?.decision?.reasons
+      ? [String(data.decision.reasons)]
+      : [];
+
+  return {
+    ...data,
+    id: rowSnapshot.id,
+    tbRowId: rowSnapshot.id,
+    uploadRowId: rowSnapshot.id,
+    rowNo: data.rowNo,
+    salesAllMeterId: data.salesAllMeterId,
+    sourceSalesAllMeterId: data.salesAllMeterId,
+    sourceLine: data?.source?.sourceLine ?? null,
+    rowDecision: decisionStatus,
+    assessmentDecision: decisionStatus,
+    rowDecisionReasons: decisionReasons,
+    rowDecisionReason: decisionReasons.join(" ") || null,
+    meterNo: data?.meter?.numberRaw || data?.meter?.numberNormalized || "",
+    meterNoNormalized: data?.meter?.numberNormalized || "",
+    accountNumber: data?.customer?.accountNumber || "",
+    customerName: data?.customer?.customerName || "",
+    addressLine1: data?.location?.addressLine1 || "",
+    town: data?.location?.town || "",
+    standNumber: data?.location?.sgCode || "",
+    wardNumberLabel: data?.location?.wardNumberLabel || "",
+    wardNumbers: Array.isArray(data?.location?.wardNumbers)
+      ? data.location.wardNumbers
+      : [],
+    actionReason: data?.selection?.actionReason || "",
+    totalSalesC:
+      data?.salesSnapshot?.totalSalesC === null ||
+      data?.salesSnapshot?.totalSalesC === undefined
+        ? null
+        : Number(data.salesSnapshot.totalSalesC),
+    astId: meterId,
+    astMatchStatus: meterId ? "MATCHED" : "NOT_MATCHED",
+    proposedTrnType: meterId ? "METER_INSPECTION" : "METER_DISCOVERY",
+    premiseId: data?.refs?.premiseId || null,
+    meterDiscoveryTrnId: data?.refs?.trnId || null,
+    allocationStatus: data?.allocation?.status || "UNALLOCATED",
+    allocationTargetType: data?.allocation?.targetType || null,
+    allocationTargetId: data?.allocation?.targetId || null,
+    allocationTargetName: data?.allocation?.targetName || null,
+    completionStatus: data?.execution?.status || "NOT_STARTED",
+    confirmedAt: timestampToIso(data?.metadata?.createdAt),
+  };
+}
+
 function InfoItem({ label, value }) {
   return (
     <div style={styles.infoItem}>
@@ -33,7 +104,15 @@ function InfoItem({ label, value }) {
 }
 
 function BatchStatusBadge({ status }) {
-  const ready = status === "READY_FOR_BACKEND";
+  const readyStatuses = [
+    "READY_FOR_ALLOCATION",
+    "PARTIALLY_ALLOCATED",
+    "ALLOCATED",
+    "IN_PROGRESS",
+    "COMPLETED",
+  ];
+  const ready = readyStatuses.includes(status);
+
   return (
     <span
       style={{
@@ -42,29 +121,101 @@ function BatchStatusBadge({ status }) {
         color: ready ? "#166534" : "#92400e",
       }}
     >
-      {status || "DRAFT"}
+      {status || "NAv"}
     </span>
   );
 }
 
 export default function TargetedBatchDetailsPage() {
   const { tbId } = useParams();
-  const storedDraft = useSelector(
-    (state) => state.targetedBatchDraft?.draft || null,
-  );
-  const draft = useMemo(
-    () => getTargetedBatchDraftView(storedDraft),
-    [storedDraft],
-  );
+  const decodedTbId = decodeURIComponent(tbId || "");
+
+  const [batch, setBatch] = useState(null);
+  const [permanentRows, setPermanentRows] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [filters, setFilters] = useState({ ...TB_ROW_FILTER_DEFAULTS });
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const decodedTbId = decodeURIComponent(tbId || "");
-  const draftMatchesRoute = draft?.id === decodedTbId;
+  useEffect(() => {
+    let active = true;
+
+    async function loadPermanentTargetedBatchRows() {
+      setIsLoading(true);
+      setLoadError("");
+      setBatch(null);
+      setPermanentRows([]);
+
+      if (!decodedTbId) {
+        setLoadError("The Targeted Batch ID is missing from the route.");
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const parentRef = doc(db, "tb_uploads", decodedTbId);
+        const rowsQuery = query(
+          collection(db, "tb_rows"),
+          where("tbId", "==", decodedTbId),
+        );
+
+        const [parentSnapshot, rowsSnapshot] = await Promise.all([
+          getDoc(parentRef),
+          getDocs(rowsQuery),
+        ]);
+
+        if (!active) return;
+
+        if (!parentSnapshot.exists()) {
+          setLoadError(`Permanent Targeted Batch ${decodedTbId} was not found.`);
+          return;
+        }
+
+        const parentData = parentSnapshot.data() || {};
+        const loadedBatch = {
+          ...parentData,
+          id: parentSnapshot.id,
+          createdAt: timestampToIso(parentData?.metadata?.createdAt),
+          updatedAt: timestampToIso(parentData?.metadata?.updatedAt),
+          validation: {
+            ...(parentData?.validation || {}),
+            passed: parentData?.validation?.status === "PASSED",
+          },
+        };
+        const loadedRows = rowsSnapshot.docs
+          .map(mapPermanentTbRow)
+          .sort((left, right) => Number(left.rowNo) - Number(right.rowNo));
+
+        setBatch(loadedBatch);
+        setPermanentRows(loadedRows);
+      } catch (error) {
+        if (!active) return;
+        setLoadError(
+          error?.message ||
+            "The permanent Targeted Batch and TB Rows could not be loaded.",
+        );
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+
+    loadPermanentTargetedBatchRows();
+
+    return () => {
+      active = false;
+    };
+  }, [decodedTbId]);
+
   const rows = useMemo(
-    () => (draftMatchesRoute ? buildTargetedBatchRows(draft) : []),
-    [draft, draftMatchesRoute],
+    () =>
+      batch
+        ? buildTargetedBatchRows({
+            ...batch,
+            rows: permanentRows,
+          })
+        : [],
+    [batch, permanentRows],
   );
   const summary = useMemo(() => buildTargetedBatchRowsSummary(rows), [rows]);
   const filterOptions = useMemo(
@@ -90,33 +241,46 @@ export default function TargetedBatchDetailsPage() {
     setCurrentPage(1);
   }
 
-  if (!draftMatchesRoute) {
+  if (isLoading) {
     return (
       <section style={styles.page}>
         <div style={styles.topActionRow}>
           <Link to="/operations/targeted-batches" style={styles.backLink}>
-            ← Back to TB Uploads
+            ← Back to TB Register
+          </Link>
+        </div>
+        <div style={styles.infoPanel}>
+          Loading permanent Targeted Batch and TB Rows...
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError || !batch) {
+    return (
+      <section style={styles.page}>
+        <div style={styles.topActionRow}>
+          <Link to="/operations/targeted-batches" style={styles.backLink}>
+            ← Back to TB Register
           </Link>
         </div>
         <div style={styles.errorNotice}>
           <strong>TB rows are not available</strong>
           <p style={styles.noticeText}>
-            The requested TB ID is not present in the current Redux draft. This
-            frontend stage does not yet reload permanent tb_uploads and tb_rows
-            documents after a browser refresh.
+            {loadError || "The permanent Targeted Batch could not be loaded."}
           </p>
         </div>
       </section>
     );
   }
 
-  const encodedId = encodeURIComponent(draft.id);
+  const encodedId = encodeURIComponent(batch.id);
 
   return (
     <section style={styles.page}>
       <div style={styles.topActionRow}>
         <Link to="/operations/targeted-batches" style={styles.backLink}>
-          ← Back to TB Uploads
+          ← Back to TB Register
         </Link>
         <Link
           to={`/operations/targeted-batches/${encodedId}/dashboard`}
@@ -141,35 +305,33 @@ export default function TargetedBatchDetailsPage() {
       <div style={styles.header}>
         <div>
           <p style={styles.eyebrow}>Operations / Targeted Batch / TB Rows</p>
-          <h2 style={styles.title}>{draft.id}</h2>
+          <h2 style={styles.title}>{batch.id}</h2>
           <p style={styles.subtitle}>
-            Source-neutral candidate register showing exact row outcomes and
-            row-level allocation, premise, Meter Discovery and completion
-            references only.
+            Permanent TB Rows loaded from Firestore for this Targeted Batch.
           </p>
         </div>
-        <BatchStatusBadge status={draft.status} />
+        <BatchStatusBadge status={batch.status} />
       </div>
 
       <div style={styles.infoPanel}>
         <div style={styles.infoGrid}>
-          <InfoItem label="Source" value={draft.source?.label} />
+          <InfoItem label="Source" value={batch.source?.label} />
           <InfoItem
             label="LM"
-            value={`${draft.scope?.lmPcode || "NAv"} · ${draft.scope?.lmName || "NAv"}`}
+            value={`${batch.scope?.lmPcode || "NAv"} · ${batch.scope?.lmName || "NAv"}`}
           />
-          <InfoItem label="Created" value={formatDateTime(draft.createdAt)} />
+          <InfoItem label="Created" value={formatDateTime(batch.createdAt)} />
           <InfoItem
             label="File / Source"
-            value={draft.source?.fileName || "Prepaid Sales selection"}
+            value={batch.source?.fileName || "Prepaid Sales selection"}
           />
           <InfoItem
-            label="File Decision"
-            value={draft.validation?.fileDecision || "NAv"}
+            label="Validation"
+            value={batch.validation?.status || "NAv"}
           />
           <InfoItem
-            label="Frontend Validation"
-            value={draft.validation?.passed ? "PASSED" : "FAILED"}
+            label="Creation State"
+            value={batch.creation?.state || "NAv"}
           />
           <InfoItem
             label="Total Rows"
@@ -177,7 +339,7 @@ export default function TargetedBatchDetailsPage() {
           />
           <InfoItem
             label="Selection Reason"
-            value={draft.selection?.reason || "NAv"}
+            value={batch.selection?.reason || "NAv"}
           />
         </div>
       </div>
@@ -190,8 +352,7 @@ export default function TargetedBatchDetailsPage() {
             <h3 style={styles.panelTitle}>TB Rows</h3>
             <p style={styles.panelSubtitle}>
               {formatNumber(filteredRows.length)} of {formatNumber(rows.length)}
-              {" "}rows match the current filters. REJECT rows remain visible for
-              audit and are not allocatable.
+              {" "}permanent rows match the current filters.
             </p>
           </div>
           <div style={styles.panelActions}>
@@ -206,7 +367,7 @@ export default function TargetedBatchDetailsPage() {
               type="button"
               style={styles.primaryButton}
               onClick={() =>
-                downloadTargetedBatchRows({ batch: draft, rows: filteredRows })
+                downloadTargetedBatchRows({ batch, rows: filteredRows })
               }
               disabled={filteredRows.length === 0}
             >
@@ -215,24 +376,32 @@ export default function TargetedBatchDetailsPage() {
           </div>
         </div>
 
-        <TargetedBatchRowsFilters
-          filters={filters}
-          options={filterOptions}
-          onChange={updateFilter}
-        />
+        {rows.length === 0 ? (
+          <div style={styles.errorNotice}>
+            No permanent TB rows were found for this batch.
+          </div>
+        ) : (
+          <>
+            <TargetedBatchRowsFilters
+              filters={filters}
+              options={filterOptions}
+              onChange={updateFilter}
+            />
 
-        <TargetedBatchRowsTable
-          rows={pagedRows}
-          totalRows={filteredRows.length}
-          currentPage={safePage}
-          pageSize={pageSize}
-          totalPages={totalPages}
-          onPageChange={setCurrentPage}
-          onPageSizeChange={(nextPageSize) => {
-            setPageSize(nextPageSize);
-            setCurrentPage(1);
-          }}
-        />
+            <TargetedBatchRowsTable
+              rows={pagedRows}
+              totalRows={filteredRows.length}
+              currentPage={safePage}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(nextPageSize) => {
+                setPageSize(nextPageSize);
+                setCurrentPage(1);
+              }}
+            />
+          </>
+        )}
       </div>
     </section>
   );

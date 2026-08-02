@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { httpsCallable } from "firebase/functions";
 import {
   collection,
   doc,
@@ -10,7 +11,7 @@ import {
   where,
 } from "firebase/firestore";
 
-import { db } from "../../firebase";
+import { db, functions } from "../../firebase";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
@@ -175,6 +176,8 @@ export default function TargetedBatchAllocationPage() {
   const [dragTarget, setDragTarget] = useState(null);
   const [isBatchDropFocused, setIsBatchDropFocused] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [allocationError, setAllocationError] = useState("");
+  const [isAllocating, setIsAllocating] = useState(false);
 
   const decodedTbId = decodeURIComponent(tbId || "");
 
@@ -188,6 +191,7 @@ export default function TargetedBatchAllocationPage() {
       setPermanentRows([]);
       setTargetId("");
       setStatusMessage("");
+      setAllocationError("");
 
       if (!decodedTbId) {
         setBatchLoadError("The Targeted Batch ID is missing from the route.");
@@ -251,6 +255,7 @@ export default function TargetedBatchAllocationPage() {
   const isConfirmed = batch?.creation?.state === "READY";
   const backendTarget = useMemo(() => getBatchBackendTarget(batch), [batch]);
   const isPermanentlyAllocated = Boolean(backendTarget?.id);
+  const isAllocationLocked = isPermanentlyAllocated || isAllocating;
 
   const {
     data: availableTeams = [],
@@ -323,7 +328,7 @@ export default function TargetedBatchAllocationPage() {
     "Could not load TEAM/SP allocation targets.";
 
   function handleTargetTypeChange(nextType) {
-    if (isPermanentlyAllocated) return;
+    if (isAllocationLocked) return;
 
     setTargetType(nextType);
     setTargetId("");
@@ -331,7 +336,7 @@ export default function TargetedBatchAllocationPage() {
   }
 
   function handleSelectTarget(target) {
-    if (isPermanentlyAllocated) return;
+    if (isAllocationLocked) return;
 
     const cleanTarget = buildTargetPayload(target);
 
@@ -348,9 +353,11 @@ export default function TargetedBatchAllocationPage() {
   }
 
   function assignTargetToWholeBatch(target = selectedTargetPayload) {
-    if (isPermanentlyAllocated) {
+    if (isAllocationLocked) {
       setStatusMessage(
-        "This Targeted Batch already has a permanent backend allocation.",
+        isPermanentlyAllocated
+          ? "This Targeted Batch already has a permanent backend allocation."
+          : "The permanent allocation is currently being written and verified.",
       );
       return;
     }
@@ -370,9 +377,11 @@ export default function TargetedBatchAllocationPage() {
   }
 
   function clearWholeBatchTarget() {
-    if (isPermanentlyAllocated) {
+    if (isAllocationLocked) {
       setStatusMessage(
-        "The permanent Targeted Batch allocation cannot be cleared here.",
+        isPermanentlyAllocated
+          ? "The permanent Targeted Batch allocation cannot be cleared here."
+          : "The allocation cannot be changed while it is being written and verified.",
       );
       return;
     }
@@ -382,7 +391,7 @@ export default function TargetedBatchAllocationPage() {
   }
 
   function handleTargetDragStart(event, target) {
-    if (isPermanentlyAllocated) return;
+    if (isAllocationLocked) return;
 
     const cleanTarget = buildTargetPayload(target);
 
@@ -426,7 +435,7 @@ export default function TargetedBatchAllocationPage() {
   }
 
   function handleBatchDragEnter(event) {
-    if (isPermanentlyAllocated) return;
+    if (isAllocationLocked) return;
     if (!dragTarget && !selectedTargetPayload) return;
 
     event.preventDefault();
@@ -442,10 +451,113 @@ export default function TargetedBatchAllocationPage() {
   }
 
   function handleAllowBatchDrop(event) {
-    if (isPermanentlyAllocated) return;
+    if (isAllocationLocked) return;
 
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
+  }
+
+  async function handleAllocateTargetedBatch() {
+    if (isAllocationLocked) return;
+
+    const target = buildTargetPayload(selectedTargetPayload);
+
+    if (!target) {
+      setAllocationError("Select one TEAM or Service Provider first.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Allocate the complete Targeted Batch ${batch.id} (${permanentRows.length} row(s)) to ${getTargetLabel(target)}? This creates one permanent whole-batch allocation.`,
+    );
+
+    if (!confirmed) return;
+
+    setIsAllocating(true);
+    setAllocationError("");
+    setStatusMessage(
+      `Allocating ${batch.id} to ${getTargetLabel(target)}...`,
+    );
+
+    try {
+      const allocateTargetedBatch = httpsCallable(
+        functions,
+        "onAllocateTargetedBatchCallable",
+      );
+      const response = await allocateTargetedBatch({
+        tbId: batch.id,
+        targetType: target.type,
+        targetId: target.id,
+      });
+      const result = response?.data || {};
+
+      if (result?.success !== true) {
+        const error = new Error(
+          result?.message || "Targeted Batch allocation failed.",
+        );
+        error.code = result?.code || "TARGETED_BATCH_ALLOCATION_FAILED";
+        error.details = result?.details || null;
+        throw error;
+      }
+
+      const backendTarget = result?.target || target;
+      const completedAt = result?.completedAt || new Date().toISOString();
+      const allocatedRows = Number(
+        result?.allocatedRows || permanentRows.length,
+      );
+
+      setBatch((current) => ({
+        ...current,
+        status: result?.batchStatus || "ALLOCATED",
+        allocation: {
+          ...(current?.allocation || {}),
+          status: result?.allocationStatus || "ALLOCATED",
+          targetType: backendTarget.type,
+          targetId: backendTarget.id,
+          targetName: backendTarget.name,
+          memberCount: Number(backendTarget.memberCount || 0),
+          completedAt,
+        },
+        counts: {
+          ...(current?.counts || {}),
+          allocatedRows,
+          unallocatedRows: Number(result?.unallocatedRows || 0),
+        },
+      }));
+
+      setPermanentRows((currentRows) =>
+        currentRows.map((row) => ({
+          ...row,
+          allocation: {
+            ...(row?.allocation || {}),
+            status: "ALLOCATED",
+            targetType: backendTarget.type,
+            targetId: backendTarget.id,
+            targetName: backendTarget.name,
+            allocatedAt: completedAt,
+          },
+        })),
+      );
+
+      setStatusMessage(
+        `${batch.id} and ${formatNumber(allocatedRows)} TB Row(s) were permanently allocated to ${getTargetLabel(backendTarget)}.`,
+      );
+    } catch (error) {
+      const code = String(
+        error?.code || error?.details?.code || "TARGETED_BATCH_ALLOCATION_FAILED",
+      )
+        .replace(/^functions\//, "")
+        .toUpperCase();
+      const message =
+        error?.message ||
+        error?.details?.message ||
+        "Targeted Batch allocation failed.";
+
+      setAllocationError(`${code}: ${message}`);
+      setStatusMessage("");
+    } finally {
+      setIsAllocating(false);
+    }
   }
 
   if (isBatchLoading) {
@@ -533,11 +645,22 @@ export default function TargetedBatchAllocationPage() {
   const finalReportStatus = batch?.finalReport?.status || "DRAFT";
   const allocationStatus =
     batch?.allocation?.status || (currentTarget ? "PLANNED" : "NOT_STARTED");
+  const allocateDisabled =
+    isAllocationLocked ||
+    targetContextLoading ||
+    targetContextError ||
+    !currentTarget;
   const createDisabledReason = isPermanentlyAllocated
     ? "This Targeted Batch already has a permanent backend allocation."
-    : !currentTarget
-      ? "Select one TEAM or Service Provider for the complete Targeted Batch."
-      : "Backend Targeted Batch allocation persistence is not connected yet.";
+    : isAllocating
+      ? "The permanent whole-batch allocation is being written and verified."
+      : targetContextLoading
+        ? "TEAM/SP allocation targets are still loading."
+        : targetContextError
+          ? "TEAM/SP allocation targets could not be loaded."
+          : !currentTarget
+            ? "Select one TEAM or Service Provider for the complete Targeted Batch."
+            : "Allocate the complete permanent Targeted Batch to this TEAM/SP.";
 
   return (
     <section style={styles.page}>
@@ -620,7 +743,7 @@ export default function TargetedBatchAllocationPage() {
         <strong>Whole-batch allocation:</strong> this Targeted Batch remains one
         operational unit. Select or drag one TEAM/SP target onto the batch. All
         permanent TB Rows remain inside the same batch and inherit the same
-        allocation when backend persistence is implemented.
+        permanent allocation.
       </div>
 
       {targetContextLoading ? (
@@ -633,6 +756,10 @@ export default function TargetedBatchAllocationPage() {
 
       {statusMessage ? (
         <div style={styles.statusMessage}>{statusMessage}</div>
+      ) : null}
+
+      {allocationError ? (
+        <div style={styles.errorNotice}>{allocationError}</div>
       ) : null}
 
       <section style={styles.boardGrid}>
@@ -662,7 +789,7 @@ export default function TargetedBatchAllocationPage() {
                     : null),
                 }}
                 onClick={() => handleTargetTypeChange("TEAM")}
-                disabled={isPermanentlyAllocated}
+                disabled={isAllocationLocked}
               >
                 TEAM
               </button>
@@ -676,7 +803,7 @@ export default function TargetedBatchAllocationPage() {
                     : null),
                 }}
                 onClick={() => handleTargetTypeChange("SP")}
-                disabled={isPermanentlyAllocated}
+                disabled={isAllocationLocked}
               >
                 SP
               </button>
@@ -701,14 +828,14 @@ export default function TargetedBatchAllocationPage() {
                     <button
                       key={`${target.type}_${target.id}`}
                       type="button"
-                      draggable={!isPermanentlyAllocated}
-                      disabled={isPermanentlyAllocated}
+                      draggable={!isAllocationLocked}
+                      disabled={isAllocationLocked}
                       style={{
                         ...styles.targetOptionCard,
                         ...(selected
                           ? styles.targetOptionCardActive
                           : null),
-                        ...(isPermanentlyAllocated
+                        ...(isAllocationLocked
                           ? styles.disabledButton
                           : null),
                       }}
@@ -773,7 +900,7 @@ export default function TargetedBatchAllocationPage() {
                 type="button"
                 style={styles.groupSelectButton}
                 onClick={() => assignTargetToWholeBatch()}
-                disabled={isPermanentlyAllocated}
+                disabled={isAllocationLocked}
                 title="Assign the selected TEAM/SP to the complete Targeted Batch"
               >
                 <span style={styles.groupName}>{batch.id}</span>
@@ -821,7 +948,7 @@ export default function TargetedBatchAllocationPage() {
             </div>
 
             <div style={styles.groupActions}>
-              {currentTarget && !isPermanentlyAllocated ? (
+              {currentTarget && !isAllocationLocked ? (
                 <button
                   type="button"
                   style={styles.clearAssignmentButton}
@@ -848,12 +975,17 @@ export default function TargetedBatchAllocationPage() {
             type="button"
             style={{
               ...styles.createButton,
-              ...styles.disabledButton,
+              ...(allocateDisabled ? styles.disabledButton : null),
             }}
-            disabled
+            disabled={allocateDisabled}
             title={createDisabledReason}
+            onClick={handleAllocateTargetedBatch}
           >
-            Allocate Targeted Batch
+            {isAllocating
+              ? "Allocating and verifying..."
+              : isPermanentlyAllocated
+                ? "Targeted Batch Allocated"
+                : "Allocate Targeted Batch"}
           </button>
         </div>
 

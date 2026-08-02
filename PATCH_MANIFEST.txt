@@ -1,0 +1,20 @@
+TARGETED BATCH WHOLE-BATCH ALLOCATION PATCH
+
+Modified files:
+- functions/index.js
+- src/pages/operations/TargetedBatchAllocationPage.jsx
+
+New file:
+- functions/targetedBatches/allocationCallable.js
+
+Behaviour:
+- Permanent whole-batch allocation only.
+- Target is one TEAM or one subcontractor SP.
+- No LM filter is applied to TEAMs, SPs, or users.
+- TEAM/SP ownership is validated against the signed-in actor's MNC.
+- Users remain members of the selected TEAM/SP and are not direct allocation targets.
+- All permanent TB Rows receive the same allocation.
+- No TRNs are created by this patch.
+- Chunked writes and post-write verification support batches up to the existing 1,000-row limit.
+- Re-running the same completed allocation is idempotent.
+- Allocation to a different target is rejected after permanent allocation.

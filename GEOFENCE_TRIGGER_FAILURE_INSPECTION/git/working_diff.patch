@@ -1,0 +1,24 @@
+﻿warning: in the working copy of 'functions/index.js', LF will be replaced by CRLF the next time Git touches it
+diff --git a/functions/index.js b/functions/index.js
+index ea012a2..a27ff5f 100644
+--- a/functions/index.js
++++ b/functions/index.js
+@@ -83,6 +83,9 @@ import {
+ import { onDeleteUnacceptedBgoCallable } from "./bgo/deleteCallable.js";
+ import { onBgoChildTrnExecutionSummaryWritten } from "./bgo/executionSummaryTrigger.js";
+ 
++import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
++import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
++
+ import {
+   onIrepsSelectOptionsCallable,
+   onIrepsSelectLookupAdminCallable,
+@@ -161,6 +164,8 @@ export {
+   onReverseBgoBatchAcceptanceCallable,
+   onDeleteUnacceptedBgoCallable,
+   onBgoChildTrnExecutionSummaryWritten,
++  onCreateTargetedBatchCallable,
++  onDeleteTargetedBatchCallable,
+   onCreateAccountDataCallable,
+   onFieldAccountDataWritten,
+   onAccountMasterWritten,

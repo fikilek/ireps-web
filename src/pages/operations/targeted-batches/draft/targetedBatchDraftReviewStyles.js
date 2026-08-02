@@ -349,4 +349,11 @@ export const draftReviewStyles = {
     color: "#991b1b",
     overflowWrap: "anywhere",
   },
+  confirmActions: {
+    display: "flex",
+    gap: "0.65rem",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
 };

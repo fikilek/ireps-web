@@ -1,0 +1,29 @@
+﻿{
+    "firebase":  {
+                     "functionLogsExitCode":  0,
+                     "versionExitCode":  0,
+                     "functionsListExitCode":  0,
+                     "targetIdFoundInLogs":  true
+                 },
+    "targetGeoFenceName":  "G2 W2 Dandee Airfield",
+    "functionName":  "onGeoFenceCreated",
+    "safety":  {
+                   "firestoreWritesPerformed":  false,
+                   "deploymentsPerformed":  false,
+                   "functionInvocationsPerformed":  false
+               },
+    "generatedAt":  "2026-08-02T06:39:53.7506453+02:00",
+    "targetGeoFenceId":  "Br0zj5M5zVUTmJ3U5ufo",
+    "firebaseProject":  "ireps2",
+    "repository":  "C:\\dev\\ireps-web",
+    "git":  {
+                "scopedStatusExitCode":  0,
+                "headExitCode":  0,
+                "diffStatExitCode":  0,
+                "logExitCode":  0,
+                "statusExitCode":  0,
+                "branchExitCode":  0,
+                "diffExitCode":  0,
+                "diffCheckExitCode":  0
+            }
+}

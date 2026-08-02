@@ -176,7 +176,7 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "TB Uploads",
+            label: "TB Register",
             path: "/operations/targeted-batches",
             allowedRoles: MANAGEMENT_ROLES,
           },
@@ -458,6 +458,33 @@ function getActiveNavItem(items = [], pathname) {
   return matchingItems.sort((a, b) => b.path.length - a.path.length)[0];
 }
 
+function getPageTitle(activeNavItem, pathname) {
+  if (pathname === "/operations/targeted-batches") {
+    return "TB Register";
+  }
+
+  if (pathname === "/operations/targeted-batches/draft") {
+    return "TB Draft";
+  }
+
+  if (/^\/operations\/targeted-batches\/[^/]+\/allocation$/.test(pathname)) {
+    return "TB Allocation";
+  }
+
+  if (
+    pathname === "/operations/tb-dashboard" ||
+    /^\/operations\/targeted-batches\/[^/]+\/dashboard$/.test(pathname)
+  ) {
+    return "TB Dashboard";
+  }
+
+  if (/^\/operations\/targeted-batches\/[^/]+$/.test(pathname)) {
+    return "TB Rows";
+  }
+
+  return activeNavItem?.label || "Dashboard";
+}
+
 function isGroupActive(group, pathname) {
   return (group?.items || []).some((item) => pathname.startsWith(item.path));
 }
@@ -510,6 +537,7 @@ export default function ConsoleLayout() {
   const visibleNavItems = getFlatNavItems(visibleSections);
 
   const activeNavItem = getActiveNavItem(visibleNavItems, location.pathname);
+  const pageTitle = getPageTitle(activeNavItem, location.pathname);
   const appEnvBadge = getEnvironmentBadgeConfig(APP_ENV_VALUE);
   const hideTopbarForRegistryRoutes =
     location.pathname === "/registries" ||
@@ -653,7 +681,7 @@ export default function ConsoleLayout() {
           <header className="topbar">
             <div>
               <p className="eyebrow">iREPS Desktop</p>
-              <h1>{activeNavItem?.label || "Dashboard"}</h1>
+              <h1>{pageTitle}</h1>
             </div>
 
             <div className="topbar-right">

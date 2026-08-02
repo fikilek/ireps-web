@@ -16,9 +16,28 @@ import {
 const ALLOWED_ROLES = new Set(["MNG", "SPV", "FWR"]);
 const MIN_BOUNDARY_VERTICES = 3;
 const MAX_BOUNDARY_VERTICES = 100;
-const INFORMAL_ERF_ID_PATTERN = /^IE-(ZA\d{7})-\d{8}-\d{6}-\d{4}$/;
-const LEGACY_INFORMAL_ERF_ID_PATTERN = /^IE-\d{8}-\d{6}-\d{4}$/;
+const INFORMAL_ERF_ID_PATTERN =
+  /^IE-(ZA\d{7})-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{4})$/;
 const INFORMAL_ERF_NUMBER_PATTERN = /^IE\d{6}$/;
+
+const LAT_LNG_KEYS = new Set(["lat", "lng"]);
+const DEVICE_LOCATION_KEYS = new Set([
+  "latitude",
+  "longitude",
+  "accuracyM",
+  "altitudeM",
+  "headingDegrees",
+  "speedMps",
+  "capturedAtMs",
+]);
+const SITE_PHOTO_KEYS = new Set([
+  "tag",
+  "type",
+  "storagePath",
+  "url",
+  "capturedAtMs",
+  "gps",
+]);
 
 const APPROVED_REASON_CODES = new Set([
   "NO_FORMAL_ERF",
@@ -36,6 +55,24 @@ export function isPlainObject(value) {
 
 export function asTrimmedString(value) {
   return String(value ?? "").trim();
+}
+
+export function assertOnlyAllowedKeys(value, allowedKeys, fieldName) {
+  if (!isPlainObject(value)) {
+    throw new Error(`${fieldName} must be an object.`);
+  }
+
+  const unsupportedKeys = Object.keys(value)
+    .filter((key) => !allowedKeys.has(key))
+    .sort();
+
+  if (unsupportedKeys.length > 0) {
+    throw new Error(
+      `${fieldName} contains unsupported fields: ${unsupportedKeys.join(", ")}.`,
+    );
+  }
+
+  return value;
 }
 
 export function asFiniteNumber(value, fieldName) {
@@ -64,9 +101,7 @@ export function assertPositiveEpochMs(value, fieldName) {
 }
 
 export function assertValidLatLng(value, fieldName) {
-  if (!isPlainObject(value)) {
-    throw new Error(`${fieldName} must be an object.`);
-  }
+  assertOnlyAllowedKeys(value, LAT_LNG_KEYS, fieldName);
 
   const lat = asFiniteNumber(value.lat, `${fieldName}.lat`);
   const lng = asFiniteNumber(value.lng, `${fieldName}.lng`);
@@ -87,9 +122,11 @@ export function assertValidLatLng(value, fieldName) {
 }
 
 export function assertValidDeviceLocation(value) {
-  if (!isPlainObject(value)) {
-    throw new Error("deviceLocation must be an object.");
-  }
+  assertOnlyAllowedKeys(
+    value,
+    DEVICE_LOCATION_KEYS,
+    "deviceLocation",
+  );
 
   const latitude = asFiniteNumber(
     value.latitude,
@@ -142,30 +179,72 @@ export function assertValidDeviceLocation(value) {
   };
 }
 
+function assertValidInformalErfWallClockTimestamp(match) {
+  const year = Number(match[2]);
+  const month = Number(match[3]);
+  const day = Number(match[4]);
+  const hour = Number(match[5]);
+  const minute = Number(match[6]);
+  const second = Number(match[7]);
+
+  if (
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    throw new Error(
+      "erfId must contain a real Johannesburg YYYYMMDD-hhmmss date and time.",
+    );
+  }
+
+  // The ID stores Johannesburg wall-clock components without an offset.
+  // UTC setters are used only to detect calendar normalization safely.
+  const roundTrip = new Date(0);
+  roundTrip.setUTCFullYear(year, month - 1, day);
+  roundTrip.setUTCHours(hour, minute, second, 0);
+
+  if (
+    roundTrip.getUTCFullYear() !== year ||
+    roundTrip.getUTCMonth() !== month - 1 ||
+    roundTrip.getUTCDate() !== day ||
+    roundTrip.getUTCHours() !== hour ||
+    roundTrip.getUTCMinutes() !== minute ||
+    roundTrip.getUTCSeconds() !== second
+  ) {
+    throw new Error(
+      "erfId must contain a real Johannesburg YYYYMMDD-hhmmss date and time.",
+    );
+  }
+}
+
 export function assertInformalErfId(erfId, wardPcode) {
   const cleanErfId = asTrimmedString(erfId);
   const cleanWardPcode = asTrimmedString(wardPcode).toUpperCase();
   const currentMatch = cleanErfId.match(INFORMAL_ERF_ID_PATTERN);
 
-  if (currentMatch) {
-    if (currentMatch[1] !== cleanWardPcode) {
-      throw new Error(
-        "The wardPcode embedded in erfId must match the submitted wardPcode.",
-      );
-    }
-
-    return cleanErfId;
+  if (!currentMatch) {
+    throw new Error(
+      "erfId must follow IE-{wardPcode}-YYYYMMDD-hhmmss-XXXX, for example IE-ZA7423006-20260724-225238-8629.",
+    );
   }
 
-  // Preserve idempotent retries for pilot or locally queued submissions that
-  // were created before wardPcode became part of the technical ERF identity.
-  if (LEGACY_INFORMAL_ERF_ID_PATTERN.test(cleanErfId)) {
-    return cleanErfId;
+  if (currentMatch[1] !== cleanWardPcode) {
+    throw new Error(
+      "The wardPcode embedded in erfId must match the submitted wardPcode.",
+    );
   }
 
-  throw new Error(
-    "erfId must follow IE-{wardPcode}-YYYYMMDD-hhmmss-XXXX, for example IE-ZA7423006-20260724-225238-8629.",
-  );
+  assertValidInformalErfWallClockTimestamp(currentMatch);
+
+  return cleanErfId;
 }
 
 export function normalizeReason(reasonCode, reasonOther) {
@@ -191,22 +270,7 @@ export function normalizeReason(reasonCode, reasonOther) {
   };
 }
 
-function normalizeMediaTimestamp(value, fallbackMs, fieldName) {
-  const direct = Date.parse(asTrimmedString(value));
-
-  if (Number.isFinite(direct) && direct > 0) {
-    return new Date(direct).toISOString();
-  }
-
-  if (fallbackMs != null) {
-    const fallback = assertPositiveEpochMs(fallbackMs, fieldName);
-    return new Date(fallback).toISOString();
-  }
-
-  throw new Error(`${fieldName} must contain a valid capture timestamp.`);
-}
-
-function assertPhotoDownloadUrl(value, storagePath, fieldName) {
+function parseFirebaseStorageDownloadUrl(value, fieldName) {
   const cleanUrl = asTrimmedString(value);
 
   if (!cleanUrl) {
@@ -231,102 +295,133 @@ function assertPhotoDownloadUrl(value, storagePath, fieldName) {
     );
   }
 
-  const objectMarker = "/o/";
-  const objectMarkerIndex = parsedUrl.pathname.indexOf(objectMarker);
+  const pathMatch = parsedUrl.pathname.match(
+    /^\/v0\/b\/([^/]+)\/o\/(.+)$/,
+  );
 
-  if (objectMarkerIndex < 0) {
+  if (!pathMatch) {
     throw new Error(`${fieldName} does not identify a Storage object.`);
   }
 
-  let urlStoragePath;
+  let bucketName;
+  let storagePath;
 
   try {
-    urlStoragePath = decodeURIComponent(
-      parsedUrl.pathname.slice(objectMarkerIndex + objectMarker.length),
-    );
+    bucketName = decodeURIComponent(pathMatch[1]);
+    storagePath = decodeURIComponent(pathMatch[2]);
   } catch {
-    throw new Error(`${fieldName} contains an invalid object path.`);
+    throw new Error(`${fieldName} contains an invalid bucket or object path.`);
   }
 
-  if (urlStoragePath !== storagePath) {
+  return {
+    url: cleanUrl,
+    bucketName,
+    storagePath,
+  };
+}
+
+function assertPhotoDownloadUrl(
+  value,
+  storagePath,
+  expectedBucketName,
+  fieldName,
+) {
+  const cleanExpectedBucketName = asTrimmedString(expectedBucketName);
+
+  if (!cleanExpectedBucketName) {
+    throw new Error("The configured Firebase Storage bucket is unavailable.");
+  }
+
+  const parsed = parseFirebaseStorageDownloadUrl(value, fieldName);
+
+  if (parsed.bucketName !== cleanExpectedBucketName) {
+    throw new Error(
+      `${fieldName} must use the configured Firebase Storage bucket.`,
+    );
+  }
+
+  if (parsed.storagePath !== storagePath) {
     throw new Error(
       `${fieldName} must point to the same object as media.storagePath.`,
     );
   }
 
-  return cleanUrl;
+  return parsed.url;
 }
 
-export function normalizeSitePhotos(media, erfId) {
+export function normalizeSitePhotos(
+  media,
+  erfId,
+  expectedBucketName,
+) {
   if (!Array.isArray(media)) {
     throw new Error("media must be an array.");
   }
 
-  const expectedPrefix = `informal_erfs/${erfId}/`;
-
-  const sitePhotos = media
-    .filter((item) => item?.tag === "informalErfSitePhoto")
-    .map((item, index) => {
-      const storagePath = asTrimmedString(item?.storagePath);
-
-      if (!storagePath) {
-        throw new Error(
-          `media[${index}].storagePath is required before server submission.`,
-        );
-      }
-
-      if (!storagePath.startsWith(expectedPrefix)) {
-        throw new Error(
-          `media[${index}].storagePath must start with ${expectedPrefix}.`,
-        );
-      }
-
-      const gps =
-        item?.gps == null
-          ? null
-          : assertValidLatLng(item.gps, `media[${index}].gps`);
-
-      const capturedAtMs =
-        item?.capturedAtMs == null
-          ? null
-          : assertPositiveEpochMs(
-              item.capturedAtMs,
-              `media[${index}].capturedAtMs`,
-            );
-      const createdAt = normalizeMediaTimestamp(
-        item?.created?.at,
-        capturedAtMs,
-        `media[${index}].created.at`,
-      );
-      const updatedAt = normalizeMediaTimestamp(
-        item?.updated?.at || item?.created?.at,
-        capturedAtMs,
-        `media[${index}].updated.at`,
-      );
-      const url = assertPhotoDownloadUrl(
-        item?.url,
-        storagePath,
-        `media[${index}].url`,
-      );
-
-      return {
-        tag: "informalErfSitePhoto",
-        type: "image",
-        storagePath,
-        url,
-        createdAt,
-        updatedAt,
-        gps,
-      };
-    });
-
-  if (sitePhotos.length === 0) {
+  if (media.length === 0) {
     throw new Error(
       "At least one uploaded informalErfSitePhoto is required.",
     );
   }
 
-  return sitePhotos;
+  const expectedPrefix = `informal_erfs/${erfId}/`;
+
+  return media.map((item, index) => {
+    const fieldName = `media[${index}]`;
+
+    assertOnlyAllowedKeys(item, SITE_PHOTO_KEYS, fieldName);
+
+    if (asTrimmedString(item.tag) !== "informalErfSitePhoto") {
+      throw new Error(
+        `${fieldName}.tag must be informalErfSitePhoto.`,
+      );
+    }
+
+    if (asTrimmedString(item.type) !== "image") {
+      throw new Error(`${fieldName}.type must be image.`);
+    }
+
+    const storagePath = asTrimmedString(item.storagePath);
+
+    if (!storagePath) {
+      throw new Error(
+        `${fieldName}.storagePath is required before server submission.`,
+      );
+    }
+
+    if (!storagePath.startsWith(expectedPrefix)) {
+      throw new Error(
+        `${fieldName}.storagePath must start with ${expectedPrefix}.`,
+      );
+    }
+
+    const gps =
+      item.gps == null
+        ? null
+        : assertValidLatLng(item.gps, `${fieldName}.gps`);
+
+    const capturedAtMs = assertPositiveEpochMs(
+      item.capturedAtMs,
+      `${fieldName}.capturedAtMs`,
+    );
+    const capturedAtIso = new Date(capturedAtMs).toISOString();
+    const url = assertPhotoDownloadUrl(
+      item.url,
+      storagePath,
+      expectedBucketName,
+      `${fieldName}.url`,
+    );
+
+    return {
+      tag: "informalErfSitePhoto",
+      type: "image",
+      storagePath,
+      url,
+      createdAt: capturedAtIso,
+      updatedAt: capturedAtIso,
+      gps,
+    };
+  });
 }
 
 export function getActorContext(userData, authToken = {}) {
@@ -695,9 +790,9 @@ export function assertNoExistingErfIntersection({
         maxLng: Number(existingBbox.maxLng),
       };
     } else {
-      // Legacy v1 Informal ERFs may not have a complete canonical bbox.
-      // Derive a temporary bbox from their stored geometry so they remain
-      // collision targets during the v2 migration period.
+      // Pre-production noncompliant Informal ERFs may not have a complete
+      // canonical bbox. Derive a temporary bbox from stored geometry so they
+      // remain collision targets until the approved cleanup is completed.
       existingFeature = parseGeoJsonFeature(
         existing?.geometry,
         `ireps_erfs/${erfDoc.id}.geometry`,
@@ -732,8 +827,8 @@ export function assertNoExistingErfIntersection({
     const geometryType = existingFeature.geometry.type;
 
     if (geometryType === "Point" && existingType === "INFORMAL") {
-      // Legacy v1 Informal ERFs were Point geometries. Treat the point as a
-      // collision target rather than skipping it or accepting unsafe overlap.
+      // Pre-production noncompliant Point records remain collision targets
+      // until the approved cleanup is completed.
     } else if (
       geometryType !== "Polygon" &&
       geometryType !== "MultiPolygon"
@@ -915,14 +1010,179 @@ export function buildInformalErfDocument({
   };
 }
 
+function normalizeComparableCoordinate(value, fieldName) {
+  const parsed = asFiniteNumber(value, fieldName);
+  return Object.is(parsed, -0) ? 0 : parsed;
+}
+
+function buildCanonicalPolygonSignature(value, fieldName) {
+  const polygonFeature = parseGeoJsonFeature(value, fieldName);
+
+  if (polygonFeature?.geometry?.type !== "Polygon") {
+    throw new Error(`${fieldName} must contain a Polygon.`);
+  }
+
+  const rings = polygonFeature.geometry.coordinates;
+
+  if (!Array.isArray(rings) || rings.length !== 1) {
+    throw new Error(`${fieldName} must contain exactly one polygon ring.`);
+  }
+
+  const rawRing = rings[0];
+
+  if (!Array.isArray(rawRing)) {
+    throw new Error(`${fieldName} has no usable polygon ring.`);
+  }
+
+  const points = rawRing.map((coordinate, index) => {
+    if (!Array.isArray(coordinate) || coordinate.length !== 2) {
+      throw new Error(
+        `${fieldName}.coordinates[0][${index}] must contain [lng, lat].`,
+      );
+    }
+
+    return [
+      normalizeComparableCoordinate(
+        coordinate[0],
+        `${fieldName}.coordinates[0][${index}][0]`,
+      ),
+      normalizeComparableCoordinate(
+        coordinate[1],
+        `${fieldName}.coordinates[0][${index}][1]`,
+      ),
+    ];
+  });
+
+  if (
+    points.length > 1 &&
+    points[0][0] === points[points.length - 1][0] &&
+    points[0][1] === points[points.length - 1][1]
+  ) {
+    points.pop();
+  }
+
+  if (points.length < MIN_BOUNDARY_VERTICES) {
+    throw new Error(
+      `${fieldName} must contain at least ${MIN_BOUNDARY_VERTICES} vertices.`,
+    );
+  }
+
+  const candidates = [];
+
+  for (const orientation of [points, [...points].reverse()]) {
+    for (let index = 0; index < orientation.length; index += 1) {
+      const rotated = [
+        ...orientation.slice(index),
+        ...orientation.slice(0, index),
+      ];
+      candidates.push(JSON.stringify(rotated));
+    }
+  }
+
+  candidates.sort();
+  return candidates[0];
+}
+
+function normalizeComparableInstant(value, fieldName) {
+  const cleanValue = asTrimmedString(value);
+  const parsedMs = Date.parse(cleanValue);
+
+  if (!cleanValue || !Number.isFinite(parsedMs)) {
+    throw new Error(`${fieldName} must be a valid timestamp.`);
+  }
+
+  return new Date(parsedMs).toISOString();
+}
+
+function normalizeComparableMediaItem({
+  item,
+  fieldName,
+  incoming,
+}) {
+  if (!isPlainObject(item)) {
+    throw new Error(`${fieldName} must be an object.`);
+  }
+
+  const tag = asTrimmedString(item.tag);
+  const type = asTrimmedString(item.type);
+
+  if (tag !== "informalErfSitePhoto" || type !== "image") {
+    throw new Error(`${fieldName} has an invalid tag or type.`);
+  }
+
+  const parsedUrl = parseFirebaseStorageDownloadUrl(
+    item.url,
+    `${fieldName}.url`,
+  );
+  const gps =
+    item.gps == null
+      ? null
+      : assertValidLatLng(item.gps, `${fieldName}.gps`);
+  const capturedAt = normalizeComparableInstant(
+    incoming ? item.createdAt : item?.created?.at,
+    incoming ? `${fieldName}.createdAt` : `${fieldName}.created.at`,
+  );
+
+  if (incoming && parsedUrl.storagePath !== item.storagePath) {
+    throw new Error(
+      `${fieldName}.url must identify the submitted storagePath.`,
+    );
+  }
+
+  return {
+    tag,
+    type,
+    bucketName: parsedUrl.bucketName,
+    storagePath: parsedUrl.storagePath,
+    capturedAt,
+    gps,
+  };
+}
+
+function normalizeComparableMedia(media, fieldName, incoming) {
+  if (!Array.isArray(media) || media.length === 0) {
+    throw new Error(`${fieldName} must contain at least one photograph.`);
+  }
+
+  return media
+    .map((item, index) =>
+      normalizeComparableMediaItem({
+        item,
+        fieldName: `${fieldName}[${index}]`,
+        incoming,
+      }),
+    )
+    .map((item) => JSON.stringify(item))
+    .sort();
+}
+
+function sameComparableValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function createSubmissionConflictError(mismatches) {
+  const normalizedMismatches = Array.from(new Set(mismatches)).sort();
+  const error = new Error(
+    "The erfId is already used by a different completed Informal ERF submission.",
+  );
+
+  error.businessCode = "INFORMAL_ERF_ID_CONFLICT";
+  error.mismatches = normalizedMismatches;
+  return error;
+}
+
 export function assertSameCompletedSubmission({
   existing,
   erfId,
   lmPcode,
   wardPcode,
   actorUid,
+  canonicalPolygon,
+  reason,
+  deviceLocation,
+  sitePhotos,
 }) {
-  const matches =
+  const identityMatches =
     existing?.erfId === erfId &&
     existing?.sg?.prclKey === erfId &&
     asTrimmedString(existing?.erf?.type).toUpperCase() === "INFORMAL" &&
@@ -933,18 +1193,77 @@ export function assertSameCompletedSubmission({
       wardPcode &&
     existing?.metadata?.createdByUid === actorUid;
 
-  if (!matches) {
-    throw new Error(
-      "The erfId is already used by a different ERF submission.",
-    );
+  if (!identityMatches) {
+    throw createSubmissionConflictError(["identity"]);
   }
 
   const parcelNo = asTrimmedString(existing?.sg?.parcelNo);
 
   if (!INFORMAL_ERF_NUMBER_PATTERN.test(parcelNo)) {
-    throw new Error(
-      "The existing Informal ERF has no valid canonical sg.parcelNo.",
+    throw createSubmissionConflictError(["parcelNo"]);
+  }
+
+  let existingGeometrySignature;
+  let incomingGeometrySignature;
+  let existingReason;
+  let existingDeviceLocation;
+  let normalizedExistingMedia;
+  let normalizedIncomingMedia;
+
+  try {
+    existingGeometrySignature = buildCanonicalPolygonSignature(
+      existing?.geometry,
+      "existing.geometry",
     );
+    incomingGeometrySignature = buildCanonicalPolygonSignature(
+      canonicalPolygon?.geometry,
+      "incoming.geometry",
+    );
+    existingReason = normalizeReason(
+      existing?.informalErfData?.reasonCode,
+      existing?.informalErfData?.reasonOther,
+    );
+    existingDeviceLocation = assertValidDeviceLocation(
+      existing?.informalErfData?.deviceLocation,
+    );
+    normalizedExistingMedia = normalizeComparableMedia(
+      existing?.informalErfData?.media,
+      "existing.informalErfData.media",
+      false,
+    );
+    normalizedIncomingMedia = normalizeComparableMedia(
+      sitePhotos,
+      "incoming.media",
+      true,
+    );
+  } catch {
+    throw createSubmissionConflictError(["canonicalContent"]);
+  }
+
+  const mismatches = [];
+
+  if (existingGeometrySignature !== incomingGeometrySignature) {
+    mismatches.push("boundary");
+  }
+
+  if (existingReason.code !== reason?.code) {
+    mismatches.push("reasonCode");
+  }
+
+  if (existingReason.otherText !== reason?.otherText) {
+    mismatches.push("reasonOther");
+  }
+
+  if (!sameComparableValue(existingDeviceLocation, deviceLocation)) {
+    mismatches.push("deviceLocation");
+  }
+
+  if (!sameComparableValue(normalizedExistingMedia, normalizedIncomingMedia)) {
+    mismatches.push("media");
+  }
+
+  if (mismatches.length > 0) {
+    throw createSubmissionConflictError(mismatches);
   }
 
   return {

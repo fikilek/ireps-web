@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-08-02T05:48:49.208Z",
+  "script": "reprocessGeoFenceMembership.js",
+  "mode": "EXECUTE",
+  "projectId": "ireps2",
+  "serviceAccountProjectId": "ireps2",
+  "geoFence": {
+    "id": "av1ij2OihfwBOERGD2BU",
+    "name": "Gf1 W3",
+    "status": "ACTIVE",
+    "lmPcode": "ZA5241",
+    "wardPcode": "ZA5241003",
+    "polygonPointCount": 17,
+    "originalCounts": {
+      "erfs": 275,
+      "premises": 0,
+      "meters": 0
+    }
+  },
+  "safety": {
+    "removesMembershipRefs": false,
+    "writesAllowed": true,
+    "geofenceCountsUpdated": true
+  },
+  "phaseSummaries": {
+    "erfs": {
+      "label": "ERFS",
+      "pagesRead": 7,
+      "docsRead": 2693,
+      "pointsChecked": 2693,
+      "memberCount": 275,
+      "alreadyLinked": 275,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "premises": {
+      "label": "PREMISES",
+      "pagesRead": 0,
+      "docsRead": 0,
+      "pointsChecked": 0,
+      "memberCount": 0,
+      "alreadyLinked": 0,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "asts": {
+      "label": "ASTS",
+      "pagesRead": 0,
+      "docsRead": 0,
+      "pointsChecked": 0,
+      "memberCount": 0,
+      "alreadyLinked": 0,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "sales": {
+      "label": "DEMO SALES",
+      "pagesRead": 19,
+      "docsRead": 7583,
+      "pointsChecked": 1729,
+      "memberCount": 157,
+      "alreadyLinked": 0,
+      "updatesRequired": 157,
+      "docsUpdated": 157,
+      "batchesCommitted": 12
+    }
+  },
+  "plannedCounts": {
+    "erfs": 275,
+    "premises": 0,
+    "meters": 0,
+    "salesMeters": 157
+  },
+  "totalUpdatesRequired": 157,
+  "totalDocsUpdated": 157,
+  "verification": {
+    "erfs": {
+      "pagesRead": 7,
+      "docsRead": 2693,
+      "refCount": 275
+    },
+    "premises": {
+      "pagesRead": 0,
+      "docsRead": 0,
+      "refCount": 0
+    },
+    "asts": {
+      "pagesRead": 0,
+      "docsRead": 0,
+      "refCount": 0
+    },
+    "sales": {
+      "pagesRead": 19,
+      "docsRead": 7583,
+      "refCount": 157
+    }
+  }
+}

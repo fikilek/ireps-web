@@ -1,0 +1,10 @@
+﻿71bd7b8 (HEAD -> main) Enforce LM scope for Sales and Targeted Batch drafts
+d3a1098 Add Geofence column and filter to Sales
+72e71e3 Include demo Sales meters in geofence membership
+9c3745c Add ward boundaries to Sales GPS map
+429bbb6 Add ward GPS map to Sales meters
+5cb7267 Refine whole-batch TB Allocation display
+a44cf7f (origin/main, origin/HEAD) Add Targeted Batch rows register and lifecycle tracking
+92b2db7 Add Targeted Batch CSV upload and row assessment workflow
+e4b4940 Add Prepaid Sales Targeted Batch draft review workflow
+ab99cfe Add Targeted Batch frontend foundation and source-neutral draft

@@ -109,10 +109,18 @@ function getSortValue(row, key) {
 
 function SortButton({ label, sortKey, sortConfig, onSort }) {
   const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕";
+  const directionLabel = isActive
+    ? sortConfig.direction === "asc"
+      ? "↑"
+      : "↓"
+    : "↕";
 
   return (
-    <button type="button" style={styles.sortButton} onClick={() => onSort(sortKey)}>
+    <button
+      type="button"
+      style={styles.sortButton}
+      onClick={() => onSort(sortKey)}
+    >
       <span>{label}</span>
       <span>{directionLabel}</span>
     </button>
@@ -238,15 +246,39 @@ function getUpdatedAtDate(value) {
 }
 
 function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
 }
 
 function endOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    999,
+  );
 }
 
 function addDays(date, days) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate() + days,
+    0,
+    0,
+    0,
+    0,
+  );
 }
 
 function parseDateOnly(value) {
@@ -286,7 +318,15 @@ function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
 
   if (mode === "THIS_MONTH") {
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const lastDay = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999,
+    );
     return { start: firstDay, end: lastDay };
   }
 
@@ -319,9 +359,14 @@ function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
 
 export default function WardsRegistryPage() {
   const { activeWorkbase, role } = useAuth();
-  const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
+  const [sortConfig, setSortConfig] = useState({
+    key: "updatedAt",
+    direction: "desc",
+  });
   const [filters, setFilters] = useState(EMPTY_WARD_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
+  const [updatedAtFilter, setUpdatedAtFilter] = useState(
+    EMPTY_UPDATED_AT_FILTER,
+  );
   const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -334,6 +379,7 @@ export default function WardsRegistryPage() {
     isFetching,
     error,
   } = useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
+  console.log(`wardRows`, wardRows);
 
   const activeWorkbaseName =
     activeWorkbase?.name ||
@@ -346,12 +392,24 @@ export default function WardsRegistryPage() {
     return wardRows.filter((row) => {
       return (
         includesText(row.wardNumber, filters.wardNumber) &&
-        includesText(getCountText(row.formalErfCount), filters.formalErfCount) &&
-        includesText(getCountText(row.informalErfCount), filters.informalErfCount) &&
+        includesText(
+          getCountText(row.formalErfCount),
+          filters.formalErfCount,
+        ) &&
+        includesText(
+          getCountText(row.informalErfCount),
+          filters.informalErfCount,
+        ) &&
         includesText(getCountText(row.totalErfCount), filters.totalErfCount) &&
         includesText(getCountText(row.premiseCount), filters.premiseCount) &&
-        includesText(getCountText(row.electricityMeterCount), filters.electricityMeterCount) &&
-        includesText(getCountText(row.waterMeterCount), filters.waterMeterCount) &&
+        includesText(
+          getCountText(row.electricityMeterCount),
+          filters.electricityMeterCount,
+        ) &&
+        includesText(
+          getCountText(row.waterMeterCount),
+          filters.waterMeterCount,
+        ) &&
         includesText(getCountText(row.meterCount), filters.meterCount) &&
         includesText(getCountText(row.trnCount), filters.trnCount) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
@@ -363,7 +421,10 @@ export default function WardsRegistryPage() {
     const rows = [...filteredWardRows];
 
     rows.sort((a, b) => {
-      const comparison = compareNatural(getSortValue(a, sortConfig.key), getSortValue(b, sortConfig.key));
+      const comparison = compareNatural(
+        getSortValue(a, sortConfig.key),
+        getSortValue(b, sortConfig.key),
+      );
       return sortConfig.direction === "asc" ? comparison : -comparison;
     });
 
@@ -389,7 +450,14 @@ export default function WardsRegistryPage() {
       accumulator.trns += row.trnCount;
       return accumulator;
     },
-    { totalErfs: 0, premises: 0, electricityMeters: 0, waterMeters: 0, meters: 0, trns: 0 },
+    {
+      totalErfs: 0,
+      premises: 0,
+      electricityMeters: 0,
+      waterMeters: 0,
+      meters: 0,
+      trns: 0,
+    },
   );
 
   const quickDownloadColumns = useMemo(
@@ -457,7 +525,8 @@ export default function WardsRegistryPage() {
     setCurrentPage(1);
     setSortConfig((current) => {
       if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc") return { key: sortKey, direction: "desc" };
+      if (current.direction === "asc")
+        return { key: sortKey, direction: "desc" };
       return { key: "updatedAt", direction: "desc" };
     });
   }
@@ -466,7 +535,10 @@ export default function WardsRegistryPage() {
     const normalizedPage = Number(nextPage);
     const clampedPage = Math.max(
       1,
-      Math.min(Number.isFinite(normalizedPage) ? normalizedPage : 1, totalPages),
+      Math.min(
+        Number.isFinite(normalizedPage) ? normalizedPage : 1,
+        totalPages,
+      ),
     );
     setCurrentPage(clampedPage);
   }
@@ -496,7 +568,9 @@ export default function WardsRegistryPage() {
           <div className="workbase-pill">{activeWorkbaseName}</div>
           <div className="role-pill">{role || "NAv"}</div>
           <div className="role-pill">
-            {isFetching ? "Streaming..." : `${formatNumber(sortedWardRows.length)} wards`}
+            {isFetching
+              ? "Streaming..."
+              : `${formatNumber(sortedWardRows.length)} wards`}
           </div>
           <DownloadButtons
             registryName="Ward Registry"
@@ -565,7 +639,8 @@ export default function WardsRegistryPage() {
           <div className="empty-state error-box">
             <h2>Could not load ward registry</h2>
             <p className="muted">
-              Check Firestore rules, the registry_wards collection, or the LM field used by the query.
+              Check Firestore rules, the registry_wards collection, or the LM
+              field used by the query.
             </p>
           </div>
         ) : null}
@@ -599,75 +674,177 @@ export default function WardsRegistryPage() {
 
             <div className="table-wrap">
               <table className="data-table">
-              <thead>
-                <tr>
-                  <th>
-                    <SortButton label="Ward" sortKey="wardNumber" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.wardNumber} onChange={(value) => updateFilter("wardNumber", value)} placeholder="Ward" />
-                  </th>
-                  <th>
-                    <SortButton label="Formal ERFs" sortKey="formalErfCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.formalErfCount} onChange={(value) => updateFilter("formalErfCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="Informal ERFs" sortKey="informalErfCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.informalErfCount} onChange={(value) => updateFilter("informalErfCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="Total ERFs" sortKey="totalErfCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.totalErfCount} onChange={(value) => updateFilter("totalErfCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="Premises" sortKey="premiseCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.premiseCount} onChange={(value) => updateFilter("premiseCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="Electricity" sortKey="electricityMeterCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.electricityMeterCount} onChange={(value) => updateFilter("electricityMeterCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="Water" sortKey="waterMeterCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.waterMeterCount} onChange={(value) => updateFilter("waterMeterCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="Total Meters" sortKey="meterCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.meterCount} onChange={(value) => updateFilter("meterCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="TRNs" sortKey="trnCount" sortConfig={sortConfig} onSort={handleSort} />
-                    <FilterInput value={filters.trnCount} onChange={(value) => updateFilter("trnCount", value)} placeholder="Filter" />
-                  </th>
-                  <th>
-                    <SortButton label="updatedAt" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
-                    <DatetimeFilterButton filter={updatedAtFilter} onClick={() => setIsUpdatedAtFilterOpen(true)} />
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {sortedWardRows.length === 0 ? (
+                <thead>
                   <tr>
-                    <td colSpan={10} className="muted">
-                      No wards match the current filters. Clear or adjust a column filter above.
-                    </td>
+                    <th>
+                      <SortButton
+                        label="Ward"
+                        sortKey="wardNumber"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.wardNumber}
+                        onChange={(value) => updateFilter("wardNumber", value)}
+                        placeholder="Ward"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Formal ERFs"
+                        sortKey="formalErfCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.formalErfCount}
+                        onChange={(value) =>
+                          updateFilter("formalErfCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Informal ERFs"
+                        sortKey="informalErfCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.informalErfCount}
+                        onChange={(value) =>
+                          updateFilter("informalErfCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Total ERFs"
+                        sortKey="totalErfCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.totalErfCount}
+                        onChange={(value) =>
+                          updateFilter("totalErfCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Premises"
+                        sortKey="premiseCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.premiseCount}
+                        onChange={(value) =>
+                          updateFilter("premiseCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Electricity"
+                        sortKey="electricityMeterCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.electricityMeterCount}
+                        onChange={(value) =>
+                          updateFilter("electricityMeterCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Water"
+                        sortKey="waterMeterCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.waterMeterCount}
+                        onChange={(value) =>
+                          updateFilter("waterMeterCount", value)
+                        }
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="Total Meters"
+                        sortKey="meterCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.meterCount}
+                        onChange={(value) => updateFilter("meterCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="TRNs"
+                        sortKey="trnCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.trnCount}
+                        onChange={(value) => updateFilter("trnCount", value)}
+                        placeholder="Filter"
+                      />
+                    </th>
+                    <th>
+                      <SortButton
+                        label="updatedAt"
+                        sortKey="updatedAt"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <DatetimeFilterButton
+                        filter={updatedAtFilter}
+                        onClick={() => setIsUpdatedAtFilterOpen(true)}
+                      />
+                    </th>
                   </tr>
-                ) : (
-                  paginatedWardRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.wardNumber}</td>
-                      <td>{formatNumber(row.formalErfCount)}</td>
-                      <td>{formatNumber(row.informalErfCount)}</td>
-                      <td>{formatNumber(row.totalErfCount)}</td>
-                      <td>{formatNumber(row.premiseCount)}</td>
-                      <td>{formatNumber(row.electricityMeterCount)}</td>
-                      <td>{formatNumber(row.waterMeterCount)}</td>
-                      <td>{formatNumber(row.meterCount)}</td>
-                      <td>{formatNumber(row.trnCount)}</td>
-                        <td>{formatUpdatedAt(row.updatedAt)}</td>
+                </thead>
+
+                <tbody>
+                  {sortedWardRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="muted">
+                        No wards match the current filters. Clear or adjust a
+                        column filter above.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
+                  ) : (
+                    paginatedWardRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.wardNumber}</td>
+                        <td>{formatNumber(row.formalErfCount)}</td>
+                        <td>{formatNumber(row.informalErfCount)}</td>
+                        <td>{formatNumber(row.totalErfCount)}</td>
+                        <td>{formatNumber(row.premiseCount)}</td>
+                        <td>{formatNumber(row.electricityMeterCount)}</td>
+                        <td>{formatNumber(row.waterMeterCount)}</td>
+                        <td>{formatNumber(row.meterCount)}</td>
+                        <td>{formatNumber(row.trnCount)}</td>
+                        <td>{formatUpdatedAt(row.updatedAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
               </table>
             </div>
 

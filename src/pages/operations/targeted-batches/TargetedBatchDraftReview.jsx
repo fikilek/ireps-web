@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   getTargetedBatchDraftIntegrity,
   getTargetedBatchDraftView,
-  TARGETED_BATCH_DRAFT_STATUSES,
   TARGETED_BATCH_SOURCE_TYPES,
 } from "../../../redux/targetedBatchDraftModel";
 import { formatDateTime } from "./targetedBatchUtils";
@@ -71,10 +70,11 @@ function buildOptions(rows, key, fallback) {
 
 export default function TargetedBatchDraftReview({
   draft,
+  isCreating = false,
+  creationFeedback = null,
+  onConfirm,
   onClear,
   onDownload,
-  onConfirm,
-  onReopen,
 }) {
   const [filters, setFilters] = useState(EMPTY_DRAFT_FILTERS);
   const [currentPage, setCurrentPage] = useState(1);
@@ -161,10 +161,6 @@ export default function TargetedBatchDraftReview({
     pageStartIndex + pageSize,
   );
 
-  const readyForBackend =
-    currentDraft?.status ===
-    TARGETED_BATCH_DRAFT_STATUSES.READY_FOR_BACKEND;
-
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
     setCurrentPage(1);
@@ -195,7 +191,7 @@ export default function TargetedBatchDraftReview({
       <div style={styles.header}>
         <div>
           <div style={styles.titleRow}>
-            <p style={styles.eyebrow}>Targeted Batch Draft Review</p>
+            <p style={styles.eyebrow}>TB Draft</p>
             <SourceBadge sourceType={currentDraft.source.type} />
           </div>
           <h2 style={styles.title}>{currentDraft.id}</h2>
@@ -207,18 +203,21 @@ export default function TargetedBatchDraftReview({
         </div>
 
         <div style={styles.headerActions}>
-          <span
-            style={{
-              ...styles.statusBadge,
-              ...(readyForBackend ? styles.readyStatus : styles.draftStatus),
-            }}
-          >
-            {readyForBackend ? "Ready for Backend" : "Draft"}
+          <span style={{ ...styles.statusBadge, ...styles.draftStatus }}>
+            Draft
           </span>
           <button type="button" style={styles.secondaryButton} onClick={onDownload}>
             Download Draft
           </button>
-          <button type="button" style={styles.dangerButton} onClick={onClear}>
+          <button
+            type="button"
+            style={{
+              ...styles.dangerButton,
+              ...(isCreating ? styles.disabledButton : null),
+            }}
+            onClick={onClear}
+            disabled={isCreating}
+          >
             Clear Draft
           </button>
         </div>
@@ -256,36 +255,57 @@ export default function TargetedBatchDraftReview({
       <div style={styles.confirmPanel}>
         <div>
           <strong>
-            {readyForBackend
-              ? "Draft confirmed for the future backend creation step"
+            {isCreating
+              ? "Creating and verifying the permanent Targeted Batch"
               : integrity.canConfirm
-                ? "Review complete: the frontend draft can be confirmed"
+                ? "Review complete: the TB Draft is ready for permanent creation"
                 : "Resolve the draft blockers before confirmation"}
           </strong>
           <p style={styles.confirmText}>
-            Confirmation changes Redux draft state only. Package 3 performs no
-            Firestore write and does not create tb_uploads, tb_rows, TRNs,
-            premises, meters or allocations.
+            Confirmation creates one permanent tb_uploads parent, all corresponding
+            permanent tb_rows documents, and the matching Sales tbRefs entries.
+            The temporary TB Draft is cleared only after the backend verifies the
+            permanent Targeted Batch as READY.
           </p>
+
+          {creationFeedback?.type === "error" ? (
+            <div
+              role="alert"
+              style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                border: "1px solid #fecaca",
+                borderRadius: 12,
+                background: "#fef2f2",
+                color: "#991b1b",
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              <strong>{creationFeedback.code}</strong>
+              <div>{creationFeedback.message}</div>
+            </div>
+          ) : null}
         </div>
 
-        {readyForBackend ? (
-          <button type="button" style={styles.secondaryButton} onClick={onReopen}>
-            Reopen Draft
-          </button>
-        ) : (
-          <button
-            type="button"
-            style={{
-              ...styles.primaryButton,
-              ...(!integrity.canConfirm ? styles.disabledButton : null),
-            }}
-            onClick={onConfirm}
-            disabled={!integrity.canConfirm}
-          >
-            Confirm Draft
-          </button>
-        )}
+        <button
+          type="button"
+          style={{
+            ...styles.primaryButton,
+            ...(!integrity.canConfirm || isCreating
+              ? styles.disabledButton
+              : null),
+          }}
+          disabled={!integrity.canConfirm || isCreating}
+          onClick={onConfirm}
+          title={
+            integrity.canConfirm
+              ? "Create and verify the permanent Targeted Batch"
+              : integrity.blockers.join(" ")
+          }
+        >
+          {isCreating ? "Creating Targeted Batch..." : "Confirm TB Draft"}
+        </button>
       </div>
     </section>
   );

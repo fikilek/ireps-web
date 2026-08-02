@@ -1,0 +1,193 @@
+﻿Folder PATH listing for volume OS
+Volume serial number is 000001FC A086:C185
+C:\DEV\IREPS-WEB\SRC
+|   App.css
+|   App.jsx
+|   index.css
+|   main.jsx
+|   
++---assets
+|       hero.png
+|       
++---auth
+|       AuthContext.js
+|       AuthProvider.jsx
+|       ProtectedRoute.jsx
+|       RoleRoute.jsx
+|       useAuth.js
+|       
++---components
+|   |   DatetimeFilter.jsx
+|   |   DownloadButtons.jsx
+|   |   RegistryIdText.jsx
+|   |   
+|   \---mread
+|           MeterHistoryModal.jsx
+|           
++---context
+|       GeoContext.jsx
+|       WarehouseContext.jsx
+|       warehouseSelectors.js
+|       
++---features
+|   \---maps
+|           DesktopGeoCascadingSelector.jsx
+|           
++---firebase
+|       index.js
+|       
++---layouts
+|       ConsoleLayout.jsx
+|       
++---pages
+|   |   AccessDeniedPage.jsx
+|   |   ComingSoonPage.jsx
+|   |   DashboardPage.jsx
+|   |   LoginPage.jsx
+|   |   PendingApprovalPage.jsx
+|   |   
+|   +---admin
+|   |       FwrMonitoringPage.jsx
+|   |       MreadStagingControllerPage.jsx
+|   |       
+|   +---maps
+|   |       MapPage.jsx
+|   |       
+|   +---operations
+|   |   |   BgoDashboardPage.jsx
+|   |   |   BmdBgoPage.jsx
+|   |   |   fakeTcFinalReportData.js
+|   |   |   GeoFencesPage.jsx
+|   |   |   MdBgoRowsPage.jsx
+|   |   |   OperationsLandingPage.jsx
+|   |   |   TargetedBatchAllocationPage.jsx
+|   |   |   TargetedBatchDashboardPage.jsx
+|   |   |   TargetedBatchDetailDashboardPage.jsx
+|   |   |   TargetedBatchDetailsPage.jsx
+|   |   |   TargetedBatchDraftPage.jsx
+|   |   |   TargetedBatchesPage.jsx
+|   |   |   TargetedBatchFinalReportPage.jsx
+|   |   |   TcBgoDashboardPage.jsx
+|   |   |   TcBgoPage.jsx
+|   |   |   TcFinalReportPage.jsx
+|   |   |   TcUploadDetailsPage.jsx
+|   |   |   TcUploadsPage.jsx
+|   |   |   
+|   |   \---targeted-batches
+|   |       |   TargetedBatchConfirmModal.jsx
+|   |       |   TargetedBatchDeleteModal.jsx
+|   |       |   TargetedBatchDraftReview.jsx
+|   |       |   TargetedBatchFoundationNotice.jsx
+|   |       |   TargetedBatchUploadModal.jsx
+|   |       |   targetedBatchUtils.js
+|   |       |   
+|   |       +---allocation
+|   |       |       TargetedBatchAllocationGroupPanel.jsx
+|   |       |       TargetedBatchAllocationPrimitives.jsx
+|   |       |       TargetedBatchAllocationReview.jsx
+|   |       |       TargetedBatchAllocationRowsPanel.jsx
+|   |       |       targetedBatchAllocationStyles.js
+|   |       |       TargetedBatchAllocationTargetPanel.jsx
+|   |       |       targetedBatchAllocationUtils.js
+|   |       |       
+|   |       +---draft
+|   |       |       TargetedBatchDraftFilters.jsx
+|   |       |       targetedBatchDraftReviewStyles.js
+|   |       |       TargetedBatchDraftSummary.jsx
+|   |       |       TargetedBatchDraftTable.jsx
+|   |       |       
+|   |       \---rows
+|   |               TargetedBatchRowsFilters.jsx
+|   |               targetedBatchRowsModel.js
+|   |               targetedBatchRowsStyles.js
+|   |               TargetedBatchRowsSummary.jsx
+|   |               TargetedBatchRowsTable.jsx
+|   |               
+|   +---profile
+|   |       ProfilePage.jsx
+|   |       
+|   +---registries
+|   |       AccountsRegistryPage.jsx
+|   |       ErfsRegistryPage.jsx
+|   |       MetersRegistryPage.jsx
+|   |       MreadRegistryPage.jsx
+|   |       MreadStagingPage.jsx
+|   |       PremisesRegistryPage.jsx
+|   |       RegistryLandingPage.jsx
+|   |       TrnsRegistryPage.jsx
+|   |       WardsRegistryPage.jsx
+|   |       
+|   +---reports
+|   |       AnomalyReportPage.jsx
+|   |       NoAccessReportPage.jsx
+|   |       NormalisationReportPage.jsx
+|   |       ReportsLandingPage.jsx
+|   |       UserActivityReportPage.jsx
+|   |       
+|   +---sales
+|   |   |   PrepaidSales.jsx
+|   |   |   salesUtils.js
+|   |   |   
+|   |   \---components
+|   |           MeterLocationModal.jsx
+|   |           SalesGpsMapSection.jsx
+|   |           SalesMetersTable.jsx
+|   |           SalesRangeFilterModal.jsx
+|   |           SalesTbRefsModal.jsx
+|   |           SalesTrendChart.jsx
+|   |           
+|   \---ward-scope
+|       |   ErfsPage.jsx
+|       |   MetersPage.jsx
+|       |   PremisesPage.jsx
+|       |   
+|       \---components
+|               WardScopeHeader.jsx
+|               
++---redux
+|       astsApi.js
+|       bgoApi.js
+|       demoSalesApi.js
+|       fwrLiveLocationsApi.js
+|       geofencesApi.js
+|       mapErfsApi.js
+|       mapGeofencesApi.js
+|       mapLmsApi.js
+|       mapPremisesApi.js
+|       mapWardsApi.js
+|       mreadStagingApi.js
+|       mreadStagingCyclesApi.js
+|       registryAccountsApi.js
+|       registryErfsApi.js
+|       registryMetersApi.js
+|       registryMreadApi.js
+|       registryPremisesApi.js
+|       registryWardsApi.js
+|       reportAnomalyApi.js
+|       reportNoAccessApi.js
+|       reportNormalisationApi.js
+|       reportUserActivityApi.js
+|       serviceProvidersApi.js
+|       store.js
+|       targetedBatchDraftModel.js
+|       targetedBatchDraftSlice.js
+|       tcApi.js
+|       teamsApi.js
+|       trnsApi.js
+|       usersApi.js
+|       wardErfsApi.js
+|       
++---routes
+|       AppRoutes.jsx
+|       
++---utils
+|   \---downloads
+|           quickDownloadExcel.js
+|           
+\---warehouse
+    \---ward
+            useWardWarehouse.js
+            WardWarehouseProvider.jsx
+            wardWarehouseSelectors.js
+            wardWarehouseUtils.js
+            

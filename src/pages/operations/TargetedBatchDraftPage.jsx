@@ -1,13 +1,15 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
+import { httpsCallable } from "firebase/functions";
 
+import { functions } from "../../firebase";
 import {
   clearTargetedBatchDraft,
-  confirmTargetedBatchDraft,
-  reopenTargetedBatchDraft,
   selectTargetedBatchDraft,
 } from "../../redux/targetedBatchDraftSlice";
+import TargetedBatchConfirmModal from "./targeted-batches/TargetedBatchConfirmModal";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
 import { downloadTargetedBatchDraft } from "./targeted-batches/targetedBatchUtils";
 
@@ -15,10 +17,13 @@ export default function TargetedBatchDraftPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const draft = useSelector(selectTargetedBatchDraft);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [creationFeedback, setCreationFeedback] = useState(null);
 
   function handleClearDraft() {
     const confirmed = window.confirm(
-      "Clear the current Targeted Batch frontend draft? This does not delete any Firestore data.",
+      "Clear the current TB Draft? No permanent Targeted Batch has been created from this draft.",
     );
 
     if (!confirmed) return;
@@ -27,11 +32,89 @@ export default function TargetedBatchDraftPage() {
     navigate("/operations/targeted-batches", { replace: true });
   }
 
+  function openConfirmModal() {
+    if (!draft || isCreating) return;
+    setIsConfirmModalOpen(true);
+  }
+
+  function closeConfirmModal() {
+    if (isCreating) return;
+    setIsConfirmModalOpen(false);
+  }
+
+  async function handleConfirmDraft() {
+    if (!draft || isCreating) return;
+
+    setIsConfirmModalOpen(false);
+    setIsCreating(true);
+    setCreationFeedback(null);
+
+    try {
+      const createTargetedBatch = httpsCallable(
+        functions,
+        "onCreateTargetedBatchCallable",
+      );
+      const response = await createTargetedBatch({ draft });
+      const result = response?.data || {};
+
+      if (result?.success !== true) {
+        const error = new Error(
+          result?.message || "Targeted Batch creation failed.",
+        );
+        error.code = result?.code || "TARGETED_BATCH_CREATE_FAILED";
+        throw error;
+      }
+
+      if (
+        String(result?.creationState || "")
+          .trim()
+          .toUpperCase() !== "READY"
+      ) {
+        const error = new Error(
+          "The backend did not confirm that the Targeted Batch is READY.",
+        );
+        error.code = "TARGETED_BATCH_NOT_READY";
+        throw error;
+      }
+
+      const permanentTbId = String(result?.tbId || draft.id || "").trim();
+
+      if (!permanentTbId) {
+        const error = new Error(
+          "The backend response did not include the permanent Targeted Batch ID.",
+        );
+        error.code = "TARGETED_BATCH_ID_MISSING";
+        throw error;
+      }
+
+      dispatch(clearTargetedBatchDraft());
+      navigate(
+        `/operations/targeted-batches/${encodeURIComponent(
+          permanentTbId,
+        )}/allocation`,
+        { replace: true },
+      );
+    } catch (error) {
+      setCreationFeedback({
+        type: "error",
+        code:
+          String(error?.code || "")
+            .trim()
+            .replace(/^functions\//, "")
+            .toUpperCase() || "TARGETED_BATCH_CREATE_FAILED",
+        message:
+          String(error?.message || "").trim() ||
+          "Targeted Batch creation failed.",
+      });
+      setIsCreating(false);
+    }
+  }
+
   return (
     <section style={styles.page}>
       <div style={styles.backRow}>
         <Link to="/operations/targeted-batches" style={styles.backLink}>
-          ← Back to TB Uploads
+          ← Back to TB Register
         </Link>
         <Link to="/sales" style={styles.backLink}>
           Open Prepaid Sales
@@ -40,15 +123,16 @@ export default function TargetedBatchDraftPage() {
 
       {!draft ? (
         <div style={styles.emptyCard}>
-          <p style={styles.eyebrow}>Targeted Batch Draft</p>
-          <h2 style={styles.title}>No frontend draft is available</h2>
+          <p style={styles.eyebrow}>Operations / TB Draft</p>
+          <h2 style={styles.title}>No TB Draft is available</h2>
           <p style={styles.description}>
-            Start from Prepaid Sales or upload a controlled TB CSV file. Package
-            1 creates the common draft route but does not write to Firestore.
+            Start from Prepaid Sales by selecting meters and opening TB Draft.
+            A permanent Targeted Batch and its permanent TB Rows are created only
+            by the controlled backend confirmation step.
           </p>
           <div style={styles.actions}>
             <Link to="/operations/targeted-batches" style={styles.primaryLink}>
-              Open TB Uploads
+              Open TB Register
             </Link>
             <Link to="/sales" style={styles.secondaryLink}>
               Open Prepaid Sales
@@ -58,12 +142,22 @@ export default function TargetedBatchDraftPage() {
       ) : (
         <TargetedBatchDraftReview
           draft={draft}
+          isCreating={isCreating}
+          creationFeedback={creationFeedback}
+          onConfirm={openConfirmModal}
           onClear={handleClearDraft}
           onDownload={() => downloadTargetedBatchDraft(draft)}
-          onConfirm={() => dispatch(confirmTargetedBatchDraft())}
-          onReopen={() => dispatch(reopenTargetedBatchDraft())}
         />
       )}
+
+      {draft && isConfirmModalOpen ? (
+        <TargetedBatchConfirmModal
+          draft={draft}
+          isCreating={isCreating}
+          onCancel={closeConfirmModal}
+          onConfirm={handleConfirmDraft}
+        />
+      ) : null}
     </section>
   );
 }

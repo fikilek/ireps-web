@@ -1,0 +1,80 @@
+{
+  "generatedAt": "2026-08-02T05:49:55.845Z",
+  "script": "reprocessGeoFenceMembership.js",
+  "mode": "DRY_RUN",
+  "projectId": "ireps2",
+  "serviceAccountProjectId": "ireps2",
+  "geoFence": {
+    "id": "u4bmxNemlbZZ1e7mkA6m",
+    "name": "G2 W3 Sebenzakusakhanya",
+    "status": "ACTIVE",
+    "lmPcode": "ZA5241",
+    "wardPcode": "ZA5241003",
+    "polygonPointCount": 4,
+    "originalCounts": {
+      "erfs": 448,
+      "premises": 0,
+      "meters": 0
+    }
+  },
+  "safety": {
+    "removesMembershipRefs": false,
+    "writesAllowed": false,
+    "geofenceCountsUpdated": false
+  },
+  "phaseSummaries": {
+    "erfs": {
+      "label": "ERFS",
+      "pagesRead": 7,
+      "docsRead": 2693,
+      "pointsChecked": 2693,
+      "memberCount": 448,
+      "alreadyLinked": 448,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "premises": {
+      "label": "PREMISES",
+      "pagesRead": 0,
+      "docsRead": 0,
+      "pointsChecked": 0,
+      "memberCount": 0,
+      "alreadyLinked": 0,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "asts": {
+      "label": "ASTS",
+      "pagesRead": 0,
+      "docsRead": 0,
+      "pointsChecked": 0,
+      "memberCount": 0,
+      "alreadyLinked": 0,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "sales": {
+      "label": "DEMO SALES",
+      "pagesRead": 19,
+      "docsRead": 7583,
+      "pointsChecked": 1729,
+      "memberCount": 338,
+      "alreadyLinked": 0,
+      "updatesRequired": 338,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    }
+  },
+  "plannedCounts": {
+    "erfs": 448,
+    "premises": 0,
+    "meters": 0,
+    "salesMeters": 338
+  },
+  "totalUpdatesRequired": 338,
+  "totalDocsUpdated": 0,
+  "verification": null
+}

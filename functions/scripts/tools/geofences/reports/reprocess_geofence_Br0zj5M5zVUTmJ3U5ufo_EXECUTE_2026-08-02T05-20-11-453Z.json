@@ -1,0 +1,102 @@
+{
+  "generatedAt": "2026-08-02T05:20:11.453Z",
+  "script": "reprocessGeoFenceMembership.js",
+  "mode": "EXECUTE",
+  "projectId": "ireps2",
+  "serviceAccountProjectId": "ireps2",
+  "geoFence": {
+    "id": "Br0zj5M5zVUTmJ3U5ufo",
+    "name": "G2 W2 Dandee Airfield",
+    "status": "ACTIVE",
+    "lmPcode": "ZA5241",
+    "wardPcode": "ZA5241002",
+    "polygonPointCount": 18,
+    "originalCounts": {
+      "erfs": 0,
+      "premises": 0,
+      "meters": 0,
+      "salesMeters": 0
+    }
+  },
+  "safety": {
+    "removesMembershipRefs": false,
+    "writesAllowed": true,
+    "geofenceCountsUpdated": true
+  },
+  "phaseSummaries": {
+    "erfs": {
+      "label": "ERFS",
+      "pagesRead": 8,
+      "docsRead": 3069,
+      "pointsChecked": 3069,
+      "memberCount": 962,
+      "alreadyLinked": 962,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "premises": {
+      "label": "PREMISES",
+      "pagesRead": 0,
+      "docsRead": 0,
+      "pointsChecked": 0,
+      "memberCount": 0,
+      "alreadyLinked": 0,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "asts": {
+      "label": "ASTS",
+      "pagesRead": 0,
+      "docsRead": 0,
+      "pointsChecked": 0,
+      "memberCount": 0,
+      "alreadyLinked": 0,
+      "updatesRequired": 0,
+      "docsUpdated": 0,
+      "batchesCommitted": 0
+    },
+    "sales": {
+      "label": "DEMO SALES",
+      "pagesRead": 19,
+      "docsRead": 7583,
+      "pointsChecked": 1812,
+      "memberCount": 796,
+      "alreadyLinked": 0,
+      "updatesRequired": 796,
+      "docsUpdated": 796,
+      "batchesCommitted": 19
+    }
+  },
+  "plannedCounts": {
+    "erfs": 962,
+    "premises": 0,
+    "meters": 0,
+    "salesMeters": 796
+  },
+  "totalUpdatesRequired": 796,
+  "totalDocsUpdated": 796,
+  "verification": {
+    "erfs": {
+      "pagesRead": 8,
+      "docsRead": 3069,
+      "refCount": 962
+    },
+    "premises": {
+      "pagesRead": 0,
+      "docsRead": 0,
+      "refCount": 0
+    },
+    "asts": {
+      "pagesRead": 0,
+      "docsRead": 0,
+      "refCount": 0
+    },
+    "sales": {
+      "pagesRead": 19,
+      "docsRead": 7583,
+      "refCount": 796
+    }
+  }
+}

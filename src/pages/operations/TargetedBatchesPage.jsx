@@ -1,33 +1,43 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 
 import { useAuth } from "../../auth/useAuth";
+import { db, functions } from "../../firebase";
 import {
   clearTargetedBatchDraft,
   prepareTargetedBatchDraft,
   recordTargetedBatchUploadAudit,
   selectTargetedBatchDraft,
-  selectTargetedBatchUploadAudit,
 } from "../../redux/targetedBatchDraftSlice";
 import {
   buildTargetedBatchDraftId,
   getTargetedBatchDraftView,
-  getTargetedBatchUploadAuditView,
   TARGETED_BATCH_FILE_DECISIONS,
   TARGETED_BATCH_SOURCE_TYPES,
   TARGETED_BATCH_UPLOAD_REGISTER_STATUSES,
 } from "../../redux/targetedBatchDraftModel";
 import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModal";
+import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModal";
 import {
   formatDateTime,
   formatNumber,
 } from "./targeted-batches/targetedBatchUtils";
 
 const SOURCE_FILTER_OPTIONS = Object.values(TARGETED_BATCH_SOURCE_TYPES);
-const STATUS_FILTER_OPTIONS = Object.values(
-  TARGETED_BATCH_UPLOAD_REGISTER_STATUSES,
+const STATUS_FILTER_OPTIONS = Array.from(
+  new Set([
+    ...Object.values(TARGETED_BATCH_UPLOAD_REGISTER_STATUSES),
+    "READY_FOR_ALLOCATION",
+    "PARTIALLY_ALLOCATED",
+    "ALLOCATED",
+    "IN_PROGRESS",
+    "COMPLETED",
+    "CREATION_FAILED",
+  ]),
 );
 
 function getActiveLmPcode(activeWorkbase) {
@@ -50,6 +60,30 @@ function getActiveWorkbaseName(activeWorkbase) {
   );
 }
 
+function timestampToIso(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value?.toDate === "function") return value.toDate().toISOString();
+  if (typeof value?.seconds === "number") {
+    return new Date(value.seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function mapPermanentTargetedBatch(snapshot) {
+  const data = snapshot.data() || {};
+
+  return {
+    ...data,
+    id: snapshot.id,
+    createdAt: timestampToIso(data?.metadata?.createdAt),
+    updatedAt: timestampToIso(data?.metadata?.updatedAt),
+    totalRows: Number(data?.counts?.totalRows || 0),
+    acceptedRows: Number(data?.counts?.acceptedRows || 0),
+    rejectedRows: Number(data?.counts?.rejectedRows || 0),
+  };
+}
+
 function getSourceReference(upload) {
   if (upload?.source?.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
     const from = upload?.selection?.salesPeriodFrom || "NAv";
@@ -63,6 +97,7 @@ function getSourceReference(upload) {
 function getUploadTotal(upload) {
   return Number(
     upload?.totalRows ??
+      upload?.counts?.totalRows ??
       upload?.validation?.totalRows ??
       upload?.displayRows?.length ??
       0,
@@ -71,6 +106,42 @@ function getUploadTotal(upload) {
 
 function getUploadFileDecision(upload) {
   return upload?.fileDecision || upload?.validation?.fileDecision || null;
+}
+
+function getDeleteEligibility(upload = {}) {
+  const executionStartedRows = Number(
+    upload?.counts?.executionStartedRows || 0,
+  );
+  const completedRows = Number(upload?.counts?.completedRows || 0);
+  const executionStatus = String(upload?.execution?.status || "")
+    .trim()
+    .toUpperCase();
+
+  if (executionStartedRows > 0 || completedRows > 0) {
+    return {
+      allowed: false,
+      reason: `${executionStartedRows} started row(s) and ${completedRows} completed row(s) prevent deletion.`,
+    };
+  }
+
+  if (executionStatus && executionStatus !== "NOT_STARTED") {
+    return {
+      allowed: false,
+      reason: `Batch execution status is ${executionStatus}.`,
+    };
+  }
+
+  if (upload?.execution?.startedAt || upload?.execution?.completedAt) {
+    return {
+      allowed: false,
+      reason: "Batch execution timestamps prevent deletion.",
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "The backend will recheck every permanent TB Row before deletion.",
+  };
 }
 
 function SummaryCard({ label, value }) {
@@ -109,16 +180,16 @@ function HelpModal({ type, onClose }) {
       body: "After a file is ACCEPTED, every row receives ACCEPT or REJECT. rowNo must be a positive whole number, meterNo is required, and duplicate rowNo or meterNo values are rejected. Every rejected row keeps its reason. Optional address, town, SG Code and action reason values may be blank.",
     },
     dictionary: {
-      title: "TB Uploads dictionary",
-      body: "TB means Targeted Batch. A TB Upload is a controlled list received from a CSV upload or selected from Prepaid Sales. The locked future Firestore collections are tb_uploads for the parent and tb_rows for all accepted-file candidate rows.",
+      title: "TB Register dictionary",
+      body: "TB means Targeted Batch. Permanent Targeted Batches are stored in tb_uploads and their permanent candidate rows are stored in tb_rows.",
     },
     dataFlow: {
       title: "TB Upload data flow",
-      body: "CSV selected → complete file ACCEPTED or REJECTED → accepted-file rows assessed ACCEPT or REJECT → frontend Draft Review. This Package 3 register is Redux-only. Permanent tb_uploads and tb_rows writes belong to the later backend creation package.",
+      body: "Sales selection → TB Draft → controlled backend creation → permanent tb_uploads parent and permanent tb_rows → TB Register and TB Rows.",
     },
   }[type] || {
-    title: "TB Uploads help",
-    body: "TB Uploads follows the controlled Targeted Batch workflow.",
+    title: "TB Register help",
+    body: "TB Register follows the controlled Targeted Batch workflow.",
   };
 
   return (
@@ -132,7 +203,7 @@ function HelpModal({ type, onClose }) {
       <div style={styles.helpModalCard} role="dialog" aria-modal="true">
         <div style={styles.modalHeader}>
           <div>
-            <p style={styles.eyebrow}>TB Uploads Help</p>
+            <p style={styles.eyebrow}>TB Register Help</p>
             <h3 style={styles.modalTitle}>{content.title}</h3>
           </div>
           <button type="button" style={styles.closeButton} onClick={onClose}>
@@ -150,7 +221,6 @@ export default function TargetedBatchesPage() {
   const navigate = useNavigate();
   const { activeWorkbase } = useAuth();
   const storedDraft = useSelector(selectTargetedBatchDraft);
-  const storedUploadAudit = useSelector(selectTargetedBatchUploadAudit);
   const draft = useMemo(
     () => getTargetedBatchDraftView(storedDraft),
     [storedDraft],
@@ -160,35 +230,67 @@ export default function TargetedBatchesPage() {
   const [activeHelpModal, setActiveHelpModal] = useState(null);
   const [sourceFilter, setSourceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [permanentUploads, setPermanentUploads] = useState([]);
+  const [isRegisterLoading, setIsRegisterLoading] = useState(true);
+  const [registerLoadError, setRegisterLoadError] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false);
+  const [deleteBatchError, setDeleteBatchError] = useState("");
+  const [registerStatusMessage, setRegisterStatusMessage] = useState("");
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
 
-  const uploads = useMemo(() => {
-    const auditRows = storedUploadAudit
-      .map((entry) => getTargetedBatchUploadAuditView(entry))
-      .filter(Boolean);
-    const byId = new Map(auditRows.map((entry) => [entry.id, entry]));
+  useEffect(() => {
+    let active = true;
 
-    if (draft) {
-      const auditEntry = byId.get(draft.id);
-      byId.set(draft.id, {
-        ...auditEntry,
-        ...draft,
-        fileDecision:
-          draft.validation?.fileDecision || auditEntry?.fileDecision || null,
-        totalRows: draft.validation?.totalRows || draft.displayRows.length,
-        acceptedRows:
-          draft.validation?.acceptedRows ?? auditEntry?.acceptedRows ?? 0,
-        rejectedRows:
-          draft.validation?.rejectedRows ?? auditEntry?.rejectedRows ?? 0,
-      });
+    async function loadPermanentTargetedBatches() {
+      setIsRegisterLoading(true);
+      setRegisterLoadError("");
+
+      if (!activeLmPcode) {
+        setPermanentUploads([]);
+        setIsRegisterLoading(false);
+        return;
+      }
+
+      try {
+        const uploadsQuery = query(
+          collection(db, "tb_uploads"),
+          where("scope.lmPcode", "==", activeLmPcode),
+        );
+        const snapshot = await getDocs(uploadsQuery);
+
+        if (!active) return;
+
+        const loadedUploads = snapshot.docs
+          .map(mapPermanentTargetedBatch)
+          .sort((left, right) =>
+            String(right?.createdAt || "").localeCompare(
+              String(left?.createdAt || ""),
+            ),
+          );
+
+        setPermanentUploads(loadedUploads);
+      } catch (error) {
+        if (!active) return;
+        setPermanentUploads([]);
+        setRegisterLoadError(
+          error?.message || "Permanent Targeted Batches could not be loaded.",
+        );
+      } finally {
+        if (active) setIsRegisterLoading(false);
+      }
     }
 
-    return Array.from(byId.values()).sort((left, right) =>
-      String(right?.createdAt || "").localeCompare(String(left?.createdAt || "")),
-    );
-  }, [storedUploadAudit, draft]);
+    loadPermanentTargetedBatches();
+
+    return () => {
+      active = false;
+    };
+  }, [activeLmPcode]);
+
+  const uploads = permanentUploads;
 
   const filteredUploads = useMemo(() => {
     return uploads.filter((upload) => {
@@ -200,25 +302,94 @@ export default function TargetedBatchesPage() {
 
   const summary = useMemo(() => {
     const totalUploads = uploads.length;
-    const drafts = uploads.filter((upload) => upload?.status === "DRAFT").length;
-    const readyForBackend = uploads.filter(
-      (upload) => upload?.status === "READY_FOR_BACKEND",
+    const readyForAllocation = uploads.filter(
+      (upload) => upload?.status === "READY_FOR_ALLOCATION",
     ).length;
-    const needsAttention = uploads.filter((upload) => {
-      const fileDecision = getUploadFileDecision(upload);
-      return (
-        fileDecision === TARGETED_BATCH_FILE_DECISIONS.REJECTED ||
-        Number(upload?.rejectedRows || upload?.validation?.rejectedRows || 0) > 0
-      );
-    }).length;
+    const allocated = uploads.filter((upload) =>
+      ["PARTIALLY_ALLOCATED", "ALLOCATED"].includes(upload?.status),
+    ).length;
+    const needsAttention = uploads.filter(
+      (upload) =>
+        upload?.creation?.state === "CREATION_FAILED" ||
+        upload?.validation?.status === "FAILED",
+    ).length;
 
     return {
       totalUploads,
-      drafts,
-      readyForBackend,
+      readyForAllocation,
+      allocated,
       needsAttention,
     };
   }, [uploads]);
+
+  function openDeleteModal(upload) {
+    const eligibility = getDeleteEligibility(upload);
+
+    if (!eligibility.allowed) {
+      setRegisterStatusMessage(eligibility.reason);
+      return;
+    }
+
+    setDeleteBatchError("");
+    setRegisterStatusMessage("");
+    setDeleteCandidate(upload);
+  }
+
+  function closeDeleteModal() {
+    if (isDeletingBatch) return;
+
+    setDeleteCandidate(null);
+    setDeleteBatchError("");
+  }
+
+  async function handleDeleteTargetedBatch() {
+    if (!deleteCandidate?.id || isDeletingBatch) return;
+
+    setIsDeletingBatch(true);
+    setDeleteBatchError("");
+    setRegisterStatusMessage("");
+
+    try {
+      const deleteCallable = httpsCallable(
+        functions,
+        "onDeleteTargetedBatchCallable",
+      );
+      const response = await deleteCallable({ tbId: deleteCandidate.id });
+      const result = response?.data || {};
+
+      if (result?.success !== true) {
+        const error = new Error(
+          result?.message || "Targeted Batch deletion failed.",
+        );
+        error.code = result?.code || "TARGETED_BATCH_DELETE_FAILED";
+        throw error;
+      }
+
+      setPermanentUploads((current) =>
+        current.filter((upload) => upload.id !== deleteCandidate.id),
+      );
+      setRegisterStatusMessage(
+        `${deleteCandidate.id} and ${formatNumber(
+          result?.deletedRows || 0,
+        )} permanent TB Row(s) were deleted.`,
+      );
+      setDeleteCandidate(null);
+    } catch (error) {
+      const code = String(
+        error?.code || error?.details?.code || "TARGETED_BATCH_DELETE_FAILED",
+      )
+        .replace(/^functions\//, "")
+        .toUpperCase();
+      const message =
+        error?.message ||
+        error?.details?.message ||
+        "Targeted Batch deletion failed.";
+
+      setDeleteBatchError(`${code}: ${message}`);
+    } finally {
+      setIsDeletingBatch(false);
+    }
+  }
 
   function handleSubmitCsvBatch(result) {
     const fileAccepted =
@@ -290,9 +461,9 @@ export default function TargetedBatchesPage() {
     <section style={styles.page}>
       <div style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>Operations / TB Uploads</p>
+          <p style={styles.eyebrow}>Operations / TB Register</p>
           <div style={styles.titleHelpRow}>
-            <h2 style={styles.title}>TB Uploads</h2>
+            <h2 style={styles.title}>TB Register</h2>
             <div style={styles.titleHelpButtons}>
               <button
                 type="button"
@@ -332,9 +503,8 @@ export default function TargetedBatchesPage() {
             </div>
           </div>
           <p style={styles.subtitle}>
-            Upload and assess controlled Targeted Batch CSV files. Complete files
-            receive ACCEPTED or REJECTED; accepted-file rows receive ACCEPT or
-            REJECT with reasons retained for rejected rows.
+            View permanent Targeted Batches and open their permanent TB Rows.
+            Current batches originate from the approved Sales workflow.
           </p>
         </div>
 
@@ -376,28 +546,38 @@ export default function TargetedBatchesPage() {
         </div>
       ) : null}
 
+      {registerLoadError ? (
+        <div style={styles.errorNotice}>
+          <strong>TB Register could not be loaded</strong>
+          <div>{registerLoadError}</div>
+        </div>
+      ) : null}
+
+      {registerStatusMessage ? (
+        <div style={styles.successNotice}>{registerStatusMessage}</div>
+      ) : null}
+
       <div style={styles.summaryGrid}>
-        <SummaryCard label="Total Uploads" value={summary.totalUploads} />
-        <SummaryCard label="Draft" value={summary.drafts} />
+        <SummaryCard label="Total Batches" value={summary.totalUploads} />
         <SummaryCard
-          label="Ready for Backend"
-          value={summary.readyForBackend}
+          label="Ready for Allocation"
+          value={summary.readyForAllocation}
         />
+        <SummaryCard label="Allocated" value={summary.allocated} />
         <SummaryCard label="Needs Attention" value={summary.needsAttention} />
       </div>
 
       <div style={styles.panel}>
         <div style={styles.panelHeader}>
           <div>
-            <h3 style={styles.panelTitle}>Upload Register</h3>
+            <h3 style={styles.panelTitle}>Permanent Targeted Batches</h3>
             <p style={styles.panelSubtitle}>
-              Frontend session register for CSV outcomes and the active Targeted
-              Batch draft. Permanent Firestore audit is introduced by the backend
-              creation package.
+              Permanent Targeted Batches loaded from tb_uploads for the active
+              Local Municipality.
             </p>
           </div>
 
-          <div style={styles.draftStreamBadge}>Frontend register</div>
+          <div style={styles.draftStreamBadge}>Permanent Firestore register</div>
         </div>
 
         <div style={styles.filterRow}>
@@ -434,6 +614,7 @@ export default function TargetedBatchesPage() {
               <tr>
                 <Th>TB Rows</Th>
                 <Th>Final Report (DRAFT)</Th>
+                <Th>Delete TB</Th>
                 <Th>TB ID</Th>
                 <Th>Total</Th>
               </tr>
@@ -442,28 +623,29 @@ export default function TargetedBatchesPage() {
             <tbody>
               {filteredUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={4}>
-                    {uploads.length === 0
-                      ? "No TB uploads found yet. Use Upload TB File or Go to Sales."
-                      : "No TB uploads match the selected filters."}
+                  <Td colSpan={5}>
+                    {isRegisterLoading
+                      ? "Loading permanent Targeted Batches..."
+                      : uploads.length === 0
+                        ? "No permanent Targeted Batches were found for this Local Municipality."
+                        : "No permanent Targeted Batches match the selected filters."}
                   </Td>
                 </tr>
               ) : null}
 
               {filteredUploads.map((upload) => {
-                const activeDraftRows = draft?.id === upload.id;
                 const fileDecision = getUploadFileDecision(upload);
-                const fileRejected =
-                  fileDecision === TARGETED_BATCH_FILE_DECISIONS.REJECTED;
+                const creationReady = upload?.creation?.state === "READY";
+                const deleteEligibility = getDeleteEligibility(upload);
                 const rejectionReason =
-                  upload?.rejectionReasons?.[0] ||
+                  upload?.creation?.failureMessage ||
                   upload?.validation?.errors?.[0] ||
                   null;
 
                 return (
                   <tr key={upload.id}>
                     <Td>
-                      {activeDraftRows && !fileRejected ? (
+                      {creationReady ? (
                         <Link
                           to={`/operations/targeted-batches/${encodeURIComponent(upload.id)}`}
                           style={styles.rowLinkButton}
@@ -478,13 +660,9 @@ export default function TargetedBatchesPage() {
                             ...styles.disabledButton,
                           }}
                           disabled
-                          title={
-                            fileRejected
-                              ? "A rejected file does not prepare TB rows."
-                              : "This frontend audit entry is not the active draft."
-                          }
+                          title="Permanent TB Rows are available only after creation reaches READY."
                         >
-                          {fileRejected ? "No TB Rows" : "Rows unavailable"}
+                          Rows unavailable
                         </button>
                       )}
                     </Td>
@@ -504,30 +682,24 @@ export default function TargetedBatchesPage() {
                     </Td>
 
                     <Td>
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.deleteBatchButton,
+                          ...(!deleteEligibility.allowed
+                            ? styles.disabledButton
+                            : null),
+                        }}
+                        disabled={!deleteEligibility.allowed}
+                        title={deleteEligibility.reason}
+                        onClick={() => openDeleteModal(upload)}
+                      >
+                        Delete TB
+                      </button>
+                    </Td>
+
+                    <Td>
                       <div style={styles.strongCell}>{upload.id || "NAv"}</div>
-                      <div style={styles.secondaryCellText}>
-                        {getSourceReference(upload)}
-                      </div>
-                      <div style={styles.secondaryCellText}>
-                        {upload.scope?.lmPcode || "NAv"} ·{" "}
-                        {upload.scope?.lmName || "NAv"}
-                      </div>
-                      <div style={styles.secondaryCellText}>
-                        {upload.status || "DRAFT"}
-                        {fileDecision ? ` · File ${fileDecision}` : ""} ·{" "}
-                        {formatDateTime(upload.createdAt)}
-                      </div>
-                      {Number(upload?.rejectedRows || 0) > 0 ? (
-                        <div style={styles.secondaryCellText}>
-                          {formatNumber(upload.acceptedRows)} ACCEPT ·{" "}
-                          {formatNumber(upload.rejectedRows)} REJECT
-                        </div>
-                      ) : null}
-                      {rejectionReason ? (
-                        <div style={styles.secondaryCellText}>
-                          Reason: {rejectionReason}
-                        </div>
-                      ) : null}
                     </Td>
 
                     <Td>
@@ -573,6 +745,16 @@ export default function TargetedBatchesPage() {
           onClose={() => setIsUploadModalOpen(false)}
           onSubmit={handleSubmitCsvBatch}
           hasExistingDraft={Boolean(draft)}
+        />
+      ) : null}
+
+      {deleteCandidate ? (
+        <TargetedBatchDeleteModal
+          batch={deleteCandidate}
+          isDeleting={isDeletingBatch}
+          error={deleteBatchError}
+          onClose={closeDeleteModal}
+          onConfirm={handleDeleteTargetedBatch}
         />
       ) : null}
 
@@ -680,6 +862,16 @@ const styles = {
     borderRadius: 16,
     background: "#fef2f2",
     color: "#991b1b",
+    fontSize: 13,
+    fontWeight: 800,
+  },
+  successNotice: {
+    marginBottom: 16,
+    padding: 14,
+    border: "1px solid #86efac",
+    borderRadius: 16,
+    background: "#f0fdf4",
+    color: "#166534",
     fontSize: 13,
     fontWeight: 800,
   },
@@ -801,6 +993,19 @@ const styles = {
     fontSize: 12,
     fontWeight: 900,
     whiteSpace: "nowrap",
+  },
+  deleteBatchButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #fecaca",
+    borderRadius: 999,
+    background: "#fef2f2",
+    color: "#b91c1c",
+    padding: "7px 10px",
+    fontSize: 12,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
   },
   strongCell: {
     color: "#0f172a",

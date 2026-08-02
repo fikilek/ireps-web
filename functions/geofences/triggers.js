@@ -21,7 +21,10 @@ import {
    ===================================================== */
 
 export const onGeoFenceCreated = onDocumentCreated(
-  "geo_fences/{geoFenceId}",
+  {
+    document: "geo_fences/{geoFenceId}",
+    memory: "512MiB",
+  },
   async (event) => {
     const db = getFirestore();
 

@@ -13,6 +13,7 @@ import {
   assertCanonicalParentDocuments,
   assertInformalErfId,
   assertNoExistingErfIntersection,
+  assertOnlyAllowedKeys,
   assertPositiveEpochMs,
   assertSameCompletedSubmission,
   assertValidDeviceLocation,
@@ -28,6 +29,19 @@ import {
 
 const COUNTER_COLLECTION = "ireps_counters";
 const COUNTER_DOCUMENT = "informal_erfs";
+const ALLOWED_PAYLOAD_KEYS = new Set([
+  "schemaVersion",
+  "formType",
+  "erfId",
+  "lmPcode",
+  "wardPcode",
+  "boundaryPoints",
+  "reasonCode",
+  "reasonOther",
+  "media",
+  "deviceLocation",
+  "clientSubmittedAtMs",
+]);
 
 function permanentDetails(details = {}) {
   return {
@@ -77,9 +91,21 @@ function throwAlreadyExists(message, details = {}) {
   );
 }
 
-async function assertStorageObjectsExist(sitePhotos) {
-  const bucket = getStorage().bucket();
+function buildSubmissionConflictDetails(error, erfId) {
+  const details = {
+    erfId,
+    businessCode:
+      error?.businessCode || "INFORMAL_ERF_ID_CONFLICT",
+  };
 
+  if (Array.isArray(error?.mismatches) && error.mismatches.length > 0) {
+    details.mismatches = [...error.mismatches];
+  }
+
+  return details;
+}
+
+async function assertStorageObjectsExist(sitePhotos, bucket) {
   const checks = await Promise.all(
     sitePhotos.map(async (photo) => {
       const [exists] = await bucket.file(photo.storagePath).exists();
@@ -107,7 +133,7 @@ function buildCollisionQuery({ db, wardPcode, bbox }) {
     .where("bbox.maxLng", ">=", bbox.minLng);
 }
 
-function buildLegacyInformalQuery({ db, wardPcode }) {
+function buildInformalErfFallbackQuery({ db, wardPcode }) {
   return db
     .collection("ireps_erfs")
     .where("admin.ward.pcode", "==", wardPcode)
@@ -394,7 +420,17 @@ export const submitInformalErfCallable = onCall(
 
     const data = request.data;
 
-    if (Number(data?.schemaVersion) !== 2) {
+    try {
+      assertOnlyAllowedKeys(
+        data,
+        ALLOWED_PAYLOAD_KEYS,
+        "The callable payload",
+      );
+    } catch (error) {
+      throwInvalidArgument(error.message);
+    }
+
+    if (data?.schemaVersion !== 2) {
       throwInvalidArgument("schemaVersion must be 2.");
     }
 
@@ -415,6 +451,17 @@ export const submitInformalErfCallable = onCall(
       );
     }
 
+    const storageBucket = getStorage().bucket();
+    const storageBucketName = asTrimmedString(storageBucket.name);
+
+    if (!storageBucketName) {
+      throw new HttpsError(
+        "internal",
+        "The Firebase Storage bucket is not configured.",
+        temporaryDetails(),
+      );
+    }
+
     let erfId;
     let canonicalPolygon;
     let deviceLocation;
@@ -426,7 +473,11 @@ export const submitInformalErfCallable = onCall(
       canonicalPolygon = buildCanonicalPolygon(data?.boundaryPoints);
       deviceLocation = assertValidDeviceLocation(data?.deviceLocation);
       reason = normalizeReason(data?.reasonCode, data?.reasonOther);
-      sitePhotos = normalizeSitePhotos(data?.media, erfId);
+      sitePhotos = normalizeSitePhotos(
+        data?.media,
+        erfId,
+        storageBucketName,
+      );
       assertPositiveEpochMs(
         data?.clientSubmittedAtMs,
         "clientSubmittedAtMs",
@@ -511,6 +562,10 @@ export const submitInformalErfCallable = onCall(
             lmPcode,
             wardPcode,
             actorUid: callerUid,
+            canonicalPolygon,
+            reason,
+            deviceLocation,
+            sitePhotos,
           });
         } catch (error) {
           logger.error("submitInformalErfCallable -- IDEMPOTENCY CHECK FAILED", {
@@ -521,7 +576,10 @@ export const submitInformalErfCallable = onCall(
             errorMessage: error?.message || "Unknown idempotency error.",
             errorStack: error?.stack || null,
           });
-          throwAlreadyExists(error.message, { erfId });
+          throwAlreadyExists(
+            error.message,
+            buildSubmissionConflictDetails(error, erfId),
+          );
         }
 
         await refreshErfRegistryProjectionOrThrow({
@@ -564,14 +622,14 @@ export const submitInformalErfCallable = onCall(
         return duplicateResult;
       }
 
-      await assertStorageObjectsExist(sitePhotos);
+      await assertStorageObjectsExist(sitePhotos, storageBucket);
 
       const collisionQuery = buildCollisionQuery({
         db,
         wardPcode,
         bbox: canonicalPolygon.bbox,
       });
-      const legacyInformalQuery = buildLegacyInformalQuery({
+      const informalErfFallbackQuery = buildInformalErfFallbackQuery({
         db,
         wardPcode,
       });
@@ -595,6 +653,10 @@ export const submitInformalErfCallable = onCall(
                 lmPcode,
                 wardPcode,
                 actorUid: callerUid,
+                canonicalPolygon,
+                reason,
+                deviceLocation,
+                sitePhotos,
               });
             } catch (error) {
               logger.error(
@@ -609,7 +671,10 @@ export const submitInformalErfCallable = onCall(
                   errorStack: error?.stack || null,
                 },
               );
-              throwAlreadyExists(error.message, { erfId });
+              throwAlreadyExists(
+                error.message,
+                buildSubmissionConflictDetails(error, erfId),
+              );
             }
 
             return {
@@ -690,12 +755,12 @@ export const submitInformalErfCallable = onCall(
           }
 
           const collisionSnapshot = await transaction.get(collisionQuery);
-          const legacyInformalSnapshot = await transaction.get(
-            legacyInformalQuery,
+          const informalErfFallbackSnapshot = await transaction.get(
+            informalErfFallbackQuery,
           );
           const collisionDocuments = mergeDocumentSnapshots(
             collisionSnapshot,
-            legacyInformalSnapshot,
+            informalErfFallbackSnapshot,
           );
           let collisionResult;
 

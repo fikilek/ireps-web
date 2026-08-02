@@ -23,7 +23,7 @@ export default function TargetedBatchDashboardPage() {
         title="Targeted Batch Dashboard"
         description="Package 1 establishes the overall monitoring route and frontend shell. Live batch cards will be connected only after the tb_uploads parent summaries and tb_rows candidate truth are available from the backend."
         primaryAction={{
-          label: "Open TB Uploads",
+          label: "Open TB Register",
           to: "/operations/targeted-batches",
         }}
         secondaryAction={

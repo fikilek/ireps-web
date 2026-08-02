@@ -104,26 +104,6 @@ function Pagination({
   );
 }
 
-function ReferenceStack({ row }) {
-  const references = [
-    ["TB Row", row.tbRowId || "PENDING_BACKEND"],
-    ["Source", row.sourceReference],
-    ["AST", row.astId || "NAv"],
-    ["Premise", row.premiseId || "NAv"],
-    ["MD TRN", row.meterDiscoveryTrnId || "NAv"],
-  ];
-
-  return (
-    <div style={styles.referenceStack}>
-      {references.map(([label, value]) => (
-        <div key={label} style={styles.referenceLine}>
-          <strong>{label}:</strong> {value}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function TargetedBatchRowsTable({
   rows,
   totalRows,
@@ -155,7 +135,7 @@ export default function TargetedBatchRowsTable({
               <th style={styles.th}>Premise</th>
               <th style={styles.th}>Meter Discovery</th>
               <th style={styles.th}>Completion</th>
-              <th style={styles.th}>Exact References</th>
+              <th style={styles.th}>TB Row ID</th>
               <th style={styles.th}>Total Sales</th>
             </tr>
           </thead>
@@ -190,7 +170,7 @@ export default function TargetedBatchRowsTable({
                   <td style={styles.td}><StatusBadge value={row.premiseStatus} /></td>
                   <td style={styles.td}><StatusBadge value={row.meterDiscoveryStatus} /></td>
                   <td style={styles.td}><StatusBadge value={row.completionStatus} /></td>
-                  <td style={styles.td}><ReferenceStack row={row} /></td>
+                  <td style={{ ...styles.td, ...styles.strongCell }}>{row.tbRowId || "NAv"}</td>
                   <td style={styles.td}>
                     {row.totalSalesC === null
                       ? "NAv"

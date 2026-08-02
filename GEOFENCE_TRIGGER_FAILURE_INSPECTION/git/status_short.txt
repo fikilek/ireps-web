@@ -1,0 +1,53 @@
+﻿ M functions/index.js
+ M functions/informal-erfs/helpers.js
+ M functions/informal-erfs/submitInformalErfCallable.js
+ M src/layouts/ConsoleLayout.jsx
+ M src/pages/operations/TargetedBatchDashboardPage.jsx
+ M src/pages/operations/TargetedBatchDetailsPage.jsx
+ M src/pages/operations/TargetedBatchDraftPage.jsx
+ M src/pages/operations/TargetedBatchesPage.jsx
+ M src/pages/operations/targeted-batches/TargetedBatchDraftReview.jsx
+ M src/pages/operations/targeted-batches/draft/targetedBatchDraftReviewStyles.js
+ M src/pages/operations/targeted-batches/rows/TargetedBatchRowsTable.jsx
+ M src/pages/registries/WardsRegistryPage.jsx
+ M src/pages/sales/components/SalesGpsMapSection.jsx
+ M src/pages/sales/components/SalesMetersTable.jsx
+ M src/redux/targetedBatchDraftSlice.js
+?? GEOFENCE_DEMO_SALES_MEMBERSHIP_1.zip
+?? GEOFENCE_TRIGGER_FAILURE_INSPECTION/
+?? SALES_CAT_COLUMNS_CURRENT_INPUT.zip
+?? SALES_GEOFENCE_COLUMN_1.zip
+?? SALES_GEOFENCE_COLUMN_2.zip
+?? SALES_GPS_MAP_GEOFENCE_FILTER_1.zip
+?? SALES_MAP_TABLE_FILTER_SYNC_1.zip
+?? SALES_STREAM_LOADING_SPINNER_2.zip
+?? SALES_STREAM_UPDATED_AT_SORT_1.zip
+?? SALES_TARGETED_BATCH_V2_INSPECTION.zip
+?? SALES_TARGETED_BATCH_V2_INSPECTION/
+?? SALES_TB_IDS_COLUMN_2.zip
+?? SALES_WARD_GPS_MAP_1.zip
+?? SALES_WARD_GPS_MAP_BOUNDARY_1.zip
+?? TB_ALLOCATION_BGO_STYLE_1.zip
+?? TB_ALLOCATION_FIRESTORE_INPUT.zip
+?? TB_ALLOCATION_PERMANENT_FIRESTORE_LOAD_1.zip
+?? TB_ALLOCATION_REMOVE_LM_DISPLAY_1.zip
+?? TB_ALLOCATION_REMOVE_LM_NAME_1.zip
+?? TB_ALLOCATION_WHOLE_BATCH_1.zip
+?? TB_BACKEND_IMPLEMENTATION_INPUT.zip
+?? TB_BACKEND_TEMP_LM_RELAXATION_1.zip
+?? TB_DELETE_IMPLEMENTATION_1.zip
+?? TB_DRAFT_CALLABLE_CONNECTION_1.zip
+?? TB_DRAFT_CONFIRM_MODAL_1.zip
+?? TB_REGISTER_LOADING_INSPECTION.zip
+?? TB_REGISTER_ROWS_FIRESTORE_INPUT.zip
+?? TB_REGISTER_ROWS_PERMANENT_FIRESTORE_1.zip
+?? TB_REGISTER_TB_ID_ONLY_1.zip
+?? TB_ROWS_ROW_ID_ONLY_1.zip
+?? functions/scripts/tools/informal-erfs/
+?? functions/targetedBatches/
+?? ireps-web-tb-package5-source.zip
+?? src/pages/operations/TargetedBatchFinalReportPage.jsx
+?? src/pages/operations/targeted-batches/TargetedBatchConfirmModal.jsx
+?? src/pages/operations/targeted-batches/TargetedBatchDeleteModal.jsx
+?? src/pages/operations/targeted-batches/allocation/
+?? src/pages/sales/components/SalesTbRefsModal.jsx

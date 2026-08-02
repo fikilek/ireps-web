@@ -1,0 +1,974 @@
+﻿diff --git a/src/pages/sales/PrepaidSales.jsx b/src/pages/sales/PrepaidSales.jsx
+index d39fa12..aa808ab 100644
+--- a/src/pages/sales/PrepaidSales.jsx
++++ b/src/pages/sales/PrepaidSales.jsx
+@@ -24,6 +24,30 @@ import {
+   getTargetFilterLabel,
+ } from "./salesUtils";
+ 
++function SalesLoadingState() {
++  return (
++    <section style={styles.loadingPanel} aria-live="polite" aria-busy="true">
++      <style>
++        {`
++          @keyframes irepsSalesSpinner {
++            from { transform: rotate(0deg); }
++            to { transform: rotate(360deg); }
++          }
++        `}
++      </style>
++
++      <div style={styles.loadingSpinner} aria-hidden="true" />
++
++      <div>
++        <h2 style={styles.loadingTitle}>Loading prepaid sales...</h2>
++        <p style={styles.loadingText}>
++          Connecting to the live Sales stream and preparing meter records.
++        </p>
++      </div>
++    </section>
++  );
++}
++
+ function SummaryCard({ label, value, subtitle, active, onClick }) {
+   const interactive = typeof onClick === "function";
+ 
+@@ -344,12 +368,7 @@ export default function PrepaidSales() {
+         </section>
+       ) : null}
+ 
+-      {isLoading ? (
+-        <section style={styles.statePanel}>
+-          <h2>Loading prepaid sales...</h2>
+-          <p>Reading Endumeni meter sales through Redux Toolkit Query.</p>
+-        </section>
+-      ) : null}
++      {isLoading ? <SalesLoadingState /> : null}
+ 
+       {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
+         <section style={styles.statePanel}>
+@@ -610,6 +629,36 @@ const styles = {
+     fontWeight: 850,
+     cursor: "pointer",
+   },
++  loadingPanel: {
++    display: "flex",
++    alignItems: "center",
++    gap: "1rem",
++    marginTop: "1rem",
++    padding: "1.4rem 1.5rem",
++    border: "1px solid rgba(37, 99, 235, 0.2)",
++    borderRadius: "1rem",
++    background: "#ffffff",
++    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.05)",
++  },
++  loadingSpinner: {
++    width: "2.35rem",
++    height: "2.35rem",
++    flex: "0 0 auto",
++    border: "4px solid #dbeafe",
++    borderTopColor: "#2563eb",
++    borderRadius: "999px",
++    animation: "irepsSalesSpinner 0.8s linear infinite",
++  },
++  loadingTitle: {
++    margin: 0,
++    color: "#0f172a",
++    fontSize: "1.08rem",
++  },
++  loadingText: {
++    margin: "0.3rem 0 0",
++    color: "#64748b",
++    fontSize: "0.88rem",
++  },
+   statePanel: {
+     padding: "1.25rem",
+     borderRadius: "1rem",
+diff --git a/src/pages/sales/components/SalesGpsMapSection.jsx b/src/pages/sales/components/SalesGpsMapSection.jsx
+index 6c89798..5eee8f7 100644
+--- a/src/pages/sales/components/SalesGpsMapSection.jsx
++++ b/src/pages/sales/components/SalesGpsMapSection.jsx
+@@ -4,6 +4,7 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
+ import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
+ 
+ import { useWarehouse } from "@/context/WarehouseContext";
++import { useGetGeoFencesByWardQuery } from "../../../redux/geofencesApi";
+ 
+ const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+ const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
+@@ -35,6 +36,31 @@ function getWardNumber(ward = {}) {
+   );
+ }
+ 
++function getWardPcode(ward = {}) {
++  return ward?.id || ward?.pcode || ward?.wardPcode || "";
++}
++
++function getWardLmPcode(ward = {}) {
++  return (
++    ward?.parents?.lmPcode ||
++    ward?.lmPcode ||
++    ward?.localMunicipalityPcode ||
++    ""
++  );
++}
++
++function getRowLmPcode(rows = []) {
++  return (
++    rows.find((row) => String(row?.lmPcode || "").trim())?.lmPcode || ""
++  );
++}
++
++function getRowGeofenceRefs(row = {}) {
++  return Array.isArray(row?.geofenceRefs)
++    ? row.geofenceRefs.filter((ref) => ref?.id)
++    : [];
++}
++
+ function parseGeometry(geometry) {
+   if (!geometry) return null;
+ 
+@@ -68,6 +94,27 @@ function geoJsonPolygonToGooglePaths(geometry) {
+   return [];
+ }
+ 
++function geofenceGeometryToGooglePaths(geometry) {
++  const parsedGeometry = parseGeometry(geometry);
++
++  if (!parsedGeometry) return [];
++
++  if (Array.isArray(parsedGeometry?.points)) {
++    const ring = parsedGeometry.points
++      .map((point) => ({
++        lat: Number(point?.latitude ?? point?.lat),
++        lng: Number(point?.longitude ?? point?.lng),
++      }))
++      .filter(
++        (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng),
++      );
++
++    return ring.length >= 3 ? [ring] : [];
++  }
++
++  return geoJsonPolygonToGooglePaths(parsedGeometry);
++}
++
+ function fitMapToBbox(map, bbox) {
+   if (!map || !bbox || !window.google?.maps) return false;
+ 
+@@ -163,7 +210,7 @@ function getWardGpsPoints(rows = [], selectedWardNo = "") {
+   return points;
+ }
+ 
+-function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
++function SalesWardBoundaryLayer({ wardBoundary, fitRequest, fitEnabled }) {
+   const map = useMap();
+   const polygonRef = useRef(null);
+ 
+@@ -197,8 +244,10 @@ function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
+     polygon.setMap(map);
+     polygonRef.current = polygon;
+ 
+-    if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+-      fitMapToPaths(map, paths);
++    if (fitEnabled) {
++      if (!fitMapToBbox(map, wardBoundary?.bbox)) {
++        fitMapToPaths(map, paths);
++      }
+     }
+ 
+     return () => {
+@@ -207,14 +256,15 @@ function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
+         polygonRef.current = null;
+       }
+     };
+-  }, [map, paths, wardBoundary]);
++  }, [fitEnabled, map, paths, wardBoundary]);
+ 
+   useEffect(() => {
+     if (
+       !map ||
+       !wardBoundary ||
+       paths.length === 0 ||
+-      fitRequest === 0
++      fitRequest === 0 ||
++      !fitEnabled
+     ) {
+       return;
+     }
+@@ -222,7 +272,65 @@ function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
+     if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+       fitMapToPaths(map, paths);
+     }
+-  }, [fitRequest, map, paths, wardBoundary]);
++  }, [fitEnabled, fitRequest, map, paths, wardBoundary]);
++
++  return null;
++}
++
++function SalesGeofenceBoundaryLayer({ geofence, fitRequest }) {
++  const map = useMap();
++  const polygonRef = useRef(null);
++
++  const paths = useMemo(
++    () => geofenceGeometryToGooglePaths(geofence?.geometry),
++    [geofence?.geometry],
++  );
++
++  useEffect(() => {
++    if (!map || !window.google?.maps) return undefined;
++
++    if (polygonRef.current) {
++      polygonRef.current.setMap(null);
++      polygonRef.current = null;
++    }
++
++    if (!geofence || paths.length === 0) return undefined;
++
++    const polygon = new window.google.maps.Polygon({
++      paths,
++      strokeColor: "#047857",
++      strokeOpacity: 1,
++      strokeWeight: 4,
++      fillColor: "#10b981",
++      fillOpacity: 0.18,
++      clickable: false,
++      zIndex: 20,
++    });
++
++    polygon.setMap(map);
++    polygonRef.current = polygon;
++
++    if (!fitMapToBbox(map, geofence?.geometry?.bbox)) {
++      fitMapToPaths(map, paths);
++    }
++
++    return () => {
++      if (polygonRef.current) {
++        polygonRef.current.setMap(null);
++        polygonRef.current = null;
++      }
++    };
++  }, [geofence, map, paths]);
++
++  useEffect(() => {
++    if (!map || !geofence || paths.length === 0 || fitRequest === 0) {
++      return;
++    }
++
++    if (!fitMapToBbox(map, geofence?.geometry?.bbox)) {
++      fitMapToPaths(map, paths);
++    }
++  }, [fitRequest, geofence, map, paths]);
+ 
+   return null;
+ }
+@@ -365,7 +473,9 @@ export default function SalesGpsMapSection({
+   rows = [],
+   wardOptions = [],
+   selectedWardNo = "",
++  selectedGeofenceId = "",
+   onSelectedWardNoChange,
++  onSelectedGeofenceIdChange,
+ }) {
+   const { available, sync } = useWarehouse();
+   const [fitRequest, setFitRequest] = useState(0);
+@@ -389,9 +499,61 @@ export default function SalesGpsMapSection({
+     );
+   }, [selectedWardNo, wardBoundaries]);
+ 
++  const selectedLmPcode =
++    getWardLmPcode(selectedWardBoundary) || getRowLmPcode(rows);
++  const selectedWardPcode = getWardPcode(selectedWardBoundary);
++
++  const {
++    data: wardGeofences = [],
++    isFetching: isFetchingGeofences,
++    isError: hasGeofenceLoadError,
++  } = useGetGeoFencesByWardQuery(
++    {
++      lmPcode: selectedLmPcode,
++      wardPcode: selectedWardPcode,
++    },
++    {
++      skip:
++        !selectedWardNo ||
++        !selectedLmPcode ||
++        !selectedWardPcode,
++    },
++  );
++
++  const hasNoGeofenceSelected = selectedGeofenceId === "NONE";
++
++  const activeSelectedGeofenceId = hasNoGeofenceSelected
++    ? "NONE"
++    : wardGeofences.some(
++          (geofence) => geofence?.id === selectedGeofenceId,
++        )
++      ? selectedGeofenceId
++      : "";
++
++  const selectedGeofence =
++    activeSelectedGeofenceId && activeSelectedGeofenceId !== "NONE"
++      ? wardGeofences.find(
++          (geofence) => geofence?.id === activeSelectedGeofenceId,
++        ) || null
++      : null;
++
++  const mapRows = useMemo(() => {
++    if (!activeSelectedGeofenceId) return rows;
++
++    if (activeSelectedGeofenceId === "NONE") {
++      return rows.filter((row) => getRowGeofenceRefs(row).length === 0);
++    }
++
++    return rows.filter((row) =>
++      getRowGeofenceRefs(row).some(
++        (ref) => ref?.id === activeSelectedGeofenceId,
++      ),
++    );
++  }, [activeSelectedGeofenceId, rows]);
++
+   const points = useMemo(
+-    () => getWardGpsPoints(rows, selectedWardNo),
+-    [rows, selectedWardNo],
++    () => getWardGpsPoints(mapRows, selectedWardNo),
++    [mapRows, selectedWardNo],
+   );
+ 
+   const gpsMeterCount = useMemo(
+@@ -405,6 +567,9 @@ export default function SalesGpsMapSection({
+ 
+   const wardSyncStatus = sync?.wards?.status || "idle";
+   const hasWardBoundary = Boolean(selectedWardBoundary);
++  const hasSelectedGeofence = Boolean(selectedGeofence);
++  const selectedGeofenceName =
++    selectedGeofence?.name || selectedGeofence?.id || "";
+ 
+   return (
+     <section style={styles.panel}>
+@@ -413,19 +578,50 @@ export default function SalesGpsMapSection({
+           <p style={styles.eyebrow}>Sales GPS Map</p>
+           <h3 style={styles.title}>Meters with GPS by ward</h3>
+           <p style={styles.subtitle}>
+-            Select one ward to draw its authoritative boundary and display all
+-            clustered Sales GPS meters in that ward.
++            Select a ward, then optionally select one of its geofences to
++            draw the polygon and display only its clustered Sales GPS meters.
+           </p>
+         </div>
+ 
+         <div style={styles.controls}>
++          {selectedWardNo ? (
++            <label style={styles.wardLabel}>
++              Geofence
++              <select
++                value={activeSelectedGeofenceId}
++                onChange={(event) =>
++                  onSelectedGeofenceIdChange?.(event.target.value)
++                }
++                style={styles.geofenceSelect}
++                disabled={
++                  !selectedWardPcode ||
++                  isFetchingGeofences ||
++                  hasGeofenceLoadError
++                }
++              >
++                <option value="">
++                  {isFetchingGeofences
++                    ? "Loading geofences..."
++                    : "All geofences"}
++                </option>
++                <option value="NONE">No geofence</option>
++                {wardGeofences.map((geofence) => (
++                  <option key={geofence.id} value={geofence.id}>
++                    {geofence.name || geofence.id}
++                  </option>
++                ))}
++              </select>
++            </label>
++          ) : null}
++
+           <label style={styles.wardLabel}>
+             Ward
+             <select
+               value={selectedWardNo}
+-              onChange={(event) =>
+-                onSelectedWardNoChange?.(event.target.value)
+-              }
++              onChange={(event) => {
++                onSelectedGeofenceIdChange?.("");
++                onSelectedWardNoChange?.(event.target.value);
++              }}
+               style={styles.wardSelect}
+             >
+               <option value="">Select ward</option>
+@@ -452,7 +648,7 @@ export default function SalesGpsMapSection({
+             onClick={() => setFitRequest((current) => current + 1)}
+             disabled={!hasWardBoundary && points.length === 0}
+           >
+-            Fit Ward
++            {hasSelectedGeofence ? "Fit Geofence" : "Fit Ward"}
+           </button>
+         </div>
+       </div>
+@@ -481,9 +677,28 @@ export default function SalesGpsMapSection({
+             </div>
+           ) : null}
+ 
++          {hasGeofenceLoadError ? (
++            <div style={styles.warningState}>
++              Geofences could not be loaded for Ward {selectedWardNo}.
++            </div>
++          ) : null}
++
++          {activeSelectedGeofenceId &&
++          activeSelectedGeofenceId !== "NONE" &&
++          !hasSelectedGeofence ? (
++            <div style={styles.warningState}>
++              The selected geofence is no longer available in Ward{" "}
++              {selectedWardNo}.
++            </div>
++          ) : null}
++
+           {points.length === 0 ? (
+             <div style={styles.warningState}>
+-              No usable GPS meters were found for Ward {selectedWardNo}.
++              {hasSelectedGeofence
++                ? `No usable Sales GPS meters were found in ${selectedGeofenceName}.`
++                : hasNoGeofenceSelected
++                  ? "No usable Sales GPS meters without a geofence were found in this ward."
++                  : `No usable GPS meters were found for Ward ${selectedWardNo}.`}
+             </div>
+           ) : null}
+ 
+@@ -500,11 +715,16 @@ export default function SalesGpsMapSection({
+                 <SalesWardBoundaryLayer
+                   wardBoundary={selectedWardBoundary}
+                   fitRequest={fitRequest}
++                  fitEnabled={!hasSelectedGeofence}
++                />
++                <SalesGeofenceBoundaryLayer
++                  geofence={selectedGeofence}
++                  fitRequest={fitRequest}
+                 />
+                 <SalesGpsMarkers
+                   points={points}
+                   fitRequest={fitRequest}
+-                  fitPointsAutomatically={!hasWardBoundary}
++                  fitPointsAutomatically={!hasWardBoundary && !hasSelectedGeofence}
+                 />
+               </Map>
+             </APIProvider>
+@@ -514,6 +734,11 @@ export default function SalesGpsMapSection({
+             <span>
+               Ward {selectedWardNo}:{" "}
+               {hasWardBoundary ? "boundary loaded" : "boundary unavailable"}
++              {hasSelectedGeofence
++                ? ` ┬╖ ${selectedGeofenceName}: polygon loaded`
++                : hasNoGeofenceSelected
++                  ? " ┬╖ No geofence"
++                  : ""}
+             </span>
+             <span>
+               {gpsMeterCount} GPS meter{gpsMeterCount === 1 ? "" : "s"} ┬╖{" "}
+@@ -584,6 +809,15 @@ const styles = {
+     color: "#0f172a",
+     fontWeight: 750,
+   },
++  geofenceSelect: {
++    minWidth: "210px",
++    border: "1px solid #6ee7b7",
++    borderRadius: "0.65rem",
++    padding: "0.52rem 0.65rem",
++    background: "#ffffff",
++    color: "#0f172a",
++    fontWeight: 750,
++  },
+   countBadge: {
+     alignSelf: "flex-end",
+     borderRadius: "999px",
+diff --git a/src/pages/sales/components/SalesMetersTable.jsx b/src/pages/sales/components/SalesMetersTable.jsx
+index f8a020b..f30e351 100644
+--- a/src/pages/sales/components/SalesMetersTable.jsx
++++ b/src/pages/sales/components/SalesMetersTable.jsx
+@@ -2,6 +2,7 @@
+ import { useEffect, useMemo, useState } from "react";
+ 
+ import MeterLocationModal from "./MeterLocationModal";
++import SalesTbRefsModal from "./SalesTbRefsModal";
+ import SalesGpsMapSection from "./SalesGpsMapSection";
+ import SalesRangeFilterModal from "./SalesRangeFilterModal";
+ import {
+@@ -21,11 +22,12 @@ import {
+ 
+ const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+ const DEFAULT_PAGE_SIZE = 5;
+-const DEFAULT_SORT = { key: "meterNo", direction: "asc" };
++const DEFAULT_SORT = { key: "updatedAt", direction: "desc" };
+ 
+ const DEFAULT_COLUMN_VISIBILITY = {
+   wardNo: true,
+   geofence: true,
++  tbRefs: true,
+   addressLine1: true,
+   town: true,
+   standNumber: false,
+@@ -39,6 +41,7 @@ const DEFAULT_COLUMN_VISIBILITY = {
+ const COLUMN_OPTIONS = [
+   { key: "wardNo", label: "Ward No" },
+   { key: "geofence", label: "Geofences" },
++  { key: "tbRefs", label: "TB IDs" },
+   { key: "addressLine1", label: "Address" },
+   { key: "town", label: "Town" },
+   { key: "standNumber", label: "SG Code" },
+@@ -54,6 +57,7 @@ const STICKY_COLUMN_WIDTHS = {
+   meterNo: 155,
+   wardNo: 105,
+   geofence: 220,
++  tbRefs: 130,
+   addressLine1: 260,
+   town: 135,
+   standNumber: 230,
+@@ -264,6 +268,17 @@ function getRowGeofenceLabel(row = {}) {
+   return names.join(", ");
+ }
+ 
++function getRowTbRefs(row = {}) {
++  return Array.isArray(row?.tbRefs)
++    ? row.tbRefs.filter((ref) => ref?.id)
++    : [];
++}
++
++function getTbCountLabel(row = {}) {
++  const count = getRowTbRefs(row).length;
++  return `${count} ${count === 1 ? "TB" : "TBs"}`;
++}
++
+ function getSortValue(row, sortKey) {
+   if (sortKey.startsWith("month:")) {
+     const monthKey = sortKey.slice("month:".length);
+@@ -282,8 +297,10 @@ function getSortValue(row, sortKey) {
+     return Number(row?.[sortKey] || 0);
+   }
+ 
++  if (sortKey === "updatedAt") return Number(row?.updatedAtMs || 0);
+   if (sortKey === "wardNo") return row?.wardNumberLabel || "";
+   if (sortKey === "geofence") return getRowGeofenceLabel(row);
++  if (sortKey === "tbRefs") return getRowTbRefs(row).length;
+   if (sortKey === "addressLine1") return row?.addressLine1 || "";
+   if (sortKey === "town") return row?.town || "";
+   if (sortKey === "standNumber") return row?.standNumber || "";
+@@ -334,12 +351,12 @@ export default function SalesMetersTable({
+   );
+   const [showColumnControls, setShowColumnControls] = useState(false);
+   const [showGpsMap, setShowGpsMap] = useState(false);
+-  const [mapWardNo, setMapWardNo] = useState("");
+   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
+   const [currentPage, setCurrentPage] = useState(1);
+   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+   const [activeRangeFilterKey, setActiveRangeFilterKey] = useState(null);
+   const [mapRow, setMapRow] = useState(null);
++  const [tbRefsRow, setTbRefsRow] = useState(null);
+ 
+   const latestMonthKey = monthKeys[0] || "2026-06";
+   const stickyLayout = useMemo(
+@@ -504,6 +521,19 @@ export default function SalesMetersTable({
+     setFilters((current) => ({ ...current, [key]: value }));
+   }
+ 
++  function updateWardFilter(value) {
++    setCurrentPage(1);
++    setFilters((current) => ({
++      ...current,
++      wardNo: value,
++      geofenceId: "ALL",
++    }));
++  }
++
++  function updateGeofenceFilter(value) {
++    updateFilter("geofenceId", value);
++  }
++
+   function applyRangeFilter(filterKey, nextFilter) {
+     setCurrentPage(1);
+     setFilters((current) => ({
+@@ -598,7 +628,10 @@ export default function SalesMetersTable({
+       return {
+         ...current,
+         wardNo: columnKey === "wardNo" ? "ALL" : current.wardNo,
+-        geofenceId: columnKey === "geofence" ? "ALL" : current.geofenceId,
++        geofenceId:
++          columnKey === "wardNo" || columnKey === "geofence"
++            ? "ALL"
++            : current.geofenceId,
+         addressLine1:
+           columnKey === "addressLine1" ? "" : current.addressLine1,
+         town: columnKey === "town" ? "ALL" : current.town,
+@@ -694,8 +727,16 @@ export default function SalesMetersTable({
+         <SalesGpsMapSection
+           rows={rows}
+           wardOptions={wardOptions}
+-          selectedWardNo={mapWardNo}
+-          onSelectedWardNoChange={setMapWardNo}
++          selectedWardNo={filters.wardNo === "ALL" ? "" : filters.wardNo}
++          selectedGeofenceId={
++                  filters.geofenceId === "ALL" ? "" : filters.geofenceId
++                }
++                onSelectedWardNoChange={(wardNo) =>
++                  updateWardFilter(wardNo || "ALL")
++                }
++                onSelectedGeofenceIdChange={(geofenceId) =>
++                  updateGeofenceFilter(geofenceId || "ALL")
++                }
+         />
+       ) : null}
+       <PaginationControls
+@@ -755,7 +796,9 @@ export default function SalesMetersTable({
+                   />
+                   <select
+                     value={filters.wardNo}
+-                    onChange={(event) => updateFilter("wardNo", event.target.value)}
++                    onChange={(event) =>
++                      updateWardFilter(event.target.value)
++                    }
+                     style={styles.headerSelect}
+                   >
+                     <option value="ALL">All wards</option>
+@@ -784,7 +827,7 @@ export default function SalesMetersTable({
+                   <select
+                     value={filters.geofenceId}
+                     onChange={(event) =>
+-                      updateFilter("geofenceId", event.target.value)
++                      updateGeofenceFilter(event.target.value)
+                     }
+                     style={styles.headerSelect}
+                   >
+@@ -799,6 +842,22 @@ export default function SalesMetersTable({
+                 </th>
+               ) : null}
+ 
++              {columnVisibility.tbRefs ? (
++                <th
++                  style={{
++                    ...styles.headerCell,
++                    ...getStickyStyle("tbRefs", stickyLayout, true),
++                  }}
++                >
++                  <SortButton
++                    label="TB IDs"
++                    sortKey="tbRefs"
++                    sortConfig={sortConfig}
++                    onSort={handleSort}
++                  />
++                </th>
++              ) : null}
++
+               {columnVisibility.addressLine1 ? (
+                 <th style={{ ...styles.headerCell, ...getStickyStyle("addressLine1", stickyLayout, true) }}>
+                   <SortButton
+@@ -984,6 +1043,48 @@ export default function SalesMetersTable({
+                     </td>
+                   ) : null}
+ 
++                  {columnVisibility.tbRefs ? (
++                    <td
++                      style={{
++                        ...styles.bodyCell,
++                        ...getStickyStyle("tbRefs", stickyLayout),
++                        textAlign: "center",
++                      }}
++                    >
++                      {getRowTbRefs(row).length > 0 ? (
++                        <button
++                          type="button"
++                          onClick={() => setTbRefsRow(row)}
++                          title={`Open Targeted Batch references for meter ${row.meterNo}`}
++                          style={{
++                            border: "1px solid #2563eb",
++                            borderRadius: "999px",
++                            padding: "0.32rem 0.58rem",
++                            background: "#eff6ff",
++                            color: "#1d4ed8",
++                            fontSize: "0.75rem",
++                            fontWeight: 900,
++                            cursor: "pointer",
++                            whiteSpace: "nowrap",
++                          }}
++                        >
++                          {getTbCountLabel(row)}
++                        </button>
++                      ) : (
++                        <span
++                          style={{
++                            color: "#94a3b8",
++                            fontSize: "0.75rem",
++                            fontWeight: 800,
++                            whiteSpace: "nowrap",
++                          }}
++                        >
++                          0 TBs
++                        </span>
++                      )}
++                    </td>
++                  ) : null}
++
+                   {columnVisibility.addressLine1 ? (
+                     <td style={{ ...styles.bodyCell, ...styles.addressCell, ...getStickyStyle("addressLine1", stickyLayout) }} title={row.addressLine1 || "NAv"}>
+                       {row.addressLine1 || "NAv"}
+@@ -1068,6 +1169,13 @@ export default function SalesMetersTable({
+         />
+       ) : null}
+ 
++      {tbRefsRow ? (
++        <SalesTbRefsModal
++          row={tbRefsRow}
++          onClose={() => setTbRefsRow(null)}
++        />
++      ) : null}
++
+       {mapRow ? (
+         <MeterLocationModal row={mapRow} onClose={() => setMapRow(null)} />
+       ) : null}
+diff --git a/src/redux/demoSalesApi.js b/src/redux/demoSalesApi.js
+index f5d4b30..f5b2751 100644
+--- a/src/redux/demoSalesApi.js
++++ b/src/redux/demoSalesApi.js
+@@ -1,5 +1,5 @@
+ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
+-import { collection, getDocs } from "firebase/firestore";
++import { collection, onSnapshot } from "firebase/firestore";
+ 
+ import { db } from "../firebase";
+ 
+@@ -144,6 +144,85 @@ function normalizeGeofenceRefs(value = []) {
+     );
+ }
+ 
++function toSerializableTimestamp(value) {
++  const milliseconds = getTimestampMs(value);
++  return milliseconds > 0 ? new Date(milliseconds).toISOString() : null;
++}
++
++function normalizeFieldWork(value) {
++  if (!value || typeof value !== "object") return null;
++
++  return {
++    ...value,
++    submittedAt: toSerializableTimestamp(value.submittedAt),
++    updatedAt: toSerializableTimestamp(value.updatedAt),
++  };
++}
++
++function normalizeTbRefs(value = []) {
++  const seen = new Set();
++
++  return (Array.isArray(value) ? value : [])
++    .map((item) => {
++      const id = String(item?.id || item?.tbId || "").trim();
++      const rowId = String(item?.rowId || item?.tbRowId || "").trim();
++
++      if (!id) return null;
++
++      return {
++        ...item,
++        id,
++        rowId: rowId || null,
++        date: toSerializableTimestamp(
++          item?.date ?? item?.addedAt ?? item?.createdAt ?? null,
++        ),
++        fieldWork: normalizeFieldWork(item?.fieldWork),
++      };
++    })
++    .filter((item) => {
++      const key = `${item.id}::${item.rowId || ""}`;
++
++      if (seen.has(key)) return false;
++      seen.add(key);
++      return true;
++    })
++    .sort((left, right) => {
++      const leftDate = String(left?.date || "");
++      const rightDate = String(right?.date || "");
++      const dateComparison = rightDate.localeCompare(leftDate);
++
++      if (dateComparison !== 0) return dateComparison;
++
++      return String(left.id).localeCompare(String(right.id), undefined, {
++        numeric: true,
++        sensitivity: "base",
++      });
++    });
++}
++
++function getTimestampMs(value) {
++  if (!value) return 0;
++
++  if (typeof value?.toMillis === "function") {
++    const milliseconds = Number(value.toMillis());
++    return Number.isFinite(milliseconds) ? milliseconds : 0;
++  }
++
++  if (typeof value?.toDate === "function") {
++    const milliseconds = value.toDate().getTime();
++    return Number.isFinite(milliseconds) ? milliseconds : 0;
++  }
++
++  if (Number.isFinite(Number(value?.seconds))) {
++    const seconds = Number(value.seconds);
++    const nanoseconds = Number(value?.nanoseconds || 0);
++    return seconds * 1000 + nanoseconds / 1_000_000;
++  }
++
++  const milliseconds = new Date(value).getTime();
++  return Number.isFinite(milliseconds) ? milliseconds : 0;
++}
++
+ function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
+   const monthlySalesC =
+     data.monthlySalesC && typeof data.monthlySalesC === "object"
+@@ -208,6 +287,10 @@ function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
+     accountNumber: String(data.accountNumber || data.AccountNumber || ""),
+     customerName: String(customerName),
+     lmPcode: String(data.lmPcode || requestedLmPcode || ""),
++    createdAt: toSerializableTimestamp(data.createdAt),
++    updatedAt: toSerializableTimestamp(data.updatedAt),
++    createdAtMs: getTimestampMs(data.createdAt),
++    updatedAtMs: getTimestampMs(data.updatedAt),
+     demoData: data.demoData !== false,
+     astId: data.astId || null,
+     astMatchStatus: String(data.astMatchStatus || "NOT_CHECKED"),
+@@ -266,14 +349,68 @@ function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
+     geofenceRefs: normalizeGeofenceRefs(
+       data.geofenceRefs || data.GeoFenceRefs || [],
+     ),
++    tbRefs: normalizeTbRefs(data.tbRefs || data.TbRefs || []),
+     trnBatchIds: Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
+   };
+ }
+ 
+ function sortDemoSalesRows(left, right) {
+-  return String(left.meterNo).localeCompare(String(right.meterNo), undefined, {
+-    numeric: true,
+-    sensitivity: "base",
++  const updatedAtComparison =
++    Number(right?.updatedAtMs || 0) - Number(left?.updatedAtMs || 0);
++
++  if (updatedAtComparison !== 0) return updatedAtComparison;
++
++  return String(left?.meterNo || "").localeCompare(
++    String(right?.meterNo || ""),
++    undefined,
++    {
++      numeric: true,
++      sensitivity: "base",
++    },
++  );
++}
++
++function buildDemoSalesRows(snapshot, lmPcode) {
++  return snapshot.docs
++    .map((documentSnapshot) =>
++      normalizeDemoSalesRow(
++        documentSnapshot.id,
++        documentSnapshot.data(),
++        lmPcode,
++      ),
++    )
++    .filter((row) => row.lmPcode === lmPcode)
++    .sort(sortDemoSalesRows);
++}
++
++function readInitialSalesSnapshot(lmPcode) {
++  return new Promise((resolve) => {
++    let unsubscribe = () => {};
++
++    unsubscribe = onSnapshot(
++      collection(db, DEMO_SALES_COLLECTION),
++      (snapshot) => {
++        const hasServerResult = snapshot.metadata?.fromCache === false;
++        const hasCachedRows = snapshot.docs.length > 0;
++
++        if (!hasServerResult && !hasCachedRows) return;
++
++        const rows = buildDemoSalesRows(snapshot, lmPcode);
++        unsubscribe();
++        resolve({ data: rows });
++      },
++      (error) => {
++        unsubscribe();
++        console.error("demoSalesApi initial stream error:", error);
++
++        resolve({
++          error: {
++            status: "CUSTOM_ERROR",
++            error: error?.message || "Could not load demo prepaid sales.",
++          },
++        });
++      },
++    );
+   });
+ }
+ 
+@@ -282,35 +419,38 @@ export const demoSalesApi = createApi({
+   baseQuery: fakeBaseQuery(),
+   endpoints: (builder) => ({
+     getDemoSalesByLmPcode: builder.query({
+-      async queryFn(lmPcode) {
+-        if (!lmPcode) return { data: [] };
++      queryFn: (lmPcode) => readInitialSalesSnapshot(lmPcode),
++
++      async onCacheEntryAdded(
++        lmPcode,
++        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
++      ) {
++        if (!lmPcode) return;
++
++        let unsubscribe = () => {};
+ 
+         try {
+-          const snapshot = await getDocs(collection(db, DEMO_SALES_COLLECTION));
+-
+-          const rows = snapshot.docs
+-            .map((documentSnapshot) =>
+-              normalizeDemoSalesRow(
+-                documentSnapshot.id,
+-                documentSnapshot.data(),
+-                lmPcode,
+-              ),
+-            )
+-            .filter((row) => row.lmPcode === lmPcode)
+-            .sort(sortDemoSalesRows);
+-
+-          return { data: rows };
+-        } catch (error) {
+-          console.error("demoSalesApi query error:", error);
++          await cacheDataLoaded;
++
++          unsubscribe = onSnapshot(
++            collection(db, DEMO_SALES_COLLECTION),
++            (snapshot) => {
++              const rows = buildDemoSalesRows(snapshot, lmPcode);
+ 
+-          return {
+-            error: {
+-              status: "CUSTOM_ERROR",
+-              error: error?.message || "Could not load demo prepaid sales.",
++              updateCachedData(() => rows);
++            },
++            (error) => {
++              console.error("demoSalesApi stream error:", error);
+             },
+-          };
++          );
++        } catch (error) {
++          console.error("demoSalesApi stream setup error:", error);
+         }
++
++        await cacheEntryRemoved;
++        unsubscribe();
+       },
++
+       keepUnusedDataFor: 300,
+     }),
+   }),
