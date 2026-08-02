@@ -142,6 +142,7 @@ export function buildTargetedBatchRowDoc({
   payload,
   draftRow,
   salesSource,
+  erfReference,
   salesAllMeterId,
   rowNo,
   creationDate,
@@ -227,7 +228,11 @@ export function buildTargetedBatchRowDoc({
         salesSource?.Surname,
       ),
     },
+    property: {
+      erfNo: getFirstNullableText(erfReference?.erfNo),
+    },
     location: {
+      erfNo: getFirstNullableText(erfReference?.erfNo),
       addressLine1: getFirstText(
         draftRow?.addressLine1,
         salesSource?.addressLine1,
@@ -240,12 +245,7 @@ export function buildTargetedBatchRowDoc({
         salesSource?.Town,
         salesSource?.PostalAddressTown,
       ),
-      sgCode: getFirstText(
-        draftRow?.standNumber,
-        draftRow?.sgCode,
-        salesSource?.standNumber,
-        salesSource?.StandNumber,
-      ),
+      sgCode: getFirstText(salesSource?.sgCode),
       wardNumberLabel: getFirstText(
         draftRow?.wardNumberLabel,
         salesSource?.wardNumberLabel,
@@ -314,7 +314,7 @@ export function buildTargetedBatchRowDoc({
       outcome: null,
     },
     refs: {
-      erfId: getFirstNullableText(draftRow?.erfId),
+      erfId: getFirstNullableText(erfReference?.erfId),
       premiseId: getFirstNullableText(draftRow?.premiseId),
       meterId: getFirstNullableText(draftRow?.astId, draftRow?.meterId),
       trnId: null,
