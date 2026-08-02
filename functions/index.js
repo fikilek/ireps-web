@@ -86,6 +86,7 @@ import { onBgoChildTrnExecutionSummaryWritten } from "./bgo/executionSummaryTrig
 import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
+import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -168,6 +169,7 @@ export {
   onCreateTargetedBatchCallable,
   onDeleteTargetedBatchCallable,
   onAllocateTargetedBatchCallable,
+  onAcceptRejectTargetedBatchCallable,
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,

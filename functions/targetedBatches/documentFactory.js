@@ -111,6 +111,16 @@ export function buildTargetedBatchParentDoc({
       status: "NOT_STARTED",
       completedAt: null,
     },
+    acceptance: {
+      status: "NOT_READY",
+      acceptedAt: null,
+      acceptedByUid: null,
+      acceptedByUser: null,
+      rejectedAt: null,
+      rejectedByUid: null,
+      rejectedByUser: null,
+      rejectReason: "",
+    },
     execution: {
       status: "NOT_STARTED",
       startedAt: null,
