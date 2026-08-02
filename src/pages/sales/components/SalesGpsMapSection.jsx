@@ -4,6 +4,7 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 
 import { useWarehouse } from "@/context/WarehouseContext";
+import { useGetGeoFencesByWardQuery } from "../../../redux/geofencesApi";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
@@ -33,6 +34,31 @@ function getWardNumber(ward = {}) {
     ward?.wardNumberLabel ||
     ""
   );
+}
+
+function getWardPcode(ward = {}) {
+  return ward?.id || ward?.pcode || ward?.wardPcode || "";
+}
+
+function getWardLmPcode(ward = {}) {
+  return (
+    ward?.parents?.lmPcode ||
+    ward?.lmPcode ||
+    ward?.localMunicipalityPcode ||
+    ""
+  );
+}
+
+function getRowLmPcode(rows = []) {
+  return (
+    rows.find((row) => String(row?.lmPcode || "").trim())?.lmPcode || ""
+  );
+}
+
+function getRowGeofenceRefs(row = {}) {
+  return Array.isArray(row?.geofenceRefs)
+    ? row.geofenceRefs.filter((ref) => ref?.id)
+    : [];
 }
 
 function parseGeometry(geometry) {
@@ -66,6 +92,27 @@ function geoJsonPolygonToGooglePaths(geometry) {
   }
 
   return [];
+}
+
+function geofenceGeometryToGooglePaths(geometry) {
+  const parsedGeometry = parseGeometry(geometry);
+
+  if (!parsedGeometry) return [];
+
+  if (Array.isArray(parsedGeometry?.points)) {
+    const ring = parsedGeometry.points
+      .map((point) => ({
+        lat: Number(point?.latitude ?? point?.lat),
+        lng: Number(point?.longitude ?? point?.lng),
+      }))
+      .filter(
+        (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng),
+      );
+
+    return ring.length >= 3 ? [ring] : [];
+  }
+
+  return geoJsonPolygonToGooglePaths(parsedGeometry);
 }
 
 function fitMapToBbox(map, bbox) {
@@ -163,7 +210,7 @@ function getWardGpsPoints(rows = [], selectedWardNo = "") {
   return points;
 }
 
-function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
+function SalesWardBoundaryLayer({ wardBoundary, fitRequest, fitEnabled }) {
   const map = useMap();
   const polygonRef = useRef(null);
 
@@ -197,7 +244,73 @@ function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
     polygon.setMap(map);
     polygonRef.current = polygon;
 
+    if (fitEnabled) {
+      if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+        fitMapToPaths(map, paths);
+      }
+    }
+
+    return () => {
+      if (polygonRef.current) {
+        polygonRef.current.setMap(null);
+        polygonRef.current = null;
+      }
+    };
+  }, [fitEnabled, map, paths, wardBoundary]);
+
+  useEffect(() => {
+    if (
+      !map ||
+      !wardBoundary ||
+      paths.length === 0 ||
+      fitRequest === 0 ||
+      !fitEnabled
+    ) {
+      return;
+    }
+
     if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+      fitMapToPaths(map, paths);
+    }
+  }, [fitEnabled, fitRequest, map, paths, wardBoundary]);
+
+  return null;
+}
+
+function SalesGeofenceBoundaryLayer({ geofence, fitRequest }) {
+  const map = useMap();
+  const polygonRef = useRef(null);
+
+  const paths = useMemo(
+    () => geofenceGeometryToGooglePaths(geofence?.geometry),
+    [geofence?.geometry],
+  );
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+
+    if (polygonRef.current) {
+      polygonRef.current.setMap(null);
+      polygonRef.current = null;
+    }
+
+    if (!geofence || paths.length === 0) return undefined;
+
+    const polygon = new window.google.maps.Polygon({
+      paths,
+      strokeColor: "#047857",
+      strokeOpacity: 1,
+      strokeWeight: 4,
+      fillColor: "#10b981",
+      fillOpacity: 0.18,
+      clickable: false,
+      zIndex: 20,
+    });
+
+    polygon.setMap(map);
+    polygonRef.current = polygon;
+
+    if (!fitMapToBbox(map, geofence?.geometry?.bbox)) {
       fitMapToPaths(map, paths);
     }
 
@@ -207,22 +320,17 @@ function SalesWardBoundaryLayer({ wardBoundary, fitRequest }) {
         polygonRef.current = null;
       }
     };
-  }, [map, paths, wardBoundary]);
+  }, [geofence, map, paths]);
 
   useEffect(() => {
-    if (
-      !map ||
-      !wardBoundary ||
-      paths.length === 0 ||
-      fitRequest === 0
-    ) {
+    if (!map || !geofence || paths.length === 0 || fitRequest === 0) {
       return;
     }
 
-    if (!fitMapToBbox(map, wardBoundary?.bbox)) {
+    if (!fitMapToBbox(map, geofence?.geometry?.bbox)) {
       fitMapToPaths(map, paths);
     }
-  }, [fitRequest, map, paths, wardBoundary]);
+  }, [fitRequest, geofence, map, paths]);
 
   return null;
 }
@@ -363,9 +471,13 @@ function SalesGpsMarkers({ points, fitRequest, fitPointsAutomatically }) {
 
 export default function SalesGpsMapSection({
   rows = [],
+  lmPcode = "",
   wardOptions = [],
   selectedWardNo = "",
+  selectedGeofenceId = "",
   onSelectedWardNoChange,
+  onSelectedGeofenceIdChange,
+  onWardGeofencesChange,
 }) {
   const { available, sync } = useWarehouse();
   const [fitRequest, setFitRequest] = useState(0);
@@ -389,9 +501,70 @@ export default function SalesGpsMapSection({
     );
   }, [selectedWardNo, wardBoundaries]);
 
+  const selectedLmPcode =
+    getWardLmPcode(selectedWardBoundary) ||
+    String(lmPcode || "").trim() ||
+    getRowLmPcode(rows);
+  const selectedWardPcode = getWardPcode(selectedWardBoundary);
+
+  const {
+    data: wardGeofences = [],
+    isFetching: isFetchingGeofences,
+    isError: hasGeofenceLoadError,
+  } = useGetGeoFencesByWardQuery(
+    {
+      lmPcode: selectedLmPcode,
+      wardPcode: selectedWardPcode,
+    },
+    {
+      skip:
+        !selectedWardNo ||
+        !selectedLmPcode ||
+        !selectedWardPcode,
+    },
+  );
+
+  useEffect(() => {
+    if (!selectedWardNo) {
+      onWardGeofencesChange?.([]);
+      return;
+    }
+
+    onWardGeofencesChange?.(
+      wardGeofences.map((geofence) => ({
+        id: String(geofence?.id || "").trim(),
+        name: String(geofence?.name || geofence?.id || "").trim(),
+      })),
+    );
+  }, [onWardGeofencesChange, selectedWardNo, wardGeofences]);
+
+  const hasNoGeofenceSelected = selectedGeofenceId === "NONE";
+  const activeSelectedGeofenceId = selectedGeofenceId || "";
+
+  const selectedGeofence =
+    activeSelectedGeofenceId && activeSelectedGeofenceId !== "NONE"
+      ? wardGeofences.find(
+          (geofence) => geofence?.id === activeSelectedGeofenceId,
+        ) || null
+      : null;
+
+  const mapRows = useMemo(() => {
+    if (!activeSelectedGeofenceId) return rows;
+
+    if (activeSelectedGeofenceId === "NONE") {
+      return rows.filter((row) => getRowGeofenceRefs(row).length === 0);
+    }
+
+    return rows.filter((row) =>
+      getRowGeofenceRefs(row).some(
+        (ref) => ref?.id === activeSelectedGeofenceId,
+      ),
+    );
+  }, [activeSelectedGeofenceId, rows]);
+
   const points = useMemo(
-    () => getWardGpsPoints(rows, selectedWardNo),
-    [rows, selectedWardNo],
+    () => getWardGpsPoints(mapRows, selectedWardNo),
+    [mapRows, selectedWardNo],
   );
 
   const gpsMeterCount = useMemo(
@@ -405,6 +578,9 @@ export default function SalesGpsMapSection({
 
   const wardSyncStatus = sync?.wards?.status || "idle";
   const hasWardBoundary = Boolean(selectedWardBoundary);
+  const hasSelectedGeofence = Boolean(selectedGeofence);
+  const selectedGeofenceName =
+    selectedGeofence?.name || selectedGeofence?.id || "";
 
   return (
     <section style={styles.panel}>
@@ -413,19 +589,50 @@ export default function SalesGpsMapSection({
           <p style={styles.eyebrow}>Sales GPS Map</p>
           <h3 style={styles.title}>Meters with GPS by ward</h3>
           <p style={styles.subtitle}>
-            Select one ward to draw its authoritative boundary and display all
-            clustered Sales GPS meters in that ward.
+            Select a ward, then optionally select one of its geofences to
+            draw the polygon and display only its clustered Sales GPS meters.
           </p>
         </div>
 
         <div style={styles.controls}>
+          {selectedWardNo ? (
+            <label style={styles.wardLabel}>
+              Geofence
+              <select
+                value={activeSelectedGeofenceId}
+                onChange={(event) =>
+                  onSelectedGeofenceIdChange?.(event.target.value)
+                }
+                style={styles.geofenceSelect}
+                disabled={
+                  !selectedWardPcode ||
+                  isFetchingGeofences ||
+                  hasGeofenceLoadError
+                }
+              >
+                <option value="">
+                  {isFetchingGeofences
+                    ? "Loading geofences..."
+                    : "All geofences"}
+                </option>
+                <option value="NONE">No geofence</option>
+                {wardGeofences.map((geofence) => (
+                  <option key={geofence.id} value={geofence.id}>
+                    {geofence.name || geofence.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
           <label style={styles.wardLabel}>
             Ward
             <select
               value={selectedWardNo}
-              onChange={(event) =>
-                onSelectedWardNoChange?.(event.target.value)
-              }
+              onChange={(event) => {
+                onSelectedGeofenceIdChange?.("");
+                onSelectedWardNoChange?.(event.target.value);
+              }}
               style={styles.wardSelect}
             >
               <option value="">Select ward</option>
@@ -452,7 +659,7 @@ export default function SalesGpsMapSection({
             onClick={() => setFitRequest((current) => current + 1)}
             disabled={!hasWardBoundary && points.length === 0}
           >
-            Fit Ward
+            {hasSelectedGeofence ? "Fit Geofence" : "Fit Ward"}
           </button>
         </div>
       </div>
@@ -481,9 +688,28 @@ export default function SalesGpsMapSection({
             </div>
           ) : null}
 
+          {hasGeofenceLoadError ? (
+            <div style={styles.warningState}>
+              Geofences could not be loaded for Ward {selectedWardNo}.
+            </div>
+          ) : null}
+
+          {activeSelectedGeofenceId &&
+          activeSelectedGeofenceId !== "NONE" &&
+          !hasSelectedGeofence ? (
+            <div style={styles.warningState}>
+              The selected geofence is no longer available in Ward{" "}
+              {selectedWardNo}.
+            </div>
+          ) : null}
+
           {points.length === 0 ? (
             <div style={styles.warningState}>
-              No usable GPS meters were found for Ward {selectedWardNo}.
+              {hasSelectedGeofence
+                ? `No usable Sales GPS meters were found in ${selectedGeofenceName}.`
+                : hasNoGeofenceSelected
+                  ? "No usable Sales GPS meters without a geofence were found in this ward."
+                  : `No usable GPS meters were found for Ward ${selectedWardNo}.`}
             </div>
           ) : null}
 
@@ -500,11 +726,16 @@ export default function SalesGpsMapSection({
                 <SalesWardBoundaryLayer
                   wardBoundary={selectedWardBoundary}
                   fitRequest={fitRequest}
+                  fitEnabled={!hasSelectedGeofence}
+                />
+                <SalesGeofenceBoundaryLayer
+                  geofence={selectedGeofence}
+                  fitRequest={fitRequest}
                 />
                 <SalesGpsMarkers
                   points={points}
                   fitRequest={fitRequest}
-                  fitPointsAutomatically={!hasWardBoundary}
+                  fitPointsAutomatically={!hasWardBoundary && !hasSelectedGeofence}
                 />
               </Map>
             </APIProvider>
@@ -514,6 +745,11 @@ export default function SalesGpsMapSection({
             <span>
               Ward {selectedWardNo}:{" "}
               {hasWardBoundary ? "boundary loaded" : "boundary unavailable"}
+              {hasSelectedGeofence
+                ? ` · ${selectedGeofenceName}: polygon loaded`
+                : hasNoGeofenceSelected
+                  ? " · No geofence"
+                  : ""}
             </span>
             <span>
               {gpsMeterCount} GPS meter{gpsMeterCount === 1 ? "" : "s"} ·{" "}
@@ -578,6 +814,15 @@ const styles = {
   wardSelect: {
     minWidth: "150px",
     border: "1px solid #93c5fd",
+    borderRadius: "0.65rem",
+    padding: "0.52rem 0.65rem",
+    background: "#ffffff",
+    color: "#0f172a",
+    fontWeight: 750,
+  },
+  geofenceSelect: {
+    minWidth: "210px",
+    border: "1px solid #6ee7b7",
     borderRadius: "0.65rem",
     padding: "0.52rem 0.65rem",
     background: "#ffffff",

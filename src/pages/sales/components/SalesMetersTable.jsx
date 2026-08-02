@@ -1,7 +1,8 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import MeterLocationModal from "./MeterLocationModal";
+import SalesTbRefsModal from "./SalesTbRefsModal";
 import SalesGpsMapSection from "./SalesGpsMapSection";
 import SalesRangeFilterModal from "./SalesRangeFilterModal";
 import {
@@ -21,11 +22,34 @@ import {
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
-const DEFAULT_SORT = { key: "meterNo", direction: "asc" };
+const DEFAULT_SORT = { key: "updatedAt", direction: "desc" };
+
+const SALES_CATEGORY_ORDER = [
+  "Normal - No Leakage Flag",
+  "CAT1 - Zero Purchaser",
+  "CAT2 - Ghost Purchaser (1-3 mo)",
+  "CAT3 - Micro Purchaser (<R400)",
+  "CAT4 - Long Gap (4+ months)",
+  "CAT5 - Stopped Purchasing",
+  "CAT6 - Low kWh per Rand",
+  "CAT8 - Energy Without Purchase",
+];
+
+const RISK_TIER_ORDER = [
+  "Normal",
+  "Low Risk",
+  "Medium Risk",
+  "High Risk",
+  "Critical",
+];
 
 const DEFAULT_COLUMN_VISIBILITY = {
   wardNo: true,
   geofence: true,
+  tbRefs: true,
+  leakageCategory: true,
+  riskTier: false,
+  riskScore: false,
   addressLine1: true,
   town: true,
   standNumber: false,
@@ -39,6 +63,10 @@ const DEFAULT_COLUMN_VISIBILITY = {
 const COLUMN_OPTIONS = [
   { key: "wardNo", label: "Ward No" },
   { key: "geofence", label: "Geofences" },
+  { key: "tbRefs", label: "TB IDs" },
+  { key: "leakageCategory", label: "Sales Category" },
+  { key: "riskTier", label: "Risk Tier" },
+  { key: "riskScore", label: "Risk Score" },
   { key: "addressLine1", label: "Address" },
   { key: "town", label: "Town" },
   { key: "standNumber", label: "SG Code" },
@@ -54,6 +82,10 @@ const STICKY_COLUMN_WIDTHS = {
   meterNo: 155,
   wardNo: 105,
   geofence: 220,
+  tbRefs: 130,
+  leakageCategory: 260,
+  riskTier: 135,
+  riskScore: 110,
   addressLine1: 260,
   town: 135,
   standNumber: 230,
@@ -68,6 +100,10 @@ const EMPTY_FILTERS = {
   meterNo: "",
   wardNo: "ALL",
   geofenceId: "ALL",
+  tbId: "ALL",
+  leakageCategory: "ALL",
+  riskTier: "ALL",
+  riskScore: "",
   addressLine1: "",
   town: "ALL",
   standNumber: "",
@@ -264,6 +300,46 @@ function getRowGeofenceLabel(row = {}) {
   return names.join(", ");
 }
 
+function getRowTbRefs(row = {}) {
+  return Array.isArray(row?.tbRefs)
+    ? row.tbRefs
+        .map((ref) => ({
+          ...ref,
+          id: typeof ref?.id === "string" ? ref.id.trim() : "",
+        }))
+        .filter((ref) => ref.id)
+    : [];
+}
+
+function getTbCountLabel(row = {}) {
+  const count = getRowTbRefs(row).length;
+  return `${count} ${count === 1 ? "TB" : "TBs"}`;
+}
+
+function getOrderedUniqueOptions(rows, fieldName, preferredOrder = []) {
+  const preferredIndex = new Map(
+    preferredOrder.map((value, index) => [value, index]),
+  );
+
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => String(row?.[fieldName] || "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => {
+    const leftIndex = preferredIndex.has(left)
+      ? preferredIndex.get(left)
+      : Number.MAX_SAFE_INTEGER;
+    const rightIndex = preferredIndex.has(right)
+      ? preferredIndex.get(right)
+      : Number.MAX_SAFE_INTEGER;
+
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+    return compareNatural(left, right);
+  });
+}
+
 function getSortValue(row, sortKey) {
   if (sortKey.startsWith("month:")) {
     const monthKey = sortKey.slice("month:".length);
@@ -277,13 +353,18 @@ function getSortValue(row, sortKey) {
       "sales2024C",
       "sales2025C",
       "sales2026C",
+      "riskScore",
     ].includes(sortKey)
   ) {
     return Number(row?.[sortKey] || 0);
   }
 
+  if (sortKey === "updatedAt") return Number(row?.updatedAtMs || 0);
   if (sortKey === "wardNo") return row?.wardNumberLabel || "";
   if (sortKey === "geofence") return getRowGeofenceLabel(row);
+  if (sortKey === "tbRefs") return getRowTbRefs(row).length;
+  if (sortKey === "leakageCategory") return row?.leakageCategory || "";
+  if (sortKey === "riskTier") return row?.riskTier || "";
   if (sortKey === "addressLine1") return row?.addressLine1 || "";
   if (sortKey === "town") return row?.town || "";
   if (sortKey === "standNumber") return row?.standNumber || "";
@@ -334,12 +415,13 @@ export default function SalesMetersTable({
   );
   const [showColumnControls, setShowColumnControls] = useState(false);
   const [showGpsMap, setShowGpsMap] = useState(false);
-  const [mapWardNo, setMapWardNo] = useState("");
   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [activeRangeFilterKey, setActiveRangeFilterKey] = useState(null);
   const [mapRow, setMapRow] = useState(null);
+  const [tbRefsRow, setTbRefsRow] = useState(null);
+  const [wardGeofenceOptions, setWardGeofenceOptions] = useState([]);
 
   const latestMonthKey = monthKeys[0] || "2026-06";
   const stickyLayout = useMemo(
@@ -375,7 +457,7 @@ export default function SalesMetersTable({
     ).sort(compareNatural);
   }, [rows]);
 
-  const geofenceOptions = useMemo(() => {
+  const salesGeofenceOptions = useMemo(() => {
     const byId = new Map();
 
     rows.forEach((row) => {
@@ -393,6 +475,53 @@ export default function SalesMetersTable({
       compareNatural(left.name, right.name),
     );
   }, [rows]);
+
+  const geofenceOptions = useMemo(() => {
+    const byId = new Map();
+
+    salesGeofenceOptions.forEach((geofence) => {
+      byId.set(geofence.id, geofence);
+    });
+
+    wardGeofenceOptions.forEach((geofence) => {
+      byId.set(geofence.id, geofence);
+    });
+
+    return Array.from(byId.values()).sort((left, right) =>
+      compareNatural(left.name, right.name),
+    );
+  }, [salesGeofenceOptions, wardGeofenceOptions]);
+
+  const salesLmPcode = useMemo(() => {
+    return (
+      rows.find((row) => String(row?.lmPcode || "").trim())?.lmPcode || ""
+    );
+  }, [rows]);
+
+  const tbIdOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        rows.flatMap((row) =>
+          getRowTbRefs(row).map((ref) => ref.id),
+        ),
+      ),
+    ).sort(compareNatural);
+  }, [rows]);
+
+  const salesCategoryOptions = useMemo(
+    () =>
+      getOrderedUniqueOptions(
+        rows,
+        "leakageCategory",
+        SALES_CATEGORY_ORDER,
+      ),
+    [rows],
+  );
+
+  const riskTierOptions = useMemo(
+    () => getOrderedUniqueOptions(rows, "riskTier", RISK_TIER_ORDER),
+    [rows],
+  );
 
   useEffect(() => {
     setCurrentPage(1);
@@ -413,11 +542,32 @@ export default function SalesMetersTable({
         (filters.geofenceId === "NONE" && rowGeofenceRefs.length === 0) ||
         rowGeofenceRefs.some((ref) => ref.id === filters.geofenceId);
 
+      const rowTbRefs = getRowTbRefs(row);
+      let matchesTb = true;
+
+      if (filters.tbId === "NONE") matchesTb = rowTbRefs.length === 0;
+      else if (filters.tbId === "ANY") matchesTb = rowTbRefs.length > 0;
+      else if (filters.tbId !== "ALL") {
+        matchesTb = rowTbRefs.some((ref) => ref.id === filters.tbId);
+      }
+
+      const riskScoreFilter = String(filters.riskScore || "").trim();
+      const matchesRiskScore =
+        riskScoreFilter === "" ||
+        (row?.riskScore !== null &&
+          row?.riskScore !== undefined &&
+          Number(row.riskScore) === Number(riskScoreFilter));
+
       return (
         matchesTargetFilter(row, targetFilter, latestMonthKey) &&
         includesText(row?.meterNo, filters.meterNo) &&
         (filters.wardNo === "ALL" || row?.wardNumbers?.includes(filters.wardNo)) &&
         matchesGeofence &&
+        matchesTb &&
+        (filters.leakageCategory === "ALL" ||
+          row?.leakageCategory === filters.leakageCategory) &&
+        (filters.riskTier === "ALL" || row?.riskTier === filters.riskTier) &&
+        matchesRiskScore &&
         includesText(row?.addressLine1, filters.addressLine1) &&
         (filters.town === "ALL" || row?.town === filters.town) &&
         includesText(row?.standNumber, filters.standNumber) &&
@@ -469,6 +619,10 @@ export default function SalesMetersTable({
     Boolean(String(filters.meterNo || "").trim()) ||
     filters.wardNo !== "ALL" ||
     filters.geofenceId !== "ALL" ||
+    filters.tbId !== "ALL" ||
+    filters.leakageCategory !== "ALL" ||
+    filters.riskTier !== "ALL" ||
+    Boolean(String(filters.riskScore || "").trim()) ||
     Boolean(String(filters.addressLine1 || "").trim()) ||
     filters.town !== "ALL" ||
     Boolean(String(filters.standNumber || "").trim()) ||
@@ -502,6 +656,51 @@ export default function SalesMetersTable({
   function updateFilter(key, value) {
     setCurrentPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateWardFilter(value) {
+    setCurrentPage(1);
+    setWardGeofenceOptions([]);
+    setFilters((current) => ({
+      ...current,
+      wardNo: value,
+      geofenceId: "ALL",
+    }));
+  }
+
+  const handleWardGeofencesChange = useCallback((nextGeofences = []) => {
+    const byId = new Map();
+
+    (Array.isArray(nextGeofences) ? nextGeofences : []).forEach((geofence) => {
+      const id = String(geofence?.id || "").trim();
+      const name = String(geofence?.name || id).trim();
+
+      if (!id) return;
+
+      byId.set(id, {
+        id,
+        name: name || id,
+      });
+    });
+
+    const normalized = Array.from(byId.values()).sort((left, right) =>
+      compareNatural(left.name, right.name),
+    );
+
+    setWardGeofenceOptions((current) => {
+      const currentSignature = current
+        .map((geofence) => `${geofence.id}::${geofence.name}`)
+        .join("|");
+      const nextSignature = normalized
+        .map((geofence) => `${geofence.id}::${geofence.name}`)
+        .join("|");
+
+      return currentSignature === nextSignature ? current : normalized;
+    });
+  }, []);
+
+  function updateGeofenceFilter(value) {
+    updateFilter("geofenceId", value);
   }
 
   function applyRangeFilter(filterKey, nextFilter) {
@@ -598,7 +797,17 @@ export default function SalesMetersTable({
       return {
         ...current,
         wardNo: columnKey === "wardNo" ? "ALL" : current.wardNo,
-        geofenceId: columnKey === "geofence" ? "ALL" : current.geofenceId,
+        geofenceId:
+          columnKey === "wardNo" || columnKey === "geofence"
+            ? "ALL"
+            : current.geofenceId,
+        tbId: columnKey === "tbRefs" ? "ALL" : current.tbId,
+        leakageCategory:
+          columnKey === "leakageCategory"
+            ? "ALL"
+            : current.leakageCategory,
+        riskTier: columnKey === "riskTier" ? "ALL" : current.riskTier,
+        riskScore: columnKey === "riskScore" ? "" : current.riskScore,
         addressLine1:
           columnKey === "addressLine1" ? "" : current.addressLine1,
         town: columnKey === "town" ? "ALL" : current.town,
@@ -692,10 +901,20 @@ export default function SalesMetersTable({
 
       {showGpsMap ? (
         <SalesGpsMapSection
-          rows={rows}
+          rows={filteredRows}
+          lmPcode={salesLmPcode}
           wardOptions={wardOptions}
-          selectedWardNo={mapWardNo}
-          onSelectedWardNoChange={setMapWardNo}
+          selectedWardNo={filters.wardNo === "ALL" ? "" : filters.wardNo}
+          selectedGeofenceId={
+            filters.geofenceId === "ALL" ? "" : filters.geofenceId
+          }
+          onSelectedWardNoChange={(wardNo) =>
+            updateWardFilter(wardNo || "ALL")
+          }
+          onSelectedGeofenceIdChange={(geofenceId) =>
+            updateGeofenceFilter(geofenceId || "ALL")
+          }
+          onWardGeofencesChange={handleWardGeofencesChange}
         />
       ) : null}
       <PaginationControls
@@ -755,7 +974,9 @@ export default function SalesMetersTable({
                   />
                   <select
                     value={filters.wardNo}
-                    onChange={(event) => updateFilter("wardNo", event.target.value)}
+                    onChange={(event) =>
+                      updateWardFilter(event.target.value)
+                    }
                     style={styles.headerSelect}
                   >
                     <option value="ALL">All wards</option>
@@ -784,7 +1005,7 @@ export default function SalesMetersTable({
                   <select
                     value={filters.geofenceId}
                     onChange={(event) =>
-                      updateFilter("geofenceId", event.target.value)
+                      updateGeofenceFilter(event.target.value)
                     }
                     style={styles.headerSelect}
                   >
@@ -796,6 +1017,122 @@ export default function SalesMetersTable({
                       </option>
                     ))}
                   </select>
+                </th>
+              ) : null}
+
+              {columnVisibility.tbRefs ? (
+                <th
+                  style={{
+                    ...styles.headerCell,
+                    ...getStickyStyle("tbRefs", stickyLayout, true),
+                  }}
+                >
+                  <SortButton
+                    label="TB IDs"
+                    sortKey="tbRefs"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <select
+                    value={filters.tbId}
+                    onChange={(event) =>
+                      updateFilter("tbId", event.target.value)
+                    }
+                    style={styles.headerSelect}
+                  >
+                    <option value="ALL">All TBs</option>
+                    <option value="NONE">No TB</option>
+                    <option value="ANY">In one or more TBs</option>
+                    {tbIdOptions.map((tbId) => (
+                      <option key={tbId} value={tbId}>
+                        {tbId}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+              ) : null}
+
+              {columnVisibility.leakageCategory ? (
+                <th
+                  style={{
+                    ...styles.headerCell,
+                    ...getStickyStyle("leakageCategory", stickyLayout, true),
+                  }}
+                >
+                  <SortButton
+                    label="Sales Category"
+                    sortKey="leakageCategory"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <select
+                    value={filters.leakageCategory}
+                    onChange={(event) =>
+                      updateFilter("leakageCategory", event.target.value)
+                    }
+                    style={styles.headerSelect}
+                  >
+                    <option value="ALL">All categories</option>
+                    {salesCategoryOptions.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+              ) : null}
+
+              {columnVisibility.riskTier ? (
+                <th
+                  style={{
+                    ...styles.headerCell,
+                    ...getStickyStyle("riskTier", stickyLayout, true),
+                  }}
+                >
+                  <SortButton
+                    label="Risk Tier"
+                    sortKey="riskTier"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <select
+                    value={filters.riskTier}
+                    onChange={(event) =>
+                      updateFilter("riskTier", event.target.value)
+                    }
+                    style={styles.headerSelect}
+                  >
+                    <option value="ALL">All risk tiers</option>
+                    {riskTierOptions.map((riskTier) => (
+                      <option key={riskTier} value={riskTier}>
+                        {riskTier}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+              ) : null}
+
+              {columnVisibility.riskScore ? (
+                <th
+                  style={{
+                    ...styles.headerCell,
+                    ...getStickyStyle("riskScore", stickyLayout, true),
+                  }}
+                >
+                  <SortButton
+                    label="Risk Score"
+                    sortKey="riskScore"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={filters.riskScore}
+                    onChange={(value) => updateFilter("riskScore", value)}
+                    placeholder="Exact score"
+                  />
                 </th>
               ) : null}
 
@@ -984,6 +1321,84 @@ export default function SalesMetersTable({
                     </td>
                   ) : null}
 
+                  {columnVisibility.tbRefs ? (
+                    <td
+                      style={{
+                        ...styles.bodyCell,
+                        ...getStickyStyle("tbRefs", stickyLayout),
+                        textAlign: "center",
+                      }}
+                    >
+                      {getRowTbRefs(row).length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setTbRefsRow(row)}
+                          title={`Open Targeted Batch references for meter ${row.meterNo}`}
+                          style={{
+                            border: "1px solid #2563eb",
+                            borderRadius: "999px",
+                            padding: "0.32rem 0.58rem",
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            fontSize: "0.75rem",
+                            fontWeight: 900,
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {getTbCountLabel(row)}
+                        </button>
+                      ) : (
+                        <span
+                          style={{
+                            color: "#94a3b8",
+                            fontSize: "0.75rem",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          0 TBs
+                        </span>
+                      )}
+                    </td>
+                  ) : null}
+
+                  {columnVisibility.leakageCategory ? (
+                    <td
+                      style={{
+                        ...styles.bodyCell,
+                        ...styles.categoryCell,
+                        ...getStickyStyle("leakageCategory", stickyLayout),
+                      }}
+                      title={row.leakageCategory || "NAv"}
+                    >
+                      {row.leakageCategory || "NAv"}
+                    </td>
+                  ) : null}
+
+                  {columnVisibility.riskTier ? (
+                    <td
+                      style={{
+                        ...styles.bodyCell,
+                        ...getStickyStyle("riskTier", stickyLayout),
+                      }}
+                    >
+                      {row.riskTier || "NAv"}
+                    </td>
+                  ) : null}
+
+                  {columnVisibility.riskScore ? (
+                    <td
+                      style={{
+                        ...styles.bodyCell,
+                        ...styles.numberCell,
+                        ...getStickyStyle("riskScore", stickyLayout),
+                      }}
+                    >
+                      {row.riskScore ?? "NAv"}
+                    </td>
+                  ) : null}
+
                   {columnVisibility.addressLine1 ? (
                     <td style={{ ...styles.bodyCell, ...styles.addressCell, ...getStickyStyle("addressLine1", stickyLayout) }} title={row.addressLine1 || "NAv"}>
                       {row.addressLine1 || "NAv"}
@@ -1065,6 +1480,13 @@ export default function SalesMetersTable({
           }
           onClear={() => clearRangeFilter(activeRangeFilterKey)}
           onClose={() => setActiveRangeFilterKey(null)}
+        />
+      ) : null}
+
+      {tbRefsRow ? (
+        <SalesTbRefsModal
+          row={tbRefsRow}
+          onClose={() => setTbRefsRow(null)}
         />
       ) : null}
 
@@ -1298,6 +1720,11 @@ const styles = {
     textUnderlineOffset: "2px",
     cursor: "pointer",
   },
+  categoryCell: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
   addressCell: {
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -1307,6 +1734,11 @@ const styles = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+  },
+  numberCell: {
+    textAlign: "right",
+    whiteSpace: "nowrap",
+    fontVariantNumeric: "tabular-nums",
   },
   moneyCell: {
     textAlign: "right",
