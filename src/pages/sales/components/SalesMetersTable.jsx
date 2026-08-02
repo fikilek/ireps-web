@@ -311,6 +311,46 @@ function getRowTbRefs(row = {}) {
     : [];
 }
 
+function normalizeWardNumber(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const numeric = Number(text.replace(/\D/g, ""));
+  return Number.isFinite(numeric) ? String(numeric) : text.toUpperCase();
+}
+
+function getRowMapMeterId(row = {}) {
+  return String(row?.id || row?.meterNo || "").trim();
+}
+
+function rowHasGpsPointForWard(row = {}, selectedWardNo = "") {
+  const normalizedSelectedWard = normalizeWardNumber(selectedWardNo);
+  if (!normalizedSelectedWard) return false;
+
+  const rowWardNumbers = Array.isArray(row?.wardNumbers)
+    ? row.wardNumbers.map(normalizeWardNumber)
+    : [];
+  const candidates = Array.isArray(row?.erfCandidates)
+    ? row.erfCandidates
+    : [];
+
+  return candidates.some((candidate) => {
+    const latitude = Number(candidate?.latitude);
+    const longitude = Number(candidate?.longitude);
+    const candidateWardNo = normalizeWardNumber(candidate?.wardNumber);
+    const belongsToWard = candidateWardNo
+      ? candidateWardNo === normalizedSelectedWard
+      : rowWardNumbers.includes(normalizedSelectedWard);
+
+    return (
+      candidate?.hasValidGps === true &&
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      belongsToWard
+    );
+  });
+}
+
 function getTbCountLabel(row = {}) {
   const count = getRowTbRefs(row).length;
   return `${count} ${count === 1 ? "TB" : "TBs"}`;
@@ -422,6 +462,9 @@ export default function SalesMetersTable({
   const [mapRow, setMapRow] = useState(null);
   const [tbRefsRow, setTbRefsRow] = useState(null);
   const [wardGeofenceOptions, setWardGeofenceOptions] = useState([]);
+  const [hoveredMapMeterId, setHoveredMapMeterId] = useState("");
+  const [focusedMapMeterId, setFocusedMapMeterId] = useState("");
+  const [mapFocusRequest, setMapFocusRequest] = useState(0);
 
   const latestMonthKey = monthKeys[0] || "2026-06";
   const stickyLayout = useMemo(
@@ -653,12 +696,25 @@ export default function SalesMetersTable({
     ? `Select all ${formatNumber(headerSelectionIds.length)} filtered meters`
     : `Select all ${formatNumber(headerSelectionIds.length)} meters on this page`;
 
+  function clearMapRowInteraction() {
+    setHoveredMapMeterId("");
+    setFocusedMapMeterId("");
+  }
+
+  function toggleGpsMap() {
+    setShowGpsMap((current) => {
+      if (current) clearMapRowInteraction();
+      return !current;
+    });
+  }
+
   function updateFilter(key, value) {
     setCurrentPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function updateWardFilter(value) {
+    clearMapRowInteraction();
     setCurrentPage(1);
     setWardGeofenceOptions([]);
     setFilters((current) => ({
@@ -700,7 +756,24 @@ export default function SalesMetersTable({
   }, []);
 
   function updateGeofenceFilter(value) {
+    clearMapRowInteraction();
     updateFilter("geofenceId", value);
+  }
+
+  function focusAddressOnMap(row) {
+    const meterId = getRowMapMeterId(row);
+
+    if (
+      !showGpsMap ||
+      filters.wardNo === "ALL" ||
+      !meterId ||
+      !rowHasGpsPointForWard(row, filters.wardNo)
+    ) {
+      return;
+    }
+
+    setFocusedMapMeterId(meterId);
+    setMapFocusRequest((current) => current + 1);
   }
 
   function applyRangeFilter(filterKey, nextFilter) {
@@ -821,6 +894,7 @@ export default function SalesMetersTable({
   }
 
   function resetColumnFilters() {
+    clearMapRowInteraction();
     setFilters(EMPTY_FILTERS);
     setSortConfig(DEFAULT_SORT);
     setCurrentPage(1);
@@ -859,7 +933,7 @@ export default function SalesMetersTable({
           <button
             type="button"
             style={styles.columnsButton}
-            onClick={() => setShowGpsMap((current) => !current)}
+            onClick={toggleGpsMap}
             aria-expanded={showGpsMap}
           >
             {showGpsMap ? "Hide GPS Map" : "Show GPS Map"}
@@ -915,6 +989,9 @@ export default function SalesMetersTable({
             updateGeofenceFilter(geofenceId || "ALL")
           }
           onWardGeofencesChange={handleWardGeofencesChange}
+          hoveredMeterId={hoveredMapMeterId}
+          focusedMeterId={focusedMapMeterId}
+          focusRequest={mapFocusRequest}
         />
       ) : null}
       <PaginationControls
@@ -1399,11 +1476,68 @@ export default function SalesMetersTable({
                     </td>
                   ) : null}
 
-                  {columnVisibility.addressLine1 ? (
-                    <td style={{ ...styles.bodyCell, ...styles.addressCell, ...getStickyStyle("addressLine1", stickyLayout) }} title={row.addressLine1 || "NAv"}>
-                      {row.addressLine1 || "NAv"}
-                    </td>
-                  ) : null}
+                  {columnVisibility.addressLine1 ? (() => {
+                    const mapMeterId = getRowMapMeterId(row);
+                    const canFocusAddressOnMap =
+                      showGpsMap &&
+                      filters.wardNo !== "ALL" &&
+                      Boolean(mapMeterId) &&
+                      rowHasGpsPointForWard(row, filters.wardNo);
+                    const isFocusedAddress =
+                      canFocusAddressOnMap &&
+                      focusedMapMeterId === mapMeterId;
+
+                    return (
+                      <td
+                        style={{
+                          ...styles.bodyCell,
+                          ...styles.addressCell,
+                          ...getStickyStyle("addressLine1", stickyLayout),
+                        }}
+                        title={
+                          canFocusAddressOnMap
+                            ? `Hover to highlight and click to zoom to ${
+                                row.addressLine1 || "this meter"
+                              }`
+                            : row.addressLine1 || "NAv"
+                        }
+                      >
+                        {canFocusAddressOnMap ? (
+                          <button
+                            type="button"
+                            style={{
+                              ...styles.addressMapButton,
+                              ...(isFocusedAddress
+                                ? styles.addressMapButtonFocused
+                                : null),
+                            }}
+                            onMouseEnter={() =>
+                              setHoveredMapMeterId(mapMeterId)
+                            }
+                            onMouseLeave={() =>
+                              setHoveredMapMeterId((current) =>
+                                current === mapMeterId ? "" : current,
+                              )
+                            }
+                            onFocus={() => setHoveredMapMeterId(mapMeterId)}
+                            onBlur={() =>
+                              setHoveredMapMeterId((current) =>
+                                current === mapMeterId ? "" : current,
+                              )
+                            }
+                            onClick={() => focusAddressOnMap(row)}
+                            aria-label={`Zoom map to meter ${
+                              row.meterNo || mapMeterId
+                            } at ${row.addressLine1 || "the selected address"}`}
+                          >
+                            {row.addressLine1 || "NAv"}
+                          </button>
+                        ) : (
+                          row.addressLine1 || "NAv"
+                        )}
+                      </td>
+                    );
+                  })() : null}
 
                   {columnVisibility.town ? (
                     <td style={{ ...styles.bodyCell, ...getStickyStyle("town", stickyLayout) }}>
@@ -1729,6 +1863,27 @@ const styles = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+  },
+  addressMapButton: {
+    maxWidth: "100%",
+    border: 0,
+    padding: 0,
+    background: "transparent",
+    color: "#334155",
+    font: "inherit",
+    textAlign: "left",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+    textDecoration: "underline",
+    textDecorationStyle: "dotted",
+    textUnderlineOffset: "3px",
+  },
+  addressMapButtonFocused: {
+    color: "#1d4ed8",
+    fontWeight: 850,
+    textDecorationStyle: "solid",
   },
   sgCodeCell: {
     overflow: "hidden",

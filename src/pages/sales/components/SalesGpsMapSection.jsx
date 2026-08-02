@@ -8,6 +8,30 @@ import { useGetGeoFencesByWardQuery } from "../../../redux/geofencesApi";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
+const DEFAULT_MARKER_SCALE = 7;
+const HOVERED_MARKER_SCALE = 10;
+const FOCUSED_MARKER_SCALE = 11;
+
+function normalizeMeterId(value) {
+  return String(value || "").trim();
+}
+
+function buildMeterMarkerIcon({ isHovered = false, isFocused = false } = {}) {
+  const scale = isFocused
+    ? FOCUSED_MARKER_SCALE
+    : isHovered
+      ? HOVERED_MARKER_SCALE
+      : DEFAULT_MARKER_SCALE;
+
+  return {
+    path: window.google.maps.SymbolPath.CIRCLE,
+    scale,
+    fillColor: "#dc2626",
+    fillOpacity: 0.96,
+    strokeColor: "#ffffff",
+    strokeWeight: isFocused || isHovered ? 3 : 2,
+  };
+}
 
 function escapeHtml(value) {
   return String(value || "")
@@ -359,11 +383,44 @@ function fitMapToPoints(map, points = []) {
   map.fitBounds(bounds, 48);
 }
 
-function SalesGpsMarkers({ points, fitRequest, fitPointsAutomatically }) {
+function SalesGpsMarkers({
+  points,
+  fitRequest,
+  fitPointsAutomatically,
+  hoveredMeterId = "",
+  focusedMeterId = "",
+  focusRequest = 0,
+}) {
   const map = useMap();
   const clustererRef = useRef(null);
   const markersRef = useRef([]);
   const infoWindowRef = useRef(null);
+
+  function openPointInfoWindow(marker, point) {
+    const infoWindow = infoWindowRef.current;
+
+    if (!infoWindow || !marker || !point) return;
+
+    infoWindow.setContent(`
+      <div style="font-family: Arial, sans-serif; min-width: 240px;">
+        <strong>Meter ${escapeHtml(point.meterNo)}</strong>
+        <div style="margin-top: 7px;">Account: ${escapeHtml(
+          point.accountNumber,
+        )}</div>
+        <div>Customer: ${escapeHtml(point.customerName)}</div>
+        <div>Address: ${escapeHtml(point.addressLine1)}</div>
+        <div>Town: ${escapeHtml(point.town)}</div>
+        <div>Ward: ${escapeHtml(point.wardNo)}</div>
+        <div>ERF: ${escapeHtml(point.erfNumber)}</div>
+      </div>
+    `);
+
+    infoWindow.open({
+      anchor: marker,
+      map,
+      shouldFocus: false,
+    });
+  }
 
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;
@@ -373,7 +430,7 @@ function SalesGpsMarkers({ points, fitRequest, fitPointsAutomatically }) {
       clustererRef.current = null;
     }
 
-    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current.forEach(({ marker }) => marker.setMap(null));
     markersRef.current = [];
 
     if (infoWindowRef.current) {
@@ -393,46 +450,21 @@ function SalesGpsMarkers({ points, fitRequest, fitPointsAutomatically }) {
         },
         map,
         title: `Meter ${point.meterNo}`,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 7,
-          fillColor: "#dc2626",
-          fillOpacity: 0.96,
-          strokeColor: "#ffffff",
-          strokeWeight: 2,
-        },
+        icon: buildMeterMarkerIcon(),
         zIndex: 40,
       });
 
       marker.addListener("click", () => {
-        infoWindow.setContent(`
-          <div style="font-family: Arial, sans-serif; min-width: 240px;">
-            <strong>Meter ${escapeHtml(point.meterNo)}</strong>
-            <div style="margin-top: 7px;">Account: ${escapeHtml(
-              point.accountNumber,
-            )}</div>
-            <div>Customer: ${escapeHtml(point.customerName)}</div>
-            <div>Address: ${escapeHtml(point.addressLine1)}</div>
-            <div>Town: ${escapeHtml(point.town)}</div>
-            <div>Ward: ${escapeHtml(point.wardNo)}</div>
-            <div>ERF: ${escapeHtml(point.erfNumber)}</div>
-          </div>
-        `);
-
-        infoWindow.open({
-          anchor: marker,
-          map,
-          shouldFocus: false,
-        });
+        openPointInfoWindow(marker, point);
       });
 
-      return marker;
+      return { marker, point };
     });
 
     markersRef.current = markers;
     clustererRef.current = new MarkerClusterer({
       map,
-      markers,
+      markers: markers.map(({ marker }) => marker),
     });
 
     if (fitPointsAutomatically) {
@@ -447,11 +479,82 @@ function SalesGpsMarkers({ points, fitRequest, fitPointsAutomatically }) {
         clustererRef.current = null;
       }
 
-      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current.forEach(({ marker }) => marker.setMap(null));
       markersRef.current = [];
       infoWindowRef.current = null;
     };
   }, [fitPointsAutomatically, map, points]);
+
+  useEffect(() => {
+    const normalizedHoveredMeterId = normalizeMeterId(hoveredMeterId);
+    const normalizedFocusedMeterId = normalizeMeterId(focusedMeterId);
+
+    markersRef.current.forEach(({ marker, point }) => {
+      const pointMeterId = normalizeMeterId(point?.meterId);
+      const isFocused =
+        Boolean(normalizedFocusedMeterId) &&
+        pointMeterId === normalizedFocusedMeterId;
+      const isHovered =
+        Boolean(normalizedHoveredMeterId) &&
+        pointMeterId === normalizedHoveredMeterId;
+
+      marker.setIcon(buildMeterMarkerIcon({ isHovered, isFocused }));
+      marker.setZIndex(isFocused ? 1200 : isHovered ? 1000 : 40);
+    });
+
+    clustererRef.current?.render?.();
+  }, [focusedMeterId, hoveredMeterId]);
+
+  useEffect(() => {
+    if (!map || focusRequest === 0 || !normalizeMeterId(focusedMeterId)) {
+      return undefined;
+    }
+
+    const matchingMarkers = markersRef.current.filter(
+      ({ point }) =>
+        normalizeMeterId(point?.meterId) === normalizeMeterId(focusedMeterId),
+    );
+
+    if (matchingMarkers.length === 0) return undefined;
+
+    let hasOpened = false;
+
+    const openFocusedMarker = () => {
+      if (hasOpened) return;
+      hasOpened = true;
+
+      const firstMatch = matchingMarkers[0];
+      openPointInfoWindow(firstMatch.marker, firstMatch.point);
+    };
+
+    const idleListener = window.google.maps.event.addListenerOnce(
+      map,
+      "idle",
+      openFocusedMarker,
+    );
+
+    if (matchingMarkers.length === 1) {
+      const [{ point }] = matchingMarkers;
+
+      map.panTo({
+        lat: point.latitude,
+        lng: point.longitude,
+      });
+      map.setZoom(Math.max(Number(map.getZoom()) || 0, 19));
+    } else {
+      fitMapToPoints(
+        map,
+        matchingMarkers.map(({ point }) => point),
+      );
+    }
+
+    const fallbackTimer = window.setTimeout(openFocusedMarker, 500);
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      window.google.maps.event.removeListener(idleListener);
+    };
+  }, [focusRequest, focusedMeterId, map]);
 
   useEffect(() => {
     if (
@@ -478,6 +581,9 @@ export default function SalesGpsMapSection({
   onSelectedWardNoChange,
   onSelectedGeofenceIdChange,
   onWardGeofencesChange,
+  hoveredMeterId = "",
+  focusedMeterId = "",
+  focusRequest = 0,
 }) {
   const { available, sync } = useWarehouse();
   const [fitRequest, setFitRequest] = useState(0);
@@ -736,6 +842,9 @@ export default function SalesGpsMapSection({
                   points={points}
                   fitRequest={fitRequest}
                   fitPointsAutomatically={!hasWardBoundary && !hasSelectedGeofence}
+                  hoveredMeterId={hoveredMeterId}
+                  focusedMeterId={focusedMeterId}
+                  focusRequest={focusRequest}
                 />
               </Map>
             </APIProvider>
