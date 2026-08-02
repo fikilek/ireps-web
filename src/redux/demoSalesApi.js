@@ -1,5 +1,5 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
 
@@ -12,6 +12,15 @@ function asNumber(value) {
 
 function hasFiniteNumber(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value));
+}
+
+function asOptionalNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
 }
 
 function normalizeNumberMap(value = {}) {
@@ -144,7 +153,86 @@ function normalizeGeofenceRefs(value = []) {
     );
 }
 
-function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
+function toSerializableTimestamp(value) {
+  const milliseconds = getTimestampMs(value);
+  return milliseconds > 0 ? new Date(milliseconds).toISOString() : null;
+}
+
+function normalizeFieldWork(value) {
+  if (!value || typeof value !== "object") return null;
+
+  return {
+    ...value,
+    submittedAt: toSerializableTimestamp(value.submittedAt),
+    updatedAt: toSerializableTimestamp(value.updatedAt),
+  };
+}
+
+function normalizeTbRefs(value = []) {
+  const seen = new Set();
+
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      const id = String(item?.id || item?.tbId || "").trim();
+      const rowId = String(item?.rowId || item?.tbRowId || "").trim();
+
+      if (!id) return null;
+
+      return {
+        ...item,
+        id,
+        rowId: rowId || null,
+        date: toSerializableTimestamp(
+          item?.date ?? item?.addedAt ?? item?.createdAt ?? null,
+        ),
+        fieldWork: normalizeFieldWork(item?.fieldWork),
+      };
+    })
+    .filter((item) => {
+      const key = `${item.id}::${item.rowId || ""}`;
+
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => {
+      const leftDate = String(left?.date || "");
+      const rightDate = String(right?.date || "");
+      const dateComparison = rightDate.localeCompare(leftDate);
+
+      if (dateComparison !== 0) return dateComparison;
+
+      return String(left.id).localeCompare(String(right.id), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+}
+
+function getTimestampMs(value) {
+  if (!value) return 0;
+
+  if (typeof value?.toMillis === "function") {
+    const milliseconds = Number(value.toMillis());
+    return Number.isFinite(milliseconds) ? milliseconds : 0;
+  }
+
+  if (typeof value?.toDate === "function") {
+    const milliseconds = value.toDate().getTime();
+    return Number.isFinite(milliseconds) ? milliseconds : 0;
+  }
+
+  if (Number.isFinite(Number(value?.seconds))) {
+    const seconds = Number(value.seconds);
+    const nanoseconds = Number(value?.nanoseconds || 0);
+    return seconds * 1000 + nanoseconds / 1_000_000;
+  }
+
+  const milliseconds = new Date(value).getTime();
+  return Number.isFinite(milliseconds) ? milliseconds : 0;
+}
+
+function normalizeDemoSalesRow(id, data = {}) {
   const monthlySalesC =
     data.monthlySalesC && typeof data.monthlySalesC === "object"
       ? normalizeNumberMap(data.monthlySalesC)
@@ -207,7 +295,11 @@ function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
     ),
     accountNumber: String(data.accountNumber || data.AccountNumber || ""),
     customerName: String(customerName),
-    lmPcode: String(data.lmPcode || requestedLmPcode || ""),
+    lmPcode: String(data.lmPcode || ""),
+    createdAt: toSerializableTimestamp(data.createdAt),
+    updatedAt: toSerializableTimestamp(data.updatedAt),
+    createdAtMs: getTimestampMs(data.createdAt),
+    updatedAtMs: getTimestampMs(data.updatedAt),
     demoData: data.demoData !== false,
     astId: data.astId || null,
     astMatchStatus: String(data.astMatchStatus || "NOT_CHECKED"),
@@ -266,14 +358,72 @@ function normalizeDemoSalesRow(id, data = {}, requestedLmPcode = "") {
     geofenceRefs: normalizeGeofenceRefs(
       data.geofenceRefs || data.GeoFenceRefs || [],
     ),
+    tbRefs: normalizeTbRefs(data.tbRefs || data.TbRefs || []),
+    leakageCategory: String(
+      data.leakageCategory || data.Leakage_Category || "",
+    ).trim(),
+    riskTier: String(data.riskTier || data.Risk_Tier || "").trim(),
+    riskScore: asOptionalNumber(data.riskScore ?? data.Risk_Score),
     trnBatchIds: Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
   };
 }
 
 function sortDemoSalesRows(left, right) {
-  return String(left.meterNo).localeCompare(String(right.meterNo), undefined, {
-    numeric: true,
-    sensitivity: "base",
+  const updatedAtComparison =
+    Number(right?.updatedAtMs || 0) - Number(left?.updatedAtMs || 0);
+
+  if (updatedAtComparison !== 0) return updatedAtComparison;
+
+  return String(left?.meterNo || "").localeCompare(
+    String(right?.meterNo || ""),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
+}
+
+function buildDemoSalesRows(snapshot, lmPcode) {
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeDemoSalesRow(documentSnapshot.id, documentSnapshot.data()),
+    )
+    .filter((row) => row.lmPcode === lmPcode)
+    .sort(sortDemoSalesRows);
+}
+
+function readInitialSalesSnapshot(lmPcode) {
+  return new Promise((resolve) => {
+    let unsubscribe = () => {};
+
+    unsubscribe = onSnapshot(
+      query(
+        collection(db, DEMO_SALES_COLLECTION),
+        where("lmPcode", "==", lmPcode),
+      ),
+      (snapshot) => {
+        const hasServerResult = snapshot.metadata?.fromCache === false;
+        const hasCachedRows = snapshot.docs.length > 0;
+
+        if (!hasServerResult && !hasCachedRows) return;
+
+        const rows = buildDemoSalesRows(snapshot, lmPcode);
+        unsubscribe();
+        resolve({ data: rows });
+      },
+      (error) => {
+        unsubscribe();
+        console.error("demoSalesApi initial stream error:", error);
+
+        resolve({
+          error: {
+            status: "CUSTOM_ERROR",
+            error: error?.message || "Could not load demo prepaid sales.",
+          },
+        });
+      },
+    );
   });
 }
 
@@ -282,35 +432,41 @@ export const demoSalesApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getDemoSalesByLmPcode: builder.query({
-      async queryFn(lmPcode) {
-        if (!lmPcode) return { data: [] };
+      queryFn: (lmPcode) => readInitialSalesSnapshot(lmPcode),
+
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        if (!lmPcode) return;
+
+        let unsubscribe = () => {};
 
         try {
-          const snapshot = await getDocs(collection(db, DEMO_SALES_COLLECTION));
+          await cacheDataLoaded;
 
-          const rows = snapshot.docs
-            .map((documentSnapshot) =>
-              normalizeDemoSalesRow(
-                documentSnapshot.id,
-                documentSnapshot.data(),
-                lmPcode,
-              ),
-            )
-            .filter((row) => row.lmPcode === lmPcode)
-            .sort(sortDemoSalesRows);
+          unsubscribe = onSnapshot(
+            query(
+              collection(db, DEMO_SALES_COLLECTION),
+              where("lmPcode", "==", lmPcode),
+            ),
+            (snapshot) => {
+              const rows = buildDemoSalesRows(snapshot, lmPcode);
 
-          return { data: rows };
-        } catch (error) {
-          console.error("demoSalesApi query error:", error);
-
-          return {
-            error: {
-              status: "CUSTOM_ERROR",
-              error: error?.message || "Could not load demo prepaid sales.",
+              updateCachedData(() => rows);
             },
-          };
+            (error) => {
+              console.error("demoSalesApi stream error:", error);
+            },
+          );
+        } catch (error) {
+          console.error("demoSalesApi stream setup error:", error);
         }
+
+        await cacheEntryRemoved;
+        unsubscribe();
       },
+
       keepUnusedDataFor: 300,
     }),
   }),

@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -23,6 +23,30 @@ import {
   getMonthLabel,
   getTargetFilterLabel,
 } from "./salesUtils";
+
+function SalesLoadingState() {
+  return (
+    <section style={styles.loadingPanel} aria-live="polite" aria-busy="true">
+      <style>
+        {`
+          @keyframes irepsSalesSpinner {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}
+      </style>
+
+      <div style={styles.loadingSpinner} aria-hidden="true" />
+
+      <div>
+        <h2 style={styles.loadingTitle}>Loading prepaid sales...</h2>
+        <p style={styles.loadingText}>
+          Connecting to the live Sales stream and preparing meter records.
+        </p>
+      </div>
+    </section>
+  );
+}
 
 function SummaryCard({ label, value, subtitle, active, onClick }) {
   const interactive = typeof onClick === "function";
@@ -62,6 +86,7 @@ function TargetingButton({ label, active, onClick }) {
 
 function TargetBatchModal({
   selectedCount,
+  scopeError,
   onClose,
   onDownload,
   onOpenTargetedBatch,
@@ -95,6 +120,12 @@ function TargetBatchModal({
             <span>Selected meters</span>
             <strong>{formatNumber(selectedCount)}</strong>
           </div>
+
+          {scopeError ? (
+            <div style={styles.modalErrorBox} role="alert">
+              {scopeError}
+            </div>
+          ) : null}
 
           <p style={styles.modalText}>
             The selected meters will be transferred to the dedicated Targeted
@@ -147,6 +178,7 @@ export default function PrepaidSales() {
   const [targetFilter, setTargetFilter] = useState(TARGET_FILTERS.ALL);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isTargetBatchModalOpen, setIsTargetBatchModalOpen] = useState(false);
+  const [targetBatchScopeError, setTargetBatchScopeError] = useState("");
 
   const {
     data: salesRows = [],
@@ -155,6 +187,12 @@ export default function PrepaidSales() {
     error,
     refetch,
   } = useGetDemoSalesByLmPcodeQuery(activeLmPcode || skipToken);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setIsTargetBatchModalOpen(false);
+    setTargetBatchScopeError("");
+  }, [activeLmPcode]);
 
   const monthKeys = useMemo(() => buildMonthKeys(salesRows), [salesRows]);
   const latestMonthKey = monthKeys[0] || "2026-02";
@@ -218,7 +256,36 @@ export default function PrepaidSales() {
   }
 
   function handleOpenTargetedBatch() {
-    if (selectedRows.length === 0) return;
+    setTargetBatchScopeError("");
+
+    if (!activeLmPcode) {
+      setTargetBatchScopeError(
+        "Targeted Batch creation is blocked because there is no active Local Municipality workbase.",
+      );
+      return;
+    }
+
+    if (selectedRows.length === 0) {
+      setTargetBatchScopeError(
+        "Targeted Batch creation is blocked because no Sales meters are selected.",
+      );
+      return;
+    }
+
+    const mismatchedRows = selectedRows.filter(
+      (row) => String(row?.lmPcode || "").trim() !== activeLmPcode,
+    );
+
+    if (mismatchedRows.length > 0) {
+      setTargetBatchScopeError(
+        `Targeted Batch creation is blocked because ${formatNumber(
+          mismatchedRows.length,
+        )} selected meter${
+          mismatchedRows.length === 1 ? "" : "s"
+        } do not belong to the active LM ${activeLmPcode}. Clear the selection and reload Sales.`,
+      );
+      return;
+    }
 
     const targetLabel = getTargetFilterLabel(targetFilter);
     const selectionReason =
@@ -344,12 +411,7 @@ export default function PrepaidSales() {
         </section>
       ) : null}
 
-      {isLoading ? (
-        <section style={styles.statePanel}>
-          <h2>Loading prepaid sales...</h2>
-          <p>Reading Endumeni meter sales through Redux Toolkit Query.</p>
-        </section>
-      ) : null}
+      {isLoading ? <SalesLoadingState /> : null}
 
       {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
         <section style={styles.statePanel}>
@@ -511,7 +573,10 @@ export default function PrepaidSales() {
                 <button
                   type="button"
                   style={styles.primaryButton}
-                  onClick={() => setIsTargetBatchModalOpen(true)}
+                  onClick={() => {
+                    setTargetBatchScopeError("");
+                    setIsTargetBatchModalOpen(true);
+                  }}
                 >
                   Create Target Batch
                 </button>
@@ -524,7 +589,11 @@ export default function PrepaidSales() {
       {isTargetBatchModalOpen ? (
         <TargetBatchModal
           selectedCount={selectedRows.length}
-          onClose={() => setIsTargetBatchModalOpen(false)}
+          scopeError={targetBatchScopeError}
+          onClose={() => {
+            setTargetBatchScopeError("");
+            setIsTargetBatchModalOpen(false);
+          }}
           onDownload={handleDownloadSelected}
           onOpenTargetedBatch={handleOpenTargetedBatch}
         />
@@ -609,6 +678,36 @@ const styles = {
     color: "#ffffff",
     fontWeight: 850,
     cursor: "pointer",
+  },
+  loadingPanel: {
+    display: "flex",
+    alignItems: "center",
+    gap: "1rem",
+    marginTop: "1rem",
+    padding: "1.4rem 1.5rem",
+    border: "1px solid rgba(37, 99, 235, 0.2)",
+    borderRadius: "1rem",
+    background: "#ffffff",
+    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.05)",
+  },
+  loadingSpinner: {
+    width: "2.35rem",
+    height: "2.35rem",
+    flex: "0 0 auto",
+    border: "4px solid #dbeafe",
+    borderTopColor: "#2563eb",
+    borderRadius: "999px",
+    animation: "irepsSalesSpinner 0.8s linear infinite",
+  },
+  loadingTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: "1.08rem",
+  },
+  loadingText: {
+    margin: "0.3rem 0 0",
+    color: "#64748b",
+    fontSize: "0.88rem",
   },
   statePanel: {
     padding: "1.25rem",
@@ -816,6 +915,16 @@ const styles = {
     background: "#eff6ff",
     color: "#1e3a8a",
     fontWeight: 850,
+  },
+  modalErrorBox: {
+    padding: "0.75rem 0.8rem",
+    border: "1px solid #fecaca",
+    borderRadius: "0.7rem",
+    background: "#fef2f2",
+    color: "#b91c1c",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    lineHeight: 1.45,
   },
   modalText: {
     margin: 0,
