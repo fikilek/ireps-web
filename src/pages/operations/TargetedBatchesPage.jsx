@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -22,10 +22,7 @@ import {
 } from "../../redux/targetedBatchDraftModel";
 import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModal";
 import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModal";
-import {
-  formatDateTime,
-  formatNumber,
-} from "./targeted-batches/targetedBatchUtils";
+import { formatNumber } from "./targeted-batches/targetedBatchUtils";
 
 const SOURCE_FILTER_OPTIONS = Object.values(TARGETED_BATCH_SOURCE_TYPES);
 const STATUS_FILTER_OPTIONS = Array.from(
@@ -176,6 +173,35 @@ function SummaryCard({ label, value }) {
   );
 }
 
+function TargetedBatchRegisterLoadingState() {
+  return (
+    <section
+      style={styles.loadingPanel}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <style>
+        {`
+          @keyframes irepsTbRegisterSpinner {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}
+      </style>
+
+      <span style={styles.loadingSpinner} aria-hidden="true" />
+
+      <div>
+        <h3 style={styles.loadingTitle}>Loading Targeted Batches...</h3>
+        <p style={styles.loadingText}>
+          Reading the permanent TB Register for the active Local Municipality.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function Th({ children }) {
   return <th style={styles.th}>{children}</th>;
 }
@@ -241,6 +267,7 @@ function HelpModal({ type, onClose }) {
 
 export default function TargetedBatchesPage() {
   const dispatch = useDispatch();
+  const location = useLocation();
   const navigate = useNavigate();
   const { activeWorkbase } = useAuth();
   const storedDraft = useSelector(selectTargetedBatchDraft);
@@ -263,6 +290,15 @@ export default function TargetedBatchesPage() {
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+  const creationResult = location.state?.targetedBatchCreation;
+  const creationStatusMessage = creationResult?.success
+    ? `${formatNumber(creationResult.createdBatchCount || 0)} ward-scoped ` +
+      `Targeted Batch${
+        Number(creationResult.createdBatchCount || 0) === 1 ? "" : "es"
+      } created with ${formatNumber(
+        creationResult.createdRowCount || 0,
+      )} row(s).`
+    : "";
 
   useEffect(() => {
     let active = true;
@@ -576,12 +612,18 @@ export default function TargetedBatchesPage() {
         </div>
       ) : null}
 
-      {registerStatusMessage ? (
-        <div style={styles.successNotice}>{registerStatusMessage}</div>
+      {creationStatusMessage || registerStatusMessage ? (
+        <div style={styles.successNotice}>
+          {creationStatusMessage || registerStatusMessage}
+        </div>
       ) : null}
 
-      <div style={styles.summaryGrid}>
-        <SummaryCard label="Total Batches" value={summary.totalUploads} />
+      {isRegisterLoading ? (
+        <TargetedBatchRegisterLoadingState />
+      ) : (
+        <>
+          <div style={styles.summaryGrid}>
+            <SummaryCard label="Total Batches" value={summary.totalUploads} />
         <SummaryCard
           label="Ready for Allocation"
           value={summary.readyForAllocation}
@@ -640,6 +682,7 @@ export default function TargetedBatchesPage() {
                 <Th>Final Report (DRAFT)</Th>
                 <Th>Delete TB</Th>
                 <Th>TB ID</Th>
+                <Th>Ward</Th>
                 <Th>Total</Th>
               </tr>
             </thead>
@@ -647,12 +690,10 @@ export default function TargetedBatchesPage() {
             <tbody>
               {filteredUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={6}>
-                    {isRegisterLoading
-                      ? "Loading permanent Targeted Batches..."
-                      : uploads.length === 0
-                        ? "No permanent Targeted Batches were found for this Local Municipality."
-                        : "No permanent Targeted Batches match the selected filters."}
+                  <Td colSpan={7}>
+                    {uploads.length === 0
+                      ? "No permanent Targeted Batches were found for this Local Municipality."
+                      : "No permanent Targeted Batches match the selected filters."}
                   </Td>
                 </tr>
               ) : null}
@@ -693,21 +734,31 @@ export default function TargetedBatchesPage() {
                     </Td>
 
                     <Td>
-                      <span
-                        style={{
-                          ...styles.allocationStatusBadge,
-                          ...(allocationState.isAllocated
-                            ? styles.allocationStatusAllocated
-                            : styles.allocationStatusNotAllocated),
-                        }}
-                        title={
-                          allocationState.isAllocated
-                            ? "This Targeted Batch has a permanent whole-batch allocation."
-                            : "This Targeted Batch has not yet been permanently allocated."
-                        }
-                      >
-                        {allocationState.label}
-                      </span>
+                      {allocationState.isAllocated ? (
+                        <span
+                          style={{
+                            ...styles.allocationStatusBadge,
+                            ...styles.allocationStatusAllocated,
+                          }}
+                          title="This Targeted Batch has a permanent whole-batch allocation."
+                        >
+                          {allocationState.label}
+                        </span>
+                      ) : (
+                        <Link
+                          to={`/operations/targeted-batches/${encodeURIComponent(
+                            upload.id,
+                          )}/allocation`}
+                          style={{
+                            ...styles.allocationStatusBadge,
+                            ...styles.allocationStatusNotAllocated,
+                            ...styles.allocationStatusLink,
+                          }}
+                          title="Open the Targeted Batch Allocation page."
+                        >
+                          {allocationState.label}
+                        </Link>
+                      )}
                     </Td>
 
                     <Td>
@@ -746,6 +797,18 @@ export default function TargetedBatchesPage() {
                     </Td>
 
                     <Td>
+                      <div style={styles.strongCell}>
+                        {upload?.scope?.wardName ||
+                          (upload?.scope?.wardNumber
+                            ? `Ward ${upload.scope.wardNumber}`
+                            : "NAv")}
+                      </div>
+                      <div style={styles.mutedCell}>
+                        {upload?.scope?.wardPcode || "NAv"}
+                      </div>
+                    </Td>
+
+                    <Td>
                       <strong style={styles.totalCell}>
                         {formatNumber(getUploadTotal(upload))}
                       </strong>
@@ -781,7 +844,9 @@ export default function TargetedBatchesPage() {
             </div>
           </div>
         ) : null}
-      </div>
+          </div>
+        </>
+      )}
 
       {isUploadModalOpen ? (
         <TargetedBatchUploadModal
@@ -918,6 +983,40 @@ const styles = {
     fontSize: 13,
     fontWeight: 800,
   },
+  loadingPanel: {
+    minHeight: 190,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    marginBottom: 16,
+    padding: 24,
+    border: "1px solid #bfdbfe",
+    borderRadius: 24,
+    background: "#ffffff",
+    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.05)",
+  },
+  loadingSpinner: {
+    width: 42,
+    height: 42,
+    flex: "0 0 auto",
+    border: "4px solid #dbeafe",
+    borderTopColor: "#2563eb",
+    borderRadius: 999,
+    animation: "irepsTbRegisterSpinner 0.8s linear infinite",
+  },
+  loadingTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 18,
+    fontWeight: 900,
+  },
+  loadingText: {
+    margin: "5px 0 0",
+    color: "#64748b",
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
   summaryGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
@@ -1047,6 +1146,10 @@ const styles = {
     fontWeight: 900,
     whiteSpace: "nowrap",
   },
+  allocationStatusLink: {
+    textDecoration: "none",
+    cursor: "pointer",
+  },
   allocationStatusAllocated: {
     border: "1px solid #86efac",
     background: "#dcfce7",
@@ -1073,6 +1176,12 @@ const styles = {
   strongCell: {
     color: "#0f172a",
     fontWeight: 900,
+  },
+  mutedCell: {
+    marginTop: 3,
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: 700,
   },
   secondaryCellText: {
     marginTop: 4,
