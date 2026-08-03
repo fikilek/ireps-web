@@ -87,6 +87,10 @@ import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
+import {
+  createOrLinkTargetedBatchPremise,
+  isSalesTargetedBatchContext,
+} from "./targetedBatches/premiseLink.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -4405,11 +4409,13 @@ const buildPremiseFailureResult = (code, message, premiseId = "NAv") => ({
 const buildPremiseSuccessResult = (
   premiseId,
   message = "Premise created successfully",
+  extra = {},
 ) => ({
   success: true,
   code: "SUCCESS",
   message,
   premiseId: premiseId || "NAv",
+  ...extra,
 });
 
 /* ------------------------------------------------
@@ -4490,6 +4496,9 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     const data = request?.data || {};
 
     const premiseId = data?.id || "NAv";
+    const isTargetedBatchPremise = isSalesTargetedBatchContext(
+      data?.targetedBatchContext,
+    );
 
     logger.info("onPremiseCreateCallable --start", {
       premiseId,
@@ -4539,7 +4548,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     /* ------------------------------------------------
        3. IDEMPOTENCY (BY ID)
        ------------------------------------------------ */
-    if (premiseSnap.exists) {
+    if (premiseSnap.exists && !isTargetedBatchPremise) {
       logTime("already exists", { premiseId });
 
       return buildPremiseSuccessResult(
@@ -4551,59 +4560,63 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     /* ------------------------------------------------
        4. DUPLICATE GUARD (FINAL RULE)
        ------------------------------------------------ */
-    const duplicateQueryStartedAtMs = Date.now();
+    if (!premiseSnap.exists) {
+      const duplicateQueryStartedAtMs = Date.now();
 
-    const possibleDuplicateSnap = await db
-      .collection("premises")
-      .where("erfId", "==", data.erfId)
-      .where("parents.lmPcode", "==", data.parents.lmPcode)
-      .where("parents.wardPcode", "==", data.parents.wardPcode)
-      .get();
+      const possibleDuplicateSnap = await db
+        .collection("premises")
+        .where("erfId", "==", data.erfId)
+        .where("parents.lmPcode", "==", data.parents.lmPcode)
+        .where("parents.wardPcode", "==", data.parents.wardPcode)
+        .get();
 
-    logger.info("⏱️ onPremiseCreateCallable -- duplicate query", {
-      premiseId,
-      elapsedSeconds: ((Date.now() - duplicateQueryStartedAtMs) / 1000).toFixed(
-        2,
-      ),
-      totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
-      candidateCount: possibleDuplicateSnap.size,
-    });
-
-    const duplicateMatchStartedAtMs = Date.now();
-
-    const existingDuplicateDoc = possibleDuplicateSnap.docs.find((doc) => {
-      const existingPremise = doc.data() || {};
-      return premisesMatchAsDuplicate(existingPremise, data);
-    });
-
-    logger.info("⏱️ onPremiseCreateCallable -- duplicate comparison", {
-      premiseId,
-      elapsedSeconds: ((Date.now() - duplicateMatchStartedAtMs) / 1000).toFixed(
-        2,
-      ),
-      totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
-      duplicateFound: Boolean(existingDuplicateDoc),
-      existingPremiseId: existingDuplicateDoc?.id || "NAv",
-    });
-
-    if (existingDuplicateDoc) {
-      logger.warn("onPremiseCreateCallable --duplicate blocked", {
+      logger.info("⏱️ onPremiseCreateCallable -- duplicate query", {
         premiseId,
-        existingPremiseId: existingDuplicateDoc.id,
-        erfId: data?.erfId || "NAv",
-        erfNo: data?.erfNo || "NAv",
+        elapsedSeconds: (
+          (Date.now() - duplicateQueryStartedAtMs) /
+          1000
+        ).toFixed(2),
+        totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
+        candidateCount: possibleDuplicateSnap.size,
       });
 
-      logTime("DUPLICATE END", {
-        premiseId,
-        existingPremiseId: existingDuplicateDoc.id,
+      const duplicateMatchStartedAtMs = Date.now();
+
+      const existingDuplicateDoc = possibleDuplicateSnap.docs.find((doc) => {
+        const existingPremise = doc.data() || {};
+        return premisesMatchAsDuplicate(existingPremise, data);
       });
 
-      return buildPremiseFailureResult(
-        "DUPLICATE_PREMISE",
-        "A premise with the same ERF, address and property type already exists",
-        existingDuplicateDoc.id,
-      );
+      logger.info("⏱️ onPremiseCreateCallable -- duplicate comparison", {
+        premiseId,
+        elapsedSeconds: (
+          (Date.now() - duplicateMatchStartedAtMs) /
+          1000
+        ).toFixed(2),
+        totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
+        duplicateFound: Boolean(existingDuplicateDoc),
+        existingPremiseId: existingDuplicateDoc?.id || "NAv",
+      });
+
+      if (existingDuplicateDoc) {
+        logger.warn("onPremiseCreateCallable --duplicate blocked", {
+          premiseId,
+          existingPremiseId: existingDuplicateDoc.id,
+          erfId: data?.erfId || "NAv",
+          erfNo: data?.erfNo || "NAv",
+        });
+
+        logTime("DUPLICATE END", {
+          premiseId,
+          existingPremiseId: existingDuplicateDoc.id,
+        });
+
+        return buildPremiseFailureResult(
+          "DUPLICATE_PREMISE",
+          "A premise with the same ERF, address and property type already exists",
+          existingDuplicateDoc.id,
+        );
+      }
     }
 
     /* ------------------------------------------------
@@ -4659,8 +4672,19 @@ export const onPremiseCreateCallable = onCall(async (request) => {
        6. CREATE PREMISE
        ------------------------------------------------ */
     const firestoreSetStartedAtMs = Date.now();
+    let targetedBatchLink = null;
 
-    await premiseRef.set(finalPayload);
+    if (isTargetedBatchPremise) {
+      targetedBatchLink = await createOrLinkTargetedBatchPremise({
+        db,
+        premiseRef,
+        premisePayload: finalPayload,
+        actorUid: caller.uid,
+        actorName,
+      });
+    } else {
+      await premiseRef.set(finalPayload);
+    }
 
     logger.info("⏱️ onPremiseCreateCallable -- premise set complete", {
       premiseId,
@@ -4668,17 +4692,30 @@ export const onPremiseCreateCallable = onCall(async (request) => {
         2,
       ),
       totalElapsedSeconds: ((Date.now() - startedAtMs) / 1000).toFixed(2),
+      targetedBatchLinked: Boolean(targetedBatchLink?.linked),
+      alreadyLinked: Boolean(targetedBatchLink?.alreadyLinked),
     });
 
     logger.info("onPremiseCreateCallable --created", {
       premiseId,
       erfId: finalPayload?.erfId || "NAv",
       erfNo: finalPayload?.erfNo || "NAv",
+      targetedBatchLink,
     });
 
     logTime("SUCCESS END", { premiseId });
 
-    return buildPremiseSuccessResult(premiseId);
+    return buildPremiseSuccessResult(
+      premiseId,
+      targetedBatchLink?.alreadyLinked
+        ? "Premise and Targeted Batch linkage already exist"
+        : "Premise created successfully",
+      targetedBatchLink
+        ? {
+            targetedBatchLink,
+          }
+        : {},
+    );
   } catch (error) {
     logTime("ERROR END", {
       message: error?.message || String(error),
@@ -4690,7 +4727,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     });
 
     return buildPremiseFailureResult(
-      "UNKNOWN_ERROR",
+      error?.irepsCode || "UNKNOWN_ERROR",
       error?.message || "Failed to create premise",
     );
   }
