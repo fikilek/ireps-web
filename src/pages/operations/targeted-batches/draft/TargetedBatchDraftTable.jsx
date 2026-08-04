@@ -1,4 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+import { Fragment } from "react";
+
 import {
   formatCurrencyFromCents,
   formatNumber,
@@ -102,6 +104,12 @@ function RowDecisionBadge({ decision }) {
   );
 }
 
+function getBatchLabel(row = {}) {
+  return row?.wardName ||
+    row?.wardNumberLabel ||
+    (row?.wardNumber ? `Ward ${row.wardNumber}` : "Ward NAv");
+}
+
 export default function TargetedBatchDraftTable({
   rows,
   totalRows,
@@ -109,10 +117,11 @@ export default function TargetedBatchDraftTable({
   pageSize,
   totalPages,
   showRowDecision,
+  showBatchGrouping = false,
   onPageChange,
   onPageSizeChange,
 }) {
-  const baseColumnCount = 12;
+  const baseColumnCount = showBatchGrouping ? 16 : 12;
   const columnCount = showRowDecision ? baseColumnCount + 2 : baseColumnCount;
 
   return (
@@ -130,12 +139,24 @@ export default function TargetedBatchDraftTable({
         <table
           style={{
             ...styles.table,
-            minWidth: showRowDecision ? "2380px" : styles.table.minWidth,
+            minWidth: showRowDecision
+              ? "2380px"
+              : showBatchGrouping
+                ? "2700px"
+                : styles.table.minWidth,
           }}
         >
           <thead>
             <tr>
               <th style={styles.headerCell}>Row</th>
+              {showBatchGrouping ? (
+                <>
+                  <th style={styles.headerCell}>Proposed Batch</th>
+                  <th style={styles.headerCell}>Ward</th>
+                  <th style={styles.headerCell}>Ward PCode</th>
+                  <th style={styles.headerCell}>ERF No</th>
+                </>
+              ) : null}
               {showRowDecision ? (
                 <>
                   <th style={styles.headerCell}>Row Outcome</th>
@@ -163,57 +184,116 @@ export default function TargetedBatchDraftTable({
                 </td>
               </tr>
             ) : (
-              rows.map((row, index) => (
-                <tr
-                  key={
-                    row.salesAllMeterId ||
-                    row.sourceSalesAllMeterId ||
-                    row.id ||
-                    `${row.meterNo}-${index}`
-                  }
-                >
-                  <td style={styles.bodyCell}>{row.rowNo || index + 1}</td>
-                  {showRowDecision ? (
-                    <>
+              rows.map((row, index) => {
+                const previousRow = rows[index - 1];
+                const showGroupHeader =
+                  showBatchGrouping &&
+                  (!previousRow ||
+                    previousRow?.draftBatchKey !== row?.draftBatchKey);
+
+                return (
+                  <Fragment
+                    key={
+                      row.salesAllMeterId ||
+                      row.sourceSalesAllMeterId ||
+                      row.id ||
+                      `${row.meterNo}-${index}`
+                    }
+                  >
+                    {showGroupHeader ? (
+                      <tr>
+                        <td colSpan={columnCount} style={styles.batchGroupRow}>
+                          <div style={styles.batchGroupContent}>
+                            <div>
+                              <strong style={styles.batchGroupTitle}>
+                                Proposed Batch {row?.batchSequence || "NAv"} ·{" "}
+                                {getBatchLabel(row)}
+                              </strong>
+                              <span style={styles.batchGroupMeta}>
+                                {row?.wardPcode || "NAv"} · One ward only
+                              </span>
+                            </div>
+                            <code style={styles.batchGroupId}>
+                              {row?.proposedTbId || "NAv"}
+                            </code>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+
+                    <tr>
                       <td style={styles.bodyCell}>
-                        <RowDecisionBadge decision={row.rowDecision} />
+                        {row.batchRowNo || row.rowNo || index + 1}
                       </td>
-                      <td style={{ ...styles.bodyCell, ...styles.rejectionCell }}>
-                        {row.rowDecision === "REJECT"
-                          ? row.rowDecisionReason || "Reason missing"
-                          : "—"}
+                      {showBatchGrouping ? (
+                        <>
+                          <td style={{ ...styles.bodyCell, ...styles.idCell }}>
+                            {row.proposedTbId || "NAv"}
+                          </td>
+                          <td style={styles.bodyCell}>{getBatchLabel(row)}</td>
+                          <td style={{ ...styles.bodyCell, ...styles.idCell }}>
+                            {row.wardPcode || "NAv"}
+                          </td>
+                          <td style={styles.bodyCell}>{row.erfNo || "NAv"}</td>
+                        </>
+                      ) : null}
+                      {showRowDecision ? (
+                        <>
+                          <td style={styles.bodyCell}>
+                            <RowDecisionBadge decision={row.rowDecision} />
+                          </td>
+                          <td
+                            style={{
+                              ...styles.bodyCell,
+                              ...styles.rejectionCell,
+                            }}
+                          >
+                            {row.rowDecision === "REJECT"
+                              ? row.rowDecisionReason || "Reason missing"
+                              : "—"}
+                          </td>
+                        </>
+                      ) : null}
+                      <td style={{ ...styles.bodyCell, ...styles.idCell }}>
+                        {row.salesAllMeterId ||
+                          row.sourceSalesAllMeterId ||
+                          "NAv"}
                       </td>
-                    </>
-                  ) : null}
-                  <td style={{ ...styles.bodyCell, ...styles.idCell }}>
-                    {row.salesAllMeterId || row.sourceSalesAllMeterId || "NAv"}
-                  </td>
-                  <td style={{ ...styles.bodyCell, ...styles.meterCell }}>
-                    {row.meterNo || "NAv"}
-                  </td>
-                  <td style={styles.bodyCell}>{row.accountNumber || "NAv"}</td>
-                  <td style={styles.bodyCell}>{row.customerName || "NAv"}</td>
-                  <td style={{ ...styles.bodyCell, ...styles.addressCell }}>
-                    {row.addressLine1 || "NAv"}
-                  </td>
-                  <td style={styles.bodyCell}>{row.town || "NAv"}</td>
-                  <td style={{ ...styles.bodyCell, ...styles.sgCell }}>
-                    {row.standNumber || "NAv"}
-                  </td>
-                  <td style={{ ...styles.bodyCell, ...styles.reasonCell }}>
-                    {row.actionReason || "NAv"}
-                  </td>
-                  <td style={styles.bodyCell}>
-                    {row.astMatchStatus || "NOT_CHECKED"}
-                  </td>
-                  <td style={styles.bodyCell}>{row.proposedTrnType || "NAv"}</td>
-                  <td style={{ ...styles.bodyCell, ...styles.moneyCell }}>
-                    {row.totalSalesC === null || row.totalSalesC === undefined
-                      ? "NAv"
-                      : formatCurrencyFromCents(row.totalSalesC)}
-                  </td>
-                </tr>
-              ))
+                      <td style={{ ...styles.bodyCell, ...styles.meterCell }}>
+                        {row.meterNo || "NAv"}
+                      </td>
+                      <td style={styles.bodyCell}>
+                        {row.accountNumber || "NAv"}
+                      </td>
+                      <td style={styles.bodyCell}>
+                        {row.customerName || "NAv"}
+                      </td>
+                      <td style={{ ...styles.bodyCell, ...styles.addressCell }}>
+                        {row.addressLine1 || "NAv"}
+                      </td>
+                      <td style={styles.bodyCell}>{row.town || "NAv"}</td>
+                      <td style={{ ...styles.bodyCell, ...styles.sgCell }}>
+                        {row.sgCode || "NAv"}
+                      </td>
+                      <td style={{ ...styles.bodyCell, ...styles.reasonCell }}>
+                        {row.actionReason || "NAv"}
+                      </td>
+                      <td style={styles.bodyCell}>
+                        {row.astMatchStatus || "NOT_CHECKED"}
+                      </td>
+                      <td style={styles.bodyCell}>
+                        {row.proposedTrnType || "NAv"}
+                      </td>
+                      <td style={{ ...styles.bodyCell, ...styles.moneyCell }}>
+                        {row.totalSalesC === null ||
+                        row.totalSalesC === undefined
+                          ? "NAv"
+                          : formatCurrencyFromCents(row.totalSalesC)}
+                      </td>
+                    </tr>
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>

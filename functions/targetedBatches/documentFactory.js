@@ -5,7 +5,6 @@ import {
   normalizeMonth,
   normalizeText,
   normalizeUpper,
-  safeArray,
 } from "./helpers.js";
 
 function asNonNegativeInteger(value) {
@@ -62,7 +61,7 @@ export function buildTargetedBatchParentDoc({
   const totalRows = payload.expectedRows;
 
   return {
-    schemaVersion: "0.1.0",
+    schemaVersion: "0.2.0",
     id: payload.tbId,
     status: "READY_FOR_ALLOCATION",
     source: {
@@ -74,6 +73,13 @@ export function buildTargetedBatchParentDoc({
     scope: {
       lmPcode: payload.scope.lmPcode,
       lmName: payload.scope.lmName,
+      wardPcode: payload.scope.wardPcode,
+      wardNumber: payload.scope.wardNumber,
+      wardName: payload.scope.wardName,
+    },
+    creationGroup: {
+      id: payload.creationGroupId,
+      batchCount: payload.creationGroupBatchCount,
     },
     selection: {
       reason: payload.selection.reason,
@@ -170,19 +176,12 @@ export function buildTargetedBatchRowDoc({
       draftRow?.masterVisibility ||
       draftRow?.master?.visibility,
   );
-  const wardNumbers = safeArray(
-    draftRow?.wardNumbers || salesSource?.wardNumbers,
-  )
-    .map((value) =>
-      typeof value === "number" ? value : normalizeText(value),
-    )
-    .filter((value) => value !== "");
   const sourceLine = Number(
     draftRow?.sourceRow || draftRow?.sourceLine || salesSource?.sourceRow || 0,
   );
 
   return {
-    schemaVersion: "0.1.0",
+    schemaVersion: "0.2.0",
     id,
     tbId: payload.tbId,
     rowNo,
@@ -201,6 +200,9 @@ export function buildTargetedBatchRowDoc({
     scope: {
       lmPcode: payload.scope.lmPcode,
       lmName: payload.scope.lmName,
+      wardPcode: payload.scope.wardPcode,
+      wardNumber: payload.scope.wardNumber,
+      wardName: payload.scope.wardName,
     },
     decision: {
       status: "ACCEPT",
@@ -247,12 +249,15 @@ export function buildTargetedBatchRowDoc({
       ),
       sgCode: getFirstText(salesSource?.sgCode),
       wardNumberLabel: getFirstText(
-        draftRow?.wardNumberLabel,
-        salesSource?.wardNumberLabel,
-        wardNumbers.join(", "),
+        payload.scope.wardName,
+        payload.scope.wardNumber
+          ? `Ward ${payload.scope.wardNumber}`
+          : "",
         "NAv",
       ),
-      wardNumbers,
+      wardNumbers: payload.scope.wardNumber
+        ? [payload.scope.wardNumber]
+        : [],
     },
     selection: {
       actionReason: payload.selection.reason,

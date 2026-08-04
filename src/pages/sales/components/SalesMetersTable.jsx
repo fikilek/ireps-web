@@ -52,7 +52,8 @@ const DEFAULT_COLUMN_VISIBILITY = {
   riskScore: false,
   addressLine1: true,
   town: true,
-  standNumber: false,
+  sgCode: true,
+  erfNo: true,
   totalSalesC: false,
   latest12MonthsSalesC: true,
   sales2024C: false,
@@ -69,7 +70,8 @@ const COLUMN_OPTIONS = [
   { key: "riskScore", label: "Risk Score" },
   { key: "addressLine1", label: "Address" },
   { key: "town", label: "Town" },
-  { key: "standNumber", label: "SG Code" },
+  { key: "sgCode", label: "SG Code" },
+  { key: "erfNo", label: "Erf No" },
   { key: "totalSalesC", label: "Total Sales" },
   { key: "latest12MonthsSalesC", label: "Latest 12 Months" },
   { key: "sales2024C", label: "Total Sales 2024" },
@@ -88,7 +90,8 @@ const STICKY_COLUMN_WIDTHS = {
   riskScore: 110,
   addressLine1: 260,
   town: 135,
-  standNumber: 230,
+  sgCode: 230,
+  erfNo: 110,
   totalSalesC: 145,
   latest12MonthsSalesC: 165,
   sales2024C: 150,
@@ -106,7 +109,8 @@ const EMPTY_FILTERS = {
   riskScore: "",
   addressLine1: "",
   town: "ALL",
-  standNumber: "",
+  sgCode: "",
+  erfNo: "",
   salesRanges: {},
 };
 
@@ -407,7 +411,8 @@ function getSortValue(row, sortKey) {
   if (sortKey === "riskTier") return row?.riskTier || "";
   if (sortKey === "addressLine1") return row?.addressLine1 || "";
   if (sortKey === "town") return row?.town || "";
-  if (sortKey === "standNumber") return row?.standNumber || "";
+  if (sortKey === "sgCode") return row?.sgCode || "";
+  if (sortKey === "erfNo") return row?.erfNo || "";
 
   return row?.meterNo || "";
 }
@@ -613,7 +618,8 @@ export default function SalesMetersTable({
         matchesRiskScore &&
         includesText(row?.addressLine1, filters.addressLine1) &&
         (filters.town === "ALL" || row?.town === filters.town) &&
-        includesText(row?.standNumber, filters.standNumber) &&
+        includesText(row?.sgCode, filters.sgCode) &&
+        includesText(row?.erfNo, filters.erfNo) &&
         matchesSalesRangeFilter(
           row?.totalSalesC,
           filters.salesRanges?.totalSalesC,
@@ -668,7 +674,8 @@ export default function SalesMetersTable({
     Boolean(String(filters.riskScore || "").trim()) ||
     Boolean(String(filters.addressLine1 || "").trim()) ||
     filters.town !== "ALL" ||
-    Boolean(String(filters.standNumber || "").trim()) ||
+    Boolean(String(filters.sgCode || "").trim()) ||
+    Boolean(String(filters.erfNo || "").trim()) ||
     Object.values(filters.salesRanges || {}).some((filter) =>
       isSalesRangeFilterActive(filter),
     );
@@ -884,8 +891,8 @@ export default function SalesMetersTable({
         addressLine1:
           columnKey === "addressLine1" ? "" : current.addressLine1,
         town: columnKey === "town" ? "ALL" : current.town,
-        standNumber:
-          columnKey === "standNumber" ? "" : current.standNumber,
+        sgCode: columnKey === "sgCode" ? "" : current.sgCode,
+        erfNo: columnKey === "erfNo" ? "" : current.erfNo,
         salesRanges: nextSalesRanges,
       };
     });
@@ -1252,18 +1259,34 @@ export default function SalesMetersTable({
                 </th>
               ) : null}
 
-              {columnVisibility.standNumber ? (
-                <th style={{ ...styles.headerCell, ...getStickyStyle("standNumber", stickyLayout, true) }}>
+              {columnVisibility.sgCode ? (
+                <th style={{ ...styles.headerCell, ...getStickyStyle("sgCode", stickyLayout, true) }}>
                   <SortButton
                     label="SG Code"
-                    sortKey="standNumber"
+                    sortKey="sgCode"
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
                   <FilterInput
-                    value={filters.standNumber}
-                    onChange={(value) => updateFilter("standNumber", value)}
+                    value={filters.sgCode}
+                    onChange={(value) => updateFilter("sgCode", value)}
                     placeholder="SG code"
+                  />
+                </th>
+              ) : null}
+
+              {columnVisibility.erfNo ? (
+                <th style={{ ...styles.headerCell, ...getStickyStyle("erfNo", stickyLayout, true) }}>
+                  <SortButton
+                    label="Erf No"
+                    sortKey="erfNo"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    value={filters.erfNo}
+                    onChange={(value) => updateFilter("erfNo", value)}
+                    placeholder="Erf no"
                   />
                 </th>
               ) : null}
@@ -1545,9 +1568,15 @@ export default function SalesMetersTable({
                     </td>
                   ) : null}
 
-                  {columnVisibility.standNumber ? (
-                    <td style={{ ...styles.bodyCell, ...styles.sgCodeCell, ...getStickyStyle("standNumber", stickyLayout) }} title={row.standNumber || "NAv"}>
-                      {row.standNumber || "NAv"}
+                  {columnVisibility.sgCode ? (
+                    <td style={{ ...styles.bodyCell, ...styles.sgCodeCell, ...getStickyStyle("sgCode", stickyLayout) }} title={row.sgCode || "NAv"}>
+                      {row.sgCode || "NAv"}
+                    </td>
+                  ) : null}
+
+                  {columnVisibility.erfNo ? (
+                    <td style={{ ...styles.bodyCell, ...getStickyStyle("erfNo", stickyLayout) }} title={row.erfNo || "NAv"}>
+                      {row.erfNo || "NAv"}
                     </td>
                   ) : null}
 

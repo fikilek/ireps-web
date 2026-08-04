@@ -21,6 +21,9 @@ export default function TargetedBatchDraftSummary({
   integrity,
 }) {
   const salesSource = draft?.source?.type === "PREPAID_SALES";
+  const proposedBatches = Array.isArray(draft?.proposedBatches)
+    ? draft.proposedBatches
+    : [];
 
   return (
     <>
@@ -29,6 +32,20 @@ export default function TargetedBatchDraftSummary({
 
         {salesSource ? (
           <>
+            <SummaryCard
+              label="Proposed Batches"
+              value={formatNumber(proposedBatches.length)}
+            />
+            <SummaryCard
+              label="Ward Groups"
+              value={formatNumber(
+                new Set(
+                  proposedBatches
+                    .map((batch) => batch?.scope?.wardPcode)
+                    .filter(Boolean),
+                ).size,
+              )}
+            />
             <SummaryCard
               label="Sales All Meter IDs"
               value={formatNumber(
@@ -62,7 +79,7 @@ export default function TargetedBatchDraftSummary({
           value={formatNumber(summary.astNotMatched)}
         />
         <SummaryCard
-          label={salesSource ? "Validation" : "File Decision"}
+          label={salesSource ? "Rule Status" : "File Decision"}
           value={
             salesSource
               ? draft?.validation?.status || "DRAFT"
@@ -80,18 +97,68 @@ export default function TargetedBatchDraftSummary({
       </div>
 
       {salesSource ? (
-        <div style={styles.sourceNotice}>
-          <strong>Sales-originated Targeted Batch</strong>
-          <p style={styles.sourceNoticeParagraph}>
-            The selected meters came directly from Prepaid Sales. The handoff
-            preserves one authoritative Sales All Meters identity per draft row.
-          </p>
-          <p style={styles.sourceNoticeParagraph}>
-            Sales period: {draft?.selection?.salesPeriodFrom || "NAv"} to{" "}
-            {draft?.selection?.salesPeriodTo || "NAv"}. Local Municipality:{" "}
-            {draft?.scope?.lmPcode || "NAv"} · {draft?.scope?.lmName || "NAv"}.
-          </p>
-        </div>
+        <>
+          <div style={styles.sourceNotice}>
+            <strong>Ward-compliant Sales draft</strong>
+            <p style={styles.sourceNoticeParagraph}>
+              The frontend has already applied the Targeted Batch rule: every
+              proposed batch belongs to exactly one ward. The backend will
+              independently confirm and enforce the same grouping before any
+              permanent documents are written.
+            </p>
+            <p style={styles.sourceNoticeParagraph}>
+              Creation group: {draft?.creationGroup?.id || "NAv"}. Sales period:{" "}
+              {draft?.selection?.salesPeriodFrom || "NAv"} to{" "}
+              {draft?.selection?.salesPeriodTo || "NAv"}. Local Municipality:{" "}
+              {draft?.scope?.lmPcode || "NAv"} · {draft?.scope?.lmName || "NAv"}.
+            </p>
+          </div>
+
+          <div style={styles.batchPlanSection}>
+            <div style={styles.batchPlanHeadingRow}>
+              <div>
+                <strong>Proposed Targeted Batches</strong>
+                <p style={styles.batchPlanHelpText}>
+                  These are the ward groups that will be submitted for backend
+                  confirmation and permanent creation.
+                </p>
+              </div>
+              <span style={styles.rulePassedBadge}>Ward rule passed</span>
+            </div>
+
+            <div style={styles.batchPlanGrid}>
+              {proposedBatches.map((batch, index) => (
+                <div
+                  key={batch?.draftBatchKey || batch?.tbId || index}
+                  style={styles.batchPlanCard}
+                >
+                  <div style={styles.batchPlanCardHeader}>
+                    <span style={styles.batchSequenceBadge}>
+                      Batch {index + 1}
+                    </span>
+                    <span style={styles.rulePassedBadge}>PASSED</span>
+                  </div>
+                  <strong style={styles.batchPlanWard}>
+                    {batch?.scope?.wardName ||
+                      (batch?.scope?.wardNumber
+                        ? `Ward ${batch.scope.wardNumber}`
+                        : "Ward NAv")}
+                  </strong>
+                  <span style={styles.batchPlanMeta}>
+                    {batch?.scope?.wardPcode || "NAv"}
+                  </span>
+                  <span style={styles.batchPlanMeta}>
+                    {formatNumber(batch?.rowCount)} meter
+                    {Number(batch?.rowCount) === 1 ? "" : "s"}
+                  </span>
+                  <code style={styles.batchPlanId}>
+                    {batch?.tbId || "NAv"}
+                  </code>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       ) : (
         <div style={styles.sourceNotice}>
           <strong>CSV-originated Targeted Batch</strong>

@@ -21,6 +21,7 @@ import {
   resolveTargetedBatchCreateAuthority,
   timestampToIso,
   timestampsEqual,
+  validateAuthoritativeErfDocument,
   validateAuthoritativeSalesDocument,
   validateCreateTargetedBatchPayload,
   validateExistingTbRow,
@@ -90,6 +91,20 @@ function validateExistingParent({ parentData, payload, fingerprint }) {
     throw controlledError(
       "TARGETED_BATCH_LM_SCOPE_CONFLICT",
       "The existing Targeted Batch belongs to a different Local Municipality.",
+    );
+  }
+
+  if (parentData?.scope?.wardPcode !== payload.scope.wardPcode) {
+    throw controlledError(
+      "TARGETED_BATCH_WARD_SCOPE_CONFLICT",
+      "The existing Targeted Batch belongs to a different ward.",
+    );
+  }
+
+  if (parentData?.creationGroup?.id !== payload.creationGroupId) {
+    throw controlledError(
+      "TARGETED_BATCH_CREATION_GROUP_CONFLICT",
+      "The existing Targeted Batch belongs to a different creation group.",
     );
   }
 
@@ -323,7 +338,9 @@ async function verifyPermanentCreation({
     db,
     refs: salesRecords.map((record) => record.salesRef),
   });
-  const rowById = new Map(rowSnapshots.map((snapshot) => [snapshot.id, snapshot]));
+  const rowById = new Map(
+    rowSnapshots.map((snapshot) => [snapshot.id, snapshot]),
+  );
   const salesById = new Map(
     salesSnapshots.map((snapshot) => [snapshot.id, snapshot]),
   );
@@ -388,143 +405,193 @@ async function verifyPermanentCreation({
   };
 }
 
-export const onCreateTargetedBatchCallable = onCall(async (request) => {
-  const startedAtMs = Date.now();
-  const db = getFirestore();
-  let parentRef = null;
-  let fingerprint = null;
-  let actorUid = request?.auth?.uid || null;
-  let actorName = actorUid || "SYSTEM";
+function buildBatchFingerprint(payload) {
+  return buildCreationFingerprint({
+    tbId: payload.tbId,
+    lmPcode: payload.scope.lmPcode,
+    wardPcode: payload.scope.wardPcode,
+    creationGroupId: payload.creationGroupId,
+    salesAllMeterIds: payload.salesAllMeterIds,
+  });
+}
+
+async function preflightPermanentBatch({ db, payload }) {
+  const fingerprint = buildBatchFingerprint(payload);
+  const parentRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.uploads)
+    .doc(payload.tbId);
+  const salesRefs = payload.salesAllMeterIds.map((salesAllMeterId) =>
+    db.collection(TARGETED_BATCH_COLLECTIONS.sales).doc(salesAllMeterId),
+  );
+  const expectedRowIds = payload.rows.map((row, index) =>
+    buildTbRowId(payload.tbId, index + 1),
+  );
+  const rowRefs = expectedRowIds.map((rowId) =>
+    db.collection(TARGETED_BATCH_COLLECTIONS.rows).doc(rowId),
+  );
+
+  const [parentSnapshot, salesSnapshots, existingRowSnapshots] =
+    await Promise.all([
+      parentRef.get(),
+      getSnapshotsInChunks({ db, refs: salesRefs }),
+      getSnapshotsInChunks({ db, refs: rowRefs }),
+    ]);
+
+  const parentPreflight = validateExistingParent({
+    parentData: parentSnapshot.exists ? parentSnapshot.data() || {} : null,
+    payload,
+    fingerprint,
+  });
+
+  const salesRecords = payload.salesAllMeterIds.map(
+    (salesAllMeterId, index) => {
+      const salesSnapshot = salesSnapshots[index];
+      const validation = validateAuthoritativeSalesDocument({
+        snapshot: salesSnapshot,
+        expectedSalesId: salesAllMeterId,
+        expectedLmPcode: payload.scope.lmPcode,
+        draftRow: payload.rows[index],
+      });
+
+      if (!validation.ok) {
+        throw controlledError(validation.code, validation.message, {
+          tbId: payload.tbId,
+          salesAllMeterId,
+        });
+      }
+
+      return {
+        salesAllMeterId,
+        salesRef: salesSnapshot.ref,
+        salesSource: validation.source,
+        erfReference: validation.erfReference,
+        draftRow: payload.rows[index],
+      };
+    },
+  );
+
+  const uniqueErfIds = [
+    ...new Set(salesRecords.map((record) => record.erfReference.erfId)),
+  ];
+  const erfRefs = uniqueErfIds.map((erfId) =>
+    db.collection(TARGETED_BATCH_COLLECTIONS.erfs).doc(erfId),
+  );
+  const erfSnapshots = await getSnapshotsInChunks({ db, refs: erfRefs });
+  const erfSnapshotsById = new Map(
+    erfSnapshots.map((snapshot) => [snapshot.id, snapshot]),
+  );
+
+  const authoritativeScopes = salesRecords.map((record) => {
+    const erfId = record.erfReference.erfId;
+    const validation = validateAuthoritativeErfDocument({
+      snapshot: erfSnapshotsById.get(erfId),
+      expectedErfId: erfId,
+      expectedErfNo: record.erfReference.erfNo,
+      expectedLmPcode: payload.scope.lmPcode,
+      expectedWardPcode: payload.scope.wardPcode,
+      expectedWardNumber: payload.scope.wardNumber,
+    });
+
+    if (!validation.ok) {
+      throw controlledError(validation.code, validation.message, {
+        tbId: payload.tbId,
+        salesAllMeterId: record.salesAllMeterId,
+        erfId,
+      });
+    }
+
+    record.erfReference = {
+      ...record.erfReference,
+      erfNo: validation.erfNo,
+    };
+    record.erfScope = validation.scope;
+    record.erfSource = validation.source;
+    return validation.scope;
+  });
+
+  const authoritativeScope = authoritativeScopes[0];
+
+  if (!authoritativeScope) {
+    throw controlledError(
+      "TARGETED_BATCH_AUTHORITATIVE_SCOPE_MISSING",
+      `Targeted Batch ${payload.tbId} has no authoritative ward scope.`,
+    );
+  }
+
+  const scopeConflict = authoritativeScopes.some(
+    (scope) =>
+      scope.lmPcode !== authoritativeScope.lmPcode ||
+      scope.wardPcode !== authoritativeScope.wardPcode ||
+      scope.wardNumber !== authoritativeScope.wardNumber,
+  );
+
+  if (scopeConflict) {
+    throw controlledError(
+      "TARGETED_BATCH_AUTHORITATIVE_WARD_CONFLICT",
+      `Targeted Batch ${payload.tbId} resolves to more than one authoritative ward.`,
+    );
+  }
+
+  const confirmedPayload = {
+    ...payload,
+    scope: {
+      ...payload.scope,
+      ...authoritativeScope,
+    },
+  };
+
+  assertExistingSalesReferencesCompatible({
+    salesRecords,
+    tbId: confirmedPayload.tbId,
+    parentExists: parentPreflight.exists,
+    creationDate: parentPreflight.creationDate,
+  });
+
+  const provisionalRows = confirmedPayload.rows.map((draftRow, index) => ({
+    id: expectedRowIds[index],
+    tbId: confirmedPayload.tbId,
+    rowNo: index + 1,
+    salesAllMeterId: confirmedPayload.salesAllMeterIds[index],
+    source: {
+      recordId: confirmedPayload.salesAllMeterIds[index],
+    },
+    scope: confirmedPayload.scope,
+  }));
+
+  assertExistingRowsCompatible({
+    existingRowSnapshots,
+    expectedRows: provisionalRows,
+    salesAllMeterIds: confirmedPayload.salesAllMeterIds,
+    creationDate: parentPreflight.creationDate,
+    parentExists: parentPreflight.exists,
+  });
+
+  return {
+    payload: confirmedPayload,
+    fingerprint,
+    parentRef,
+    parentPreflight,
+    salesRecords,
+    existingRowSnapshots,
+  };
+}
+
+async function createPreflightedBatch({
+  db,
+  context,
+  actorUid,
+  actorName,
+}) {
+  const {
+    payload,
+    fingerprint,
+    parentRef,
+    salesRecords,
+    existingRowSnapshots,
+  } = context;
   let parentInitialized = false;
 
   try {
-    if (!actorUid) {
-      return buildFailureResult(
-        "UNAUTHENTICATED",
-        "Authentication is required to create a Targeted Batch.",
-      );
-    }
-
-    const authority = await resolveTargetedBatchCreateAuthority({ db, request });
-    actorName = getActorNameFromRequest(request, authority.profile);
-
-    if (!authority.ok) {
-      return buildFailureResult(
-        "UNAUTHORIZED_TARGETED_BATCH_ORIGINATOR",
-        "Only MNG and SPV(MNC) users may create Targeted Batches.",
-        {
-          actorRole: authority.role,
-          actorRelationshipType: authority.relationshipType,
-          actorClientType: authority.clientType,
-        },
-      );
-    }
-
-    const payloadCheck = validateCreateTargetedBatchPayload(request?.data || {});
-
-    if (!payloadCheck.ok) {
-      return buildFailureResult(
-        payloadCheck.code,
-        payloadCheck.message,
-        { errors: payloadCheck.errors || [] },
-      );
-    }
-
-    const payload = payloadCheck;
-    fingerprint = buildCreationFingerprint({
-      tbId: payload.tbId,
-      lmPcode: payload.scope.lmPcode,
-      salesAllMeterIds: payload.salesAllMeterIds,
-    });
-    parentRef = db.collection(TARGETED_BATCH_COLLECTIONS.uploads).doc(payload.tbId);
-
-    logger.info("onCreateTargetedBatchCallable -- START", {
-      tbId: payload.tbId,
-      expectedRows: payload.expectedRows,
-      lmPcode: payload.scope.lmPcode,
-      salesCollection: TARGETED_BATCH_COLLECTIONS.sales,
-      actorUid,
-    });
-
-    const salesRefs = payload.salesAllMeterIds.map((salesAllMeterId) =>
-      db.collection(TARGETED_BATCH_COLLECTIONS.sales).doc(salesAllMeterId),
-    );
-    const expectedRowIds = payload.rows.map((row, index) =>
-      buildTbRowId(payload.tbId, index + 1),
-    );
-    const rowRefs = expectedRowIds.map((rowId) =>
-      db.collection(TARGETED_BATCH_COLLECTIONS.rows).doc(rowId),
-    );
-
-    const [parentSnapshot, salesSnapshots, existingRowSnapshots] =
-      await Promise.all([
-        parentRef.get(),
-        getSnapshotsInChunks({ db, refs: salesRefs }),
-        getSnapshotsInChunks({ db, refs: rowRefs }),
-      ]);
-
-    const parentPreflight = validateExistingParent({
-      parentData: parentSnapshot.exists ? parentSnapshot.data() || {} : null,
-      payload,
-      fingerprint,
-    });
-
-    const salesRecords = payload.salesAllMeterIds.map(
-      (salesAllMeterId, index) => {
-        const salesSnapshot = salesSnapshots[index];
-        const validation = validateAuthoritativeSalesDocument({
-          snapshot: salesSnapshot,
-          expectedSalesId: salesAllMeterId,
-          expectedLmPcode: payload.scope.lmPcode,
-          draftRow: payload.rows[index],
-        });
-
-        if (!validation.ok) {
-          throw controlledError(validation.code, validation.message);
-        }
-
-        return {
-          salesAllMeterId,
-          salesRef: salesSnapshot.ref,
-          salesSource: validation.source,
-        };
-      },
-    );
-
-    assertExistingSalesReferencesCompatible({
-      salesRecords,
-      tbId: payload.tbId,
-      parentExists: parentPreflight.exists,
-      creationDate: parentPreflight.creationDate,
-    });
-
-    const provisionalRows = payload.rows.map((draftRow, index) => ({
-      id: expectedRowIds[index],
-      tbId: payload.tbId,
-      rowNo: index + 1,
-      salesAllMeterId: payload.salesAllMeterIds[index],
-      source: {
-        recordId: payload.salesAllMeterIds[index],
-      },
-    }));
-
-    assertExistingRowsCompatible({
-      existingRowSnapshots,
-      expectedRows: provisionalRows,
-      salesAllMeterIds: payload.salesAllMeterIds,
-      creationDate: parentPreflight.creationDate,
-      parentExists: parentPreflight.exists,
-    });
-
-    logger.info("onCreateTargetedBatchCallable -- PREFLIGHT PASSED", {
-      tbId: payload.tbId,
-      validatedSalesRecords: salesRecords.length,
-      existingRows: existingRowSnapshots.filter((snapshot) => snapshot.exists)
-        .length,
-      parentExists: parentPreflight.exists,
-      parentState: parentPreflight.state,
-    });
-
     const parentState = await ensureParentCreationState({
       db,
       parentRef,
@@ -543,6 +610,7 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
         payload,
         draftRow,
         salesSource: salesRecord.salesSource,
+        erfReference: salesRecord.erfReference,
         salesAllMeterId: salesRecord.salesAllMeterId,
         rowNo: index + 1,
         creationDate,
@@ -574,24 +642,18 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
         creationDate,
       });
 
-      logger.info("onCreateTargetedBatchCallable -- IDEMPOTENT SUCCESS", {
+      return {
         tbId: payload.tbId,
+        wardPcode: payload.scope.wardPcode,
+        wardNumber: payload.scope.wardNumber,
+        wardName: payload.scope.wardName,
+        rowCount: payload.expectedRows,
+        expectedRows: payload.expectedRows,
+        creationState: TARGETED_BATCH_CREATION_STATES.ready,
+        code: "TARGETED_BATCH_ALREADY_READY",
+        creationDate: timestampToIso(creationDate),
         ...verification,
-        elapsedMs: Date.now() - startedAtMs,
-      });
-
-      return buildSuccessResult(
-        "Targeted Batch already exists and is verified as ready",
-        {
-          code: "TARGETED_BATCH_ALREADY_READY",
-          tbId: payload.tbId,
-          creationState: TARGETED_BATCH_CREATION_STATES.ready,
-          expectedRows: payload.expectedRows,
-          ...verification,
-          creationDate: timestampToIso(creationDate),
-          elapsedMs: Date.now() - startedAtMs,
-        },
-      );
+      };
     }
 
     const salesTbRef = buildSalesTbRef({
@@ -645,7 +707,9 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       processedRows += chunk.length;
 
       logger.info("onCreateTargetedBatchCallable -- WRITE PROGRESS", {
+        creationGroupId: payload.creationGroupId,
         tbId: payload.tbId,
+        wardPcode: payload.scope.wardPcode,
         chunk: chunkIndex + 1,
         chunks: writeChunks.length,
         processedRows,
@@ -691,37 +755,20 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       }
     });
 
-    const elapsedMs = Date.now() - startedAtMs;
-
-    logger.info("onCreateTargetedBatchCallable -- SUCCESS", {
+    return {
       tbId: payload.tbId,
+      wardPcode: payload.scope.wardPcode,
+      wardNumber: payload.scope.wardNumber,
+      wardName: payload.scope.wardName,
+      rowCount: payload.expectedRows,
       expectedRows: payload.expectedRows,
-      ...verification,
-      elapsedMs,
-    });
-
-    return buildSuccessResult("Targeted Batch created successfully", {
-      code: "TARGETED_BATCH_CREATED",
-      tbId: payload.tbId,
       creationState: TARGETED_BATCH_CREATION_STATES.ready,
-      expectedRows: payload.expectedRows,
-      ...verification,
+      code: "TARGETED_BATCH_CREATED",
       creationDate: timestampToIso(creationDate),
-      elapsedMs,
-    });
+      ...verification,
+    };
   } catch (error) {
-    const code = getErrorCode(error);
-    const message = getErrorMessage(error);
-
-    logger.error("onCreateTargetedBatchCallable -- FAILED", {
-      tbId: parentRef?.id || null,
-      code,
-      message,
-      details: error?.details || null,
-      elapsedMs: Date.now() - startedAtMs,
-    });
-
-    if (parentInitialized && parentRef && fingerprint) {
+    if (parentInitialized) {
       await markCreationFailed({
         db,
         parentRef,
@@ -732,13 +779,153 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       });
     }
 
-    return buildFailureResult(code, message, {
-      tbId: parentRef?.id || null,
-      creationState: parentInitialized
-        ? TARGETED_BATCH_CREATION_STATES.failed
-        : null,
+    throw error;
+  }
+}
+
+export const onCreateTargetedBatchCallable = onCall(async (request) => {
+  const startedAtMs = Date.now();
+  const db = getFirestore();
+  const actorUid = request?.auth?.uid || null;
+  let actorName = actorUid || "SYSTEM";
+  let creationGroupId = null;
+  const completedBatches = [];
+
+  try {
+    if (!actorUid) {
+      return buildFailureResult(
+        "UNAUTHENTICATED",
+        "Authentication is required to create a Targeted Batch.",
+      );
+    }
+
+    const authority = await resolveTargetedBatchCreateAuthority({ db, request });
+    actorName = getActorNameFromRequest(request, authority.profile);
+
+    if (!authority.ok) {
+      return buildFailureResult(
+        "UNAUTHORIZED_TARGETED_BATCH_ORIGINATOR",
+        "Only MNG and SPV(MNC) users may create Targeted Batches.",
+        {
+          actorRole: authority.role,
+          actorRelationshipType: authority.relationshipType,
+          actorClientType: authority.clientType,
+        },
+      );
+    }
+
+    const payloadCheck = validateCreateTargetedBatchPayload(request?.data || {});
+
+    if (!payloadCheck.ok) {
+      return buildFailureResult(payloadCheck.code, payloadCheck.message, {
+        errors: payloadCheck.errors || [],
+      });
+    }
+
+    creationGroupId = payloadCheck.creationGroupId;
+
+    logger.info("onCreateTargetedBatchCallable -- GROUP START", {
+      creationGroupId,
+      expectedBatches: payloadCheck.expectedBatches,
+      expectedRows: payloadCheck.expectedRows,
+      lmPcode: payloadCheck.scope.lmPcode,
+      actorUid,
+    });
+
+    const preflightContexts = [];
+
+    for (const batchPayload of payloadCheck.proposedBatches) {
+      const context = await preflightPermanentBatch({
+        db,
+        payload: batchPayload,
+      });
+      preflightContexts.push(context);
+
+      logger.info("onCreateTargetedBatchCallable -- BATCH PREFLIGHT PASSED", {
+        creationGroupId,
+        tbId: context.payload.tbId,
+        wardPcode: context.payload.scope.wardPcode,
+        expectedRows: context.payload.expectedRows,
+        parentExists: context.parentPreflight.exists,
+        parentState: context.parentPreflight.state,
+      });
+    }
+
+    logger.info("onCreateTargetedBatchCallable -- GROUP PREFLIGHT PASSED", {
+      creationGroupId,
+      validatedBatches: preflightContexts.length,
+      validatedRows: payloadCheck.expectedRows,
+    });
+
+    for (const context of preflightContexts) {
+      const batchResult = await createPreflightedBatch({
+        db,
+        context,
+        actorUid,
+        actorName,
+      });
+      completedBatches.push(batchResult);
+
+      logger.info("onCreateTargetedBatchCallable -- BATCH READY", {
+        creationGroupId,
+        ...batchResult,
+      });
+    }
+
+    const elapsedMs = Date.now() - startedAtMs;
+    const createdRowCount = completedBatches.reduce(
+      (sum, batch) => sum + Number(batch.rowCount || 0),
+      0,
+    );
+    const firstBatchId = completedBatches[0]?.tbId || null;
+
+    logger.info("onCreateTargetedBatchCallable -- GROUP SUCCESS", {
+      creationGroupId,
+      createdBatchCount: completedBatches.length,
+      createdRowCount,
+      elapsedMs,
+    });
+
+    return buildSuccessResult(
+      `${completedBatches.length} ward-scoped Targeted Batch${
+        completedBatches.length === 1 ? "" : "es"
+      } created successfully`,
+      {
+        code: "TARGETED_BATCH_GROUP_CREATED",
+        creationState: TARGETED_BATCH_CREATION_STATES.ready,
+        creationGroupId,
+        createdBatchCount: completedBatches.length,
+        createdRowCount,
+        batches: completedBatches,
+        tbId: completedBatches.length === 1 ? firstBatchId : null,
+        expectedRows: createdRowCount,
+        elapsedMs,
+      },
+    );
+  } catch (error) {
+    const code = getErrorCode(error);
+    const message = getErrorMessage(error);
+    const elapsedMs = Date.now() - startedAtMs;
+
+    logger.error("onCreateTargetedBatchCallable -- GROUP FAILED", {
+      creationGroupId,
+      code,
+      message,
       details: error?.details || null,
-      elapsedMs: Date.now() - startedAtMs,
+      completedBatchIds: completedBatches.map((batch) => batch.tbId),
+      elapsedMs,
+    });
+
+    return buildFailureResult(code, message, {
+      creationGroupId,
+      creationState:
+        completedBatches.length > 0
+          ? TARGETED_BATCH_CREATION_STATES.failed
+          : null,
+      completedBatchCount: completedBatches.length,
+      completedBatches,
+      details: error?.details || null,
+      elapsedMs,
     });
   }
 });

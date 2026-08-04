@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.1.0",
+  "status": "PASSED",
+  "runId": "TARGETED_BATCH_RESET_INVENTORY_20260803T012549Z",
+  "mode": "READ_ONLY_EXPORT",
+  "projectId": "ireps2",
+  "resetPolicy": {
+    "deleteCollections": [
+      "tb_rows",
+      "tb_uploads"
+    ],
+    "preserveCollectionDocuments": [
+      "demo_sales_meters"
+    ],
+    "demoSalesCleanOperation": "DELETE_FIELD_tbRefs_ONLY"
+  },
+  "collections": [
+    {
+      "collection": "tb_rows",
+      "documents": 293,
+      "pages": 1,
+      "pageSize": 500,
+      "exportFile": "C:\\dev\\ireps-web\\reports\\targeted-batch-reset\\TARGETED_BATCH_RESET_INVENTORY_20260803T012549Z\\before\\tb_rows.jsonl",
+      "sha256": "7e3c6fad1a0bb6b862fda96f0d14e405ec37e767e7ee1e301d860dc86da2fdff",
+      "docsWithTbRefsField": null,
+      "docsWithNonEmptyTbRefs": null
+    },
+    {
+      "collection": "tb_uploads",
+      "documents": 8,
+      "pages": 1,
+      "pageSize": 500,
+      "exportFile": "C:\\dev\\ireps-web\\reports\\targeted-batch-reset\\TARGETED_BATCH_RESET_INVENTORY_20260803T012549Z\\before\\tb_uploads.jsonl",
+      "sha256": "f952682580dfb3d130ad809a5ff4b89b81158daa3e5927db6e25b6eedde031f8",
+      "docsWithTbRefsField": null,
+      "docsWithNonEmptyTbRefs": null
+    },
+    {
+      "collection": "demo_sales_meters",
+      "documents": 10216,
+      "pages": 21,
+      "pageSize": 500,
+      "exportFile": "C:\\dev\\ireps-web\\reports\\targeted-batch-reset\\TARGETED_BATCH_RESET_INVENTORY_20260803T012549Z\\before\\demo_sales_meters.jsonl",
+      "sha256": "86fa94e9b658612b77377de1627ec57d7e5bbdb117c6831e7f9c3d723a50fa9f",
+      "docsWithTbRefsField": 293,
+      "docsWithNonEmptyTbRefs": 293
+    }
+  ],
+  "totalDocuments": 10517,
+  "firestoreWrites": 0,
+  "startedAt": "2026-08-03T01:25:49.840Z",
+  "finishedAt": "2026-08-03T01:26:53.261Z",
+  "reportDirectory": "C:\\dev\\ireps-web\\reports\\targeted-batch-reset\\TARGETED_BATCH_RESET_INVENTORY_20260803T012549Z"
+}

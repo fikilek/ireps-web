@@ -77,23 +77,56 @@ export default function TargetedBatchDraftPage() {
         throw error;
       }
 
-      const permanentTbId = String(result?.tbId || draft.id || "").trim();
+      const createdBatches = Array.isArray(result?.batches)
+        ? result.batches
+            .map((batch) => ({
+              tbId: String(batch?.tbId || "").trim(),
+              wardPcode: String(batch?.wardPcode || "").trim(),
+              wardNumber: String(batch?.wardNumber || "").trim(),
+              rowCount: Number(batch?.rowCount || batch?.expectedRows || 0),
+            }))
+            .filter((batch) => batch.tbId)
+        : [];
+      const fallbackTbId = String(result?.tbId || "").trim();
+      const permanentBatches =
+        createdBatches.length > 0
+          ? createdBatches
+          : fallbackTbId
+            ? [{ tbId: fallbackTbId, rowCount: Number(result?.expectedRows || 0) }]
+            : [];
 
-      if (!permanentTbId) {
+      if (permanentBatches.length === 0) {
         const error = new Error(
-          "The backend response did not include the permanent Targeted Batch ID.",
+          "The backend response did not include any permanent Targeted Batch IDs.",
         );
-        error.code = "TARGETED_BATCH_ID_MISSING";
+        error.code = "TARGETED_BATCH_IDS_MISSING";
         throw error;
       }
 
       dispatch(clearTargetedBatchDraft());
-      navigate(
-        `/operations/targeted-batches/${encodeURIComponent(
-          permanentTbId,
-        )}/allocation`,
-        { replace: true },
-      );
+
+      if (permanentBatches.length === 1) {
+        navigate(
+          `/operations/targeted-batches/${encodeURIComponent(
+            permanentBatches[0].tbId,
+          )}/allocation`,
+          { replace: true },
+        );
+        return;
+      }
+
+      navigate("/operations/targeted-batches", {
+        replace: true,
+        state: {
+          targetedBatchCreation: {
+            success: true,
+            creationGroupId: result?.creationGroupId || null,
+            createdBatchCount: permanentBatches.length,
+            createdRowCount: Number(result?.createdRowCount || 0),
+            batches: permanentBatches,
+          },
+        },
+      });
     } catch (error) {
       setCreationFeedback({
         type: "error",
@@ -127,8 +160,9 @@ export default function TargetedBatchDraftPage() {
           <h2 style={styles.title}>No TB Draft is available</h2>
           <p style={styles.description}>
             Start from Prepaid Sales by selecting meters and opening TB Draft.
-            A permanent Targeted Batch and its permanent TB Rows are created only
-            by the controlled backend confirmation step.
+            Ward-compliant proposed batches are prepared locally from the Sales
+            selection. Permanent Targeted Batches and TB Rows are created only by
+            the controlled backend confirmation step.
           </p>
           <div style={styles.actions}>
             <Link to="/operations/targeted-batches" style={styles.primaryLink}>

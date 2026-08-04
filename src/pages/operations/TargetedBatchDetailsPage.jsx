@@ -291,12 +291,6 @@ export default function TargetedBatchDetailsPage() {
           ← Back to TB Register
         </Link>
         <Link
-          to={`/operations/targeted-batches/${encodedId}/dashboard`}
-          style={styles.actionLink}
-        >
-          TB Dashboard
-        </Link>
-        <Link
           to={`/operations/targeted-batches/${encodedId}/final-report`}
           style={styles.actionLink}
         >

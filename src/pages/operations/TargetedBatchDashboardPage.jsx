@@ -1,111 +1,175 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo } from "react";
-import { useSelector } from "react-redux";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
-import { selectTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
+import { useAuth } from "../../auth/useAuth";
+import TargetedBatchDashboardCard from "./targeted-batches/dashboard/TargetedBatchDashboardCard";
+import useTargetedBatchDashboardData from "./targeted-batches/dashboard/useTargetedBatchDashboardData";
 import {
-  getTargetedBatchDraftView,
-  TARGETED_BATCH_COLLECTIONS,
-} from "../../redux/targetedBatchDraftModel";
-import TargetedBatchFoundationNotice from "./targeted-batches/TargetedBatchFoundationNotice";
+  getActiveLmName,
+  getActiveLmPcode,
+  getBatchAllocationStatus,
+  getBatchExecutionStatus,
+  groupRowsByTbId,
+  TB_DASHBOARD_FILTER_ALL,
+} from "./targeted-batches/dashboard/targetedBatchDashboardModel";
+import styles from "./targeted-batches/dashboard/targetedBatchDashboardStyles";
 
 export default function TargetedBatchDashboardPage() {
-  const draft = useSelector(selectTargetedBatchDraft);
-  const currentDraft = useMemo(
-    () => getTargetedBatchDraftView(draft),
-    [draft],
+  const { activeWorkbase } = useAuth();
+  const lmPcode = getActiveLmPcode(activeWorkbase);
+  const lmName = getActiveLmName(activeWorkbase);
+
+  const [allocationFilter, setAllocationFilter] = useState(
+    TB_DASHBOARD_FILTER_ALL,
+  );
+  const [executionFilter, setExecutionFilter] = useState(
+    TB_DASHBOARD_FILTER_ALL,
+  );
+
+  const {
+    batches,
+    rows,
+    isLoading,
+    loadError,
+  } = useTargetedBatchDashboardData({ lmPcode });
+
+  const rowsByTbId = useMemo(() => groupRowsByTbId(rows), [rows]);
+
+  const allocationOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(batches.map(getBatchAllocationStatus)),
+      ).sort(),
+    [batches],
+  );
+
+  const executionOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(batches.map(getBatchExecutionStatus)),
+      ).sort(),
+    [batches],
+  );
+
+  const visibleBatches = useMemo(
+    () =>
+      batches.filter((batch) => {
+        const allocationMatches =
+          allocationFilter === TB_DASHBOARD_FILTER_ALL ||
+          getBatchAllocationStatus(batch) === allocationFilter;
+        const executionMatches =
+          executionFilter === TB_DASHBOARD_FILTER_ALL ||
+          getBatchExecutionStatus(batch) === executionFilter;
+
+        return allocationMatches && executionMatches;
+      }),
+    [batches, allocationFilter, executionFilter],
   );
 
   return (
     <section style={styles.page}>
-      <TargetedBatchFoundationNotice
-        eyebrow="Operations / TB Dashboard"
-        title="Targeted Batch Dashboard"
-        description="Package 1 establishes the overall monitoring route and frontend shell. Live batch cards will be connected only after the tb_uploads parent summaries and tb_rows candidate truth are available from the backend."
-        primaryAction={{
-          label: "Open TB Register",
-          to: "/operations/targeted-batches",
-        }}
-        secondaryAction={
-          currentDraft
-            ? {
-                label: "Review Current Draft",
-                to: "/operations/targeted-batches/draft",
-              }
-            : null
-        }
-      >
-        <div style={styles.grid}>
-          <InfoCard
-            label="Parent collection"
-            value={TARGETED_BATCH_COLLECTIONS.uploads}
-          />
-          <InfoCard
-            label="Row truth collection"
-            value={TARGETED_BATCH_COLLECTIONS.rows}
-          />
-          <InfoCard
-            label="Frontend draft"
-            value={currentDraft ? currentDraft.status : "NONE"}
-          />
+      <div style={styles.hero}>
+        <div>
+          <p style={styles.eyebrow}>Operations / TB Dashboard</p>
+          <h2 style={styles.title}>Targeted Batch Dashboard</h2>
+          <p style={styles.description}>
+            Live permanent Targeted Batch cards for {lmName} ({lmPcode || "NAv"}).
+            Each card follows the MD BGO operational view and tracks original
+            meters, meters found, meter mismatches, premises in progress and
+            No Access.
+          </p>
         </div>
 
-        <div style={styles.notice}>
-          No Firestore query or write is introduced by this page. Validation,
-          allocation, acceptance, premise, meter-discovery and completion metrics
-          remain intentionally unpopulated until backend integration.
+        <div style={styles.heroActions}>
+          <span style={styles.heroBadge}>LIVE FIRESTORE</span>
+          <Link
+            to="/operations/targeted-batches"
+            style={styles.heroLink}
+          >
+            Open TB Register
+          </Link>
         </div>
-      </TargetedBatchFoundationNotice>
+      </div>
+
+      <div style={styles.filterPanel}>
+        <div>
+          <p style={styles.sectionMiniTitle}>Dashboard filters</p>
+          <p style={styles.mutedText}>
+            Filter the live cards by whole-batch allocation and execution state.
+          </p>
+        </div>
+
+        <div style={styles.filterControls}>
+          <select
+            value={allocationFilter}
+            onChange={(event) =>
+              setAllocationFilter(event.target.value)
+            }
+            style={styles.filterInput}
+          >
+            <option value={TB_DASHBOARD_FILTER_ALL}>
+              All Allocation States
+            </option>
+            {allocationOptions.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={executionFilter}
+            onChange={(event) =>
+              setExecutionFilter(event.target.value)
+            }
+            style={styles.filterInput}
+          >
+            <option value={TB_DASHBOARD_FILTER_ALL}>
+              All Execution States
+            </option>
+            {executionOptions.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {!lmPcode ? (
+        <div style={styles.errorNotice}>
+          Activate a Local Municipality workbase to load the TB Dashboard.
+        </div>
+      ) : null}
+
+      {loadError ? (
+        <div style={styles.errorNotice}>{loadError}</div>
+      ) : null}
+
+      <div style={styles.dashboardGrid}>
+        {isLoading ? (
+          <article style={styles.emptyCard}>
+            Connecting to permanent Targeted Batch dashboard streams...
+          </article>
+        ) : null}
+
+        {!isLoading && !loadError && visibleBatches.length === 0 ? (
+          <article style={styles.emptyCard}>
+            No permanent Targeted Batch cards match the current filters.
+          </article>
+        ) : null}
+
+        {!isLoading
+          ? visibleBatches.map((batch) => (
+              <TargetedBatchDashboardCard
+                key={batch.id}
+                batch={batch}
+                rows={rowsByTbId[batch.id] || []}
+              />
+            ))
+          : null}
+      </div>
     </section>
   );
 }
-
-function InfoCard({ label, value }) {
-  return (
-    <article style={styles.infoCard}>
-      <span style={styles.infoLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value}</strong>
-    </article>
-  );
-}
-
-const styles = {
-  page: {
-    padding: 24,
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-    gap: 12,
-  },
-  infoCard: {
-    display: "grid",
-    gap: 6,
-    padding: 14,
-    border: "1px solid #e2e8f0",
-    borderRadius: 16,
-    background: "#f8fafc",
-  },
-  infoLabel: {
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  infoValue: {
-    color: "#0f172a",
-    fontSize: 16,
-    overflowWrap: "anywhere",
-  },
-  notice: {
-    marginTop: 14,
-    padding: 14,
-    border: "1px solid #bfdbfe",
-    borderRadius: 16,
-    background: "#eff6ff",
-    color: "#1e3a8a",
-    lineHeight: 1.5,
-    fontSize: 13,
-    fontWeight: 750,
-  },
-};

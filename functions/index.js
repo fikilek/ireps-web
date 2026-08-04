@@ -87,9 +87,10 @@ import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
+import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatchRowsCallable.js";
 import {
+  classifyTargetedBatchPremiseRoute,
   createOrLinkTargetedBatchPremise,
-  isSalesTargetedBatchContext,
 } from "./targetedBatches/premiseLink.js";
 
 import {
@@ -174,6 +175,7 @@ export {
   onDeleteTargetedBatchCallable,
   onAllocateTargetedBatchCallable,
   onAcceptRejectTargetedBatchCallable,
+  getTargetedBatchRowsCallable,
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,
@@ -4496,9 +4498,16 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     const data = request?.data || {};
 
     const premiseId = data?.id || "NAv";
-    const isTargetedBatchPremise = isSalesTargetedBatchContext(
-      data?.targetedBatchContext,
+    const hasTargetedBatchContext = Object.prototype.hasOwnProperty.call(
+      data,
+      "targetedBatchContext",
     );
+    const targetedBatchRoute = classifyTargetedBatchPremiseRoute({
+      hasTargetedBatchContext,
+      targetedBatchContext: data?.targetedBatchContext,
+    });
+    const isTargetedBatchPremise =
+      targetedBatchRoute.selectedBranch === "TARGETED_BATCH";
 
     logger.info("onPremiseCreateCallable --start", {
       premiseId,
@@ -4518,6 +4527,29 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     }
 
     logTime("auth guard passed", { premiseId, uid: caller.uid });
+
+    logger.info("onPremiseCreateCallable -- branch selected", {
+      hasTargetedBatchContext:
+        targetedBatchRoute.hasTargetedBatchContext,
+      sourceModule: targetedBatchRoute.sourceModule,
+      tbId: targetedBatchRoute.tbId,
+      rowId: targetedBatchRoute.rowId,
+      salesDocId: targetedBatchRoute.salesDocId,
+      erfId: targetedBatchRoute.erfId,
+      selectedBranch: targetedBatchRoute.selectedBranch,
+    });
+
+    if (targetedBatchRoute.selectedBranch === "REJECTED_CONTEXT") {
+      logTime("REJECTED targeted batch context", {
+        premiseId,
+        missing: targetedBatchRoute.missing,
+      });
+
+      return buildPremiseFailureResult(
+        targetedBatchRoute.code,
+        "Targeted Batch context is invalid or incomplete",
+      );
+    }
 
     /* ------------------------------------------------
        2. BASIC VALIDATION

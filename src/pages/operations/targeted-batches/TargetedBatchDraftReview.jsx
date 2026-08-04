@@ -51,7 +51,11 @@ function rowMatchesSearch(row, searchText) {
     row?.customerName,
     row?.addressLine1,
     row?.town,
-    row?.standNumber,
+    row?.sgCode,
+    row?.erfNo,
+    row?.wardPcode,
+    row?.wardNumber,
+    row?.proposedTbId,
     row?.actionReason,
     row?.rowDecision,
     row?.rowDecisionReason,
@@ -87,6 +91,11 @@ export default function TargetedBatchDraftReview({
   const rows = currentDraft?.displayRows || [];
   const csvSource =
     currentDraft?.source?.type === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD;
+  const salesSource =
+    currentDraft?.source?.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES;
+  const proposedBatchCount = Array.isArray(currentDraft?.proposedBatches)
+    ? currentDraft.proposedBatches.length
+    : 0;
   const integrity = useMemo(
     () => getTargetedBatchDraftIntegrity(currentDraft),
     [currentDraft],
@@ -194,7 +203,11 @@ export default function TargetedBatchDraftReview({
             <p style={styles.eyebrow}>TB Draft</p>
             <SourceBadge sourceType={currentDraft.source.type} />
           </div>
-          <h2 style={styles.title}>{currentDraft.id}</h2>
+          <h2 style={styles.title}>
+            {salesSource
+              ? currentDraft?.creationGroup?.id || currentDraft.id
+              : currentDraft.id}
+          </h2>
           <p style={styles.subtitle}>
             {currentDraft.scope.lmPcode || "NAv"} ·{" "}
             {currentDraft.scope.lmName || "NAv"} · Created{" "}
@@ -248,6 +261,7 @@ export default function TargetedBatchDraftReview({
         pageSize={pageSize}
         totalPages={totalPages}
         showRowDecision={csvSource}
+        showBatchGrouping={salesSource}
         onPageChange={changePage}
         onPageSizeChange={changePageSize}
       />
@@ -256,16 +270,18 @@ export default function TargetedBatchDraftReview({
         <div>
           <strong>
             {isCreating
-              ? "Creating and verifying the permanent Targeted Batch"
+              ? "Creating and verifying the permanent Targeted Batches"
               : integrity.canConfirm
-                ? "Review complete: the TB Draft is ready for permanent creation"
+                ? "Review complete: the ward-compliant TB Draft is ready for permanent creation"
                 : "Resolve the draft blockers before confirmation"}
           </strong>
           <p style={styles.confirmText}>
-            Confirmation creates one permanent tb_uploads parent, all corresponding
-            permanent tb_rows documents, and the matching Sales tbRefs entries.
-            The temporary TB Draft is cleared only after the backend verifies the
-            permanent Targeted Batch as READY.
+            {salesSource
+              ? `Confirmation submits ${proposedBatchCount} ward-compliant proposed batch${
+                  proposedBatchCount === 1 ? "" : "es"
+                }. The backend re-reads Sales and ERF data, confirms the exact ward grouping, and creates one permanent tb_uploads parent per ward with its corresponding tb_rows and Sales tbRefs.`
+              : "Confirmation creates the permanent Targeted Batch documents allowed by the accepted CSV workflow."}
+            {" "}The temporary TB Draft is cleared only after the backend verifies every created Targeted Batch as READY.
           </p>
 
           {creationFeedback?.type === "error" ? (
@@ -300,11 +316,17 @@ export default function TargetedBatchDraftReview({
           onClick={onConfirm}
           title={
             integrity.canConfirm
-              ? "Create and verify the permanent Targeted Batch"
+              ? `Create and verify ${proposedBatchCount || 1} permanent Targeted Batch${
+                  proposedBatchCount === 1 ? "" : "es"
+                }`
               : integrity.blockers.join(" ")
           }
         >
-          {isCreating ? "Creating Targeted Batch..." : "Confirm TB Draft"}
+          {isCreating
+            ? "Creating Targeted Batches..."
+            : salesSource && proposedBatchCount > 1
+              ? `Create ${proposedBatchCount} Targeted Batches`
+              : "Create Targeted Batch"}
         </button>
       </div>
     </section>

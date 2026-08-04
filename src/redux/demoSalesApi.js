@@ -293,6 +293,8 @@ function normalizeDemoSalesRow(id, data = {}) {
     standNumber: String(
       data.standNumber || data.StandNumber || erfNumbers[0] || "",
     ),
+    sgCode: String(data.sgCode || "").trim(),
+    erfNo: String(data.erfNo || "").trim(),
     accountNumber: String(data.accountNumber || data.AccountNumber || ""),
     customerName: String(customerName),
     lmPcode: String(data.lmPcode || ""),

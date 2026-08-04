@@ -1,0 +1,185 @@
+{
+  "documentsRead": 10216,
+  "fields": [
+    {
+      "field": "AccountNumber",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "AccountNumberNormalized",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "AddressLine1",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "AddressLine2",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Customer",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "ElmAccountMatched",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "ElmSourceRows",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "ErfCandidateCount",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "ErfCandidates",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "ErfNumbers",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "GpsMatchStatus",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "HasUsableGps",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "InstallationDate",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Leakage_Category",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "MeterNumber",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "MissingErfNumbers",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "PostalAddress1",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "PostalAddress2",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "PostalAddressTown",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "PreviousInstallationDate",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "PreviousMeterNumber",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Risk_Score",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Risk_Tier",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Sales",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "SourceEndRow",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "StandNumber",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Surname",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "TariffInstance",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Town",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "Units",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "geofenceRefs",
+      "documentsWithField": 1456,
+      "documentsMissingField": 8760
+    },
+    {
+      "field": "lmPcode",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "loadedAt",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "tbRefs",
+      "documentsWithField": 291,
+      "documentsMissingField": 9925
+    },
+    {
+      "field": "trnBatchIds",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    },
+    {
+      "field": "updatedAt",
+      "documentsWithField": 10216,
+      "documentsMissingField": 0
+    }
+  ]
+}

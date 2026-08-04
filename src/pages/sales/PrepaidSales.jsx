@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -10,7 +10,7 @@ import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import SalesMetersTable from "./components/SalesMetersTable";
 import SalesTrendChart from "./components/SalesTrendChart";
-import { normalizeSalesTargetRows } from "../operations/targeted-batches/targetedBatchUtils";
+import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
   SALES_TARGET_THRESHOLDS_C,
   TARGET_FILTERS,
@@ -23,6 +23,28 @@ import {
   getMonthLabel,
   getTargetFilterLabel,
 } from "./salesUtils";
+
+const GPS_FILTERS = {
+  ALL: "ALL",
+  WITH_GPS: "WITH_GPS",
+  WITHOUT_GPS: "WITHOUT_GPS",
+};
+
+function hasUsableSalesGps(row = {}) {
+  return row?.hasUsableGps === true;
+}
+
+function matchesGpsFilter(row, gpsFilter) {
+  if (gpsFilter === GPS_FILTERS.WITH_GPS) {
+    return hasUsableSalesGps(row);
+  }
+
+  if (gpsFilter === GPS_FILTERS.WITHOUT_GPS) {
+    return !hasUsableSalesGps(row);
+  }
+
+  return true;
+}
 
 function SalesLoadingState() {
   return (
@@ -128,14 +150,15 @@ function TargetBatchModal({
           ) : null}
 
           <p style={styles.modalText}>
-            The selected meters will be transferred to the dedicated Targeted
-            Batch page as one draft. The selection is preserved across all
-            filtered pagination pages.
+            iREPS will apply the Targeted Batch rules locally, resolve the ward
+            carried by each selected Sales row, and prepare one proposed batch
+            per ward. The selection is preserved across all filtered pages.
           </p>
 
           <p style={styles.modalText}>
-            On the Targeted Batch page, review the meter list and confirm the
-            draft before backend batch creation and TRN origination are added.
+            TB Draft opens only when every selected meter can be placed into a
+            ward-compliant proposed batch. The backend confirms and enforces the
+            same plan when permanent batches are created.
           </p>
         </div>
 
@@ -169,12 +192,26 @@ function TargetBatchModal({
 
 export default function PrepaidSales() {
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useDispatch();
   const { activeWorkbase, role } = useAuth();
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
 
+  const dashboardMapContext = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+
+    return {
+      tbId: String(params.get("tbId") || "").trim(),
+      openMap:
+        String(params.get("view") || "")
+          .trim()
+          .toLowerCase() === "map",
+    };
+  }, [location.search]);
+
   const [trendMode, setTrendMode] = useState("SALES");
+  const [gpsFilter, setGpsFilter] = useState(GPS_FILTERS.ALL);
   const [targetFilter, setTargetFilter] = useState(TARGET_FILTERS.ALL);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isTargetBatchModalOpen, setIsTargetBatchModalOpen] = useState(false);
@@ -189,6 +226,7 @@ export default function PrepaidSales() {
   } = useGetDemoSalesByLmPcodeQuery(activeLmPcode || skipToken);
 
   useEffect(() => {
+    setGpsFilter(GPS_FILTERS.ALL);
     setSelectedIds(new Set());
     setIsTargetBatchModalOpen(false);
     setTargetBatchScopeError("");
@@ -198,8 +236,31 @@ export default function PrepaidSales() {
   const latestMonthKey = monthKeys[0] || "2026-02";
   const earliestMonthKey = monthKeys[monthKeys.length - 1] || "2023-12";
 
-  const summary = useMemo(() => {
+  const gpsSummary = useMemo(() => {
     return salesRows.reduce(
+      (accumulator, row) => {
+        accumulator.totalMeters += 1;
+
+        if (hasUsableSalesGps(row)) accumulator.withGps += 1;
+        else accumulator.withoutGps += 1;
+
+        return accumulator;
+      },
+      {
+        totalMeters: 0,
+        withGps: 0,
+        withoutGps: 0,
+      },
+    );
+  }, [salesRows]);
+
+  const gpsFilteredRows = useMemo(
+    () => salesRows.filter((row) => matchesGpsFilter(row, gpsFilter)),
+    [gpsFilter, salesRows],
+  );
+
+  const summary = useMemo(() => {
+    return gpsFilteredRows.reduce(
       (accumulator, row) => {
         accumulator.totalMeters += 1;
         accumulator.totalSalesC += Number(row?.totalSalesC || 0);
@@ -227,19 +288,20 @@ export default function PrepaidSales() {
         neverVended: 0,
       },
     );
-  }, [salesRows]);
+  }, [gpsFilteredRows]);
 
   const selectedRows = useMemo(() => {
     if (selectedIds.size === 0) return [];
-    return salesRows.filter((row) => selectedIds.has(row.id));
-  }, [salesRows, selectedIds]);
+    return gpsFilteredRows.filter((row) => selectedIds.has(row.id));
+  }, [gpsFilteredRows, selectedIds]);
 
   const selectedDownloadColumns = useMemo(() => {
     return [
       { header: "Meter Number", value: (row) => row.meterNo || "NAv" },
       { header: "Address", value: (row) => row.addressLine1 || "NAv" },
       { header: "Town", value: (row) => row.town || "NAv" },
-      { header: "SG Code", value: (row) => row.standNumber || "NAv" },
+      { header: "SG Code", value: (row) => row.sgCode || "NAv" },
+      { header: "Erf No", value: (row) => row.erfNo || "NAv" },
       {
         header: "Total Sales (R)",
         value: (row) => Number(row.totalSalesC || 0) / 100,
@@ -250,6 +312,15 @@ export default function PrepaidSales() {
       })),
     ];
   }, [monthKeys]);
+
+  function setGpsStatusFilter(nextGpsFilter) {
+    if (nextGpsFilter === gpsFilter) return;
+
+    setGpsFilter(nextGpsFilter);
+    setSelectedIds(new Set());
+    setIsTargetBatchModalOpen(false);
+    setTargetBatchScopeError("");
+  }
 
   function setTarget(target) {
     setTargetFilter(target);
@@ -268,6 +339,21 @@ export default function PrepaidSales() {
     if (selectedRows.length === 0) {
       setTargetBatchScopeError(
         "Targeted Batch creation is blocked because no Sales meters are selected.",
+      );
+      return;
+    }
+
+    const selectedRowsWithoutGps = selectedRows.filter(
+      (row) => !hasUsableSalesGps(row),
+    );
+
+    if (selectedRowsWithoutGps.length > 0) {
+      setTargetBatchScopeError(
+        `Targeted Batch creation is blocked because ${formatNumber(
+          selectedRowsWithoutGps.length,
+        )} selected meter${
+          selectedRowsWithoutGps.length === 1 ? " does" : "s do"
+        } not have usable GPS coordinates. Select the WITH GPS card before preparing a batch.`,
       );
       return;
     }
@@ -293,16 +379,38 @@ export default function PrepaidSales() {
         ? "Selected from Prepaid Sales filters"
         : targetLabel;
 
-    const displayRows = normalizeSalesTargetRows(
-      selectedRows,
+    const draftPlan = buildSalesTargetedBatchDraftPlan({
+      rows: selectedRows,
       selectionReason,
-    );
-    const salesAllMeterIds = displayRows
-      .map((row) => row.salesAllMeterId)
-      .filter(Boolean);
+      lmPcode: activeLmPcode,
+      lmName: activeWorkbaseName,
+    });
+
+    if (!draftPlan.ok) {
+      const failureMessages = (draftPlan.failures || [])
+        .slice(0, 5)
+        .map((failure) => failure.message)
+        .join(" ");
+      const remainingFailures = Math.max(
+        0,
+        Number(draftPlan.failures?.length || 0) - 5,
+      );
+
+      setTargetBatchScopeError(
+        `${draftPlan.message} ${failureMessages}${
+          remainingFailures > 0
+            ? ` A further ${formatNumber(remainingFailures)} row(s) also failed.`
+            : ""
+        }`,
+      );
+      return;
+    }
 
     dispatch(
       prepareTargetedBatchDraft({
+        id: draftPlan.proposedBatches[0]?.tbId,
+        creationGroup: draftPlan.creationGroup,
+        proposedBatches: draftPlan.proposedBatches,
         source: {
           type: "PREPAID_SALES",
           label: "Prepaid Sales",
@@ -319,21 +427,15 @@ export default function PrepaidSales() {
           salesPeriodTo: latestMonthKey,
         },
         authoritativeIds: {
-          salesAllMeterIds,
+          salesAllMeterIds: draftPlan.salesAllMeterIds,
           uploadRowIds: [],
         },
-        displayRows,
+        displayRows: draftPlan.displayRows,
         validation: {
-          status: "PASSED",
-          passed: true,
-          totalRows: displayRows.length,
-          acceptedRows: displayRows.length,
-          rejectedRows: 0,
+          ...draftPlan.validation,
           duplicateRowNos: [],
           duplicateMeterNos: [],
           invalidRowDetails: [],
-          errors: [],
-          warnings: [],
         },
       }),
     );
@@ -425,8 +527,24 @@ export default function PrepaidSales() {
           <section style={styles.summaryGrid}>
             <SummaryCard
               label="Total Meters"
-              value={formatNumber(summary.totalMeters)}
-              subtitle="Loaded prepaid sales meters"
+              value={formatNumber(gpsSummary.totalMeters)}
+              subtitle="Show all sales meters"
+              active={gpsFilter === GPS_FILTERS.ALL}
+              onClick={() => setGpsStatusFilter(GPS_FILTERS.ALL)}
+            />
+            <SummaryCard
+              label="With GPS"
+              value={formatNumber(gpsSummary.withGps)}
+              subtitle="Click to filter"
+              active={gpsFilter === GPS_FILTERS.WITH_GPS}
+              onClick={() => setGpsStatusFilter(GPS_FILTERS.WITH_GPS)}
+            />
+            <SummaryCard
+              label="Without GPS"
+              value={formatNumber(gpsSummary.withoutGps)}
+              subtitle="Click to filter"
+              active={gpsFilter === GPS_FILTERS.WITHOUT_GPS}
+              onClick={() => setGpsStatusFilter(GPS_FILTERS.WITHOUT_GPS)}
             />
             <SummaryCard
               label="Total Sales"
@@ -478,7 +596,7 @@ export default function PrepaidSales() {
           </section>
 
           <SalesTrendChart
-            rows={salesRows}
+            rows={gpsFilteredRows}
             monthKeys={monthKeys}
             mode={trendMode}
             onModeChange={setTrendMode}
@@ -537,11 +655,13 @@ export default function PrepaidSales() {
           </section>
 
           <SalesMetersTable
-            rows={salesRows}
+            rows={gpsFilteredRows}
             monthKeys={monthKeys}
             targetFilter={targetFilter}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
+            initialTbId={dashboardMapContext.tbId}
+            initialShowGpsMap={dashboardMapContext.openMap}
           />
 
           {selectedRows.length > 0 ? (

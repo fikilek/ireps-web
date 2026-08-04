@@ -22,9 +22,14 @@ export default function TargetedBatchConfirmModal({
     };
   }, [isCreating, onCancel]);
 
+  const proposedBatches = Array.isArray(draft?.proposedBatches)
+    ? draft.proposedBatches
+    : [];
+  const batchCount = proposedBatches.length || 1;
   const rowCount = Array.isArray(draft?.displayRows)
     ? draft.displayRows.length
     : 0;
+  const plural = batchCount !== 1;
 
   return (
     <div
@@ -45,7 +50,7 @@ export default function TargetedBatchConfirmModal({
           <div>
             <p style={styles.eyebrow}>TB Draft</p>
             <h2 id="tb-confirm-title" style={styles.title}>
-              Confirm permanent Targeted Batch creation
+              Confirm permanent Targeted Batch{plural ? "es" : ""}
             </h2>
           </div>
 
@@ -65,15 +70,47 @@ export default function TargetedBatchConfirmModal({
 
         <div style={styles.body}>
           <div style={styles.batchCard}>
-            <span style={styles.label}>Targeted Batch ID</span>
-            <strong style={styles.batchId}>{draft?.id || "NAv"}</strong>
+            <span style={styles.label}>Creation Group</span>
+            <strong style={styles.batchId}>
+              {draft?.creationGroup?.id || draft?.id || "NAv"}
+            </strong>
+            <span style={styles.batchSummary}>
+              {batchCount} proposed batch{plural ? "es" : ""} · {rowCount}{" "}
+              row{rowCount === 1 ? "" : "s"}
+            </span>
           </div>
 
+          {proposedBatches.length > 0 ? (
+            <div style={styles.batchList}>
+              {proposedBatches.map((batch, index) => (
+                <div
+                  key={batch?.draftBatchKey || batch?.tbId || index}
+                  style={styles.batchListItem}
+                >
+                  <div>
+                    <strong>
+                      Batch {index + 1} ·{" "}
+                      {batch?.scope?.wardName ||
+                        (batch?.scope?.wardNumber
+                          ? `Ward ${batch.scope.wardNumber}`
+                          : "Ward NAv")}
+                    </strong>
+                    <span style={styles.batchListMeta}>
+                      {batch?.scope?.wardPcode || "NAv"} · {batch?.rowCount || 0}{" "}
+                      row{Number(batch?.rowCount) === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <code style={styles.batchListId}>{batch?.tbId || "NAv"}</code>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <p id="tb-confirm-description" style={styles.description}>
-            This will create one permanent TB parent, {rowCount} permanent TB
-            {rowCount === 1 ? " Row" : " Rows"}, and the matching Sales
-            references. The temporary TB Draft will be cleared only after the
-            backend verifies the permanent Targeted Batch as READY.
+            The backend will re-read every Sales document and its authoritative
+            ERF, confirm that each proposed batch contains exactly one ward, and
+            reject the complete request before creation when the frontend plan
+            does not match the authoritative data.
           </p>
 
           <div style={styles.notice}>
@@ -106,7 +143,9 @@ export default function TargetedBatchConfirmModal({
             onClick={onConfirm}
             disabled={isCreating}
           >
-            {isCreating ? "Creating Targeted Batch..." : "Confirm TB Draft"}
+            {isCreating
+              ? `Creating ${batchCount} Targeted Batch${plural ? "es" : ""}...`
+              : `Create ${batchCount} Targeted Batch${plural ? "es" : ""}`}
           </button>
         </div>
       </div>
@@ -125,11 +164,12 @@ const styles = {
     background: "rgba(15, 23, 42, 0.62)",
   },
   card: {
-    width: "min(560px, 96vw)",
+    width: "min(720px, 96vw)",
+    maxHeight: "92vh",
     borderRadius: "1rem",
     background: "#ffffff",
     boxShadow: "0 28px 70px rgba(15, 23, 42, 0.34)",
-    overflow: "hidden",
+    overflow: "auto",
   },
   header: {
     display: "flex",
@@ -184,6 +224,36 @@ const styles = {
   },
   batchId: {
     color: "#0f172a",
+    overflowWrap: "anywhere",
+  },
+  batchSummary: {
+    color: "#475569",
+    fontSize: "0.82rem",
+  },
+  batchList: {
+    display: "grid",
+    gap: "0.55rem",
+  },
+  batchListItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "0.8rem",
+    padding: "0.75rem",
+    border: "1px solid #bbf7d0",
+    borderRadius: "0.75rem",
+    background: "#f0fdf4",
+    flexWrap: "wrap",
+  },
+  batchListMeta: {
+    display: "block",
+    marginTop: "0.2rem",
+    color: "#166534",
+    fontSize: "0.78rem",
+  },
+  batchListId: {
+    color: "#166534",
+    fontSize: "0.76rem",
     overflowWrap: "anywhere",
   },
   description: {

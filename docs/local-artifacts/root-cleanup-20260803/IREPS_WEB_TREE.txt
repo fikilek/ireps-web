@@ -1,0 +1,462 @@
+﻿iREPS WEB PROJECT TREE
+Root: C:\dev\ireps-web
+Generated: 2026-08-02 18:59:57
+
+Git branch: main
+Git commit: f0f9771e5334590754d5b4221cfaf9df25a0f1ac
+
+[.agents]
+[.codex]
+.env.dev.local
+.env.example
+.env.test.local
+.firebaserc
+[.github]
+    [workflows]
+        web-config-check.yml
+        web-dev-hosting-deploy.yml
+        web-manual-build.yml
+        web-test-hosting-deploy.yml
+.gitignore
+ALLOCATION_CURRENT_INPUT.zip
+BROKEN_TB_DASHBOARD_PATCH_BACKUP.diff
+eslint.config.js
+firebase.json
+firestore.indexes.json
+firestore.rules
+[functions]
+    [.expo]
+        README.md
+        settings.json
+    .gitignore
+    [_bgo_reset_backups]
+        TC_20260601_095534_ZA7423_MDCN_2026-06-02T13-25-41-526Z.json
+        TC_20260601_095534_ZA7423_MDCN_2026-06-02T13-30-18-643Z.json
+    [bgo]
+        acceptanceCallable.js
+        callables.js
+        deleteCallable.js
+        executionSummary.js
+        executionSummaryTrigger.js
+        helpers.js
+        trnFactory.js
+    [commissioning]
+        callable.js
+        helpers.js
+        trigger.js
+    [dataCleansing]
+        callables.js
+        helpers.js
+        triggers.js
+    [fwr-monitoring]
+        submitFwrLocationCallable.js
+        updateFwrMonitoringStatusCallable.js
+    [geofences]
+        callables.js
+        helpers.js
+        membership.js
+        salesMembership.js
+        triggers.js
+    index.js
+    [informal-erfs]
+        helpers.js
+        submitInformalErfCallable.js
+    [lookups]
+        constants.js
+        index.js
+        onIrepsSelectLookupAdminCallable.js
+        onIrepsSelectOptionsCallable.js
+        serializers.js
+        validators.js
+    [meterLifecycle]
+        acceptRejectCallable.js
+        callables.js
+        helpers.js
+        instructionCallable.js
+        manageInstructionCallable.js
+    [meterMaster]
+        helpers.js
+    package.json
+    package-lock.json
+    [registry]
+        erfBaseRowRebuild.js
+        erfBuilder.js
+        erfCallable.js
+        erfCounters.js
+        erfHelpers.js
+        erfMeterCountsRebuild.js
+        erfPremiseCountRebuild.js
+        erfSyncCallable.js
+        erfSyncTrigger.js
+        erfTrnCountRebuild.js
+        meterCallable.js
+        meterRegistryRowRebuild.js
+        [mread]
+            constants.js
+            generateMreadStaging.js
+            index.js
+            listMreadStagingCycles.js
+            listMreadStagingRows.js
+            listMreadStagingSessions.js
+            mapTrnMreadToRegistryMread.js
+            mreadStagingCycleController.v2.js
+            rebuildRegistryMread.js
+            writeRegistryMreadFromTrn.js
+        premiseCallable.js
+        premiseMeterCountsRebuild.js
+        premiseRegistryRowBuilder.js
+        premiseRegistryRowRebuild.js
+        wardBuilder.js
+        wardCallable.js
+        wardCounters.js
+        wardHelpers.js
+        wardSyncCallable.js
+        wardSyncTrigger.js
+        workbaseBuilder.js
+        workbaseCallable.js
+        workbaseCounters.js
+        workbaseHelpers.js
+        workbaseSyncCallable.js
+        workbaseSyncTrigger.js
+    [reports]
+        reportHelpers.js
+        trnReports.js
+    [salesAllMeters]
+        helpers.js
+    [scripts]
+        24_write_spu_workbases_from_lms.js
+        25_compare_ireps_select_lookups_exceptions_only.js
+        28_copy_mread_staging_cycles_to_test.js
+        29_seed_mread_staging_cycles_for_lm_test.js
+        30_seed_mread_staging_cycles_for_lm_test_clean.js
+        bootstrap_test_spu_from_export.js
+        copy_ireps_select_lookups_recursive_to_test.js
+        delete_fake_cycle9_registry_mread.js
+        delete_fake_mread_registry_rows.js
+        delete_test_mread_staging_packs.js
+        devResetPendingWork.js
+        [input]
+            ireps2-lms-20260624-0729.json
+        ireps2-auth-users-export.json
+        ireps2-users-20260621-2233.json
+        [mread-billing-cycles]
+            audit-mread-staging-cycles.js
+            seed-mread-staging-cycles.js
+        patch_spu_user_workbases_for_test_demo.js
+        [reports]
+            delete_fake_mread_registry_rows_report_2026-06-19_154439420Z.json
+            delete_fake_mread_registry_rows_report_2026-06-19_154835124Z.json
+            delete_fake_mread_registry_rows_report_2026-06-19_155112980Z.json
+            delete_test_mread_staging_packs_report_2026-06-19_154021075Z.json
+            delete_test_mread_staging_packs_report_2026-06-19_154248909Z.json
+            seed_fake_cycle11_registry_mread_report_2026-06-19_234630171Z.json
+            seed_fake_cycle9_cycle10_registry_mread_report_2026-06-19_160011652Z.json
+            seed_fake_cycle9_cycle10_registry_mread_report_2026-06-19_161616187Z.json
+            seed_fake_cycle9_cycle10_registry_mread_report_2026-06-19_165632423Z.json
+            seed_fake_cycle9_cycle10_registry_mread_report_2026-06-19_165930467Z.json
+        resetBgoTcUploadToPreBgo.js
+        resetDataCleansingPremise.js
+        seed_fake_cycle11_registry_mread_from_cycle10.js
+        seed_fake_cycle9_cycle10_registry_mread_from_real_later_readings.js
+        seed_fake_cycle9_registry_mread_from_ast_export.js
+        seed_mread_staging_cycles.js
+        seed-dcn-lookups.js
+        seed-lookup-migration-v1.js
+        seed-meter-reading-instruction-lookup.js
+        smoke_mobile_lookup_options.js
+        tag_ast_meter_to_geofence.js
+        [tools]
+            [geofences]
+                [reports]
+                    reprocess_geofence_av1ij2OihfwBOERGD2BU_DRY_RUN_2026-08-02T05-46-45-769Z.json
+                    reprocess_geofence_av1ij2OihfwBOERGD2BU_EXECUTE_2026-08-02T05-48-49-208Z.json
+                    reprocess_geofence_Br0zj5M5zVUTmJ3U5ufo_DRY_RUN_2026-08-02T05-14-03-982Z.json
+                    reprocess_geofence_Br0zj5M5zVUTmJ3U5ufo_EXECUTE_2026-08-02T05-20-11-453Z.json
+                    reprocess_geofence_u4bmxNemlbZZ1e7mkA6m_DRY_RUN_2026-08-02T05-49-55-845Z.json
+                    reprocess_geofence_u4bmxNemlbZZ1e7mkA6m_EXECUTE_2026-08-02T05-52-24-181Z.json
+                reprocessGeoFenceMembership.js
+            [informal-erfs]
+                cleanupNoncompliantInformalErfs.js
+            [registry]
+                backfillInformalErfRegistry.js
+                rebuildInformalErfWardRegistry.js
+    [targetedBatches]
+        allocationCallable.js
+        callables.js
+        deleteCallable.js
+        documentFactory.js
+        helpers.js
+    [tcUploads]
+        callables.js
+        deleteCallable.js
+        helpers.js
+        readiness.js
+        refreshCallable.js
+    [teams]
+        callables.js
+        helpers.js
+    [test]
+        meterMaster.helpers.test.js
+        salesAllMeters.helpers.test.js
+GEOFENCE_DEMO_SALES_MEMBERSHIP_1.zip
+[GEOFENCE_TRIGGER_FAILURE_INSPECTION]
+GEOFENCE_TRIGGER_FAILURE_INSPECTION.zip
+    [git]
+        backend_status_short.txt
+        branch.txt
+        diff_check.txt
+        head_commit.txt
+        recent_commits.txt
+        status_short.txt
+        working_diff.patch
+        working_diff_stat.txt
+    inspection_summary.json
+    [logs]
+        firebase_cli_version.txt
+        functions_list.txt
+        G2_focused_log_extract.txt
+        onGeoFenceCreated_logs.txt
+    [source]
+        firebase.json
+        [functions]
+            [geofences]
+                helpers.js
+                membership.js
+                salesMembership.js
+                triggers.js
+            index.js
+            package.json
+            package-lock.json
+index.html
+ireps-web-tb-package5-source.zip
+jsconfig.json
+MD_BGO_DASHBOARD_REFERENCE_INPUT.zip
+package.json
+package-lock.json
+PATCH_MANIFEST.txt
+[public]
+    favicon.svg
+    icons.svg
+README.md
+REPAIR_ENDUMENI_WARD003_GEOFENCES.ps1
+SALES_CAT_COLUMNS_CURRENT_INPUT.zip
+SALES_GEOFENCE_COLUMN_1.zip
+SALES_GEOFENCE_COLUMN_2.zip
+SALES_GPS_MAP_GEOFENCE_FILTER_1.zip
+SALES_MAP_TABLE_FILTER_SYNC_1.zip
+SALES_STREAM_LOADING_SPINNER_2.zip
+SALES_STREAM_UPDATED_AT_SORT_1.zip
+[SALES_TARGETED_BATCH_V2_INSPECTION]
+SALES_TARGETED_BATCH_V2_INSPECTION.zip
+    git-branch.txt
+    git-head.txt
+    git-status.txt
+    package.json
+    sales-current-diff.txt
+    [src]
+        [pages]
+            [sales]
+                [components]
+                    SalesGpsMapSection.jsx
+                    SalesMetersTable.jsx
+                    SalesTbRefsModal.jsx
+                PrepaidSales.jsx
+        [redux]
+            demoSalesApi.js
+    src-tree.txt
+SALES_TB_IDS_COLUMN_2.zip
+SALES_WARD_GPS_MAP_1.zip
+SALES_WARD_GPS_MAP_BOUNDARY_1.zip
+[scripts]
+    [ci]
+        notes.txt
+        README-web-env-check.md
+        verify-web-env.mjs
+        web-env-check-status.txt
+        web-env-check-summary.txt
+[src]
+    App.css
+    App.jsx
+    [assets]
+        hero.png
+    [auth]
+        AuthContext.js
+        AuthProvider.jsx
+        ProtectedRoute.jsx
+        RoleRoute.jsx
+        useAuth.js
+    [components]
+        DatetimeFilter.jsx
+        DownloadButtons.jsx
+        [mread]
+            MeterHistoryModal.jsx
+        RegistryIdText.jsx
+    [context]
+        GeoContext.jsx
+        WarehouseContext.jsx
+        warehouseSelectors.js
+    [features]
+        [maps]
+            DesktopGeoCascadingSelector.jsx
+    [firebase]
+        index.js
+    index.css
+    [layouts]
+        ConsoleLayout.jsx
+    main.jsx
+    [pages]
+        AccessDeniedPage.jsx
+        [admin]
+            FwrMonitoringPage.jsx
+            MreadStagingControllerPage.jsx
+        ComingSoonPage.jsx
+        DashboardPage.jsx
+        LoginPage.jsx
+        [maps]
+            MapPage.jsx
+        [operations]
+            BgoDashboardPage.jsx
+            BmdBgoPage.jsx
+            fakeTcFinalReportData.js
+            GeoFencesPage.jsx
+            MdBgoRowsPage.jsx
+            OperationsLandingPage.jsx
+            TargetedBatchAllocationPage.jsx
+            TargetedBatchDashboardPage.jsx
+            TargetedBatchDetailDashboardPage.jsx
+            TargetedBatchDetailsPage.jsx
+            TargetedBatchDraftPage.jsx
+            [targeted-batches]
+                [allocation]
+                    TargetedBatchAllocationGroupPanel.jsx
+                    TargetedBatchAllocationPrimitives.jsx
+                    TargetedBatchAllocationReview.jsx
+                    TargetedBatchAllocationRowsPanel.jsx
+                    targetedBatchAllocationStyles.js
+                    TargetedBatchAllocationTargetPanel.jsx
+                    targetedBatchAllocationUtils.js
+                [dashboard]
+                    TargetedBatchDashboardCard.jsx
+                    targetedBatchDashboardModel.js
+                    targetedBatchDashboardStyles.js
+                    useTargetedBatchDashboardData.js
+                [draft]
+                    TargetedBatchDraftFilters.jsx
+                    targetedBatchDraftReviewStyles.js
+                    TargetedBatchDraftSummary.jsx
+                    TargetedBatchDraftTable.jsx
+                [rows]
+                    TargetedBatchRowsFilters.jsx
+                    targetedBatchRowsModel.js
+                    targetedBatchRowsStyles.js
+                    TargetedBatchRowsSummary.jsx
+                    TargetedBatchRowsTable.jsx
+                TargetedBatchConfirmModal.jsx
+                TargetedBatchDeleteModal.jsx
+                TargetedBatchDraftReview.jsx
+                TargetedBatchFoundationNotice.jsx
+                TargetedBatchUploadModal.jsx
+                targetedBatchUtils.js
+            TargetedBatchesPage.jsx
+            TargetedBatchFinalReportPage.jsx
+            TcBgoDashboardPage.jsx
+            TcBgoPage.jsx
+            TcFinalReportPage.jsx
+            TcUploadDetailsPage.jsx
+            TcUploadsPage.jsx
+        PendingApprovalPage.jsx
+        [profile]
+            ProfilePage.jsx
+        [registries]
+            AccountsRegistryPage.jsx
+            ErfsRegistryPage.jsx
+            MetersRegistryPage.jsx
+            MreadRegistryPage.jsx
+            MreadStagingPage.jsx
+            PremisesRegistryPage.jsx
+            RegistryLandingPage.jsx
+            TrnsRegistryPage.jsx
+            WardsRegistryPage.jsx
+        [reports]
+            AnomalyReportPage.jsx
+            NoAccessReportPage.jsx
+            NormalisationReportPage.jsx
+            ReportsLandingPage.jsx
+            UserActivityReportPage.jsx
+        [sales]
+            [components]
+                MeterLocationModal.jsx
+                SalesGpsMapSection.jsx
+                SalesMetersTable.jsx
+                SalesRangeFilterModal.jsx
+                SalesTbRefsModal.jsx
+                SalesTrendChart.jsx
+            PrepaidSales.jsx
+            salesUtils.js
+        [ward-scope]
+            [components]
+                WardScopeHeader.jsx
+            ErfsPage.jsx
+            MetersPage.jsx
+            PremisesPage.jsx
+    [redux]
+        astsApi.js
+        bgoApi.js
+        demoSalesApi.js
+        fwrLiveLocationsApi.js
+        geofencesApi.js
+        mapErfsApi.js
+        mapGeofencesApi.js
+        mapLmsApi.js
+        mapPremisesApi.js
+        mapWardsApi.js
+        mreadStagingApi.js
+        mreadStagingCyclesApi.js
+        registryAccountsApi.js
+        registryErfsApi.js
+        registryMetersApi.js
+        registryMreadApi.js
+        registryPremisesApi.js
+        registryWardsApi.js
+        reportAnomalyApi.js
+        reportNoAccessApi.js
+        reportNormalisationApi.js
+        reportUserActivityApi.js
+        serviceProvidersApi.js
+        store.js
+        targetedBatchDraftModel.js
+        targetedBatchDraftSlice.js
+        tcApi.js
+        teamsApi.js
+        trnsApi.js
+        usersApi.js
+        wardErfsApi.js
+    [routes]
+        AppRoutes.jsx
+    [utils]
+        [downloads]
+            quickDownloadExcel.js
+    [warehouse]
+        [ward]
+            useWardWarehouse.js
+            WardWarehouseProvider.jsx
+            wardWarehouseSelectors.js
+            wardWarehouseUtils.js
+TB_ALLOCATION_BGO_STYLE_1.zip
+TB_ALLOCATION_FIRESTORE_INPUT.zip
+TB_ALLOCATION_PERMANENT_FIRESTORE_LOAD_1.zip
+TB_ALLOCATION_REMOVE_LM_DISPLAY_1.zip
+TB_ALLOCATION_REMOVE_LM_NAME_1.zip
+TB_ALLOCATION_WHOLE_BATCH_1.zip
+TB_BACKEND_IMPLEMENTATION_INPUT.zip
+TB_BACKEND_TEMP_LM_RELAXATION_1.zip
+TB_DASHBOARD_CURRENT_INPUT.zip
+TB_DELETE_IMPLEMENTATION_1.zip
+TB_DRAFT_CALLABLE_CONNECTION_1.zip
+TB_DRAFT_CONFIRM_MODAL_1.zip
+TB_REGISTER_LOADING_INSPECTION.zip
+TB_REGISTER_ROWS_FIRESTORE_INPUT.zip
+TB_REGISTER_ROWS_PERMANENT_FIRESTORE_1.zip
+TB_REGISTER_TB_ID_ONLY_1.zip
+TB_ROWS_ROW_ID_ONLY_1.zip
+vite.config.js

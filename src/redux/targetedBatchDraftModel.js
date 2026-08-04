@@ -2,6 +2,9 @@ const TARGETED_BATCH_ID_TIME_ZONE = "Africa/Johannesburg";
 const TARGETED_BATCH_ID_RANDOM_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
+const TARGETED_BATCH_ID_PATTERN = /^TGB_[0-9]{8}_[0-9]{6}_[A-Z0-9]{4}$/;
+const TARGETED_BATCH_MAX_ROWS_PER_BATCH = 1000;
+
 export const TARGETED_BATCH_COLLECTIONS = Object.freeze({
   uploads: "tb_uploads",
   rows: "tb_rows",
@@ -332,11 +335,137 @@ function buildCanonicalValidation(validation = {}, rows = [], sourceType) {
   };
 }
 
+function normalizeScopePcode(value) {
+  return normalizeUppercase(value);
+}
+
+function normalizeWardNumber(value) {
+  const text = String(value || "")
+    .trim()
+    .replace(/^WARD\s*/i, "");
+
+  if (!text) return "";
+  if (/^\d+$/.test(text)) return String(Number(text));
+  return text.toUpperCase();
+}
+
+function normalizeOrderedSalesIds(values = []) {
+  return asArray(values).map(normalizeAuthoritativeId);
+}
+
+function normalizeProposedBatches({
+  payload,
+  sourceType,
+  lmPcode,
+  lmName,
+  fallbackDraftId,
+  fallbackDisplayRows,
+}) {
+  if (sourceType !== TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) return [];
+
+  let batchInputs = asArray(payload?.proposedBatches);
+
+  if (batchInputs.length === 0 && fallbackDisplayRows.length > 0) {
+    const wardPcodes = uniqueStrings(
+      fallbackDisplayRows.map((row) => normalizeScopePcode(row?.wardPcode)),
+    );
+
+    if (wardPcodes.length === 1) {
+      const firstRow = fallbackDisplayRows[0] || {};
+      batchInputs = [
+        {
+          tbId: fallbackDraftId,
+          draftBatchKey: `${wardPcodes[0]}::${fallbackDraftId}`,
+          sequence: 1,
+          scope: {
+            lmPcode,
+            lmName,
+            wardPcode: wardPcodes[0],
+            wardNumber: firstRow?.wardNumber,
+            wardName: firstRow?.wardName || firstRow?.wardNumberLabel,
+          },
+          rows: fallbackDisplayRows,
+        },
+      ];
+    }
+  }
+
+  return batchInputs.map((batch, batchIndex) => {
+    const tbId = normalizeUppercase(
+      readFirstString(batch?.tbId, batch?.id),
+    );
+    const wardPcode = normalizeScopePcode(
+      readFirstString(batch?.scope?.wardPcode, batch?.wardPcode),
+    );
+    const wardNumber = normalizeWardNumber(
+      readFirstString(batch?.scope?.wardNumber, batch?.wardNumber),
+    );
+    const wardName = readFirstString(
+      batch?.scope?.wardName,
+      batch?.wardName,
+      wardNumber ? `Ward ${wardNumber}` : "",
+    );
+    const draftBatchKey = readFirstString(
+      batch?.draftBatchKey,
+      wardPcode && tbId ? `${wardPcode}::${tbId}` : "",
+    );
+    const rows = normalizeDraftRows(batch?.rows, sourceType).map(
+      (row, rowIndex) => ({
+        ...row,
+        rowNo: String(row?.rowNo || rowIndex + 1),
+        batchRowNo: String(row?.batchRowNo || row?.rowNo || rowIndex + 1),
+        draftBatchKey,
+        proposedTbId: tbId,
+        batchSequence: safeCount(batch?.sequence, batchIndex + 1),
+        lmPcode: normalizeScopePcode(row?.lmPcode || lmPcode),
+        wardPcode: normalizeScopePcode(row?.wardPcode || wardPcode),
+        wardNumber: normalizeWardNumber(row?.wardNumber || wardNumber),
+        wardName: readFirstString(row?.wardName, row?.wardNumberLabel, wardName),
+      }),
+    );
+    const explicitIds = normalizeOrderedSalesIds(
+      batch?.salesAllMeterIds ?? batch?.authoritativeIds?.salesAllMeterIds,
+    );
+    const salesAllMeterIds =
+      explicitIds.length > 0 ? explicitIds : rows.map((row) =>
+        normalizeAuthoritativeId(
+          readFirstString(
+            row?.salesAllMeterId,
+            row?.sourceSalesAllMeterId,
+            row?.meterNoNormalized,
+            row?.meterNo,
+            row?.id,
+          ),
+        ),
+      );
+
+    return {
+      draftBatchKey,
+      sequence: safeCount(batch?.sequence, batchIndex + 1),
+      tbId,
+      scope: {
+        lmPcode: normalizeScopePcode(batch?.scope?.lmPcode || lmPcode),
+        lmName: readFirstString(batch?.scope?.lmName, lmName, "NAv"),
+        wardPcode,
+        wardNumber,
+        wardName,
+      },
+      rowCount: rows.length,
+      salesAllMeterIds,
+      rows,
+      validation: {
+        status: normalizeUppercase(batch?.validation?.status, "PASSED"),
+        oneWardOnly: batch?.validation?.oneWardOnly !== false,
+      },
+    };
+  });
+}
+
 export function buildTargetedBatchDraft(payload = {}) {
   const sourceType = normalizeTargetedBatchSourceType(
     payload?.source?.type ?? payload?.sourceType,
   );
-  const displayRows = normalizeDraftRows(
+  const fallbackDisplayRows = normalizeDraftRows(
     payload?.displayRows ?? payload?.rows,
     sourceType,
   );
@@ -354,9 +483,8 @@ export function buildTargetedBatchDraft(payload = {}) {
     payload?.fileName,
   );
 
-  const lmPcode = readFirstString(
-    payload?.scope?.lmPcode,
-    payload?.lmPcode,
+  const lmPcode = normalizeScopePcode(
+    readFirstString(payload?.scope?.lmPcode, payload?.lmPcode),
   );
   const lmName = readFirstString(
     payload?.scope?.lmName,
@@ -373,13 +501,25 @@ export function buildTargetedBatchDraft(payload = {}) {
     payload?.selection?.salesPeriodFrom ?? payload?.salesPeriodFrom ?? null;
   const salesPeriodTo =
     payload?.selection?.salesPeriodTo ?? payload?.salesPeriodTo ?? null;
+  const fallbackDraftId =
+    normalizeUppercase(payload?.id) || buildTargetedBatchDraftId();
+  const proposedBatches = normalizeProposedBatches({
+    payload,
+    sourceType,
+    lmPcode,
+    lmName,
+    fallbackDraftId,
+    fallbackDisplayRows,
+  });
+  const displayRows =
+    proposedBatches.length > 0
+      ? proposedBatches.flatMap((batch) => batch.rows)
+      : fallbackDisplayRows;
 
-  const explicitSalesIds = uniqueStrings(
-    asArray(
-      payload?.authoritativeIds?.salesAllMeterIds ??
-        payload?.salesAllMeterIds ??
-        payload?.selectedSalesAllMeterIds,
-    ).map(normalizeAuthoritativeId),
+  const explicitSalesIds = normalizeOrderedSalesIds(
+    payload?.authoritativeIds?.salesAllMeterIds ??
+      payload?.salesAllMeterIds ??
+      payload?.selectedSalesAllMeterIds,
   );
   const explicitUploadRowIds = uniqueStrings(
     payload?.authoritativeIds?.uploadRowIds ?? payload?.uploadRowIds,
@@ -387,9 +527,11 @@ export function buildTargetedBatchDraft(payload = {}) {
 
   const salesAllMeterIds =
     sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES
-      ? explicitSalesIds.length > 0
-        ? explicitSalesIds
-        : deriveSalesAllMeterIds(displayRows)
+      ? proposedBatches.length > 0
+        ? proposedBatches.flatMap((batch) => batch.salesAllMeterIds)
+        : explicitSalesIds.length > 0
+          ? explicitSalesIds
+          : deriveSalesAllMeterIds(displayRows)
       : [];
   const uploadRowIds =
     sourceType === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD
@@ -398,20 +540,35 @@ export function buildTargetedBatchDraft(payload = {}) {
         : deriveUploadRowIds(displayRows)
       : [];
 
-  const validation = buildCanonicalValidation(
-    payload?.validation,
-    displayRows,
-    sourceType,
-  );
+  const validation = {
+    ...buildCanonicalValidation(payload?.validation, displayRows, sourceType),
+    proposedBatchCount: proposedBatches.length,
+    wardGroupingApplied:
+      sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES
+        ? payload?.validation?.wardGroupingApplied === true ||
+          proposedBatches.length > 0
+        : false,
+  };
   const now = new Date().toISOString();
+  const creationGroupId = readFirstString(
+    payload?.creationGroup?.id,
+    payload?.creationGroupId,
+    proposedBatches.length > 0
+      ? proposedBatches[0].tbId.replace(/^TGB_/, "TBCG_")
+      : "",
+  );
 
   const canonicalDraft = {
-    id: readFirstString(payload?.id) || buildTargetedBatchDraftId(),
+    id: fallbackDraftId,
     status:
       readFirstString(payload?.status) ||
       TARGETED_BATCH_DRAFT_STATUSES.DRAFT,
     createdAt: payload?.createdAt || now,
     confirmedAt: payload?.confirmedAt || null,
+    creationGroup: {
+      id: creationGroupId || null,
+      proposedBatchCount: proposedBatches.length,
+    },
     source: {
       type: sourceType,
       label: sourceLabel,
@@ -427,16 +584,19 @@ export function buildTargetedBatchDraft(payload = {}) {
       salesPeriodFrom,
       salesPeriodTo,
     },
+    totals: {
+      selectedRows: displayRows.length,
+      proposedBatches: proposedBatches.length,
+    },
     authoritativeIds: {
       salesAllMeterIds,
       uploadRowIds,
     },
+    proposedBatches,
     displayRows,
     validation,
   };
 
-  // Temporary compatibility aliases keep the existing TB pages working while
-  // later packages migrate them to the canonical nested contract.
   return {
     ...canonicalDraft,
     sourceType: canonicalDraft.source.type,
@@ -551,6 +711,7 @@ export function getTargetedBatchDraftIntegrity(draft) {
       canConfirm: false,
       blockers: ["No Targeted Batch draft is available."],
       totalRows: 0,
+      proposedBatchCount: 0,
       authoritativeIdCount: 0,
       missingAuthoritativeIdRows: 0,
       duplicateAuthoritativeIds: [],
@@ -662,10 +823,137 @@ export function getTargetedBatchDraftIntegrity(draft) {
     );
   }
 
+  if (isSalesSource) {
+    const proposedBatches = asArray(currentDraft.proposedBatches);
+    const batchIds = proposedBatches.map((batch) => batch.tbId).filter(Boolean);
+    const batchKeys = proposedBatches
+      .map((batch) => batch.draftBatchKey)
+      .filter(Boolean);
+    const proposedSalesIds = [];
+    let proposedRowCount = 0;
+
+    if (proposedBatches.length === 0) {
+      blockers.push("The Sales draft has no ward-compliant proposed batches.");
+    }
+
+    if (!currentDraft.creationGroup?.id) {
+      blockers.push("The Sales draft has no creation-group identity.");
+    }
+
+    if (new Set(batchIds).size !== batchIds.length) {
+      blockers.push("Duplicate proposed Targeted Batch IDs were found.");
+    }
+
+    if (new Set(batchKeys).size !== batchKeys.length) {
+      blockers.push("Duplicate proposed batch keys were found.");
+    }
+
+    proposedBatches.forEach((batch, batchIndex) => {
+      const batchLabel = `Proposed batch ${batchIndex + 1}`;
+      const batchRows = asArray(batch?.rows);
+      const batchSalesIds = normalizeOrderedSalesIds(
+        batch?.salesAllMeterIds,
+      );
+      const wardPcode = normalizeScopePcode(batch?.scope?.wardPcode);
+      const wardNumber = normalizeWardNumber(batch?.scope?.wardNumber);
+
+      proposedRowCount += batchRows.length;
+      proposedSalesIds.push(...batchSalesIds);
+
+      if (!TARGETED_BATCH_ID_PATTERN.test(batch?.tbId || "")) {
+        blockers.push(`${batchLabel} has an invalid Targeted Batch ID.`);
+      }
+
+      if (!wardPcode || !wardNumber) {
+        blockers.push(`${batchLabel} has incomplete ward scope.`);
+      }
+
+      if (batch?.scope?.lmPcode !== currentDraft.scope.lmPcode) {
+        blockers.push(`${batchLabel} does not match the draft LM scope.`);
+      }
+
+      if (batchRows.length < 1) {
+        blockers.push(`${batchLabel} contains no rows.`);
+      }
+
+      if (batchRows.length > TARGETED_BATCH_MAX_ROWS_PER_BATCH) {
+        blockers.push(
+          `${batchLabel} exceeds ${TARGETED_BATCH_MAX_ROWS_PER_BATCH} rows.`,
+        );
+      }
+
+      if (batchSalesIds.length !== batchRows.length) {
+        blockers.push(
+          `${batchLabel} Sales ID count does not match its row count.`,
+        );
+      }
+
+      batchRows.forEach((row, rowIndex) => {
+        const expectedSalesId = batchSalesIds[rowIndex] || "";
+        const rowSalesId = normalizeAuthoritativeId(
+          row?.salesAllMeterId || row?.sourceSalesAllMeterId,
+        );
+
+        if (rowSalesId !== expectedSalesId) {
+          blockers.push(
+            `${batchLabel} row ${rowIndex + 1} does not match its ordered Sales ID.`,
+          );
+        }
+
+        if (normalizeScopePcode(row?.wardPcode) !== wardPcode) {
+          blockers.push(
+            `${batchLabel} row ${rowIndex + 1} crosses the proposed ward boundary.`,
+          );
+        }
+
+        if (normalizeWardNumber(row?.wardNumber) !== wardNumber) {
+          blockers.push(
+            `${batchLabel} row ${rowIndex + 1} has a conflicting ward number.`,
+          );
+        }
+
+        if (normalizeUppercase(row?.proposedTbId) !== batch?.tbId) {
+          blockers.push(
+            `${batchLabel} row ${rowIndex + 1} has a conflicting proposed batch ID.`,
+          );
+        }
+      });
+    });
+
+    if (proposedRowCount !== rows.length) {
+      blockers.push(
+        "The proposed batch row total does not match the TB Draft row total.",
+      );
+    }
+
+    if (proposedSalesIds.length !== rows.length) {
+      blockers.push(
+        "The proposed batch Sales ID total does not match the TB Draft row total.",
+      );
+    }
+
+    if (new Set(proposedSalesIds.filter(Boolean)).size !== proposedSalesIds.length) {
+      blockers.push(
+        "A Sales meter appears in more than one proposed Targeted Batch.",
+      );
+    }
+
+    const rootIds = currentDraft.authoritativeIds.salesAllMeterIds;
+    if (
+      rootIds.length !== proposedSalesIds.length ||
+      rootIds.some((id, index) => id !== proposedSalesIds[index])
+    ) {
+      blockers.push(
+        "The root Sales ID order does not match the proposed batch plan.",
+      );
+    }
+  }
+
   return {
     canConfirm: blockers.length === 0,
-    blockers,
+    blockers: uniqueStrings(blockers),
     totalRows: rows.length,
+    proposedBatchCount: currentDraft.proposedBatches?.length || 0,
     authoritativeIdCount,
     missingAuthoritativeIdRows,
     duplicateAuthoritativeIds,

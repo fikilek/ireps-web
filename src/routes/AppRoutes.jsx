@@ -31,7 +31,6 @@ import TcUploadsPage from "../pages/operations/TcUploadsPage";
 import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
 import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
 import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboardPage";
-import TargetedBatchDetailDashboardPage from "../pages/operations/TargetedBatchDetailDashboardPage";
 import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPage";
 import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
@@ -298,15 +297,6 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TargetedBatchAllocationPage />
-              </RoleRoute>
-            }
-          />
-
-          <Route
-            path="/operations/targeted-batches/:tbId/dashboard"
-            element={
-              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <TargetedBatchDetailDashboardPage />
               </RoleRoute>
             }
           />

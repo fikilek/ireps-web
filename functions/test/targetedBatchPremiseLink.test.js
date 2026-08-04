@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   assertCompleteTargetedBatchPremiseContext,
   buildSalesTbRefsForPremiseStart,
+  classifyTargetedBatchPremiseRoute,
   createOrLinkTargetedBatchPremise,
   isSalesTargetedBatchContext,
   normalizeTargetedBatchPremiseContext,
@@ -29,6 +30,73 @@ test("recognises only the Sales Targeted Batch source module", () => {
     }),
     false,
   );
+});
+
+test("classifies absent context as NORMAL", () => {
+  assert.equal(
+    classifyTargetedBatchPremiseRoute({
+      hasTargetedBatchContext: false,
+    }).selectedBranch,
+    "NORMAL",
+  );
+});
+
+test("classifies supported Sales operation types as TARGETED_BATCH", () => {
+  [undefined, "   ", "METER_DISCOVERY"].forEach((operationType) => {
+    const result = classifyTargetedBatchPremiseRoute({
+      hasTargetedBatchContext: true,
+      targetedBatchContext: {
+        sourceModule: "SALES_TARGETED_BATCH",
+        operationType,
+        tbId: TB_ID,
+        rowId: ROW_ID,
+        salesDocId: "04298074388",
+        erfId: "ERF_001",
+      },
+    });
+
+    assert.equal(result.selectedBranch, "TARGETED_BATCH");
+  });
+});
+
+test("rejects an explicitly invalid Sales operation type", () => {
+  const result = classifyTargetedBatchPremiseRoute({
+    hasTargetedBatchContext: true,
+    targetedBatchContext: {
+      sourceModule: "SALES_TARGETED_BATCH",
+      operationType: "BGO",
+      tbId: TB_ID,
+      rowId: ROW_ID,
+      salesDocId: "04298074388",
+      erfId: "ERF_001",
+    },
+  });
+
+  assert.equal(result.selectedBranch, "REJECTED_CONTEXT");
+  assert.equal(result.code, "TARGETED_BATCH_CONTEXT_INVALID");
+});
+
+test("rejects empty, incomplete and unrecognized supplied contexts", () => {
+  const contexts = [
+    {},
+    { sourceModule: "SALES_TARGETED_BATCH", tbId: TB_ID },
+    {
+      sourceModule: "BGO",
+      tbId: TB_ID,
+      rowId: ROW_ID,
+      salesDocId: "04298074388",
+      erfId: "ERF_001",
+    },
+  ];
+
+  contexts.forEach((targetedBatchContext) => {
+    const result = classifyTargetedBatchPremiseRoute({
+      hasTargetedBatchContext: true,
+      targetedBatchContext,
+    });
+    assert.equal(result.selectedBranch, "REJECTED_CONTEXT");
+    assert.equal(result.code, "TARGETED_BATCH_CONTEXT_INVALID");
+  });
 });
 
 test("normalises the complete premise correlation chain", () => {
@@ -225,8 +293,10 @@ test("premise callable routes linked creation through the transaction helper", a
   );
   assert.match(
     indexSource,
-    /isSalesTargetedBatchContext\(\s*data\?\.targetedBatchContext/,
+    /classifyTargetedBatchPremiseRoute\(\{/,
   );
+  assert.match(indexSource, /selectedBranch: targetedBatchRoute\.selectedBranch/);
+  assert.match(indexSource, /"REJECTED_CONTEXT"/);
   assert.match(
     indexSource,
     /error\?\.irepsCode \|\| "UNKNOWN_ERROR"/,
@@ -282,6 +352,7 @@ class FakeFirestore {
         cloneValue(value),
       ]),
     );
+    this.transactionWrites = [];
   }
 
   collection(collectionName) {
@@ -313,6 +384,8 @@ class FakeFirestore {
     };
 
     const result = await callback(transaction);
+
+    this.transactionWrites.push(...cloneValue(writes));
 
     writes.forEach((write) => {
       if (write.type === "create") {
@@ -404,6 +477,10 @@ function buildLinkedFixture() {
           accountNumber: "ACC-1",
           customerName: "Test Customer",
         },
+        location: {
+          addressLine1: "67 DAMMANN",
+          town: "GLENCOE",
+        },
         scope: {
           lmPcode: "ZA5241",
           wardPcode: "ZA524100005",
@@ -431,6 +508,126 @@ function buildLinkedFixture() {
     },
   };
 }
+
+function buildPremisePayload(fixture, targetedBatchContext = {}) {
+  return {
+    id: fixture.premiseId,
+    erfId: fixture.erfId,
+    erfNo: "1018",
+    address: {
+      strNo: "1",
+      strName: "Main",
+      strType: "Street",
+    },
+    propertyType: {
+      type: "Residential",
+    },
+    parents: {
+      lmPcode: "ZA5241",
+      wardPcode: "ZA524100005",
+    },
+    metadata: {},
+    targetedBatchContext: {
+      sourceModule: "SALES_TARGETED_BATCH",
+      operationType: "METER_DISCOVERY",
+      tbId: TB_ID,
+      rowId: ROW_ID,
+      rowNo: 1,
+      salesDocId: fixture.salesDocId,
+      erfId: fixture.erfId,
+      ...targetedBatchContext,
+    },
+  };
+}
+
+function readPremiseCreateWrite(db, premiseId) {
+  return db.transactionWrites.find(
+    (write) =>
+      write.type === "create" &&
+      write.ref.path === `premises/${premiseId}`,
+  );
+}
+
+test("authoritative TB-row source address is stored when mobile context has no source address", async () => {
+  const fixture = buildLinkedFixture();
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+
+  await createOrLinkTargetedBatchPremise({
+    db,
+    premiseRef,
+    premisePayload: buildPremisePayload(fixture),
+    actorUid: "USER_1",
+    actorName: "Field Worker",
+  });
+
+  const premiseCreate = readPremiseCreateWrite(db, fixture.premiseId);
+  assert.ok(premiseCreate);
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.sourceAddress.addressLine1,
+    "67 DAMMANN",
+  );
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.sourceAddress.town,
+    "GLENCOE",
+  );
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.sourceModule,
+    "SALES_TARGETED_BATCH",
+  );
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.operationType,
+    "METER_DISCOVERY",
+  );
+  assert.equal(premiseCreate.value.targetedBatchContext.tbId, TB_ID);
+  assert.equal(premiseCreate.value.targetedBatchContext.rowId, ROW_ID);
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.salesDocId,
+    fixture.salesDocId,
+  );
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.erfId,
+    fixture.erfId,
+  );
+});
+
+test("authoritative TB-row source address overrides a conflicting mobile source address", async () => {
+  const fixture = buildLinkedFixture();
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+
+  await createOrLinkTargetedBatchPremise({
+    db,
+    premiseRef,
+    premisePayload: buildPremisePayload(fixture, {
+      sourceAddress: {
+        addressLine1: "999 WRONG MOBILE ADDRESS",
+        town: "WRONG MOBILE TOWN",
+      },
+    }),
+    actorUid: "USER_1",
+    actorName: "Field Worker",
+  });
+
+  const premiseCreate = readPremiseCreateWrite(db, fixture.premiseId);
+  assert.ok(premiseCreate);
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.sourceAddress.addressLine1,
+    "67 DAMMANN",
+  );
+  assert.equal(
+    premiseCreate.value.targetedBatchContext.sourceAddress.town,
+    "GLENCOE",
+  );
+  assert.notEqual(
+    premiseCreate.value.targetedBatchContext.sourceAddress.addressLine1,
+    "999 WRONG MOBILE ADDRESS",
+  );
+  assert.notEqual(
+    premiseCreate.value.targetedBatchContext.sourceAddress.town,
+    "WRONG MOBILE TOWN",
+  );
+});
 
 test("linked premise transaction starts TB execution and preserves Sales data", async () => {
   const fixture = buildLinkedFixture();
@@ -498,6 +695,15 @@ test("linked premise transaction starts TB execution and preserves Sales data", 
     premise.targetedBatchContext.salesDocId,
     fixture.salesDocId,
   );
+  const premiseCreate = readPremiseCreateWrite(db, fixture.premiseId);
+  assert.ok(premiseCreate);
+  assert.deepEqual(
+    premiseCreate.value.targetedBatchContext.sourceAddress,
+    {
+      addressLine1: "67 DAMMANN",
+      town: "GLENCOE",
+    },
+  );
 
   const secondResult = await createOrLinkTargetedBatchPremise({
     db,
@@ -515,5 +721,53 @@ test("linked premise transaction starts TB execution and preserves Sales data", 
   assert.equal(
     db.read(`demo_sales_meters/${fixture.salesDocId}`).tbRefs.length,
     1,
+  );
+  assert.equal(
+    db.transactionWrites.filter(
+      (write) =>
+        write.type === "create" &&
+        write.ref.path === `premises/${fixture.premiseId}`,
+    ).length,
+    1,
+  );
+});
+
+test("linked helper failure creates no premise or partial linkage", async () => {
+  const fixture = buildLinkedFixture();
+  fixture.documents[`demo_sales_meters/${fixture.salesDocId}`].tbRefs = [];
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({
+      db,
+      premiseRef,
+      premisePayload: {
+        id: fixture.premiseId,
+        erfId: fixture.erfId,
+        parents: {
+          lmPcode: "ZA5241",
+          wardPcode: "ZA524100005",
+        },
+        targetedBatchContext: {
+          sourceModule: "SALES_TARGETED_BATCH",
+          operationType: "METER_DISCOVERY",
+          tbId: TB_ID,
+          rowId: ROW_ID,
+          salesDocId: fixture.salesDocId,
+          erfId: fixture.erfId,
+        },
+      },
+      actorUid: "USER_1",
+      actorName: "Field Worker",
+    }),
+    (error) => error?.irepsCode === "SALES_TB_REF_NOT_FOUND",
+  );
+
+  assert.equal(db.read(`premises/${fixture.premiseId}`), undefined);
+  assert.equal(db.read(`tb_rows/${ROW_ID}`).execution.status, "NOT_STARTED");
+  assert.equal(
+    db.read(`tb_uploads/${TB_ID}`).counts.executionStartedRows,
+    0,
   );
 });

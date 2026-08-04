@@ -1,4 +1,5 @@
 import {
+  buildTargetedBatchDraftId,
   getTargetedBatchDraftView,
   TARGETED_BATCH_FILE_DECISIONS,
   TARGETED_BATCH_ROW_DECISIONS,
@@ -134,7 +135,14 @@ export function downloadTargetedBatchDraft(draft) {
   const csvSource = currentDraft.source?.type === "CSV_UPLOAD";
   const headers = csvSource
     ? [...TARGETED_BATCH_COLUMNS, "rowDecision", "rejectionReason"]
-    : TARGETED_BATCH_COLUMNS;
+    : [
+        "proposedTbId",
+        "wardPcode",
+        "wardNumber",
+        "erfId",
+        "erfNo",
+        ...TARGETED_BATCH_COLUMNS,
+      ];
   const csvRows = [
     headers,
     ...currentDraft.displayRows.map((row, index) => {
@@ -143,7 +151,7 @@ export function downloadTargetedBatchDraft(draft) {
         row.meterNo || "",
         row.addressLine1 || "",
         row.town || "",
-        row.standNumber || "",
+        row.sgCode || "",
         row.actionReason || currentDraft.selection.reason || "",
       ];
 
@@ -153,7 +161,14 @@ export function downloadTargetedBatchDraft(draft) {
             row.rowDecision || "",
             row.rowDecisionReason || "",
           ]
-        : sourceValues;
+        : [
+            row.proposedTbId || "",
+            row.wardPcode || "",
+            row.wardNumber || "",
+            row.erfId || "",
+            row.erfNo || "",
+            ...sourceValues,
+          ];
     }),
   ];
 
@@ -455,6 +470,198 @@ function normalizeSalesAllMeterId(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizeScopeText(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeWardNumber(value) {
+  const text = String(value || "")
+    .trim()
+    .replace(/^WARD\s*/i, "");
+
+  if (!text) return "";
+  if (/^\d+$/.test(text)) return String(Number(text));
+  return text.toUpperCase();
+}
+
+function deriveWardNumberFromPcode(wardPcode, lmPcode) {
+  const normalizedWardPcode = normalizeScopeText(wardPcode);
+  const normalizedLmPcode = normalizeScopeText(lmPcode);
+
+  if (
+    !normalizedWardPcode ||
+    !normalizedLmPcode ||
+    !normalizedWardPcode.startsWith(normalizedLmPcode)
+  ) {
+    return "";
+  }
+
+  return normalizeWardNumber(
+    normalizedWardPcode.slice(normalizedLmPcode.length),
+  );
+}
+
+function uniqueNonBlank(values = []) {
+  return Array.from(
+    new Set(values.map((value) => String(value || "").trim()).filter(Boolean)),
+  );
+}
+
+function normalizeDraftErfCandidate(candidate = {}) {
+  return {
+    erfId: String(candidate?.erfId || candidate?.ErfId || "").trim(),
+    erfNo: String(
+      candidate?.erfNo ||
+        candidate?.erfNumber ||
+        candidate?.ErfNo ||
+        candidate?.ErfNumber ||
+        "",
+    ).trim(),
+    lmPcode: normalizeScopeText(
+      candidate?.lmPcode || candidate?.LmPcode,
+    ),
+    wardPcode: normalizeScopeText(
+      candidate?.wardPcode || candidate?.WardPcode,
+    ),
+    wardNumber: normalizeWardNumber(
+      candidate?.wardNumber || candidate?.WardNumber,
+    ),
+  };
+}
+
+function resolveLocalSalesTargetScope(row = {}, expectedLmPcode = "") {
+  const salesAllMeterId = getSalesAllMeterId(row);
+  const expectedLm = normalizeScopeText(expectedLmPcode);
+  const candidates = [
+    ...(Array.isArray(row?.erfCandidates) ? row.erfCandidates : []),
+    ...(row?.erfId
+      ? [
+          {
+            erfId: row.erfId,
+            erfNo: row.erfNo || row.erfNumber,
+            lmPcode: row.lmPcode,
+            wardPcode: row.wardPcode,
+            wardNumber: row.wardNumber,
+          },
+        ]
+      : []),
+  ]
+    .map(normalizeDraftErfCandidate)
+    .filter((candidate) => candidate.erfId);
+
+  const uniqueErfIds = uniqueNonBlank(
+    candidates.map((candidate) => candidate.erfId),
+  );
+
+  if (uniqueErfIds.length === 0) {
+    return {
+      ok: false,
+      code: "SALES_ERF_REFERENCE_MISSING",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} has no resolved ERF.`,
+    };
+  }
+
+  if (uniqueErfIds.length > 1) {
+    return {
+      ok: false,
+      code: "SALES_ERF_REFERENCE_AMBIGUOUS",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} resolves to ${uniqueErfIds.length} ERFs.`,
+    };
+  }
+
+  const erfId = uniqueErfIds[0];
+  const matchingCandidates = candidates.filter(
+    (candidate) => candidate.erfId === erfId,
+  );
+  const lmPcodes = uniqueNonBlank([
+    normalizeScopeText(row?.lmPcode),
+    ...matchingCandidates.map((candidate) => candidate.lmPcode),
+  ]);
+
+  if (expectedLm && lmPcodes.some((value) => value !== expectedLm)) {
+    return {
+      ok: false,
+      code: "SALES_LM_SCOPE_MISMATCH",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} does not belong to active LM ${expectedLm}.`,
+    };
+  }
+
+  const lmPcode = expectedLm || lmPcodes[0] || "";
+  if (!lmPcode) {
+    return {
+      ok: false,
+      code: "SALES_LM_SCOPE_MISSING",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} has no Local Municipality scope.`,
+    };
+  }
+
+  const wardPcodes = uniqueNonBlank(
+    matchingCandidates.map((candidate) => candidate.wardPcode),
+  );
+
+  if (wardPcodes.length !== 1) {
+    return {
+      ok: false,
+      code:
+        wardPcodes.length === 0
+          ? "SALES_WARD_SCOPE_MISSING"
+          : "SALES_WARD_SCOPE_AMBIGUOUS",
+      message:
+        wardPcodes.length === 0
+          ? `Meter ${salesAllMeterId || row?.meterNo || "NAv"} has no resolved ward.`
+          : `Meter ${salesAllMeterId || row?.meterNo || "NAv"} resolves to ${wardPcodes.length} wards.`,
+    };
+  }
+
+  const wardPcode = wardPcodes[0];
+  if (!wardPcode.startsWith(lmPcode)) {
+    return {
+      ok: false,
+      code: "SALES_WARD_LM_SCOPE_MISMATCH",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} has ward ${wardPcode}, which is outside LM ${lmPcode}.`,
+    };
+  }
+
+  const candidateWardNumbers = uniqueNonBlank(
+    matchingCandidates
+      .map((candidate) => normalizeWardNumber(candidate.wardNumber))
+      .filter(Boolean),
+  );
+  const derivedWardNumber = deriveWardNumberFromPcode(wardPcode, lmPcode);
+
+  if (
+    candidateWardNumbers.length > 1 ||
+    (candidateWardNumbers.length === 1 &&
+      derivedWardNumber &&
+      candidateWardNumbers[0] !== derivedWardNumber)
+  ) {
+    return {
+      ok: false,
+      code: "SALES_WARD_NUMBER_CONFLICT",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} has conflicting ward-number information.`,
+    };
+  }
+
+  const wardNumber = candidateWardNumbers[0] || derivedWardNumber;
+  if (!wardNumber) {
+    return {
+      ok: false,
+      code: "SALES_WARD_NUMBER_MISSING",
+      message: `Meter ${salesAllMeterId || row?.meterNo || "NAv"} has no resolved ward number.`,
+    };
+  }
+
+  return {
+    ok: true,
+    erfId,
+    erfNo: String(row?.erfNo || "").trim(),
+    lmPcode,
+    wardPcode,
+    wardNumber,
+    wardName: `Ward ${wardNumber}`,
+  };
+}
+
 export function getSalesAllMeterId(row = {}) {
   return normalizeSalesAllMeterId(
     row?.salesAllMeterId ||
@@ -466,55 +673,270 @@ export function getSalesAllMeterId(row = {}) {
   );
 }
 
+function normalizeSalesTargetRow({
+  row,
+  index,
+  selectionReason,
+  resolvedScope = {},
+  batch = {},
+}) {
+  const salesAllMeterId = getSalesAllMeterId(row);
+  const meterNo = String(
+    row?.meterNo || row?.meterNoNormalized || salesAllMeterId || "",
+  ).trim();
+
+  return {
+    id: salesAllMeterId || row?.id || `SALES_${index + 1}`,
+    rowNo: String(batch?.rowNo || index + 1),
+    draftRowNo: String(batch?.draftRowNo || index + 1),
+    batchRowNo: String(batch?.rowNo || index + 1),
+    sourceLine: null,
+    salesAllMeterId: salesAllMeterId || null,
+    sourceSalesAllMeterId: salesAllMeterId || null,
+    meterNo,
+    meterNoNormalized: salesAllMeterId || meterNo,
+    accountNumber: String(
+      row?.accountNumber || row?.accountNo || row?.customerNo || "",
+    ).trim(),
+    customerName: String(row?.customerName || "").trim(),
+    addressLine1: String(row?.addressLine1 || "").trim(),
+    town: String(row?.town || "").trim(),
+    standNumber: String(row?.standNumber || "").trim(),
+    sgCode: String(row?.sgCode || "").trim(),
+    erfId: String(resolvedScope?.erfId || row?.erfId || "").trim(),
+    erfNo: String(resolvedScope?.erfNo || row?.erfNo || "").trim(),
+    lmPcode: normalizeScopeText(
+      resolvedScope?.lmPcode || row?.lmPcode,
+    ),
+    wardPcode: normalizeScopeText(
+      resolvedScope?.wardPcode || row?.wardPcode,
+    ),
+    wardNumber: normalizeWardNumber(
+      resolvedScope?.wardNumber || row?.wardNumber,
+    ),
+    wardName: String(
+      resolvedScope?.wardName || row?.wardName || "",
+    ).trim(),
+    wardNumberLabel: String(
+      resolvedScope?.wardName ||
+        row?.wardNumberLabel ||
+        (resolvedScope?.wardNumber
+          ? `Ward ${resolvedScope.wardNumber}`
+          : ""),
+    ).trim(),
+    wardNumbers: resolvedScope?.wardNumber
+      ? [resolvedScope.wardNumber]
+      : Array.isArray(row?.wardNumbers)
+        ? [...row.wardNumbers]
+        : [],
+    draftBatchKey: String(batch?.draftBatchKey || "").trim(),
+    proposedTbId: String(batch?.tbId || "").trim(),
+    batchSequence: Number(batch?.sequence || 0),
+    actionReason: selectionReason,
+    totalSalesC: Number(row?.totalSalesC || row?.totalAmountC || 0),
+    latestMonthSalesC: Number(row?.latestMonthSalesC || 0),
+    latest12MonthsSalesC: Number(
+      row?.latest12MonthsSalesC || row?.sales12MonthsC || 0,
+    ),
+    sales3MonthsC: Number(row?.sales3MonthsC || 0),
+    sales6MonthsC: Number(row?.sales6MonthsC || 0),
+    sales12MonthsC: Number(row?.sales12MonthsC || 0),
+    sales2024C: Number(row?.sales2024C || 0),
+    sales2025C: Number(row?.sales2025C || 0),
+    sales2026C: Number(row?.sales2026C || 0),
+    monthlySalesC: { ...(row?.monthlySalesC || row?.monthlyTotalsC || {}) },
+    monthlyUnits: { ...(row?.monthlyUnits || {}) },
+    monthsWithoutSales: Number(row?.monthsWithoutSales || 0),
+    lastPositiveSalesMonth: row?.lastPositiveSalesMonth || null,
+    sourceFileName: String(row?.sourceFileName || "").trim(),
+    sourceRow: Number(row?.sourceRow || 0),
+    astId: row?.astId || null,
+    astMatchStatus: String(
+      row?.astMatchStatus || "NOT_CHECKED",
+    ).toUpperCase(),
+    proposedTrnType: row?.proposedTrnType || null,
+    masterVisibility:
+      row?.masterVisibility || row?.master?.visibility || null,
+  };
+}
+
 export function normalizeSalesTargetRows(rows = [], selectionReason = "NAv") {
   return rows.map((row, index) => {
-    const salesAllMeterId = getSalesAllMeterId(row);
-    const meterNo = String(
-      row?.meterNo || row?.meterNoNormalized || salesAllMeterId || "",
-    ).trim();
+    const resolvedScope = resolveLocalSalesTargetScope(row, row?.lmPcode);
 
-    return {
-      id: salesAllMeterId || row?.id || `SALES_${index + 1}`,
-      rowNo: String(index + 1),
-      sourceLine: null,
-      salesAllMeterId: salesAllMeterId || null,
-      sourceSalesAllMeterId: salesAllMeterId || null,
-      meterNo,
-      meterNoNormalized: salesAllMeterId || meterNo,
-      accountNumber: String(
-        row?.accountNumber || row?.accountNo || row?.customerNo || "",
-      ).trim(),
-      customerName: String(row?.customerName || "").trim(),
-      addressLine1: String(row?.addressLine1 || "").trim(),
-      town: String(row?.town || "").trim(),
-      standNumber: String(row?.standNumber || row?.sgCode || "").trim(),
-      wardNumberLabel: String(row?.wardNumberLabel || "").trim(),
-      wardNumbers: Array.isArray(row?.wardNumbers) ? [...row.wardNumbers] : [],
-      actionReason: selectionReason,
-      totalSalesC: Number(row?.totalSalesC || row?.totalAmountC || 0),
-      latestMonthSalesC: Number(row?.latestMonthSalesC || 0),
-      latest12MonthsSalesC: Number(
-        row?.latest12MonthsSalesC || row?.sales12MonthsC || 0,
-      ),
-      sales3MonthsC: Number(row?.sales3MonthsC || 0),
-      sales6MonthsC: Number(row?.sales6MonthsC || 0),
-      sales12MonthsC: Number(row?.sales12MonthsC || 0),
-      sales2024C: Number(row?.sales2024C || 0),
-      sales2025C: Number(row?.sales2025C || 0),
-      sales2026C: Number(row?.sales2026C || 0),
-      monthlySalesC: { ...(row?.monthlySalesC || row?.monthlyTotalsC || {}) },
-      monthlyUnits: { ...(row?.monthlyUnits || {}) },
-      monthsWithoutSales: Number(row?.monthsWithoutSales || 0),
-      lastPositiveSalesMonth: row?.lastPositiveSalesMonth || null,
-      sourceFileName: String(row?.sourceFileName || "").trim(),
-      sourceRow: Number(row?.sourceRow || 0),
-      astId: row?.astId || null,
-      astMatchStatus: String(row?.astMatchStatus || "NOT_CHECKED").toUpperCase(),
-      proposedTrnType: row?.proposedTrnType || null,
-      masterVisibility:
-        row?.masterVisibility || row?.master?.visibility || null,
-    };
+    return normalizeSalesTargetRow({
+      row,
+      index,
+      selectionReason,
+      resolvedScope: resolvedScope.ok ? resolvedScope : {},
+    });
   });
+}
+
+export function buildSalesTargetedBatchDraftPlan({
+  rows = [],
+  selectionReason = "NAv",
+  lmPcode = "",
+  lmName = "NAv",
+} = {}) {
+  const normalizedLmPcode = normalizeScopeText(lmPcode);
+  const failures = [];
+  const resolvedRows = [];
+  const seenSalesIds = new Set();
+
+  rows.forEach((row, index) => {
+    const salesAllMeterId = getSalesAllMeterId(row);
+
+    if (!salesAllMeterId) {
+      failures.push({
+        row: index + 1,
+        meterNo: String(row?.meterNo || "NAv"),
+        code: "SALES_ID_MISSING",
+        message: `Selected row ${index + 1} has no Sales All Meters identity.`,
+      });
+      return;
+    }
+
+    if (seenSalesIds.has(salesAllMeterId)) {
+      failures.push({
+        row: index + 1,
+        salesAllMeterId,
+        meterNo: String(row?.meterNo || salesAllMeterId),
+        code: "DUPLICATE_SALES_ID",
+        message: `Sales meter ${salesAllMeterId} is selected more than once.`,
+      });
+      return;
+    }
+
+    seenSalesIds.add(salesAllMeterId);
+    const scopeResolution = resolveLocalSalesTargetScope(
+      row,
+      normalizedLmPcode,
+    );
+
+    if (!scopeResolution.ok) {
+      failures.push({
+        row: index + 1,
+        salesAllMeterId,
+        meterNo: String(row?.meterNo || salesAllMeterId),
+        code: scopeResolution.code,
+        message: scopeResolution.message,
+      });
+      return;
+    }
+
+    resolvedRows.push({
+      sourceRow: row,
+      sourceIndex: index,
+      salesAllMeterId,
+      scope: scopeResolution,
+    });
+  });
+
+  if (failures.length > 0) {
+    return {
+      ok: false,
+      code: "TARGETED_BATCH_DRAFT_RULES_FAILED",
+      message: `${failures.length} selected meter${
+        failures.length === 1 ? "" : "s"
+      } cannot be placed into a ward-compliant Targeted Batch Draft.`,
+      failures,
+    };
+  }
+
+  const groupsByWard = new Map();
+
+  resolvedRows.forEach((record) => {
+    const key = record.scope.wardPcode;
+    if (!groupsByWard.has(key)) groupsByWard.set(key, []);
+    groupsByWard.get(key).push(record);
+  });
+
+  const sortedGroups = Array.from(groupsByWard.entries()).sort(
+    ([leftPcode, leftRows], [rightPcode, rightRows]) => {
+      const leftWard = leftRows[0]?.scope?.wardNumber || leftPcode;
+      const rightWard = rightRows[0]?.scope?.wardNumber || rightPcode;
+      return String(leftWard).localeCompare(String(rightWard), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    },
+  );
+
+  const firstTbId = buildTargetedBatchDraftId();
+  const creationGroupId = firstTbId.replace(/^TGB_/, "TBCG_");
+  let globalRowNo = 0;
+
+  const proposedBatches = sortedGroups.map(
+    ([wardPcode, groupRows], groupIndex) => {
+      const tbId = groupIndex === 0 ? firstTbId : buildTargetedBatchDraftId();
+      const scope = groupRows[0].scope;
+      const draftBatchKey = `${wardPcode}::${tbId}`;
+      const normalizedRows = groupRows.map((record, rowIndex) => {
+        globalRowNo += 1;
+
+        return normalizeSalesTargetRow({
+          row: record.sourceRow,
+          index: record.sourceIndex,
+          selectionReason,
+          resolvedScope: record.scope,
+          batch: {
+            draftBatchKey,
+            tbId,
+            sequence: groupIndex + 1,
+            rowNo: rowIndex + 1,
+            draftRowNo: globalRowNo,
+          },
+        });
+      });
+
+      return {
+        draftBatchKey,
+        sequence: groupIndex + 1,
+        tbId,
+        scope: {
+          lmPcode: normalizedLmPcode,
+          lmName: String(lmName || "NAv").trim() || "NAv",
+          wardPcode,
+          wardNumber: scope.wardNumber,
+          wardName: scope.wardName,
+        },
+        rowCount: normalizedRows.length,
+        salesAllMeterIds: normalizedRows.map(
+          (row) => row.salesAllMeterId,
+        ),
+        rows: normalizedRows,
+        validation: {
+          status: "PASSED",
+          oneWardOnly: true,
+        },
+      };
+    },
+  );
+
+  const displayRows = proposedBatches.flatMap((batch) => batch.rows);
+
+  return {
+    ok: true,
+    creationGroup: {
+      id: creationGroupId,
+      proposedBatchCount: proposedBatches.length,
+    },
+    proposedBatches,
+    displayRows,
+    salesAllMeterIds: displayRows.map((row) => row.salesAllMeterId),
+    validation: {
+      status: "PASSED",
+      passed: true,
+      totalRows: displayRows.length,
+      acceptedRows: displayRows.length,
+      rejectedRows: 0,
+      proposedBatchCount: proposedBatches.length,
+      wardGroupingApplied: true,
+      errors: [],
+      warnings: [],
+    },
+  };
 }
 
 export function downloadTargetedBatchRows({ batch, rows = [] }) {

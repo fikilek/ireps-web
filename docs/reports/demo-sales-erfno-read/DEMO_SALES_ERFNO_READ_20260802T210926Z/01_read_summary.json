@@ -1,0 +1,26 @@
+{
+  "status": "PASSED",
+  "runId": "DEMO_SALES_ERFNO_READ_20260802T210926Z",
+  "generatedAt": "2026-08-02T21:09:42.969057Z",
+  "mode": "READ_ONLY",
+  "projectId": "ireps2",
+  "collection": "demo_sales_meters",
+  "expectedDocumentCount": 10216,
+  "documentsRead": 10216,
+  "documentsWithSgCode": 2498,
+  "documentsWithoutSgCode": 7718,
+  "uniqueNonblankSgCodes": 2184,
+  "duplicateSgCodeGroups": 145,
+  "documentsWithRootErfNo": 0,
+  "documentsWithErfNumbersArray": 7583,
+  "documentsWithCandidateErfNumber": 7583,
+  "documentsWithSingleCandidateErfNumber": 7583,
+  "documentsWithMultipleCandidateErfNumbers": 0,
+  "sgCodeSourceFieldDistribution": {
+    "StandNumber": 2498
+  },
+  "rootErfNoSourceFieldDistribution": {},
+  "countErrors": [],
+  "firestoreWritesAttempted": 0,
+  "firestoreWritesPerformed": false
+}

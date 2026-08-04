@@ -1,0 +1,22 @@
+{
+  "status": "PASSED",
+  "runId": "DEMO_SALES_SG_ERFNO_APPLY_20260802T230405Z",
+  "generatedAt": "2026-08-02T23:05:04.926070Z",
+  "mode": "APPLY",
+  "projectId": "ireps2",
+  "collection": "demo_sales_meters",
+  "manifestPath": "C:\\dev\\ireps-web\\scripts\\tools\\demo-sales\\input\\DEMO_SALES_SG_ERFNO_WRITE_MANIFEST_RESOLVED_8034.jsonl",
+  "manifestSha256": "4b49cc52c63e4adffbbdacbdd9cc1b8b192d26504f24a7b8c7d151487d68f572",
+  "manifestRows": 8034,
+  "documentsAssessed": 8034,
+  "missingDocuments": 0,
+  "assessmentStateCounts": {
+    "READY_TO_UPDATE": 8034
+  },
+  "identityConflicts": 0,
+  "existingValueConflicts": 0,
+  "readyToUpdate": 8034,
+  "alreadyMatching": 0,
+  "blockers": 0,
+  "firestoreWritesPerformed": 0
+}

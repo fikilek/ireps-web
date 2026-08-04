@@ -209,6 +209,10 @@ function buildCanonicalContext({
       row?.customer?.customerName,
       context?.customerName,
     ),
+    sourceAddress: {
+      addressLine1: readNullableText(row?.location?.addressLine1),
+      town: readNullableText(row?.location?.town),
+    },
   };
 }
 
@@ -363,6 +367,64 @@ export function isSalesTargetedBatchContext(value = {}) {
     normalizeUpper(value?.sourceModule) ===
     TARGETED_BATCH_PREMISE_SOURCE_MODULE
   );
+}
+
+export function classifyTargetedBatchPremiseRoute({
+  hasTargetedBatchContext = false,
+  targetedBatchContext,
+} = {}) {
+  const context =
+    targetedBatchContext && typeof targetedBatchContext === "object"
+      ? targetedBatchContext
+      : {};
+  const sourceModule = normalizeUpper(context?.sourceModule);
+  const operationType = normalizeUpper(context?.operationType);
+  const safeIds = {
+    tbId: normalizeText(context?.tbId) || null,
+    rowId: normalizeText(context?.rowId) || null,
+    salesDocId: normalizeText(context?.salesDocId) || null,
+    erfId: normalizeText(context?.erfId) || null,
+  };
+
+  if (!hasTargetedBatchContext) {
+    return {
+      hasTargetedBatchContext: false,
+      sourceModule: null,
+      ...safeIds,
+      selectedBranch: "NORMAL",
+      code: null,
+      missing: [],
+    };
+  }
+
+  const missing = Object.entries(safeIds)
+    .filter(([, value]) => !value)
+    .map(([field]) => field);
+  const validSourceModule =
+    sourceModule === TARGETED_BATCH_PREMISE_SOURCE_MODULE;
+  const validOperationType =
+    !operationType ||
+    operationType === TARGETED_BATCH_PREMISE_OPERATION_TYPE;
+
+  if (!validSourceModule || !validOperationType || missing.length > 0) {
+    return {
+      hasTargetedBatchContext: true,
+      sourceModule: sourceModule || null,
+      ...safeIds,
+      selectedBranch: "REJECTED_CONTEXT",
+      code: "TARGETED_BATCH_CONTEXT_INVALID",
+      missing,
+    };
+  }
+
+  return {
+    hasTargetedBatchContext: true,
+    sourceModule,
+    ...safeIds,
+    selectedBranch: "TARGETED_BATCH",
+    code: null,
+    missing: [],
+  };
 }
 
 export function normalizeTargetedBatchPremiseContext(value = {}) {

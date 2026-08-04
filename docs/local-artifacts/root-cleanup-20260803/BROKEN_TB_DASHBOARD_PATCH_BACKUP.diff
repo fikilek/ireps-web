@@ -1,0 +1,533 @@
+﻿diff --git a/src/pages/operations/TargetedBatchDashboardPage.jsx b/src/pages/operations/TargetedBatchDashboardPage.jsx
+index 007ccea..9908c05 100644
+--- a/src/pages/operations/TargetedBatchDashboardPage.jsx
++++ b/src/pages/operations/TargetedBatchDashboardPage.jsx
+@@ -1,111 +1,175 @@
+ /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+-import { useMemo } from "react";
+-import { useSelector } from "react-redux";
++import { useMemo, useState } from "react";
++import { Link } from "react-router-dom";
+ 
+-import { selectTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
++import { useAuth } from "../../auth/useAuth";
++import TargetedBatchDashboardCard from "./targeted-batches/dashboard/TargetedBatchDashboardCard";
++import useTargetedBatchDashboardData from "./targeted-batches/dashboard/useTargetedBatchDashboardData";
+ import {
+-  getTargetedBatchDraftView,
+-  TARGETED_BATCH_COLLECTIONS,
+-} from "../../redux/targetedBatchDraftModel";
+-import TargetedBatchFoundationNotice from "./targeted-batches/TargetedBatchFoundationNotice";
++  getActiveLmName,
++  getActiveLmPcode,
++  getBatchAllocationStatus,
++  getBatchExecutionStatus,
++  groupRowsByTbId,
++  TB_DASHBOARD_FILTER_ALL,
++} from "./targeted-batches/dashboard/targetedBatchDashboardModel";
++import styles from "./targeted-batches/dashboard/targetedBatchDashboardStyles";
+ 
+ export default function TargetedBatchDashboardPage() {
+-  const draft = useSelector(selectTargetedBatchDraft);
+-  const currentDraft = useMemo(
+-    () => getTargetedBatchDraftView(draft),
+-    [draft],
++  const { activeWorkbase } = useAuth();
++  const lmPcode = getActiveLmPcode(activeWorkbase);
++  const lmName = getActiveLmName(activeWorkbase);
++
++  const [allocationFilter, setAllocationFilter] = useState(
++    TB_DASHBOARD_FILTER_ALL,
++  );
++  const [executionFilter, setExecutionFilter] = useState(
++    TB_DASHBOARD_FILTER_ALL,
++  );
++
++  const {
++    batches,
++    rows,
++    isLoading,
++    loadError,
++  } = useTargetedBatchDashboardData({ lmPcode });
++
++  const rowsByTbId = useMemo(() => groupRowsByTbId(rows), [rows]);
++
++  const allocationOptions = useMemo(
++    () =>
++      Array.from(
++        new Set(batches.map(getBatchAllocationStatus)),
++      ).sort(),
++    [batches],
++  );
++
++  const executionOptions = useMemo(
++    () =>
++      Array.from(
++        new Set(batches.map(getBatchExecutionStatus)),
++      ).sort(),
++    [batches],
++  );
++
++  const visibleBatches = useMemo(
++    () =>
++      batches.filter((batch) => {
++        const allocationMatches =
++          allocationFilter === TB_DASHBOARD_FILTER_ALL ||
++          getBatchAllocationStatus(batch) === allocationFilter;
++        const executionMatches =
++          executionFilter === TB_DASHBOARD_FILTER_ALL ||
++          getBatchExecutionStatus(batch) === executionFilter;
++
++        return allocationMatches && executionMatches;
++      }),
++    [batches, allocationFilter, executionFilter],
+   );
+ 
+   return (
+     <section style={styles.page}>
+-      <TargetedBatchFoundationNotice
+-        eyebrow="Operations / TB Dashboard"
+-        title="Targeted Batch Dashboard"
+-        description="Package 1 establishes the overall monitoring route and frontend shell. Live batch cards will be connected only after the tb_uploads parent summaries and tb_rows candidate truth are available from the backend."
+-        primaryAction={{
+-          label: "Open TB Register",
+-          to: "/operations/targeted-batches",
+-        }}
+-        secondaryAction={
+-          currentDraft
+-            ? {
+-                label: "Review Current Draft",
+-                to: "/operations/targeted-batches/draft",
+-              }
+-            : null
+-        }
+-      >
+-        <div style={styles.grid}>
+-          <InfoCard
+-            label="Parent collection"
+-            value={TARGETED_BATCH_COLLECTIONS.uploads}
+-          />
+-          <InfoCard
+-            label="Row truth collection"
+-            value={TARGETED_BATCH_COLLECTIONS.rows}
+-          />
+-          <InfoCard
+-            label="Frontend draft"
+-            value={currentDraft ? currentDraft.status : "NONE"}
+-          />
++      <div style={styles.hero}>
++        <div>
++          <p style={styles.eyebrow}>Operations / TB Dashboard</p>
++          <h2 style={styles.title}>Targeted Batch Dashboard</h2>
++          <p style={styles.description}>
++            Live permanent Targeted Batch cards for {lmName} ({lmPcode || "NAv"}).
++            Each card follows the MD BGO operational view and tracks original
++            meters, meters found, meter mismatches, premises in progress and
++            No Access.
++          </p>
+         </div>
+ 
+-        <div style={styles.notice}>
+-          No Firestore query or write is introduced by this page. Validation,
+-          allocation, acceptance, premise, meter-discovery and completion metrics
+-          remain intentionally unpopulated until backend integration.
++        <div style={styles.heroActions}>
++          <span style={styles.heroBadge}>LIVE FIRESTORE</span>
++          <Link
++            to="/operations/targeted-batches"
++            style={styles.heroLink}
++          >
++            Open TB Register
++          </Link>
+         </div>
+-      </TargetedBatchFoundationNotice>
+-    </section>
+-  );
+-}
++      </div>
+ 
+-function InfoCard({ label, value }) {
+-  return (
+-    <article style={styles.infoCard}>
+-      <span style={styles.infoLabel}>{label}</span>
+-      <strong style={styles.infoValue}>{value}</strong>
+-    </article>
++      <div style={styles.filterPanel}>
++        <div>
++          <p style={styles.sectionMiniTitle}>Dashboard filters</p>
++          <p style={styles.mutedText}>
++            Filter the live cards by whole-batch allocation and execution state.
++          </p>
++        </div>
++
++        <div style={styles.filterControls}>
++          <select
++            value={allocationFilter}
++            onChange={(event) =>
++              setAllocationFilter(event.target.value)
++            }
++            style={styles.filterInput}
++          >
++            <option value={TB_DASHBOARD_FILTER_ALL}>
++              All Allocation States
++            </option>
++            {allocationOptions.map((status) => (
++              <option key={status} value={status}>
++                {status}
++              </option>
++            ))}
++          </select>
++
++          <select
++            value={executionFilter}
++            onChange={(event) =>
++              setExecutionFilter(event.target.value)
++            }
++            style={styles.filterInput}
++          >
++            <option value={TB_DASHBOARD_FILTER_ALL}>
++              All Execution States
++            </option>
++            {executionOptions.map((status) => (
++              <option key={status} value={status}>
++                {status}
++              </option>
++            ))}
++          </select>
++        </div>
++      </div>
++
++      {!lmPcode ? (
++        <div style={styles.errorNotice}>
++          Activate a Local Municipality workbase to load the TB Dashboard.
++        </div>
++      ) : null}
++
++      {loadError ? (
++        <div style={styles.errorNotice}>{loadError}</div>
++      ) : null}
++
++      <div style={styles.dashboardGrid}>
++        {isLoading ? (
++          <article style={styles.emptyCard}>
++            Connecting to permanent Targeted Batch dashboard streams...
++          </article>
++        ) : null}
++
++        {!isLoading && !loadError && visibleBatches.length === 0 ? (
++          <article style={styles.emptyCard}>
++            No permanent Targeted Batch cards match the current filters.
++          </article>
++        ) : null}
++
++        {!isLoading
++          ? visibleBatches.map((batch) => (
++              <TargetedBatchDashboardCard
++                key={batch.id}
++                batch={batch}
++                rows={rowsByTbId[batch.id] || []}
++              />
++            ))
++          : null}
++      </div>
++    </section>
+   );
+ }
+-
+-const styles = {
+-  page: {
+-    padding: 24,
+-  },
+-  grid: {
+-    display: "grid",
+-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+-    gap: 12,
+-  },
+-  infoCard: {
+-    display: "grid",
+-    gap: 6,
+-    padding: 14,
+-    border: "1px solid #e2e8f0",
+-    borderRadius: 16,
+-    background: "#f8fafc",
+-  },
+-  infoLabel: {
+-    color: "#64748b",
+-    fontSize: 11,
+-    fontWeight: 900,
+-    textTransform: "uppercase",
+-  },
+-  infoValue: {
+-    color: "#0f172a",
+-    fontSize: 16,
+-    overflowWrap: "anywhere",
+-  },
+-  notice: {
+-    marginTop: 14,
+-    padding: 14,
+-    border: "1px solid #bfdbfe",
+-    borderRadius: 16,
+-    background: "#eff6ff",
+-    color: "#1e3a8a",
+-    lineHeight: 1.5,
+-    fontSize: 13,
+-    fontWeight: 750,
+-  },
+-};
+diff --git a/src/pages/operations/TargetedBatchDetailDashboardPage.jsx b/src/pages/operations/TargetedBatchDetailDashboardPage.jsx
+index eed75d3..c0ccbd0 100644
+--- a/src/pages/operations/TargetedBatchDetailDashboardPage.jsx
++++ b/src/pages/operations/TargetedBatchDetailDashboardPage.jsx
+@@ -1,105 +1,69 @@
+ /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+-import { useMemo } from "react";
+-import { useParams } from "react-router-dom";
+-import { useSelector } from "react-redux";
++import { Link, useParams } from "react-router-dom";
+ 
+-import { selectTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
+-import { getTargetedBatchDraftView } from "../../redux/targetedBatchDraftModel";
+-import TargetedBatchFoundationNotice from "./targeted-batches/TargetedBatchFoundationNotice";
+-import { formatNumber } from "./targeted-batches/targetedBatchUtils";
++import TargetedBatchDashboardCard from "./targeted-batches/dashboard/TargetedBatchDashboardCard";
++import useTargetedBatchDashboardData from "./targeted-batches/dashboard/useTargetedBatchDashboardData";
++import styles from "./targeted-batches/dashboard/targetedBatchDashboardStyles";
+ 
+ export default function TargetedBatchDetailDashboardPage() {
+   const { tbId = "" } = useParams();
+-  const draft = useSelector(selectTargetedBatchDraft);
+-  const currentDraft = useMemo(
+-    () => getTargetedBatchDraftView(draft),
+-    [draft],
+-  );
+-  const draftMatchesRoute = currentDraft?.id === tbId;
++  const decodedTbId = decodeURIComponent(tbId);
++
++  const {
++    batch,
++    rows,
++    isLoading,
++    loadError,
++  } = useTargetedBatchDashboardData({ tbId: decodedTbId });
+ 
+   return (
+     <section style={styles.page}>
+-      <TargetedBatchFoundationNotice
+-        eyebrow="Operations / TB Dashboard / Batch"
+-        title={tbId || "Targeted Batch Dashboard"}
+-        description="Package 1 establishes the individual Targeted Batch dashboard route. Exact candidate monitoring will later be read from tb_rows and reconciled to the tb_uploads parent summary."
+-        primaryAction={{
+-          label: "Back to TB Dashboard",
+-          to: "/operations/tb-dashboard",
+-        }}
+-        secondaryAction={{
+-          label: "Open TB Rows",
+-          to: `/operations/targeted-batches/${encodeURIComponent(tbId)}`,
+-        }}
+-      >
+-        {draftMatchesRoute ? (
+-          <div style={styles.previewGrid}>
+-            <InfoCard label="Source" value={currentDraft.source.label} />
+-            <InfoCard
+-              label="Municipality"
+-              value={`${currentDraft.scope.lmPcode || "NAv"} ┬╖ ${currentDraft.scope.lmName || "NAv"}`}
+-            />
+-            <InfoCard label="Draft state" value={currentDraft.status} />
+-            <InfoCard
+-              label="Display rows"
+-              value={formatNumber(currentDraft.displayRows.length)}
+-            />
+-          </div>
+-        ) : (
+-          <div style={styles.emptyNotice}>
+-            No matching frontend draft is currently available for this TB ID.
+-            Permanent dashboard data is not connected in Package 1.
+-          </div>
+-        )}
+-      </TargetedBatchFoundationNotice>
+-    </section>
+-  );
+-}
++      <div style={styles.hero}>
++        <div>
++          <p style={styles.eyebrow}>
++            Operations / TB Dashboard / Batch
++          </p>
++          <h2 style={styles.title}>
++            {decodedTbId || "Targeted Batch Dashboard"}
++          </h2>
++          <p style={styles.description}>
++            Live operational dashboard for one permanent Targeted Batch.
++          </p>
++        </div>
+ 
+-function InfoCard({ label, value }) {
+-  return (
+-    <article style={styles.infoCard}>
+-      <span style={styles.infoLabel}>{label}</span>
+-      <strong style={styles.infoValue}>{value}</strong>
+-    </article>
++        <div style={styles.heroActions}>
++          <span style={styles.heroBadge}>LIVE FIRESTORE</span>
++          <Link to="/operations/tb-dashboard" style={styles.heroLink}>
++            Back to TB Dashboard
++          </Link>
++        </div>
++      </div>
++
++      {isLoading ? (
++        <div style={styles.notice}>
++          Loading the permanent Targeted Batch dashboard...
++        </div>
++      ) : null}
++
++      {loadError ? (
++        <div style={styles.errorNotice}>{loadError}</div>
++      ) : null}
++
++      {!isLoading && !loadError && !batch ? (
++        <div style={styles.errorNotice}>
++          Permanent Targeted Batch {decodedTbId} was not found.
++        </div>
++      ) : null}
++
++      {!isLoading && batch ? (
++        <div style={styles.detailCardWrap}>
++          <TargetedBatchDashboardCard
++            batch={batch}
++            rows={rows}
++            showDashboardAction={false}
++          />
++        </div>
++      ) : null}
++    </section>
+   );
+ }
+-
+-const styles = {
+-  page: {
+-    padding: 24,
+-  },
+-  previewGrid: {
+-    display: "grid",
+-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+-    gap: 12,
+-  },
+-  infoCard: {
+-    display: "grid",
+-    gap: 6,
+-    padding: 14,
+-    border: "1px solid #e2e8f0",
+-    borderRadius: 16,
+-    background: "#f8fafc",
+-  },
+-  infoLabel: {
+-    color: "#64748b",
+-    fontSize: 11,
+-    fontWeight: 900,
+-    textTransform: "uppercase",
+-  },
+-  infoValue: {
+-    color: "#0f172a",
+-    fontSize: 15,
+-    overflowWrap: "anywhere",
+-  },
+-  emptyNotice: {
+-    padding: 14,
+-    border: "1px dashed #cbd5e1",
+-    borderRadius: 16,
+-    background: "#f8fafc",
+-    color: "#64748b",
+-    lineHeight: 1.5,
+-    fontWeight: 750,
+-  },
+-};
+diff --git a/src/pages/sales/PrepaidSales.jsx b/src/pages/sales/PrepaidSales.jsx
+index 5b88363..98d316d 100644
+--- a/src/pages/sales/PrepaidSales.jsx
++++ b/src/pages/sales/PrepaidSales.jsx
+@@ -1,6 +1,6 @@
+ /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+ import { useEffect, useMemo, useState } from "react";
+-import { useNavigate } from "react-router-dom";
++import { useLocation, useNavigate } from "react-router-dom";
+ import { useDispatch } from "react-redux";
+ import { skipToken } from "@reduxjs/toolkit/query";
+ 
+@@ -169,11 +169,24 @@ function TargetBatchModal({
+ 
+ export default function PrepaidSales() {
+   const navigate = useNavigate();
++  const location = useLocation();
+   const dispatch = useDispatch();
+   const { activeWorkbase, role } = useAuth();
+   const activeLmPcode = getActiveLmPcode(activeWorkbase);
+   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+ 
++  const dashboardMapContext = useMemo(() => {
++    const params = new URLSearchParams(location.search);
++
++    return {
++      tbId: String(params.get("tbId") || "").trim(),
++      openMap:
++        String(params.get("view") || "")
++          .trim()
++          .toLowerCase() === "map",
++    };
++  }, [location.search]);
++
+   const [trendMode, setTrendMode] = useState("SALES");
+   const [targetFilter, setTargetFilter] = useState(TARGET_FILTERS.ALL);
+   const [selectedIds, setSelectedIds] = useState(new Set());
+@@ -542,6 +555,8 @@ export default function PrepaidSales() {
+             targetFilter={targetFilter}
+             selectedIds={selectedIds}
+             onSelectedIdsChange={setSelectedIds}
++            initialTbId={dashboardMapContext.tbId}
++            initialShowGpsMap={dashboardMapContext.openMap}
+           />
+ 
+           {selectedRows.length > 0 ? (
+diff --git a/src/pages/sales/components/SalesMetersTable.jsx b/src/pages/sales/components/SalesMetersTable.jsx
+index 632be92..bcad54c 100644
+--- a/src/pages/sales/components/SalesMetersTable.jsx
++++ b/src/pages/sales/components/SalesMetersTable.jsx
+@@ -408,13 +408,18 @@ export default function SalesMetersTable({
+   targetFilter = TARGET_FILTERS.ALL,
+   selectedIds,
+   onSelectedIdsChange,
++  initialTbId = "",
++  initialShowGpsMap = false,
+ }) {
+-  const [filters, setFilters] = useState(EMPTY_FILTERS);
++  const [filters, setFilters] = useState(() => ({
++    ...EMPTY_FILTERS,
++    tbId: initialTbId || "ALL",
++  }));
+   const [columnVisibility, setColumnVisibility] = useState(
+     DEFAULT_COLUMN_VISIBILITY,
+   );
+   const [showColumnControls, setShowColumnControls] = useState(false);
+-  const [showGpsMap, setShowGpsMap] = useState(false);
++  const [showGpsMap, setShowGpsMap] = useState(Boolean(initialShowGpsMap));
+   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
+   const [currentPage, setCurrentPage] = useState(1);
+   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+@@ -423,6 +428,17 @@ export default function SalesMetersTable({
+   const [tbRefsRow, setTbRefsRow] = useState(null);
+   const [wardGeofenceOptions, setWardGeofenceOptions] = useState([]);
+ 
++  useEffect(() => {
++    if (!initialTbId && !initialShowGpsMap) return;
++
++    setFilters((current) => ({
++      ...current,
++      tbId: initialTbId || current.tbId,
++    }));
++    setShowGpsMap(Boolean(initialShowGpsMap));
++    setCurrentPage(1);
++  }, [initialTbId, initialShowGpsMap]);
++
+   const latestMonthKey = monthKeys[0] || "2026-06";
+   const stickyLayout = useMemo(
+     () => buildStickyLayout(columnVisibility),
