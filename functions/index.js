@@ -88,6 +88,7 @@ import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.
 import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
 import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatchRowsCallable.js";
+import { recordTargetedBatchNoAccessCallable } from "./targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import {
   classifyTargetedBatchPremiseRoute,
   createOrLinkTargetedBatchPremise,
@@ -176,6 +177,7 @@ export {
   onAllocateTargetedBatchCallable,
   onAcceptRejectTargetedBatchCallable,
   getTargetedBatchRowsCallable,
+  recordTargetedBatchNoAccessCallable,
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,
