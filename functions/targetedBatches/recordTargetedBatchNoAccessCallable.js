@@ -350,26 +350,36 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
       premiseId, actorName: actor.name, now});
     transaction.create(trnRef, buildTrn({input, row, actor, premiseId, now}));
     transaction.update(salesRef, {tbRefs: salesAppend.tbRefs});
+    const rowPatch = {
+      "metadata.updatedAt": now,
+      "metadata.updatedByUid": actor.uid,
+      "metadata.updatedByUser": actor.name,
+    };
     if (rowStatus === "NOT_STARTED") {
-      transaction.update(rowRef, {
+      Object.assign(rowPatch, {
         "execution.status": "IN_PROGRESS", "execution.startedAt": row?.execution?.startedAt || now,
-        "execution.completedAt": null, "metadata.updatedAt": now,
-        "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.name,
+        "execution.completedAt": null,
       });
     }
+    transaction.update(rowRef, rowPatch);
     const parentStatus = normalizeUpper(parent?.execution?.status || "NOT_STARTED");
+    const parentPatch = {
+      "metadata.updatedAt": now,
+      "metadata.updatedByUid": actor.uid,
+      "metadata.updatedByUser": actor.name,
+    };
     if (parentStatus === "NOT_STARTED" || rowStatus === "NOT_STARTED") {
-      const patch = {
+      Object.assign(parentPatch, {
         "execution.status": "IN_PROGRESS", "execution.startedAt": parent?.execution?.startedAt || now,
-        "execution.completedAt": null, "metadata.updatedAt": now,
-        "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.name,
-      };
+        "execution.completedAt": null,
+      });
       if (rowStatus === "NOT_STARTED") {
         const count = Number(parent?.counts?.executionStartedRows || 0);
-        patch["counts.executionStartedRows"] = Math.max(0, Number.isFinite(count) ? Math.trunc(count) : 0) + 1;
+        parentPatch["counts.executionStartedRows"] =
+          Math.max(0, Number.isFinite(count) ? Math.trunc(count) : 0) + 1;
       }
-      transaction.update(parentRef, patch);
     }
+    transaction.update(parentRef, parentPatch);
     return {success: true, alreadyRecorded: false, trnId: input.trnId,
       tbId: input.tbId, rowId: input.rowId, salesDocId: input.salesDocId,
       erfId: input.erfId, premiseId, rowStatus: "IN_PROGRESS",

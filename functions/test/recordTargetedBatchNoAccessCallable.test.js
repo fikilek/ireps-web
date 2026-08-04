@@ -11,9 +11,15 @@ const SALES = "SALE_1";
 const ERF = "ERF_1";
 const TRN = "TRN_MDIS_20260804_001";
 const NOW = Timestamp.fromDate(new Date("2026-08-04T12:30:00.000Z"));
+const LATER = Timestamp.fromDate(new Date("2026-08-04T12:45:00.000Z"));
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
+}
+
+function assertTimestampEqual(actual, expected) {
+  assert.equal(actual?._seconds, expected.seconds);
+  assert.equal(actual?._nanoseconds, expected.nanoseconds);
 }
 
 function setPath(target, path, value) {
@@ -112,8 +118,8 @@ function request(overrides = {}, auth = {uid: "U1", token: {role: "FWR"}}) {
     location: {gps: {lat: -28.7, lng: 30.1}}, ...overrides}};
 }
 
-async function record(db, req = request()) {
-  return recordTargetedBatchNoAccess({db, request: req, now: NOW});
+async function record(db, req = request(), now = NOW) {
+  return recordTargetedBatchNoAccess({db, request: req, now});
 }
 
 test("requires authentication and supported role with zero writes", async () => {
@@ -152,8 +158,18 @@ test("no-premise attempt creates canonical TRN and atomically starts row and par
   assert.equal(trn.targetedBatchContext.salesDocId, SALES);
   assert.equal(trn.metadata.createdByUid, "U1");
   assert.equal(db.read(`tb_rows/${ROW}`).execution.status, "IN_PROGRESS");
-  assert.equal(db.read(`tb_uploads/${TB}`).counts.executionStartedRows, 1);
-  assert.equal(db.read(`tb_uploads/${TB}`).counts.completedRows, 0);
+  const row = db.read(`tb_rows/${ROW}`);
+  const parent = db.read(`tb_uploads/${TB}`);
+  assertTimestampEqual(row.execution.startedAt, NOW);
+  assertTimestampEqual(row.metadata.updatedAt, NOW);
+  assert.equal(row.metadata.updatedByUid, "U1");
+  assert.equal(row.metadata.updatedByUser, "Field Worker");
+  assert.equal(parent.counts.executionStartedRows, 1);
+  assert.equal(parent.counts.completedRows, 0);
+  assertTimestampEqual(parent.execution.startedAt, NOW);
+  assertTimestampEqual(parent.metadata.updatedAt, NOW);
+  assert.equal(parent.metadata.updatedByUid, "U1");
+  assert.equal(parent.metadata.updatedByUser, "Field Worker");
   assert.equal(db.writes.some((write) => write.ref.path.startsWith("asts/")), false);
   assert.equal(db.writes.some((write) => write.ref.path.startsWith("premises/")), false);
 });
@@ -217,20 +233,40 @@ test("Sales append preserves all existing fields, references, date, and entry or
 test("multiple attempts append in order and increment first-activity counter once", async () => {
   const db = new FakeDb(fixture());
   await record(db);
+  const firstRowStartedAt = db.read(`tb_rows/${ROW}`).execution.startedAt;
+  const firstParentStartedAt = db.read(`tb_uploads/${TB}`).execution.startedAt;
   await record(db, request({trnId: "TRN_MDIS_20260804_002",
-    capturedAt: "2026-08-04T10:12:13.000Z"}));
-  assert.equal(db.read(`demo_sales_meters/${SALES}`).tbRefs[1].fieldWork.noAccess.length, 3);
-  assert.equal(db.read(`tb_uploads/${TB}`).counts.executionStartedRows, 1);
-  assert.equal(db.read(`tb_rows/${ROW}`).execution.status, "IN_PROGRESS");
+    capturedAt: "2026-08-04T10:12:13.000Z"}), LATER);
+  const sales = db.read(`demo_sales_meters/${SALES}`);
+  const row = db.read(`tb_rows/${ROW}`);
+  const parent = db.read(`tb_uploads/${TB}`);
+  assert.equal(sales.tbRefs[1].fieldWork.noAccess.length, 3);
+  assert.deepEqual(sales.tbRefs[1].fieldWork.noAccess.slice(0, 2), [
+    {date: "2026-08-01", time: "01:02:03", user: "Earlier"},
+    {date: "2026-08-04", time: "10:11:12", user: "Field Worker"},
+  ]);
+  assert.equal(parent.counts.executionStartedRows, 1);
+  assert.equal(parent.counts.completedRows, 0);
+  assert.equal(row.execution.status, "IN_PROGRESS");
+  assert.deepEqual(row.execution.startedAt, firstRowStartedAt);
+  assert.deepEqual(parent.execution.startedAt, firstParentStartedAt);
+  assertTimestampEqual(row.metadata.updatedAt, LATER);
+  assertTimestampEqual(parent.metadata.updatedAt, LATER);
+  assert.equal(row.metadata.updatedByUid, "U1");
+  assert.equal(parent.metadata.updatedByUser, "Field Worker");
 });
 
 test("same trnId is idempotent; conflicting identity fails closed", async () => {
   const db = new FakeDb(fixture());
   await record(db);
   const writes = db.writes.length;
-  const retry = await record(db);
+  const rowUpdatedAt = db.read(`tb_rows/${ROW}`).metadata.updatedAt;
+  const parentUpdatedAt = db.read(`tb_uploads/${TB}`).metadata.updatedAt;
+  const retry = await record(db, request(), LATER);
   assert.equal(retry.alreadyRecorded, true);
   assert.equal(db.writes.length, writes);
+  assert.deepEqual(db.read(`tb_rows/${ROW}`).metadata.updatedAt, rowUpdatedAt);
+  assert.deepEqual(db.read(`tb_uploads/${TB}`).metadata.updatedAt, parentUpdatedAt);
   const trn = db.read(`trns/${TRN}`);
   trn.targetedBatchContext.erfId = "OTHER";
   db.documents.set(`trns/${TRN}`, trn);
