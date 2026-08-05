@@ -85,13 +85,28 @@ const navSections = [
         path: "/ward-scope/map",
         allowedRoles: MANAGEMENT_ROLES,
       },
-      {
-        label: "Sales",
-        path: "/sales",
-        allowedRoles: MANAGEMENT_ROLES,
-      },
     ],
     groups: [
+      {
+        label: "Sales",
+        items: [
+          {
+            label: "Sales Table",
+            path: "/sales/table",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Sales Reporting",
+            path: "/sales/reporting",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Sales Stats",
+            path: "/sales/stats",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+        ],
+      },
       {
         label: "Registries",
         items: [

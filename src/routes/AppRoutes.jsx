@@ -52,6 +52,8 @@ import MreadStagingControllerPage from "../pages/admin/MreadStagingControllerPag
 import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 
 import PrepaidSales from "../pages/sales/PrepaidSales";
+import SalesReportingPage from "../pages/sales/SalesReportingPage";
+import SalesStatsPage from "../pages/sales/SalesStatsPage";
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
@@ -90,9 +92,32 @@ export default function AppRoutes() {
 
           <Route
             path="/sales"
+            element={<Navigate to="/sales/table" replace />}
+          />
+
+          <Route
+            path="/sales/table"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <PrepaidSales />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/reporting"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <SalesReportingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/stats"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <SalesStatsPage />
               </RoleRoute>
             }
           />

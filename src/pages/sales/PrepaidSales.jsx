@@ -467,7 +467,7 @@ export default function PrepaidSales() {
       <section style={styles.hero}>
         <div>
           <div style={styles.heroEyebrowRow}>
-            <p style={styles.heroEyebrow}>Prepaid Sales</p>
+            <p style={styles.heroEyebrow}>Sales Table</p>
             <span style={styles.demoBadge}>Demo Data</span>
           </div>
 
