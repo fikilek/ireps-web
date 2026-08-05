@@ -53,6 +53,7 @@ import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 
 import PrepaidSales from "../pages/sales/PrepaidSales";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
+import SalesBatchReportPage from "../pages/sales/SalesBatchReportPage";
 import SalesStatsPage from "../pages/sales/SalesStatsPage";
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
@@ -109,6 +110,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <SalesReportingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/reporting/:tbId"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <SalesBatchReportPage />
               </RoleRoute>
             }
           />
