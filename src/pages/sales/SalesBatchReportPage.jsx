@@ -1,19 +1,35 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  collection,
-  doc,
-  documentId,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
 
-import { db } from "../../firebase";
+import { useGetTargetedBatchReportByIdQuery } from "../../redux/salesTargetedBatchApi";
 
 const ALL_FILTER = "ALL";
-const FIRESTORE_IN_CHUNK_SIZE = 30;
+const TERMINAL_STREAM_STATES = new Set(["ready", "error"]);
+
+const EMPTY_REPORT = {
+  batch: null,
+  rows: [],
+  summary: {
+    total: 0,
+    notStarted: 0,
+    inProgress: 0,
+    completed: 0,
+    metersDiscovered: 0,
+    noAccessAttempts: 0,
+  },
+  sync: {
+    status: "idle",
+    sources: {
+      batch: "idle",
+      rows: "idle",
+      sales: "idle",
+      premises: "idle",
+      trns: "idle",
+    },
+    error: null,
+  },
+};
 
 function cleanText(value) {
   return String(value ?? "").trim();
@@ -23,44 +39,15 @@ function normalizeUpper(value) {
   return cleanText(value).toUpperCase();
 }
 
-function firstText(...values) {
-  for (const value of values) {
-    const text = cleanText(value);
-    if (text && text !== "NAv") return text;
-  }
-
-  return "";
-}
-
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === "function") return value.toMillis();
-  if (typeof value?.toDate === "function") return value.toDate().getTime();
-  if (typeof value?.seconds === "number") {
-    return Number(value.seconds) * 1000;
-  }
-
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function formatDateTime(value) {
-  const millis = toMillis(value);
-  return millis ? new Date(millis).toLocaleString() : "NAv";
+  const millis = Number(value || 0);
+  return Number.isFinite(millis) && millis > 0
+    ? new Date(millis).toLocaleString()
+    : "NAv";
 }
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
-}
-
-function chunkValues(values, size = FIRESTORE_IN_CHUNK_SIZE) {
-  const chunks = [];
-
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size));
-  }
-
-  return chunks;
 }
 
 function uniqueNonBlank(values = []) {
@@ -74,395 +61,12 @@ function uniqueNonBlank(values = []) {
   );
 }
 
-function getSalesPeriod(batch = {}) {
-  const from = cleanText(batch?.selection?.salesPeriodFrom);
-  const to = cleanText(batch?.selection?.salesPeriodTo);
-
-  if (from && to) return from === to ? from : `${from} to ${to}`;
-  return from || to || "NAv";
-}
-
-function getWard(row = {}, batch = {}) {
-  return firstText(
-    row?.location?.wardNumberLabel,
-    row?.scope?.wardName,
-    row?.scope?.wardNumber,
-    row?.scope?.wardPcode,
-    batch?.scope?.wardName,
-    batch?.scope?.wardNumber,
-    batch?.scope?.wardPcode,
-  ) || "NAv";
-}
-
-function getOriginalMeter(row = {}, sales = {}) {
-  return firstText(
-    row?.meter?.numberRaw,
-    row?.meter?.numberNormalized,
-    sales?.meterNo,
-    sales?.meterNoNormalized,
-    sales?.MeterNumber,
-    row?.salesAllMeterId,
-  ) || "NAv";
-}
-
-function getFieldMeter(fieldWork = {}, row = {}) {
-  return firstText(
-    fieldWork?.discoveredMeterNo,
-    fieldWork?.discoveredMeterNumber,
-    fieldWork?.foundMeterNo,
-    fieldWork?.foundMeterNumber,
-    fieldWork?.meterNo,
-    fieldWork?.meterNumber,
-    row?.execution?.foundMeterNoNormalized,
-    row?.execution?.foundMeterNumberNormalized,
-    row?.execution?.foundMeterNo,
-    row?.execution?.foundMeterNumber,
-    row?.execution?.meterNoFound,
-    row?.execution?.meterNumberFound,
-    row?.execution?.foundMeter?.numberNormalized,
-    row?.execution?.foundMeter?.number,
-    row?.execution?.result?.meterNoNormalized,
-    row?.execution?.result?.meterNumberNormalized,
-    row?.execution?.result?.meterNo,
-    row?.execution?.result?.meterNumber,
-  );
-}
-
-function getOriginalAddress(row = {}, sales = {}) {
-  const addressLine1 = firstText(
-    row?.location?.addressLine1,
-    sales?.addressLine1,
-    sales?.AddressLine1,
-    sales?.PostalAddress1,
-  );
-  const addressLine2 = firstText(
-    row?.location?.addressLine2,
-    sales?.addressLine2,
-    sales?.AddressLine2,
-    sales?.PostalAddress2,
-  );
-  const town = firstText(
-    row?.location?.town,
-    sales?.town,
-    sales?.Town,
-    sales?.PostalAddressTown,
-  );
-
-  return [addressLine1, addressLine2, town].filter(Boolean).join(", ") || "NAv";
-}
-
-function getFieldAddress(premise = {}) {
-  const address = premise?.address || {};
-  const street = [
-    cleanText(address?.strNo),
-    cleanText(address?.strName),
-    cleanText(address?.strType),
-  ]
-    .filter((part) => part && part !== "NAv")
-    .join(" ");
-
-  return firstText(
-    street,
-    premise?.addressText,
-    premise?.location?.addressLine1,
-  ) || "";
-}
-
-function parseStreetNumberAndName(value) {
-  const firstAddressSegment = cleanText(value).split(",")[0].trim();
-
-  if (!firstAddressSegment) {
-    return {
-      strNo: "",
-      strName: "",
-    };
-  }
-
-  const parts = firstAddressSegment
-    .split(/\s+/)
-    .map(cleanText)
-    .filter(Boolean);
-
-  return {
-    strNo: parts[0] || "",
-    strName: parts.slice(1).join(" "),
-  };
-}
-
-function getOriginalAddressParts(row = {}, sales = {}) {
-  const explicitStrNo = firstText(
-    row?.location?.strNo,
-    row?.location?.address?.strNo,
-    sales?.strNo,
-    sales?.address?.strNo,
-  );
-  const explicitStrName = firstText(
-    row?.location?.strName,
-    row?.location?.address?.strName,
-    sales?.strName,
-    sales?.address?.strName,
-  );
-
-  if (explicitStrNo || explicitStrName) {
-    return {
-      strNo: explicitStrNo,
-      strName: explicitStrName,
-    };
-  }
-
-  const sourceAddressLine1 = firstText(
-    row?.location?.addressLine1,
-    sales?.addressLine1,
-    sales?.AddressLine1,
-    sales?.PostalAddress1,
-  );
-
-  return parseStreetNumberAndName(sourceAddressLine1);
-}
-
-function getFieldAddressParts(premise = {}) {
-  const address = premise?.address || {};
-
-  return {
-    strNo: cleanText(address?.strNo),
-    strName: cleanText(address?.strName),
-  };
-}
-
-function normalizeMeter(value) {
-  return normalizeUpper(value).replace(/[^A-Z0-9]/g, "");
-}
-
-function normalizeAddressPart(value) {
-  return normalizeUpper(value)
-    .replace(/[^A-Z0-9]/g, "")
-    .trim();
-}
-
-function normalizeBooleanMatch(value) {
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-
-  const normalized = normalizeUpper(value);
-
-  if (["TRUE", "YES", "MATCH", "MATCHED"].includes(normalized)) {
-    return "TRUE";
-  }
-
-  if (["FALSE", "NO", "MISMATCH", "NOT_MATCHED"].includes(normalized)) {
-    return "FALSE";
-  }
-
-  return null;
-}
-
-function getMeterMatch({
-  originalMeter,
-  fieldMeter,
-  fieldWork,
-}) {
-  const explicit = normalizeBooleanMatch(fieldWork?.meterMatch);
-  if (explicit) return explicit;
-
-  const original = normalizeMeter(originalMeter);
-  const field = normalizeMeter(fieldMeter);
-
-  if (!field) return "PENDING";
-  if (!original) return "PENDING";
-
-  return original === field ? "TRUE" : "FALSE";
-}
-
-function getAddressMatch({
-  originalAddressParts,
-  fieldAddressParts,
-}) {
-  const originalStrNo = normalizeAddressPart(
-    originalAddressParts?.strNo,
-  );
-  const originalStrName = normalizeAddressPart(
-    originalAddressParts?.strName,
-  );
-  const fieldStrNo = normalizeAddressPart(
-    fieldAddressParts?.strNo,
-  );
-  const fieldStrName = normalizeAddressPart(
-    fieldAddressParts?.strName,
-  );
-
-  if (
-    !originalStrNo ||
-    !originalStrName ||
-    !fieldStrNo ||
-    !fieldStrName
-  ) {
-    return "PENDING";
-  }
-
-  return originalStrNo === fieldStrNo &&
-    originalStrName === fieldStrName
-    ? "TRUE"
-    : "FALSE";
-}
-
-function getBatchReference(sales = {}, tbId, rowId) {
-  const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
-  const normalizedTbId = cleanText(tbId);
-  const normalizedRowId = cleanText(rowId);
-
-  return (
-    refs.find(
-      (reference) =>
-        cleanText(reference?.id || reference?.tbId) === normalizedTbId &&
-        cleanText(reference?.rowId || reference?.tbRowId) === normalizedRowId,
-    ) ||
-    refs.find(
-      (reference) =>
-        cleanText(reference?.id || reference?.tbId) === normalizedTbId,
-    ) ||
-    null
-  );
-}
-
-function getExecutionStatus(row = {}, fieldWork = {}) {
-  return normalizeUpper(
-    firstText(
-      fieldWork?.status,
-      row?.execution?.status,
-    ),
-  ) || "NOT_STARTED";
-}
-
-function getPremiseId(row = {}, fieldWork = {}) {
-  return firstText(
-    fieldWork?.premiseId,
-    row?.refs?.premiseId,
-    row?.execution?.premiseId,
-    row?.execution?.result?.premiseId,
-  );
-}
-
-function getNoAccessCount(fieldWork = {}) {
-  return Array.isArray(fieldWork?.noAccess)
-    ? fieldWork.noAccess.length
-    : 0;
-}
-
-function getLastActivity(row = {}, fieldWork = {}, reference = {}) {
-  const values = [
-    fieldWork?.updatedAt,
-    fieldWork?.submittedAt,
-    reference?.date,
-    reference?.updatedAt,
-    row?.execution?.completedAt,
-    row?.execution?.startedAt,
-    row?.metadata?.updatedAt,
-    row?.metadata?.createdAt,
-  ];
-
-  return values.reduce((latest, value) => {
-    return toMillis(value) > toMillis(latest) ? value : latest;
-  }, null);
-}
-
-function getCategoryOrReason(row = {}) {
-  return firstText(
-    row?.selection?.category,
-    row?.selection?.categoryCode,
-    row?.selection?.actionReason,
-    row?.selection?.reason,
-  ) || "NAv";
-}
-
-function getAccount(row = {}, sales = {}) {
-  return firstText(
-    row?.customer?.accountNumber,
-    sales?.accountNumber,
-    sales?.AccountNumber,
-  ) || "NAv";
-}
-
-function getCustomer(row = {}, sales = {}) {
-  return firstText(
-    row?.customer?.customerName,
-    sales?.customerName,
-  ) || "NAv";
-}
-
-function getSgCode(row = {}, sales = {}) {
-  return firstText(
-    row?.location?.sgCode,
-    row?.location?.standNumber,
-    sales?.sgCode,
-    sales?.standNumber,
-  ) || "NAv";
-}
-
-function buildReportRow({
-  row,
-  batch,
-  salesById,
-  premiseById,
-  tbId,
-}) {
-  const salesId = cleanText(row?.salesAllMeterId);
-  const sales = salesById[salesId] || {};
-  const reference = getBatchReference(sales, tbId, row?.id);
-  const fieldWork =
-    reference?.fieldWork &&
-    typeof reference.fieldWork === "object" &&
-    !Array.isArray(reference.fieldWork)
-      ? reference.fieldWork
-      : {};
-
-  const premiseId = getPremiseId(row, fieldWork);
-  const premise = premiseById[premiseId] || {};
-  const originalMeter = getOriginalMeter(row, sales);
-  const fieldMeter = getFieldMeter(fieldWork, row);
-  const originalAddress = getOriginalAddress(row, sales);
-  const fieldAddress = getFieldAddress(premise);
-  const originalAddressParts = getOriginalAddressParts(row, sales);
-  const fieldAddressParts = getFieldAddressParts(premise);
-  const noAccessCount = getNoAccessCount(fieldWork);
-
-  return {
-    id: row.id,
-    rowNo: Number(row?.rowNo || 0),
-    salesId,
-    account: getAccount(row, sales),
-    customer: getCustomer(row, sales),
-    ward: getWard(row, batch),
-    originalMeter,
-    fieldMeter: fieldMeter || "PENDING",
-    meterMatch: getMeterMatch({
-      originalMeter,
-      fieldMeter,
-      fieldWork,
-    }),
-    originalAddress,
-    fieldAddress: fieldAddress || "PENDING",
-    addressMatch: getAddressMatch({
-      originalAddressParts,
-      fieldAddressParts,
-    }),
-    sgCode: getSgCode(row, sales),
-    categoryReason: getCategoryOrReason(row),
-    executionStatus: getExecutionStatus(row, fieldWork),
-    premiseId,
-    premiseStatus: premiseId ? "LINKED" : "PENDING",
-    noAccessCount,
-    lastActivity: getLastActivity(row, fieldWork, reference),
-    fieldWork,
-    rawRow: row,
-    rawSales: sales,
-    rawPremise: premise,
-  };
-}
-
 function statusTone(status = "") {
   switch (normalizeUpper(status)) {
     case "TRUE":
     case "COMPLETED":
     case "LINKED":
+    case "ACCEPTED":
       return "success";
     case "FALSE":
     case "FAILED":
@@ -557,125 +161,83 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }) {
   );
 }
 
-function getAttemptReason(attempt = {}) {
-  return firstText(
-    attempt?.accessData?.access?.reason,
-    attempt?.accessData?.reason,
-    attempt?.reason,
-  ) || "NAv";
-}
-
-function getAttemptUser(attempt = {}) {
-  return firstText(
-    attempt?.metadata?.createdByUser,
-    attempt?.metadata?.updatedByUser,
-    attempt?.metadata?.createdByUid,
-  ) || "NAv";
-}
-
-function getAttemptDate(attempt = {}) {
-  return (
-    attempt?.capturedAt ||
-    attempt?.metadata?.createdAt ||
-    attempt?.metadata?.updatedAt
-  );
-}
-
-function getAttemptGps(attempt = {}) {
-  const gps = attempt?.location?.gps || attempt?.location || {};
-  const lat = Number(gps?.lat);
-  const lng = Number(gps?.lng);
+function formatAttemptGps(attempt = {}) {
+  const lat = Number(attempt?.point?.lat);
+  const lng = Number(attempt?.point?.lng);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "NAv";
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
-function getAttemptMedia(attempt = {}) {
-  return (Array.isArray(attempt?.media) ? attempt.media : [])
-    .filter((item) => item?.tag === "noAccessPhoto")
-    .map((item) => firstText(item?.url, item?.uri))
-    .filter(Boolean);
-}
+function NoAccessModal({ row, onClose }) {
+  const attempts = row?.noAccess?.attempts || [];
+  const noAccessCount = Number(row?.noAccess?.count || 0);
 
-function NoAccessModal({ row, attempts, onClose }) {
   return (
     <ModalShell
-      title={`No Access Details — ${formatNumber(row.noAccessCount)}`}
-      subtitle={`Row ${row.rowNo || "NAv"} • ${row.originalMeter}`}
+      title={`No Access Details — ${formatNumber(noAccessCount)}`}
+      subtitle={`Row ${row.rowNo || "NAv"} • ${row.originalMeter.number}`}
       onClose={onClose}
       wide
     >
-      {row.noAccessCount === 0 ? (
+      {noAccessCount === 0 ? (
         <div style={styles.emptyModalState}>
           No No Access attempts are recorded for this row.
         </div>
       ) : null}
 
-      {row.noAccessCount > 0 && attempts.length === 0 ? (
+      {noAccessCount > 0 && attempts.length === 0 ? (
         <div style={styles.notice}>
-          The Sales TB reference reports {formatNumber(row.noAccessCount)} No
+          The Sales TB reference reports {formatNumber(noAccessCount)} No
           Access attempt(s), but detailed TRN records are not available in the
           current live result stream.
         </div>
       ) : null}
 
       <div style={styles.attemptList}>
-        {attempts.map((attempt, index) => {
-          const media = getAttemptMedia(attempt);
+        {attempts.map((attempt, index) => (
+          <article key={attempt.id || index} style={styles.attemptCard}>
+            <div style={styles.attemptHeader}>
+              <strong>Attempt {index + 1}</strong>
+              <Badge value="NO ACCESS" />
+            </div>
 
-          return (
-            <article key={attempt.id} style={styles.attemptCard}>
-              <div style={styles.attemptHeader}>
-                <strong>Attempt {index + 1}</strong>
-                <Badge value="NO ACCESS" />
+            <div style={styles.attemptGrid}>
+              <InfoItem
+                label="Captured"
+                value={formatDateTime(attempt.capturedAtMs)}
+              />
+              <InfoItem label="Reason" value={attempt.reason} />
+              <InfoItem label="Captured By" value={attempt.capturedBy} />
+              <InfoItem label="GPS" value={formatAttemptGps(attempt)} />
+            </div>
+
+            {attempt.mediaUrls.length > 0 ? (
+              <div style={styles.photoGrid}>
+                {attempt.mediaUrls.map((url, mediaIndex) => (
+                  <a
+                    key={`${attempt.id}-${mediaIndex}`}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={styles.photoLink}
+                  >
+                    <img
+                      src={url}
+                      alt={`No Access attempt ${index + 1}`}
+                      style={styles.photo}
+                    />
+                    <span>Open evidence photo</span>
+                  </a>
+                ))}
               </div>
-
-              <div style={styles.attemptGrid}>
-                <InfoItem
-                  label="Captured"
-                  value={formatDateTime(getAttemptDate(attempt))}
-                />
-                <InfoItem
-                  label="Reason"
-                  value={getAttemptReason(attempt)}
-                />
-                <InfoItem
-                  label="Captured By"
-                  value={getAttemptUser(attempt)}
-                />
-                <InfoItem
-                  label="GPS"
-                  value={getAttemptGps(attempt)}
-                />
-              </div>
-
-              {media.length > 0 ? (
-                <div style={styles.photoGrid}>
-                  {media.map((url, mediaIndex) => (
-                    <a
-                      key={`${attempt.id}-${mediaIndex}`}
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={styles.photoLink}
-                    >
-                      <img
-                        src={url}
-                        alt={`No Access attempt ${index + 1}`}
-                        style={styles.photo}
-                      />
-                      <span>Open evidence photo</span>
-                    </a>
-                  ))}
-                </div>
-              ) : (
-                <span style={styles.secondaryText}>
-                  No evidence photo URL is available in this report record.
-                </span>
-              )}
-            </article>
-          );
-        })}
+            ) : (
+              <span style={styles.secondaryText}>
+                No evidence photo URL is available in this report record.
+              </span>
+            )}
+          </article>
+        ))}
       </div>
     </ModalShell>
   );
@@ -685,18 +247,18 @@ function RowDetailsModal({ row, onClose }) {
   return (
     <ModalShell
       title={`TB Row ${row.rowNo || "NAv"}`}
-      subtitle={row.originalMeter}
+      subtitle={row.originalMeter.number}
       onClose={onClose}
       wide
     >
       <div style={styles.detailSection}>
         <h3 style={styles.detailTitle}>Source identity</h3>
         <div style={styles.detailGrid}>
-          <InfoItem label="Account" value={row.account} />
-          <InfoItem label="Customer" value={row.customer} />
-          <InfoItem label="Ward" value={row.ward} />
-          <InfoItem label="SG Code" value={row.sgCode} />
-          <InfoItem label="Sales Document" value={row.salesId} />
+          <InfoItem label="Account" value={row.source.accountNumber} />
+          <InfoItem label="Customer" value={row.source.customerName} />
+          <InfoItem label="Ward" value={row.scope.wardLabel} />
+          <InfoItem label="SG Code" value={row.source.sgCode} />
+          <InfoItem label="Sales Document" value={row.source.salesId} />
           <InfoItem label="TB Row ID" value={row.id} />
         </div>
       </div>
@@ -704,12 +266,18 @@ function RowDetailsModal({ row, onClose }) {
       <div style={styles.detailSection}>
         <h3 style={styles.detailTitle}>Meter comparison</h3>
         <div style={styles.detailGrid}>
-          <InfoItem label="Original Meter" value={row.originalMeter} />
-          <InfoItem label="Field Meter" value={row.fieldMeter} />
-          <InfoItem label="Meter Match" value={row.meterMatch} />
+          <InfoItem label="Original Meter" value={row.originalMeter.number} />
+          <InfoItem
+            label="Field Meter"
+            value={row.fieldMeter.number || "PENDING"}
+          />
+          <InfoItem
+            label="Meter Match"
+            value={row.comparison.meterMatch}
+          />
           <InfoItem
             label="Field Meter ID"
-            value={row.fieldWork?.meterId || "NAv"}
+            value={row.fieldMeter.id || "NAv"}
           />
         </div>
       </div>
@@ -717,26 +285,35 @@ function RowDetailsModal({ row, onClose }) {
       <div style={styles.detailSection}>
         <h3 style={styles.detailTitle}>Address comparison</h3>
         <div style={styles.detailGrid}>
-          <InfoItem label="Original Address" value={row.originalAddress} />
-          <InfoItem label="Field Address" value={row.fieldAddress} />
-          <InfoItem label="Address Match" value={row.addressMatch} />
-          <InfoItem label="Premise ID" value={row.premiseId || "NAv"} />
+          <InfoItem label="Original Address" value={row.addresses.original} />
+          <InfoItem
+            label="Field Address"
+            value={row.addresses.field || "PENDING"}
+          />
+          <InfoItem
+            label="Address Match"
+            value={row.comparison.addressMatch}
+          />
+          <InfoItem label="Premise ID" value={row.premise.id || "NAv"} />
         </div>
       </div>
 
       <div style={styles.detailSection}>
         <h3 style={styles.detailTitle}>Field result</h3>
         <div style={styles.detailGrid}>
-          <InfoItem label="Execution" value={row.executionStatus} />
+          <InfoItem label="Execution" value={row.execution.status} />
           <InfoItem
             label="No Access Attempts"
-            value={formatNumber(row.noAccessCount)}
+            value={formatNumber(row.noAccess.count)}
           />
           <InfoItem
             label="Last Activity"
-            value={formatDateTime(row.lastActivity)}
+            value={formatDateTime(row.execution.lastActivityAtMs)}
           />
-          <InfoItem label="Category / Reason" value={row.categoryReason} />
+          <InfoItem
+            label="Category / Reason"
+            value={row.source.categoryReason}
+          />
         </div>
       </div>
     </ModalShell>
@@ -747,18 +324,15 @@ export default function SalesBatchReportPage() {
   const { tbId = "" } = useParams();
   const decodedTbId = decodeURIComponent(tbId);
 
-  const [batch, setBatch] = useState(null);
-  const [tbRows, setTbRows] = useState([]);
-  const [salesById, setSalesById] = useState({});
-  const [premiseById, setPremiseById] = useState({});
-  const [noAccessTrns, setNoAccessTrns] = useState([]);
+  const { data = EMPTY_REPORT } = useGetTargetedBatchReportByIdQuery(
+    decodedTbId,
+    { skip: !decodedTbId },
+  );
 
-  const [parentReady, setParentReady] = useState(false);
-  const [rowsReady, setRowsReady] = useState(false);
-  const [salesReady, setSalesReady] = useState(false);
-  const [premisesReady, setPremisesReady] = useState(false);
-  const [trnsReady, setTrnsReady] = useState(false);
-  const [loadError, setLoadError] = useState("");
+  const batch = data?.batch || null;
+  const rows = data?.rows || [];
+  const summary = data?.summary || EMPTY_REPORT.summary;
+  const sync = data?.sync || EMPTY_REPORT.sync;
 
   const [searchText, setSearchText] = useState("");
   const [executionFilter, setExecutionFilter] = useState(ALL_FILTER);
@@ -766,326 +340,22 @@ export default function SalesBatchReportPage() {
   const [meterMatchFilter, setMeterMatchFilter] = useState(ALL_FILTER);
   const [addressMatchFilter, setAddressMatchFilter] = useState(ALL_FILTER);
   const [noAccessFilter, setNoAccessFilter] = useState(ALL_FILTER);
-
   const [selectedNoAccessRow, setSelectedNoAccessRow] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
 
-  useEffect(() => {
-    setBatch(null);
-    setTbRows([]);
-    setParentReady(false);
-    setRowsReady(false);
-    setLoadError("");
-
-    if (!decodedTbId) {
-      setLoadError("The Targeted Batch ID is missing from the route.");
-      setParentReady(true);
-      setRowsReady(true);
-      return undefined;
-    }
-
-    const handleError = (error) => {
-      console.error("[SALES TB ROW REPORT]", error);
-      setLoadError(
-        error?.message ||
-          "The live Targeted Batch report stream could not be opened.",
-      );
-    };
-
-    const unsubscribeParent = onSnapshot(
-      doc(db, "tb_uploads", decodedTbId),
-      (snapshot) => {
-        setBatch(
-          snapshot.exists()
-            ? {
-                id: snapshot.id,
-                ...snapshot.data(),
-              }
-            : null,
-        );
-        setParentReady(true);
-      },
-      handleError,
-    );
-
-    const unsubscribeRows = onSnapshot(
-      query(
-        collection(db, "tb_rows"),
-        where("tbId", "==", decodedTbId),
-      ),
-      (snapshot) => {
-        setTbRows(
-          snapshot.docs
-            .map((rowSnapshot) => ({
-              id: rowSnapshot.id,
-              ...rowSnapshot.data(),
-            }))
-            .sort(
-              (left, right) =>
-                Number(left?.rowNo || 0) - Number(right?.rowNo || 0),
-            ),
-        );
-        setRowsReady(true);
-      },
-      handleError,
-    );
-
-    return () => {
-      unsubscribeParent();
-      unsubscribeRows();
-    };
-  }, [decodedTbId]);
-
-  const salesIds = useMemo(
-    () =>
-      uniqueNonBlank(
-        tbRows.map((row) => row?.salesAllMeterId),
-      ),
-    [tbRows],
+  const sourceStatuses = sync?.sources || EMPTY_REPORT.sync.sources;
+  const baseReady =
+    TERMINAL_STREAM_STATES.has(sourceStatuses.batch) &&
+    TERMINAL_STREAM_STATES.has(sourceStatuses.rows);
+  const allReady = Object.values(sourceStatuses).every((status) =>
+    TERMINAL_STREAM_STATES.has(status),
   );
-
-  const salesIdsKey = salesIds.join("|");
-
-  useEffect(() => {
-    setSalesById({});
-    setSalesReady(false);
-
-    if (salesIds.length === 0) {
-      setSalesReady(true);
-      return undefined;
-    }
-
-    let active = true;
-    const chunkResults = new Map();
-    const chunks = chunkValues(salesIds);
-    const unsubscribes = [];
-
-    const publish = () => {
-      if (!active) return;
-
-      const combined = {};
-
-      chunkResults.forEach((rows) => {
-        Object.assign(combined, rows);
-      });
-
-      setSalesById(combined);
-      setSalesReady(chunkResults.size === chunks.length);
-    };
-
-    chunks.forEach((salesIdChunk, chunkIndex) => {
-      const unsubscribe = onSnapshot(
-        query(
-          collection(db, "demo_sales_meters"),
-          where(documentId(), "in", salesIdChunk),
-        ),
-        (snapshot) => {
-          const rows = {};
-
-          snapshot.docs.forEach((salesSnapshot) => {
-            rows[salesSnapshot.id] = {
-              id: salesSnapshot.id,
-              ...salesSnapshot.data(),
-            };
-          });
-
-          chunkResults.set(chunkIndex, rows);
-          publish();
-        },
-        (error) => {
-          console.error("[SALES TB ROW REPORT][SALES JOIN]", error);
-          setLoadError(
-            error?.message ||
-              "The live Sales result join could not be opened.",
-          );
-          chunkResults.set(chunkIndex, {});
-          publish();
-        },
-      );
-
-      unsubscribes.push(unsubscribe);
-    });
-
-    return () => {
-      active = false;
-      unsubscribes.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [salesIdsKey]);
-
-  const premiseIds = useMemo(() => {
-    return uniqueNonBlank(
-      tbRows.map((row) => {
-        const sales = salesById[cleanText(row?.salesAllMeterId)] || {};
-        const reference = getBatchReference(sales, decodedTbId, row?.id);
-        const fieldWork =
-          reference?.fieldWork &&
-          typeof reference.fieldWork === "object" &&
-          !Array.isArray(reference.fieldWork)
-            ? reference.fieldWork
-            : {};
-
-        return getPremiseId(row, fieldWork);
-      }),
-    );
-  }, [tbRows, salesById, decodedTbId]);
-
-  const premiseIdsKey = premiseIds.join("|");
-
-  useEffect(() => {
-    setPremiseById({});
-    setPremisesReady(false);
-
-    if (premiseIds.length === 0) {
-      setPremisesReady(true);
-      return undefined;
-    }
-
-    let active = true;
-    const chunkResults = new Map();
-    const chunks = chunkValues(premiseIds);
-    const unsubscribes = [];
-
-    const publish = () => {
-      if (!active) return;
-
-      const combined = {};
-
-      chunkResults.forEach((rows) => {
-        Object.assign(combined, rows);
-      });
-
-      setPremiseById(combined);
-      setPremisesReady(chunkResults.size === chunks.length);
-    };
-
-    chunks.forEach((premiseIdChunk, chunkIndex) => {
-      const unsubscribe = onSnapshot(
-        query(
-          collection(db, "registry_premises"),
-          where(documentId(), "in", premiseIdChunk),
-        ),
-        (snapshot) => {
-          const rows = {};
-
-          snapshot.docs.forEach((premiseSnapshot) => {
-            rows[premiseSnapshot.id] = {
-              id: premiseSnapshot.id,
-              ...premiseSnapshot.data(),
-            };
-          });
-
-          chunkResults.set(chunkIndex, rows);
-          publish();
-        },
-        (error) => {
-          console.error("[SALES TB ROW REPORT][PREMISE JOIN]", error);
-          setLoadError(
-            error?.message ||
-              "The live field-address join could not be opened.",
-          );
-          chunkResults.set(chunkIndex, {});
-          publish();
-        },
-      );
-
-      unsubscribes.push(unsubscribe);
-    });
-
-    return () => {
-      active = false;
-      unsubscribes.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [premiseIdsKey]);
-
-  useEffect(() => {
-    setNoAccessTrns([]);
-    setTrnsReady(false);
-
-    if (!decodedTbId) {
-      setTrnsReady(true);
-      return undefined;
-    }
-
-    const unsubscribe = onSnapshot(
-      query(
-        collection(db, "trns"),
-        where(
-          "targetedBatchContext.tbId",
-          "==",
-          decodedTbId,
-        ),
-      ),
-      (snapshot) => {
-        setNoAccessTrns(
-          snapshot.docs
-            .map((trnSnapshot) => ({
-              id: trnSnapshot.id,
-              ...trnSnapshot.data(),
-            }))
-            .filter(
-              (trn) =>
-                normalizeUpper(trn?.accessData?.access?.hasAccess) === "NO",
-            )
-            .sort(
-              (left, right) =>
-                toMillis(getAttemptDate(left)) -
-                toMillis(getAttemptDate(right)),
-            ),
-        );
-        setTrnsReady(true);
-      },
-      (error) => {
-        console.error("[SALES TB ROW REPORT][NO ACCESS STREAM]", error);
-        setLoadError(
-          error?.message ||
-            "The live No Access detail stream could not be opened.",
-        );
-        setTrnsReady(true);
-      },
-    );
-
-    return () => unsubscribe();
-  }, [decodedTbId]);
-
-  const rows = useMemo(
-    () =>
-      tbRows.map((row) =>
-        buildReportRow({
-          row,
-          batch,
-          salesById,
-          premiseById,
-          tbId: decodedTbId,
-        }),
-      ),
-    [
-      tbRows,
-      batch,
-      salesById,
-      premiseById,
-      decodedTbId,
-    ],
-  );
-
-  const attemptsByRowId = useMemo(() => {
-    return noAccessTrns.reduce((accumulator, trn) => {
-      const rowId = cleanText(trn?.targetedBatchContext?.rowId);
-
-      if (!rowId) return accumulator;
-
-      if (!accumulator[rowId]) accumulator[rowId] = [];
-      accumulator[rowId].push(trn);
-
-      return accumulator;
-    }, {});
-  }, [noAccessTrns]);
+  const loadError = cleanText(sync?.error?.message);
 
   const filterOptions = useMemo(
     () => ({
-      wards: uniqueNonBlank(rows.map((row) => row.ward)),
-      executions: uniqueNonBlank(
-        rows.map((row) => row.executionStatus),
-      ),
+      wards: uniqueNonBlank(rows.map((row) => row.scope.wardLabel)),
+      executions: uniqueNonBlank(rows.map((row) => row.execution.status)),
     }),
     [rows],
   );
@@ -1097,50 +367,47 @@ export default function SalesBatchReportPage() {
       const searchable = normalizeUpper(
         [
           row.rowNo,
-          row.account,
-          row.customer,
-          row.ward,
-          row.originalMeter,
-          row.fieldMeter,
-          row.originalAddress,
-          row.fieldAddress,
-          row.sgCode,
-          row.categoryReason,
+          row.source.accountNumber,
+          row.source.customerName,
+          row.scope.wardLabel,
+          row.originalMeter.number,
+          row.fieldMeter.number || "PENDING",
+          row.addresses.original,
+          row.addresses.field || "PENDING",
+          row.source.sgCode,
+          row.source.categoryReason,
         ].join(" "),
       );
 
       if (search && !searchable.includes(search)) return false;
       if (
         executionFilter !== ALL_FILTER &&
-        row.executionStatus !== executionFilter
+        row.execution.status !== executionFilter
       ) {
         return false;
       }
-      if (wardFilter !== ALL_FILTER && row.ward !== wardFilter) {
+      if (
+        wardFilter !== ALL_FILTER &&
+        row.scope.wardLabel !== wardFilter
+      ) {
         return false;
       }
       if (
         meterMatchFilter !== ALL_FILTER &&
-        row.meterMatch !== meterMatchFilter
+        row.comparison.meterMatch !== meterMatchFilter
       ) {
         return false;
       }
       if (
         addressMatchFilter !== ALL_FILTER &&
-        row.addressMatch !== addressMatchFilter
+        row.comparison.addressMatch !== addressMatchFilter
       ) {
         return false;
       }
-      if (
-        noAccessFilter === "HAS_NA" &&
-        row.noAccessCount === 0
-      ) {
+      if (noAccessFilter === "HAS_NA" && row.noAccess.count === 0) {
         return false;
       }
-      if (
-        noAccessFilter === "NO_NA" &&
-        row.noAccessCount > 0
-      ) {
+      if (noAccessFilter === "NO_NA" && row.noAccess.count > 0) {
         return false;
       }
 
@@ -1156,45 +423,6 @@ export default function SalesBatchReportPage() {
     noAccessFilter,
   ]);
 
-  const summary = useMemo(() => {
-    return rows.reduce(
-      (accumulator, row) => {
-        accumulator.total += 1;
-
-        if (row.executionStatus === "COMPLETED") {
-          accumulator.completed += 1;
-        } else if (row.executionStatus === "IN_PROGRESS") {
-          accumulator.inProgress += 1;
-        } else {
-          accumulator.notStarted += 1;
-        }
-
-        if (cleanText(row.fieldWork?.meterId)) {
-          accumulator.metersDiscovered += 1;
-        }
-
-        accumulator.noAccessAttempts += row.noAccessCount;
-
-        return accumulator;
-      },
-      {
-        total: 0,
-        notStarted: 0,
-        inProgress: 0,
-        completed: 0,
-        metersDiscovered: 0,
-        noAccessAttempts: 0,
-      },
-    );
-  }, [rows]);
-
-  const allReady =
-    parentReady &&
-    rowsReady &&
-    salesReady &&
-    premisesReady &&
-    trnsReady;
-
   function clearFilters() {
     setSearchText("");
     setExecutionFilter(ALL_FILTER);
@@ -1204,7 +432,20 @@ export default function SalesBatchReportPage() {
     setNoAccessFilter(ALL_FILTER);
   }
 
-  if (!parentReady || !rowsReady) {
+  if (!decodedTbId) {
+    return (
+      <section style={styles.page}>
+        <Link to="/sales/reporting" style={styles.backButton}>
+          ← Back to Sales Reporting
+        </Link>
+        <div style={styles.errorState}>
+          The Targeted Batch ID is missing from the route.
+        </div>
+      </section>
+    );
+  }
+
+  if (!baseReady) {
     return (
       <section style={styles.page}>
         <Link to="/sales/reporting" style={styles.backButton}>
@@ -1224,6 +465,8 @@ export default function SalesBatchReportPage() {
         <Link to="/sales/reporting" style={styles.backButton}>
           ← Back to Sales Reporting
         </Link>
+
+        {loadError ? <div style={styles.errorState}>{loadError}</div> : null}
 
         <div style={styles.errorState}>
           Permanent Targeted Batch {decodedTbId || "NAv"} was not found.
@@ -1247,55 +490,33 @@ export default function SalesBatchReportPage() {
 
       <header style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>
-            Sales / Reporting / Targeted Batch
-          </p>
+          <p style={styles.eyebrow}>Sales / Reporting / Targeted Batch</p>
           <h1 style={styles.title}>Targeted Batch Report</h1>
           <p style={styles.subtitle}>{batch.id}</p>
         </div>
 
-        <Badge value={batch?.execution?.status || batch?.status} />
+        <Badge value={batch.execution.status} />
       </header>
 
-      {loadError ? (
-        <div style={styles.errorState}>{loadError}</div>
-      ) : null}
+      {loadError ? <div style={styles.errorState}>{loadError}</div> : null}
 
       <section style={styles.batchPanel}>
         <div style={styles.infoGrid}>
           <InfoItem
             label="Sales Period"
-            value={getSalesPeriod(batch)}
+            value={batch.selection.salesPeriodLabel}
           />
           <InfoItem
             label="Selection Reason"
-            value={batch?.selection?.reason}
+            value={batch.selection.reason}
           />
-          <InfoItem
-            label="Ward"
-            value={firstText(
-              batch?.scope?.wardName,
-              batch?.scope?.wardNumber,
-              batch?.scope?.wardPcode,
-            )}
-          />
+          <InfoItem label="Ward" value={batch.scope.wardLabel} />
           <InfoItem
             label="Allocated To"
-            value={
-              firstText(
-                batch?.allocation?.targetName,
-                batch?.allocation?.target?.name,
-              ) || "Unallocated"
-            }
+            value={batch.allocation.targetLabel}
           />
-          <InfoItem
-            label="Acceptance"
-            value={batch?.acceptance?.status}
-          />
-          <InfoItem
-            label="Execution"
-            value={batch?.execution?.status}
-          />
+          <InfoItem label="Acceptance" value={batch.acceptance.status} />
+          <InfoItem label="Execution" value={batch.execution.status} />
         </div>
       </section>
 
@@ -1335,9 +556,7 @@ export default function SalesBatchReportPage() {
       <section style={styles.panel}>
         <div style={styles.panelHeader}>
           <div>
-            <h2 style={styles.panelTitle}>
-              Targeted Batch Field Results
-            </h2>
+            <h2 style={styles.panelTitle}>Targeted Batch Field Results</h2>
             <p style={styles.panelSubtitle}>
               Original Sales values are shown next to live field results.
             </p>
@@ -1365,15 +584,13 @@ export default function SalesBatchReportPage() {
             <span style={styles.filterLabel}>Execution</span>
             <select
               value={executionFilter}
-              onChange={(event) =>
-                setExecutionFilter(event.target.value)
-              }
+              onChange={(event) => setExecutionFilter(event.target.value)}
               style={styles.filterInput}
             >
               <option value={ALL_FILTER}>All Execution States</option>
-              {filterOptions.executions.map((status) => (
-                <option key={status} value={status}>
-                  {status.replaceAll("_", " ")}
+              {filterOptions.executions.map((execution) => (
+                <option key={execution} value={execution}>
+                  {execution.replaceAll("_", " ")}
                 </option>
               ))}
             </select>
@@ -1399,9 +616,7 @@ export default function SalesBatchReportPage() {
             <span style={styles.filterLabel}>Meter Match</span>
             <select
               value={meterMatchFilter}
-              onChange={(event) =>
-                setMeterMatchFilter(event.target.value)
-              }
+              onChange={(event) => setMeterMatchFilter(event.target.value)}
               style={styles.filterInput}
             >
               <option value={ALL_FILTER}>All Meter Matches</option>
@@ -1415,9 +630,7 @@ export default function SalesBatchReportPage() {
             <span style={styles.filterLabel}>Address Match</span>
             <select
               value={addressMatchFilter}
-              onChange={(event) =>
-                setAddressMatchFilter(event.target.value)
-              }
+              onChange={(event) => setAddressMatchFilter(event.target.value)}
               style={styles.filterInput}
             >
               <option value={ALL_FILTER}>All Address Matches</option>
@@ -1431,9 +644,7 @@ export default function SalesBatchReportPage() {
             <span style={styles.filterLabel}>No Access</span>
             <select
               value={noAccessFilter}
-              onChange={(event) =>
-                setNoAccessFilter(event.target.value)
-              }
+              onChange={(event) => setNoAccessFilter(event.target.value)}
               style={styles.filterInput}
             >
               <option value={ALL_FILTER}>All Rows</option>
@@ -1495,44 +706,42 @@ export default function SalesBatchReportPage() {
               {filteredRows.map((row) => (
                 <tr key={row.id}>
                   <Td>{row.rowNo || "NAv"}</Td>
-                  <Td>{row.account}</Td>
-                  <Td>{row.customer}</Td>
-                  <Td>{row.ward}</Td>
+                  <Td>{row.source.accountNumber}</Td>
+                  <Td>{row.source.customerName}</Td>
+                  <Td>{row.scope.wardLabel}</Td>
                   <Td>
                     <strong style={styles.primaryCell}>
-                      {row.originalMeter}
+                      {row.originalMeter.number}
                     </strong>
                   </Td>
                   <Td>
                     <strong style={styles.primaryCell}>
-                      {row.fieldMeter}
+                      {row.fieldMeter.number || "PENDING"}
                     </strong>
                   </Td>
                   <Td>
-                    <Badge value={row.meterMatch} />
+                    <Badge value={row.comparison.meterMatch} />
                   </Td>
                   <Td>
                     <span style={styles.addressCell}>
-                      {row.originalAddress}
+                      {row.addresses.original}
                     </span>
                   </Td>
                   <Td>
                     <span style={styles.addressCell}>
-                      {row.fieldAddress}
+                      {row.addresses.field || "PENDING"}
                     </span>
                   </Td>
                   <Td>
-                    <Badge value={row.addressMatch} />
+                    <Badge value={row.comparison.addressMatch} />
                   </Td>
                   <Td>
-                    <Badge value={row.executionStatus} />
+                    <Badge value={row.execution.status} />
                   </Td>
                   <Td>
-                    <Badge value={row.premiseStatus} />
-                    {row.premiseId ? (
-                      <div style={styles.secondaryText}>
-                        {row.premiseId}
-                      </div>
+                    <Badge value={row.premise.status} />
+                    {row.premise.id ? (
+                      <div style={styles.secondaryText}>{row.premise.id}</div>
                     ) : null}
                   </Td>
                   <Td>
@@ -1540,22 +749,22 @@ export default function SalesBatchReportPage() {
                       type="button"
                       style={{
                         ...styles.noAccessButton,
-                        ...(row.noAccessCount === 0
+                        ...(row.noAccess.count === 0
                           ? styles.noAccessButtonDisabled
                           : null),
                       }}
-                      disabled={row.noAccessCount === 0}
+                      disabled={row.noAccess.count === 0}
                       onClick={() => setSelectedNoAccessRow(row)}
                       title={
-                        row.noAccessCount > 0
+                        row.noAccess.count > 0
                           ? "Open No Access details"
                           : "No No Access attempts"
                       }
                     >
-                      {formatNumber(row.noAccessCount)}
+                      {formatNumber(row.noAccess.count)}
                     </button>
                   </Td>
-                  <Td>{formatDateTime(row.lastActivity)}</Td>
+                  <Td>{formatDateTime(row.execution.lastActivityAtMs)}</Td>
                   <Td>
                     <button
                       type="button"
@@ -1575,9 +784,6 @@ export default function SalesBatchReportPage() {
       {selectedNoAccessRow ? (
         <NoAccessModal
           row={selectedNoAccessRow}
-          attempts={
-            attemptsByRowId[selectedNoAccessRow.id] || []
-          }
           onClose={() => setSelectedNoAccessRow(null)}
         />
       ) : null}
@@ -1990,7 +1196,7 @@ const styles = {
 
   modalEyebrow: {
     margin: 0,
-    color: "#64748b",
+    color: "#2563eb",
     fontSize: 10,
     fontWeight: 900,
     textTransform: "uppercase",

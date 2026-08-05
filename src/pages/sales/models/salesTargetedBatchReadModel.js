@@ -6,6 +6,15 @@ export function normalizeUpper(value) {
   return cleanText(value).toUpperCase();
 }
 
+export function firstText(...values) {
+  for (const value of values) {
+    const text = cleanText(value);
+    if (text && text !== "NAv") return text;
+  }
+
+  return "";
+}
+
 export function toMillis(value) {
   if (!value) return 0;
 
@@ -72,7 +81,7 @@ function getProgress(counts = {}) {
   };
 }
 
-function getLastActivityAtMs(batch = {}) {
+function getBatchLastActivityAtMs(batch = {}) {
   return [
     batch?.metadata?.updatedAt,
     batch?.execution?.completedAt,
@@ -97,8 +106,18 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
 
   const salesPeriodFrom = cleanText(selection?.salesPeriodFrom);
   const salesPeriodTo = cleanText(selection?.salesPeriodTo);
-  const targetType = normalizeUpper(allocation?.targetType) || "UNALLOCATED";
-  const targetName = cleanText(allocation?.targetName);
+  const allocationTarget = allocation?.target || {};
+  const targetType =
+    normalizeUpper(allocation?.targetType || allocationTarget?.type) ||
+    "UNALLOCATED";
+  const targetName = firstText(
+    allocation?.targetName,
+    allocationTarget?.name,
+  );
+  const targetId = firstText(
+    allocation?.targetId,
+    allocationTarget?.id,
+  );
 
   return {
     id: cleanText(id || batch?.id),
@@ -126,7 +145,7 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
     allocation: {
       status: normalizeUpper(allocation?.status) || "UNALLOCATED",
       targetType,
-      targetId: cleanText(allocation?.targetId) || null,
+      targetId: targetId || null,
       targetName: targetName || null,
       targetLabel: getTargetLabel(targetType, targetName),
       memberCount: asNonNegativeNumber(allocation?.memberCount),
@@ -148,7 +167,7 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
 
     createdAtMs: toMillis(batch?.metadata?.createdAt),
     updatedAtMs: toMillis(batch?.metadata?.updatedAt),
-    lastActivityAtMs: getLastActivityAtMs(batch),
+    lastActivityAtMs: getBatchLastActivityAtMs(batch),
   };
 }
 
@@ -173,4 +192,650 @@ export function buildTargetedBatchHeaders(documentSnapshots = []) {
       ),
     )
     .sort(sortTargetedBatchHeaders);
+}
+
+export function uniqueNonBlank(values = []) {
+  return Array.from(
+    new Set(values.map(cleanText).filter(Boolean)),
+  ).sort((left, right) =>
+    left.localeCompare(right, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+}
+
+function normalizeMeter(value) {
+  return normalizeUpper(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeAddressPart(value) {
+  return normalizeUpper(value).replace(/[^A-Z0-9]/g, "").trim();
+}
+
+function normalizeBooleanMatch(value) {
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+
+  const normalized = normalizeUpper(value);
+
+  if (["TRUE", "YES", "MATCH", "MATCHED"].includes(normalized)) {
+    return "TRUE";
+  }
+
+  if (["FALSE", "NO", "MISMATCH", "NOT_MATCHED"].includes(normalized)) {
+    return "FALSE";
+  }
+
+  return null;
+}
+
+function getBatchReference(sales = {}, tbId, rowId) {
+  const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
+  const normalizedTbId = cleanText(tbId);
+  const normalizedRowId = cleanText(rowId);
+
+  return (
+    refs.find(
+      (reference) =>
+        cleanText(reference?.id || reference?.tbId) === normalizedTbId &&
+        cleanText(reference?.rowId || reference?.tbRowId) === normalizedRowId,
+    ) ||
+    refs.find(
+      (reference) =>
+        cleanText(reference?.id || reference?.tbId) === normalizedTbId,
+    ) ||
+    null
+  );
+}
+
+function getFieldWork(reference = {}) {
+  const fieldWork = reference?.fieldWork;
+
+  return fieldWork &&
+    typeof fieldWork === "object" &&
+    !Array.isArray(fieldWork)
+    ? fieldWork
+    : {};
+}
+
+function getWard(row = {}, batch = {}) {
+  return (
+    firstText(
+      row?.location?.wardNumberLabel,
+      row?.scope?.wardName,
+      row?.scope?.wardNumber,
+      row?.scope?.wardPcode,
+      batch?.scope?.wardName,
+      batch?.scope?.wardNumber,
+      batch?.scope?.wardPcode,
+    ) || "NAv"
+  );
+}
+
+function getOriginalMeter(row = {}, sales = {}) {
+  return (
+    firstText(
+      row?.meter?.numberRaw,
+      row?.meter?.numberNormalized,
+      sales?.meterNo,
+      sales?.meterNoNormalized,
+      sales?.MeterNumber,
+      row?.salesAllMeterId,
+    ) || "NAv"
+  );
+}
+
+function getFieldMeterNumber(fieldWork = {}, row = {}) {
+  return firstText(
+    fieldWork?.discoveredMeterNo,
+    fieldWork?.discoveredMeterNumber,
+    fieldWork?.foundMeterNo,
+    fieldWork?.foundMeterNumber,
+    fieldWork?.meterNo,
+    fieldWork?.meterNumber,
+    row?.execution?.foundMeterNoNormalized,
+    row?.execution?.foundMeterNumberNormalized,
+    row?.execution?.foundMeterNo,
+    row?.execution?.foundMeterNumber,
+    row?.execution?.meterNoFound,
+    row?.execution?.meterNumberFound,
+    row?.execution?.foundMeter?.numberNormalized,
+    row?.execution?.foundMeter?.number,
+    row?.execution?.result?.meterNoNormalized,
+    row?.execution?.result?.meterNumberNormalized,
+    row?.execution?.result?.meterNo,
+    row?.execution?.result?.meterNumber,
+  );
+}
+
+function getFieldMeterId(row = {}, fieldWork = {}) {
+  return firstText(
+    fieldWork?.meterId,
+    row?.refs?.meterId,
+    row?.execution?.meterId,
+    row?.execution?.result?.meterId,
+    row?.execution?.foundMeter?.id,
+  );
+}
+
+function getPremiseId(row = {}, fieldWork = {}) {
+  return firstText(
+    fieldWork?.premiseId,
+    row?.refs?.premiseId,
+    row?.execution?.premiseId,
+    row?.execution?.result?.premiseId,
+  );
+}
+
+function getErfId(row = {}, fieldWork = {}) {
+  return firstText(
+    row?.refs?.erfId,
+    fieldWork?.erfId,
+    row?.execution?.erfId,
+    row?.execution?.result?.erfId,
+  );
+}
+
+function getOriginalAddress(row = {}, sales = {}) {
+  const addressLine1 = firstText(
+    row?.location?.addressLine1,
+    sales?.addressLine1,
+    sales?.AddressLine1,
+    sales?.PostalAddress1,
+  );
+  const addressLine2 = firstText(
+    row?.location?.addressLine2,
+    sales?.addressLine2,
+    sales?.AddressLine2,
+    sales?.PostalAddress2,
+  );
+  const town = firstText(
+    row?.location?.town,
+    sales?.town,
+    sales?.Town,
+    sales?.PostalAddressTown,
+  );
+
+  return [addressLine1, addressLine2, town].filter(Boolean).join(", ") || "NAv";
+}
+
+function getFieldAddress(premise = {}) {
+  const address = premise?.address || {};
+  const street = [
+    cleanText(address?.strNo),
+    cleanText(address?.strName),
+    cleanText(address?.strType),
+  ]
+    .filter((part) => part && part !== "NAv")
+    .join(" ");
+
+  return (
+    firstText(
+      street,
+      premise?.addressText,
+      premise?.location?.addressLine1,
+    ) || ""
+  );
+}
+
+function parseStreetNumberAndName(value) {
+  const firstAddressSegment = cleanText(value).split(",")[0].trim();
+
+  if (!firstAddressSegment) {
+    return {
+      strNo: "",
+      strName: "",
+    };
+  }
+
+  const parts = firstAddressSegment
+    .split(/\s+/)
+    .map(cleanText)
+    .filter(Boolean);
+
+  return {
+    strNo: parts[0] || "",
+    strName: parts.slice(1).join(" "),
+  };
+}
+
+function getOriginalAddressParts(row = {}, sales = {}) {
+  const explicitStrNo = firstText(
+    row?.location?.strNo,
+    row?.location?.address?.strNo,
+    sales?.strNo,
+    sales?.address?.strNo,
+  );
+  const explicitStrName = firstText(
+    row?.location?.strName,
+    row?.location?.address?.strName,
+    sales?.strName,
+    sales?.address?.strName,
+  );
+
+  if (explicitStrNo || explicitStrName) {
+    return {
+      strNo: explicitStrNo,
+      strName: explicitStrName,
+    };
+  }
+
+  return parseStreetNumberAndName(
+    firstText(
+      row?.location?.addressLine1,
+      sales?.addressLine1,
+      sales?.AddressLine1,
+      sales?.PostalAddress1,
+    ),
+  );
+}
+
+function getFieldAddressParts(premise = {}) {
+  const address = premise?.address || {};
+
+  return {
+    strNo: cleanText(address?.strNo),
+    strName: cleanText(address?.strName),
+  };
+}
+
+function getMeterMatch({ originalMeter, fieldMeter, fieldWork }) {
+  const explicit = normalizeBooleanMatch(fieldWork?.meterMatch);
+  if (explicit) return explicit;
+
+  const original = normalizeMeter(originalMeter);
+  const field = normalizeMeter(fieldMeter);
+
+  if (!field || !original) return "PENDING";
+  return original === field ? "TRUE" : "FALSE";
+}
+
+function getAddressMatch({ originalAddressParts, fieldAddressParts }) {
+  const originalStrNo = normalizeAddressPart(originalAddressParts?.strNo);
+  const originalStrName = normalizeAddressPart(originalAddressParts?.strName);
+  const fieldStrNo = normalizeAddressPart(fieldAddressParts?.strNo);
+  const fieldStrName = normalizeAddressPart(fieldAddressParts?.strName);
+
+  if (!originalStrNo || !originalStrName || !fieldStrNo || !fieldStrName) {
+    return "PENDING";
+  }
+
+  return originalStrNo === fieldStrNo && originalStrName === fieldStrName
+    ? "TRUE"
+    : "FALSE";
+}
+
+function getExecutionStatus(row = {}, fieldWork = {}) {
+  return (
+    normalizeUpper(firstText(fieldWork?.status, row?.execution?.status)) ||
+    "NOT_STARTED"
+  );
+}
+
+function getNoAccessCount(fieldWork = {}) {
+  return Array.isArray(fieldWork?.noAccess) ? fieldWork.noAccess.length : 0;
+}
+
+function getLastActivityAtMs(row = {}, fieldWork = {}, reference = {}) {
+  return [
+    fieldWork?.updatedAt,
+    fieldWork?.submittedAt,
+    reference?.date,
+    reference?.updatedAt,
+    row?.execution?.completedAt,
+    row?.execution?.startedAt,
+    row?.metadata?.updatedAt,
+    row?.metadata?.createdAt,
+  ].reduce(
+    (latestMilliseconds, value) =>
+      Math.max(latestMilliseconds, toMillis(value)),
+    0,
+  );
+}
+
+function getCategoryOrReason(row = {}) {
+  return (
+    firstText(
+      row?.selection?.category,
+      row?.selection?.categoryCode,
+      row?.selection?.actionReason,
+      row?.selection?.reason,
+    ) || "NAv"
+  );
+}
+
+function getAccount(row = {}, sales = {}) {
+  return (
+    firstText(
+      row?.customer?.accountNumber,
+      sales?.accountNumber,
+      sales?.AccountNumber,
+    ) || "NAv"
+  );
+}
+
+function getCustomer(row = {}, sales = {}) {
+  return firstText(row?.customer?.customerName, sales?.customerName) || "NAv";
+}
+
+function getSgCode(row = {}, sales = {}) {
+  return (
+    firstText(
+      row?.location?.sgCode,
+      row?.location?.standNumber,
+      sales?.sgCode,
+      sales?.standNumber,
+    ) || "NAv"
+  );
+}
+
+function getAttemptReason(attempt = {}) {
+  return (
+    firstText(
+      attempt?.accessData?.access?.reason,
+      attempt?.accessData?.reason,
+      attempt?.reason,
+    ) || "NAv"
+  );
+}
+
+function getAttemptUser(attempt = {}) {
+  return (
+    firstText(
+      attempt?.metadata?.createdByUser,
+      attempt?.metadata?.updatedByUser,
+      attempt?.metadata?.createdByUid,
+    ) || "NAv"
+  );
+}
+
+function getAttemptDate(attempt = {}) {
+  return (
+    attempt?.capturedAt ||
+    attempt?.metadata?.createdAt ||
+    attempt?.metadata?.updatedAt
+  );
+}
+
+function getAttemptPoint(attempt = {}) {
+  const gps = attempt?.location?.gps || attempt?.location || {};
+  const lat = Number(gps?.lat);
+  const lng = Number(gps?.lng);
+
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function getAttemptMediaUrls(attempt = {}) {
+  return (Array.isArray(attempt?.media) ? attempt.media : [])
+    .filter((item) => item?.tag === "noAccessPhoto")
+    .map((item) => firstText(item?.url, item?.uri))
+    .filter(Boolean);
+}
+
+function normalizeNoAccessAttempt(attempt = {}) {
+  return {
+    id: cleanText(attempt?.id),
+    capturedAtMs: toMillis(getAttemptDate(attempt)) || null,
+    reason: getAttemptReason(attempt),
+    capturedBy: getAttemptUser(attempt),
+    point: getAttemptPoint(attempt),
+    mediaUrls: getAttemptMediaUrls(attempt),
+  };
+}
+
+function buildAttemptsByRowId(noAccessTrns = []) {
+  const attemptsByRowId = {};
+
+  noAccessTrns.forEach((attempt) => {
+    if (normalizeUpper(attempt?.accessData?.access?.hasAccess) !== "NO") {
+      return;
+    }
+
+    const rowId = cleanText(attempt?.targetedBatchContext?.rowId);
+    if (!rowId) return;
+
+    if (!attemptsByRowId[rowId]) attemptsByRowId[rowId] = [];
+    attemptsByRowId[rowId].push(normalizeNoAccessAttempt(attempt));
+  });
+
+  Object.values(attemptsByRowId).forEach((attempts) => {
+    attempts.sort(
+      (left, right) =>
+        Number(left?.capturedAtMs || 0) - Number(right?.capturedAtMs || 0),
+    );
+  });
+
+  return attemptsByRowId;
+}
+
+export function getTargetedBatchSalesIds(rows = []) {
+  return uniqueNonBlank(rows.map((row) => row?.salesAllMeterId));
+}
+
+export function getTargetedBatchPremiseIds({
+  rows = [],
+  salesById = {},
+  tbId = "",
+}) {
+  return uniqueNonBlank(
+    rows.map((row) => {
+      const sales = salesById[cleanText(row?.salesAllMeterId)] || {};
+      const reference = getBatchReference(sales, tbId, row?.id);
+      return getPremiseId(row, getFieldWork(reference));
+    }),
+  );
+}
+
+export function normalizeTargetedBatchReportRow({
+  row = {},
+  batch = {},
+  salesById = {},
+  premiseById = {},
+  attemptsByRowId = {},
+  tbId = "",
+}) {
+  const salesId = cleanText(row?.salesAllMeterId);
+  const sales = salesById[salesId] || {};
+  const reference = getBatchReference(sales, tbId, row?.id);
+  const fieldWork = getFieldWork(reference);
+  const premiseId = getPremiseId(row, fieldWork);
+  const premise = premiseById[premiseId] || {};
+  const originalMeterNumber = getOriginalMeter(row, sales);
+  const fieldMeterNumber = getFieldMeterNumber(fieldWork, row);
+  const fieldMeterId = getFieldMeterId(row, fieldWork);
+  const erfId = getErfId(row, fieldWork);
+  const originalAddress = getOriginalAddress(row, sales);
+  const fieldAddress = getFieldAddress(premise);
+  const originalAddressParts = getOriginalAddressParts(row, sales);
+  const fieldAddressParts = getFieldAddressParts(premise);
+  const noAccessCount = getNoAccessCount(fieldWork);
+  const noAccessAttempts = attemptsByRowId[cleanText(row?.id)] || [];
+
+  return {
+    id: cleanText(row?.id),
+    tbId: cleanText(tbId || row?.tbId),
+    rowNo: Number(row?.rowNo || 0),
+
+    scope: {
+      lmPcode: firstText(row?.scope?.lmPcode, batch?.scope?.lmPcode),
+      wardPcode: firstText(row?.scope?.wardPcode, batch?.scope?.wardPcode),
+      wardLabel: getWard(row, batch),
+    },
+
+    source: {
+      salesId,
+      accountNumber: getAccount(row, sales),
+      customerName: getCustomer(row, sales),
+      sgCode: getSgCode(row, sales),
+      categoryReason: getCategoryOrReason(row),
+    },
+
+    originalMeter: {
+      number: originalMeterNumber,
+      normalizedNumber: normalizeMeter(originalMeterNumber) || null,
+    },
+
+    fieldMeter: {
+      id: fieldMeterId || null,
+      number: fieldMeterNumber || null,
+      normalizedNumber: normalizeMeter(fieldMeterNumber) || null,
+      type: null,
+      state: null,
+      point: null,
+      hasMeter: Boolean(fieldMeterId || fieldMeterNumber),
+      canOpenMap: Boolean(fieldMeterId && fieldMeterNumber),
+      linkSource: fieldMeterId
+        ? cleanText(fieldWork?.meterId)
+          ? "sales.tbRefs.fieldWork.meterId"
+          : cleanText(row?.refs?.meterId)
+            ? "tb_rows.refs.meterId"
+            : "execution"
+        : null,
+    },
+
+    premise: {
+      id: premiseId || null,
+      address: fieldAddress || null,
+      point: null,
+      status: premiseId ? "LINKED" : "PENDING",
+      linkSource: premiseId
+        ? cleanText(fieldWork?.premiseId)
+          ? "sales.tbRefs.fieldWork.premiseId"
+          : cleanText(row?.refs?.premiseId)
+            ? "tb_rows.refs.premiseId"
+            : "execution"
+        : null,
+    },
+
+    erf: {
+      id: erfId || null,
+      number: null,
+      geometry: null,
+      centroid: null,
+      linkSource: erfId
+        ? cleanText(row?.refs?.erfId)
+          ? "tb_rows.refs.erfId"
+          : "execution"
+        : null,
+    },
+
+    comparison: {
+      meterMatch: getMeterMatch({
+        originalMeter: originalMeterNumber,
+        fieldMeter: fieldMeterNumber,
+        fieldWork,
+      }),
+      addressMatch: getAddressMatch({
+        originalAddressParts,
+        fieldAddressParts,
+      }),
+    },
+
+    addresses: {
+      original: originalAddress,
+      field: fieldAddress || null,
+    },
+
+    execution: {
+      status: getExecutionStatus(row, fieldWork),
+      lastActivityAtMs: getLastActivityAtMs(row, fieldWork, reference) || null,
+    },
+
+    noAccess: {
+      count: noAccessCount,
+      attempts: noAccessAttempts,
+      detailedAttemptsAvailable:
+        noAccessCount === 0 || noAccessAttempts.length > 0,
+    },
+
+    linkage: {
+      salesIdSource: salesId ? "tb_rows.salesAllMeterId" : null,
+      premiseIdSource: premiseId
+        ? cleanText(fieldWork?.premiseId)
+          ? "sales.tbRefs.fieldWork.premiseId"
+          : cleanText(row?.refs?.premiseId)
+            ? "tb_rows.refs.premiseId"
+            : "execution"
+        : null,
+      meterIdSource: fieldMeterId
+        ? cleanText(fieldWork?.meterId)
+          ? "sales.tbRefs.fieldWork.meterId"
+          : cleanText(row?.refs?.meterId)
+            ? "tb_rows.refs.meterId"
+            : "execution"
+        : null,
+      erfIdSource: erfId
+        ? cleanText(row?.refs?.erfId)
+          ? "tb_rows.refs.erfId"
+          : "execution"
+        : null,
+    },
+  };
+}
+
+export function summarizeTargetedBatchReportRows(rows = []) {
+  return rows.reduce(
+    (summary, row) => {
+      summary.total += 1;
+
+      if (row?.execution?.status === "COMPLETED") {
+        summary.completed += 1;
+      } else if (row?.execution?.status === "IN_PROGRESS") {
+        summary.inProgress += 1;
+      } else {
+        summary.notStarted += 1;
+      }
+
+      if (
+        row?.fieldMeter?.linkSource ===
+        "sales.tbRefs.fieldWork.meterId"
+      ) {
+        summary.metersDiscovered += 1;
+      }
+      summary.noAccessAttempts += Number(row?.noAccess?.count || 0);
+
+      return summary;
+    },
+    {
+      total: 0,
+      notStarted: 0,
+      inProgress: 0,
+      completed: 0,
+      metersDiscovered: 0,
+      noAccessAttempts: 0,
+    },
+  );
+}
+
+export function buildTargetedBatchReport({
+  tbId = "",
+  batch = null,
+  rows = [],
+  salesById = {},
+  premiseById = {},
+  noAccessTrns = [],
+}) {
+  const attemptsByRowId = buildAttemptsByRowId(noAccessTrns);
+  const normalizedRows = rows
+    .map((row) =>
+      normalizeTargetedBatchReportRow({
+        row,
+        batch: batch || {},
+        salesById,
+        premiseById,
+        attemptsByRowId,
+        tbId,
+      }),
+    )
+    .sort((left, right) => {
+      const rowNumberDifference = Number(left?.rowNo || 0) - Number(right?.rowNo || 0);
+      if (rowNumberDifference !== 0) return rowNumberDifference;
+      return cleanText(left?.id).localeCompare(cleanText(right?.id));
+    });
+
+  return {
+    batch: batch ? normalizeTargetedBatchHeader(tbId, batch) : null,
+    rows: normalizedRows,
+    summary: summarizeTargetedBatchReportRows(normalizedRows),
+  };
 }
