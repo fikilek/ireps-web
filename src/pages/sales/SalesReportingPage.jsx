@@ -1,14 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
+import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { db } from "../../firebase";
+import { useGetTargetedBatchHeadersByLmQuery } from "../../redux/salesTargetedBatchApi";
 
 const ALL_FILTER = "ALL";
 
@@ -39,88 +34,15 @@ function getActiveWorkbaseName(activeWorkbase) {
   );
 }
 
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === "function") return value.toMillis();
-  if (typeof value?.seconds === "number") return value.seconds * 1000;
-
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function formatDateTime(value) {
-  const millis = toMillis(value);
-  if (!millis) return "NAv";
+  const millis = Number(value || 0);
+  if (!Number.isFinite(millis) || millis <= 0) return "NAv";
 
   return new Date(millis).toLocaleString();
 }
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
-}
-
-function getSalesPeriod(batch = {}) {
-  const from = cleanText(batch?.selection?.salesPeriodFrom);
-  const to = cleanText(batch?.selection?.salesPeriodTo);
-
-  if (from && to) return from === to ? from : `${from} to ${to}`;
-  return from || to || "NAv";
-}
-
-function getBatchProgress(batch = {}) {
-  const counts = batch?.counts || {};
-  const total = Number(counts?.totalRows || 0);
-  const started = Math.min(
-    total,
-    Math.max(0, Number(counts?.executionStartedRows || 0)),
-  );
-  const completed = Math.min(
-    total,
-    Math.max(0, Number(counts?.completedRows || 0)),
-  );
-
-  return {
-    total,
-    notStarted: Math.max(total - started, 0),
-    inProgress: Math.max(started - completed, 0),
-    completed,
-  };
-}
-
-function getLastActivityValue(batch = {}) {
-  const candidates = [
-    batch?.metadata?.updatedAt,
-    batch?.execution?.completedAt,
-    batch?.execution?.startedAt,
-    batch?.acceptance?.acceptedAt,
-    batch?.acceptance?.rejectedAt,
-    batch?.allocation?.completedAt,
-    batch?.metadata?.createdAt,
-  ];
-
-  return candidates.reduce((latest, value) => {
-    return toMillis(value) > toMillis(latest) ? value : latest;
-  }, null);
-}
-
-function getAcceptanceStatus(batch = {}) {
-  return normalizeUpper(batch?.acceptance?.status) || "NOT_READY";
-}
-
-function getExecutionStatus(batch = {}) {
-  return normalizeUpper(batch?.execution?.status) || "NOT_STARTED";
-}
-
-function getTargetType(batch = {}) {
-  return normalizeUpper(batch?.allocation?.targetType) || "UNALLOCATED";
-}
-
-function getTargetText(batch = {}) {
-  const targetName = cleanText(batch?.allocation?.targetName);
-  const targetType = getTargetType(batch);
-
-  if (!targetName) return "Unallocated";
-  return `${targetType} • ${targetName}`;
 }
 
 function statusTone(status = "") {
@@ -186,9 +108,38 @@ export default function SalesReportingPage() {
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
 
-  const [batches, setBatches] = useState([]);
-  const [streamReady, setStreamReady] = useState(false);
-  const [streamError, setStreamError] = useState(null);
+  const {
+    data: targetedBatchStream,
+    isError: isTargetedBatchQueryError,
+    error: targetedBatchQueryError,
+  } = useGetTargetedBatchHeadersByLmQuery(
+    activeLmPcode || skipToken,
+  );
+
+  const batches = useMemo(
+    () =>
+      Array.isArray(targetedBatchStream?.items)
+        ? targetedBatchStream.items
+        : [],
+    [targetedBatchStream?.items],
+  );
+
+  const streamStatus = cleanText(targetedBatchStream?.sync?.status);
+  const streamReady =
+    !activeLmPcode ||
+    streamStatus === "ready" ||
+    streamStatus === "error" ||
+    isTargetedBatchQueryError;
+  const streamError =
+    targetedBatchStream?.sync?.error ||
+    (isTargetedBatchQueryError
+      ? {
+          message:
+            targetedBatchQueryError?.error ||
+            targetedBatchQueryError?.data?.message ||
+            "The live reporting stream could not be opened.",
+        }
+      : null);
 
   const [searchText, setSearchText] = useState("");
   const [wardFilter, setWardFilter] = useState(ALL_FILTER);
@@ -197,49 +148,6 @@ export default function SalesReportingPage() {
   const [acceptanceFilter, setAcceptanceFilter] = useState(ALL_FILTER);
   const [executionFilter, setExecutionFilter] = useState(ALL_FILTER);
 
-  useEffect(() => {
-    setBatches([]);
-    setStreamReady(false);
-    setStreamError(null);
-
-    if (!activeLmPcode) {
-      setStreamReady(true);
-      return undefined;
-    }
-
-    const batchesQuery = query(
-      collection(db, "tb_uploads"),
-      where("scope.lmPcode", "==", activeLmPcode),
-    );
-
-    const unsubscribe = onSnapshot(
-      batchesQuery,
-      (snapshot) => {
-        const nextBatches = snapshot.docs
-          .map((documentSnapshot) => ({
-            id: documentSnapshot.id,
-            ...documentSnapshot.data(),
-          }))
-          .sort(
-            (left, right) =>
-              toMillis(right?.metadata?.createdAt) -
-              toMillis(left?.metadata?.createdAt),
-          );
-
-        setBatches(nextBatches);
-        setStreamReady(true);
-        setStreamError(null);
-      },
-      (error) => {
-        console.error("[SALES REPORTING][TB STREAM]", error);
-        setStreamError(error);
-        setStreamReady(true);
-      },
-    );
-
-    return () => unsubscribe();
-  }, [activeLmPcode]);
-
   const filterOptions = useMemo(() => {
     const unique = (values) =>
       Array.from(new Set(values.filter(Boolean))).sort((left, right) =>
@@ -247,18 +155,21 @@ export default function SalesReportingPage() {
       );
 
     return {
-      wards: unique(
-        batches.map(
-          (batch) =>
-            cleanText(batch?.scope?.wardName) ||
-            cleanText(batch?.scope?.wardNumber) ||
-            cleanText(batch?.scope?.wardPcode),
+      wards: unique(batches.map((batch) => cleanText(batch?.scope?.wardLabel))),
+      periods: unique(
+        batches.map((batch) =>
+          cleanText(batch?.selection?.salesPeriodLabel),
         ),
       ),
-      periods: unique(batches.map(getSalesPeriod)),
-      targetTypes: unique(batches.map(getTargetType)),
-      acceptanceStatuses: unique(batches.map(getAcceptanceStatus)),
-      executionStatuses: unique(batches.map(getExecutionStatus)),
+      targetTypes: unique(
+        batches.map((batch) => cleanText(batch?.allocation?.targetType)),
+      ),
+      acceptanceStatuses: unique(
+        batches.map((batch) => cleanText(batch?.acceptance?.status)),
+      ),
+      executionStatuses: unique(
+        batches.map((batch) => cleanText(batch?.execution?.status)),
+      ),
     };
   }, [batches]);
 
@@ -266,11 +177,15 @@ export default function SalesReportingPage() {
     const search = normalizeUpper(searchText);
 
     return batches.filter((batch) => {
-      const ward =
-        cleanText(batch?.scope?.wardName) ||
-        cleanText(batch?.scope?.wardNumber) ||
-        cleanText(batch?.scope?.wardPcode) ||
-        "NAv";
+      const ward = cleanText(batch?.scope?.wardLabel) || "NAv";
+      const salesPeriod =
+        cleanText(batch?.selection?.salesPeriodLabel) || "NAv";
+      const targetType =
+        cleanText(batch?.allocation?.targetType) || "UNALLOCATED";
+      const acceptanceStatus =
+        cleanText(batch?.acceptance?.status) || "NOT_READY";
+      const executionStatus =
+        cleanText(batch?.execution?.status) || "NOT_STARTED";
 
       const searchableText = normalizeUpper(
         [
@@ -280,34 +195,31 @@ export default function SalesReportingPage() {
           batch?.scope?.lmPcode,
           ward,
           batch?.allocation?.targetName,
-          batch?.allocation?.targetType,
-          getSalesPeriod(batch),
+          targetType,
+          salesPeriod,
         ].join(" "),
       );
 
       if (search && !searchableText.includes(search)) return false;
       if (wardFilter !== ALL_FILTER && ward !== wardFilter) return false;
-      if (
-        periodFilter !== ALL_FILTER &&
-        getSalesPeriod(batch) !== periodFilter
-      ) {
+      if (periodFilter !== ALL_FILTER && salesPeriod !== periodFilter) {
         return false;
       }
       if (
         targetTypeFilter !== ALL_FILTER &&
-        getTargetType(batch) !== targetTypeFilter
+        targetType !== targetTypeFilter
       ) {
         return false;
       }
       if (
         acceptanceFilter !== ALL_FILTER &&
-        getAcceptanceStatus(batch) !== acceptanceFilter
+        acceptanceStatus !== acceptanceFilter
       ) {
         return false;
       }
       if (
         executionFilter !== ALL_FILTER &&
-        getExecutionStatus(batch) !== executionFilter
+        executionStatus !== executionFilter
       ) {
         return false;
       }
@@ -327,12 +239,12 @@ export default function SalesReportingPage() {
   const summary = useMemo(() => {
     return batches.reduce(
       (accumulator, batch) => {
-        const progress = getBatchProgress(batch);
+        const progress = batch?.progress || {};
 
         accumulator.batches += 1;
-        accumulator.rows += progress.total;
-        accumulator.inProgress += progress.inProgress;
-        accumulator.completed += progress.completed;
+        accumulator.rows += Number(progress?.total || 0);
+        accumulator.inProgress += Number(progress?.inProgress || 0);
+        accumulator.completed += Number(progress?.completed || 0);
 
         return accumulator;
       },
@@ -522,10 +434,7 @@ export default function SalesReportingPage() {
             <thead>
               <tr>
                 <Th>Targeted Batch ID</Th>
-                <Th>Created</Th>
-                <Th>Sales Period</Th>
-                <Th>Selection Reason</Th>
-                <Th>Scope</Th>
+                <Th>Ward</Th>
                 <Th>Allocated To</Th>
                 <Th>Acceptance</Th>
                 <Th>Total Rows</Th>
@@ -540,7 +449,7 @@ export default function SalesReportingPage() {
             <tbody>
               {!streamReady ? (
                 <tr>
-                  <Td colSpan={13}>
+                  <Td colSpan={10}>
                     <div style={styles.loadingState}>
                       <span style={styles.spinner} />
                       Loading live Targeted Batch reports...
@@ -551,7 +460,7 @@ export default function SalesReportingPage() {
 
               {streamReady && streamError ? (
                 <tr>
-                  <Td colSpan={13}>
+                  <Td colSpan={10}>
                     <div style={styles.errorState}>
                       <strong>Targeted Batch report stream failed.</strong>
                       <span>
@@ -567,7 +476,7 @@ export default function SalesReportingPage() {
               !streamError &&
               filteredBatches.length === 0 ? (
                 <tr>
-                  <Td colSpan={13}>
+                  <Td colSpan={10}>
                     {batches.length === 0
                       ? "No permanent Targeted Batches exist in this workbase yet."
                       : "No Targeted Batches match the selected filters."}
@@ -578,39 +487,26 @@ export default function SalesReportingPage() {
               {streamReady &&
                 !streamError &&
                 filteredBatches.map((batch) => {
-                  const progress = getBatchProgress(batch);
-                  const ward =
-                    cleanText(batch?.scope?.wardName) ||
-                    cleanText(batch?.scope?.wardNumber) ||
-                    cleanText(batch?.scope?.wardPcode) ||
-                    "NAv";
+                  const progress = batch?.progress || {};
+                  const ward = cleanText(batch?.scope?.wardLabel) || "NAv";
 
                   return (
                     <tr key={batch.id}>
                       <Td>
                         <strong style={styles.batchId}>{batch.id}</strong>
                       </Td>
-                      <Td>{formatDateTime(batch?.metadata?.createdAt)}</Td>
-                      <Td>{getSalesPeriod(batch)}</Td>
                       <Td>
-                        {cleanText(batch?.selection?.reason) || "NAv"}
+                        <strong>{ward}</strong>
                       </Td>
+                      <Td>{batch?.allocation?.targetLabel || "Unallocated"}</Td>
                       <Td>
-                        <strong>
-                          {cleanText(batch?.scope?.lmName) ||
-                            activeWorkbaseName}
-                        </strong>
-                        <div style={styles.secondaryText}>Ward {ward}</div>
+                        <StatusBadge value={batch?.acceptance?.status} />
                       </Td>
-                      <Td>{getTargetText(batch)}</Td>
-                      <Td>
-                        <StatusBadge value={getAcceptanceStatus(batch)} />
-                      </Td>
-                      <Td>{formatNumber(progress.total)}</Td>
-                      <Td>{formatNumber(progress.notStarted)}</Td>
-                      <Td>{formatNumber(progress.inProgress)}</Td>
-                      <Td>{formatNumber(progress.completed)}</Td>
-                      <Td>{formatDateTime(getLastActivityValue(batch))}</Td>
+                      <Td>{formatNumber(progress?.total)}</Td>
+                      <Td>{formatNumber(progress?.notStarted)}</Td>
+                      <Td>{formatNumber(progress?.inProgress)}</Td>
+                      <Td>{formatNumber(progress?.completed)}</Td>
+                      <Td>{formatDateTime(batch?.lastActivityAtMs)}</Td>
                       <Td>
                         <Link
                           to={`/sales/reporting/${encodeURIComponent(batch.id)}`}
@@ -821,7 +717,7 @@ const styles = {
 
   table: {
     width: "100%",
-    minWidth: 1640,
+    minWidth: 1240,
     borderCollapse: "collapse",
   },
 

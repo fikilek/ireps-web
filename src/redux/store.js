@@ -32,6 +32,7 @@ import { mreadStagingApi } from "./mreadStagingApi";
 import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
 import targetedBatchDraftReducer from "./targetedBatchDraftSlice";
 import { demoSalesApi } from "./demoSalesApi";
+import { salesTargetedBatchApi } from "./salesTargetedBatchApi";
 
 export const store = configureStore({
   reducer: {
@@ -67,6 +68,7 @@ export const store = configureStore({
     [geofencesApi.reducerPath]: geofencesApi.reducer,
     [fwrLiveLocationsApi.reducerPath]: fwrLiveLocationsApi.reducer,
     [demoSalesApi.reducerPath]: demoSalesApi.reducer,
+    [salesTargetedBatchApi.reducerPath]: salesTargetedBatchApi.reducer,
   },
 
   middleware: (getDefaultMiddleware) =>
@@ -98,7 +100,8 @@ export const store = configureStore({
       .concat(usersApi.middleware)
       .concat(geofencesApi.middleware)
       .concat(fwrLiveLocationsApi.middleware)
-      .concat(demoSalesApi.middleware),
+      .concat(demoSalesApi.middleware)
+      .concat(salesTargetedBatchApi.middleware),
 });
 
 setupListeners(store.dispatch);
