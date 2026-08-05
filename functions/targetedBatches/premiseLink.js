@@ -2,6 +2,9 @@ import { Timestamp } from "firebase-admin/firestore";
 
 import {
   TARGETED_BATCH_COLLECTIONS,
+  findActorProfile,
+  getActorNameFromRequest,
+  normalizeMeterNo,
   normalizeText,
   normalizeUpper,
 } from "./helpers.js";
@@ -850,3 +853,821 @@ export async function createOrLinkTargetedBatchPremise({
     };
   });
 }
+
+function targetedBatchActorRole(profile = {}, token = {}) {
+  return normalizeUpper(
+    readFirstText(
+      token?.role,
+      token?.userRole,
+      token?.employmentRole,
+      token?.employment_role,
+      token?.irepsRole,
+      profile?.role,
+      profile?.userRole,
+      profile?.profile?.employment?.role,
+      profile?.employment?.role,
+      profile?.employment?.position,
+    ),
+  );
+}
+
+function targetedBatchActorSpId(profile = {}, token = {}) {
+  return readFirstText(
+    token?.spId,
+    token?.serviceProviderId,
+    token?.employmentServiceProviderId,
+    profile?.profile?.employment?.serviceProvider?.id,
+    profile?.employment?.serviceProvider?.id,
+    profile?.serviceProvider?.id,
+  );
+}
+
+function targetedBatchTeamMemberIds(team = {}) {
+  const ids = new Set();
+
+  const add = (value) => {
+    const id = normalizeText(value);
+    if (id) ids.add(id);
+  };
+
+  (Array.isArray(team?.memberUids) ? team.memberUids : []).forEach(add);
+  (
+    Array.isArray(team?.scope?.memberUserIds)
+      ? team.scope.memberUserIds
+      : []
+  ).forEach(add);
+
+  [
+    ...(Array.isArray(team?.members) ? team.members : []),
+    ...(Array.isArray(team?.users) ? team.users : []),
+  ].forEach((member) => {
+    if (typeof member === "string") {
+      add(member);
+      return;
+    }
+
+    add(member?.uid);
+    add(member?.id);
+    add(member?.userId);
+  });
+
+  return ids;
+}
+
+function getTargetedBatchAllocation(parent = {}) {
+  const allocation = parent?.allocation || {};
+  const target = allocation?.target || {};
+
+  return {
+    type: normalizeUpper(allocation?.targetType || target?.type),
+    id: readFirstText(allocation?.targetId, target?.id),
+  };
+}
+
+function assertTargetedBatchExecutionAuthority({
+  parent,
+  actor,
+  team,
+}) {
+  if (!["FWR", "SPV"].includes(actor?.role)) {
+    throw controlledError(
+      "TARGETED_BATCH_ACCESS_DENIED",
+      "Targeted Batch access denied.",
+      { role: actor?.role || "UNKNOWN" },
+    );
+  }
+
+  const allocation = getTargetedBatchAllocation(parent);
+
+  if (!allocation.id || !["TEAM", "SP"].includes(allocation.type)) {
+    throw controlledError(
+      "TARGETED_BATCH_ALLOCATION_TARGET_INVALID",
+      "A TEAM or Service Provider allocation is required.",
+      {
+        targetType: allocation.type || null,
+        targetId: allocation.id || null,
+      },
+    );
+  }
+
+  if (
+    allocation.type === "SP" &&
+    sameId(actor?.spId, allocation.id)
+  ) {
+    return;
+  }
+
+  if (
+    allocation.type === "TEAM" &&
+    targetedBatchTeamMemberIds(team).has(actor?.uid)
+  ) {
+    return;
+  }
+
+  throw controlledError(
+    "TARGETED_BATCH_NOT_ASSIGNED_TO_ACTOR",
+    "The Targeted Batch is not assigned to this field user.",
+    {
+      targetType: allocation.type,
+      targetId: allocation.id,
+      actorUid: actor?.uid || null,
+      actorSpId: actor?.spId || null,
+    },
+  );
+}
+
+function findSalesTargetedBatchReference({
+  tbRefs,
+  tbId,
+  rowId,
+}) {
+  if (!Array.isArray(tbRefs)) {
+    throw controlledError(
+      "SALES_TB_REFS_INVALID",
+      "The Sales document has an invalid tbRefs field.",
+    );
+  }
+
+  const matches = [];
+
+  tbRefs.forEach((reference, index) => {
+    if (sameId(reference?.id, tbId)) {
+      matches.push({ index, reference: reference || {} });
+    }
+  });
+
+  if (matches.length === 0) {
+    throw controlledError(
+      "SALES_TB_REF_NOT_FOUND",
+      `The Sales document is not linked to ${tbId}.`,
+    );
+  }
+
+  if (matches.length > 1) {
+    throw controlledError(
+      "SALES_TB_REF_DUPLICATE",
+      `The Sales document contains duplicate references to ${tbId}.`,
+      { count: matches.length },
+    );
+  }
+
+  const match = matches[0];
+  const existingRowId = normalizeText(match.reference?.rowId);
+
+  if (existingRowId && !sameId(existingRowId, rowId)) {
+    throw controlledError(
+      "SALES_TB_REF_ROW_CONFLICT",
+      `The Sales reference for ${tbId} belongs to another TB Row.`,
+      {
+        existingRowId,
+        expectedRowId: rowId,
+      },
+    );
+  }
+
+  return match;
+}
+
+function assertTargetedBatchMeterDiscoveryCorrelations({
+  parentRef,
+  rowRef,
+  salesRef,
+  premiseRef,
+  context,
+  parent,
+  row,
+  sales,
+  premise,
+}) {
+  assertSameId({
+    left: parent?.id || parentRef.id,
+    right: context.tbId,
+    code: "TARGETED_BATCH_PARENT_ID_MISMATCH",
+    message: "The Targeted Batch parent ID does not match the request.",
+  });
+
+  assertSameId({
+    left: row?.tbId,
+    right: context.tbId,
+    code: "TARGETED_BATCH_ROW_PARENT_MISMATCH",
+    message: "The Targeted Batch Row belongs to another parent batch.",
+  });
+
+  assertSameId({
+    left: row?.id || rowRef.id,
+    right: context.rowId,
+    code: "TARGETED_BATCH_ROW_ID_MISMATCH",
+    message: "The Targeted Batch Row ID does not match the request.",
+  });
+
+  assertSameId({
+    left: getAuthoritativeSalesDocId(row),
+    right: salesRef.id,
+    code: "TARGETED_BATCH_SALES_LINK_MISMATCH",
+    message: "The Targeted Batch Row points to another Sales document.",
+  });
+
+  assertSameId({
+    left: context.salesDocId,
+    right: salesRef.id,
+    code: "TARGETED_BATCH_SALES_LINK_MISMATCH",
+    message: "The Targeted Batch context points to another Sales document.",
+  });
+
+  assertSameId({
+    left: getAuthoritativeErfId(row),
+    right: context.erfId,
+    code: "TARGETED_BATCH_ERF_LINK_MISMATCH",
+    message: "The Targeted Batch Row points to another ERF.",
+  });
+
+  assertSameId({
+    left: row?.refs?.premiseId,
+    right: premiseRef.id,
+    code: "TARGETED_BATCH_PREMISE_LINK_MISMATCH",
+    message: "The Targeted Batch Row points to another premise.",
+  });
+
+  assertSameId({
+    left: premise?.erfId,
+    right: context.erfId,
+    code: "TARGETED_BATCH_ERF_LINK_MISMATCH",
+    message: "The linked premise belongs to another ERF.",
+  });
+
+  const premiseContext = premise?.targetedBatchContext;
+
+  if (
+    !premiseContext ||
+    !coreContextMatches(premiseContext, context)
+  ) {
+    throw controlledError(
+      "TARGETED_BATCH_PREMISE_CONTEXT_MISMATCH",
+      "The linked premise does not carry the expected Targeted Batch context.",
+      {
+        premiseId: premiseRef.id,
+        expectedContext: context,
+        existingContext: premiseContext || null,
+      },
+    );
+  }
+
+  findSalesTargetedBatchReference({
+    tbRefs: sales?.tbRefs,
+    tbId: context.tbId,
+    rowId: context.rowId,
+  });
+}
+
+export async function validateTargetedBatchMeterDiscoverySubmission({
+  db,
+  request,
+  data,
+}) {
+  const rawContext = data?.targetedBatchContext;
+
+  if (!rawContext) {
+    return {
+      isTargetedBatch: false,
+      targetedBatchContext: null,
+    };
+  }
+
+  const context = normalizeTargetedBatchPremiseContext(rawContext);
+
+  if (!context) {
+    throw controlledError(
+      "TARGETED_BATCH_CONTEXT_INVALID",
+      "The Meter Discovery Targeted Batch context is invalid.",
+    );
+  }
+
+  assertCompleteTargetedBatchPremiseContext(context);
+
+  if (data?.accessData?.access?.hasAccess !== "yes") {
+    throw controlledError(
+      "TARGETED_BATCH_USE_NO_ACCESS_FLOW",
+      "Use the Targeted Batch No Access action when the site cannot be accessed.",
+    );
+  }
+
+  const uid = request?.auth?.uid;
+
+  if (!uid) {
+    throw controlledError(
+      "UNAUTHENTICATED",
+      "Authentication is required.",
+    );
+  }
+
+  const premiseId = readFirstText(
+    data?.accessData?.premise?.id,
+    context?.premiseId,
+  );
+
+  if (!premiseId || premiseId === "NAv") {
+    throw controlledError(
+      "TARGETED_BATCH_PREMISE_LINK_MISSING",
+      "A linked Targeted Batch premise is required.",
+    );
+  }
+
+  const parentRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.uploads)
+    .doc(context.tbId);
+  const rowRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.rows)
+    .doc(context.rowId);
+  const salesRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.sales)
+    .doc(context.salesDocId);
+  const erfRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.erfs)
+    .doc(context.erfId);
+  const premiseRef = db.collection("premises").doc(premiseId);
+
+  const [
+    parentSnapshot,
+    rowSnapshot,
+    salesSnapshot,
+    erfSnapshot,
+    premiseSnapshot,
+  ] = await Promise.all([
+    parentRef.get(),
+    rowRef.get(),
+    salesRef.get(),
+    erfRef.get(),
+    premiseRef.get(),
+  ]);
+
+  const parent = requireDocument(
+    parentSnapshot,
+    "TARGETED_BATCH_NOT_FOUND",
+    `Targeted Batch ${context.tbId} was not found.`,
+  );
+  const row = requireDocument(
+    rowSnapshot,
+    "TARGETED_BATCH_ROW_NOT_FOUND",
+    `Targeted Batch Row ${context.rowId} was not found.`,
+  );
+  const sales = requireDocument(
+    salesSnapshot,
+    "SALES_DOCUMENT_NOT_FOUND",
+    `Sales document ${context.salesDocId} was not found.`,
+  );
+  const erf = requireDocument(
+    erfSnapshot,
+    "TARGETED_BATCH_ERF_NOT_FOUND",
+    `Authoritative ERF ${context.erfId} was not found.`,
+  );
+  const premise = requireDocument(
+    premiseSnapshot,
+    "TARGETED_BATCH_PREMISE_NOT_FOUND",
+    `Premise ${premiseId} was not found.`,
+  );
+
+  assertParentReady(parent, context.tbId);
+  assertRowReady(row, context.rowId);
+
+  assertTargetedBatchMeterDiscoveryCorrelations({
+    parentRef,
+    rowRef,
+    salesRef,
+    premiseRef,
+    context,
+    parent,
+    row,
+    sales,
+    premise,
+  });
+
+  assertSameScope({
+    parentScope: getScope(parent, "PARENT"),
+    rowScope: getScope(row, "PARENT"),
+    erfScope: getScope(erf, "ERF"),
+    premiseScope: getScope(premise, "PREMISE"),
+  });
+
+  const profile = await findActorProfile(db, uid);
+  const token = request?.auth?.token || {};
+  const actor = {
+    uid,
+    name: getActorNameFromRequest(request, profile),
+    role: targetedBatchActorRole(profile, token),
+    spId: targetedBatchActorSpId(profile, token),
+  };
+  const allocation = getTargetedBatchAllocation(parent);
+  let team = {};
+
+  if (allocation.type === "TEAM" && allocation.id) {
+    const teamSnapshot = await db
+      .collection("teams")
+      .doc(allocation.id)
+      .get();
+
+    team = requireDocument(
+      teamSnapshot,
+      "TARGETED_BATCH_TEAM_NOT_FOUND",
+      "The allocated TEAM was not found.",
+    );
+  }
+
+  assertTargetedBatchExecutionAuthority({
+    parent,
+    actor,
+    team,
+  });
+
+  const canonicalContext = {
+    ...buildCanonicalContext({
+      parentRef,
+      rowRef,
+      row,
+      context,
+      salesDocId: salesRef.id,
+      erfId: context.erfId,
+    }),
+    premiseId,
+  };
+
+  return {
+    isTargetedBatch: true,
+    targetedBatchContext: canonicalContext,
+    actor,
+  };
+}
+
+export function buildSalesTbRefsForMeterDiscoveryCompletion({
+  tbRefs,
+  tbId,
+  rowId,
+  premiseId,
+  meterId,
+  trnId,
+  targetedMeterNo,
+  discoveredMeterNo,
+  updatedAt,
+}) {
+  const match = findSalesTargetedBatchReference({
+    tbRefs,
+    tbId,
+    rowId,
+  });
+  const currentReference = match.reference || {};
+  const currentFieldWork = currentReference?.fieldWork || {};
+
+  if (
+    currentReference?.fieldWork !== undefined &&
+    (
+      !currentReference.fieldWork ||
+      typeof currentReference.fieldWork !== "object" ||
+      Array.isArray(currentReference.fieldWork)
+    )
+  ) {
+    throw controlledError(
+      "FIELDWORK_INVALID",
+      "The Sales fieldWork value is invalid.",
+    );
+  }
+
+  const currentStatus = normalizeUpper(
+    currentFieldWork?.status || "NOT_STARTED",
+  );
+  const currentPremiseId = normalizeText(currentFieldWork?.premiseId);
+  const currentMeterId = normalizeText(currentFieldWork?.meterId);
+  const currentTrnId = normalizeText(currentFieldWork?.trnId);
+
+  if (currentPremiseId && !sameId(currentPremiseId, premiseId)) {
+    throw controlledError(
+      "SALES_TB_REF_PREMISE_CONFLICT",
+      "The Sales Targeted Batch reference points to another premise.",
+      {
+        existingPremiseId: currentPremiseId,
+        expectedPremiseId: premiseId,
+      },
+    );
+  }
+
+  if (currentMeterId && !sameId(currentMeterId, meterId)) {
+    throw controlledError(
+      "SALES_TB_REF_METER_CONFLICT",
+      "The Sales Targeted Batch reference points to another meter.",
+      {
+        existingMeterId: currentMeterId,
+        expectedMeterId: meterId,
+      },
+    );
+  }
+
+  if (currentTrnId && !sameId(currentTrnId, trnId)) {
+    throw controlledError(
+      "SALES_TB_REF_TRN_CONFLICT",
+      "The Sales Targeted Batch reference points to another TRN.",
+      {
+        existingTrnId: currentTrnId,
+        expectedTrnId: trnId,
+      },
+    );
+  }
+
+  const targetedNormalized = normalizeMeterNo(targetedMeterNo);
+  const discoveredNormalized = normalizeMeterNo(discoveredMeterNo);
+  const meterMatch =
+    Boolean(targetedNormalized && discoveredNormalized) &&
+    targetedNormalized === discoveredNormalized;
+  const alreadyCompleted =
+    currentStatus === "COMPLETED" &&
+    sameId(currentPremiseId, premiseId) &&
+    sameId(currentMeterId, meterId) &&
+    sameId(currentTrnId, trnId);
+
+  const updatedReference = {
+    ...currentReference,
+    rowId,
+    fieldWork: {
+      ...currentFieldWork,
+      status: "COMPLETED",
+      outcomeCode: "METER_DISCOVERED",
+      outcomeLabel: "Meter Discovered",
+      targetedMeterNo:
+        readNullableText(
+          targetedMeterNo,
+          currentFieldWork?.targetedMeterNo,
+        ),
+      discoveredMeterNo:
+        readNullableText(
+          discoveredMeterNo,
+          currentFieldWork?.discoveredMeterNo,
+        ),
+      meterMatch,
+      premiseId,
+      meterId,
+      trnId,
+      submittedAt: currentFieldWork?.submittedAt || updatedAt,
+      updatedAt,
+    },
+  };
+
+  const updatedTbRefs = tbRefs.map((reference, index) =>
+    index === match.index ? updatedReference : reference,
+  );
+
+  return {
+    updatedTbRefs,
+    currentReference,
+    updatedReference,
+    alreadyCompleted,
+    meterMatch,
+  };
+}
+
+function getTargetedBatchCompletionTarget(parent = {}) {
+  const candidates = [
+    parent?.counts?.allocatableRows,
+    parent?.counts?.acceptedRows,
+    parent?.counts?.allocatedRows,
+    parent?.counts?.totalRows,
+  ]
+    .map((value) => readNonNegativeInteger(value))
+    .filter((value) => value > 0);
+
+  return candidates[0] || 0;
+}
+
+export async function completeTargetedBatchMeterDiscoveryInTransaction({
+  transaction,
+  db,
+  trnData,
+  astId,
+  normalizedMeterNo,
+  now = Timestamp.now(),
+}) {
+  const rawContext = trnData?.targetedBatchContext;
+
+  if (!rawContext) {
+    return {
+      applied: false,
+      alreadyCompleted: false,
+    };
+  }
+
+  const context = normalizeTargetedBatchPremiseContext(rawContext);
+
+  if (!context) {
+    throw controlledError(
+      "TARGETED_BATCH_CONTEXT_INVALID",
+      "The Meter Discovery TRN carries invalid Targeted Batch context.",
+    );
+  }
+
+  assertCompleteTargetedBatchPremiseContext(context);
+
+  const premiseId = readFirstText(
+    trnData?.accessData?.premise?.id,
+    context?.premiseId,
+  );
+  const trnId = normalizeText(trnData?.id || astId);
+  const discoveredMeterNo = readFirstText(
+    trnData?.ast?.astData?.astNo,
+    normalizedMeterNo,
+  );
+
+  if (!premiseId || !trnId || !astId || !discoveredMeterNo) {
+    throw controlledError(
+      "TARGETED_BATCH_METER_DISCOVERY_RESULT_INCOMPLETE",
+      "The Meter Discovery result is missing its premise, meter or TRN linkage.",
+      {
+        premiseId: premiseId || null,
+        trnId: trnId || null,
+        meterId: astId || null,
+        discoveredMeterNo: discoveredMeterNo || null,
+      },
+    );
+  }
+
+  const parentRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.uploads)
+    .doc(context.tbId);
+  const rowRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.rows)
+    .doc(context.rowId);
+  const salesRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.sales)
+    .doc(context.salesDocId);
+  const premiseRef = db.collection("premises").doc(premiseId);
+
+  const [
+    parentSnapshot,
+    rowSnapshot,
+    salesSnapshot,
+    premiseSnapshot,
+  ] = await Promise.all([
+    transaction.get(parentRef),
+    transaction.get(rowRef),
+    transaction.get(salesRef),
+    transaction.get(premiseRef),
+  ]);
+
+  const parent = requireDocument(
+    parentSnapshot,
+    "TARGETED_BATCH_NOT_FOUND",
+    `Targeted Batch ${context.tbId} was not found.`,
+  );
+  const row = requireDocument(
+    rowSnapshot,
+    "TARGETED_BATCH_ROW_NOT_FOUND",
+    `Targeted Batch Row ${context.rowId} was not found.`,
+  );
+  const sales = requireDocument(
+    salesSnapshot,
+    "SALES_DOCUMENT_NOT_FOUND",
+    `Sales document ${context.salesDocId} was not found.`,
+  );
+  const premise = requireDocument(
+    premiseSnapshot,
+    "TARGETED_BATCH_PREMISE_NOT_FOUND",
+    `Premise ${premiseId} was not found.`,
+  );
+
+  assertTargetedBatchMeterDiscoveryCorrelations({
+    parentRef,
+    rowRef,
+    salesRef,
+    premiseRef,
+    context,
+    parent,
+    row,
+    sales,
+    premise,
+  });
+
+  const rowStatus = normalizeUpper(
+    row?.execution?.status || "NOT_STARTED",
+  );
+  const existingRowMeterId = normalizeText(row?.refs?.meterId);
+  const existingRowTrnId = normalizeText(row?.refs?.trnId);
+  const existingRowPremiseId = normalizeText(row?.refs?.premiseId);
+
+  const salesCompletion = buildSalesTbRefsForMeterDiscoveryCompletion({
+    tbRefs: sales?.tbRefs,
+    tbId: context.tbId,
+    rowId: context.rowId,
+    premiseId,
+    meterId: astId,
+    trnId,
+    targetedMeterNo: getAuthoritativeMeterNo(row, context),
+    discoveredMeterNo,
+    updatedAt: now,
+  });
+
+  if (rowStatus === "COMPLETED") {
+    const rowMatches =
+      sameId(existingRowPremiseId, premiseId) &&
+      sameId(existingRowMeterId, astId) &&
+      sameId(existingRowTrnId, trnId);
+
+    if (!rowMatches || !salesCompletion.alreadyCompleted) {
+      throw controlledError(
+        "TARGETED_BATCH_COMPLETION_CONFLICT",
+        "The Targeted Batch row is already completed with different linkage.",
+        {
+          rowId: context.rowId,
+          existingPremiseId: existingRowPremiseId || null,
+          existingMeterId: existingRowMeterId || null,
+          existingTrnId: existingRowTrnId || null,
+          expectedPremiseId: premiseId,
+          expectedMeterId: astId,
+          expectedTrnId: trnId,
+        },
+      );
+    }
+
+    return {
+      applied: true,
+      alreadyCompleted: true,
+      tbId: context.tbId,
+      rowId: context.rowId,
+      salesDocId: context.salesDocId,
+      premiseId,
+      meterId: astId,
+      trnId,
+      meterMatch: salesCompletion.meterMatch,
+      batchCompleted:
+        normalizeUpper(parent?.execution?.status) === "COMPLETED",
+    };
+  }
+
+  assertParentReady(parent, context.tbId);
+  assertRowReady(row, context.rowId);
+
+  const actorUid =
+    trnData?.metadata?.updatedByUid ||
+    trnData?.metadata?.createdByUid ||
+    "SYSTEM";
+  const actorName =
+    trnData?.metadata?.updatedByUser ||
+    trnData?.metadata?.createdByUser ||
+    "SYSTEM";
+
+  const currentCompletedRows = readNonNegativeInteger(
+    parent?.counts?.completedRows,
+  );
+  const currentStartedRows = readNonNegativeInteger(
+    parent?.counts?.executionStartedRows,
+  );
+  const nextCompletedRows = currentCompletedRows + 1;
+  const completionTarget = getTargetedBatchCompletionTarget(parent);
+  const batchCompleted =
+    completionTarget > 0 &&
+    nextCompletedRows >= completionTarget;
+
+  transaction.update(rowRef, {
+    "execution.status": "COMPLETED",
+    "execution.startedAt": row?.execution?.startedAt || now,
+    "execution.completedAt": now,
+    "execution.outcome": "METER_DISCOVERED",
+    "refs.premiseId": premiseId,
+    "refs.meterId": astId,
+    "refs.trnId": trnId,
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+  });
+
+  transaction.update(salesRef, {
+    tbRefs: salesCompletion.updatedTbRefs,
+  });
+
+  const parentPatch = {
+    "counts.completedRows": nextCompletedRows,
+    "execution.status": batchCompleted ? "COMPLETED" : "IN_PROGRESS",
+    "execution.startedAt": parent?.execution?.startedAt || now,
+    "execution.completedAt": batchCompleted ? now : null,
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+  };
+
+  if (rowStatus === "NOT_STARTED") {
+    parentPatch["counts.executionStartedRows"] =
+      currentStartedRows + 1;
+  }
+
+  transaction.update(parentRef, parentPatch);
+
+  return {
+    applied: true,
+    alreadyCompleted: false,
+    tbId: context.tbId,
+    rowId: context.rowId,
+    salesDocId: context.salesDocId,
+    premiseId,
+    meterId: astId,
+    trnId,
+    meterMatch: salesCompletion.meterMatch,
+    completedRows: nextCompletedRows,
+    completionTarget,
+    batchCompleted,
+  };
+}
+

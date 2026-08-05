@@ -91,7 +91,9 @@ import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatch
 import { recordTargetedBatchNoAccessCallable } from "./targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import {
   classifyTargetedBatchPremiseRoute,
+  completeTargetedBatchMeterDiscoveryInTransaction,
   createOrLinkTargetedBatchPremise,
+  validateTargetedBatchMeterDiscoverySubmission,
 } from "./targetedBatches/premiseLink.js";
 
 import {
@@ -1635,6 +1637,16 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         const masterSnap = await tx.get(masterRef);
         const salesSnap = await tx.get(salesRef);
 
+        const targetedBatchCompletion =
+          await completeTargetedBatchMeterDiscoveryInTransaction({
+            transaction: tx,
+            db,
+            trnData,
+            astId,
+            normalizedMeterNo,
+            now: Timestamp.now(),
+          });
+
         const masterBefore = masterSnap.exists ? masterSnap.data() : null;
         const masterDecision = classifyOperationalAstChange({
           masterId: normalizedMeterNo,
@@ -1791,6 +1803,21 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
                 id: normalizedMeterNo,
                 visibility,
               },
+              ...(targetedBatchCompletion?.applied
+                ? {
+                    targetedBatch: {
+                      tbId: targetedBatchCompletion.tbId,
+                      rowId: targetedBatchCompletion.rowId,
+                      salesDocId: targetedBatchCompletion.salesDocId,
+                      premiseId: targetedBatchCompletion.premiseId,
+                      meterId: targetedBatchCompletion.meterId,
+                      trnId: targetedBatchCompletion.trnId,
+                      meterMatch: targetedBatchCompletion.meterMatch,
+                      batchCompleted:
+                        targetedBatchCompletion.batchCompleted,
+                    },
+                  }
+                : {}),
               processedAt: updatedAt,
             },
           },
@@ -1825,6 +1852,8 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         astId,
         normalizedMeterNo,
         salesAllMetersOutcome: syncResult.outcome,
+        targetedBatchLinked:
+          Boolean(trnData?.targetedBatchContext),
       });
 
       return { success: true, salesAllMeters: syncResult };
@@ -3113,6 +3142,13 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       );
     }
 
+    const targetedBatchValidation =
+      await validateTargetedBatchMeterDiscoverySubmission({
+        db,
+        request,
+        data,
+      });
+
     // ------------------------------------------------------------
     // 1. MASTER DUPLICATE GATEKEEPER
     // Only check duplicate for real meter discovery with access
@@ -3171,6 +3207,12 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     );
 
     delete safePayload.metadata;
+
+    if (targetedBatchValidation?.isTargetedBatch) {
+      safePayload.targetedBatchContext =
+        targetedBatchValidation.targetedBatchContext;
+    }
+
     const now = new Date().toISOString();
     const actorName =
       caller.token?.name ||
@@ -3207,7 +3249,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     });
 
     return buildFailureResult(
-      "UNKNOWN_ERROR",
+      error?.irepsCode || error?.code || "UNKNOWN_ERROR",
       error?.message || "Failed to submit meter discovery transaction",
     );
   }
