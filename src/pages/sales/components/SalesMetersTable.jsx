@@ -5,6 +5,7 @@ import MeterLocationModal from "./MeterLocationModal";
 import SalesTbRefsModal from "./SalesTbRefsModal";
 import SalesGpsMapSection from "./SalesGpsMapSection";
 import SalesRangeFilterModal from "./SalesRangeFilterModal";
+import MultiSelectFilter from "./MultiSelectFilter";
 import {
   TARGET_FILTERS,
   compareNatural,
@@ -101,14 +102,14 @@ const STICKY_COLUMN_WIDTHS = {
 
 const EMPTY_FILTERS = {
   meterNo: "",
-  wardNo: "ALL",
-  geofenceId: "ALL",
-  tbId: "ALL",
-  leakageCategory: "ALL",
+  wardNos: [],
+  geofenceIds: [],
+  tbIds: [],
+  leakageCategories: [],
   riskTier: "ALL",
   riskScore: "",
   addressLine1: "",
-  town: "ALL",
+  towns: [],
   sgCode: "",
   erfNo: "",
   salesRanges: {},
@@ -571,11 +572,25 @@ export default function SalesMetersTable({
     [rows],
   );
 
+  const singleSelectedWardNo =
+    filters.wardNos.length === 1 ? filters.wardNos[0] : "";
+  const singleSelectedGeofenceId =
+    filters.geofenceIds.length === 1 ? filters.geofenceIds[0] : "";
+  const mapSelectedGeofenceId = singleSelectedWardNo
+    ? singleSelectedGeofenceId
+    : "";
+
   useEffect(() => {
     setCurrentPage(1);
   }, [targetFilter]);
 
   const filteredRows = useMemo(() => {
+    const selectedWardNos = new Set(filters.wardNos);
+    const selectedGeofenceIds = new Set(filters.geofenceIds);
+    const selectedTbIds = new Set(filters.tbIds);
+    const selectedSalesCategories = new Set(filters.leakageCategories);
+    const selectedTowns = new Set(filters.towns);
+
     return rows.filter((row) => {
       const matchesMonthlyFilters = monthKeys.every((monthKey) => {
         return matchesSalesRangeFilter(
@@ -584,20 +599,25 @@ export default function SalesMetersTable({
         );
       });
 
+      const rowWardNumbers = Array.isArray(row?.wardNumbers)
+        ? row.wardNumbers
+        : [];
+      const matchesWard =
+        selectedWardNos.size === 0 ||
+        rowWardNumbers.some((wardNo) => selectedWardNos.has(wardNo));
+
       const rowGeofenceRefs = getRowGeofenceRefs(row);
       const matchesGeofence =
-        filters.geofenceId === "ALL" ||
-        (filters.geofenceId === "NONE" && rowGeofenceRefs.length === 0) ||
-        rowGeofenceRefs.some((ref) => ref.id === filters.geofenceId);
+        selectedGeofenceIds.size === 0 ||
+        (selectedGeofenceIds.has("NONE") && rowGeofenceRefs.length === 0) ||
+        rowGeofenceRefs.some((ref) => selectedGeofenceIds.has(ref.id));
 
       const rowTbRefs = getRowTbRefs(row);
-      let matchesTb = true;
-
-      if (filters.tbId === "NONE") matchesTb = rowTbRefs.length === 0;
-      else if (filters.tbId === "ANY") matchesTb = rowTbRefs.length > 0;
-      else if (filters.tbId !== "ALL") {
-        matchesTb = rowTbRefs.some((ref) => ref.id === filters.tbId);
-      }
+      const matchesTb =
+        selectedTbIds.size === 0 ||
+        (selectedTbIds.has("NONE") && rowTbRefs.length === 0) ||
+        (selectedTbIds.has("ANY") && rowTbRefs.length > 0) ||
+        rowTbRefs.some((ref) => selectedTbIds.has(ref.id));
 
       const riskScoreFilter = String(filters.riskScore || "").trim();
       const matchesRiskScore =
@@ -609,15 +629,15 @@ export default function SalesMetersTable({
       return (
         matchesTargetFilter(row, targetFilter, latestMonthKey) &&
         includesText(row?.meterNo, filters.meterNo) &&
-        (filters.wardNo === "ALL" || row?.wardNumbers?.includes(filters.wardNo)) &&
+        matchesWard &&
         matchesGeofence &&
         matchesTb &&
-        (filters.leakageCategory === "ALL" ||
-          row?.leakageCategory === filters.leakageCategory) &&
+        (selectedSalesCategories.size === 0 ||
+          selectedSalesCategories.has(row?.leakageCategory)) &&
         (filters.riskTier === "ALL" || row?.riskTier === filters.riskTier) &&
         matchesRiskScore &&
         includesText(row?.addressLine1, filters.addressLine1) &&
-        (filters.town === "ALL" || row?.town === filters.town) &&
+        (selectedTowns.size === 0 || selectedTowns.has(row?.town)) &&
         includesText(row?.sgCode, filters.sgCode) &&
         includesText(row?.erfNo, filters.erfNo) &&
         matchesSalesRangeFilter(
@@ -666,14 +686,14 @@ export default function SalesMetersTable({
 
   const hasActiveColumnFilters =
     Boolean(String(filters.meterNo || "").trim()) ||
-    filters.wardNo !== "ALL" ||
-    filters.geofenceId !== "ALL" ||
-    filters.tbId !== "ALL" ||
-    filters.leakageCategory !== "ALL" ||
+    filters.wardNos.length > 0 ||
+    filters.geofenceIds.length > 0 ||
+    filters.tbIds.length > 0 ||
+    filters.leakageCategories.length > 0 ||
     filters.riskTier !== "ALL" ||
     Boolean(String(filters.riskScore || "").trim()) ||
     Boolean(String(filters.addressLine1 || "").trim()) ||
-    filters.town !== "ALL" ||
+    filters.towns.length > 0 ||
     Boolean(String(filters.sgCode || "").trim()) ||
     Boolean(String(filters.erfNo || "").trim()) ||
     Object.values(filters.salesRanges || {}).some((filter) =>
@@ -720,14 +740,14 @@ export default function SalesMetersTable({
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
-  function updateWardFilter(value) {
+  function updateWardFilter(values = []) {
     clearMapRowInteraction();
     setCurrentPage(1);
     setWardGeofenceOptions([]);
     setFilters((current) => ({
       ...current,
-      wardNo: value,
-      geofenceId: "ALL",
+      wardNos: Array.isArray(values) ? values : [],
+      geofenceIds: [],
     }));
   }
 
@@ -762,9 +782,9 @@ export default function SalesMetersTable({
     });
   }, []);
 
-  function updateGeofenceFilter(value) {
+  function updateGeofenceFilter(values = []) {
     clearMapRowInteraction();
-    updateFilter("geofenceId", value);
+    updateFilter("geofenceIds", Array.isArray(values) ? values : []);
   }
 
   function focusAddressOnMap(row) {
@@ -772,9 +792,9 @@ export default function SalesMetersTable({
 
     if (
       !showGpsMap ||
-      filters.wardNo === "ALL" ||
+      !singleSelectedWardNo ||
       !meterId ||
-      !rowHasGpsPointForWard(row, filters.wardNo)
+      !rowHasGpsPointForWard(row, singleSelectedWardNo)
     ) {
       return;
     }
@@ -876,21 +896,21 @@ export default function SalesMetersTable({
 
       return {
         ...current,
-        wardNo: columnKey === "wardNo" ? "ALL" : current.wardNo,
-        geofenceId:
+        wardNos: columnKey === "wardNo" ? [] : current.wardNos,
+        geofenceIds:
           columnKey === "wardNo" || columnKey === "geofence"
-            ? "ALL"
-            : current.geofenceId,
-        tbId: columnKey === "tbRefs" ? "ALL" : current.tbId,
-        leakageCategory:
+            ? []
+            : current.geofenceIds,
+        tbIds: columnKey === "tbRefs" ? [] : current.tbIds,
+        leakageCategories:
           columnKey === "leakageCategory"
-            ? "ALL"
-            : current.leakageCategory,
+            ? []
+            : current.leakageCategories,
         riskTier: columnKey === "riskTier" ? "ALL" : current.riskTier,
         riskScore: columnKey === "riskScore" ? "" : current.riskScore,
         addressLine1:
           columnKey === "addressLine1" ? "" : current.addressLine1,
-        town: columnKey === "town" ? "ALL" : current.town,
+        towns: columnKey === "town" ? [] : current.towns,
         sgCode: columnKey === "sgCode" ? "" : current.sgCode,
         erfNo: columnKey === "erfNo" ? "" : current.erfNo,
         salesRanges: nextSalesRanges,
@@ -985,15 +1005,13 @@ export default function SalesMetersTable({
           rows={filteredRows}
           lmPcode={salesLmPcode}
           wardOptions={wardOptions}
-          selectedWardNo={filters.wardNo === "ALL" ? "" : filters.wardNo}
-          selectedGeofenceId={
-            filters.geofenceId === "ALL" ? "" : filters.geofenceId
-          }
+          selectedWardNo={singleSelectedWardNo}
+          selectedGeofenceId={mapSelectedGeofenceId}
           onSelectedWardNoChange={(wardNo) =>
-            updateWardFilter(wardNo || "ALL")
+            updateWardFilter(wardNo ? [wardNo] : [])
           }
           onSelectedGeofenceIdChange={(geofenceId) =>
-            updateGeofenceFilter(geofenceId || "ALL")
+            updateGeofenceFilter(geofenceId ? [geofenceId] : [])
           }
           onWardGeofencesChange={handleWardGeofencesChange}
           hoveredMeterId={hoveredMapMeterId}
@@ -1056,20 +1074,19 @@ export default function SalesMetersTable({
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
-                  <select
-                    value={filters.wardNo}
-                    onChange={(event) =>
-                      updateWardFilter(event.target.value)
-                    }
+                  <MultiSelectFilter
+                    allLabel="All wards"
+                    ariaLabel="Filter Sales meters by wards"
+                    menuMinWidth={220}
+                    onChange={updateWardFilter}
+                    options={wardOptions.map((wardNo) => ({
+                      value: wardNo,
+                      label: `Ward ${wardNo}`,
+                    }))}
+                    selectedCountLabel="wards selected"
                     style={styles.headerSelect}
-                  >
-                    <option value="ALL">All wards</option>
-                    {wardOptions.map((wardNo) => (
-                      <option key={wardNo} value={wardNo}>
-                        Ward {wardNo}
-                      </option>
-                    ))}
-                  </select>
+                    value={filters.wardNos}
+                  />
                 </th>
               ) : null}
 
@@ -1086,21 +1103,22 @@ export default function SalesMetersTable({
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
-                  <select
-                    value={filters.geofenceId}
-                    onChange={(event) =>
-                      updateGeofenceFilter(event.target.value)
-                    }
+                  <MultiSelectFilter
+                    allLabel="All geofences"
+                    ariaLabel="Filter Sales meters by geofences"
+                    menuMinWidth={300}
+                    onChange={updateGeofenceFilter}
+                    options={[
+                      { value: "NONE", label: "No geofence" },
+                      ...geofenceOptions.map((geofence) => ({
+                        value: geofence.id,
+                        label: geofence.name,
+                      })),
+                    ]}
+                    selectedCountLabel="geofences selected"
                     style={styles.headerSelect}
-                  >
-                    <option value="ALL">All geofences</option>
-                    <option value="NONE">No geofence</option>
-                    {geofenceOptions.map((geofence) => (
-                      <option key={geofence.id} value={geofence.id}>
-                        {geofence.name}
-                      </option>
-                    ))}
-                  </select>
+                    value={filters.geofenceIds}
+                  />
                 </th>
               ) : null}
 
@@ -1117,22 +1135,24 @@ export default function SalesMetersTable({
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
-                  <select
-                    value={filters.tbId}
-                    onChange={(event) =>
-                      updateFilter("tbId", event.target.value)
-                    }
+                  <MultiSelectFilter
+                    allLabel="All TBs"
+                    ariaLabel="Filter Sales meters by Targeted Batch IDs"
+                    exclusiveValues={["ANY"]}
+                    menuMinWidth={340}
+                    onChange={(values) => updateFilter("tbIds", values)}
+                    options={[
+                      { value: "NONE", label: "No TB" },
+                      { value: "ANY", label: "In one or more TBs" },
+                      ...tbIdOptions.map((tbId) => ({
+                        value: tbId,
+                        label: tbId,
+                      })),
+                    ]}
+                    selectedCountLabel="TB filters selected"
                     style={styles.headerSelect}
-                  >
-                    <option value="ALL">All TBs</option>
-                    <option value="NONE">No TB</option>
-                    <option value="ANY">In one or more TBs</option>
-                    {tbIdOptions.map((tbId) => (
-                      <option key={tbId} value={tbId}>
-                        {tbId}
-                      </option>
-                    ))}
-                  </select>
+                    value={filters.tbIds}
+                  />
                 </th>
               ) : null}
 
@@ -1149,20 +1169,24 @@ export default function SalesMetersTable({
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
-                  <select
-                    value={filters.leakageCategory}
-                    onChange={(event) =>
-                      updateFilter("leakageCategory", event.target.value)
+                  <MultiSelectFilter
+                    allLabel="All categories"
+                    ariaLabel="Filter Sales meters by Sales categories"
+                    menuMinWidth={300}
+                    onChange={(values) =>
+                      updateFilter(
+                        "leakageCategories",
+                        Array.isArray(values) ? values : [],
+                      )
                     }
+                    options={salesCategoryOptions.map((category) => ({
+                      value: category,
+                      label: category,
+                    }))}
+                    selectedCountLabel="categories selected"
                     style={styles.headerSelect}
-                  >
-                    <option value="ALL">All categories</option>
-                    {salesCategoryOptions.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
+                    value={filters.leakageCategories}
+                  />
                 </th>
               ) : null}
 
@@ -1244,18 +1268,24 @@ export default function SalesMetersTable({
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
-                  <select
-                    value={filters.town}
-                    onChange={(event) => updateFilter("town", event.target.value)}
+                  <MultiSelectFilter
+                    allLabel="All towns"
+                    ariaLabel="Filter Sales meters by towns"
+                    menuMinWidth={260}
+                    onChange={(values) =>
+                      updateFilter(
+                        "towns",
+                        Array.isArray(values) ? values : [],
+                      )
+                    }
+                    options={townOptions.map((town) => ({
+                      value: town,
+                      label: town,
+                    }))}
+                    selectedCountLabel="towns selected"
                     style={styles.headerSelect}
-                  >
-                    <option value="ALL">All towns</option>
-                    {townOptions.map((town) => (
-                      <option key={town} value={town}>
-                        {town}
-                      </option>
-                    ))}
-                  </select>
+                    value={filters.towns}
+                  />
                 </th>
               ) : null}
 
@@ -1503,9 +1533,9 @@ export default function SalesMetersTable({
                     const mapMeterId = getRowMapMeterId(row);
                     const canFocusAddressOnMap =
                       showGpsMap &&
-                      filters.wardNo !== "ALL" &&
+                      Boolean(singleSelectedWardNo) &&
                       Boolean(mapMeterId) &&
-                      rowHasGpsPointForWard(row, filters.wardNo);
+                      rowHasGpsPointForWard(row, singleSelectedWardNo);
                     const isFocusedAddress =
                       canFocusAddressOnMap &&
                       focusedMapMeterId === mapMeterId;
