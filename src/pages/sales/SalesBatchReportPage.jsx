@@ -119,6 +119,19 @@ function Td({ children, colSpan }) {
   );
 }
 
+function ComparisonLine({ label, hoverText, children, valueStyle }) {
+  return (
+    <div style={styles.comparisonLine}>
+      <abbr title={hoverText} style={styles.comparisonPrefix}>
+        {label}:
+      </abbr>
+      <span style={{ ...styles.comparisonValue, ...valueStyle }}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
 function InfoItem({ label, value }) {
   return (
     <div style={styles.infoItem}>
@@ -672,11 +685,9 @@ export default function SalesBatchReportPage() {
                 <Th>Account</Th>
                 <Th>Customer</Th>
                 <Th>Ward</Th>
-                <Th>Original Meter</Th>
-                <Th>Field Meter</Th>
+                <Th>Meter</Th>
                 <Th>Meter Match</Th>
-                <Th>Original Address</Th>
-                <Th>Field Address</Th>
+                <Th>Address</Th>
                 <Th>Address Match</Th>
                 <Th>Execution</Th>
                 <Th>Premise</Th>
@@ -689,7 +700,7 @@ export default function SalesBatchReportPage() {
             <tbody>
               {!allReady && rows.length === 0 ? (
                 <tr>
-                  <Td colSpan={15}>
+                  <Td colSpan={13}>
                     Joining live Sales and field-result records...
                   </Td>
                 </tr>
@@ -697,7 +708,7 @@ export default function SalesBatchReportPage() {
 
               {allReady && filteredRows.length === 0 ? (
                 <tr>
-                  <Td colSpan={15}>
+                  <Td colSpan={13}>
                     {rows.length === 0
                       ? "No permanent TB rows exist for this Targeted Batch."
                       : "No TB rows match the selected filters."}
@@ -712,37 +723,55 @@ export default function SalesBatchReportPage() {
                   <Td>{row.source.customerName}</Td>
                   <Td>{row.scope.wardLabel}</Td>
                   <Td>
-                    <strong style={styles.primaryCell}>
-                      {row.originalMeter.number}
-                    </strong>
-                  </Td>
-                  <Td>
-                    {row.fieldMeter.canOpenMap ? (
-                      <button
-                        type="button"
-                        style={styles.fieldMeterMapButton}
-                        onClick={() => setSelectedMapRow(row)}
-                        title={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
-                        aria-label={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                    <div style={styles.comparisonStack}>
+                      <ComparisonLine
+                        label="O"
+                        hoverText="Original Sales Meter Number"
                       >
-                        {row.fieldMeter.number}
-                      </button>
-                    ) : (
-                      <strong style={styles.primaryCell}>PENDING</strong>
-                    )}
+                        {row.originalMeter.number}
+                      </ComparisonLine>
+                      <ComparisonLine label="F" hoverText="Field Meter Number">
+                        {row.fieldMeter.canOpenMap ? (
+                          <button
+                            type="button"
+                            style={styles.fieldMeterMapButton}
+                            onClick={() => setSelectedMapRow(row)}
+                            title={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                            aria-label={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                          >
+                            {row.fieldMeter.number}
+                          </button>
+                        ) : (
+                          "PENDING"
+                        )}
+                      </ComparisonLine>
+                    </div>
                   </Td>
                   <Td>
                     <Badge value={row.comparison.meterMatch} />
                   </Td>
                   <Td>
-                    <span style={styles.addressCell}>
-                      {row.addresses.original}
-                    </span>
-                  </Td>
-                  <Td>
-                    <span style={styles.addressCell}>
-                      {row.addresses.field || "PENDING"}
-                    </span>
+                    <div
+                      style={{
+                        ...styles.comparisonStack,
+                        ...styles.addressComparisonStack,
+                      }}
+                    >
+                      <ComparisonLine
+                        label="O"
+                        hoverText="Original Sales Address"
+                        valueStyle={styles.addressComparisonValue}
+                      >
+                        {row.addresses.original}
+                      </ComparisonLine>
+                      <ComparisonLine
+                        label="F"
+                        hoverText="Field Address"
+                        valueStyle={styles.addressComparisonValue}
+                      >
+                        {row.addresses.field || "PENDING"}
+                      </ComparisonLine>
+                    </div>
                   </Td>
                   <Td>
                     <Badge value={row.comparison.addressMatch} />
@@ -1054,7 +1083,7 @@ const styles = {
 
   table: {
     width: "100%",
-    minWidth: 2050,
+    minWidth: 1750,
     borderCollapse: "collapse",
   },
 
@@ -1079,9 +1108,46 @@ const styles = {
     verticalAlign: "top",
   },
 
-  primaryCell: {
-    color: "#0f172a",
+  comparisonStack: {
+    display: "grid",
+    gap: 5,
+    minWidth: 150,
+  },
+
+  addressComparisonStack: {
+    minWidth: 260,
+    maxWidth: 360,
+  },
+
+  comparisonLine: {
+    display: "grid",
+    gridTemplateColumns: "18px minmax(0, 1fr)",
+    alignItems: "start",
+    columnGap: 4,
+    lineHeight: 1.35,
+  },
+
+  comparisonPrefix: {
+    color: "#64748b",
+    fontSize: 10,
+    fontWeight: 900,
+    textDecoration: "none",
+    cursor: "help",
     whiteSpace: "nowrap",
+  },
+
+  comparisonValue: {
+    minWidth: 0,
+    color: "#0f172a",
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  },
+
+  addressComparisonValue: {
+    color: "#334155",
+    fontWeight: 700,
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
   },
 
   fieldMeterMapButton: {
@@ -1098,12 +1164,6 @@ const styles = {
     whiteSpace: "nowrap",
   },
 
-  addressCell: {
-    display: "block",
-    minWidth: 170,
-    maxWidth: 250,
-    lineHeight: 1.45,
-  },
 
   secondaryText: {
     marginTop: 4,
