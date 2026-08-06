@@ -10,6 +10,7 @@ import {
   useRemoveTeamMemberMutation,
   useRenameTeamMutation,
 } from "../../redux/teamsApi";
+import { useGetRegistryTrnsByLmPcodeQuery } from "../../redux/trnsApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 
 const DRAG_MIME = "application/x-ireps-team-user";
@@ -57,6 +58,22 @@ function resolveActorServiceProvider(authContext = {}) {
     profile?.serviceProvider ||
     null
   );
+}
+
+function resolveActiveLmPcode(authContext = {}) {
+  const profile = resolveAuthProfile(authContext);
+  const activeWorkbase =
+    authContext?.activeWorkbase ||
+    authContext?.activeLm ||
+    profile?.access?.activeWorkbase ||
+    profile?.activeWorkbase ||
+    null;
+
+  const lmPcode = cleanText(
+    authContext?.activeLmPcode || activeWorkbase?.pcode || activeWorkbase?.id,
+  );
+
+  return lmPcode && lmPcode !== "NAv" ? lmPcode : "";
 }
 
 function getUserDisplayName(user = {}) {
@@ -135,7 +152,12 @@ function getErrorMessage(error, fallback) {
 
 export default function OperationalTeamsPage() {
   const authContext = useAuth();
+  const activeLmPcode = resolveActiveLmPcode(authContext);
 
+  const { data: trns = [], isLoading: trnsLoading } =
+    useGetRegistryTrnsByLmPcodeQuery(activeLmPcode, {
+      skip: !activeLmPcode,
+    });
   const { data: users = [], isLoading: usersLoading } =
     useGetUsersDirectoryQuery({ limit: 1000 });
   const { data: teams = [], isLoading: teamsLoading } =
@@ -197,6 +219,19 @@ export default function OperationalTeamsPage() {
     });
     return map;
   }, [users]);
+
+  const trnCountsByUserUid = useMemo(() => {
+    const counts = new Map();
+
+    trns.forEach((trn) => {
+      const userUid = cleanText(trn?.updatedByUid);
+      if (!userUid || userUid === "NAv") return;
+
+      counts.set(userUid, (counts.get(userUid) || 0) + 1);
+    });
+
+    return counts;
+  }, [trns]);
 
   const usersByServiceProvider = useMemo(() => {
     const map = new Map();
@@ -510,7 +545,10 @@ export default function OperationalTeamsPage() {
                             {getUserDisplayName(user)}
                           </strong>
                           <span style={styles.userMeta}>
-                            Role: {getUserRole(user)} • TRNs: 0
+                            Role: {getUserRole(user)} • TRNs:{" "}
+                            {trnsLoading
+                              ? "…"
+                              : trnCountsByUserUid.get(userUid) || 0}
                           </span>
                         </div>
                       </article>

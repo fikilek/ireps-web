@@ -219,6 +219,30 @@ function getRegistryCreatedForName(data = {}) {
   return valueOrNav(firstTarget?.name || firstTarget?.displayName);
 }
 
+function getRegistryAssignedUserIds(data = {}) {
+  const targets = [...asArray(data.assignment?.targets)];
+  const singleTarget = data.assignment?.target || data.bgo?.target;
+
+  if (singleTarget && typeof singleTarget === "object") {
+    targets.push(singleTarget);
+  }
+
+  const userIds = targets
+    .filter((target) => {
+      const targetType = normalizeRegistryCode(
+        target?.type || target?.targetType || data.bgo?.targetType,
+      );
+
+      return targetType === "USER";
+    })
+    .map((target) =>
+      String(target?.id || target?.uid || data.bgo?.targetId || "").trim(),
+    )
+    .filter(Boolean);
+
+  return Array.from(new Set(userIds));
+}
+
 function getRegistryOriginChannel(data = {}) {
   return normalizeRegistryCode(
     data.origin?.channel || data.workflow?.createdMode,
@@ -272,8 +296,10 @@ function normalizeTrnRegistryDoc(docSnap) {
     mediaCount: asArray(data.media).length,
     originChannel: getRegistryOriginChannel(data),
     createdByUser: valueOrNav(metadata.createdByUser),
+    updatedByUid: valueOrNav(metadata.updatedByUid),
     createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
     createdForName: getRegistryCreatedForName(data),
+    assignedUserIds: getRegistryAssignedUserIds(data),
     issuedAt: normalizeDateValue(data.workflow?.issuedAt),
     acceptedRejected: getRegistryAcceptedRejected(data),
     executionStartedAt: normalizeDateValue(data.workflow?.executionStartedAt),
