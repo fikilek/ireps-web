@@ -1014,3 +1014,527 @@ export function buildSalesOperationalStatsReadModel({
   };
 }
 
+const TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT = 20;
+
+function toFiniteCoordinate(value, minimum, maximum) {
+  const numericValue = Number(value);
+
+  return Number.isFinite(numericValue) &&
+    numericValue >= minimum &&
+    numericValue <= maximum
+    ? numericValue
+    : null;
+}
+
+function normalizeSpatialPoint(value) {
+  const latitude = toFiniteCoordinate(
+    value?.lat ?? value?.latitude,
+    -90,
+    90,
+  );
+  const longitude = toFiniteCoordinate(
+    value?.lng ?? value?.longitude,
+    -180,
+    180,
+  );
+
+  if (latitude === null || longitude === null) return null;
+
+  return {
+    lat: latitude,
+    lng: longitude,
+  };
+}
+
+function normalizeTargetedBatchCoordinatePair(value) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+
+  const lng = toFiniteCoordinate(value[0], -180, 180);
+  const lat = toFiniteCoordinate(value[1], -90, 90);
+
+  return lng === null || lat === null ? null : [lng, lat];
+}
+
+function normalizeTargetedBatchLinearRing(value) {
+  if (!Array.isArray(value)) return null;
+
+  const ring = value
+    .map(normalizeTargetedBatchCoordinatePair)
+    .filter(Boolean);
+
+  return ring.length >= 4 ? ring : null;
+}
+
+function normalizeTargetedBatchPolygonCoordinates(value) {
+  if (!Array.isArray(value)) return null;
+
+  const rings = value.map(normalizeTargetedBatchLinearRing);
+
+  return rings.length > 0 && rings.every(Boolean) ? rings : null;
+}
+
+function parseTargetedBatchErfGeometry(value) {
+  if (!value) return null;
+
+  let geometry = value;
+
+  if (typeof value === "string") {
+    try {
+      geometry = JSON.parse(value);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  if (!geometry || typeof geometry !== "object") return null;
+
+  if (geometry?.type === "Polygon") {
+    const coordinates = normalizeTargetedBatchPolygonCoordinates(
+      geometry?.coordinates,
+    );
+
+    return coordinates
+      ? {
+          type: "Polygon",
+          coordinates,
+        }
+      : null;
+  }
+
+  if (geometry?.type === "MultiPolygon") {
+    if (!Array.isArray(geometry?.coordinates)) return null;
+
+    const coordinates = geometry.coordinates.map(
+      normalizeTargetedBatchPolygonCoordinates,
+    );
+
+    return coordinates.length > 0 && coordinates.every(Boolean)
+      ? {
+          type: "MultiPolygon",
+          coordinates,
+        }
+      : null;
+  }
+
+  return null;
+}
+
+function buildTargetedBatchErfNumber(erf = {}) {
+  const explicitErfNumber = firstText(
+    erf?.erfNo,
+    erf?.erf?.erfNo,
+    erf?.erf?.number,
+  );
+
+  if (explicitErfNumber) return explicitErfNumber;
+
+  const parcelNumber = firstText(
+    erf?.sg?.parcelNo,
+    erf?.sg?.parcelNumber,
+  );
+
+  if (!parcelNumber) return null;
+
+  const portion = Number(erf?.sg?.portion ?? 0);
+
+  return Number.isFinite(portion) && portion > 0
+    ? `${parcelNumber}/${portion}`
+    : parcelNumber;
+}
+
+function buildTargetedBatchPremiseAddress(premise = {}) {
+  const address = premise?.address || {};
+
+  return (
+    [
+      address?.strNo,
+      address?.strName,
+      address?.strType,
+      address?.suburbName,
+      address?.town,
+    ]
+      .map(cleanText)
+      .filter(Boolean)
+      .join(" ") || null
+  );
+}
+
+function getTargetedBatchMeterPoint(meter = {}) {
+  return normalizeSpatialPoint(
+    meter?.ast?.location?.gps ||
+      meter?.location?.gps ||
+      meter?.gps ||
+      null,
+  );
+}
+
+function getTargetedBatchMeterNumber(meter = {}) {
+  return (
+    firstText(
+      meter?.ast?.astData?.astNo,
+      meter?.astData?.astNo,
+      meter?.meterNo,
+      meter?.meterNumber,
+    ) || null
+  );
+}
+
+function getTargetedBatchMeterType(meter = {}) {
+  return (
+    firstText(
+      meter?.accessData?.meterType,
+      meter?.ast?.astData?.astType,
+      meter?.astData?.astType,
+      meter?.meterType,
+    ) || null
+  );
+}
+
+function getTargetedBatchMeterState(meter = {}) {
+  return (
+    firstText(
+      meter?.status?.state,
+      meter?.ast?.status?.state,
+      meter?.statusState,
+      typeof meter?.status === "string" ? meter.status : null,
+    ) || null
+  );
+}
+
+function buildRowIdLookup(links, fieldName) {
+  const rowIdsByFeatureId = new Map();
+
+  links.forEach((link) => {
+    const featureId = cleanText(link?.[fieldName]);
+    const rowId = cleanText(link?.rowId);
+
+    if (!featureId || !rowId) return;
+
+    if (!rowIdsByFeatureId.has(featureId)) {
+      rowIdsByFeatureId.set(featureId, []);
+    }
+
+    rowIdsByFeatureId.get(featureId).push(rowId);
+  });
+
+  rowIdsByFeatureId.forEach((rowIds, featureId) => {
+    rowIdsByFeatureId.set(featureId, uniqueNonBlank(rowIds));
+  });
+
+  return rowIdsByFeatureId;
+}
+
+function buildLinkedIdLookup(links, sourceField, targetField) {
+  const linkedIdsBySourceId = new Map();
+
+  links.forEach((link) => {
+    const sourceId = cleanText(link?.[sourceField]);
+    const targetId = cleanText(link?.[targetField]);
+
+    if (!sourceId || !targetId) return;
+
+    if (!linkedIdsBySourceId.has(sourceId)) {
+      linkedIdsBySourceId.set(sourceId, []);
+    }
+
+    linkedIdsBySourceId.get(sourceId).push(targetId);
+  });
+
+  linkedIdsBySourceId.forEach((linkedIds, sourceId) => {
+    linkedIdsBySourceId.set(sourceId, uniqueNonBlank(linkedIds));
+  });
+
+  return linkedIdsBySourceId;
+}
+
+function takeDiagnosticSample(values = []) {
+  return values.slice(0, TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT);
+}
+
+export function getTargetedBatchMapMembership(rows = []) {
+  const links = rows
+    .map((row) => ({
+      rowId: cleanText(row?.id),
+      rowNo: Number(row?.rowNo || 0),
+      erfId: cleanText(row?.refs?.erfId) || null,
+      premiseId: cleanText(row?.refs?.premiseId) || null,
+      meterId: cleanText(row?.refs?.meterId) || null,
+    }))
+    .sort((left, right) => {
+      const rowNumberDifference =
+        Number(left?.rowNo || 0) - Number(right?.rowNo || 0);
+
+      if (rowNumberDifference !== 0) return rowNumberDifference;
+
+      return cleanText(left?.rowId).localeCompare(
+        cleanText(right?.rowId),
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        },
+      );
+    });
+
+  return {
+    rowCount: links.length,
+    links,
+    erfIds: uniqueNonBlank(links.map((link) => link.erfId)),
+    premiseIds: uniqueNonBlank(links.map((link) => link.premiseId)),
+    meterIds: uniqueNonBlank(links.map((link) => link.meterId)),
+  };
+}
+
+export function buildTargetedBatchMapReadModel({
+  tbId = "",
+  expectedLmPcode = "",
+  batch = null,
+  rows = [],
+  erfById = {},
+  premiseById = {},
+  meterById = {},
+}) {
+  const membership = getTargetedBatchMapMembership(rows);
+  const erfRowIds = buildRowIdLookup(membership.links, "erfId");
+  const premiseRowIds = buildRowIdLookup(membership.links, "premiseId");
+  const meterRowIds = buildRowIdLookup(membership.links, "meterId");
+  const meterPremiseIds = buildLinkedIdLookup(
+    membership.links,
+    "meterId",
+    "premiseId",
+  );
+  const meterErfIds = buildLinkedIdLookup(
+    membership.links,
+    "meterId",
+    "erfId",
+  );
+
+  const erfs = membership.erfIds
+    .map((erfId) => {
+      const erf = erfById[erfId];
+      if (!erf) return null;
+
+      return {
+        id: erfId,
+        number: buildTargetedBatchErfNumber(erf),
+        type: firstText(erf?.erf?.type, erf?.type) || null,
+        state: firstText(erf?.erf?.status, erf?.status) || null,
+        geometry: parseTargetedBatchErfGeometry(erf?.geometry),
+        centroid: normalizeSpatialPoint(erf?.centroid),
+        rowIds: erfRowIds.get(erfId) || [],
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      cleanText(left?.number || left?.id).localeCompare(
+        cleanText(right?.number || right?.id),
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        },
+      ),
+    );
+
+  const premises = membership.premiseIds
+    .map((premiseId) => {
+      const premise = premiseById[premiseId];
+      if (!premise) return null;
+
+      return {
+        id: premiseId,
+        erfId:
+          firstText(
+            premise?.erfId,
+            premise?.erf?.id,
+            premise?.parents?.erfId,
+          ) || null,
+        erfNumber:
+          firstText(
+            premise?.erfNo,
+            premise?.erf?.erfNo,
+            premise?.erf?.number,
+          ) || null,
+        address: buildTargetedBatchPremiseAddress(premise),
+        propertyType:
+          firstText(
+            premise?.propertyType?.type,
+            premise?.propertyTypeLabel,
+          ) || null,
+        occupancyState:
+          firstText(
+            premise?.occupancy?.status,
+            premise?.occupancyStatus,
+          ) || null,
+        point: normalizeSpatialPoint(
+          premise?.geometry?.centroid ||
+            (premise?.lat != null || premise?.lng != null
+              ? {
+                  lat: premise?.lat,
+                  lng: premise?.lng,
+                }
+              : null),
+        ),
+        rowIds: premiseRowIds.get(premiseId) || [],
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      cleanText(left?.address || left?.id).localeCompare(
+        cleanText(right?.address || right?.id),
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        },
+      ),
+    );
+
+  const meters = membership.meterIds
+    .map((meterId) => {
+      const meter = meterById[meterId];
+      if (!meter) return null;
+
+      const linkedPremiseIds = meterPremiseIds.get(meterId) || [];
+      const linkedErfIds = meterErfIds.get(meterId) || [];
+
+      return {
+        id: meterId,
+        entityId:
+          firstText(
+            meter?.ast?.astData?.astId,
+            meter?.astData?.astId,
+            meter?.meterId,
+            meter?.id,
+          ) || meterId,
+        number: getTargetedBatchMeterNumber(meter),
+        type: getTargetedBatchMeterType(meter),
+        state: getTargetedBatchMeterState(meter),
+        point: getTargetedBatchMeterPoint(meter),
+        linkedPremiseId:
+          linkedPremiseIds.length === 1 ? linkedPremiseIds[0] : null,
+        linkedErfId: linkedErfIds.length === 1 ? linkedErfIds[0] : null,
+        linkedPremiseIds,
+        linkedErfIds,
+        rowIds: meterRowIds.get(meterId) || [],
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      cleanText(left?.number || left?.id).localeCompare(
+        cleanText(right?.number || right?.id),
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        },
+      ),
+    );
+
+  const foundErfIds = new Set(erfs.map((erf) => erf.id));
+  const foundPremiseIds = new Set(
+    premises.map((premise) => premise.id),
+  );
+  const foundMeterIds = new Set(meters.map((meter) => meter.id));
+
+  const missingErfIds = membership.erfIds.filter(
+    (erfId) => !foundErfIds.has(erfId),
+  );
+  const missingPremiseIds = membership.premiseIds.filter(
+    (premiseId) => !foundPremiseIds.has(premiseId),
+  );
+  const missingMeterIds = membership.meterIds.filter(
+    (meterId) => !foundMeterIds.has(meterId),
+  );
+
+  const rowIdsMissingErfRef = membership.links
+    .filter((link) => !link.erfId)
+    .map((link) => link.rowId)
+    .filter(Boolean);
+  const rowIdsMissingPremiseRef = membership.links
+    .filter((link) => !link.premiseId)
+    .map((link) => link.rowId)
+    .filter(Boolean);
+  const rowIdsMissingMeterRef = membership.links
+    .filter((link) => !link.meterId)
+    .map((link) => link.rowId)
+    .filter(Boolean);
+
+  const normalizedBatch = batch
+    ? normalizeTargetedBatchHeader(tbId || batch?.id, batch)
+    : null;
+  const normalizedExpectedLmPcode = cleanText(expectedLmPcode);
+  const batchLmPcode = cleanText(normalizedBatch?.scope?.lmPcode);
+
+  return {
+    batch: normalizedBatch,
+
+    membership,
+
+    erfs,
+    premises,
+    meters,
+
+    diagnostics: {
+      rows: membership.rowCount,
+
+      erfRefs: membership.erfIds.length,
+      erfsFound: erfs.length,
+      erfsWithGeometry: erfs.filter((erf) => erf.geometry).length,
+      erfsWithCentroid: erfs.filter((erf) => erf.centroid).length,
+      rowsMissingErfRef: rowIdsMissingErfRef.length,
+      missingErfCount: missingErfIds.length,
+      missingErfIds: takeDiagnosticSample(missingErfIds),
+      missingErfIdsTruncated:
+        missingErfIds.length > TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT,
+      rowIdsMissingErfRef: takeDiagnosticSample(rowIdsMissingErfRef),
+      rowIdsMissingErfRefTruncated:
+        rowIdsMissingErfRef.length >
+        TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT,
+
+      premiseRefs: membership.premiseIds.length,
+      premisesFound: premises.length,
+      premisesWithGps: premises.filter((premise) => premise.point).length,
+      rowsMissingPremiseRef: rowIdsMissingPremiseRef.length,
+      missingPremiseCount: missingPremiseIds.length,
+      missingPremiseIds: takeDiagnosticSample(missingPremiseIds),
+      missingPremiseIdsTruncated:
+        missingPremiseIds.length >
+        TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT,
+      rowIdsMissingPremiseRef: takeDiagnosticSample(
+        rowIdsMissingPremiseRef,
+      ),
+      rowIdsMissingPremiseRefTruncated:
+        rowIdsMissingPremiseRef.length >
+        TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT,
+
+      meterRefs: membership.meterIds.length,
+      metersFound: meters.length,
+      metersWithGps: meters.filter((meter) => meter.point).length,
+      metersWithAmbiguousPremiseLinks: meters.filter(
+        (meter) => meter.linkedPremiseIds.length > 1,
+      ).length,
+      metersWithAmbiguousErfLinks: meters.filter(
+        (meter) => meter.linkedErfIds.length > 1,
+      ).length,
+      rowsMissingMeterRef: rowIdsMissingMeterRef.length,
+      missingMeterCount: missingMeterIds.length,
+      missingMeterIds: takeDiagnosticSample(missingMeterIds),
+      missingMeterIdsTruncated:
+        missingMeterIds.length >
+        TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT,
+      rowIdsMissingMeterRef: takeDiagnosticSample(rowIdsMissingMeterRef),
+      rowIdsMissingMeterRefTruncated:
+        rowIdsMissingMeterRef.length >
+        TARGETED_BATCH_MAP_DIAGNOSTIC_ID_LIMIT,
+
+      expectedLmPcode: normalizedExpectedLmPcode || null,
+      batchLmPcode: batchLmPcode || null,
+      lmPcodeMatches:
+        normalizedExpectedLmPcode && batchLmPcode
+          ? normalizedExpectedLmPcode === batchLmPcode
+          : null,
+    },
+  };
+}
+

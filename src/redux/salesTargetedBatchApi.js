@@ -12,9 +12,11 @@ import { db } from "../firebase";
 import {
   buildSalesOperationalStatsReadModel,
   buildTargetedBatchHeaders,
+  buildTargetedBatchMapReadModel,
   buildTargetedBatchReport,
   cleanText,
   getSalesOperationalPremiseIds,
+  getTargetedBatchMapMembership,
   getTargetedBatchPremiseIds,
   getTargetedBatchSalesIds,
 } from "../pages/sales/models/salesTargetedBatchReadModel";
@@ -23,6 +25,9 @@ const TARGETED_BATCH_UPLOADS_COLLECTION = "tb_uploads";
 const TARGETED_BATCH_ROWS_COLLECTION = "tb_rows";
 const SALES_COLLECTION = "demo_sales_meters";
 const REPORTING_PREMISES_COLLECTION = "registry_premises";
+const MAP_ERFS_COLLECTION = "ireps_erfs";
+const MAP_PREMISES_COLLECTION = "premises";
+const MAP_METERS_COLLECTION = "asts";
 const TRNS_COLLECTION = "trns";
 const FIRESTORE_IN_CHUNK_SIZE = 30;
 
@@ -85,6 +90,86 @@ function createSalesOperationalStatsStreamState(status = "idle") {
       lastSyncAtMs: null,
       error: null,
     },
+  };
+}
+
+function createTargetedBatchMapStreamState(status = "idle") {
+  return {
+    batch: null,
+    membership: {
+      rowCount: 0,
+      links: [],
+      erfIds: [],
+      premiseIds: [],
+      meterIds: [],
+    },
+    erfs: [],
+    premises: [],
+    meters: [],
+    diagnostics: {
+      rows: 0,
+      erfRefs: 0,
+      erfsFound: 0,
+      erfsWithGeometry: 0,
+      erfsWithCentroid: 0,
+      rowsMissingErfRef: 0,
+      missingErfCount: 0,
+      missingErfIds: [],
+      missingErfIdsTruncated: false,
+      rowIdsMissingErfRef: [],
+      rowIdsMissingErfRefTruncated: false,
+      premiseRefs: 0,
+      premisesFound: 0,
+      premisesWithGps: 0,
+      rowsMissingPremiseRef: 0,
+      missingPremiseCount: 0,
+      missingPremiseIds: [],
+      missingPremiseIdsTruncated: false,
+      rowIdsMissingPremiseRef: [],
+      rowIdsMissingPremiseRefTruncated: false,
+      meterRefs: 0,
+      metersFound: 0,
+      metersWithGps: 0,
+      metersWithAmbiguousPremiseLinks: 0,
+      metersWithAmbiguousErfLinks: 0,
+      rowsMissingMeterRef: 0,
+      missingMeterCount: 0,
+      missingMeterIds: [],
+      missingMeterIdsTruncated: false,
+      rowIdsMissingMeterRef: [],
+      rowIdsMissingMeterRefTruncated: false,
+      expectedLmPcode: null,
+      batchLmPcode: null,
+      lmPcodeMatches: null,
+    },
+    sync: {
+      status,
+      source: "firestore-stream",
+      sources: {
+        batch: status,
+        rows: status,
+        erfs: status === "ready" ? "ready" : "idle",
+        premises: status === "ready" ? "ready" : "idle",
+        meters: status === "ready" ? "ready" : "idle",
+      },
+      firstSnapshotAtMs: null,
+      lastSyncAtMs: null,
+      error: null,
+    },
+  };
+}
+
+function resolveTargetedBatchMapArgs(arg) {
+  if (typeof arg === "string") {
+    return {
+      tbId: cleanText(arg),
+      lmPcode: "",
+    };
+  }
+
+  return {
+    tbId: cleanText(arg?.tbId),
+    lmPcode: cleanText(arg?.lmPcode),
   };
 }
 
@@ -900,11 +985,371 @@ export const salesTargetedBatchApi = createApi({
 
       keepUnusedDataFor: 300,
     }),
+
+    getTargetedBatchMapById: builder.query({
+      queryFn: (arg) => {
+        const { tbId, lmPcode } = resolveTargetedBatchMapArgs(arg);
+        const data = createTargetedBatchMapStreamState(
+          tbId ? "syncing" : "ready",
+        );
+
+        data.diagnostics.expectedLmPcode = lmPcode || null;
+
+        return { data };
+      },
+
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const { tbId: normalizedTbId, lmPcode: expectedLmPcode } =
+          resolveTargetedBatchMapArgs(arg);
+
+        if (!normalizedTbId) return;
+
+        let active = true;
+        let unsubscribeBatch = () => {};
+        let unsubscribeRows = () => {};
+        let diagnosticLogCount = 0;
+        let lastDiagnosticKey = "";
+
+        const sourceStatuses = {
+          batch: "syncing",
+          rows: "syncing",
+          erfs: "idle",
+          premises: "idle",
+          meters: "idle",
+        };
+        const sourceErrors = {};
+        const rawState = {
+          batch: null,
+          rows: [],
+          erfById: {},
+          premiseById: {},
+          meterById: {},
+        };
+        const assetStreams = {
+          erfs: {
+            collectionName: MAP_ERFS_COLLECTION,
+            rawStateKey: "erfById",
+            idsKey: null,
+            unsubscribes: [],
+          },
+          premises: {
+            collectionName: MAP_PREMISES_COLLECTION,
+            rawStateKey: "premiseById",
+            idsKey: null,
+            unsubscribes: [],
+          },
+          meters: {
+            collectionName: MAP_METERS_COLLECTION,
+            rawStateKey: "meterById",
+            idsKey: null,
+            unsubscribes: [],
+          },
+        };
+
+        const clearUnsubscribes = (unsubscribes) => {
+          unsubscribes.forEach((unsubscribe) => {
+            try {
+              unsubscribe();
+            } catch (error) {
+              console.warn(
+                "[SALES TARGETED BATCH API][MAP LISTENER CLEANUP]",
+                error,
+              );
+            }
+          });
+        };
+
+        const markSource = (source, status, error = null) => {
+          sourceStatuses[source] = status;
+
+          if (error) {
+            sourceErrors[source] = normalizeStreamError(error, source);
+          } else {
+            delete sourceErrors[source];
+          }
+        };
+
+        const publish = () => {
+          if (!active) return;
+
+          const syncedAtMs = Date.now();
+          const readModel = buildTargetedBatchMapReadModel({
+            tbId: normalizedTbId,
+            expectedLmPcode,
+            batch: rawState.batch,
+            rows: rawState.rows,
+            erfById: rawState.erfById,
+            premiseById: rawState.premiseById,
+            meterById: rawState.meterById,
+          });
+          const firstError = Object.values(sourceErrors)[0] || null;
+          const overallStatus = getOverallReportStatus(sourceStatuses);
+
+          updateCachedData((draft) => {
+            draft.batch = readModel.batch;
+            draft.membership = readModel.membership;
+            draft.erfs = readModel.erfs;
+            draft.premises = readModel.premises;
+            draft.meters = readModel.meters;
+            draft.diagnostics = readModel.diagnostics;
+            draft.sync.status = overallStatus;
+            draft.sync.sources = { ...sourceStatuses };
+            draft.sync.firstSnapshotAtMs ??= syncedAtMs;
+            draft.sync.lastSyncAtMs = syncedAtMs;
+            draft.sync.error = firstError;
+          });
+
+          if (
+            diagnosticLogCount < 10 &&
+            ["ready", "error"].includes(overallStatus)
+          ) {
+            const diagnostics = readModel.diagnostics;
+            const diagnosticKey = JSON.stringify({
+              rows: diagnostics.rows,
+              erfRefs: diagnostics.erfRefs,
+              erfsFound: diagnostics.erfsFound,
+              erfsWithGeometry: diagnostics.erfsWithGeometry,
+              premiseRefs: diagnostics.premiseRefs,
+              premisesFound: diagnostics.premisesFound,
+              premisesWithGps: diagnostics.premisesWithGps,
+              meterRefs: diagnostics.meterRefs,
+              metersFound: diagnostics.metersFound,
+              metersWithGps: diagnostics.metersWithGps,
+              missingErfCount: diagnostics.missingErfCount,
+              missingPremiseCount: diagnostics.missingPremiseCount,
+              missingMeterCount: diagnostics.missingMeterCount,
+              status: overallStatus,
+            });
+
+            if (diagnosticKey !== lastDiagnosticKey) {
+              lastDiagnosticKey = diagnosticKey;
+              diagnosticLogCount += 1;
+
+              console.info(
+                "[SALES TARGETED BATCH API][MAP DIAGNOSTICS]",
+                {
+                  tbId: normalizedTbId,
+                  status: overallStatus,
+                  rows: diagnostics.rows,
+                  erfRefs: diagnostics.erfRefs,
+                  erfsFound: diagnostics.erfsFound,
+                  erfsWithGeometry: diagnostics.erfsWithGeometry,
+                  premiseRefs: diagnostics.premiseRefs,
+                  premisesFound: diagnostics.premisesFound,
+                  premisesWithGps: diagnostics.premisesWithGps,
+                  meterRefs: diagnostics.meterRefs,
+                  metersFound: diagnostics.metersFound,
+                  metersWithGps: diagnostics.metersWithGps,
+                  rowsMissingErfRef: diagnostics.rowsMissingErfRef,
+                  rowsMissingPremiseRef:
+                    diagnostics.rowsMissingPremiseRef,
+                  rowsMissingMeterRef: diagnostics.rowsMissingMeterRef,
+                  missingErfCount: diagnostics.missingErfCount,
+                  missingPremiseCount: diagnostics.missingPremiseCount,
+                  missingMeterCount: diagnostics.missingMeterCount,
+                  missingErfIds: diagnostics.missingErfIds,
+                  missingPremiseIds: diagnostics.missingPremiseIds,
+                  missingMeterIds: diagnostics.missingMeterIds,
+                  lmPcodeMatches: diagnostics.lmPcodeMatches,
+                },
+              );
+            }
+          }
+        };
+
+        const handleSourceError = (source, error) => {
+          console.error(
+            `[SALES TARGETED BATCH API][MAP ${source.toUpperCase()} STREAM]`,
+            error,
+          );
+          markSource(source, "error", error);
+          publish();
+        };
+
+        const restartAssetListeners = (source, ids) => {
+          if (!active) return;
+
+          const assetStream = assetStreams[source];
+          const nextIdsKey = ids.join("|");
+
+          if (nextIdsKey === assetStream.idsKey) return;
+
+          assetStream.idsKey = nextIdsKey;
+          clearUnsubscribes(assetStream.unsubscribes);
+          assetStream.unsubscribes = [];
+          rawState[assetStream.rawStateKey] = {};
+
+          if (ids.length === 0) {
+            markSource(source, "ready");
+            publish();
+            return;
+          }
+
+          markSource(source, "syncing");
+          const chunks = chunkValues(ids);
+          const chunkResults = new Map();
+          const chunkErrors = new Set();
+
+          chunks.forEach((idChunk, chunkIndex) => {
+            const unsubscribe = onSnapshot(
+              query(
+                collection(db, assetStream.collectionName),
+                where(documentId(), "in", idChunk),
+              ),
+              (snapshot) => {
+                if (
+                  !active ||
+                  nextIdsKey !== assetStream.idsKey
+                ) {
+                  return;
+                }
+
+                const documents = {};
+                snapshot.docs.forEach((documentSnapshot) => {
+                  documents[documentSnapshot.id] = {
+                    id: documentSnapshot.id,
+                    ...documentSnapshot.data(),
+                  };
+                });
+
+                chunkResults.set(chunkIndex, documents);
+                chunkErrors.delete(chunkIndex);
+                rawState[assetStream.rawStateKey] =
+                  combineChunkMaps(chunkResults);
+
+                if (chunkResults.size === chunks.length) {
+                  markSource(
+                    source,
+                    chunkErrors.size > 0 ? "error" : "ready",
+                    chunkErrors.size > 0
+                      ? new Error(
+                          `One or more Targeted Batch Map ${source} streams failed.`,
+                        )
+                      : null,
+                  );
+                }
+
+                publish();
+              },
+              (error) => {
+                if (
+                  !active ||
+                  nextIdsKey !== assetStream.idsKey
+                ) {
+                  return;
+                }
+
+                console.error(
+                  `[SALES TARGETED BATCH API][MAP ${source.toUpperCase()} JOIN]`,
+                  error,
+                );
+                chunkErrors.add(chunkIndex);
+                markSource(source, "error", error);
+                publish();
+              },
+            );
+
+            assetStream.unsubscribes.push(unsubscribe);
+          });
+
+          publish();
+        };
+
+        const restartAllAssetListeners = () => {
+          const membership = getTargetedBatchMapMembership(rawState.rows);
+
+          restartAssetListeners("erfs", membership.erfIds);
+          restartAssetListeners("premises", membership.premiseIds);
+          restartAssetListeners("meters", membership.meterIds);
+        };
+
+        try {
+          await cacheDataLoaded;
+
+          unsubscribeBatch = onSnapshot(
+            doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, normalizedTbId),
+            (snapshot) => {
+              if (!active) return;
+
+              rawState.batch = snapshot.exists()
+                ? {
+                    id: snapshot.id,
+                    ...snapshot.data(),
+                  }
+                : null;
+              markSource("batch", "ready");
+              publish();
+            },
+            (error) => handleSourceError("batch", error),
+          );
+
+          unsubscribeRows = onSnapshot(
+            query(
+              collection(db, TARGETED_BATCH_ROWS_COLLECTION),
+              where("tbId", "==", normalizedTbId),
+            ),
+            (snapshot) => {
+              if (!active) return;
+
+              rawState.rows = snapshot.docs
+                .map((rowSnapshot) => ({
+                  id: rowSnapshot.id,
+                  ...rowSnapshot.data(),
+                }))
+                .sort(
+                  (left, right) =>
+                    Number(left?.rowNo || 0) -
+                    Number(right?.rowNo || 0),
+                );
+              markSource("rows", "ready");
+              restartAllAssetListeners();
+              publish();
+            },
+            (error) => {
+              markSource("erfs", "error", error);
+              markSource("premises", "error", error);
+              markSource("meters", "error", error);
+              handleSourceError("rows", error);
+            },
+          );
+        } catch (error) {
+          console.error(
+            "[SALES TARGETED BATCH API][MAP SETUP]",
+            error,
+          );
+
+          Object.keys(sourceStatuses).forEach((source) => {
+            if (sourceStatuses[source] !== "ready") {
+              markSource(source, "error", error);
+            }
+          });
+          publish();
+        }
+
+        try {
+          await cacheEntryRemoved;
+        } finally {
+          active = false;
+          unsubscribeBatch();
+          unsubscribeRows();
+
+          Object.values(assetStreams).forEach((assetStream) => {
+            clearUnsubscribes(assetStream.unsubscribes);
+          });
+        }
+      },
+
+      keepUnusedDataFor: 300,
+    }),
   }),
 });
 
 export const {
   useGetSalesOperationalStatsByLmQuery,
   useGetTargetedBatchHeadersByLmQuery,
+  useGetTargetedBatchMapByIdQuery,
   useGetTargetedBatchReportByIdQuery,
 } = salesTargetedBatchApi;
