@@ -4,6 +4,10 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 
 const DEMO_SALES_COLLECTION = "demo_sales_meters";
+const STREAM_RELEASE_DELAY_MS = 1_000;
+const MAX_UPDATE_DIAGNOSTIC_LOGS = 10;
+
+const demoSalesStreams = new Map();
 
 function asNumber(value) {
   const numberValue = Number(value);
@@ -153,6 +157,62 @@ function normalizeGeofenceRefs(value = []) {
     );
 }
 
+function toSerializableValue(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value ?? null;
+  }
+
+  if (value instanceof Date) {
+    const milliseconds = value.getTime();
+    return Number.isFinite(milliseconds) ? value.toISOString() : null;
+  }
+
+  if (
+    typeof value?.toMillis === "function" ||
+    typeof value?.toDate === "function" ||
+    Number.isFinite(Number(value?.seconds))
+  ) {
+    return toSerializableTimestamp(value);
+  }
+
+  if (
+    value?.constructor?.name === "GeoPoint" &&
+    hasFiniteNumber(value.latitude) &&
+    hasFiniteNumber(value.longitude)
+  ) {
+    return {
+      latitude: Number(value.latitude),
+      longitude: Number(value.longitude),
+    };
+  }
+
+  if (
+    value?.constructor?.name === "DocumentReference" &&
+    typeof value.path === "string"
+  ) {
+    return value.path;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toSerializableValue(item));
+  }
+
+  if (typeof value === "object") {
+    return Object.entries(value).reduce((accumulator, [key, itemValue]) => {
+      accumulator[key] = toSerializableValue(itemValue);
+      return accumulator;
+    }, {});
+  }
+
+  return String(value);
+}
+
 function toSerializableTimestamp(value) {
   const milliseconds = getTimestampMs(value);
   return milliseconds > 0 ? new Date(milliseconds).toISOString() : null;
@@ -161,8 +221,10 @@ function toSerializableTimestamp(value) {
 function normalizeFieldWork(value) {
   if (!value || typeof value !== "object") return null;
 
+  const serializableValue = toSerializableValue(value);
+
   return {
-    ...value,
+    ...serializableValue,
     submittedAt: toSerializableTimestamp(value.submittedAt),
     updatedAt: toSerializableTimestamp(value.updatedAt),
   };
@@ -179,7 +241,7 @@ function normalizeTbRefs(value = []) {
       if (!id) return null;
 
       return {
-        ...item,
+        ...toSerializableValue(item),
         id,
         rowId: rowId || null,
         date: toSerializableTimestamp(
@@ -366,7 +428,9 @@ function normalizeDemoSalesRow(id, data = {}) {
     ).trim(),
     riskTier: String(data.riskTier || data.Risk_Tier || "").trim(),
     riskScore: asOptionalNumber(data.riskScore ?? data.Risk_Score),
-    trnBatchIds: Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
+    trnBatchIds: uniqueNonBlank(
+      Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
+    ),
   };
 }
 
@@ -386,46 +450,259 @@ function sortDemoSalesRows(left, right) {
   );
 }
 
-function buildDemoSalesRows(snapshot, lmPcode) {
-  return snapshot.docs
-    .map((documentSnapshot) =>
-      normalizeDemoSalesRow(documentSnapshot.id, documentSnapshot.data()),
-    )
-    .filter((row) => row.lmPcode === lmPcode)
-    .sort(sortDemoSalesRows);
+function normalizeLmPcode(value) {
+  return String(value || "").trim();
 }
 
-function readInitialSalesSnapshot(lmPcode) {
+function normalizeSnapshotDocument(documentSnapshot, lmPcode) {
+  const row = normalizeDemoSalesRow(
+    documentSnapshot.id,
+    documentSnapshot.data(),
+  );
+
+  return row.lmPcode === lmPcode ? row : null;
+}
+
+function buildRowsFromStream(stream) {
+  return Array.from(stream.rowsById.values()).sort(sortDemoSalesRows);
+}
+
+function createDemoSalesStream(lmPcode) {
+  const normalizedLmPcode = normalizeLmPcode(lmPcode);
+  const startedAtMs = Date.now();
+
+  const stream = {
+    lmPcode: normalizedLmPcode,
+    subscribers: new Set(),
+    rowsById: new Map(),
+    latestRows: null,
+    latestError: null,
+    initialized: false,
+    serverConfirmed: false,
+    updateDiagnosticCount: 0,
+    releaseTimer: null,
+    unsubscribeFirestore: () => {},
+  };
+
+  const salesQuery = query(
+    collection(db, DEMO_SALES_COLLECTION),
+    where("lmPcode", "==", normalizedLmPcode),
+  );
+
+  stream.unsubscribeFirestore = onSnapshot(
+    salesQuery,
+    (snapshot) => {
+      const normalizationStartedAtMs = Date.now();
+      const isInitialSnapshot = !stream.initialized;
+      const changes = isInitialSnapshot
+        ? snapshot.docs.map((documentSnapshot) => ({
+            type: "added",
+            doc: documentSnapshot,
+          }))
+        : snapshot.docChanges();
+
+      for (const change of changes) {
+        const documentId = change.doc.id;
+
+        if (change.type === "removed") {
+          stream.rowsById.delete(documentId);
+          continue;
+        }
+
+        const normalizedRow = normalizeSnapshotDocument(
+          change.doc,
+          normalizedLmPcode,
+        );
+
+        if (normalizedRow) {
+          stream.rowsById.set(documentId, normalizedRow);
+        } else {
+          stream.rowsById.delete(documentId);
+        }
+      }
+
+      stream.initialized = true;
+      stream.latestRows = buildRowsFromStream(stream);
+      stream.latestError = null;
+
+      const fromCache = snapshot.metadata?.fromCache === true;
+      const normalizationMs = Date.now() - normalizationStartedAtMs;
+      const elapsedMs = Date.now() - startedAtMs;
+
+      if (isInitialSnapshot) {
+        console.info("[demoSalesApi] Sales stream first snapshot", {
+          lmPcode: normalizedLmPcode,
+          rows: stream.latestRows.length,
+          fromCache,
+          elapsedMs,
+          normalizationMs,
+        });
+      } else if (
+        changes.length > 0 &&
+        stream.updateDiagnosticCount < MAX_UPDATE_DIAGNOSTIC_LOGS
+      ) {
+        stream.updateDiagnosticCount += 1;
+
+        console.info("[demoSalesApi] Sales stream update", {
+          lmPcode: normalizedLmPcode,
+          changedDocuments: changes.length,
+          rows: stream.latestRows.length,
+          fromCache,
+          normalizationMs,
+          diagnosticNumber: stream.updateDiagnosticCount,
+          diagnosticLimit: MAX_UPDATE_DIAGNOSTIC_LOGS,
+        });
+      }
+
+      if (!fromCache && !stream.serverConfirmed) {
+        stream.serverConfirmed = true;
+
+        console.info("[demoSalesApi] Sales stream server confirmed", {
+          lmPcode: normalizedLmPcode,
+          rows: stream.latestRows.length,
+          elapsedMs,
+        });
+      }
+
+      for (const subscriber of stream.subscribers) {
+        subscriber.onRows?.({
+          rows: stream.latestRows,
+          fromCache,
+          serverConfirmed: stream.serverConfirmed,
+        });
+      }
+    },
+    (error) => {
+      stream.latestError = {
+        status: "CUSTOM_ERROR",
+        error: error?.message || "Could not load demo prepaid sales.",
+      };
+
+      console.error("[demoSalesApi] Sales stream error", {
+        lmPcode: normalizedLmPcode,
+        code: error?.code || null,
+        message: stream.latestError.error,
+      });
+
+      for (const subscriber of stream.subscribers) {
+        subscriber.onError?.(stream.latestError);
+      }
+    },
+  );
+
+  demoSalesStreams.set(normalizedLmPcode, stream);
+  return stream;
+}
+
+function getOrCreateDemoSalesStream(lmPcode) {
+  const normalizedLmPcode = normalizeLmPcode(lmPcode);
+  const existingStream = demoSalesStreams.get(normalizedLmPcode);
+
+  if (existingStream) {
+    if (existingStream.releaseTimer) {
+      clearTimeout(existingStream.releaseTimer);
+      existingStream.releaseTimer = null;
+    }
+
+    return existingStream;
+  }
+
+  return createDemoSalesStream(normalizedLmPcode);
+}
+
+function scheduleDemoSalesStreamRelease(stream) {
+  if (stream.subscribers.size > 0 || stream.releaseTimer) return;
+
+  stream.releaseTimer = setTimeout(() => {
+    if (stream.subscribers.size > 0) {
+      stream.releaseTimer = null;
+      return;
+    }
+
+    stream.unsubscribeFirestore();
+    demoSalesStreams.delete(stream.lmPcode);
+  }, STREAM_RELEASE_DELAY_MS);
+}
+
+function subscribeToDemoSalesStream(
+  lmPcode,
+  { onRows = null, onError = null } = {},
+) {
+  const stream = getOrCreateDemoSalesStream(lmPcode);
+  const subscriber = { onRows, onError };
+
+  stream.subscribers.add(subscriber);
+
+  if (stream.latestRows) {
+    onRows?.({
+      rows: stream.latestRows,
+      fromCache: !stream.serverConfirmed,
+      serverConfirmed: stream.serverConfirmed,
+    });
+  } else if (stream.latestError) {
+    onError?.(stream.latestError);
+  }
+
+  return () => {
+    stream.subscribers.delete(subscriber);
+    scheduleDemoSalesStreamRelease(stream);
+  };
+}
+
+function readInitialSalesStream(lmPcode, signal) {
+  const normalizedLmPcode = normalizeLmPcode(lmPcode);
+
+  if (!normalizedLmPcode) {
+    return Promise.resolve({ data: [] });
+  }
+
   return new Promise((resolve) => {
+    let settled = false;
     let unsubscribe = () => {};
 
-    unsubscribe = onSnapshot(
-      query(
-        collection(db, DEMO_SALES_COLLECTION),
-        where("lmPcode", "==", lmPcode),
-      ),
-      (snapshot) => {
-        const hasServerResult = snapshot.metadata?.fromCache === false;
-        const hasCachedRows = snapshot.docs.length > 0;
+    const finish = (result) => {
+      if (settled) return;
 
-        if (!hasServerResult && !hasCachedRows) return;
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
 
-        const rows = buildDemoSalesRows(snapshot, lmPcode);
-        unsubscribe();
-        resolve({ data: rows });
-      },
-      (error) => {
-        unsubscribe();
-        console.error("demoSalesApi initial stream error:", error);
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "Sales stream request was cancelled.",
+        },
+      });
+    };
 
-        resolve({
-          error: {
-            status: "CUSTOM_ERROR",
-            error: error?.message || "Could not load demo prepaid sales.",
-          },
-        });
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = subscribeToDemoSalesStream(
+      normalizedLmPcode,
+      {
+        onRows: ({ rows, fromCache }) => {
+          const hasUsableInitialResult = !fromCache || rows.length > 0;
+
+          if (!hasUsableInitialResult) return;
+          finish({ data: rows });
+        },
+        onError: (error) => finish({ error }),
       },
     );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
   });
 }
 
@@ -434,39 +711,53 @@ export const demoSalesApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getDemoSalesByLmPcode: builder.query({
-      queryFn: (lmPcode) => readInitialSalesSnapshot(lmPcode),
+      queryFn: (lmPcode, { signal }) =>
+        readInitialSalesStream(lmPcode, signal),
 
       async onCacheEntryAdded(
         lmPcode,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
-        if (!lmPcode) return;
+        const normalizedLmPcode = normalizeLmPcode(lmPcode);
 
-        let unsubscribe = () => {};
+        if (!normalizedLmPcode) return;
+
+        let cacheReady = false;
+        let latestRows = null;
+
+        const unsubscribe = subscribeToDemoSalesStream(normalizedLmPcode, {
+          onRows: ({ rows }) => {
+            latestRows = rows;
+
+            if (cacheReady) {
+              updateCachedData(() => rows);
+            }
+          },
+          onError: (error) => {
+            console.error("[demoSalesApi] Cache stream error", {
+              lmPcode: normalizedLmPcode,
+              message: error?.error || "Unknown Sales stream error.",
+            });
+          },
+        });
 
         try {
           await cacheDataLoaded;
+          cacheReady = true;
 
-          unsubscribe = onSnapshot(
-            query(
-              collection(db, DEMO_SALES_COLLECTION),
-              where("lmPcode", "==", lmPcode),
-            ),
-            (snapshot) => {
-              const rows = buildDemoSalesRows(snapshot, lmPcode);
+          if (latestRows) {
+            updateCachedData(() => latestRows);
+          }
 
-              updateCachedData(() => rows);
-            },
-            (error) => {
-              console.error("demoSalesApi stream error:", error);
-            },
-          );
+          await cacheEntryRemoved;
         } catch (error) {
-          console.error("demoSalesApi stream setup error:", error);
+          console.error("[demoSalesApi] Cache lifecycle error", {
+            lmPcode: normalizedLmPcode,
+            message: error?.message || String(error),
+          });
+        } finally {
+          unsubscribe();
         }
-
-        await cacheEntryRemoved;
-        unsubscribe();
       },
 
       keepUnusedDataFor: 300,
