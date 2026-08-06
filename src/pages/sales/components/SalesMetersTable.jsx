@@ -24,6 +24,7 @@ import {
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_SORT = { key: "updatedAt", direction: "desc" };
+const WARD_FILTER_NAV = "__NAV__";
 
 const SALES_CATEGORY_ORDER = [
   "Normal - No Leakage Flag",
@@ -324,6 +325,15 @@ function normalizeWardNumber(value) {
   return Number.isFinite(numeric) ? String(numeric) : text.toUpperCase();
 }
 
+function rowHasNoWardValue(row = {}) {
+  const wardLabel = String(row?.wardNumberLabel || "").trim();
+  const wardNumbers = Array.isArray(row?.wardNumbers)
+    ? row.wardNumbers.map(normalizeWardNumber).filter(Boolean)
+    : [];
+
+  return !wardLabel || wardNumbers.length === 0;
+}
+
 function getRowMapMeterId(row = {}) {
   return String(row?.id || row?.meterNo || "").trim();
 }
@@ -506,6 +516,11 @@ export default function SalesMetersTable({
     ).sort(compareNatural);
   }, [rows]);
 
+  const hasNavWardOption = useMemo(
+    () => rows.some(rowHasNoWardValue),
+    [rows],
+  );
+
   const salesGeofenceOptions = useMemo(() => {
     const byId = new Map();
 
@@ -573,7 +588,9 @@ export default function SalesMetersTable({
   );
 
   const singleSelectedWardNo =
-    filters.wardNos.length === 1 ? filters.wardNos[0] : "";
+    filters.wardNos.length === 1 && filters.wardNos[0] !== WARD_FILTER_NAV
+      ? filters.wardNos[0]
+      : "";
   const singleSelectedGeofenceId =
     filters.geofenceIds.length === 1 ? filters.geofenceIds[0] : "";
   const mapSelectedGeofenceId = singleSelectedWardNo
@@ -604,6 +621,7 @@ export default function SalesMetersTable({
         : [];
       const matchesWard =
         selectedWardNos.size === 0 ||
+        (selectedWardNos.has(WARD_FILTER_NAV) && rowHasNoWardValue(row)) ||
         rowWardNumbers.some((wardNo) => selectedWardNos.has(wardNo));
 
       const rowGeofenceRefs = getRowGeofenceRefs(row);
@@ -1079,10 +1097,15 @@ export default function SalesMetersTable({
                     ariaLabel="Filter Sales meters by wards"
                     menuMinWidth={220}
                     onChange={updateWardFilter}
-                    options={wardOptions.map((wardNo) => ({
-                      value: wardNo,
-                      label: `Ward ${wardNo}`,
-                    }))}
+                    options={[
+                      ...wardOptions.map((wardNo) => ({
+                        value: wardNo,
+                        label: `Ward ${wardNo}`,
+                      })),
+                      ...(hasNavWardOption
+                        ? [{ value: WARD_FILTER_NAV, label: "NAv" }]
+                        : []),
+                    ]}
                     selectedCountLabel="wards selected"
                     style={styles.headerSelect}
                     value={filters.wardNos}
