@@ -1,8 +1,8 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+/* eslint-disable no-unused-vars, react-hooks/set-state-in-effect -- subscription effects reset route-scoped loading state. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 
 import { useAuth } from "../../auth/useAuth";
@@ -116,6 +116,24 @@ function getAllocationState(upload = {}) {
     upload?.allocation?.targetId ||
     upload?.allocation?.target?.id ||
     null;
+  const rawTargetType = String(
+    upload?.allocation?.targetType ||
+      upload?.allocation?.target?.type ||
+      "",
+  )
+    .trim()
+    .toUpperCase();
+  const targetName = String(
+    upload?.allocation?.targetName ||
+      upload?.allocation?.target?.name ||
+      "",
+  ).trim();
+  const targetType =
+    rawTargetType === "TEAM" ? "TEAM" : rawTargetType ? "SP" : "";
+  const targetLabel =
+    targetType && targetName
+      ? `${targetType} • ${targetName}`
+      : targetType || targetName || "";
 
   const isAllocated =
     batchStatus === "ALLOCATED" ||
@@ -125,6 +143,7 @@ function getAllocationState(upload = {}) {
   return {
     isAllocated,
     label: isAllocated ? "ALLOCATED" : "NOT ALLOCATED",
+    targetLabel,
   };
 }
 
@@ -301,27 +320,22 @@ export default function TargetedBatchesPage() {
     : "";
 
   useEffect(() => {
-    let active = true;
+    setIsRegisterLoading(true);
+    setRegisterLoadError("");
 
-    async function loadPermanentTargetedBatches() {
-      setIsRegisterLoading(true);
-      setRegisterLoadError("");
+    if (!activeLmPcode) {
+      setPermanentUploads([]);
+      setIsRegisterLoading(false);
+      return undefined;
+    }
 
-      if (!activeLmPcode) {
-        setPermanentUploads([]);
-        setIsRegisterLoading(false);
-        return;
-      }
-
-      try {
-        const uploadsQuery = query(
-          collection(db, "tb_uploads"),
-          where("scope.lmPcode", "==", activeLmPcode),
-        );
-        const snapshot = await getDocs(uploadsQuery);
-
-        if (!active) return;
-
+    const uploadsQuery = query(
+      collection(db, "tb_uploads"),
+      where("scope.lmPcode", "==", activeLmPcode),
+    );
+    const unsubscribe = onSnapshot(
+      uploadsQuery,
+      (snapshot) => {
         const loadedUploads = snapshot.docs
           .map(mapPermanentTargetedBatch)
           .sort((left, right) =>
@@ -331,22 +345,18 @@ export default function TargetedBatchesPage() {
           );
 
         setPermanentUploads(loadedUploads);
-      } catch (error) {
-        if (!active) return;
+        setIsRegisterLoading(false);
+      },
+      (error) => {
         setPermanentUploads([]);
         setRegisterLoadError(
           error?.message || "Permanent Targeted Batches could not be loaded.",
         );
-      } finally {
-        if (active) setIsRegisterLoading(false);
-      }
-    }
+        setIsRegisterLoading(false);
+      },
+    );
 
-    loadPermanentTargetedBatches();
-
-    return () => {
-      active = false;
-    };
+    return unsubscribe;
   }, [activeLmPcode]);
 
   const uploads = permanentUploads;
@@ -679,11 +689,11 @@ export default function TargetedBatchesPage() {
               <tr>
                 <Th>TB Rows</Th>
                 <Th>Allocation</Th>
+                <Th>Total</Th>
+                <Th>Ward</Th>
                 <Th>Final Report (DRAFT)</Th>
                 <Th>Delete TB</Th>
                 <Th>TB ID</Th>
-                <Th>Ward</Th>
-                <Th>Total</Th>
               </tr>
             </thead>
 
@@ -740,9 +750,20 @@ export default function TargetedBatchesPage() {
                             ...styles.allocationStatusBadge,
                             ...styles.allocationStatusAllocated,
                           }}
-                          title="This Targeted Batch has a permanent whole-batch allocation."
+                          title={
+                            allocationState.targetLabel
+                              ? `Allocated to ${allocationState.targetLabel}`
+                              : "This Targeted Batch has a permanent whole-batch allocation."
+                          }
                         >
-                          {allocationState.label}
+                          <span style={styles.allocationStatusLabel}>
+                            {allocationState.label}
+                          </span>
+                          {allocationState.targetLabel ? (
+                            <span style={styles.allocationTargetText}>
+                              {allocationState.targetLabel}
+                            </span>
+                          ) : null}
                         </span>
                       ) : (
                         <Link
@@ -759,6 +780,24 @@ export default function TargetedBatchesPage() {
                           {allocationState.label}
                         </Link>
                       )}
+                    </Td>
+
+                    <Td>
+                      <strong style={styles.totalCell}>
+                        {formatNumber(getUploadTotal(upload))}
+                      </strong>
+                    </Td>
+
+                    <Td>
+                      <div style={styles.strongCell}>
+                        {upload?.scope?.wardName ||
+                          (upload?.scope?.wardNumber
+                            ? `Ward ${upload.scope.wardNumber}`
+                            : "NAv")}
+                      </div>
+                      <div style={styles.mutedCell}>
+                        {upload?.scope?.wardPcode || "NAv"}
+                      </div>
                     </Td>
 
                     <Td>
@@ -794,24 +833,6 @@ export default function TargetedBatchesPage() {
 
                     <Td>
                       <div style={styles.strongCell}>{upload.id || "NAv"}</div>
-                    </Td>
-
-                    <Td>
-                      <div style={styles.strongCell}>
-                        {upload?.scope?.wardName ||
-                          (upload?.scope?.wardNumber
-                            ? `Ward ${upload.scope.wardNumber}`
-                            : "NAv")}
-                      </div>
-                      <div style={styles.mutedCell}>
-                        {upload?.scope?.wardPcode || "NAv"}
-                      </div>
-                    </Td>
-
-                    <Td>
-                      <strong style={styles.totalCell}>
-                        {formatNumber(getUploadTotal(upload))}
-                      </strong>
                     </Td>
                   </tr>
                 );
@@ -1138,13 +1159,28 @@ const styles = {
   },
   allocationStatusBadge: {
     display: "inline-flex",
+    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
+    gap: 2,
     borderRadius: 999,
     padding: "7px 10px",
     fontSize: 11,
     fontWeight: 900,
+    lineHeight: 1.1,
     whiteSpace: "nowrap",
+  },
+  allocationStatusLabel: {
+    display: "block",
+  },
+  allocationTargetText: {
+    display: "block",
+    maxWidth: 150,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    fontSize: 9,
+    fontWeight: 700,
+    opacity: 0.82,
   },
   allocationStatusLink: {
     textDecoration: "none",
