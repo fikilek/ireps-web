@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useGetTargetedBatchReportByIdQuery } from "../../redux/salesTargetedBatchApi";
+import SalesBatchMapModal from "./components/SalesBatchMapModal";
 
 const ALL_FILTER = "ALL";
 const TERMINAL_STREAM_STATES = new Set(["ready", "error"]);
@@ -342,6 +343,7 @@ export default function SalesBatchReportPage() {
   const [noAccessFilter, setNoAccessFilter] = useState(ALL_FILTER);
   const [selectedNoAccessRow, setSelectedNoAccessRow] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [selectedMapRow, setSelectedMapRow] = useState(null);
 
   const sourceStatuses = sync?.sources || EMPTY_REPORT.sync.sources;
   const baseReady =
@@ -715,9 +717,19 @@ export default function SalesBatchReportPage() {
                     </strong>
                   </Td>
                   <Td>
-                    <strong style={styles.primaryCell}>
-                      {row.fieldMeter.number || "PENDING"}
-                    </strong>
+                    {row.fieldMeter.canOpenMap ? (
+                      <button
+                        type="button"
+                        style={styles.fieldMeterMapButton}
+                        onClick={() => setSelectedMapRow(row)}
+                        title={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                        aria-label={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                      >
+                        {row.fieldMeter.number}
+                      </button>
+                    ) : (
+                      <strong style={styles.primaryCell}>PENDING</strong>
+                    )}
                   </Td>
                   <Td>
                     <Badge value={row.comparison.meterMatch} />
@@ -792,6 +804,16 @@ export default function SalesBatchReportPage() {
         <RowDetailsModal
           row={selectedRow}
           onClose={() => setSelectedRow(null)}
+        />
+      ) : null}
+
+      {selectedMapRow ? (
+        <SalesBatchMapModal
+          tbId={decodedTbId}
+          lmPcode={batch?.scope?.lmPcode || ""}
+          focusedMeterId={selectedMapRow.fieldMeter.id || ""}
+          focusedMeterNumber={selectedMapRow.fieldMeter.number || ""}
+          onClose={() => setSelectedMapRow(null)}
         />
       ) : null}
     </section>
@@ -1059,6 +1081,20 @@ const styles = {
 
   primaryCell: {
     color: "#0f172a",
+    whiteSpace: "nowrap",
+  },
+
+  fieldMeterMapButton: {
+    appearance: "none",
+    border: 0,
+    borderBottom: "1px solid currentColor",
+    background: "transparent",
+    color: "#1d4ed8",
+    padding: 0,
+    font: "inherit",
+    fontWeight: 900,
+    lineHeight: 1.35,
+    cursor: "pointer",
     whiteSpace: "nowrap",
   },
 

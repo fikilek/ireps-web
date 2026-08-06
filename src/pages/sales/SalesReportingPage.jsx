@@ -103,6 +103,27 @@ function Td({ children, colSpan }) {
   );
 }
 
+function MapIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z" />
+      <path d="M9 3v15" />
+      <path d="M15 6v15" />
+    </svg>
+  );
+}
+
 export default function SalesReportingPage() {
   const { activeWorkbase } = useAuth();
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
@@ -493,7 +514,17 @@ export default function SalesReportingPage() {
                   return (
                     <tr key={batch.id}>
                       <Td>
-                        <strong style={styles.batchId}>{batch.id}</strong>
+                        <div style={styles.batchIdCell}>
+                          <strong style={styles.batchId}>{batch.id}</strong>
+                          <Link
+                            to={`/sales/reporting/${encodeURIComponent(batch.id)}/map`}
+                            style={styles.batchMapIconButton}
+                            aria-label={`View Batch Map for ${batch.id}`}
+                            title="View Batch Map"
+                          >
+                            <MapIcon />
+                          </Link>
+                        </div>
                       </Td>
                       <Td>
                         <strong>{ward}</strong>
@@ -717,7 +748,7 @@ const styles = {
 
   table: {
     width: "100%",
-    minWidth: 1240,
+    minWidth: 1380,
     borderCollapse: "collapse",
   },
 
@@ -792,6 +823,27 @@ const styles = {
     fontWeight: 900,
     textDecoration: "none",
     whiteSpace: "nowrap",
+  },
+
+  batchIdCell: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    whiteSpace: "nowrap",
+  },
+
+  batchMapIconButton: {
+    width: 30,
+    height: 30,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: "0 0 auto",
+    borderRadius: 9,
+    border: "1px solid #93c5fd",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    textDecoration: "none",
   },
 
   loadingState: {
