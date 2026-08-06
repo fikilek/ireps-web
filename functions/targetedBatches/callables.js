@@ -37,6 +37,7 @@ import {
 } from "./documentFactory.js";
 
 const ROWS_PER_WRITE_CHUNK = 190;
+const BATCH_FAILS_PER_WRITE_CHUNK = 400;
 
 function controlledError(code, message, details = {}) {
   const error = new Error(message);
@@ -55,6 +56,91 @@ function getErrorMessage(error) {
     String(error?.message || "").trim() ||
     "Targeted Batch creation failed"
   );
+}
+
+function buildRowValidationFailure({
+  payload,
+  salesAllMeterId,
+  salesRef,
+  salesDocumentExists,
+  validation,
+}) {
+  return {
+    tbId: payload.tbId,
+    wardPcode: payload.scope.wardPcode,
+    salesAllMeterId,
+    salesRef,
+    salesDocumentExists: Boolean(salesDocumentExists),
+    failureCode: getErrorCode(validation),
+  };
+}
+
+async function writeBatchFailures({
+  db,
+  failures,
+  actorUid,
+  creationGroupId,
+}) {
+  const uniqueFailuresBySalesId = new Map();
+
+  failures.forEach((failure) => {
+    if (!failure?.salesAllMeterId) return;
+    uniqueFailuresBySalesId.set(failure.salesAllMeterId, failure);
+  });
+
+  const uniqueFailures = [...uniqueFailuresBySalesId.values()];
+  const writableFailures = uniqueFailures.filter(
+    (failure) => failure.salesDocumentExists && failure.salesRef,
+  );
+  const skippedFailures = uniqueFailures.filter(
+    (failure) => !failure.salesDocumentExists || !failure.salesRef,
+  );
+
+  if (writableFailures.length === 0) {
+    return {
+      flaggedRowCount: 0,
+      unflaggedRowCount: skippedFailures.length,
+      timestamp: null,
+    };
+  }
+
+  const timestamp = Timestamp.now();
+  const writeChunks = chunkArray(
+    writableFailures,
+    BATCH_FAILS_PER_WRITE_CHUNK,
+  );
+  let processedRows = 0;
+
+  for (const [chunkIndex, chunk] of writeChunks.entries()) {
+    const batch = db.batch();
+
+    chunk.forEach((failure) => {
+      batch.update(failure.salesRef, {
+        batchFail: {
+          timestamp,
+          failureCode: failure.failureCode,
+          userId: actorUid,
+        },
+      });
+    });
+
+    await batch.commit();
+    processedRows += chunk.length;
+
+    logger.info("onCreateTargetedBatchCallable -- BATCH FAIL PROGRESS", {
+      creationGroupId,
+      chunk: chunkIndex + 1,
+      chunks: writeChunks.length,
+      processedRows,
+      expectedRows: writableFailures.length,
+    });
+  }
+
+  return {
+    flaggedRowCount: writableFailures.length,
+    unflaggedRowCount: skippedFailures.length,
+    timestamp,
+  };
 }
 
 function validateExistingParent({ parentData, payload, fingerprint }) {
@@ -416,62 +502,53 @@ function buildBatchFingerprint(payload) {
 }
 
 async function preflightPermanentBatch({ db, payload }) {
-  const fingerprint = buildBatchFingerprint(payload);
+  const requestedRowCount = payload.expectedRows;
   const parentRef = db
     .collection(TARGETED_BATCH_COLLECTIONS.uploads)
     .doc(payload.tbId);
   const salesRefs = payload.salesAllMeterIds.map((salesAllMeterId) =>
     db.collection(TARGETED_BATCH_COLLECTIONS.sales).doc(salesAllMeterId),
   );
-  const expectedRowIds = payload.rows.map((row, index) =>
-    buildTbRowId(payload.tbId, index + 1),
-  );
-  const rowRefs = expectedRowIds.map((rowId) =>
-    db.collection(TARGETED_BATCH_COLLECTIONS.rows).doc(rowId),
-  );
+  const salesSnapshots = await getSnapshotsInChunks({ db, refs: salesRefs });
+  const failedRows = [];
+  const candidateSalesRecords = [];
 
-  const [parentSnapshot, salesSnapshots, existingRowSnapshots] =
-    await Promise.all([
-      parentRef.get(),
-      getSnapshotsInChunks({ db, refs: salesRefs }),
-      getSnapshotsInChunks({ db, refs: rowRefs }),
-    ]);
+  payload.salesAllMeterIds.forEach((salesAllMeterId, index) => {
+    const salesSnapshot = salesSnapshots[index];
+    const validation = validateAuthoritativeSalesDocument({
+      snapshot: salesSnapshot,
+      expectedSalesId: salesAllMeterId,
+      expectedLmPcode: payload.scope.lmPcode,
+      draftRow: payload.rows[index],
+    });
 
-  const parentPreflight = validateExistingParent({
-    parentData: parentSnapshot.exists ? parentSnapshot.data() || {} : null,
-    payload,
-    fingerprint,
+    if (!validation.ok) {
+      failedRows.push(
+        buildRowValidationFailure({
+          payload,
+          salesAllMeterId,
+          salesRef: salesSnapshot?.ref || salesRefs[index],
+          salesDocumentExists: salesSnapshot?.exists,
+          validation,
+        }),
+      );
+      return;
+    }
+
+    candidateSalesRecords.push({
+      originalIndex: index,
+      salesAllMeterId,
+      salesRef: salesSnapshot.ref,
+      salesSource: validation.source,
+      erfReference: validation.erfReference,
+      draftRow: payload.rows[index],
+    });
   });
 
-  const salesRecords = payload.salesAllMeterIds.map(
-    (salesAllMeterId, index) => {
-      const salesSnapshot = salesSnapshots[index];
-      const validation = validateAuthoritativeSalesDocument({
-        snapshot: salesSnapshot,
-        expectedSalesId: salesAllMeterId,
-        expectedLmPcode: payload.scope.lmPcode,
-        draftRow: payload.rows[index],
-      });
-
-      if (!validation.ok) {
-        throw controlledError(validation.code, validation.message, {
-          tbId: payload.tbId,
-          salesAllMeterId,
-        });
-      }
-
-      return {
-        salesAllMeterId,
-        salesRef: salesSnapshot.ref,
-        salesSource: validation.source,
-        erfReference: validation.erfReference,
-        draftRow: payload.rows[index],
-      };
-    },
-  );
-
   const uniqueErfIds = [
-    ...new Set(salesRecords.map((record) => record.erfReference.erfId)),
+    ...new Set(
+      candidateSalesRecords.map((record) => record.erfReference.erfId),
+    ),
   ];
   const erfRefs = uniqueErfIds.map((erfId) =>
     db.collection(TARGETED_BATCH_COLLECTIONS.erfs).doc(erfId),
@@ -480,8 +557,9 @@ async function preflightPermanentBatch({ db, payload }) {
   const erfSnapshotsById = new Map(
     erfSnapshots.map((snapshot) => [snapshot.id, snapshot]),
   );
+  const salesRecords = [];
 
-  const authoritativeScopes = salesRecords.map((record) => {
+  candidateSalesRecords.forEach((record) => {
     const erfId = record.erfReference.erfId;
     const validation = validateAuthoritativeErfDocument({
       snapshot: erfSnapshotsById.get(erfId),
@@ -493,23 +571,55 @@ async function preflightPermanentBatch({ db, payload }) {
     });
 
     if (!validation.ok) {
-      throw controlledError(validation.code, validation.message, {
-        tbId: payload.tbId,
-        salesAllMeterId: record.salesAllMeterId,
-        erfId,
-      });
+      failedRows.push(
+        buildRowValidationFailure({
+          payload,
+          salesAllMeterId: record.salesAllMeterId,
+          salesRef: record.salesRef,
+          salesDocumentExists: true,
+          validation,
+        }),
+      );
+      return;
     }
 
-    record.erfReference = {
-      ...record.erfReference,
-      erfNo: validation.erfNo,
-    };
-    record.erfScope = validation.scope;
-    record.erfSource = validation.source;
-    return validation.scope;
+    salesRecords.push({
+      ...record,
+      erfReference: {
+        ...record.erfReference,
+        erfNo: validation.erfNo,
+      },
+      erfScope: validation.scope,
+      erfSource: validation.source,
+    });
   });
 
-  const authoritativeScope = authoritativeScopes[0];
+  if (salesRecords.length === 0) {
+    const parentSnapshot = await parentRef.get();
+
+    if (parentSnapshot.exists) {
+      throw controlledError(
+        "TARGETED_BATCH_EXISTING_PARENT_WITH_NO_ELIGIBLE_ROWS",
+        `Targeted Batch ${payload.tbId} already exists, but the current request has no eligible rows.`,
+        { tbId: payload.tbId },
+      );
+    }
+
+    return {
+      skipped: true,
+      payload: {
+        ...payload,
+        salesAllMeterIds: [],
+        rows: [],
+        expectedRows: 0,
+      },
+      requestedRowCount,
+      failedRows,
+      salesRecords: [],
+    };
+  }
+
+  const authoritativeScope = salesRecords[0]?.erfScope;
 
   if (!authoritativeScope) {
     throw controlledError(
@@ -518,11 +628,11 @@ async function preflightPermanentBatch({ db, payload }) {
     );
   }
 
-  const scopeConflict = authoritativeScopes.some(
-    (scope) =>
-      scope.lmPcode !== authoritativeScope.lmPcode ||
-      scope.wardPcode !== authoritativeScope.wardPcode ||
-      scope.wardNumber !== authoritativeScope.wardNumber,
+  const scopeConflict = salesRecords.some(
+    (record) =>
+      record.erfScope.lmPcode !== authoritativeScope.lmPcode ||
+      record.erfScope.wardPcode !== authoritativeScope.wardPcode ||
+      record.erfScope.wardNumber !== authoritativeScope.wardNumber,
   );
 
   if (scopeConflict) {
@@ -534,11 +644,30 @@ async function preflightPermanentBatch({ db, payload }) {
 
   const confirmedPayload = {
     ...payload,
+    salesAllMeterIds: salesRecords.map((record) => record.salesAllMeterId),
+    rows: salesRecords.map((record) => record.draftRow),
+    expectedRows: salesRecords.length,
     scope: {
       ...payload.scope,
       ...authoritativeScope,
     },
   };
+  const fingerprint = buildBatchFingerprint(confirmedPayload);
+  const expectedRowIds = confirmedPayload.rows.map((row, index) =>
+    buildTbRowId(confirmedPayload.tbId, index + 1),
+  );
+  const rowRefs = expectedRowIds.map((rowId) =>
+    db.collection(TARGETED_BATCH_COLLECTIONS.rows).doc(rowId),
+  );
+  const [parentSnapshot, existingRowSnapshots] = await Promise.all([
+    parentRef.get(),
+    getSnapshotsInChunks({ db, refs: rowRefs }),
+  ]);
+  const parentPreflight = validateExistingParent({
+    parentData: parentSnapshot.exists ? parentSnapshot.data() || {} : null,
+    payload: confirmedPayload,
+    fingerprint,
+  });
 
   assertExistingSalesReferencesCompatible({
     salesRecords,
@@ -567,7 +696,10 @@ async function preflightPermanentBatch({ db, payload }) {
   });
 
   return {
+    skipped: false,
     payload: confirmedPayload,
+    requestedRowCount,
+    failedRows,
     fingerprint,
     parentRef,
     parentPreflight,
@@ -584,6 +716,8 @@ async function createPreflightedBatch({
 }) {
   const {
     payload,
+    requestedRowCount,
+    failedRows,
     fingerprint,
     parentRef,
     salesRecords,
@@ -649,8 +783,13 @@ async function createPreflightedBatch({
         wardName: payload.scope.wardName,
         rowCount: payload.expectedRows,
         expectedRows: payload.expectedRows,
+        requestedRowCount,
+        failedRowCount: failedRows.length,
         creationState: TARGETED_BATCH_CREATION_STATES.ready,
-        code: "TARGETED_BATCH_ALREADY_READY",
+        code:
+          failedRows.length > 0
+            ? "TARGETED_BATCH_PARTIALLY_ALREADY_READY"
+            : "TARGETED_BATCH_ALREADY_READY",
         creationDate: timestampToIso(creationDate),
         ...verification,
       };
@@ -700,6 +839,7 @@ async function createPreflightedBatch({
 
           transaction.update(record.salesRef, {
             tbRefs: FieldValue.arrayUnion(salesTbRef),
+            batchFail: FieldValue.delete(),
           });
         });
       });
@@ -762,8 +902,13 @@ async function createPreflightedBatch({
       wardName: payload.scope.wardName,
       rowCount: payload.expectedRows,
       expectedRows: payload.expectedRows,
+      requestedRowCount,
+      failedRowCount: failedRows.length,
       creationState: TARGETED_BATCH_CREATION_STATES.ready,
-      code: "TARGETED_BATCH_CREATED",
+      code:
+        failedRows.length > 0
+          ? "TARGETED_BATCH_PARTIALLY_CREATED"
+          : "TARGETED_BATCH_CREATED",
       creationDate: timestampToIso(creationDate),
       ...verification,
     };
@@ -789,7 +934,14 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
   const actorUid = request?.auth?.uid || null;
   let actorName = actorUid || "SYSTEM";
   let creationGroupId = null;
+  let batchFailWriteResult = {
+    flaggedRowCount: 0,
+    unflaggedRowCount: 0,
+    timestamp: null,
+  };
   const completedBatches = [];
+  const skippedBatches = [];
+  const rowValidationFailures = [];
 
   try {
     if (!actorUid) {
@@ -839,22 +991,66 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
         db,
         payload: batchPayload,
       });
+      rowValidationFailures.push(...context.failedRows);
+
+      if (context.skipped) {
+        skippedBatches.push({
+          tbId: batchPayload.tbId,
+          wardPcode: batchPayload.scope.wardPcode,
+          wardNumber: batchPayload.scope.wardNumber,
+          wardName: batchPayload.scope.wardName,
+          requestedRowCount: context.requestedRowCount,
+          createdRowCount: 0,
+          failedRowCount: context.failedRows.length,
+          code: "TARGETED_BATCH_SKIPPED_NO_ELIGIBLE_ROWS",
+        });
+
+        logger.warn(
+          "onCreateTargetedBatchCallable -- BATCH PREFLIGHT NO ELIGIBLE ROWS",
+          {
+            creationGroupId,
+            tbId: batchPayload.tbId,
+            wardPcode: batchPayload.scope.wardPcode,
+            requestedRows: context.requestedRowCount,
+            failedRows: context.failedRows.length,
+          },
+        );
+        continue;
+      }
+
       preflightContexts.push(context);
 
       logger.info("onCreateTargetedBatchCallable -- BATCH PREFLIGHT PASSED", {
         creationGroupId,
         tbId: context.payload.tbId,
         wardPcode: context.payload.scope.wardPcode,
-        expectedRows: context.payload.expectedRows,
+        requestedRows: context.requestedRowCount,
+        eligibleRows: context.payload.expectedRows,
+        failedRows: context.failedRows.length,
         parentExists: context.parentPreflight.exists,
         parentState: context.parentPreflight.state,
       });
     }
 
+    const eligibleRowCount = preflightContexts.reduce(
+      (sum, context) => sum + context.payload.expectedRows,
+      0,
+    );
+
     logger.info("onCreateTargetedBatchCallable -- GROUP PREFLIGHT PASSED", {
       creationGroupId,
       validatedBatches: preflightContexts.length,
-      validatedRows: payloadCheck.expectedRows,
+      skippedBatches: skippedBatches.length,
+      requestedRows: payloadCheck.expectedRows,
+      eligibleRows: eligibleRowCount,
+      failedRows: rowValidationFailures.length,
+    });
+
+    batchFailWriteResult = await writeBatchFailures({
+      db,
+      failures: rowValidationFailures,
+      actorUid,
+      creationGroupId,
     });
 
     for (const context of preflightContexts) {
@@ -877,31 +1073,69 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       (sum, batch) => sum + Number(batch.rowCount || 0),
       0,
     );
+    const failedRowCount = rowValidationFailures.length;
     const firstBatchId = completedBatches[0]?.tbId || null;
+    const groupCode =
+      failedRowCount === 0
+        ? "TARGETED_BATCH_GROUP_CREATED"
+        : completedBatches.length > 0
+          ? "TARGETED_BATCH_GROUP_PARTIALLY_CREATED"
+          : "TARGETED_BATCH_GROUP_NO_ELIGIBLE_ROWS";
+    const message =
+      failedRowCount === 0
+        ? `${completedBatches.length} ward-scoped Targeted Batch${
+            completedBatches.length === 1 ? "" : "es"
+          } created successfully`
+        : completedBatches.length > 0
+          ? `${createdRowCount} Sales record${
+              createdRowCount === 1 ? " was" : "s were"
+            } batched and ${failedRowCount} record${
+              failedRowCount === 1 ? " was" : "s were"
+            } flagged`
+          : `No Targeted Batch was created. ${failedRowCount} Sales record${
+              failedRowCount === 1 ? " was" : "s were"
+            } flagged`;
 
     logger.info("onCreateTargetedBatchCallable -- GROUP SUCCESS", {
       creationGroupId,
+      groupCode,
       createdBatchCount: completedBatches.length,
+      skippedBatchCount: skippedBatches.length,
+      requestedRowCount: payloadCheck.expectedRows,
       createdRowCount,
+      failedRowCount,
+      flaggedRowCount: batchFailWriteResult.flaggedRowCount,
+      unflaggedRowCount: batchFailWriteResult.unflaggedRowCount,
       elapsedMs,
     });
 
-    return buildSuccessResult(
-      `${completedBatches.length} ward-scoped Targeted Batch${
-        completedBatches.length === 1 ? "" : "es"
-      } created successfully`,
-      {
-        code: "TARGETED_BATCH_GROUP_CREATED",
-        creationState: TARGETED_BATCH_CREATION_STATES.ready,
-        creationGroupId,
-        createdBatchCount: completedBatches.length,
-        createdRowCount,
-        batches: completedBatches,
-        tbId: completedBatches.length === 1 ? firstBatchId : null,
-        expectedRows: createdRowCount,
-        elapsedMs,
-      },
-    );
+    return buildSuccessResult(message, {
+      code: groupCode,
+      creationState:
+        completedBatches.length > 0
+          ? TARGETED_BATCH_CREATION_STATES.ready
+          : null,
+      creationGroupId,
+      requestedRowCount: payloadCheck.expectedRows,
+      createdBatchCount: completedBatches.length,
+      skippedBatchCount: skippedBatches.length,
+      createdRowCount,
+      failedRowCount,
+      flaggedRowCount: batchFailWriteResult.flaggedRowCount,
+      unflaggedFailedRowCount: batchFailWriteResult.unflaggedRowCount,
+      batches: completedBatches,
+      skippedBatches,
+      failedRows: rowValidationFailures.map((failure) => ({
+        tbId: failure.tbId,
+        salesAllMeterId: failure.salesAllMeterId,
+        failureCode: failure.failureCode,
+        flagged: failure.salesDocumentExists,
+      })),
+      tbId: completedBatches.length === 1 ? firstBatchId : null,
+      expectedRows: createdRowCount,
+      elapsedMs,
+    });
+
   } catch (error) {
     const code = getErrorCode(error);
     const message = getErrorMessage(error);
@@ -924,6 +1158,10 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
           : null,
       completedBatchCount: completedBatches.length,
       completedBatches,
+      skippedBatches,
+      failedRowCount: rowValidationFailures.length,
+      flaggedRowCount: batchFailWriteResult.flaggedRowCount,
+      unflaggedFailedRowCount: batchFailWriteResult.unflaggedRowCount,
       details: error?.details || null,
       elapsedMs,
     });
