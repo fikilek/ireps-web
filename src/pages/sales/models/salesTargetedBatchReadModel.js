@@ -626,6 +626,20 @@ export function getTargetedBatchPremiseIds({
   );
 }
 
+export function getSalesOperationalPremiseIds({
+  rows = [],
+  salesById = {},
+}) {
+  return uniqueNonBlank(
+    rows.map((row) => {
+      const tbId = cleanText(row?.tbId);
+      const sales = salesById[cleanText(row?.salesAllMeterId)] || {};
+      const reference = getBatchReference(sales, tbId, row?.id);
+      return getPremiseId(row, getFieldWork(reference));
+    }),
+  );
+}
+
 export function normalizeTargetedBatchReportRow({
   row = {},
   batch = {},
@@ -839,3 +853,164 @@ export function buildTargetedBatchReport({
     summary: summarizeTargetedBatchReportRows(normalizedRows),
   };
 }
+
+const SALES_STATS_UNASSIGNED_WARD = "Ward Not Assigned";
+const SALES_STATS_UNASSIGNED_GEOFENCE_ID = "__GEOFENCE_NOT_ASSIGNED__";
+const SALES_STATS_UNASSIGNED_GEOFENCE_NAME = "Geofence Not Assigned";
+const SALES_STATS_UNCATEGORISED = "Uncategorised";
+
+function getOperationalWard(sales = {}, row = {}, batch = {}) {
+  return (
+    firstText(
+      row?.location?.wardNumberLabel,
+      row?.scope?.wardName,
+      row?.scope?.wardNumber,
+      sales?.wardNumberLabel,
+      batch?.scope?.wardName,
+      batch?.scope?.wardNumber,
+    ) || SALES_STATS_UNASSIGNED_WARD
+  );
+}
+
+function getOperationalSalesCategory(sales = {}) {
+  return firstText(sales?.leakageCategory) || SALES_STATS_UNCATEGORISED;
+}
+
+function getOperationalGeofenceRefs(sales = {}) {
+  const refs = Array.isArray(sales?.geofenceRefs) ? sales.geofenceRefs : [];
+  const seen = new Set();
+
+  const normalized = refs
+    .map((reference) => {
+      const id = cleanText(reference?.id);
+      if (!id || seen.has(id)) return null;
+      seen.add(id);
+
+      return {
+        id,
+        name: firstText(reference?.name, id) || id,
+      };
+    })
+    .filter(Boolean);
+
+  return normalized.length
+    ? normalized
+    : [
+        {
+          id: SALES_STATS_UNASSIGNED_GEOFENCE_ID,
+          name: SALES_STATS_UNASSIGNED_GEOFENCE_NAME,
+        },
+      ];
+}
+
+function getOperationalAllocation(row = {}, batch = {}) {
+  const targetType = firstText(
+    row?.allocation?.targetType,
+    batch?.allocation?.targetType,
+  );
+  const targetId = firstText(
+    row?.allocation?.targetId,
+    batch?.allocation?.targetId,
+  );
+  const targetName = firstText(
+    row?.allocation?.targetName,
+    batch?.allocation?.targetName,
+  );
+  const key =
+    targetType || targetName || targetId
+      ? `${targetType || "TARGET"}::${targetId || targetName}`
+      : "UNALLOCATED";
+
+  return {
+    key,
+    targetType: targetType || "UNALLOCATED",
+    targetId: targetId || null,
+    targetName: targetName || "Unallocated",
+    label:
+      targetType || targetName
+        ? `${targetType || "TARGET"} • ${targetName || targetId}`
+        : "Unallocated",
+  };
+}
+
+export function buildSalesOperationalStatsReadModel({
+  batches = [],
+  rows = [],
+  salesById = {},
+  premiseById = {},
+}) {
+  const batchById = Object.fromEntries(
+    batches.map((batch) => [cleanText(batch?.id), batch]),
+  );
+  const normalizedBatches = batches
+    .map((batch) => normalizeTargetedBatchHeader(batch?.id, batch))
+    .sort(sortTargetedBatchHeaders);
+  const normalizedBatchById = Object.fromEntries(
+    normalizedBatches.map((batch) => [batch.id, batch]),
+  );
+
+  const normalizedRows = rows
+    .map((row) => {
+      const tbId = cleanText(row?.tbId);
+      const batch = batchById[tbId] || {};
+      const salesId = cleanText(row?.salesAllMeterId);
+      const sales = salesById[salesId] || {};
+      const batchHeader = normalizedBatchById[tbId] || null;
+      const normalizedRow = normalizeTargetedBatchReportRow({
+        row,
+        batch,
+        salesById,
+        premiseById,
+        tbId,
+      });
+
+      return {
+        ...normalizedRow,
+        analytics: {
+          ward: getOperationalWard(sales, row, batch),
+          category: getOperationalSalesCategory(sales),
+          geofenceRefs: getOperationalGeofenceRefs(sales),
+          salesPeriod:
+            batchHeader?.selection?.salesPeriodLabel || "NAv",
+          allocation: getOperationalAllocation(row, batch),
+        },
+        batchContext: batchHeader
+          ? {
+              id: batchHeader.id,
+              updatedAtMs: batchHeader.updatedAtMs || null,
+              lastActivityAtMs: batchHeader.lastActivityAtMs || null,
+              wardLabel: batchHeader.scope.wardLabel,
+              salesPeriodLabel: batchHeader.selection.salesPeriodLabel,
+              allocation: batchHeader.allocation,
+            }
+          : {
+              id: tbId,
+              updatedAtMs: null,
+              lastActivityAtMs: null,
+              wardLabel: "NAv",
+              salesPeriodLabel: "NAv",
+              allocation: null,
+            },
+      };
+    })
+    .sort((left, right) => {
+      const batchComparison = cleanText(left?.tbId).localeCompare(
+        cleanText(right?.tbId),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+      if (batchComparison !== 0) return batchComparison;
+
+      const rowNumberComparison =
+        Number(left?.rowNo || 0) - Number(right?.rowNo || 0);
+      if (rowNumberComparison !== 0) return rowNumberComparison;
+
+      return cleanText(left?.id).localeCompare(cleanText(right?.id));
+    });
+
+  return {
+    batches: normalizedBatches,
+    rows: normalizedRows,
+  };
+}
+
