@@ -687,13 +687,13 @@ export default function TargetedBatchesPage() {
           <table style={styles.table}>
             <thead>
               <tr>
+                <Th>TB ID</Th>
                 <Th>TB Rows</Th>
                 <Th>Allocation</Th>
                 <Th>Total</Th>
                 <Th>Ward</Th>
                 <Th>Final Report (DRAFT)</Th>
                 <Th>Delete TB</Th>
-                <Th>TB ID</Th>
               </tr>
             </thead>
 
@@ -720,6 +720,10 @@ export default function TargetedBatchesPage() {
 
                 return (
                   <tr key={upload.id}>
+                    <Td>
+                      <div style={styles.strongCell}>{upload.id || "NAv"}</div>
+                    </Td>
+
                     <Td>
                       {creationReady ? (
                         <Link
@@ -829,10 +833,6 @@ export default function TargetedBatchesPage() {
                       >
                         Delete TB
                       </button>
-                    </Td>
-
-                    <Td>
-                      <div style={styles.strongCell}>{upload.id || "NAv"}</div>
                     </Td>
                   </tr>
                 );
