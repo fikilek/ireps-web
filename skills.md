@@ -6,6 +6,22 @@ This file contains binding housekeeping rules for the `iREPS Web` repository.
 
 Before giving or following any instruction involving ZIP creation, ZIP upload, ZIP download, ZIP extraction, or file delivery, read this file first and apply it.
 
+## Mandatory new-chat repository inspection
+
+At the start of every new `iREPS Web` chat:
+
+1. The user sends the current `skills.md` file.
+2. Capture the exact current folder/file tree.
+3. Capture the current branch, commit, and Git status.
+4. Create one unique timestamped ZIP under:
+
+   `C:\dev\ireps-web\zips`
+
+5. The user uploads that ZIP to ChatGPT.
+6. Inspect the uploaded repository tree and Git state before touching the ERF validation code or making any repository change.
+
+This new-chat inspection is mandatory. Do not rely on an older repository tree, an older uploaded source snapshot, or assumptions about the current working tree.
+
 ## Mandatory Firestore access and streaming policy
 
 1. All Firestore-backed data used by an iREPS user interface must stream in real time by default.
