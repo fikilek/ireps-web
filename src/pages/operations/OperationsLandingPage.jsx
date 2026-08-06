@@ -30,8 +30,8 @@ const operationModules = [
     description:
       "Manage teams for allocation, assignment, and field execution grouping.",
     path: "/operations/teams",
-    status: "Coming Soon",
-    active: false,
+    status: "Active",
+    active: true,
   },
   {
     title: "Geo-Fences",

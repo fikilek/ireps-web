@@ -6,9 +6,17 @@ import {
   query,
 } from "firebase/firestore";
 
-import { db } from "../firebase";
+import { db, functions } from "../firebase";
+import { httpsCallable } from "firebase/functions";
 
 const TEAMS_COLLECTION = "teams";
+
+function normalizeCallableError(error, fallbackMessage) {
+  return {
+    message: error?.message || fallbackMessage,
+    code: error?.code || "unknown",
+  };
+}
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -121,7 +129,102 @@ export const teamsApi = createApi({
         }
       },
     }),
+    createTeam: builder.mutation({
+      async queryFn({ name, description = "NAv" }) {
+        try {
+          const callable = httpsCallable(functions, "createTeam");
+          const result = await callable({
+            name: String(name || "").trim(),
+            description: String(description || "").trim() || "NAv",
+          });
+
+          return { data: result?.data || { success: true } };
+        } catch (error) {
+          return {
+            error: normalizeCallableError(error, "Team creation failed."),
+          };
+        }
+      },
+    }),
+
+    renameTeam: builder.mutation({
+      async queryFn({ teamId, name }) {
+        try {
+          const callable = httpsCallable(functions, "renameTeam");
+          const result = await callable({
+            teamId: String(teamId || "").trim(),
+            name: String(name || "").trim(),
+          });
+
+          return { data: result?.data || { success: true, teamId } };
+        } catch (error) {
+          return { error: normalizeCallableError(error, "Team rename failed.") };
+        }
+      },
+    }),
+
+    addTeamMember: builder.mutation({
+      async queryFn({ teamId, userUid }) {
+        try {
+          const callable = httpsCallable(functions, "addTeamMember");
+          const result = await callable({
+            teamId: String(teamId || "").trim(),
+            userUid: String(userUid || "").trim(),
+          });
+
+          return {
+            data: result?.data || { success: true, teamId, userUid },
+          };
+        } catch (error) {
+          return {
+            error: normalizeCallableError(error, "Add team member failed."),
+          };
+        }
+      },
+    }),
+
+    removeTeamMember: builder.mutation({
+      async queryFn({ teamId, userUid }) {
+        try {
+          const callable = httpsCallable(functions, "removeTeamMember");
+          const result = await callable({
+            teamId: String(teamId || "").trim(),
+            userUid: String(userUid || "").trim(),
+          });
+
+          return {
+            data: result?.data || { success: true, teamId, userUid },
+          };
+        } catch (error) {
+          return {
+            error: normalizeCallableError(error, "Remove team member failed."),
+          };
+        }
+      },
+    }),
+
+    deleteTeam: builder.mutation({
+      async queryFn({ teamId }) {
+        try {
+          const callable = httpsCallable(functions, "deleteTeam");
+          const result = await callable({
+            teamId: String(teamId || "").trim(),
+          });
+
+          return { data: result?.data || { success: true, teamId } };
+        } catch (error) {
+          return { error: normalizeCallableError(error, "Delete team failed.") };
+        }
+      },
+    }),
   }),
 });
 
-export const { useGetAvailableTeamsQuery } = teamsApi;
+export const {
+  useGetAvailableTeamsQuery,
+  useCreateTeamMutation,
+  useRenameTeamMutation,
+  useAddTeamMemberMutation,
+  useRemoveTeamMemberMutation,
+  useDeleteTeamMutation,
+} = teamsApi;

@@ -27,6 +27,7 @@ import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
 import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 
 import OperationsLandingPage from "../pages/operations/OperationsLandingPage";
+import OperationalTeamsPage from "../pages/operations/OperationalTeamsPage";
 import TcUploadsPage from "../pages/operations/TcUploadsPage";
 import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
 import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
@@ -54,6 +55,7 @@ import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 import PrepaidSales from "../pages/sales/PrepaidSales";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
 import SalesBatchReportPage from "../pages/sales/SalesBatchReportPage";
+import SalesBatchMapPage from "../pages/sales/SalesBatchMapPage";
 import SalesStatsPage from "../pages/sales/SalesStatsPage";
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
@@ -110,6 +112,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <SalesReportingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/reporting/:tbId/map"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <SalesBatchMapPage />
               </RoleRoute>
             }
           />
@@ -403,10 +414,7 @@ export default function AppRoutes() {
             path="/operations/teams"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Operational Teams"
-                  description="Web-based operational team management."
-                />
+                <OperationalTeamsPage />
               </RoleRoute>
             }
           />
