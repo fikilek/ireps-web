@@ -462,8 +462,8 @@ export default function SalesReportingPage() {
                 <Th>Not Started</Th>
                 <Th>In Progress</Th>
                 <Th>Completed</Th>
-                <Th>Last Activity</Th>
                 <Th>Report</Th>
+                <Th>Last Activity</Th>
               </tr>
             </thead>
 
@@ -515,7 +515,6 @@ export default function SalesReportingPage() {
                     <tr key={batch.id}>
                       <Td>
                         <div style={styles.batchIdCell}>
-                          <strong style={styles.batchId}>{batch.id}</strong>
                           <Link
                             to={`/sales/reporting/${encodeURIComponent(batch.id)}/map`}
                             style={styles.batchMapIconButton}
@@ -524,6 +523,7 @@ export default function SalesReportingPage() {
                           >
                             <MapIcon />
                           </Link>
+                          <strong style={styles.batchId}>{batch.id}</strong>
                         </div>
                       </Td>
                       <Td>
@@ -537,7 +537,6 @@ export default function SalesReportingPage() {
                       <Td>{formatNumber(progress?.notStarted)}</Td>
                       <Td>{formatNumber(progress?.inProgress)}</Td>
                       <Td>{formatNumber(progress?.completed)}</Td>
-                      <Td>{formatDateTime(batch?.lastActivityAtMs)}</Td>
                       <Td>
                         <Link
                           to={`/sales/reporting/${encodeURIComponent(batch.id)}`}
@@ -546,6 +545,7 @@ export default function SalesReportingPage() {
                           Open Report
                         </Link>
                       </Td>
+                      <Td>{formatDateTime(batch?.lastActivityAtMs)}</Td>
                     </tr>
                   );
                 })}
