@@ -507,7 +507,7 @@ export default function PrepaidSales() {
         <section style={{ ...styles.statePanel, ...styles.errorPanel }}>
           <h2>Could not load prepaid sales</h2>
           <p>
-            Check Firestore access to demo_sales_meters and confirm that the
+            Check Firestore access to sales-all-meters and confirm that the
             records contain lmPcode {activeLmPcode}.
           </p>
         </section>
@@ -518,7 +518,7 @@ export default function PrepaidSales() {
       {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
         <section style={styles.statePanel}>
           <h2>No prepaid sales found</h2>
-          <p>No demo sales meters were returned for {activeLmPcode}.</p>
+          <p>No Sales All meters were returned for {activeLmPcode}.</p>
         </section>
       ) : null}
 

@@ -98,7 +98,7 @@ function fixture({targetType = "TEAM", premiseId = null, rowStatus = "NOT_STARTE
       refs: {erfId: ERF, premiseId, meterId: null, trnId: null},
       scope: {lmPcode: "ZA1", wardPcode: "ZA1001"}, metadata: {},
     },
-    [`demo_sales_meters/${SALES}`]: {
+    [`sales-all-meters/${SALES}`]: {
       untouched: {yes: true}, geofenceRefs: [{id: "GF1"}],
       tbRefs: [{id: "OTHER", rowId: "OTHER_ROW", fieldWork: {status: "NOT_STARTED"}}, {
         id: TB, rowId: ROW, date: "LOCKED", fieldWork: {status: "NOT_STARTED",
@@ -178,7 +178,7 @@ test("premise is derived from row, preserved in TRN, and client mismatch fails",
   const okDb = new FakeDb(fixture({premiseId: "PREM_1"}));
   await record(okDb, request({premiseId: "PREM_1"}));
   assert.equal(okDb.read(`trns/${TRN}`).accessData.premise.id, "PREM_1");
-  assert.equal(okDb.read(`demo_sales_meters/${SALES}`).tbRefs[1].fieldWork.premiseId, "PREM_1");
+  assert.equal(okDb.read(`sales-all-meters/${SALES}`).tbRefs[1].fieldWork.premiseId, "PREM_1");
   const derivedDb = new FakeDb(fixture({premiseId: "PREM_1"}));
   await record(derivedDb, request({premiseId: undefined}));
   assert.equal(derivedDb.read(`trns/${TRN}`).accessData.premise.id, "PREM_1");
@@ -201,13 +201,13 @@ test("exact correlation and Sales shape failures produce zero writes", async () 
     assert.equal(db.writes.length, 0);
   }
   const wrongRow = fixture();
-  wrongRow[`demo_sales_meters/${SALES}`].tbRefs[1].rowId = "OTHER_ROW";
+  wrongRow[`sales-all-meters/${SALES}`].tbRefs[1].rowId = "OTHER_ROW";
   const wrongRowDb = new FakeDb(wrongRow);
   await assert.rejects(record(wrongRowDb), {code: "SALES_TB_REF_NOT_FOUND"});
   assert.equal(wrongRowDb.writes.length, 0);
   for (const value of ["bad", {noAccess: "bad"}]) {
     const docs = fixture();
-    docs[`demo_sales_meters/${SALES}`].tbRefs[1].fieldWork = value;
+    docs[`sales-all-meters/${SALES}`].tbRefs[1].fieldWork = value;
     const db = new FakeDb(docs);
     await assert.rejects(record(db), {code: "FIELDWORK_INVALID"});
     assert.equal(db.writes.length, 0);
@@ -216,9 +216,9 @@ test("exact correlation and Sales shape failures produce zero writes", async () 
 
 test("Sales append preserves all existing fields, references, date, and entry order", async () => {
   const db = new FakeDb(fixture());
-  const before = db.read(`demo_sales_meters/${SALES}`);
+  const before = db.read(`sales-all-meters/${SALES}`);
   await record(db);
-  const after = db.read(`demo_sales_meters/${SALES}`);
+  const after = db.read(`sales-all-meters/${SALES}`);
   assert.deepEqual(after.geofenceRefs, before.geofenceRefs);
   assert.deepEqual(after.untouched, before.untouched);
   assert.deepEqual(after.tbRefs[0], before.tbRefs[0]);
@@ -237,7 +237,7 @@ test("multiple attempts append in order and increment first-activity counter onc
   const firstParentStartedAt = db.read(`tb_uploads/${TB}`).execution.startedAt;
   await record(db, request({trnId: "TRN_MDIS_20260804_002",
     capturedAt: "2026-08-04T10:12:13.000Z"}), LATER);
-  const sales = db.read(`demo_sales_meters/${SALES}`);
+  const sales = db.read(`sales-all-meters/${SALES}`);
   const row = db.read(`tb_rows/${ROW}`);
   const parent = db.read(`tb_uploads/${TB}`);
   assert.equal(sales.tbRefs[1].fieldWork.noAccess.length, 3);

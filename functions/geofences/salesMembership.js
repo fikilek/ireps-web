@@ -2,27 +2,32 @@
 
 /* eslint-disable no-undef */
 
+import { FieldValue } from "firebase-admin/firestore";
+
 import {
-  appendGeoFenceRef,
   doesEntityBelongToGeoFence,
-  normalizeGeoFenceRefs,
 } from "./helpers.js";
+
+
+function chunkArray(items = [], size = 200) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
 
 function normalizeScopeValue(value) {
   return String(value || "").trim().toUpperCase();
 }
 
-function geoFenceRefsEqual(left = [], right = []) {
-  const cleanLeft = normalizeGeoFenceRefs(left);
-  const cleanRight = normalizeGeoFenceRefs(right);
+function normalizeRefId(value) {
+  return String(value || "").trim();
+}
 
-  if (cleanLeft.length !== cleanRight.length) return false;
-
-  return cleanLeft.every(
-    (item, index) =>
-      item?.id === cleanRight[index]?.id &&
-      item?.name === cleanRight[index]?.name,
-  );
+function normalizeRefName(value) {
+  return String(value ?? "").trim();
 }
 
 function getSalesErfCandidates(sales = {}) {
@@ -38,10 +43,7 @@ function extractSalesCandidatePoint(candidate = {}) {
     return null;
   }
 
-  return {
-    latitude,
-    longitude,
-  };
+  return { latitude, longitude };
 }
 
 function candidateMatchesScope(candidate = {}, lmPcode, wardPcode) {
@@ -59,10 +61,45 @@ function candidateMatchesScope(candidate = {}, lmPcode, wardPcode) {
 }
 
 function hasUsableSalesGps(sales = {}) {
-  return sales?.HasUsableGps === true || sales?.hasUsableGps === true;
+  return sales?.hasUsableGps === true || sales?.HasUsableGps === true;
 }
 
-export const collectGeoFenceDemoSalesUpdates = ({
+function inspectExistingGeoFenceRef(sales = {}, geoFenceId, geoFenceName) {
+  const refs = Array.isArray(sales?.geofenceRefs) ? sales.geofenceRefs : [];
+  const normalizedId = normalizeRefId(geoFenceId);
+  const normalizedName = normalizeRefName(geoFenceName);
+  const matches = refs.filter(
+    (ref) => normalizeRefId(ref?.id).toUpperCase() === normalizedId.toUpperCase(),
+  );
+
+  if (matches.length > 1) {
+    return {
+      state: "CONFLICT",
+      code: "GEOFENCE_REF_DUPLICATE_LOGICAL_ID",
+      existingRefs: matches,
+    };
+  }
+
+  if (matches.length === 1) {
+    const existingRawName = matches[0]?.name;
+    const existingName = normalizeRefName(existingRawName);
+
+    if (existingRawName !== undefined && existingRawName !== null &&
+        existingName !== normalizedName) {
+      return {
+        state: "CONFLICT",
+        code: "GEOFENCE_REF_NAME_CONFLICT",
+        existingRefs: matches,
+      };
+    }
+
+    return { state: "ALREADY_LINKED", existingRefs: matches };
+  }
+
+  return { state: "ADD", existingRefs: [] };
+}
+
+export const collectGeoFenceSalesUpdates = ({
   salesDocs = [],
   geoFenceId,
   geoFenceName,
@@ -72,8 +109,14 @@ export const collectGeoFenceDemoSalesUpdates = ({
   polygonPoints,
 }) => {
   const updates = [];
+  const conflicts = [];
   let memberCount = 0;
   let candidatePointsChecked = 0;
+
+  const canonicalRef = {
+    id: normalizeRefId(geoFenceId),
+    name: normalizeRefName(geoFenceName),
+  };
 
   for (const salesDoc of salesDocs) {
     const sales = salesDoc.data() || {};
@@ -84,22 +127,14 @@ export const collectGeoFenceDemoSalesUpdates = ({
     let belongs = false;
 
     for (const candidate of candidates) {
-      if (!candidateMatchesScope(candidate, lmPcode, wardPcode)) {
-        continue;
-      }
+      if (!candidateMatchesScope(candidate, lmPcode, wardPcode)) continue;
 
       const point = extractSalesCandidatePoint(candidate);
       if (!point) continue;
 
       candidatePointsChecked += 1;
 
-      if (
-        doesEntityBelongToGeoFence({
-          point,
-          bbox,
-          polygonPoints,
-        })
-      ) {
+      if (doesEntityBelongToGeoFence({ point, bbox, polygonPoints })) {
         belongs = true;
         break;
       }
@@ -109,30 +144,76 @@ export const collectGeoFenceDemoSalesUpdates = ({
 
     memberCount += 1;
 
-    const currentGeoFenceRefs = normalizeGeoFenceRefs(
-      sales?.geofenceRefs || [],
+    const existing = inspectExistingGeoFenceRef(
+      sales,
+      canonicalRef.id,
+      canonicalRef.name,
     );
 
-    const nextGeoFenceRefs = appendGeoFenceRef(currentGeoFenceRefs, {
-      id: geoFenceId,
-      name: geoFenceName,
-    });
-
-    if (geoFenceRefsEqual(currentGeoFenceRefs, nextGeoFenceRefs)) {
+    if (existing.state === "CONFLICT") {
+      conflicts.push({
+        salesDocId: salesDoc.id,
+        salesPath: salesDoc.ref?.path || null,
+        code: existing.code,
+        geoFenceId: canonicalRef.id,
+        geoFenceName: canonicalRef.name,
+        existingRefs: existing.existingRefs,
+      });
       continue;
     }
 
+    if (existing.state === "ALREADY_LINKED") continue;
+
     updates.push({
       ref: salesDoc.ref,
-      data: {
-        geofenceRefs: nextGeoFenceRefs,
-      },
+      geoFenceRef: canonicalRef,
     });
   }
 
   return {
     updates,
+    conflicts,
     memberCount,
     candidatePointsChecked,
   };
+};
+
+export const commitGeoFenceSalesMembershipUpdates = async ({
+  db,
+  updates = [],
+  conflicts = [],
+  batchSize = 200,
+}) => {
+  if (Array.isArray(conflicts) && conflicts.length > 0) {
+    const error = new Error(
+      `Sales geofence membership integrity conflict on ${conflicts.length} document(s).`,
+    );
+    error.code = "SALES_GEOFENCE_MEMBERSHIP_INTEGRITY_CONFLICT";
+    error.details = { conflicts: conflicts.slice(0, 20) };
+    throw error;
+  }
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return { batchesCommitted: 0, docsUpdated: 0 };
+  }
+
+  const chunks = chunkArray(updates, batchSize);
+  let batchesCommitted = 0;
+  let docsUpdated = 0;
+
+  for (const chunk of chunks) {
+    const batch = db.batch();
+
+    for (const update of chunk) {
+      batch.update(update.ref, {
+        geofenceRefs: FieldValue.arrayUnion(update.geoFenceRef),
+      });
+    }
+
+    await batch.commit();
+    batchesCommitted += 1;
+    docsUpdated += chunk.length;
+  }
+
+  return { batchesCommitted, docsUpdated };
 };

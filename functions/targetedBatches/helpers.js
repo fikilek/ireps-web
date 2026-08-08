@@ -4,7 +4,7 @@ import { Timestamp } from "firebase-admin/firestore";
 export const TARGETED_BATCH_COLLECTIONS = Object.freeze({
   uploads: "tb_uploads",
   rows: "tb_rows",
-  sales: "demo_sales_meters",
+  sales: "sales-all-meters",
   erfs: "ireps_erfs",
   users: "users",
 });
@@ -646,8 +646,8 @@ export function getDemoSalesMeterType(data = {}) {
       data?.tariffType,
   );
 
-  // demo_sales_meters is the temporary Prepaid Sales source. Conventional
-  // demo records must carry an explicit meter type when they are introduced.
+  // Prepaid Sales remains the supported Targeted Batch source type. Canonical
+  // Sales All records may omit an explicit meter type, so default to PREPAID.
   return explicitType || "PREPAID";
 }
 
@@ -836,12 +836,15 @@ export function validateAuthoritativeSalesDocument({
     };
   }
 
-  // TEMPORARY DEMO SOURCE RULE:
-  // demo_sales_meters does not currently carry lmPcode on every document.
-  // Do not require the field for Targeted Batch creation. When a demo Sales
-  // document does contain lmPcode, still reject a real conflict with the
-  // confirmed TB Draft scope.
-  if (sourceLmPcode && sourceLmPcode !== expectedLmPcode) {
+  if (!sourceLmPcode) {
+    return {
+      ok: false,
+      code: "SALES_LM_SCOPE_MISSING",
+      message: `Sales source ${expectedSalesId} has no canonical lmPcode.`,
+    };
+  }
+
+  if (sourceLmPcode !== expectedLmPcode) {
     return {
       ok: false,
       code: "SALES_LM_SCOPE_MISMATCH",

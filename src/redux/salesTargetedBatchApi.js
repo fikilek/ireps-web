@@ -23,7 +23,7 @@ import {
 
 const TARGETED_BATCH_UPLOADS_COLLECTION = "tb_uploads";
 const TARGETED_BATCH_ROWS_COLLECTION = "tb_rows";
-const SALES_COLLECTION = "demo_sales_meters";
+const SALES_COLLECTION = "sales-all-meters";
 const REPORTING_PREMISES_COLLECTION = "registry_premises";
 const MAP_ERFS_COLLECTION = "ireps_erfs";
 const MAP_PREMISES_COLLECTION = "premises";

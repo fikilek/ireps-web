@@ -487,7 +487,7 @@ function buildLinkedFixture() {
         },
         metadata: {},
       },
-      [`demo_sales_meters/${salesDocId}`]: {
+      [`sales-all-meters/${salesDocId}`]: {
         meterNo: salesDocId,
         geofenceRefs: [{ id: "GF_001" }],
         category: "CAT-1",
@@ -675,7 +675,7 @@ test("linked premise transaction starts TB execution and preserves Sales data", 
 
   const parent = db.read(`tb_uploads/${TB_ID}`);
   const row = db.read(`tb_rows/${ROW_ID}`);
-  const sales = db.read(`demo_sales_meters/${fixture.salesDocId}`);
+  const sales = db.read(`sales-all-meters/${fixture.salesDocId}`);
   const premise = db.read(`premises/${fixture.premiseId}`);
 
   assert.equal(parent.execution.status, "IN_PROGRESS");
@@ -719,7 +719,7 @@ test("linked premise transaction starts TB execution and preserves Sales data", 
     1,
   );
   assert.equal(
-    db.read(`demo_sales_meters/${fixture.salesDocId}`).tbRefs.length,
+    db.read(`sales-all-meters/${fixture.salesDocId}`).tbRefs.length,
     1,
   );
   assert.equal(
@@ -734,7 +734,7 @@ test("linked premise transaction starts TB execution and preserves Sales data", 
 
 test("linked helper failure creates no premise or partial linkage", async () => {
   const fixture = buildLinkedFixture();
-  fixture.documents[`demo_sales_meters/${fixture.salesDocId}`].tbRefs = [];
+  fixture.documents[`sales-all-meters/${fixture.salesDocId}`].tbRefs = [];
   const db = new FakeFirestore(fixture.documents);
   const premiseRef = db.collection("premises").doc(fixture.premiseId);
 

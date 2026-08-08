@@ -37,7 +37,6 @@ import {
 } from "./documentFactory.js";
 
 const ROWS_PER_WRITE_CHUNK = 190;
-const BATCH_FAILS_PER_WRITE_CHUNK = 400;
 
 function controlledError(code, message, details = {}) {
   const error = new Error(message);
@@ -72,74 +71,6 @@ function buildRowValidationFailure({
     salesRef,
     salesDocumentExists: Boolean(salesDocumentExists),
     failureCode: getErrorCode(validation),
-  };
-}
-
-async function writeBatchFailures({
-  db,
-  failures,
-  actorUid,
-  creationGroupId,
-}) {
-  const uniqueFailuresBySalesId = new Map();
-
-  failures.forEach((failure) => {
-    if (!failure?.salesAllMeterId) return;
-    uniqueFailuresBySalesId.set(failure.salesAllMeterId, failure);
-  });
-
-  const uniqueFailures = [...uniqueFailuresBySalesId.values()];
-  const writableFailures = uniqueFailures.filter(
-    (failure) => failure.salesDocumentExists && failure.salesRef,
-  );
-  const skippedFailures = uniqueFailures.filter(
-    (failure) => !failure.salesDocumentExists || !failure.salesRef,
-  );
-
-  if (writableFailures.length === 0) {
-    return {
-      flaggedRowCount: 0,
-      unflaggedRowCount: skippedFailures.length,
-      timestamp: null,
-    };
-  }
-
-  const timestamp = Timestamp.now();
-  const writeChunks = chunkArray(
-    writableFailures,
-    BATCH_FAILS_PER_WRITE_CHUNK,
-  );
-  let processedRows = 0;
-
-  for (const [chunkIndex, chunk] of writeChunks.entries()) {
-    const batch = db.batch();
-
-    chunk.forEach((failure) => {
-      batch.update(failure.salesRef, {
-        batchFail: {
-          timestamp,
-          failureCode: failure.failureCode,
-          userId: actorUid,
-        },
-      });
-    });
-
-    await batch.commit();
-    processedRows += chunk.length;
-
-    logger.info("onCreateTargetedBatchCallable -- BATCH FAIL PROGRESS", {
-      creationGroupId,
-      chunk: chunkIndex + 1,
-      chunks: writeChunks.length,
-      processedRows,
-      expectedRows: writableFailures.length,
-    });
-  }
-
-  return {
-    flaggedRowCount: writableFailures.length,
-    unflaggedRowCount: skippedFailures.length,
-    timestamp,
   };
 }
 
@@ -839,7 +770,6 @@ async function createPreflightedBatch({
 
           transaction.update(record.salesRef, {
             tbRefs: FieldValue.arrayUnion(salesTbRef),
-            batchFail: FieldValue.delete(),
           });
         });
       });
@@ -934,11 +864,6 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
   const actorUid = request?.auth?.uid || null;
   let actorName = actorUid || "SYSTEM";
   let creationGroupId = null;
-  let batchFailWriteResult = {
-    flaggedRowCount: 0,
-    unflaggedRowCount: 0,
-    timestamp: null,
-  };
   const completedBatches = [];
   const skippedBatches = [];
   const rowValidationFailures = [];
@@ -1046,13 +971,6 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       failedRows: rowValidationFailures.length,
     });
 
-    batchFailWriteResult = await writeBatchFailures({
-      db,
-      failures: rowValidationFailures,
-      actorUid,
-      creationGroupId,
-    });
-
     for (const context of preflightContexts) {
       const batchResult = await createPreflightedBatch({
         db,
@@ -1104,8 +1022,6 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       requestedRowCount: payloadCheck.expectedRows,
       createdRowCount,
       failedRowCount,
-      flaggedRowCount: batchFailWriteResult.flaggedRowCount,
-      unflaggedRowCount: batchFailWriteResult.unflaggedRowCount,
       elapsedMs,
     });
 
@@ -1121,15 +1037,12 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       skippedBatchCount: skippedBatches.length,
       createdRowCount,
       failedRowCount,
-      flaggedRowCount: batchFailWriteResult.flaggedRowCount,
-      unflaggedFailedRowCount: batchFailWriteResult.unflaggedRowCount,
       batches: completedBatches,
       skippedBatches,
       failedRows: rowValidationFailures.map((failure) => ({
         tbId: failure.tbId,
         salesAllMeterId: failure.salesAllMeterId,
         failureCode: failure.failureCode,
-        flagged: failure.salesDocumentExists,
       })),
       tbId: completedBatches.length === 1 ? firstBatchId : null,
       expectedRows: createdRowCount,
@@ -1160,8 +1073,6 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
       completedBatches,
       skippedBatches,
       failedRowCount: rowValidationFailures.length,
-      flaggedRowCount: batchFailWriteResult.flaggedRowCount,
-      unflaggedFailedRowCount: batchFailWriteResult.unflaggedRowCount,
       details: error?.details || null,
       elapsedMs,
     });

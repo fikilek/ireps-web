@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
 
-const DEMO_SALES_COLLECTION = "demo_sales_meters";
+const DEMO_SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
 const MAX_UPDATE_DIAGNOSTIC_LOGS = 10;
 

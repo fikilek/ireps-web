@@ -60,11 +60,11 @@ function docs(targetType = "TEAM", targetId = "TEAM_1") {
     result[`tb_rows/${id}`] = { id, tbId: TB, rowNo, salesAllMeterId: rowNo < 3 ? "SALE_1" : "SALE_2", refs: { erfId: `ERF_${rowNo}` } };
   }
   result["tb_rows/OTHER"] = { tbId: "OTHER", rowNo: 1, salesAllMeterId: "SALE_1" };
-  result["demo_sales_meters/SALE_1"] = { secret: "never returned", tbRefs: [
+  result["sales-all-meters/SALE_1"] = { secret: "never returned", tbRefs: [
     { id: TB, rowId: "ROW_1", fieldWork: {} },
     { id: TB, rowId: "ROW_2", fieldWork: { noAccess: [{}, {}] } },
   ] };
-  result["demo_sales_meters/SALE_2"] = { tbRefs: [{ id: TB, rowId: "ROW_3", fieldWork: { noAccess: [] } }] };
+  result["sales-all-meters/SALE_2"] = { tbRefs: [{ id: TB, rowId: "ROW_3", fieldWork: { noAccess: [] } }] };
   return result;
 }
 

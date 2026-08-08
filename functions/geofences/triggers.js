@@ -13,7 +13,8 @@ import {
   recomputeGeoFenceCounts,
 } from "./membership.js";
 import {
-  collectGeoFenceDemoSalesUpdates,
+  collectGeoFenceSalesUpdates,
+  commitGeoFenceSalesMembershipUpdates,
 } from "./salesMembership.js";
 
 /* =====================================================
@@ -180,20 +181,20 @@ export const onGeoFenceCreated = onDocumentCreated(
       console.log("onGeoFenceCreated ---- ast updates", astCommit);
 
       /* =====================================================
-         DEMO SALES METER PHASE
+         SALES ALL METER PHASE
          ===================================================== */
 
-      const demoSalesSnapshot = await db
-        .collection("demo_sales_meters")
-        .where("HasUsableGps", "==", true)
+      const salesSnapshot = await db
+        .collection("sales-all-meters")
+        .where("hasUsableGps", "==", true)
         .get();
 
-      console.log("onGeoFenceCreated ---- demo Sales candidates", {
-        count: demoSalesSnapshot.size,
+      console.log("onGeoFenceCreated ---- Sales All candidates", {
+        count: salesSnapshot.size,
       });
 
-      const salesMembership = collectGeoFenceDemoSalesUpdates({
-        salesDocs: demoSalesSnapshot.docs,
+      const salesMembership = collectGeoFenceSalesUpdates({
+        salesDocs: salesSnapshot.docs,
         geoFenceId,
         geoFenceName,
         lmPcode,
@@ -202,18 +203,20 @@ export const onGeoFenceCreated = onDocumentCreated(
         polygonPoints,
       });
 
-      console.log("onGeoFenceCreated ---- demo Sales assessed", {
+      console.log("onGeoFenceCreated ---- Sales All assessed", {
         candidatePointsChecked: salesMembership.candidatePointsChecked,
         memberCount: salesMembership.memberCount,
         updatesRequired: salesMembership.updates.length,
+        integrityConflicts: salesMembership.conflicts.length,
       });
 
-      const salesCommit = await commitGeoFenceMembershipUpdates({
+      const salesCommit = await commitGeoFenceSalesMembershipUpdates({
         db,
         updates: salesMembership.updates,
+        conflicts: salesMembership.conflicts,
       });
 
-      console.log("onGeoFenceCreated ---- demo Sales updates", {
+      console.log("onGeoFenceCreated ---- Sales All updates", {
         ...salesCommit,
         memberCount: salesMembership.memberCount,
       });
