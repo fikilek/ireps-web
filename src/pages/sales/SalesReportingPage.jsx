@@ -81,6 +81,28 @@ function StatusBadge({ value }) {
   );
 }
 
+function AllocationCell({ allocation = {} }) {
+  const targetName = cleanText(allocation?.targetName);
+
+  if (!targetName) return "Unallocated";
+
+  const targetType = normalizeUpper(allocation?.targetType);
+  let targetTypeLabel = cleanText(allocation?.targetType).replaceAll("_", " ");
+
+  if (targetType === "TEAM") targetTypeLabel = "Team";
+  if (targetType === "SP" || targetType === "SERVICE_PROVIDER") {
+    targetTypeLabel = "SP";
+  }
+  if (!targetTypeLabel) targetTypeLabel = "Target";
+
+  return (
+    <div style={styles.allocationCell}>
+      <span style={styles.allocationType}>{targetTypeLabel}</span>
+      <span style={styles.allocationName}>{targetName}</span>
+    </div>
+  );
+}
+
 function SummaryCard({ label, value, helper }) {
   return (
     <article style={styles.summaryCard}>
@@ -529,7 +551,9 @@ export default function SalesReportingPage() {
                       <Td>
                         <strong>{ward}</strong>
                       </Td>
-                      <Td>{batch?.allocation?.targetLabel || "Unallocated"}</Td>
+                      <Td>
+                        <AllocationCell allocation={batch?.allocation} />
+                      </Td>
                       <Td>
                         <StatusBadge value={batch?.acceptance?.status} />
                       </Td>
@@ -782,6 +806,25 @@ const styles = {
     marginTop: 3,
     color: "#64748b",
     fontSize: 10,
+  },
+
+  allocationCell: {
+    display: "grid",
+    gap: 2,
+    lineHeight: 1.25,
+  },
+
+  allocationType: {
+    color: "#475569",
+    fontSize: 10,
+    fontWeight: 900,
+  },
+
+  allocationName: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
   },
 
   badge: {

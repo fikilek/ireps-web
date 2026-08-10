@@ -1,0 +1,323 @@
+{
+  "collection": "demo_sales_meters",
+  "documentCount": 10216,
+  "fields": [
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "AccountNumber",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "AccountNumberNormalized",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "AddressLine1",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "AddressLine2",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Customer",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "ElmAccountMatched",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "boolean": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "ElmSourceRows",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "array": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "ErfCandidateCount",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "integer": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "ErfCandidates",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "array": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "ErfNumbers",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "array": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "GpsMatchStatus",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "HasUsableGps",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "boolean": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "InstallationDate",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Leakage_Category",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "MeterNumber",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "MissingErfNumbers",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "array": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "PostalAddress1",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "PostalAddress2",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "PostalAddressTown",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "PreviousInstallationDate",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "PreviousMeterNumber",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Risk_Score",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "integer": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Risk_Tier",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Sales",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "map": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "SourceEndRow",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "integer": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "StandNumber",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Surname",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "TariffInstance",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Town",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "Units",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "map": 10216
+      }
+    },
+    {
+      "documentsMissing": 10215,
+      "documentsPresent": 1,
+      "field": "batchFail",
+      "presencePercent": 0.0098,
+      "rootValueTypes": {
+        "map": 1
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "lmPcode",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "string": 10216
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "loadedAt",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "firestore_timestamp": 10216
+      }
+    },
+    {
+      "documentsMissing": 10207,
+      "documentsPresent": 9,
+      "field": "tbRefs",
+      "presencePercent": 0.0881,
+      "rootValueTypes": {
+        "array": 9
+      }
+    },
+    {
+      "documentsMissing": 0,
+      "documentsPresent": 10216,
+      "field": "trnBatchIds",
+      "presencePercent": 100.0,
+      "rootValueTypes": {
+        "array": 10216
+      }
+    }
+  ],
+  "projectId": "ireps-test",
+  "rootFieldCount": 35
+}

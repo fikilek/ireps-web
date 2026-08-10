@@ -1,604 +1,95 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import crypto from "crypto";
+import {fileURLToPath} from "url";
 import admin from "firebase-admin";
+import {
+  RESET_SCHEMA_VERSION, RESET_POLICY, EXPECTED_PROJECT_ID, validatePreflight,
+  cleanPremiseIds, classifySalesTbTrn, inventoryPathWithinRoot,
+  assertExpectedUpdateTime, exactUpdateTime, makeLastUpdateTime,
+  assessStorageLiveState, assessSalesCollection, RESET_MANIFEST_VERSION,
+} from "./targetedBatchReset.helpers.js";
 
-const EXPECTED_PROJECT_ID = "ireps2";
-const DEFAULT_SERVICE_ACCOUNT =
-  "C:\\dev\\secrets\\ireps2-e72fd9dc94de.json";
-
-const DELETE_COLLECTIONS_IN_ORDER = [
-  "tb_rows",
-  "tb_uploads",
-];
-
-const DEMO_SALES_COLLECTION = "demo_sales_meters";
-const DEMO_SALES_FIELD_TO_CLEAN = "tbRefs";
-const BATCH_SIZE = 400;
-const PAGE_SIZE = 500;
-const CONFIRM_TOKEN = "RESET_TARGETED_BATCH_SCOPE_DEV";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.resolve(__dirname, "../../../../");
-const REPORTS_ROOT = path.join(
-  REPO_ROOT,
-  "reports",
-  "targeted-batch-reset",
-);
-
-function getArgValue(args, name, fallback = null) {
-  const index = args.indexOf(name);
-  if (index === -1) return fallback;
-
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`Missing value for ${name}.`);
+const DEFAULT_SERVICE_ACCOUNT = "C:\\dev\\secrets\\ireps2-e72fd9dc94de.json";
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../");
+const REPORTS_ROOT = path.join(ROOT, "docs", "reports", "targeted-batch-reset", "generated");
+const arg = (name, fallback) => { const index = process.argv.indexOf(name); return index < 0 ? fallback : process.argv[index + 1]; };
+const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+const readJsonl = (file) => fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map(JSON.parse);
+const hashFile = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+const snapshotUpdateTime = (snapshot) => snapshot?.updateTime ? exactUpdateTime(snapshot.updateTime) : null;
+const precondition = (value) => makeLastUpdateTime(value, admin.firestore.Timestamp);
+async function count(db, name) { return (await db.collection(name).count().get()).data().count; }
+async function exactDocs(db, rows, collection, idKey) { return Promise.all(rows.map(async (row) => ({row, snap: await db.collection(collection).doc(row[idKey]).get()}))); }
+async function allSales(db) { const snapshot = await db.collection("demo_sales_meters").orderBy(admin.firestore.FieldPath.documentId()).get(); return snapshot.docs.map((snap) => ({documentId: snap.id, documentPath: snap.ref.path, updateTime: exactUpdateTime(snap.updateTime), data: snap.data()})); }
+async function liveObject(bucket, object) { try { const [metadata] = await bucket.file(object.objectPath).getMetadata(); return {metadata, error: null}; } catch (error) { return {metadata: null, error}; } }
+function assertExactPath(pathValue, collection, id) { if (pathValue !== `${collection}/${id}` || !id || id.includes("/")) throw new Error(`Unsafe exact path: ${pathValue}`); }
+function realPath(file) { return fs.realpathSync.native ? fs.realpathSync.native(file) : fs.realpathSync(file); }
+function validateInventoryFile(file) { const result = inventoryPathWithinRoot(file, REPORTS_ROOT, {root: realPath(REPORTS_ROOT), candidate: realPath(file)}); if (!result.valid) throw new Error(result.reason); return result.inventoryPath; }
+function validateArtifactPath(file, inventoryPath) { validateInventoryFile(path.join(path.dirname(inventoryPath), "inventory.json")); const relative = path.relative(path.dirname(inventoryPath), path.resolve(file)); if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`INVENTORY_ARTIFACT_PATH_ESCAPE ${file}`); }
+async function guardedWrite({ref, collection, id, expectedUpdateTime, operation}) {
+  try { return await operation(precondition(expectedUpdateTime)); } catch (error) {
+    if (![5, 9, "not-found", "failed-precondition"].includes(error?.code)) throw error;
+    const actual = await ref.get();
+    throw new Error(`STALE_WRITE_REJECTED ${collection}/${id} expected=${JSON.stringify(expectedUpdateTime)} actual=${actual.exists ? JSON.stringify(snapshotUpdateTime(actual)) : "<missing>"}`);
   }
-
-  return value;
-}
-
-function utcRunId(prefix) {
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}Z$/, "Z");
-
-  return `${prefix}_${stamp}`;
-}
-
-function printDivider() {
-  console.log("============================================================");
-}
-
-function readJson(filePath, label) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`${label} not found: ${filePath}`);
-  }
-
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
-function assertDevProject(projectId, serviceAccount) {
-  if (projectId !== EXPECTED_PROJECT_ID) {
-    throw new Error(
-      `DEV guard failed. Expected project "${EXPECTED_PROJECT_ID}", received "${projectId}".`,
-    );
-  }
-
-  if (serviceAccount.project_id !== EXPECTED_PROJECT_ID) {
-    throw new Error(
-      `Service-account guard failed. Expected "${EXPECTED_PROJECT_ID}", received "${serviceAccount.project_id}".`,
-    );
-  }
-}
-
-function initFirestore(serviceAccount) {
-  const app = admin.initializeApp(
-    {
-      credential: admin.credential.cert(serviceAccount),
-      projectId: EXPECTED_PROJECT_ID,
-    },
-    `targeted-batch-reset-apply-${Date.now()}`,
-  );
-
-  return admin.firestore(app);
-}
-
-async function countCollectionByPaging(db, collectionName) {
-  const collectionRef = db.collection(collectionName);
-  let lastDoc = null;
-  let count = 0;
-
-  while (true) {
-    let query = collectionRef
-      .orderBy(admin.firestore.FieldPath.documentId())
-      .limit(1000);
-
-    if (lastDoc) {
-      query = query.startAfter(lastDoc);
-    }
-
-    const snapshot = await query.get();
-    if (snapshot.empty) break;
-
-    count += snapshot.size;
-    lastDoc = snapshot.docs[snapshot.docs.length - 1];
-  }
-
-  return count;
-}
-
-async function countCollection(db, collectionName) {
-  try {
-    const snapshot = await db.collection(collectionName).count().get();
-    return snapshot.data().count;
-  } catch (error) {
-    console.warn(
-      `[COUNT] Aggregation unavailable for ${collectionName}; ` +
-        "falling back to paged read.",
-    );
-
-    return countCollectionByPaging(db, collectionName);
-  }
-}
-
-function inventoryCountMap(inventory) {
-  return Object.fromEntries(
-    inventory.collections.map((item) => [
-      item.collection,
-      item.documents,
-    ]),
-  );
-}
-
-function validateInventory(latestPointer, inventory) {
-  if (latestPointer.projectId !== EXPECTED_PROJECT_ID) {
-    throw new Error(
-      `Latest inventory pointer belongs to "${latestPointer.projectId}", ` +
-        `not "${EXPECTED_PROJECT_ID}".`,
-    );
-  }
-
-  if (inventory.projectId !== EXPECTED_PROJECT_ID) {
-    throw new Error(
-      `Inventory belongs to "${inventory.projectId}", ` +
-        `not "${EXPECTED_PROJECT_ID}".`,
-    );
-  }
-
-  if (inventory.status !== "PASSED") {
-    throw new Error(
-      `Inventory status must be PASSED. Found "${inventory.status}".`,
-    );
-  }
-
-  if (inventory.mode !== "READ_ONLY_EXPORT") {
-    throw new Error(
-      `Unexpected inventory mode "${inventory.mode}".`,
-    );
-  }
-
-  const expectedCollections = new Set([
-    ...DELETE_COLLECTIONS_IN_ORDER,
-    DEMO_SALES_COLLECTION,
-  ]);
-
-  const inventoryCollections = new Set(
-    inventory.collections.map((item) => item.collection),
-  );
-
-  for (const collectionName of expectedCollections) {
-    if (!inventoryCollections.has(collectionName)) {
-      throw new Error(
-        `Inventory is missing required collection "${collectionName}".`,
-      );
-    }
-  }
-
-  for (const item of inventory.collections) {
-    if (!fs.existsSync(item.exportFile)) {
-      throw new Error(
-        `Inventory export is missing for ${item.collection}: ` +
-          `${item.exportFile}`,
-      );
-    }
-  }
-
-  if (
-    inventory.resetPolicy?.demoSalesCleanOperation !==
-    "DELETE_FIELD_tbRefs_ONLY"
-  ) {
-    throw new Error(
-      "Inventory reset policy does not authorize the expected " +
-        "demo_sales_meters cleanup.",
-    );
-  }
-}
-
-async function preflightCounts(db, expectedCounts) {
-  const currentCounts = {};
-
-  for (const collectionName of [
-    ...DELETE_COLLECTIONS_IN_ORDER,
-    DEMO_SALES_COLLECTION,
-  ]) {
-    const currentCount = await countCollection(db, collectionName);
-    const expectedCount = expectedCounts[collectionName];
-
-    currentCounts[collectionName] = currentCount;
-
-    console.log(
-      `[PREFLIGHT] ${collectionName}: ` +
-        `inventory=${expectedCount}, current=${currentCount}`,
-    );
-
-    if (currentCount !== expectedCount) {
-      throw new Error(
-        `Collection changed after inventory: ${collectionName}. ` +
-          `Inventory=${expectedCount}, current=${currentCount}. ` +
-          "Run Step 1 again before applying the reset.",
-      );
-    }
-  }
-
-  return currentCounts;
-}
-
-async function deleteCollection(db, collectionName, expectedCount) {
-  const collectionRef = db.collection(collectionName);
-  let deleted = 0;
-  let commits = 0;
-
-  while (true) {
-    const snapshot = await collectionRef
-      .orderBy(admin.firestore.FieldPath.documentId())
-      .limit(BATCH_SIZE)
-      .get();
-
-    if (snapshot.empty) break;
-
-    const batch = db.batch();
-
-    for (const docSnap of snapshot.docs) {
-      batch.delete(docSnap.ref);
-    }
-
-    await batch.commit();
-
-    deleted += snapshot.size;
-    commits += 1;
-
-    console.log(
-      `[DELETE] ${collectionName}: commit ${commits}, ` +
-        `${snapshot.size} deleted, total ${deleted}/${expectedCount}`,
-    );
-  }
-
-  const remaining = await countCollection(db, collectionName);
-
-  if (remaining !== 0) {
-    throw new Error(
-      `Verification failed for ${collectionName}: ` +
-        `${remaining} documents remain.`,
-    );
-  }
-
-  return {
-    collection: collectionName,
-    expectedFromInventory: expectedCount,
-    deleted,
-    commits,
-    remaining,
-    status:
-      deleted === expectedCount
-        ? "PASSED"
-        : "COUNT_CHANGED_DURING_DELETE",
-  };
-}
-
-async function listDemoSalesDocsWithTbRefs(db) {
-  const collectionRef = db.collection(DEMO_SALES_COLLECTION);
-
-  let lastDoc = null;
-  let pages = 0;
-  let scanned = 0;
-  const matches = [];
-
-  while (true) {
-    let query = collectionRef
-      .select(DEMO_SALES_FIELD_TO_CLEAN)
-      .orderBy(admin.firestore.FieldPath.documentId())
-      .limit(PAGE_SIZE);
-
-    if (lastDoc) {
-      query = query.startAfter(lastDoc);
-    }
-
-    const snapshot = await query.get();
-    if (snapshot.empty) break;
-
-    pages += 1;
-    scanned += snapshot.size;
-
-    for (const docSnap of snapshot.docs) {
-      const data = docSnap.data();
-
-      if (
-        Object.prototype.hasOwnProperty.call(
-          data,
-          DEMO_SALES_FIELD_TO_CLEAN,
-        )
-      ) {
-        matches.push({
-          id: docSnap.id,
-          ref: docSnap.ref,
-          tbRefsBefore: data[DEMO_SALES_FIELD_TO_CLEAN],
-        });
-      }
-    }
-
-    lastDoc = snapshot.docs[snapshot.docs.length - 1];
-
-    console.log(
-      `[SCAN] ${DEMO_SALES_COLLECTION}: page ${pages}, ` +
-        `${snapshot.size} docs, total ${scanned}, ` +
-        `tbRefs matches ${matches.length}`,
-    );
-  }
-
-  return {
-    pages,
-    scanned,
-    matches,
-  };
-}
-
-async function cleanDemoSalesTbRefs(db, expectedDocumentCount) {
-  const beforeCount = await countCollection(
-    db,
-    DEMO_SALES_COLLECTION,
-  );
-
-  if (beforeCount !== expectedDocumentCount) {
-    throw new Error(
-      `${DEMO_SALES_COLLECTION} count changed before cleanup. ` +
-        `Expected ${expectedDocumentCount}, found ${beforeCount}.`,
-    );
-  }
-
-  const scanBefore = await listDemoSalesDocsWithTbRefs(db);
-
-  let cleaned = 0;
-  let commits = 0;
-
-  for (
-    let offset = 0;
-    offset < scanBefore.matches.length;
-    offset += BATCH_SIZE
-  ) {
-    const chunk = scanBefore.matches.slice(
-      offset,
-      offset + BATCH_SIZE,
-    );
-    const batch = db.batch();
-
-    for (const item of chunk) {
-      batch.update(item.ref, {
-        [DEMO_SALES_FIELD_TO_CLEAN]:
-          admin.firestore.FieldValue.delete(),
-      });
-    }
-
-    await batch.commit();
-
-    cleaned += chunk.length;
-    commits += 1;
-
-    console.log(
-      `[CLEAN] ${DEMO_SALES_COLLECTION}.${DEMO_SALES_FIELD_TO_CLEAN}: ` +
-        `commit ${commits}, ${chunk.length} updated, ` +
-        `total ${cleaned}/${scanBefore.matches.length}`,
-    );
-  }
-
-  const afterCount = await countCollection(
-    db,
-    DEMO_SALES_COLLECTION,
-  );
-
-  if (afterCount !== beforeCount) {
-    throw new Error(
-      `${DEMO_SALES_COLLECTION} document-count guard failed. ` +
-        `Before=${beforeCount}, after=${afterCount}.`,
-    );
-  }
-
-  const scanAfter = await listDemoSalesDocsWithTbRefs(db);
-
-  if (scanAfter.matches.length !== 0) {
-    throw new Error(
-      `Verification failed: ${scanAfter.matches.length} ` +
-        `${DEMO_SALES_COLLECTION} documents still contain ` +
-        `${DEMO_SALES_FIELD_TO_CLEAN}.`,
-    );
-  }
-
-  return {
-    collection: DEMO_SALES_COLLECTION,
-    operation: `DELETE_FIELD_${DEMO_SALES_FIELD_TO_CLEAN}_ONLY`,
-    documentsBefore: beforeCount,
-    documentsAfter: afterCount,
-    documentsDeleted: 0,
-    documentsCleaned: cleaned,
-    commits,
-    matchedDocumentIds: scanBefore.matches.map((item) => item.id),
-    fieldsPreserved: "ALL_EXCEPT_tbRefs",
-    remainingDocsWithTbRefs: scanAfter.matches.length,
-    status: "PASSED",
-  };
 }
 
 async function main() {
-  const args = process.argv.slice(2);
+  const projectId = arg("--project-id", EXPECTED_PROJECT_ID); const confirmToken = arg("--confirm", "");
+  const serviceAccountPath = arg("--service-account", process.env.IREPS_DEV_SERVICE_ACCOUNT || DEFAULT_SERVICE_ACCOUNT);
+  const pointerPath = path.join(REPORTS_ROOT, "LATEST_INVENTORY.json"); const pointer = readJson(pointerPath);
+  const inventoryPath = validateInventoryFile(pointer.inventoryPath); const inventory = readJson(inventoryPath); const credential = readJson(serviceAccountPath);
+  const artifacts = [...Object.values(inventory.exports || {}), ...Object.values(inventory.manifests || {})]; let hashesMatch = true;
+  for (const item of artifacts) { if (!item?.path) { hashesMatch = false; continue; } validateArtifactPath(item.path, inventoryPath); if (!fs.existsSync(item.path) || hashFile(item.path) !== item.sha256) hashesMatch = false; }
+  const trns = readJsonl(inventory.manifests.salesTbNaTrns.path); const premises = readJsonl(inventory.manifests.salesTbNaPremises.path); const erfs = readJsonl(inventory.manifests.salesTbNaErfs.path); const objects = readJsonl(inventory.manifests.salesTbNaStorageObjects.path); const ambiguous = readJsonl(inventory.manifests.ambiguousSalesTbTrns.path);
+  const rowTargets = readJsonl(inventory.exports.tb_rows.path); const uploadTargets = readJsonl(inventory.exports.tb_uploads.path); const salesExport = readJsonl(inventory.exports.demo_sales_meters.path); const salesTargets = salesExport.filter((row) => Object.hasOwn(row.data, "tbRefs"));
+  let guard = validatePreflight({projectId, serviceAccountProject: credential.project_id, confirmToken, inventory, hashesMatch, ambiguousTrns: ambiguous.length, ambiguousStorage: objects.some((item) => !item.deletionEligible)});
+  if (pointer.projectId !== EXPECTED_PROJECT_ID || pointer.runId !== inventory.runId || inventoryPath !== path.resolve(pointer.inventoryPath) || inventory.manifestVersion !== RESET_MANIFEST_VERSION || trns.some((row) => row.manifestVersion !== RESET_MANIFEST_VERSION)) guard.errors.push("LATEST_POINTER_OR_MANIFEST_INVALID");
+  if (guard.errors.length) throw new Error(`Preflight blocked: ${guard.errors.join(", ")}`);
+  trns.forEach((row) => assertExactPath(row.trnPath, "trns", row.trnId)); premises.forEach((row) => assertExactPath(row.premisePath, "premises", row.premiseId)); erfs.forEach((row) => assertExactPath(`registry_erfs/${row.erfId}`, "registry_erfs", row.erfId)); rowTargets.forEach((row) => assertExactPath(row.documentPath, "tb_rows", row.documentId)); uploadTargets.forEach((row) => assertExactPath(row.documentPath, "tb_uploads", row.documentId)); salesTargets.forEach((row) => assertExactPath(row.documentPath, "demo_sales_meters", row.documentId));
 
-  const projectId = getArgValue(
-    args,
-    "--project-id",
-    EXPECTED_PROJECT_ID,
-  );
+  const app = admin.initializeApp({credential: admin.credential.cert(credential), projectId, storageBucket: `${projectId}.appspot.com`}, `tb-reset-apply-${Date.now()}`); const db = admin.firestore(app); const bucket = admin.storage(app).bucket();
+  const currentCounts = {}; for (const name of Object.keys(inventory.preservationCounts)) currentCounts[name] = await count(db, name);
+  const countsMatch = Object.entries(inventory.preservationCounts).every(([name, value]) => currentCounts[name] === value);
+  const [trnSnaps, premiseSnaps, rowSnaps, uploadSnaps, salesSnaps, registrySnaps] = await Promise.all([
+    exactDocs(db, trns, "trns", "trnId"), exactDocs(db, premises, "premises", "premiseId"), exactDocs(db, rowTargets, "tb_rows", "documentId"), exactDocs(db, uploadTargets, "tb_uploads", "documentId"), exactDocs(db, salesTargets, "demo_sales_meters", "documentId"), exactDocs(db, erfs, "registry_erfs", "erfId"),
+  ]);
+  const liveSalesBefore = await allSales(db); const salesPreflight = assessSalesCollection(salesExport, liveSalesBefore);
+  let updateTimesMatch = true;
+  for (const {row, snap} of trnSnaps) { try { assertExpectedUpdateTime({collection: "trns", id: row.trnId, expected: row.trnUpdateTime, actual: snapshotUpdateTime(snap), exists: snap.exists}); } catch { updateTimesMatch = false; } }
+  for (const {row, snap} of premiseSnaps) { try { assertExpectedUpdateTime({collection: "premises", id: row.premiseId, expected: row.updateTime, actual: snapshotUpdateTime(snap), exists: snap.exists}); if (JSON.stringify(snap.data()?.noAccessTrnIds) !== JSON.stringify(row.noAccessTrnIds)) updateTimesMatch = false; } catch { updateTimesMatch = false; } }
+  for (const [{row, snap}, collection, idKey, timeKey] of [...rowSnaps.map((item) => [item, "tb_rows", "documentId", "updateTime"]), ...uploadSnaps.map((item) => [item, "tb_uploads", "documentId", "updateTime"]), ...registrySnaps.map((item) => [item, "registry_erfs", "erfId", "registryErfUpdateTime"])]) { try { assertExpectedUpdateTime({collection, id: row[idKey], expected: row[timeKey], actual: snapshotUpdateTime(snap), exists: snap.exists}); } catch { updateTimesMatch = false; } }
+  for (const object of objects) { const live = await liveObject(bucket, object); const assessment = assessStorageLiveState(object, live.metadata, live.error); if (!assessment.valid) { console.error(assessment.blocker, object.objectPath); updateTimesMatch = false; } }
+  if (!salesPreflight.valid) { console.error("SALES_GLOBAL_PREFLIGHT", salesPreflight.blockers); updateTimesMatch = false; }
+  guard = validatePreflight({projectId, serviceAccountProject: credential.project_id, confirmToken, inventory, hashesMatch, countsMatch, updateTimesMatch, ambiguousTrns: ambiguous.length, ambiguousStorage: objects.some((item) => !item.deletionEligible)});
+  if (!guard.passed) throw new Error(`Preflight blocked: ${guard.errors.join(", ")}`);
+  console.log("PREFLIGHT PASSED - 0 WRITES PERFORMED SO FAR");
 
-  const serviceAccountPath = getArgValue(
-    args,
-    "--service-account",
-    process.env.IREPS_DEV_SERVICE_ACCOUNT ||
-      DEFAULT_SERVICE_ACCOUNT,
-  );
-
-  const confirmValue = getArgValue(args, "--confirm", "");
-
-  if (confirmValue !== CONFIRM_TOKEN) {
-    throw new Error(
-      `Reset blocked. Run with --confirm ${CONFIRM_TOKEN}`,
-    );
-  }
-
-  const latestPointerPath = path.join(
-    REPORTS_ROOT,
-    "LATEST_INVENTORY.json",
-  );
-
-  const latestPointer = readJson(
-    latestPointerPath,
-    "Latest inventory pointer",
-  );
-
-  const inventory = readJson(
-    latestPointer.inventoryPath,
-    "Inventory report",
-  );
-
-  validateInventory(latestPointer, inventory);
-
-  const serviceAccount = readJson(
-    serviceAccountPath,
-    "Service-account file",
-  );
-
-  assertDevProject(projectId, serviceAccount);
-
-  const runId = utcRunId("TARGETED_BATCH_RESET_APPLY");
-  const runDir = path.join(REPORTS_ROOT, runId);
-
-  fs.mkdirSync(runDir, { recursive: true });
-
-  printDivider();
-  console.log("TARGETED BATCH RESET — STEP 2 APPLY");
-  printDivider();
-  console.log(`Run ID: ${runId}`);
-  console.log(`Project: ${projectId}`);
-  console.log(`Service account: ${serviceAccountPath}`);
-  console.log(`Inventory run: ${inventory.runId}`);
-  console.log(
-    `Delete collections: ${DELETE_COLLECTIONS_IN_ORDER.join(" -> ")}`,
-  );
-  console.log(
-    `Clean only: ${DEMO_SALES_COLLECTION}.${DEMO_SALES_FIELD_TO_CLEAN}`,
-  );
-  console.log(
-    `${DEMO_SALES_COLLECTION} document deletion: FORBIDDEN`,
-  );
-  console.log(`Report directory: ${runDir}`);
-  printDivider();
-
-  const db = initFirestore(serviceAccount);
-  const expectedCounts = inventoryCountMap(inventory);
-  const startedAt = new Date().toISOString();
-
-  console.log("Running count preflight...");
-  const countsBefore = await preflightCounts(
-    db,
-    expectedCounts,
-  );
-
-  printDivider();
-  console.log("Preflight passed. Starting controlled reset...");
-  printDivider();
-
-  const deletionReports = [];
-
-  for (const collectionName of DELETE_COLLECTIONS_IN_ORDER) {
-    const report = await deleteCollection(
-      db,
-      collectionName,
-      expectedCounts[collectionName],
-    );
-
-    deletionReports.push(report);
-
-    console.log(
-      `[VERIFIED] ${collectionName}: ` +
-        `${report.remaining} remaining`,
-    );
-  }
-
-  const demoSalesReport = await cleanDemoSalesTbRefs(
-    db,
-    expectedCounts[DEMO_SALES_COLLECTION],
-  );
-
-  console.log(
-    `[VERIFIED] ${DEMO_SALES_COLLECTION}: ` +
-      `${demoSalesReport.documentsAfter} documents preserved, ` +
-      `${demoSalesReport.remainingDocsWithTbRefs} tbRefs fields remain`,
-  );
-
-  const finishedAt = new Date().toISOString();
-
-  const totalDeleted = deletionReports.reduce(
-    (sum, item) => sum + item.deleted,
-    0,
-  );
-
-  const status =
-    deletionReports.every((item) => item.remaining === 0) &&
-    demoSalesReport.documentsBefore ===
-      demoSalesReport.documentsAfter &&
-    demoSalesReport.documentsDeleted === 0 &&
-    demoSalesReport.remainingDocsWithTbRefs === 0
-      ? "PASSED"
-      : "FAILED";
-
-  const report = {
-    schemaVersion: "1.1.0",
-    status,
-    runId,
-    mode: "APPLY_RESET",
-    projectId,
-    inventoryRunId: inventory.runId,
-    inventoryPath: latestPointer.inventoryPath,
-    countsBefore,
-    deletedCollections: deletionReports,
-    cleanedCollection: demoSalesReport,
-    totalDocumentsDeleted: totalDeleted,
-    demoSalesDocumentsDeleted: 0,
-    startedAt,
-    finishedAt,
-    reportDirectory: runDir,
-  };
-
-  const reportPath = path.join(runDir, "reset-report.json");
-
-  fs.writeFileSync(
-    reportPath,
-    `${JSON.stringify(report, null, 2)}\n`,
-    "utf8",
-  );
-
-  printDivider();
-  console.log(`STEP 2 ${status}`);
-  console.log(`Total documents deleted: ${totalDeleted}`);
-  console.log("demo_sales_meters documents deleted: 0");
-  console.log(
-    `demo_sales_meters documents preserved: ` +
-      `${demoSalesReport.documentsAfter}`,
-  );
-  console.log(
-    `demo_sales_meters tbRefs fields removed: ` +
-      `${demoSalesReport.documentsCleaned}`,
-  );
-  console.log(`Report: ${reportPath}`);
-  printDivider();
-
-  if (status !== "PASSED") {
-    process.exitCode = 1;
-  }
+  const startedAt = new Date().toISOString(); const phases = []; let firestoreWrites = 0; let storageDeletions = 0; let finalStatus = "PARTIAL_FAILURE";
+  try {
+    console.log("[PREMISES] START");
+    for (const {row, snap} of premiseSnaps) { const current = snap.data()?.noAccessTrnIds; if (JSON.stringify(current) !== JSON.stringify(row.noAccessTrnIds)) throw new Error(`PREMISE_ARRAY_STALE premises/${row.premiseId}`); const cleaned = cleanPremiseIds(current, row.targetedRemovalIds); if (!cleaned.safe || JSON.stringify(cleaned.remaining) !== JSON.stringify(row.remainingIds)) throw new Error(`Premise guard failed: ${row.premiseId}`); await guardedWrite({ref: snap.ref, collection: "premises", id: row.premiseId, expectedUpdateTime: row.updateTime, operation: (condition) => snap.ref.update({noAccessTrnIds: cleaned.remaining, "metadata.updatedAt": new Date().toISOString(), "metadata.updatedByUid": "SYSTEM", "metadata.updatedByUser": "Targeted Batch Nuclear Reset"}, condition)}); firestoreWrites += 1; }
+    phases.push({phase: "PREMISES", status: "DONE", writes: premises.length}); console.log("[PREMISES] DONE");
+    console.log("[TRNS] START");
+    for (const {row, snap} of trnSnaps) { await guardedWrite({ref: snap.ref, collection: "trns", id: row.trnId, expectedUpdateTime: row.trnUpdateTime, operation: (condition) => snap.ref.delete(condition)}); firestoreWrites += 1; }
+    phases.push({phase: "TRNS", status: "DONE", deleted: trns.length}); console.log("[TRNS] DONE");
+    console.log("[REGISTRY_ERFS] START");
+    for (const {row, snap} of registrySnaps) { const [na, yes] = await Promise.all([db.collection("trns").where("accessData.erfId", "==", row.erfId).where("accessData.access.hasAccess", "==", "no").count().get(), db.collection("trns").where("accessData.erfId", "==", row.erfId).where("accessData.access.hasAccess", "==", "yes").count().get()]); const counts = {trnsNa: na.data().count || 0, trnsAccess: yes.data().count || 0}; counts.trnsTotal = counts.trnsNa + counts.trnsAccess; if (JSON.stringify(counts) !== JSON.stringify(row.expectedCounts)) throw new Error(`REGISTRY_ERF_COUNT_MISMATCH registry_erfs/${row.erfId}`); await guardedWrite({ref: snap.ref, collection: "registry_erfs", id: row.erfId, expectedUpdateTime: row.registryErfUpdateTime, operation: (condition) => snap.ref.update({"counts.trnsNa": counts.trnsNa, "counts.trnsAccess": counts.trnsAccess, "counts.trnsTotal": counts.trnsTotal, "metadata.updatedAt": new Date().toISOString(), "metadata.updatedByUid": "SYSTEM", "metadata.updatedByUser": "Targeted Batch Nuclear Reset Rebuild"}, condition)}); firestoreWrites += 1; }
+    phases.push({phase: "REGISTRY_ERFS", status: "DONE", rebuilt: erfs.length}); console.log("[REGISTRY_ERFS] DONE");
+    console.log("[STORAGE] START");
+    for (const object of objects) { if (object.state === "ALREADY_MISSING") continue; try { await bucket.file(object.objectPath, {generation: object.generation}).delete({ifGenerationMatch: Number(object.generation), ifMetagenerationMatch: Number(object.metageneration)}); storageDeletions += 1; } catch (error) { const current = await liveObject(bucket, object); if (error?.code === 404 && !current.error) throw new Error(`STORAGE_REPLACEMENT_PRESENT_AFTER_DELETE_404 ${object.objectPath}`); throw error; } }
+    phases.push({phase: "STORAGE", status: "DONE", deleted: storageDeletions}); console.log("[STORAGE] DONE");
+    for (const [phase, collection, snapshots, idKey] of [["TB_ROWS", "tb_rows", rowSnaps, "documentId"], ["TB_UPLOADS", "tb_uploads", uploadSnaps, "documentId"]]) { console.log(`[${phase}] START`); for (const {row, snap} of snapshots) { await guardedWrite({ref: snap.ref, collection, id: row[idKey], expectedUpdateTime: row.updateTime, operation: (condition) => snap.ref.delete(condition)}); firestoreWrites += 1; } phases.push({phase, status: "DONE", deleted: snapshots.length}); console.log(`[${phase}] DONE`); }
+    console.log("[DEMO_SALES] START");
+    for (const {snap} of salesSnaps) { await snap.ref.update({tbRefs: admin.firestore.FieldValue.delete()}); firestoreWrites += 1; }
+    phases.push({phase: "DEMO_SALES", status: "DONE", cleaned: salesSnaps.length}); console.log("[DEMO_SALES] DONE");
+    const [rowsAfter, uploadsAfter, salesAfter, trnsAfter, premisesAfter, registryErfsAfter, astsAfter] = await Promise.all([count(db, "tb_rows"), count(db, "tb_uploads"), count(db, "demo_sales_meters"), count(db, "trns"), count(db, "premises"), count(db, "registry_erfs"), count(db, "asts")]);
+    const targetAbsent = (await exactDocs(db, trns, "trns", "trnId")).every(({snap}) => !snap.exists); const verifiedPremises = await exactDocs(db, premises, "premises", "premiseId"); const premisesCorrect = verifiedPremises.every(({row, snap}) => snap.exists && JSON.stringify(snap.data()?.noAccessTrnIds) === JSON.stringify(row.remainingIds)); const verifiedSales = await exactDocs(db, salesTargets, "demo_sales_meters", "documentId"); const salesCorrect = verifiedSales.every(({snap}) => snap.exists && !Object.hasOwn(snap.data(), "tbRefs")); const erfsCorrect = (await Promise.all(erfs.map(async (row) => { const snap = await db.collection("registry_erfs").doc(row.erfId).get(); const counts = snap.data()?.counts || {}; return snap.exists && ["trnsNa", "trnsAccess", "trnsTotal"].every((key) => counts[key] === row.expectedCounts[key]); }))).every(Boolean); const storageAbsent = (await Promise.all(objects.map(async (object) => { const current = await liveObject(bucket, object); return current.error?.code === 404 || current.error?.statusCode === 404; }))).every(Boolean); const canonicalRemaining = (await db.collection("trns").where("sourceModule", "==", "SALES_TARGETED_BATCH").get()).docs.filter((doc) => classifySalesTbTrn({id: doc.id, data: doc.data()}).classification === "CANONICAL_SALES_TB_NA").length; const finalSales = assessSalesCollection(salesExport, await allSales(db), {final: true});
+    const passed = rowsAfter === 0 && uploadsAfter === 0 && salesAfter === inventory.preservationCounts.demo_sales_meters && premisesAfter === inventory.preservationCounts.premises && registryErfsAfter === inventory.preservationCounts.registry_erfs && astsAfter === inventory.preservationCounts.asts && trnsAfter === inventory.preservationCounts.trns - trns.length && targetAbsent && canonicalRemaining === 0 && premisesCorrect && salesCorrect && erfsCorrect && storageAbsent && finalSales.valid;
+    finalStatus = passed ? "PASSED" : "FAILED";
+  } catch (error) { phases.push({phase: "FAILED", status: "PARTIAL_FAILURE", error: error.message}); throw error; }
+  finally { const runId = `TARGETED_BATCH_RESET_APPLY_${new Date().toISOString().replace(/[-:.]/g, "")}`; const runDir = path.join(REPORTS_ROOT, runId); fs.mkdirSync(runDir, {recursive: true}); fs.writeFileSync(path.join(runDir, "reset-report.json"), `${JSON.stringify({schemaVersion: RESET_SCHEMA_VERSION, runId, projectId, mode: "APPLY_RESET", resetPolicy: RESET_POLICY, inventoryRunId: inventory.runId, startedAt, finishedAt: new Date().toISOString(), status: finalStatus, phases, exactDeletedTrnIds: trns.map((row) => row.trnId), exactAffectedPremiseIds: premises.map((row) => row.premiseId), exactAffectedErfIds: erfs.map((row) => row.erfId), exactStorageObjects: objects.map((item) => ({bucket: item.bucket, objectPath: item.objectPath, generation: item.generation, state: item.state})), irepsErfsScope: {reads: 0, writes: 0, status: "OUTSIDE_RESET_SCOPE"}, firestoreWrites, storageDeletions}, null, 2)}\n`); await app.delete(); }
+  if (finalStatus !== "PASSED") process.exitCode = 1;
 }
-
-main().catch((error) => {
-  console.error("");
-  console.error("STEP 2 FAILED");
-  console.error(error?.stack || error);
-  process.exitCode = 1;
-});
+main().catch((error) => { console.error("STEP 2 FAILED OR PARTIAL_FAILURE", error); process.exitCode = 1; });

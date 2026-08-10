@@ -468,7 +468,6 @@ export default function PrepaidSales() {
         <div>
           <div style={styles.heroEyebrowRow}>
             <p style={styles.heroEyebrow}>Sales Table</p>
-            <span style={styles.demoBadge}>Demo Data</span>
           </div>
 
           <h1 style={styles.heroTitle}>
@@ -751,18 +750,6 @@ const styles = {
     fontSize: "0.74rem",
     fontWeight: 900,
     letterSpacing: "0.11em",
-    textTransform: "uppercase",
-  },
-  demoBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    borderRadius: "999px",
-    padding: "0.18rem 0.5rem",
-    background: "rgba(254, 240, 138, 0.18)",
-    border: "1px solid rgba(254, 240, 138, 0.48)",
-    color: "#fef08a",
-    fontSize: "0.66rem",
-    fontWeight: 900,
     textTransform: "uppercase",
   },
   heroTitle: {

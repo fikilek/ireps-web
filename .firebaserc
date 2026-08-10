@@ -18,6 +18,13 @@
           "ireps-test"
         ]
       }
+    },
+    "ireps-5c3e9": {
+      "hosting": {
+        "ireps-web": [
+          "ireps-5c3e9"
+        ]
+      }
     }
   },
   "etags": {}

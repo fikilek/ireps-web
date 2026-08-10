@@ -1,0 +1,11 @@
+{
+  "countMatchesExport": true,
+  "duplicateDocumentIds": [],
+  "expectedExportedDocuments": 10216,
+  "invalidLineCount": 0,
+  "invalidLines": [],
+  "invalidLinesTruncated": false,
+  "lineCount": 10216,
+  "passed": true,
+  "uniqueDocumentIds": 10216
+}

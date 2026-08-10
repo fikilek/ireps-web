@@ -165,9 +165,6 @@ function assertRowExecutable(row, rowId) {
   if (!["NOT_STARTED", "IN_PROGRESS"].includes(status)) {
     throw controlledError("TARGETED_BATCH_ROW_EXECUTION_STATE_INVALID", `${rowId} is not executable.`);
   }
-  if (normalizeText(row?.refs?.meterId)) {
-    throw controlledError("TARGETED_BATCH_METER_ALREADY_LINKED", `${rowId} already has a linked meter.`);
-  }
   return status;
 }
 
@@ -198,20 +195,41 @@ function assertIdentity(existing, input) {
   }
 }
 
-function buildSalesAppend({tbRefs, input, premiseId, actorName, now}) {
+export function resolveSalesTbRef({tbRefs, input}) {
   if (!Array.isArray(tbRefs)) {
     throw controlledError("SALES_TB_REFS_INVALID", "The Sales tbRefs field is invalid.");
   }
+
   const matches = [];
   tbRefs.forEach((ref, index) => {
-    if (sameId(ref?.id, input.tbId) && sameId(ref?.rowId, input.rowId)) matches.push(index);
+    if (sameId(ref?.id, input.tbId)) matches.push(index);
   });
+
   if (matches.length !== 1) {
-    throw controlledError(matches.length ? "SALES_TB_REF_DUPLICATE" : "SALES_TB_REF_NOT_FOUND",
-      "The exact Sales Targeted Batch reference was not found uniquely.");
+    throw controlledError(
+      matches.length ? "SALES_TB_REF_DUPLICATE" : "SALES_TB_REF_NOT_FOUND",
+      "The Sales Targeted Batch reference was not found uniquely.",
+    );
   }
+
   const index = matches[0];
-  const ref = tbRefs[index];
+  const ref = tbRefs[index] || {};
+  const existingRowId = normalizeText(ref?.rowId);
+
+  if (existingRowId && !sameId(existingRowId, input.rowId)) {
+    throw controlledError(
+      "SALES_TB_REF_ROW_CONFLICT",
+      "The Sales Targeted Batch reference belongs to another TB Row.",
+      {existingRowId, expectedRowId: input.rowId},
+    );
+  }
+
+  return {index, ref};
+}
+
+export function buildSalesAppend({tbRefs, input, premiseId, actorName, now}) {
+  const {index, ref} = resolveSalesTbRef({tbRefs, input});
+
   if (ref.fieldWork !== undefined &&
       (!ref.fieldWork || typeof ref.fieldWork !== "object" || Array.isArray(ref.fieldWork))) {
     throw controlledError("FIELDWORK_INVALID", "Sales fieldWork is invalid.");
@@ -219,6 +237,12 @@ function buildSalesAppend({tbRefs, input, premiseId, actorName, now}) {
   const fieldWork = ref.fieldWork || {};
   if (fieldWork.noAccess !== undefined && !Array.isArray(fieldWork.noAccess)) {
     throw controlledError("FIELDWORK_INVALID", "Sales fieldWork.noAccess is invalid.");
+  }
+  if (normalizeText(fieldWork.meterId)) {
+    throw controlledError(
+      "TARGETED_BATCH_METER_ALREADY_LINKED",
+      "A meter is already linked. No Access cannot be recorded.",
+    );
   }
   if (normalizeUpper(fieldWork.status) === "COMPLETED") {
     throw controlledError("TARGETED_BATCH_EXECUTION_COMPLETED", "Sales field work is completed.");
@@ -231,6 +255,7 @@ function buildSalesAppend({tbRefs, input, premiseId, actorName, now}) {
   const updated = [...tbRefs];
   updated[index] = {
     ...ref,
+    rowId: input.rowId,
     fieldWork: {
       ...fieldWork,
       status: "IN_PROGRESS",
@@ -322,8 +347,7 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
     if (trnSnap.exists) {
       assertIdentity(trnSnap.data() || {}, input);
       const premiseId = normalizeText(row?.refs?.premiseId) || null;
-      const exact = Array.isArray(sales.tbRefs) ? sales.tbRefs.find((ref) =>
-        sameId(ref?.id, input.tbId) && sameId(ref?.rowId, input.rowId)) : null;
+      const {ref: exact} = resolveSalesTbRef({tbRefs: sales.tbRefs, input});
       return {success: true, alreadyRecorded: true, trnId: input.trnId,
         tbId: input.tbId, rowId: input.rowId, salesDocId: input.salesDocId,
         erfId: input.erfId, premiseId, rowStatus: "IN_PROGRESS",

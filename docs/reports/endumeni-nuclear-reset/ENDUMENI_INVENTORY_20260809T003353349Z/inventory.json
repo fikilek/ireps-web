@@ -1,0 +1,39 @@
+{
+  "blockers": [],
+  "counts": {
+    "asts": 130,
+    "geo_fences": 4,
+    "ireps_erfs": 15080,
+    "meter_master": 10219,
+    "premises": 11,
+    "registry_accounts": 0,
+    "registry_erfs": 11,
+    "registry_meters": 4,
+    "registry_premises": 11,
+    "registry_wards": 5,
+    "report_trn_access": 0,
+    "report_trn_no_access": 9,
+    "sales-all-meters": 10216,
+    "tb_rows": 1660,
+    "tb_uploads": 18,
+    "tb_uploads_history": 6,
+    "trns": 362
+  },
+  "createdAt": "2026-08-09T00:33:55.002Z",
+  "files": {
+    "storage": {
+      "path": "C:\\dev\\ireps-web\\docs\\reports\\endumeni-nuclear-reset\\ENDUMENI_INVENTORY_20260809T003353349Z\\storage.json",
+      "sha256": "e543ff25b60e914ad56a754c8d897648523aa75b5e81b8416e0a6f49a29f7eaa"
+    },
+    "targets": {
+      "path": "C:\\dev\\ireps-web\\docs\\reports\\endumeni-nuclear-reset\\ENDUMENI_INVENTORY_20260809T003353349Z\\targets.json",
+      "sha256": "87a3a5abb4fc70b2ef1cb7e35d708140c66d92aec4e2e5d09c2ffe00acebe8e8"
+    }
+  },
+  "lmPcode": "ZA5241",
+  "mode": "READ_ONLY",
+  "projectId": "ireps2",
+  "schemaVersion": "1.0.0",
+  "status": "PASSED",
+  "storageCount": 859
+}

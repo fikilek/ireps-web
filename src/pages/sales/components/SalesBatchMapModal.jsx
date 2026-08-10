@@ -8,6 +8,17 @@ function cleanText(value) {
   return String(value ?? "").trim();
 }
 
+function isValidPoint(value) {
+  return (
+    Number.isFinite(value?.lat) &&
+    Number.isFinite(value?.lng) &&
+    value.lat >= -90 &&
+    value.lat <= 90 &&
+    value.lng >= -180 &&
+    value.lng <= 180
+  );
+}
+
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
@@ -89,6 +100,53 @@ export default function SalesBatchMapModal({
       ) || null,
     [erfs, focusedMeter?.linkedErfId],
   );
+
+  const hasFocusedMeterGps = isValidPoint(focusedMeter?.point);
+  const hasFocusedPremiseGps = isValidPoint(focusedPremise?.point);
+  const canDrawConnection =
+    Boolean(focusedMeter && focusedPremise) &&
+    hasFocusedMeterGps &&
+    hasFocusedPremiseGps;
+
+  const connectionIssue = useMemo(() => {
+    if (!focusedMeter) return "";
+
+    if (!cleanText(focusedMeter?.linkedPremiseId)) {
+      return "The selected Field Meter has no linked premise ID.";
+    }
+
+    if (!focusedPremise) {
+      return "The linked premise was not resolved in this Targeted Batch.";
+    }
+
+    if (!hasFocusedMeterGps && !hasFocusedPremiseGps) {
+      return (
+        "The Field Meter and linked premise locations are unavailable. " +
+        "No connection line can be drawn."
+      );
+    }
+
+    if (!hasFocusedMeterGps) {
+      return (
+        "The Field Meter location is unavailable. " +
+        "No connection line can be drawn."
+      );
+    }
+
+    if (!hasFocusedPremiseGps) {
+      return (
+        "The linked premise location is unavailable. " +
+        "No connection line can be drawn."
+      );
+    }
+
+    return "";
+  }, [
+    focusedMeter,
+    focusedPremise,
+    hasFocusedMeterGps,
+    hasFocusedPremiseGps,
+  ]);
 
   const streamStatus = cleanText(mapStream?.sync?.status);
   const streamReady =
@@ -201,6 +259,31 @@ export default function SalesBatchMapModal({
               The complete batch is shown, but this meter is not present in
               the canonical Batch Map membership returned by the live stream.
             </span>
+          </div>
+        ) : null}
+
+        {canOpenStream &&
+        streamReady &&
+        !streamError &&
+        focusedMeter &&
+        canDrawConnection ? (
+          <div style={styles.connectionReadyState}>
+            <strong>Premise-to-Field-Meter connection shown.</strong>
+            <span>
+              The line starts at the linked premise and ends at the selected
+              Field Meter.
+            </span>
+          </div>
+        ) : null}
+
+        {canOpenStream &&
+        streamReady &&
+        !streamError &&
+        focusedMeter &&
+        connectionIssue ? (
+          <div style={styles.warningState}>
+            <strong>Premise-to-Field-Meter line unavailable.</strong>
+            <span>{connectionIssue}</span>
           </div>
         ) : null}
 
@@ -361,6 +444,17 @@ const styles = {
     border: "1px solid #fecaca",
     background: "#fef2f2",
     color: "#991b1b",
+    padding: 14,
+    fontSize: 12,
+  },
+
+  connectionReadyState: {
+    display: "grid",
+    gap: 4,
+    borderRadius: 12,
+    border: "1px solid #c4b5fd",
+    background: "#f5f3ff",
+    color: "#5b21b6",
     padding: 14,
     fontSize: 12,
   },

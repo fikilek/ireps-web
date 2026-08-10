@@ -1,0 +1,29 @@
+{
+  "collection": "demo_sales_meters",
+  "documentsExported": 10216,
+  "finishedAtUtc": "2026-08-08T00:42:40.410750Z",
+  "firestoreWriteOperations": 0,
+  "nextStep": "Inspect the raw snapshot and root-field inventory. Define cleaning rules. Do not edit 01_RAW_MIGRATION_SNAPSHOT.jsonl.",
+  "pageSize": 500,
+  "pagesRead": 21,
+  "projectId": "ireps-test",
+  "readOnly": true,
+  "rootFieldCount": 35,
+  "runId": "DEMO_SALES_MIGRATION_EXPORT_20260808T004156Z",
+  "snapshot": {
+    "bytes": 21499227,
+    "file": "01_RAW_MIGRATION_SNAPSHOT.jsonl",
+    "sha256": "e8a69bb464b97d8a6866b30b5ceb80ed5ff0c2f41d8e6860e77ec8f30b3769a7"
+  },
+  "startedAtUtc": "2026-08-08T00:41:56.188271Z",
+  "status": "PASSED",
+  "unknownPythonValueCount": 0,
+  "verification": {
+    "countMatchesExport": true,
+    "duplicateDocumentIds": 0,
+    "invalidLineCount": 0,
+    "lineCount": 10216,
+    "passed": true,
+    "uniqueDocumentIds": 10216
+  }
+}

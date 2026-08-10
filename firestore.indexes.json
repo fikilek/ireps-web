@@ -1,6 +1,26 @@
 ﻿{
   "indexes": [
     {
+      "collectionGroup": "tb_rows",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tbId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rowNo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+
+    {
       "collectionGroup": "asts",
       "queryScope": "COLLECTION",
       "fields": [

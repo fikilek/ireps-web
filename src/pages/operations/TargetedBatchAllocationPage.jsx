@@ -1,12 +1,11 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+/* eslint-disable no-unused-vars, react-hooks/set-state-in-effect -- subscription effects reset route-scoped loading state. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
+  onSnapshot,
   query,
   where,
 } from "firebase/firestore";
@@ -182,9 +181,7 @@ export default function TargetedBatchAllocationPage() {
   const decodedTbId = decodeURIComponent(tbId || "");
 
   useEffect(() => {
-    let active = true;
-
-    async function loadPermanentTargetedBatch() {
+    {
       setIsBatchLoading(true);
       setBatchLoadError("");
       setBatch(null);
@@ -196,27 +193,23 @@ export default function TargetedBatchAllocationPage() {
       if (!decodedTbId) {
         setBatchLoadError("The Targeted Batch ID is missing from the route.");
         setIsBatchLoading(false);
-        return;
+        return undefined;
       }
-
-      try {
-        const parentRef = doc(db, "tb_uploads", decodedTbId);
-        const rowsQuery = query(
-          collection(db, "tb_rows"),
-          where("tbId", "==", decodedTbId),
-        );
-
-        const [parentSnapshot, rowsSnapshot] = await Promise.all([
-          getDoc(parentRef),
-          getDocs(rowsQuery),
-        ]);
-
-        if (!active) return;
-
+      let parentReady = false;
+      let rowsReady = false;
+      const markReady = () => parentReady && rowsReady && setIsBatchLoading(false);
+      const handleError = (error) => {
+        setBatchLoadError(error?.message || "The permanent Targeted Batch could not be loaded from Firestore.");
+        setIsBatchLoading(false);
+      };
+      const unsubscribeParent = onSnapshot(doc(db, "tb_uploads", decodedTbId), (parentSnapshot) => {
         if (!parentSnapshot.exists()) {
           setBatchLoadError(
             `Permanent Targeted Batch ${decodedTbId} was not found.`,
           );
+          setBatch(null);
+          parentReady = true;
+          markReady();
           return;
         }
 
@@ -225,29 +218,25 @@ export default function TargetedBatchAllocationPage() {
           id: parentSnapshot.id,
         };
 
+        setBatch(permanentBatch);
+        parentReady = true;
+        markReady();
+      }, handleError);
+      const unsubscribeRows = onSnapshot(query(collection(db, "tb_rows"), where("tbId", "==", decodedTbId)), (rowsSnapshot) => {
         const loadedRows = rowsSnapshot.docs
           .map(mapPermanentTbRow)
           .sort((left, right) => Number(left.rowNo) - Number(right.rowNo));
 
-        setBatch(permanentBatch);
         setPermanentRows(loadedRows);
-      } catch (error) {
-        if (!active) return;
-
-        setBatchLoadError(
-          error?.message ||
-            "The permanent Targeted Batch could not be loaded from Firestore.",
-        );
-      } finally {
-        if (active) setIsBatchLoading(false);
-      }
-    }
-
-    loadPermanentTargetedBatch();
+        rowsReady = true;
+        markReady();
+      }, handleError);
 
     return () => {
-      active = false;
+      unsubscribeParent();
+      unsubscribeRows();
     };
+    }
   }, [decodedTbId]);
 
   const sourceType = batch?.source?.type || "";
