@@ -963,8 +963,8 @@ const styles = {
   },
   mapWrap: {
     width: "100%",
-    height: "min(54vh, 520px)",
-    minHeight: "380px",
+    height: "min(72vh, 720px)",
+    minHeight: "520px",
     background: "#e2e8f0",
   },
   emptyState: {
