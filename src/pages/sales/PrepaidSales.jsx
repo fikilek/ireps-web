@@ -9,19 +9,13 @@ import { useGetDemoSalesByLmPcodeQuery } from "../../redux/demoSalesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import SalesMetersTable from "./components/SalesMetersTable";
-import SalesTrendChart from "./components/SalesTrendChart";
 import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
-  SALES_TARGET_THRESHOLDS_C,
-  TARGET_FILTERS,
   buildMonthKeys,
-  formatCompactCurrencyFromCents,
-  formatCurrencyFromCents,
   formatNumber,
   getActiveLmPcode,
   getActiveWorkbaseName,
   getMonthLabel,
-  getTargetFilterLabel,
 } from "./salesUtils";
 
 const GPS_FILTERS = {
@@ -87,21 +81,6 @@ function SummaryCard({ label, value, subtitle, active, onClick }) {
       <span style={styles.summaryLabel}>{label}</span>
       <strong style={styles.summaryValue}>{value}</strong>
       {subtitle ? <span style={styles.summarySubtitle}>{subtitle}</span> : null}
-    </button>
-  );
-}
-
-function TargetingButton({ label, active, onClick }) {
-  return (
-    <button
-      type="button"
-      style={{
-        ...styles.targetButton,
-        ...(active ? styles.targetButtonActive : null),
-      }}
-      onClick={onClick}
-    >
-      {label}
     </button>
   );
 }
@@ -210,9 +189,7 @@ export default function PrepaidSales() {
     };
   }, [location.search]);
 
-  const [trendMode, setTrendMode] = useState("SALES");
   const [gpsFilter, setGpsFilter] = useState(GPS_FILTERS.ALL);
-  const [targetFilter, setTargetFilter] = useState(TARGET_FILTERS.ALL);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isTargetBatchModalOpen, setIsTargetBatchModalOpen] = useState(false);
   const [targetBatchScopeError, setTargetBatchScopeError] = useState("");
@@ -259,37 +236,6 @@ export default function PrepaidSales() {
     [gpsFilter, salesRows],
   );
 
-  const summary = useMemo(() => {
-    return gpsFilteredRows.reduce(
-      (accumulator, row) => {
-        accumulator.totalMeters += 1;
-        accumulator.totalSalesC += Number(row?.totalSalesC || 0);
-        if (Number(row?.sales3MonthsC || 0) === 0) accumulator.noSales3M += 1;
-        if (Number(row?.sales6MonthsC || 0) === 0) accumulator.noSales6M += 1;
-        const latest12MonthsSalesC = Number(row?.sales12MonthsC || 0);
-        if (latest12MonthsSalesC === 0) accumulator.noSales12M += 1;
-        if (latest12MonthsSalesC < SALES_TARGET_THRESHOLDS_C.BELOW_R400_X_12) {
-          accumulator.belowR400X12 += 1;
-        }
-        if (latest12MonthsSalesC < SALES_TARGET_THRESHOLDS_C.BELOW_R200_X_12) {
-          accumulator.belowR200X12 += 1;
-        }
-        if (Number(row?.totalSalesC || 0) === 0) accumulator.neverVended += 1;
-        return accumulator;
-      },
-      {
-        totalMeters: 0,
-        totalSalesC: 0,
-        noSales3M: 0,
-        noSales6M: 0,
-        noSales12M: 0,
-        belowR400X12: 0,
-        belowR200X12: 0,
-        neverVended: 0,
-      },
-    );
-  }, [gpsFilteredRows]);
-
   const selectedRows = useMemo(() => {
     if (selectedIds.size === 0) return [];
     return gpsFilteredRows.filter((row) => selectedIds.has(row.id));
@@ -320,10 +266,6 @@ export default function PrepaidSales() {
     setSelectedIds(new Set());
     setIsTargetBatchModalOpen(false);
     setTargetBatchScopeError("");
-  }
-
-  function setTarget(target) {
-    setTargetFilter(target);
   }
 
   function handleOpenTargetedBatch() {
@@ -373,11 +315,7 @@ export default function PrepaidSales() {
       return;
     }
 
-    const targetLabel = getTargetFilterLabel(targetFilter);
-    const selectionReason =
-      targetFilter === TARGET_FILTERS.ALL
-        ? "Selected from Prepaid Sales filters"
-        : targetLabel;
+    const selectionReason = "Selected from Prepaid Sales filters";
 
     const draftPlan = buildSalesTargetedBatchDraftPlan({
       rows: selectedRows,
@@ -545,118 +483,11 @@ export default function PrepaidSales() {
               active={gpsFilter === GPS_FILTERS.WITHOUT_GPS}
               onClick={() => setGpsStatusFilter(GPS_FILTERS.WITHOUT_GPS)}
             />
-            <SummaryCard
-              label="Total Sales"
-              value={formatCompactCurrencyFromCents(summary.totalSalesC)}
-              subtitle={formatCurrencyFromCents(summary.totalSalesC)}
-            />
-            <SummaryCard
-              label="No Sales 3M"
-              value={formatNumber(summary.noSales3M)}
-              subtitle="Click to target"
-              active={targetFilter === TARGET_FILTERS.NO_SALES_3M}
-              onClick={() => setTarget(TARGET_FILTERS.NO_SALES_3M)}
-            />
-            <SummaryCard
-              label="No Sales 6M"
-              value={formatNumber(summary.noSales6M)}
-              subtitle="Click to target"
-              active={targetFilter === TARGET_FILTERS.NO_SALES_6M}
-              onClick={() => setTarget(TARGET_FILTERS.NO_SALES_6M)}
-            />
-            <SummaryCard
-              label="No Sales 12M"
-              value={formatNumber(summary.noSales12M)}
-              subtitle="Click to target"
-              active={targetFilter === TARGET_FILTERS.NO_SALES_12M}
-              onClick={() => setTarget(TARGET_FILTERS.NO_SALES_12M)}
-            />
-            <SummaryCard
-              label="Below R400 × 12M"
-              value={formatNumber(summary.belowR400X12)}
-              subtitle="Latest 12 months below R4,800"
-              active={targetFilter === TARGET_FILTERS.BELOW_R400_X_12}
-              onClick={() => setTarget(TARGET_FILTERS.BELOW_R400_X_12)}
-            />
-            <SummaryCard
-              label="Below R200 × 12M"
-              value={formatNumber(summary.belowR200X12)}
-              subtitle="Latest 12 months below R2,400"
-              active={targetFilter === TARGET_FILTERS.BELOW_R200_X_12}
-              onClick={() => setTarget(TARGET_FILTERS.BELOW_R200_X_12)}
-            />
-            <SummaryCard
-              label="Never Vended"
-              value={formatNumber(summary.neverVended)}
-              subtitle="Click to target"
-              active={targetFilter === TARGET_FILTERS.NEVER_VENDED}
-              onClick={() => setTarget(TARGET_FILTERS.NEVER_VENDED)}
-            />
-          </section>
-
-          <SalesTrendChart
-            rows={gpsFilteredRows}
-            monthKeys={monthKeys}
-            mode={trendMode}
-            onModeChange={setTrendMode}
-          />
-
-          <section style={styles.targetPanel}>
-            <div>
-              <p style={styles.targetEyebrow}>Targeting Shortcuts</p>
-              <h2 style={styles.targetTitle}>
-                Identify meters for field investigation
-              </h2>
-            </div>
-
-            <div style={styles.targetButtons}>
-              <TargetingButton
-                label="No sales 3 months"
-                active={targetFilter === TARGET_FILTERS.NO_SALES_3M}
-                onClick={() => setTarget(TARGET_FILTERS.NO_SALES_3M)}
-              />
-              <TargetingButton
-                label="No sales 6 months"
-                active={targetFilter === TARGET_FILTERS.NO_SALES_6M}
-                onClick={() => setTarget(TARGET_FILTERS.NO_SALES_6M)}
-              />
-              <TargetingButton
-                label="No sales 12 months"
-                active={targetFilter === TARGET_FILTERS.NO_SALES_12M}
-                onClick={() => setTarget(TARGET_FILTERS.NO_SALES_12M)}
-              />
-              <TargetingButton
-                label="Below R400 × 12 months"
-                active={targetFilter === TARGET_FILTERS.BELOW_R400_X_12}
-                onClick={() => setTarget(TARGET_FILTERS.BELOW_R400_X_12)}
-              />
-              <TargetingButton
-                label="Below R200 × 12 months"
-                active={targetFilter === TARGET_FILTERS.BELOW_R200_X_12}
-                onClick={() => setTarget(TARGET_FILTERS.BELOW_R200_X_12)}
-              />
-              <TargetingButton
-                label="Never purchased"
-                active={targetFilter === TARGET_FILTERS.NEVER_VENDED}
-                onClick={() => setTarget(TARGET_FILTERS.NEVER_VENDED)}
-              />
-              <TargetingButton
-                label={`${getMonthLabel(latestMonthKey)} sales = R0`}
-                active={targetFilter === TARGET_FILTERS.LATEST_MONTH_ZERO}
-                onClick={() => setTarget(TARGET_FILTERS.LATEST_MONTH_ZERO)}
-              />
-              <TargetingButton
-                label="Clear targeting"
-                active={targetFilter === TARGET_FILTERS.ALL}
-                onClick={() => setTarget(TARGET_FILTERS.ALL)}
-              />
-            </div>
           </section>
 
           <SalesMetersTable
             rows={gpsFilteredRows}
             monthKeys={monthKeys}
-            targetFilter={targetFilter}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
             initialTbId={dashboardMapContext.tbId}
@@ -869,50 +700,6 @@ const styles = {
     paddingTop: "0.45rem",
     color: "#64748b",
     fontSize: "0.75rem",
-  },
-  targetPanel: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "1rem",
-    borderRadius: "1rem",
-    background: "#ffffff",
-    border: "1px solid rgba(148, 163, 184, 0.26)",
-    boxShadow: "0 12px 26px rgba(15, 23, 42, 0.05)",
-    flexWrap: "wrap",
-  },
-  targetEyebrow: {
-    margin: 0,
-    color: "#2563eb",
-    fontSize: "0.72rem",
-    fontWeight: 900,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-  },
-  targetTitle: {
-    margin: "0.2rem 0 0",
-    color: "#0f172a",
-    fontSize: "1.05rem",
-  },
-  targetButtons: {
-    display: "flex",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  targetButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    borderRadius: "999px",
-    padding: "0.5rem 0.75rem",
-    background: "#ffffff",
-    color: "#334155",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  targetButtonActive: {
-    borderColor: "#2563eb",
-    background: "#2563eb",
-    color: "#ffffff",
   },
   selectionBar: {
     position: "fixed",
