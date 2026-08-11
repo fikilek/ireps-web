@@ -101,6 +101,8 @@ const STICKY_COLUMN_WIDTHS = {
   sales2026C: 150,
 };
 
+const HORIZONTALLY_STICKY_COLUMNS = new Set(["select", "meterNo"]);
+
 const EMPTY_FILTERS = {
   meterNo: "",
   wardNos: [],
@@ -277,18 +279,26 @@ function getStickyStyle(columnKey, stickyLayout, isHeader = false) {
   const config = stickyLayout[columnKey];
   if (!config) return {};
 
-  const visibleKeys = Object.keys(stickyLayout);
-  const isLastSticky = visibleKeys[visibleKeys.length - 1] === columnKey;
-
-  return {
-    position: "sticky",
-    left: `${config.left}px`,
+  const sizeStyle = {
     width: `${config.width}px`,
     minWidth: `${config.width}px`,
     maxWidth: `${config.width}px`,
+  };
+
+  if (!HORIZONTALLY_STICKY_COLUMNS.has(columnKey)) {
+    return sizeStyle;
+  }
+
+  return {
+    ...sizeStyle,
+    position: "sticky",
+    left: `${config.left}px`,
     zIndex: isHeader ? 8 : 3,
     background: isHeader ? "#e2e8f0" : "#ffffff",
-    boxShadow: isLastSticky ? "5px 0 10px rgba(15, 23, 42, 0.09)" : undefined,
+    boxShadow:
+      columnKey === "meterNo"
+        ? "5px 0 10px rgba(15, 23, 42, 0.09)"
+        : undefined,
   };
 }
 
