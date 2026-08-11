@@ -137,6 +137,8 @@ import { updateFwrMonitoringStatusCallable } from "./fwr-monitoring/updateFwrMon
 
 import { submitInformalErfCallable } from "./informal-erfs/submitInformalErfCallable.js";
 
+import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
+
 initializeApp();
 const auth = getAuth();
 const db = getFirestore();
@@ -1594,11 +1596,8 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
 
     const agentUid = updatedByUid;
     const agentName = updatedByUser;
-    const validationError = validateMeterCreationPayload({
+    const validationError = validateMeterDiscoveryPayload({
       data: trnData,
-      expectedTrnType: "METER_DISCOVERY",
-      expectedTrnPrefix: "TRN_MDIS_",
-      allowedStatuses: ["CONNECTED", "DISCONNECTED"],
     });
 
     if (validationError) {
@@ -3087,11 +3086,8 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       meterNoNormalized,
     });
 
-    const validationError = validateMeterCreationPayload({
+    const validationError = validateMeterDiscoveryPayload({
       data,
-      expectedTrnType: "METER_DISCOVERY",
-      expectedTrnPrefix: "TRN_MDIS_",
-      allowedStatuses: ["CONNECTED", "DISCONNECTED"],
     });
     if (validationError) return validationError;
 
