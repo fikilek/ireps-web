@@ -14,6 +14,12 @@ const EXPECTED = {
     firebaseStorageBucket: "ireps-test.firebasestorage.app",
     firebaseAlias: "ireps-test",
   },
+  live: {
+    firebaseProjectId: "ireps-5c3e9",
+    firebaseAuthDomain: "ireps-5c3e9.firebaseapp.com",
+    firebaseStorageBucket: "ireps-5c3e9.firebasestorage.app",
+    firebaseAlias: "ireps-5c3e9",
+  },
 };
 
 const envName = process.argv[2];

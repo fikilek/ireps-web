@@ -2,7 +2,8 @@
   "projects": {
     "default": "ireps2",
     "test": "ireps-test",
-    "dev": "ireps2"
+    "dev": "ireps2",
+    "live": "ireps-5c3e9"
   },
   "targets": {
     "ireps2": {
