@@ -1,0 +1,218 @@
+{
+  "schemaVersion": "1.0.0",
+  "contract": {
+    "canonicalRowStatuses": [
+      "CREATED",
+      "ALLOCATED",
+      "ACCEPTED",
+      "REJECTED",
+      "COMPLETED"
+    ],
+    "derivedOnlyStatus": "INCONSISTENT"
+  },
+  "cases": [
+    {
+      "name": "all CREATED rows derive CREATED",
+      "input": {
+        "tbId": "TB-001",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-001-0001", "rowNo": 1, "salesAllMeterId": "S-001" },
+          { "id": "TB-001-0002", "rowNo": 2, "salesAllMeterId": "S-002" }
+        ],
+        "rows": [
+          { "id": "TB-001-0001", "tbId": "TB-001", "rowNo": 1, "salesAllMeterId": "S-001", "status": "CREATED" },
+          { "id": "TB-001-0002", "tbId": "TB-001", "rowNo": 2, "salesAllMeterId": "S-002", "status": "CREATED" }
+        ]
+      },
+      "expected": { "status": "CREATED", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "all ALLOCATED rows derive ALLOCATED",
+      "input": {
+        "tbId": "TB-002",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-002-0001", "rowNo": 1, "salesAllMeterId": "S-011" },
+          { "id": "TB-002-0002", "rowNo": 2, "salesAllMeterId": "S-012" }
+        ],
+        "rows": [
+          { "id": "TB-002-0001", "tbId": "TB-002", "rowNo": 1, "salesAllMeterId": "S-011", "status": "ALLOCATED" },
+          { "id": "TB-002-0002", "tbId": "TB-002", "rowNo": 2, "salesAllMeterId": "S-012", "status": "ALLOCATED" }
+        ]
+      },
+      "expected": { "status": "ALLOCATED", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "all ACCEPTED rows derive ACCEPTED",
+      "input": {
+        "tbId": "TB-003",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-003-0001", "rowNo": 1, "salesAllMeterId": "S-021" },
+          { "id": "TB-003-0002", "rowNo": 2, "salesAllMeterId": "S-022" }
+        ],
+        "rows": [
+          { "id": "TB-003-0001", "tbId": "TB-003", "rowNo": 1, "salesAllMeterId": "S-021", "status": "ACCEPTED" },
+          { "id": "TB-003-0002", "tbId": "TB-003", "rowNo": 2, "salesAllMeterId": "S-022", "status": "ACCEPTED" }
+        ]
+      },
+      "expected": { "status": "ACCEPTED", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "ACCEPTED plus COMPLETED derives ACCEPTED",
+      "input": {
+        "tbId": "TB-004",
+        "expectedRowCount": 3,
+        "expectedRows": [
+          { "id": "TB-004-0001", "rowNo": 1, "salesAllMeterId": "S-031" },
+          { "id": "TB-004-0002", "rowNo": 2, "salesAllMeterId": "S-032" },
+          { "id": "TB-004-0003", "rowNo": 3, "salesAllMeterId": "S-033" }
+        ],
+        "rows": [
+          { "id": "TB-004-0001", "tbId": "TB-004", "rowNo": 1, "salesAllMeterId": "S-031", "status": "COMPLETED" },
+          { "id": "TB-004-0002", "tbId": "TB-004", "rowNo": 2, "salesAllMeterId": "S-032", "status": "ACCEPTED" },
+          { "id": "TB-004-0003", "tbId": "TB-004", "rowNo": 3, "salesAllMeterId": "S-033", "status": "COMPLETED" }
+        ]
+      },
+      "expected": { "status": "ACCEPTED", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "all REJECTED rows derive REJECTED",
+      "input": {
+        "tbId": "TB-005",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-005-0001", "rowNo": 1, "salesAllMeterId": "S-041" },
+          { "id": "TB-005-0002", "rowNo": 2, "salesAllMeterId": "S-042" }
+        ],
+        "rows": [
+          { "id": "TB-005-0001", "tbId": "TB-005", "rowNo": 1, "salesAllMeterId": "S-041", "status": "REJECTED" },
+          { "id": "TB-005-0002", "tbId": "TB-005", "rowNo": 2, "salesAllMeterId": "S-042", "status": "REJECTED" }
+        ]
+      },
+      "expected": { "status": "REJECTED", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "all COMPLETED rows derive COMPLETED",
+      "input": {
+        "tbId": "TB-006",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-006-0001", "rowNo": 1, "salesAllMeterId": "S-051" },
+          { "id": "TB-006-0002", "rowNo": 2, "salesAllMeterId": "S-052" }
+        ],
+        "rows": [
+          { "id": "TB-006-0001", "tbId": "TB-006", "rowNo": 1, "salesAllMeterId": "S-051", "status": "COMPLETED" },
+          { "id": "TB-006-0002", "tbId": "TB-006", "rowNo": 2, "salesAllMeterId": "S-052", "status": "COMPLETED" }
+        ]
+      },
+      "expected": { "status": "COMPLETED", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "unsupported ALLOCATED plus ACCEPTED mix fails closed",
+      "input": {
+        "tbId": "TB-007",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-007-0001", "rowNo": 1, "salesAllMeterId": "S-061" },
+          { "id": "TB-007-0002", "rowNo": 2, "salesAllMeterId": "S-062" }
+        ],
+        "rows": [
+          { "id": "TB-007-0001", "tbId": "TB-007", "rowNo": 1, "salesAllMeterId": "S-061", "status": "ALLOCATED" },
+          { "id": "TB-007-0002", "tbId": "TB-007", "rowNo": 2, "salesAllMeterId": "S-062", "status": "ACCEPTED" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": true, "diagnosticCodes": [] }
+    },
+    {
+      "name": "missing authoritative row fails closed",
+      "input": {
+        "tbId": "TB-008",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-008-0001", "rowNo": 1, "salesAllMeterId": "S-071" },
+          { "id": "TB-008-0002", "rowNo": 2, "salesAllMeterId": "S-072" }
+        ],
+        "rows": [
+          { "id": "TB-008-0001", "tbId": "TB-008", "rowNo": 1, "salesAllMeterId": "S-071", "status": "CREATED" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": false, "diagnosticCodes": ["ROW_COUNT_MISMATCH", "EXPECTED_ROW_MISSING"] }
+    },
+    {
+      "name": "wrong parent tbId fails closed",
+      "input": {
+        "tbId": "TB-009",
+        "expectedRowCount": 1,
+        "expectedRows": [
+          { "id": "TB-009-0001", "rowNo": 1, "salesAllMeterId": "S-081" }
+        ],
+        "rows": [
+          { "id": "TB-009-0001", "tbId": "TB-WRONG", "rowNo": 1, "salesAllMeterId": "S-081", "status": "CREATED" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": false, "diagnosticCodes": ["ROW_TB_ID_MISMATCH"] }
+    },
+    {
+      "name": "duplicate Sales identity fails closed",
+      "input": {
+        "tbId": "TB-010",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-010-0001", "rowNo": 1, "salesAllMeterId": "S-091" },
+          { "id": "TB-010-0002", "rowNo": 2, "salesAllMeterId": "S-092" }
+        ],
+        "rows": [
+          { "id": "TB-010-0001", "tbId": "TB-010", "rowNo": 1, "salesAllMeterId": "S-091", "status": "CREATED" },
+          { "id": "TB-010-0002", "tbId": "TB-010", "rowNo": 2, "salesAllMeterId": "S-091", "status": "CREATED" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": false, "diagnosticCodes": ["DUPLICATE_SALES_ID", "ROW_IDENTITY_SALES_ID_MISMATCH"] }
+    },
+    {
+      "name": "substituted row identity at correct count fails closed",
+      "input": {
+        "tbId": "TB-011",
+        "expectedRowCount": 2,
+        "expectedRows": [
+          { "id": "TB-011-0001", "rowNo": 1, "salesAllMeterId": "S-101" },
+          { "id": "TB-011-0002", "rowNo": 2, "salesAllMeterId": "S-102" }
+        ],
+        "rows": [
+          { "id": "TB-011-0001", "tbId": "TB-011", "rowNo": 1, "salesAllMeterId": "S-101", "status": "CREATED" },
+          { "id": "TB-011-9999", "tbId": "TB-011", "rowNo": 2, "salesAllMeterId": "S-102", "status": "CREATED" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": false, "diagnosticCodes": ["EXPECTED_ROW_MISSING", "UNEXPECTED_ROW_ID"] }
+    },
+    {
+      "name": "missing canonical status fails closed",
+      "input": {
+        "tbId": "TB-012",
+        "expectedRowCount": 1,
+        "expectedRows": [
+          { "id": "TB-012-0001", "rowNo": 1, "salesAllMeterId": "S-111" }
+        ],
+        "rows": [
+          { "id": "TB-012-0001", "tbId": "TB-012", "rowNo": 1, "salesAllMeterId": "S-111" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": false, "diagnosticCodes": ["ROW_STATUS_INVALID"] }
+    },
+    {
+      "name": "legacy identity aliases cannot satisfy canonical identity",
+      "input": {
+        "tbId": "TB-013",
+        "expectedRowCount": 1,
+        "expectedRows": [
+          { "id": "TB-013-0001", "rowNo": 1, "salesAllMeterId": "S-121" }
+        ],
+        "rows": [
+          { "rowId": "TB-013-0001", "tbId": "TB-013", "rowNo": 1, "sourceSalesAllMeterId": "S-121", "status": "CREATED" }
+        ]
+      },
+      "expected": { "status": "INCONSISTENT", "completeRowSet": false, "diagnosticCodes": ["ROW_ID_MISSING", "SALES_ID_MISSING", "EXPECTED_ROW_MISSING"] }
+    }
+  ]
+}
