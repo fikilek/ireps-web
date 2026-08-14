@@ -137,6 +137,8 @@ import { updateFwrMonitoringStatusCallable } from "./fwr-monitoring/updateFwrMon
 
 import { submitInformalErfCallable } from "./informal-erfs/submitInformalErfCallable.js";
 
+import { updateUserCallable } from "./users/index.js";
+
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
 
 initializeApp();
@@ -194,6 +196,7 @@ export {
   submitFwrLocationCallable,
   updateFwrMonitoringStatusCallable,
   submitInformalErfCallable,
+  updateUserCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {

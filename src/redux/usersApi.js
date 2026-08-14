@@ -5,6 +5,7 @@ import {
   onSnapshot,
   query,
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 import { db } from "../firebase";
 
@@ -98,6 +99,33 @@ export const usersApi = createApi({
   reducerPath: "usersApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    updateUserRole: builder.mutation({
+      async queryFn({ userUid, newRole }) {
+        try {
+          const functions = getFunctions();
+          const callable = httpsCallable(functions, "updateUserCallable");
+          const result = await callable({ userUid, newRole });
+
+          return { data: result.data };
+        } catch (error) {
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              error:
+                error?.message ||
+                "Could not update the user role.",
+              data: {
+                code: error?.code || null,
+                message:
+                  error?.message ||
+                  "Could not update the user role.",
+              },
+            },
+          };
+        }
+      },
+    }),
+
     getUsersDirectory: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
@@ -139,4 +167,4 @@ export const usersApi = createApi({
   }),
 });
 
-export const { useGetUsersDirectoryQuery } = usersApi;
+export const { useGetUsersDirectoryQuery, useUpdateUserRoleMutation } = usersApi;

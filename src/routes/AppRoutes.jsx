@@ -51,6 +51,7 @@ import MetersPage from "../pages/ward-scope/MetersPage";
 import ProfilePage from "../pages/profile/ProfilePage";
 import MreadStagingControllerPage from "../pages/admin/MreadStagingControllerPage";
 import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
+import UsersPage from "../pages/users/UsersPage";
 
 import PrepaidSales from "../pages/sales/PrepaidSales";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
@@ -500,11 +501,8 @@ export default function AppRoutes() {
           <Route
             path="/admin/users"
             element={
-              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Users"
-                  description="LM-wide user oversight."
-                />
+              <RoleRoute allowedRoles={ADMIN_ROLES}>
+                <UsersPage />
               </RoleRoute>
             }
           />

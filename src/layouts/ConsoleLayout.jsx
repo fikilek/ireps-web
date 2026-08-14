@@ -238,7 +238,7 @@ const navSections = [
           {
             label: "Users",
             path: "/admin/users",
-            allowedRoles: MANAGEMENT_ROLES,
+            allowedRoles: ADMIN_ROLES,
           },
           {
             label: "Teams",
