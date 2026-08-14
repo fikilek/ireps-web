@@ -53,6 +53,7 @@ import MreadStagingControllerPage from "../pages/admin/MreadStagingControllerPag
 import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 
 import PrepaidSales from "../pages/sales/PrepaidSales";
+import NonGpsBatchPlanningPage from "../pages/sales/NonGpsBatchPlanningPage";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
 import SalesBatchReportPage from "../pages/sales/SalesBatchReportPage";
 import SalesBatchMapPage from "../pages/sales/SalesBatchMapPage";
@@ -103,6 +104,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <PrepaidSales />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/non-gps-batch-planning"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <NonGpsBatchPlanningPage />
               </RoleRoute>
             }
           />

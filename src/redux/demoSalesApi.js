@@ -2,6 +2,7 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { inspectSalesTbRefsIntegrity } from "../pages/sales/models/salesTbRefsIntegrityModel";
 
 const DEMO_SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
@@ -230,6 +231,22 @@ function normalizeFieldWork(value) {
   };
 }
 
+function normalizeAuthoritativeAddress(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      strNo: "",
+      strName: "",
+      strType: "",
+    };
+  }
+
+  return {
+    strNo: String(value.strNo ?? ""),
+    strName: String(value.strName ?? ""),
+    strType: String(value.strType ?? ""),
+  };
+}
+
 function normalizeTbRefs(value = []) {
   const seen = new Set();
 
@@ -352,6 +369,7 @@ function normalizeDemoSalesRow(id, data = {}) {
       data.addressLine2 || data.AddressLine2 || data.PostalAddress2 || "",
     ),
     town: String(data.town || data.Town || data.PostalAddressTown || "NAv"),
+    adr: normalizeAuthoritativeAddress(data.adr),
     standNumber: String(
       data.standNumber || data.StandNumber || erfNumbers[0] || "",
     ),
@@ -423,6 +441,9 @@ function normalizeDemoSalesRow(id, data = {}) {
       data.geofenceRefs || data.GeoFenceRefs || [],
     ),
     tbRefs: normalizeTbRefs(data.tbRefs || data.TbRefs || []),
+    tbRefsIntegrity: inspectSalesTbRefsIntegrity(
+      data.tbRefs !== undefined ? data.tbRefs : data.TbRefs,
+    ),
     leakageCategory: String(
       data.leakageCategory || data.Leakage_Category || "",
     ).trim(),
