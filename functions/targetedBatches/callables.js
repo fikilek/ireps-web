@@ -9,6 +9,7 @@ import {
 import {
   TARGETED_BATCH_COLLECTIONS,
   TARGETED_BATCH_CREATION_STATES,
+  TARGETED_BATCH_PLANNING_MODES,
   buildCreationFingerprint,
   buildFailureResult,
   buildSuccessResult,
@@ -422,11 +423,21 @@ async function verifyPermanentCreation({
   };
 }
 
+function isNgpPayload(payload = {}) {
+  return (
+    String(payload?.selection?.planningMode || "")
+      .trim()
+      .toUpperCase() === TARGETED_BATCH_PLANNING_MODES.nonGpsStreet
+  );
+}
+
 function buildBatchFingerprint(payload) {
   return buildCreationFingerprint({
     tbId: payload.tbId,
     lmPcode: payload.scope.lmPcode,
-    wardPcode: payload.scope.wardPcode,
+    wardPcode: isNgpPayload(payload)
+      ? TARGETED_BATCH_PLANNING_MODES.nonGpsStreet
+      : payload.scope.wardPcode,
     creationGroupId: payload.creationGroupId,
     salesAllMeterIds: payload.salesAllMeterIds,
   });
@@ -434,6 +445,7 @@ function buildBatchFingerprint(payload) {
 
 async function preflightPermanentBatch({ db, payload }) {
   const requestedRowCount = payload.expectedRows;
+  const ngpPayload = isNgpPayload(payload);
   const parentRef = db
     .collection(TARGETED_BATCH_COLLECTIONS.uploads)
     .doc(payload.tbId);
@@ -450,6 +462,8 @@ async function preflightPermanentBatch({ db, payload }) {
       snapshot: salesSnapshot,
       expectedSalesId: salesAllMeterId,
       expectedLmPcode: payload.scope.lmPcode,
+      expectedTbId: payload.tbId,
+      planningMode: payload.selection.planningMode,
       draftRow: payload.rows[index],
     });
 
@@ -472,58 +486,114 @@ async function preflightPermanentBatch({ db, payload }) {
       salesRef: salesSnapshot.ref,
       salesSource: validation.source,
       erfReference: validation.erfReference,
+      ngpPlanning: validation.ngpPlanning || null,
       draftRow: payload.rows[index],
     });
   });
 
-  const uniqueErfIds = [
-    ...new Set(
-      candidateSalesRecords.map((record) => record.erfReference.erfId),
-    ),
-  ];
-  const erfRefs = uniqueErfIds.map((erfId) =>
-    db.collection(TARGETED_BATCH_COLLECTIONS.erfs).doc(erfId),
-  );
-  const erfSnapshots = await getSnapshotsInChunks({ db, refs: erfRefs });
-  const erfSnapshotsById = new Map(
-    erfSnapshots.map((snapshot) => [snapshot.id, snapshot]),
-  );
-  const salesRecords = [];
+  if (ngpPayload && failedRows.length > 0) {
+    throw controlledError(
+      "NGP_TARGETED_BATCH_SOURCE_CHANGED",
+      `The NGP Targeted Batch was not created because ${failedRows.length} selected Sales target${
+        failedRows.length === 1 ? "" : "s"
+      } changed or became ineligible after selection. Refresh NGP planning and select the batch again.`,
+      {
+        tbId: payload.tbId,
+        failureCount: failedRows.length,
+        failedRows: failedRows.slice(0, 20),
+      },
+    );
+  }
 
-  candidateSalesRecords.forEach((record) => {
-    const erfId = record.erfReference.erfId;
-    const validation = validateAuthoritativeErfDocument({
-      snapshot: erfSnapshotsById.get(erfId),
-      expectedErfId: erfId,
-      expectedErfNo: record.erfReference.erfNo,
-      expectedLmPcode: payload.scope.lmPcode,
-      expectedWardPcode: payload.scope.wardPcode,
-      expectedWardNumber: payload.scope.wardNumber,
+  let salesRecords = [];
+  let confirmedScope = payload.scope;
+
+  if (ngpPayload) {
+    salesRecords = candidateSalesRecords.map((record) => ({
+      ...record,
+      erfReference: null,
+      erfScope: null,
+      erfSource: null,
+    }));
+  } else {
+    const uniqueErfIds = [
+      ...new Set(
+        candidateSalesRecords.map((record) => record.erfReference.erfId),
+      ),
+    ];
+    const erfRefs = uniqueErfIds.map((erfId) =>
+      db.collection(TARGETED_BATCH_COLLECTIONS.erfs).doc(erfId),
+    );
+    const erfSnapshots = await getSnapshotsInChunks({ db, refs: erfRefs });
+    const erfSnapshotsById = new Map(
+      erfSnapshots.map((snapshot) => [snapshot.id, snapshot]),
+    );
+
+    candidateSalesRecords.forEach((record) => {
+      const erfId = record.erfReference.erfId;
+      const validation = validateAuthoritativeErfDocument({
+        snapshot: erfSnapshotsById.get(erfId),
+        expectedErfId: erfId,
+        expectedErfNo: record.erfReference.erfNo,
+        expectedLmPcode: payload.scope.lmPcode,
+        expectedWardPcode: payload.scope.wardPcode,
+        expectedWardNumber: payload.scope.wardNumber,
+      });
+
+      if (!validation.ok) {
+        failedRows.push(
+          buildRowValidationFailure({
+            payload,
+            salesAllMeterId: record.salesAllMeterId,
+            salesRef: record.salesRef,
+            salesDocumentExists: true,
+            validation,
+          }),
+        );
+        return;
+      }
+
+      salesRecords.push({
+        ...record,
+        erfReference: {
+          ...record.erfReference,
+          erfNo: validation.erfNo,
+        },
+        erfScope: validation.scope,
+        erfSource: validation.source,
+      });
     });
 
-    if (!validation.ok) {
-      failedRows.push(
-        buildRowValidationFailure({
-          payload,
-          salesAllMeterId: record.salesAllMeterId,
-          salesRef: record.salesRef,
-          salesDocumentExists: true,
-          validation,
-        }),
+    const authoritativeScope = salesRecords[0]?.erfScope;
+
+    if (salesRecords.length > 0 && !authoritativeScope) {
+      throw controlledError(
+        "TARGETED_BATCH_AUTHORITATIVE_SCOPE_MISSING",
+        `Targeted Batch ${payload.tbId} has no authoritative ward scope.`,
       );
-      return;
     }
 
-    salesRecords.push({
-      ...record,
-      erfReference: {
-        ...record.erfReference,
-        erfNo: validation.erfNo,
-      },
-      erfScope: validation.scope,
-      erfSource: validation.source,
-    });
-  });
+    if (authoritativeScope) {
+      const scopeConflict = salesRecords.some(
+        (record) =>
+          record.erfScope.lmPcode !== authoritativeScope.lmPcode ||
+          record.erfScope.wardPcode !== authoritativeScope.wardPcode ||
+          record.erfScope.wardNumber !== authoritativeScope.wardNumber,
+      );
+
+      if (scopeConflict) {
+        throw controlledError(
+          "TARGETED_BATCH_AUTHORITATIVE_WARD_CONFLICT",
+          `Targeted Batch ${payload.tbId} resolves to more than one authoritative ward.`,
+        );
+      }
+
+      confirmedScope = {
+        ...payload.scope,
+        ...authoritativeScope,
+      };
+    }
+  }
 
   if (salesRecords.length === 0) {
     const parentSnapshot = await parentRef.get();
@@ -550,26 +620,15 @@ async function preflightPermanentBatch({ db, payload }) {
     };
   }
 
-  const authoritativeScope = salesRecords[0]?.erfScope;
-
-  if (!authoritativeScope) {
+  if (ngpPayload && salesRecords.length !== requestedRowCount) {
     throw controlledError(
-      "TARGETED_BATCH_AUTHORITATIVE_SCOPE_MISSING",
-      `Targeted Batch ${payload.tbId} has no authoritative ward scope.`,
-    );
-  }
-
-  const scopeConflict = salesRecords.some(
-    (record) =>
-      record.erfScope.lmPcode !== authoritativeScope.lmPcode ||
-      record.erfScope.wardPcode !== authoritativeScope.wardPcode ||
-      record.erfScope.wardNumber !== authoritativeScope.wardNumber,
-  );
-
-  if (scopeConflict) {
-    throw controlledError(
-      "TARGETED_BATCH_AUTHORITATIVE_WARD_CONFLICT",
-      `Targeted Batch ${payload.tbId} resolves to more than one authoritative ward.`,
+      "NGP_TARGETED_BATCH_ROW_COUNT_CHANGED",
+      "The NGP Targeted Batch source population changed before creation. Refresh NGP planning and select the batch again.",
+      {
+        tbId: payload.tbId,
+        requestedRowCount,
+        eligibleRowCount: salesRecords.length,
+      },
     );
   }
 
@@ -578,10 +637,7 @@ async function preflightPermanentBatch({ db, payload }) {
     salesAllMeterIds: salesRecords.map((record) => record.salesAllMeterId),
     rows: salesRecords.map((record) => record.draftRow),
     expectedRows: salesRecords.length,
-    scope: {
-      ...payload.scope,
-      ...authoritativeScope,
-    },
+    scope: confirmedScope,
   };
   const fingerprint = buildBatchFingerprint(confirmedPayload);
   const expectedRowIds = confirmedPayload.rows.map((row, index) =>
@@ -900,6 +956,9 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
     }
 
     creationGroupId = payloadCheck.creationGroupId;
+    const ngpCreation =
+      payloadCheck.selection?.planningMode ===
+      TARGETED_BATCH_PLANNING_MODES.nonGpsStreet;
 
     logger.info("onCreateTargetedBatchCallable -- GROUP START", {
       creationGroupId,
@@ -1001,9 +1060,13 @@ export const onCreateTargetedBatchCallable = onCall(async (request) => {
           : "TARGETED_BATCH_GROUP_NO_ELIGIBLE_ROWS";
     const message =
       failedRowCount === 0
-        ? `${completedBatches.length} ward-scoped Targeted Batch${
-            completedBatches.length === 1 ? "" : "es"
-          } created successfully`
+        ? ngpCreation
+          ? `${completedBatches.length} NGP Targeted Batch${
+              completedBatches.length === 1 ? "" : "es"
+            } created successfully`
+          : `${completedBatches.length} ward-scoped Targeted Batch${
+              completedBatches.length === 1 ? "" : "es"
+            } created successfully`
         : completedBatches.length > 0
           ? `${createdRowCount} Sales record${
               createdRowCount === 1 ? " was" : "s were"

@@ -96,6 +96,11 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            label: "Non GPS Batch Planning",
+            path: "/sales/non-gps-batch-planning",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "Sales Reporting",
             path: "/sales/reporting",
             allowedRoles: MANAGEMENT_ROLES,

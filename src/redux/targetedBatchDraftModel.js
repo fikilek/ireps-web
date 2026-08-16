@@ -15,6 +15,13 @@ export const TARGETED_BATCH_SOURCE_TYPES = Object.freeze({
   CSV_UPLOAD: "CSV_UPLOAD",
 });
 
+export const TARGETED_BATCH_PLANNING_MODES = Object.freeze({
+  WARD_ERF: "WARD_ERF",
+  NON_GPS_STREET: "NON_GPS_STREET",
+});
+
+const TARGETED_BATCH_NGP_MAX_ROWS = 20;
+
 export const TARGETED_BATCH_DRAFT_STATUSES = Object.freeze({
   DRAFT: "DRAFT",
   READY_FOR_BACKEND: "READY_FOR_BACKEND",
@@ -155,6 +162,23 @@ export function getTargetedBatchSourceLabel(sourceType) {
   return sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES
     ? "Prepaid Sales"
     : "CSV Upload";
+}
+
+export function normalizeTargetedBatchPlanningMode(
+  value,
+  sourceType = TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES,
+) {
+  if (sourceType !== TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
+    return null;
+  }
+
+  const normalized = normalizeUppercase(value);
+
+  if (normalized === TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET) {
+    return TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET;
+  }
+
+  return TARGETED_BATCH_PLANNING_MODES.WARD_ERF;
 }
 
 function normalizeFileDecision(value, passed = null) {
@@ -356,6 +380,7 @@ function normalizeOrderedSalesIds(values = []) {
 function normalizeProposedBatches({
   payload,
   sourceType,
+  planningMode,
   lmPcode,
   lmName,
   fallbackDraftId,
@@ -364,8 +389,10 @@ function normalizeProposedBatches({
   if (sourceType !== TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) return [];
 
   let batchInputs = asArray(payload?.proposedBatches);
+  const isNgp =
+    planningMode === TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET;
 
-  if (batchInputs.length === 0 && fallbackDisplayRows.length > 0) {
+  if (!isNgp && batchInputs.length === 0 && fallbackDisplayRows.length > 0) {
     const wardPcodes = uniqueStrings(
       fallbackDisplayRows.map((row) => normalizeScopePcode(row?.wardPcode)),
     );
@@ -407,7 +434,13 @@ function normalizeProposedBatches({
     );
     const draftBatchKey = readFirstString(
       batch?.draftBatchKey,
-      wardPcode && tbId ? `${wardPcode}::${tbId}` : "",
+      isNgp
+        ? tbId
+          ? `NGP::${tbId}`
+          : ""
+        : wardPcode && tbId
+          ? `${wardPcode}::${tbId}`
+          : "",
     );
     const rows = normalizeDraftRows(batch?.rows, sourceType).map(
       (row, rowIndex) => ({
@@ -418,26 +451,45 @@ function normalizeProposedBatches({
         proposedTbId: tbId,
         batchSequence: safeCount(batch?.sequence, batchIndex + 1),
         lmPcode: normalizeScopePcode(row?.lmPcode || lmPcode),
-        wardPcode: normalizeScopePcode(row?.wardPcode || wardPcode),
-        wardNumber: normalizeWardNumber(row?.wardNumber || wardNumber),
-        wardName: readFirstString(row?.wardName, row?.wardNumberLabel, wardName),
+        wardPcode: isNgp
+          ? ""
+          : normalizeScopePcode(row?.wardPcode || wardPcode),
+        wardNumber: isNgp
+          ? ""
+          : normalizeWardNumber(row?.wardNumber || wardNumber),
+        wardName: isNgp
+          ? ""
+          : readFirstString(row?.wardName, row?.wardNumberLabel, wardName),
+        planning: row?.planning
+          ? {
+              ...row.planning,
+              mode: normalizeTargetedBatchPlanningMode(
+                row?.planning?.mode || planningMode,
+                sourceType,
+              ),
+            }
+          : isNgp
+            ? { mode: planningMode }
+            : row?.planning,
       }),
     );
     const explicitIds = normalizeOrderedSalesIds(
       batch?.salesAllMeterIds ?? batch?.authoritativeIds?.salesAllMeterIds,
     );
     const salesAllMeterIds =
-      explicitIds.length > 0 ? explicitIds : rows.map((row) =>
-        normalizeAuthoritativeId(
-          readFirstString(
-            row?.salesAllMeterId,
-            row?.sourceSalesAllMeterId,
-            row?.meterNoNormalized,
-            row?.meterNo,
-            row?.id,
-          ),
-        ),
-      );
+      explicitIds.length > 0
+        ? explicitIds
+        : rows.map((row) =>
+            normalizeAuthoritativeId(
+              readFirstString(
+                row?.salesAllMeterId,
+                row?.sourceSalesAllMeterId,
+                row?.meterNoNormalized,
+                row?.meterNo,
+                row?.id,
+              ),
+            ),
+          );
 
     return {
       draftBatchKey,
@@ -446,16 +498,16 @@ function normalizeProposedBatches({
       scope: {
         lmPcode: normalizeScopePcode(batch?.scope?.lmPcode || lmPcode),
         lmName: readFirstString(batch?.scope?.lmName, lmName, "NAv"),
-        wardPcode,
-        wardNumber,
-        wardName,
+        wardPcode: isNgp ? "" : wardPcode,
+        wardNumber: isNgp ? "" : wardNumber,
+        wardName: isNgp ? "" : wardName,
       },
       rowCount: rows.length,
       salesAllMeterIds,
       rows,
       validation: {
         status: normalizeUppercase(batch?.validation?.status, "PASSED"),
-        oneWardOnly: batch?.validation?.oneWardOnly !== false,
+        oneWardOnly: isNgp ? false : batch?.validation?.oneWardOnly !== false,
       },
     };
   });
@@ -497,6 +549,12 @@ export function buildTargetedBatchDraft(payload = {}) {
     payload?.selectionReason,
     "NAv",
   );
+  const planningMode = normalizeTargetedBatchPlanningMode(
+    payload?.selection?.planningMode ??
+      payload?.planningMode ??
+      payload?.validation?.planningMode,
+    sourceType,
+  );
   const salesPeriodFrom =
     payload?.selection?.salesPeriodFrom ?? payload?.salesPeriodFrom ?? null;
   const salesPeriodTo =
@@ -506,6 +564,7 @@ export function buildTargetedBatchDraft(payload = {}) {
   const proposedBatches = normalizeProposedBatches({
     payload,
     sourceType,
+    planningMode,
     lmPcode,
     lmName,
     fallbackDraftId,
@@ -543,8 +602,10 @@ export function buildTargetedBatchDraft(payload = {}) {
   const validation = {
     ...buildCanonicalValidation(payload?.validation, displayRows, sourceType),
     proposedBatchCount: proposedBatches.length,
+    planningMode,
     wardGroupingApplied:
-      sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES
+      sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES &&
+      planningMode === TARGETED_BATCH_PLANNING_MODES.WARD_ERF
         ? payload?.validation?.wardGroupingApplied === true ||
           proposedBatches.length > 0
         : false,
@@ -583,6 +644,7 @@ export function buildTargetedBatchDraft(payload = {}) {
       reason: selectionReason,
       salesPeriodFrom,
       salesPeriodTo,
+      planningMode,
     },
     totals: {
       selectedRows: displayRows.length,
@@ -606,6 +668,7 @@ export function buildTargetedBatchDraft(payload = {}) {
     lmPcode: canonicalDraft.scope.lmPcode,
     lmName: canonicalDraft.scope.lmName,
     selectionReason: canonicalDraft.selection.reason,
+    planningMode: canonicalDraft.selection.planningMode,
     salesPeriodFrom: canonicalDraft.selection.salesPeriodFrom,
     salesPeriodTo: canonicalDraft.selection.salesPeriodTo,
     salesAllMeterIds: canonicalDraft.authoritativeIds.salesAllMeterIds,
@@ -726,6 +789,13 @@ export function getTargetedBatchDraftIntegrity(draft) {
     currentDraft.source.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES;
   const isCsvSource =
     currentDraft.source.type === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD;
+  const planningMode = normalizeTargetedBatchPlanningMode(
+    currentDraft?.selection?.planningMode,
+    currentDraft.source.type,
+  );
+  const isNgpSales =
+    isSalesSource &&
+    planningMode === TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET;
   const rowIds = rows.map((row) =>
     normalizeAuthoritativeId(
       row?.salesAllMeterId ||
@@ -833,7 +903,17 @@ export function getTargetedBatchDraftIntegrity(draft) {
     let proposedRowCount = 0;
 
     if (proposedBatches.length === 0) {
-      blockers.push("The Sales draft has no ward-compliant proposed batches.");
+      blockers.push(
+        isNgpSales
+          ? "The NGP Sales draft has no proposed Targeted Batch."
+          : "The Sales draft has no ward-compliant proposed batches.",
+      );
+    }
+
+    if (isNgpSales && proposedBatches.length !== 1) {
+      blockers.push(
+        "One NGP operation must create exactly one proposed Targeted Batch.",
+      );
     }
 
     if (!currentDraft.creationGroup?.id) {
@@ -864,7 +944,7 @@ export function getTargetedBatchDraftIntegrity(draft) {
         blockers.push(`${batchLabel} has an invalid Targeted Batch ID.`);
       }
 
-      if (!wardPcode || !wardNumber) {
+      if (!isNgpSales && (!wardPcode || !wardNumber)) {
         blockers.push(`${batchLabel} has incomplete ward scope.`);
       }
 
@@ -876,10 +956,12 @@ export function getTargetedBatchDraftIntegrity(draft) {
         blockers.push(`${batchLabel} contains no rows.`);
       }
 
-      if (batchRows.length > TARGETED_BATCH_MAX_ROWS_PER_BATCH) {
-        blockers.push(
-          `${batchLabel} exceeds ${TARGETED_BATCH_MAX_ROWS_PER_BATCH} rows.`,
-        );
+      const maxRows = isNgpSales
+        ? TARGETED_BATCH_NGP_MAX_ROWS
+        : TARGETED_BATCH_MAX_ROWS_PER_BATCH;
+
+      if (batchRows.length > maxRows) {
+        blockers.push(`${batchLabel} exceeds ${maxRows} rows.`);
       }
 
       if (batchSalesIds.length !== batchRows.length) {
@@ -900,16 +982,37 @@ export function getTargetedBatchDraftIntegrity(draft) {
           );
         }
 
-        if (normalizeScopePcode(row?.wardPcode) !== wardPcode) {
-          blockers.push(
-            `${batchLabel} row ${rowIndex + 1} crosses the proposed ward boundary.`,
+        if (isNgpSales) {
+          const rowPlanningMode = normalizeTargetedBatchPlanningMode(
+            row?.planning?.mode,
+            currentDraft.source.type,
           );
-        }
+          const townKey = readFirstString(row?.planning?.townKey);
+          const streetKey = readFirstString(row?.planning?.streetKey);
 
-        if (normalizeWardNumber(row?.wardNumber) !== wardNumber) {
-          blockers.push(
-            `${batchLabel} row ${rowIndex + 1} has a conflicting ward number.`,
-          );
+          if (rowPlanningMode !== TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET) {
+            blockers.push(
+              `${batchLabel} row ${rowIndex + 1} does not carry NGP planning mode.`,
+            );
+          }
+
+          if (!townKey || !streetKey) {
+            blockers.push(
+              `${batchLabel} row ${rowIndex + 1} has incomplete NGP Town / street identity.`,
+            );
+          }
+        } else {
+          if (normalizeScopePcode(row?.wardPcode) !== wardPcode) {
+            blockers.push(
+              `${batchLabel} row ${rowIndex + 1} crosses the proposed ward boundary.`,
+            );
+          }
+
+          if (normalizeWardNumber(row?.wardNumber) !== wardNumber) {
+            blockers.push(
+              `${batchLabel} row ${rowIndex + 1} has a conflicting ward number.`,
+            );
+          }
         }
 
         if (normalizeUppercase(row?.proposedTbId) !== batch?.tbId) {

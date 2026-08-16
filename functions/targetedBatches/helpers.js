@@ -7,11 +7,20 @@ export const TARGETED_BATCH_COLLECTIONS = Object.freeze({
   sales: "sales-all-meters",
   erfs: "ireps_erfs",
   users: "users",
+  serviceProviders: "serviceProviders",
 });
 
 export const TARGETED_BATCH_SOURCE_TYPES = Object.freeze({
   prepaidSales: "PREPAID_SALES",
+  prepaidSalesNonGps: "PREPAID_SALES_NON_GPS",
 });
+
+export const TARGETED_BATCH_PLANNING_MODES = Object.freeze({
+  wardErf: "WARD_ERF",
+  nonGpsStreet: "NON_GPS_STREET",
+});
+
+export const TARGETED_BATCH_NGP_MAX_ROWS = 20;
 
 export const TARGETED_BATCH_CREATION_STATES = Object.freeze({
   creating: "CREATING",
@@ -67,6 +76,16 @@ export function normalizeWardNumber(value) {
   if (!text) return "";
   if (/^\d+$/.test(text)) return String(Number(text));
   return normalizeUpper(text);
+}
+
+export function normalizePlanningMode(value) {
+  return normalizeUpper(value) === TARGETED_BATCH_PLANNING_MODES.nonGpsStreet
+    ? TARGETED_BATCH_PLANNING_MODES.nonGpsStreet
+    : TARGETED_BATCH_PLANNING_MODES.wardErf;
+}
+
+export function normalizePlanningKey(value) {
+  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
 }
 
 export function deriveWardNumberFromPcode(wardPcode, lmPcode) {
@@ -151,32 +170,23 @@ function extractRole({ profile = {}, token = {} }) {
   );
 }
 
-function extractRelationshipType({ profile = {}, token = {} }) {
-  return normalizeUpper(
+function extractServiceProviderId(profile = {}) {
+  return normalizeText(
     readFirstText(
-      token?.serviceProviderRelationshipType,
-      token?.relationshipType,
-      token?.spRelationshipType,
-      token?.employmentServiceProviderRelationshipType,
-      profile?.profile?.employment?.serviceProvider?.relationshipType,
-      profile?.employment?.serviceProvider?.relationshipType,
-      profile?.employment?.serviceProvider?.clientRelationshipType,
-      profile?.serviceProvider?.relationshipType,
+      profile?.employment?.serviceProvider?.id,
+      profile?.profile?.employment?.serviceProvider?.id,
+      profile?.serviceProvider?.id,
     ),
   );
 }
 
-function extractClientType({ profile = {}, token = {} }) {
-  return normalizeUpper(
-    readFirstText(
-      token?.serviceProviderClientType,
-      token?.clientType,
-      token?.spClientType,
-      profile?.profile?.employment?.serviceProvider?.clientType,
-      profile?.employment?.serviceProvider?.clientType,
-      profile?.serviceProvider?.clientType,
-    ),
-  );
+export function isSubcontractorServiceProvider(serviceProvider = {}) {
+  return safeArray(serviceProvider?.clients).some((client) => {
+    const clientType = normalizeUpper(client?.clientType);
+    const relationshipType = normalizeUpper(client?.relationshipType);
+
+    return clientType === "SP" && relationshipType === "SUBC";
+  });
 }
 
 export async function findActorProfile(db, uid) {
@@ -204,22 +214,82 @@ export async function resolveTargetedBatchCreateAuthority({ db, request }) {
   const token = request?.auth?.token || {};
   const profile = await findActorProfile(db, uid);
   const role = extractRole({ profile, token });
-  const relationshipType = extractRelationshipType({ profile, token });
-  const clientType = extractClientType({ profile, token });
 
-  const isMnc =
-    relationshipType === "MNC" ||
-    clientType === "MNC" ||
-    profile?.profile?.employment?.serviceProvider?.isMnc === true ||
-    profile?.employment?.serviceProvider?.isMnc === true ||
-    profile?.serviceProvider?.isMnc === true;
+  if (role === "MNG") {
+    return {
+      ok: true,
+      role,
+      serviceProviderId: extractServiceProviderId(profile) || "UNKNOWN",
+      serviceProviderFound: null,
+      isSubcontractor: false,
+      relationshipType: "MAIN_SP",
+      clientType: "SP",
+      isMnc: true,
+      profile,
+    };
+  }
+
+  if (role !== "SPV") {
+    return {
+      ok: false,
+      role: role || "UNKNOWN",
+      serviceProviderId: extractServiceProviderId(profile) || "UNKNOWN",
+      serviceProviderFound: null,
+      isSubcontractor: false,
+      relationshipType: "UNKNOWN",
+      clientType: "UNKNOWN",
+      isMnc: false,
+      profile,
+    };
+  }
+
+  const serviceProviderId = extractServiceProviderId(profile);
+
+  if (!serviceProviderId) {
+    return {
+      ok: false,
+      role,
+      serviceProviderId: "UNKNOWN",
+      serviceProviderFound: false,
+      isSubcontractor: false,
+      relationshipType: "UNKNOWN",
+      clientType: "UNKNOWN",
+      isMnc: false,
+      profile,
+    };
+  }
+
+  const serviceProviderSnapshot = await db
+    .doc(`${TARGETED_BATCH_COLLECTIONS.serviceProviders}/${serviceProviderId}`)
+    .get();
+
+  if (!serviceProviderSnapshot.exists) {
+    return {
+      ok: false,
+      role,
+      serviceProviderId,
+      serviceProviderFound: false,
+      isSubcontractor: false,
+      relationshipType: "UNKNOWN",
+      clientType: "UNKNOWN",
+      isMnc: false,
+      profile,
+    };
+  }
+
+  const serviceProvider = serviceProviderSnapshot.data() || {};
+  const isSubcontractor = isSubcontractorServiceProvider(serviceProvider);
 
   return {
-    ok: role === "MNG" || (role === "SPV" && isMnc),
-    role: role || "UNKNOWN",
-    relationshipType: relationshipType || "UNKNOWN",
-    clientType: clientType || "UNKNOWN",
-    isMnc,
+    ok: !isSubcontractor,
+    role,
+    serviceProviderId,
+    serviceProviderFound: true,
+    isSubcontractor,
+    relationshipType: isSubcontractor ? "SUBC" : "MAIN_SP",
+    clientType: "SP",
+    isMnc: !isSubcontractor,
+    serviceProvider,
     profile,
   };
 }
@@ -297,7 +367,7 @@ export function validateCreateTargetedBatchPayload(data = {}) {
   const sourceType = normalizeUpper(
     draft?.source?.type || draft?.sourceType || data?.sourceType,
   );
-  const sourceLabel = readFirstText(
+  const requestedSourceLabel = readFirstText(
     draft?.source?.label,
     draft?.sourceLabel,
     "Prepaid Sales",
@@ -320,6 +390,19 @@ export function validateCreateTargetedBatchPayload(data = {}) {
     draft?.selectionReason,
     "NAv",
   );
+  const planningMode = normalizePlanningMode(
+    draft?.selection?.planningMode ||
+      draft?.planningMode ||
+      draft?.validation?.planningMode,
+  );
+  const isNgp =
+    planningMode === TARGETED_BATCH_PLANNING_MODES.nonGpsStreet;
+  const persistedSourceType = isNgp
+    ? TARGETED_BATCH_SOURCE_TYPES.prepaidSalesNonGps
+    : TARGETED_BATCH_SOURCE_TYPES.prepaidSales;
+  const persistedSourceLabel = isNgp
+    ? "Prepaid Sales Non-GPS"
+    : requestedSourceLabel;
   const salesPeriodFrom = normalizeMonth(
     draft?.selection?.salesPeriodFrom ?? draft?.salesPeriodFrom,
   );
@@ -335,9 +418,23 @@ export function validateCreateTargetedBatchPayload(data = {}) {
   );
   const errors = [];
 
-  if (sourceType !== TARGETED_BATCH_SOURCE_TYPES.prepaidSales) {
+  if (
+    ![
+      TARGETED_BATCH_SOURCE_TYPES.prepaidSales,
+      TARGETED_BATCH_SOURCE_TYPES.prepaidSalesNonGps,
+    ].includes(sourceType)
+  ) {
     errors.push(
-      "Only PREPAID_SALES Targeted Batch creation is currently supported.",
+      "Only PREPAID_SALES and PREPAID_SALES_NON_GPS Targeted Batch creation are currently supported.",
+    );
+  }
+
+  if (
+    sourceType === TARGETED_BATCH_SOURCE_TYPES.prepaidSalesNonGps &&
+    !isNgp
+  ) {
+    errors.push(
+      "PREPAID_SALES_NON_GPS requires NON_GPS_STREET planning mode.",
     );
   }
 
@@ -361,12 +458,23 @@ export function validateCreateTargetedBatchPayload(data = {}) {
   }
 
   if (proposedBatchInputs.length < 1) {
-    errors.push("The confirmed TB Draft has no proposed ward batches.");
+    errors.push(
+      isNgp
+        ? "The confirmed NGP TB Draft has no proposed Targeted Batch."
+        : "The confirmed TB Draft has no proposed ward batches.",
+    );
+  }
+
+  if (isNgp && proposedBatchInputs.length !== 1) {
+    errors.push(
+      "One NGP operation must contain exactly one proposed Targeted Batch.",
+    );
   }
 
   const seenBatchIds = new Set();
   const seenBatchKeys = new Set();
   const seenSalesIds = new Set();
+
   const normalizedBatches = proposedBatchInputs.map((batch, batchIndex) => {
     const batchLabel = `Proposed batch ${batchIndex + 1}`;
     const tbId = normalizeUpper(batch?.tbId || batch?.id);
@@ -380,22 +488,23 @@ export function validateCreateTargetedBatchPayload(data = {}) {
       lmName,
       "NAv",
     );
-    const wardPcode = normalizeWardPcode(
-      batch?.scope?.wardPcode || batch?.wardPcode,
-    );
-    const proposedWardNumber = normalizeWardNumber(
-      batch?.scope?.wardNumber || batch?.wardNumber,
-    );
-    const derivedWardNumber = deriveWardNumberFromPcode(
-      wardPcode,
-      batchLmPcode,
-    );
+    const wardPcode = isNgp
+      ? ""
+      : normalizeWardPcode(batch?.scope?.wardPcode || batch?.wardPcode);
+    const proposedWardNumber = isNgp
+      ? ""
+      : normalizeWardNumber(batch?.scope?.wardNumber || batch?.wardNumber);
+    const derivedWardNumber = isNgp
+      ? ""
+      : deriveWardNumberFromPcode(wardPcode, batchLmPcode);
     const wardNumber = proposedWardNumber || derivedWardNumber;
-    const wardName = readFirstText(
-      batch?.scope?.wardName,
-      batch?.wardName,
-      wardNumber ? `Ward ${wardNumber}` : "",
-    );
+    const wardName = isNgp
+      ? ""
+      : readFirstText(
+          batch?.scope?.wardName,
+          batch?.wardName,
+          wardNumber ? `Ward ${wardNumber}` : "",
+        );
     const rows = safeArray(batch?.rows);
     const salesAllMeterIds = safeArray(batch?.salesAllMeterIds).map(
       normalizeSalesId,
@@ -423,34 +532,38 @@ export function validateCreateTargetedBatchPayload(data = {}) {
       errors.push(`${batchLabel} does not match the root LM scope.`);
     }
 
-    if (
-      !WARD_PCODE_PATTERN.test(wardPcode) ||
-      !wardPcode.startsWith(batchLmPcode) ||
-      wardPcode === batchLmPcode
-    ) {
-      errors.push(`${batchLabel} has an invalid ward pcode.`);
-    }
+    if (!isNgp) {
+      if (
+        !WARD_PCODE_PATTERN.test(wardPcode) ||
+        !wardPcode.startsWith(batchLmPcode) ||
+        wardPcode === batchLmPcode
+      ) {
+        errors.push(`${batchLabel} has an invalid ward pcode.`);
+      }
 
-    if (!wardNumber) {
-      errors.push(`${batchLabel} has no ward number.`);
-    }
+      if (!wardNumber) {
+        errors.push(`${batchLabel} has no ward number.`);
+      }
 
-    if (
-      proposedWardNumber &&
-      derivedWardNumber &&
-      proposedWardNumber !== derivedWardNumber
-    ) {
-      errors.push(`${batchLabel} has conflicting ward scope values.`);
+      if (
+        proposedWardNumber &&
+        derivedWardNumber &&
+        proposedWardNumber !== derivedWardNumber
+      ) {
+        errors.push(`${batchLabel} has conflicting ward scope values.`);
+      }
     }
 
     if (rows.length < 1) {
       errors.push(`${batchLabel} must contain at least one row.`);
     }
 
-    if (rows.length > TARGETED_BATCH_MAX_ROWS) {
-      errors.push(
-        `${batchLabel} may contain at most ${TARGETED_BATCH_MAX_ROWS} rows.`,
-      );
+    const maxRows = isNgp
+      ? TARGETED_BATCH_NGP_MAX_ROWS
+      : TARGETED_BATCH_MAX_ROWS;
+
+    if (rows.length > maxRows) {
+      errors.push(`${batchLabel} may contain at most ${maxRows} rows.`);
     }
 
     if (salesAllMeterIds.length !== rows.length) {
@@ -460,10 +573,23 @@ export function validateCreateTargetedBatchPayload(data = {}) {
     const normalizedRows = rows.map((row, rowIndex) => {
       const expectedSalesId = salesAllMeterIds[rowIndex] || "";
       const rowSalesId = getRowSalesId(row);
-      const rowWardPcode = normalizeWardPcode(row?.wardPcode);
-      const rowWardNumber = normalizeWardNumber(row?.wardNumber);
+      const rowWardPcode = isNgp
+        ? ""
+        : normalizeWardPcode(row?.wardPcode);
+      const rowWardNumber = isNgp
+        ? ""
+        : normalizeWardNumber(row?.wardNumber);
       const rowProposedTbId = normalizeUpper(row?.proposedTbId);
       const rowLmPcode = normalizeLmPcode(row?.lmPcode || batchLmPcode);
+      const rowPlanning = {
+        mode: normalizePlanningMode(row?.planning?.mode || planningMode),
+        townKey: normalizePlanningKey(row?.planning?.townKey),
+        streetKey: normalizePlanningKey(row?.planning?.streetKey),
+        streetNameKey: normalizePlanningKey(row?.planning?.streetNameKey),
+        strNo: normalizeText(row?.planning?.strNo),
+        strName: normalizeText(row?.planning?.strName),
+        strType: normalizeText(row?.planning?.strType),
+      };
 
       if (!expectedSalesId) {
         errors.push(`${batchLabel} row ${rowIndex + 1} has no Sales ID.`);
@@ -486,16 +612,36 @@ export function validateCreateTargetedBatchPayload(data = {}) {
         errors.push(`${batchLabel} row ${rowIndex + 1} crosses the LM scope.`);
       }
 
-      if (rowWardPcode !== wardPcode) {
-        errors.push(
-          `${batchLabel} row ${rowIndex + 1} crosses the proposed ward boundary.`,
-        );
-      }
+      if (isNgp) {
+        if (rowPlanning.mode !== TARGETED_BATCH_PLANNING_MODES.nonGpsStreet) {
+          errors.push(
+            `${batchLabel} row ${rowIndex + 1} does not carry NGP planning mode.`,
+          );
+        }
 
-      if (rowWardNumber !== wardNumber) {
-        errors.push(
-          `${batchLabel} row ${rowIndex + 1} has a conflicting ward number.`,
-        );
+        if (
+          !rowPlanning.townKey ||
+          !rowPlanning.streetKey ||
+          !rowPlanning.streetNameKey ||
+          !rowPlanning.strNo ||
+          !rowPlanning.strName
+        ) {
+          errors.push(
+            `${batchLabel} row ${rowIndex + 1} has incomplete NGP Town / street planning identity.`,
+          );
+        }
+      } else {
+        if (rowWardPcode !== wardPcode) {
+          errors.push(
+            `${batchLabel} row ${rowIndex + 1} crosses the proposed ward boundary.`,
+          );
+        }
+
+        if (rowWardNumber !== wardNumber) {
+          errors.push(
+            `${batchLabel} row ${rowIndex + 1} has a conflicting ward number.`,
+          );
+        }
       }
 
       if (rowProposedTbId !== tbId) {
@@ -514,6 +660,7 @@ export function validateCreateTargetedBatchPayload(data = {}) {
         wardName,
         proposedTbId: tbId,
         draftBatchKey,
+        planning: isNgp ? rowPlanning : row?.planning,
       };
     });
 
@@ -522,8 +669,8 @@ export function validateCreateTargetedBatchPayload(data = {}) {
       draftBatchKey,
       sequence: Number(batch?.sequence || batchIndex + 1),
       source: {
-        type: sourceType,
-        label: sourceLabel,
+        type: persistedSourceType,
+        label: persistedSourceLabel,
         sourceId,
         fileName,
       },
@@ -538,6 +685,7 @@ export function validateCreateTargetedBatchPayload(data = {}) {
         reason: selectionReason,
         salesPeriodFrom,
         salesPeriodTo,
+        planningMode,
       },
       validation: {
         status: "PASSED",
@@ -587,8 +735,8 @@ export function validateCreateTargetedBatchPayload(data = {}) {
     ok: true,
     creationGroupId,
     source: {
-      type: sourceType,
-      label: sourceLabel,
+      type: persistedSourceType,
+      label: persistedSourceLabel,
       sourceId,
       fileName,
     },
@@ -600,6 +748,7 @@ export function validateCreateTargetedBatchPayload(data = {}) {
       reason: selectionReason,
       salesPeriodFrom,
       salesPeriodTo,
+      planningMode,
     },
     validation: {
       status: "PASSED",
@@ -789,10 +938,201 @@ export function resolveAuthoritativeSalesErfReference({
   };
 }
 
+function isMeaningfulNgpText(value) {
+  const normalized = normalizeUpper(value);
+  return !["", "NAV", "N/A", "NA", "NULL"].includes(normalized);
+}
+
+function getAuthoritativeSalesAddress(source = {}) {
+  const adr =
+    source?.adr && typeof source.adr === "object" && !Array.isArray(source.adr)
+      ? source.adr
+      : {};
+
+  return {
+    strNo: normalizeText(adr?.strNo),
+    strName: normalizeText(adr?.strName),
+    strType: normalizeText(adr?.strType),
+  };
+}
+
+function hasUsableAuthoritativeSalesGps(source = {}) {
+  if (source?.HasUsableGps === true || source?.hasUsableGps === true) {
+    return true;
+  }
+
+  const candidates = [
+    ...safeArray(source?.ErfCandidates),
+    ...safeArray(source?.erfCandidates),
+  ];
+
+  return candidates.some((candidate) => {
+    const rawLatitude = candidate?.Latitude ?? candidate?.latitude;
+    const rawLongitude = candidate?.Longitude ?? candidate?.longitude;
+
+    if (
+      rawLatitude === null ||
+      rawLatitude === undefined ||
+      rawLongitude === null ||
+      rawLongitude === undefined ||
+      String(rawLatitude).trim() === "" ||
+      String(rawLongitude).trim() === ""
+    ) {
+      return false;
+    }
+
+    const latitude = Number(rawLatitude);
+    const longitude = Number(rawLongitude);
+
+    return (
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180
+    );
+  });
+}
+
+function validateNgpTbRefs({ source, expectedSalesId, expectedTbId }) {
+  const rawTbRefs =
+    source?.tbRefs !== undefined ? source.tbRefs : source?.TbRefs;
+
+  if (rawTbRefs === undefined || rawTbRefs === null) {
+    return { ok: true, tbRefs: [] };
+  }
+
+  if (!Array.isArray(rawTbRefs)) {
+    return {
+      ok: false,
+      code: "INVALID_SALES_TB_REFS",
+      message: `Sales source ${expectedSalesId} has an invalid tbRefs field.`,
+    };
+  }
+
+  const seenIds = new Set();
+  const normalizedExpectedTbId = normalizeUpper(expectedTbId);
+  const normalizedRefs = [];
+
+  for (const reference of rawTbRefs) {
+    const id = normalizeUpper(reference?.id || reference?.tbId);
+
+    if (!id || seenIds.has(id)) {
+      return {
+        ok: false,
+        code: "INVALID_SALES_TB_REFS",
+        message: `Sales source ${expectedSalesId} has malformed or duplicate Targeted Batch references.`,
+      };
+    }
+
+    seenIds.add(id);
+    normalizedRefs.push({ ...reference, id });
+  }
+
+  const conflictingRefs = normalizedRefs.filter(
+    (reference) => reference.id !== normalizedExpectedTbId,
+  );
+
+  if (conflictingRefs.length > 0) {
+    return {
+      ok: false,
+      code: "NGP_SALES_ALREADY_BATCHED",
+      message: `Sales source ${expectedSalesId} is already represented by another Targeted Batch.`,
+    };
+  }
+
+  return {
+    ok: true,
+    tbRefs: normalizedRefs,
+  };
+}
+
+function validateNgpAuthoritativeSalesPlanning({
+  source,
+  expectedSalesId,
+  expectedTbId,
+  draftRow,
+}) {
+  if (hasUsableAuthoritativeSalesGps(source)) {
+    return {
+      ok: false,
+      code: "NGP_SALES_NOW_HAS_GPS",
+      message: `Sales source ${expectedSalesId} now has usable GPS and is no longer eligible for NGP batching.`,
+    };
+  }
+
+  const tbRefValidation = validateNgpTbRefs({
+    source,
+    expectedSalesId,
+    expectedTbId,
+  });
+
+  if (!tbRefValidation.ok) return tbRefValidation;
+
+  const town = readFirstText(
+    source?.town,
+    source?.Town,
+    source?.PostalAddressTown,
+  );
+  const address = getAuthoritativeSalesAddress(source);
+
+  if (
+    !isMeaningfulNgpText(town) ||
+    !isMeaningfulNgpText(address.strNo) ||
+    !isMeaningfulNgpText(address.strName)
+  ) {
+    return {
+      ok: false,
+      code: "NGP_AUTHORITATIVE_ADDRESS_INCOMPLETE",
+      message: `Sales source ${expectedSalesId} no longer has complete authoritative Town / street planning data.`,
+    };
+  }
+
+  const authoritativeTownKey = normalizePlanningKey(town);
+  const authoritativeStreetNameKey = normalizePlanningKey(address.strName);
+  const authoritativeStreetKey = `${authoritativeTownKey}::${authoritativeStreetNameKey}`;
+  const draftTownKey = normalizePlanningKey(draftRow?.planning?.townKey);
+  const draftStreetNameKey = normalizePlanningKey(
+    draftRow?.planning?.streetNameKey,
+  );
+  const draftStreetKey = normalizePlanningKey(draftRow?.planning?.streetKey);
+  const draftStrNo = normalizeText(draftRow?.planning?.strNo);
+  const draftStrName = normalizeText(draftRow?.planning?.strName);
+  const draftStrType = normalizeText(draftRow?.planning?.strType);
+
+  if (
+    draftTownKey !== authoritativeTownKey ||
+    draftStreetNameKey !== authoritativeStreetNameKey ||
+    draftStreetKey !== authoritativeStreetKey ||
+    normalizePlanningKey(draftStrName) !== authoritativeStreetNameKey ||
+    normalizePlanningKey(draftStrNo) !== normalizePlanningKey(address.strNo) ||
+    normalizePlanningKey(draftStrType) !== normalizePlanningKey(address.strType)
+  ) {
+    return {
+      ok: false,
+      code: "NGP_AUTHORITATIVE_PLANNING_CHANGED",
+      message: `Sales source ${expectedSalesId} Town / street data changed after selection. Refresh NGP planning before creating the batch.`,
+    };
+  }
+
+  return {
+    ok: true,
+    town,
+    townKey: authoritativeTownKey,
+    streetNameKey: authoritativeStreetNameKey,
+    streetKey: authoritativeStreetKey,
+    address,
+    tbRefs: tbRefValidation.tbRefs,
+  };
+}
+
 export function validateAuthoritativeSalesDocument({
   snapshot,
   expectedSalesId,
   expectedLmPcode,
+  expectedTbId = "",
+  planningMode = TARGETED_BATCH_PLANNING_MODES.wardErf,
   draftRow,
 }) {
   if (!snapshot?.exists) {
@@ -811,6 +1151,7 @@ export function validateAuthoritativeSalesDocument({
   );
   const sourceLmPcode = getDemoSalesLmPcode(source);
   const meterType = getDemoSalesMeterType(source);
+  const normalizedPlanningMode = normalizePlanningMode(planningMode);
 
   if (documentId !== expectedSalesId) {
     return {
@@ -857,6 +1198,27 @@ export function validateAuthoritativeSalesDocument({
       ok: false,
       code: "UNSUPPORTED_SALES_METER_TYPE",
       message: `Sales source ${expectedSalesId} has unsupported meter type ${meterType || "NAv"}.`,
+    };
+  }
+
+  if (normalizedPlanningMode === TARGETED_BATCH_PLANNING_MODES.nonGpsStreet) {
+    const ngpPlanning = validateNgpAuthoritativeSalesPlanning({
+      source,
+      expectedSalesId,
+      expectedTbId,
+      draftRow,
+    });
+
+    if (!ngpPlanning.ok) return ngpPlanning;
+
+    return {
+      ok: true,
+      source,
+      sourceLmPcode,
+      sourceMeterNo,
+      meterType,
+      erfReference: null,
+      ngpPlanning,
     };
   }
 

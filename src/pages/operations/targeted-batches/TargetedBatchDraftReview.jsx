@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   getTargetedBatchDraftIntegrity,
   getTargetedBatchDraftView,
+  TARGETED_BATCH_PLANNING_MODES,
   TARGETED_BATCH_SOURCE_TYPES,
 } from "../../../redux/targetedBatchDraftModel";
 import { formatDateTime } from "./targetedBatchUtils";
@@ -93,6 +94,10 @@ export default function TargetedBatchDraftReview({
     currentDraft?.source?.type === TARGETED_BATCH_SOURCE_TYPES.CSV_UPLOAD;
   const salesSource =
     currentDraft?.source?.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES;
+  const ngpSalesSource =
+    salesSource &&
+    currentDraft?.selection?.planningMode ===
+      TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET;
   const proposedBatchCount = Array.isArray(currentDraft?.proposedBatches)
     ? currentDraft.proposedBatches.length
     : 0;
@@ -270,16 +275,24 @@ export default function TargetedBatchDraftReview({
         <div>
           <strong>
             {isCreating
-              ? "Creating and verifying the permanent Targeted Batches"
+              ? ngpSalesSource
+                ? "Creating and verifying the permanent Targeted Batch"
+                : "Creating and verifying the permanent Targeted Batches"
               : integrity.canConfirm
-                ? "Review complete: the ward-compliant TB Draft is ready for permanent creation"
+                ? ngpSalesSource
+                  ? "Review complete: the NGP TB Draft is ready for permanent creation"
+                  : "Review complete: the ward-compliant TB Draft is ready for permanent creation"
                 : "Resolve the draft blockers before confirmation"}
           </strong>
           <p style={styles.confirmText}>
             {salesSource
-              ? `Confirmation submits ${proposedBatchCount} ward-compliant proposed batch${
-                  proposedBatchCount === 1 ? "" : "es"
-                }. The backend re-reads Sales and ERF data, confirms the exact ward grouping, and creates one permanent tb_uploads parent per ward with its corresponding tb_rows and Sales tbRefs.`
+              ? ngpSalesSource
+                ? `Confirmation submits one NGP Targeted Batch containing ${rows.length} selected meter${
+                    rows.length === 1 ? "" : "s"
+                  }. The backend re-reads the authoritative Sales records, verifies that every target is still eligible for NGP batching, and creates the permanent tb_uploads parent, tb_rows and Sales tbRefs.`
+                : `Confirmation submits ${proposedBatchCount} ward-compliant proposed batch${
+                    proposedBatchCount === 1 ? "" : "es"
+                  }. The backend re-reads Sales and ERF data, confirms the exact ward grouping, and creates one permanent tb_uploads parent per ward with its corresponding tb_rows and Sales tbRefs.`
               : "Confirmation creates the permanent Targeted Batch documents allowed by the accepted CSV workflow."}
             {" "}The temporary TB Draft is cleared only after the backend verifies every created Targeted Batch as READY.
           </p>

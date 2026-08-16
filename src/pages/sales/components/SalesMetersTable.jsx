@@ -6,6 +6,7 @@ import SalesTbRefsModal from "./SalesTbRefsModal";
 import SalesGpsMapSection from "./SalesGpsMapSection";
 import SalesRangeFilterModal from "./SalesRangeFilterModal";
 import MultiSelectFilter from "./MultiSelectFilter";
+import { hasUsableSalesGps } from "../models/salesGpsModel";
 import {
   TARGET_FILTERS,
   compareNatural,
@@ -710,7 +711,10 @@ export default function SalesMetersTable({
   );
 
   const selectedIdSet = selectedIds || new Set();
-  const pageIds = paginatedRows.map((row) => row.id).filter(Boolean);
+  const pageIds = paginatedRows
+    .filter((row) => hasUsableSalesGps(row))
+    .map((row) => row.id)
+    .filter(Boolean);
 
   const hasActiveColumnFilters =
     Boolean(String(filters.meterNo || "").trim()) ||
@@ -732,7 +736,10 @@ export default function SalesMetersTable({
     targetFilter !== TARGET_FILTERS.ALL || hasActiveColumnFilters;
 
   const headerSelectionIds = hasActiveFilter
-    ? sortedRows.map((row) => row.id).filter(Boolean)
+    ? sortedRows
+        .filter((row) => hasUsableSalesGps(row))
+        .map((row) => row.id)
+        .filter(Boolean)
     : pageIds;
 
   const selectedHeaderScopeCount = headerSelectionIds.reduce(
@@ -886,7 +893,12 @@ export default function SalesMetersTable({
     setCurrentPage(1);
   }
 
-  function toggleRow(rowId) {
+  function toggleRow(row) {
+    if (!hasUsableSalesGps(row)) return;
+
+    const rowId = row?.id;
+    if (!rowId) return;
+
     const nextSelected = new Set(selectedIdSet);
 
     if (nextSelected.has(rowId)) nextSelected.delete(rowId);
@@ -1449,9 +1461,17 @@ export default function SalesMetersTable({
                   <td style={{ ...styles.bodyCell, ...getStickyStyle("select", stickyLayout) }}>
                     <input
                       type="checkbox"
-                      checked={selectedIdSet.has(row.id)}
-                      onChange={() => toggleRow(row.id)}
+                      checked={
+                        hasUsableSalesGps(row) && selectedIdSet.has(row.id)
+                      }
+                      disabled={!hasUsableSalesGps(row)}
+                      onChange={() => toggleRow(row)}
                       aria-label={`Select meter ${row.meterNo}`}
+                      title={
+                        hasUsableSalesGps(row)
+                          ? `Select meter ${row.meterNo}`
+                          : "No GPS — use Non GPS Batch Planning"
+                      }
                     />
                   </td>
 
@@ -1464,6 +1484,11 @@ export default function SalesMetersTable({
                     >
                       {row.meterNo || "NAv"}
                     </button>
+                    {!hasUsableSalesGps(row) ? (
+                      <span style={styles.noGpsHelper}>
+                        No GPS — use Non GPS Batch Planning
+                      </span>
+                    ) : null}
                   </td>
 
                   {columnVisibility.wardNo ? (
@@ -1945,6 +1970,15 @@ const styles = {
     textDecoration: "underline",
     textUnderlineOffset: "2px",
     cursor: "pointer",
+  },
+  noGpsHelper: {
+    display: "block",
+    marginTop: "0.22rem",
+    color: "#b45309",
+    fontSize: "0.68rem",
+    fontWeight: 800,
+    lineHeight: 1.2,
+    whiteSpace: "normal",
   },
   categoryCell: {
     overflow: "hidden",

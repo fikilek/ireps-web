@@ -35,6 +35,7 @@ import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboa
 import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPage";
 import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
+import TargetedBatchAllocationMatrixPage from "../pages/operations/TargetedBatchAllocationMatrixPage";
 import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
@@ -54,6 +55,7 @@ import FwrMonitoringPage from "../pages/admin/FwrMonitoringPage";
 import UsersPage from "../pages/users/UsersPage";
 
 import PrepaidSales from "../pages/sales/PrepaidSales";
+import NonGpsBatchPlanningPage from "../pages/sales/NonGpsBatchPlanningPage";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
 import SalesBatchReportPage from "../pages/sales/SalesBatchReportPage";
 import SalesBatchMapPage from "../pages/sales/SalesBatchMapPage";
@@ -109,10 +111,28 @@ export default function AppRoutes() {
           />
 
           <Route
+            path="/sales/non-gps-batch-planning"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <NonGpsBatchPlanningPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
             path="/sales/reporting"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <SalesReportingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/allocation-matrix"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchAllocationMatrixPage />
               </RoleRoute>
             }
           />

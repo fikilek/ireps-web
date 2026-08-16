@@ -9,6 +9,11 @@ import { useGetDemoSalesByLmPcodeQuery } from "../../redux/demoSalesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import SalesMetersTable from "./components/SalesMetersTable";
+import {
+  SALES_GPS_FILTERS as GPS_FILTERS,
+  hasUsableSalesGps,
+  matchesSalesGpsFilter,
+} from "./models/salesGpsModel";
 import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
   buildMonthKeys,
@@ -17,28 +22,6 @@ import {
   getActiveWorkbaseName,
   getMonthLabel,
 } from "./salesUtils";
-
-const GPS_FILTERS = {
-  ALL: "ALL",
-  WITH_GPS: "WITH_GPS",
-  WITHOUT_GPS: "WITHOUT_GPS",
-};
-
-function hasUsableSalesGps(row = {}) {
-  return row?.hasUsableGps === true;
-}
-
-function matchesGpsFilter(row, gpsFilter) {
-  if (gpsFilter === GPS_FILTERS.WITH_GPS) {
-    return hasUsableSalesGps(row);
-  }
-
-  if (gpsFilter === GPS_FILTERS.WITHOUT_GPS) {
-    return !hasUsableSalesGps(row);
-  }
-
-  return true;
-}
 
 function SalesLoadingState() {
   return (
@@ -232,7 +215,7 @@ export default function PrepaidSales() {
   }, [salesRows]);
 
   const gpsFilteredRows = useMemo(
-    () => salesRows.filter((row) => matchesGpsFilter(row, gpsFilter)),
+    () => salesRows.filter((row) => matchesSalesGpsFilter(row, gpsFilter)),
     [gpsFilter, salesRows],
   );
 
@@ -419,6 +402,13 @@ export default function PrepaidSales() {
         </div>
 
         <div style={styles.heroActions}>
+          <button
+            type="button"
+            style={styles.ngpButton}
+            onClick={() => navigate("/sales/non-gps-batch-planning")}
+          >
+            Non GPS Batch Planning
+          </button>
           <div style={styles.roleBadge}>{role || "NAv"}</div>
           <button
             type="button"
@@ -599,6 +589,15 @@ const styles = {
     alignItems: "center",
     gap: "0.55rem",
     flexWrap: "wrap",
+  },
+  ngpButton: {
+    border: "1px solid rgba(255, 255, 255, 0.32)",
+    borderRadius: "0.7rem",
+    padding: "0.55rem 0.75rem",
+    background: "rgba(255, 255, 255, 0.1)",
+    color: "#ffffff",
+    fontWeight: 850,
+    cursor: "pointer",
   },
   roleBadge: {
     borderRadius: "999px",

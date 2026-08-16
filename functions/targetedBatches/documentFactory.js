@@ -85,6 +85,7 @@ export function buildTargetedBatchParentDoc({
       reason: payload.selection.reason,
       salesPeriodFrom: payload.selection.salesPeriodFrom,
       salesPeriodTo: payload.selection.salesPeriodTo,
+      planningMode: payload.selection.planningMode || "WARD_ERF",
     },
     validation: {
       status: "PASSED",
@@ -261,6 +262,9 @@ export function buildTargetedBatchRowDoc({
     },
     selection: {
       actionReason: payload.selection.reason,
+      planningMode: payload.selection.planningMode || "WARD_ERF",
+      townKey: getFirstNullableText(draftRow?.planning?.townKey),
+      streetKey: getFirstNullableText(draftRow?.planning?.streetKey),
     },
     salesSnapshot: {
       totalSalesC: asNonNegativeInteger(

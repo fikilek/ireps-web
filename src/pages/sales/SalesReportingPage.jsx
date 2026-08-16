@@ -164,7 +164,7 @@ export default function SalesReportingPage() {
       Array.isArray(targetedBatchStream?.items)
         ? targetedBatchStream.items
         : [],
-    [targetedBatchStream?.items],
+    [targetedBatchStream],
   );
 
   const streamStatus = cleanText(targetedBatchStream?.sync?.status);
@@ -321,9 +321,14 @@ export default function SalesReportingPage() {
           </p>
         </div>
 
-        <div style={styles.liveBadge}>
-          <span style={styles.liveDot} />
-          Live Targeted Batches
+        <div style={styles.headerActions}>
+          <Link to="/sales/allocation-matrix" style={styles.matrixButton}>
+            Allocation Matrix
+          </Link>
+          <div style={styles.liveBadge}>
+            <span style={styles.liveDot} />
+            Live Targeted Batches
+          </div>
         </div>
       </header>
 
@@ -618,6 +623,27 @@ const styles = {
     fontSize: 14,
     fontWeight: 600,
     lineHeight: 1.6,
+  },
+
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+
+  matrixButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: 38,
+    borderRadius: 10,
+    border: "1px solid #2563eb",
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "0 13px",
+    textDecoration: "none",
+    fontSize: 12,
+    fontWeight: 900,
   },
 
   liveBadge: {
