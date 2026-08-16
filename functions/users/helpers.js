@@ -172,9 +172,6 @@ export function buildRoleUpdateFields({
     "metadata.updatedAt": safeNow,
     "metadata.updatedByUid": safeActorUid,
     "metadata.updatedByUser": safeActorName,
-    "metadata.roleUpdatedAt": safeNow,
-    "metadata.roleUpdatedByUid": safeActorUid,
-    "metadata.roleUpdatedByUser": safeActorName,
   };
 
   if (Object.prototype.hasOwnProperty.call(targetUserDoc, "role")) {
