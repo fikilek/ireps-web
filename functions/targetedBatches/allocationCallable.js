@@ -5,6 +5,7 @@ import { Timestamp, getFirestore } from "firebase-admin/firestore";
 import {
   TARGETED_BATCH_COLLECTIONS,
   TARGETED_BATCH_CREATION_STATES,
+  TARGETED_BATCH_PLANNING_MODES,
   buildFailureResult,
   buildSuccessResult,
   chunkArray,
@@ -193,6 +194,89 @@ async function resolveAllocationTarget({
   };
 }
 
+async function resolveAllocationTargetInTransaction({
+  db,
+  transaction,
+  targetType,
+  targetId,
+  actorMncId,
+  fallbackMemberCount = 0,
+}) {
+  if (targetType === "TEAM") {
+    const targetRef = db.collection("teams").doc(targetId);
+    const snapshot = await transaction.get(targetRef);
+
+    if (!snapshot.exists) {
+      throw controlledError(
+        "ALLOCATION_TEAM_NOT_FOUND",
+        `TEAM ${targetId} was not found.`,
+      );
+    }
+
+    const data = snapshot.data() || {};
+    const status = getTeamStatus(data);
+    const ownerMncId = normalizeText(data?.ownership?.mncServiceProviderId);
+
+    if (status !== "ACTIVE") {
+      throw controlledError(
+        "ALLOCATION_TEAM_NOT_ACTIVE",
+        `TEAM ${targetId} is not ACTIVE.`,
+      );
+    }
+
+    if (!ownerMncId || ownerMncId !== actorMncId) {
+      throw controlledError(
+        "ALLOCATION_TEAM_OUTSIDE_MNC",
+        "The selected TEAM does not belong to the authorised MNC.",
+        { targetId, actorMncId, ownerMncId: ownerMncId || null },
+      );
+    }
+
+    return {
+      type: "TEAM",
+      id: snapshot.id,
+      name: getTeamName(data, snapshot.id),
+      memberCount: safeArray(data?.scope?.memberUserIds).length,
+    };
+  }
+
+  const targetRef = db.collection("serviceProviders").doc(targetId);
+  const snapshot = await transaction.get(targetRef);
+
+  if (!snapshot.exists) {
+    throw controlledError(
+      "ALLOCATION_SERVICE_PROVIDER_NOT_FOUND",
+      `Service Provider ${targetId} was not found.`,
+    );
+  }
+
+  const data = snapshot.data() || {};
+  const status = getServiceProviderStatus(data);
+  const mncClient = findSubcontractorMncClient(data, actorMncId);
+
+  if (status !== "ACTIVE") {
+    throw controlledError(
+      "ALLOCATION_SERVICE_PROVIDER_NOT_ACTIVE",
+      `Service Provider ${targetId} is not ACTIVE.`,
+    );
+  }
+
+  if (!mncClient) {
+    throw controlledError(
+      "ALLOCATION_SERVICE_PROVIDER_OUTSIDE_MNC",
+      "The selected Service Provider is not a subcontractor of the authorised MNC.",
+      { targetId, actorMncId },
+    );
+  }
+
+  return {
+    type: "SP",
+    id: snapshot.id,
+    name: getServiceProviderName(data, snapshot.id),
+    memberCount: Math.max(0, Number(fallbackMemberCount || 0)),
+  };
+}
+
 function assertParentReadyForAllocation({ parent = {}, tbId }) {
   const creationState = normalizeUpper(parent?.creation?.state);
   const executionStatus = normalizeUpper(parent?.execution?.status);
@@ -305,6 +389,312 @@ function getRowsAlreadyAllocatedToTarget(rowSnapshots, target) {
       )
     );
   });
+}
+
+export function isNonGpsTargetedBatch(parent = {}) {
+  const sourceType = normalizeUpper(parent?.source?.type);
+  const planningMode = normalizeUpper(parent?.selection?.planningMode);
+
+  return (
+    sourceType === "PREPAID_SALES_NON_GPS" ||
+    (sourceType === "PREPAID_SALES" &&
+      planningMode === TARGETED_BATCH_PLANNING_MODES.nonGpsStreet)
+  );
+}
+
+function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
+  const candidates = [
+    {
+      field: "counts.totalRows",
+      raw: parent?.counts?.totalRows,
+    },
+    {
+      field: "creation.expectedRows",
+      raw: parent?.creation?.expectedRows,
+    },
+  ].filter(({ raw }) => raw !== null && raw !== undefined && raw !== "");
+
+  if (candidates.length === 0) {
+    throw controlledError(
+      "NGP_ALLOCATION_EXPECTED_ROW_COUNT_INVALID",
+      `${tbId} does not have a positive authoritative parent row count.`,
+      { reason: "MISSING" },
+    );
+  }
+
+  const parsed = candidates.map(({ field, raw }) => ({
+    field,
+    raw,
+    value: Number(raw),
+  }));
+  const invalid = parsed.find(
+    ({ value }) => !Number.isInteger(value) || value < 1 || value > 20,
+  );
+
+  if (invalid) {
+    throw controlledError(
+      "NGP_ALLOCATION_EXPECTED_ROW_COUNT_INVALID",
+      `${tbId} has an invalid authoritative parent row count.`,
+      { field: invalid.field, value: invalid.raw ?? null },
+    );
+  }
+
+  const expectedRows = parsed[0].value;
+  const conflicting = parsed.find(({ value }) => value !== expectedRows);
+  if (conflicting) {
+    throw controlledError(
+      "NGP_ALLOCATION_EXPECTED_ROW_COUNT_CONFLICT",
+      `${tbId} has conflicting authoritative parent row counts.`,
+      {
+        countsTotalRows: parent?.counts?.totalRows ?? null,
+        creationExpectedRows: parent?.creation?.expectedRows ?? null,
+      },
+    );
+  }
+
+  return expectedRows;
+}
+
+export async function allocateNonGpsBatchAtomically({
+  db,
+  parentRef,
+  tbId,
+  targetType,
+  targetId,
+  actorMncId,
+  fallbackMemberCount = 0,
+  actorUid,
+  actorName,
+  startedAtMs,
+}) {
+  const result = await db.runTransaction(async (transaction) => {
+    const liveParentSnapshot = await transaction.get(parentRef);
+
+    if (!liveParentSnapshot.exists) {
+      throw controlledError(
+        "TARGETED_BATCH_NOT_FOUND",
+        `Targeted Batch ${tbId} was not found.`,
+      );
+    }
+
+    const rowsQuery = db
+      .collection(TARGETED_BATCH_COLLECTIONS.rows)
+      .where("tbId", "==", tbId);
+    const liveRowsQuerySnapshot = await transaction.get(rowsQuery);
+    const liveRowSnapshots = liveRowsQuerySnapshot.docs;
+    const liveTarget = await resolveAllocationTargetInTransaction({
+      db,
+      transaction,
+      targetType,
+      targetId,
+      actorMncId,
+      fallbackMemberCount,
+    });
+
+    const liveParent = liveParentSnapshot.data() || {};
+    assertParentReadyForAllocation({ parent: liveParent, tbId });
+
+    if (!isNonGpsTargetedBatch(liveParent)) {
+      throw controlledError(
+        "NGP_ALLOCATION_SOURCE_CHANGED",
+        `${tbId} is no longer recognised as a Non-GPS Targeted Batch.`,
+      );
+    }
+
+    if (liveRowSnapshots.length < 1 || liveRowSnapshots.length > 20) {
+      throw controlledError(
+        "NGP_ALLOCATION_ROW_COUNT_INVALID",
+        `${tbId} must contain between 1 and 20 rows for atomic Non-GPS allocation.`,
+        { rowCount: liveRowSnapshots.length },
+      );
+    }
+
+    const expectedRows = getAuthoritativeNonGpsExpectedRows(
+      liveParent,
+      tbId,
+    );
+
+    if (liveRowSnapshots.length !== expectedRows) {
+      throw controlledError(
+        "TARGETED_BATCH_ROW_COUNT_MISMATCH",
+        `${tbId} expected ${expectedRows} rows but ${liveRowSnapshots.length} were found.`,
+        { expectedRows, actualRows: liveRowSnapshots.length },
+      );
+    }
+
+    const foreignRows = liveRowSnapshots
+      .filter(
+        (snapshot) =>
+          normalizeUpper(snapshot.data()?.tbId) !== normalizeUpper(tbId),
+      )
+      .map((snapshot) => snapshot.id);
+
+    if (foreignRows.length > 0) {
+      throw controlledError(
+        "TARGETED_BATCH_ROW_PARENT_MISMATCH",
+        `${tbId} contains TB Rows linked to another parent.`,
+        { rowIds: foreignRows },
+      );
+    }
+
+    assertRowsSafeForAllocation({
+      rowSnapshots: liveRowSnapshots,
+      target: liveTarget,
+      tbId,
+    });
+
+    const liveStatus = normalizeUpper(liveParent?.allocation?.status);
+    const liveParentTarget = getExistingParentTarget(liveParent);
+    const alreadyAllocatedRows = getRowsAlreadyAllocatedToTarget(
+      liveRowSnapshots,
+      liveTarget,
+    ).length;
+
+    if (liveStatus === "ALLOCATED") {
+      if (!targetMatches(liveParentTarget, liveTarget)) {
+        throw controlledError(
+          "TARGETED_BATCH_ALREADY_ALLOCATED",
+          `${tbId} is already allocated to another TEAM/SP.`,
+          { existingTarget: liveParentTarget },
+        );
+      }
+
+      if (alreadyAllocatedRows !== liveRowSnapshots.length) {
+        throw controlledError(
+          "TARGETED_BATCH_ALLOCATION_INCOMPLETE",
+          `${tbId} is marked ALLOCATED but not every TB Row has the same target.`,
+          {
+            expectedRows: liveRowSnapshots.length,
+            allocatedRows: alreadyAllocatedRows,
+          },
+        );
+      }
+
+      return {
+        alreadyAllocated: true,
+        completedAt: liveParent?.allocation?.completedAt || Timestamp.now(),
+        totalRows: liveRowSnapshots.length,
+        updatedRows: 0,
+        target: liveTarget,
+      };
+    }
+
+    if (liveParentTarget && !targetMatches(liveParentTarget, liveTarget)) {
+      throw controlledError(
+        "TARGETED_BATCH_ALLOCATION_TARGET_CONFLICT",
+        `${tbId} already has a different allocation target.`,
+        { existingTarget: liveParentTarget },
+      );
+    }
+
+    const completedAt = Timestamp.now();
+    let updatedRows = 0;
+
+    liveRowSnapshots.forEach((rowSnapshot) => {
+      const row = rowSnapshot.data() || {};
+      const existingTarget = {
+        type: row?.allocation?.targetType,
+        id: row?.allocation?.targetId,
+      };
+      const alreadyAllocated =
+        normalizeUpper(row?.allocation?.status) === "ALLOCATED" &&
+        targetMatches(existingTarget, liveTarget);
+
+      if (alreadyAllocated) return;
+
+      transaction.update(rowSnapshot.ref, {
+        "allocation.status": "ALLOCATED",
+        "allocation.targetType": liveTarget.type,
+        "allocation.targetId": liveTarget.id,
+        "allocation.targetName": liveTarget.name,
+        "allocation.allocatedAt": completedAt,
+        "allocation.allocatedByUid": actorUid,
+        "allocation.allocatedByUser": actorName,
+        "metadata.updatedAt": completedAt,
+        "metadata.updatedByUid": actorUid,
+        "metadata.updatedByUser": actorName,
+      });
+      updatedRows += 1;
+    });
+
+    transaction.update(parentRef, {
+      status: "ALLOCATED",
+      "allocation.status": "ALLOCATED",
+      "allocation.targetType": liveTarget.type,
+      "allocation.targetId": liveTarget.id,
+      "allocation.targetName": liveTarget.name,
+      "allocation.memberCount": liveTarget.memberCount,
+      "allocation.startedAt": liveParent?.allocation?.startedAt || completedAt,
+      "allocation.completedAt": completedAt,
+      "allocation.failureCode": null,
+      "allocation.failureMessage": null,
+      "allocation.failedAt": null,
+      "allocation.allocatedByUid": actorUid,
+      "allocation.allocatedByUser": actorName,
+      "acceptance.status": "WAITING",
+      "acceptance.acceptedAt": null,
+      "acceptance.acceptedByUid": null,
+      "acceptance.acceptedByUser": null,
+      "acceptance.rejectedAt": null,
+      "acceptance.rejectedByUid": null,
+      "acceptance.rejectedByUser": null,
+      "acceptance.rejectReason": "",
+      "counts.allocatedRows": liveRowSnapshots.length,
+      "counts.unallocatedRows": 0,
+      "metadata.updatedAt": completedAt,
+      "metadata.updatedByUid": actorUid,
+      "metadata.updatedByUser": actorName,
+    });
+
+    return {
+      alreadyAllocated: false,
+      completedAt,
+      totalRows: liveRowSnapshots.length,
+      updatedRows,
+      target: liveTarget,
+    };
+  });
+
+  const completedAtIso =
+    typeof result.completedAt?.toDate === "function"
+      ? result.completedAt.toDate().toISOString()
+      : new Date().toISOString();
+
+  logger.info("onAllocateTargetedBatchCallable -- NGP ATOMIC COMPLETED", {
+    tbId,
+    targetType: result.target.type,
+    targetId: result.target.id,
+    targetName: result.target.name,
+    totalRows: result.totalRows,
+    updatedRows: result.updatedRows,
+    alreadyAllocated: result.alreadyAllocated,
+    durationMs: Date.now() - startedAtMs,
+  });
+
+  return buildSuccessResult(
+    result.alreadyAllocated
+      ? `${tbId} is already allocated to ${result.target.name}.`
+      : `${tbId} was allocated to ${result.target.name}.`,
+    {
+      code: result.alreadyAllocated
+        ? "TARGETED_BATCH_ALREADY_ALLOCATED_TO_TARGET"
+        : "TARGETED_BATCH_ALLOCATED",
+      tbId,
+      batchStatus: "ALLOCATED",
+      allocationStatus: "ALLOCATED",
+      acceptanceStatus: "WAITING",
+      target: result.target,
+      totalRows: result.totalRows,
+      allocatedRows: result.totalRows,
+      unallocatedRows: 0,
+      updatedRows: result.updatedRows,
+      verifiedRows: result.totalRows,
+      completedAt: completedAtIso,
+      alreadyAllocated: result.alreadyAllocated,
+      atomic: true,
+      durationMs: Date.now() - startedAtMs,
+    },
+  );
 }
 
 async function markAllocationFailure({
@@ -445,6 +835,21 @@ export const onAllocateTargetedBatchCallable = onCall(
       const parent = parentSnapshot.data() || {};
       assertParentReadyForAllocation({ parent, tbId });
 
+      if (isNonGpsTargetedBatch(parent)) {
+        return await allocateNonGpsBatchAtomically({
+          db,
+          parentRef,
+          tbId,
+          targetType,
+          targetId,
+          actorMncId,
+          fallbackMemberCount: resolvedTarget?.memberCount || 0,
+          actorUid,
+          actorName,
+          startedAtMs,
+        });
+      }
+
       const rowsSnapshot = await db
         .collection(TARGETED_BATCH_COLLECTIONS.rows)
         .where("tbId", "==", tbId)
@@ -532,8 +937,16 @@ export const onAllocateTargetedBatchCallable = onCall(
 
       const allocationStartedAt = Timestamp.now();
 
-      allocationClaimed = await db.runTransaction(async (transaction) => {
+      const allocationClaim = await db.runTransaction(async (transaction) => {
         const liveSnapshot = await transaction.get(parentRef);
+        const liveResolvedTarget = await resolveAllocationTargetInTransaction({
+          db,
+          transaction,
+          targetType,
+          targetId,
+          actorMncId,
+          fallbackMemberCount: resolvedTarget?.memberCount || 0,
+        });
 
         if (!liveSnapshot.exists) {
           throw controlledError(
@@ -549,7 +962,7 @@ export const onAllocateTargetedBatchCallable = onCall(
         const liveTarget = getExistingParentTarget(liveParent);
 
         if (liveStatus === "ALLOCATED") {
-          if (!targetMatches(liveTarget, resolvedTarget)) {
+          if (!targetMatches(liveTarget, liveResolvedTarget)) {
             throw controlledError(
               "TARGETED_BATCH_ALREADY_ALLOCATED",
               `${tbId} is already allocated to another TEAM/SP.`,
@@ -557,10 +970,10 @@ export const onAllocateTargetedBatchCallable = onCall(
             );
           }
 
-          return false;
+          return { claimed: false, target: liveResolvedTarget };
         }
 
-        if (liveTarget && !targetMatches(liveTarget, resolvedTarget)) {
+        if (liveTarget && !targetMatches(liveTarget, liveResolvedTarget)) {
           throw controlledError(
             "TARGETED_BATCH_ALLOCATION_TARGET_CONFLICT",
             `${tbId} already has a different allocation target in progress.`,
@@ -570,10 +983,10 @@ export const onAllocateTargetedBatchCallable = onCall(
 
         transaction.update(parentRef, {
           "allocation.status": "ALLOCATING",
-          "allocation.targetType": resolvedTarget.type,
-          "allocation.targetId": resolvedTarget.id,
-          "allocation.targetName": resolvedTarget.name,
-          "allocation.memberCount": resolvedTarget.memberCount,
+          "allocation.targetType": liveResolvedTarget.type,
+          "allocation.targetId": liveResolvedTarget.id,
+          "allocation.targetName": liveResolvedTarget.name,
+          "allocation.memberCount": liveResolvedTarget.memberCount,
           "allocation.startedAt":
             liveParent?.allocation?.startedAt || allocationStartedAt,
           "allocation.completedAt": null,
@@ -587,8 +1000,11 @@ export const onAllocateTargetedBatchCallable = onCall(
           "metadata.updatedByUser": actorName,
         });
 
-        return true;
+        return { claimed: true, target: liveResolvedTarget };
       });
+
+      allocationClaimed = allocationClaim.claimed;
+      resolvedTarget = allocationClaim.target;
 
       let updatedRows = 0;
       let processedRows = 0;

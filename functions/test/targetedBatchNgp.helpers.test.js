@@ -118,6 +118,30 @@ test("NGP create payload accepts one 1-20 batch without ward scope", () => {
   assert.equal(result.proposedBatches.length, 1);
   assert.equal(result.proposedBatches[0].expectedRows, 20);
   assert.equal(result.proposedBatches[0].scope.wardPcode, "");
+  assert.equal(
+    result.proposedBatches[0].source.type,
+    "PREPAID_SALES_NON_GPS",
+  );
+  assert.equal(result.source.type, "PREPAID_SALES_NON_GPS");
+  assert.equal(result.source.label, "Prepaid Sales Non-GPS");
+});
+
+test("explicit PREPAID_SALES_NON_GPS source requires NGP planning mode", () => {
+  const ngpDraft = makeNgpDraft(1);
+  ngpDraft.source.type = "PREPAID_SALES_NON_GPS";
+  assert.equal(validateCreateTargetedBatchPayload({ draft: ngpDraft }).ok, true);
+
+  const invalidDraft = makeNgpDraft(1);
+  invalidDraft.source.type = "PREPAID_SALES_NON_GPS";
+  invalidDraft.selection.planningMode = TARGETED_BATCH_PLANNING_MODES.wardErf;
+  invalidDraft.validation.planningMode = TARGETED_BATCH_PLANNING_MODES.wardErf;
+  const result = validateCreateTargetedBatchPayload({ draft: invalidDraft });
+  assert.equal(result.ok, false);
+  assert.ok(
+    result.errors.some((message) =>
+      message.includes("PREPAID_SALES_NON_GPS requires NON_GPS_STREET"),
+    ),
+  );
 });
 
 test("NGP create payload rejects more than 20 rows", () => {

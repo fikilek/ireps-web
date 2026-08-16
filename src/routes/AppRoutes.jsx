@@ -35,6 +35,7 @@ import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboa
 import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPage";
 import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
+import TargetedBatchAllocationMatrixPage from "../pages/operations/TargetedBatchAllocationMatrixPage";
 import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
@@ -122,6 +123,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <SalesReportingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/allocation-matrix"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchAllocationMatrixPage />
               </RoleRoute>
             }
           />

@@ -66,7 +66,10 @@ function normalizeOutcome(row, sourceType) {
 
   // A Prepaid Sales draft contains only the meters deliberately selected by the
   // user. They become operational candidates when the batch is confirmed.
-  if (sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
+  if (
+    sourceType === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES ||
+    sourceType === "PREPAID_SALES_NON_GPS"
+  ) {
     return TARGETED_BATCH_ROW_DECISIONS.ACCEPT;
   }
 

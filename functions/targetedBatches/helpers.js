@@ -12,6 +12,7 @@ export const TARGETED_BATCH_COLLECTIONS = Object.freeze({
 
 export const TARGETED_BATCH_SOURCE_TYPES = Object.freeze({
   prepaidSales: "PREPAID_SALES",
+  prepaidSalesNonGps: "PREPAID_SALES_NON_GPS",
 });
 
 export const TARGETED_BATCH_PLANNING_MODES = Object.freeze({
@@ -366,7 +367,7 @@ export function validateCreateTargetedBatchPayload(data = {}) {
   const sourceType = normalizeUpper(
     draft?.source?.type || draft?.sourceType || data?.sourceType,
   );
-  const sourceLabel = readFirstText(
+  const requestedSourceLabel = readFirstText(
     draft?.source?.label,
     draft?.sourceLabel,
     "Prepaid Sales",
@@ -396,6 +397,12 @@ export function validateCreateTargetedBatchPayload(data = {}) {
   );
   const isNgp =
     planningMode === TARGETED_BATCH_PLANNING_MODES.nonGpsStreet;
+  const persistedSourceType = isNgp
+    ? TARGETED_BATCH_SOURCE_TYPES.prepaidSalesNonGps
+    : TARGETED_BATCH_SOURCE_TYPES.prepaidSales;
+  const persistedSourceLabel = isNgp
+    ? "Prepaid Sales Non-GPS"
+    : requestedSourceLabel;
   const salesPeriodFrom = normalizeMonth(
     draft?.selection?.salesPeriodFrom ?? draft?.salesPeriodFrom,
   );
@@ -411,9 +418,23 @@ export function validateCreateTargetedBatchPayload(data = {}) {
   );
   const errors = [];
 
-  if (sourceType !== TARGETED_BATCH_SOURCE_TYPES.prepaidSales) {
+  if (
+    ![
+      TARGETED_BATCH_SOURCE_TYPES.prepaidSales,
+      TARGETED_BATCH_SOURCE_TYPES.prepaidSalesNonGps,
+    ].includes(sourceType)
+  ) {
     errors.push(
-      "Only PREPAID_SALES Targeted Batch creation is currently supported.",
+      "Only PREPAID_SALES and PREPAID_SALES_NON_GPS Targeted Batch creation are currently supported.",
+    );
+  }
+
+  if (
+    sourceType === TARGETED_BATCH_SOURCE_TYPES.prepaidSalesNonGps &&
+    !isNgp
+  ) {
+    errors.push(
+      "PREPAID_SALES_NON_GPS requires NON_GPS_STREET planning mode.",
     );
   }
 
@@ -648,8 +669,8 @@ export function validateCreateTargetedBatchPayload(data = {}) {
       draftBatchKey,
       sequence: Number(batch?.sequence || batchIndex + 1),
       source: {
-        type: sourceType,
-        label: sourceLabel,
+        type: persistedSourceType,
+        label: persistedSourceLabel,
         sourceId,
         fileName,
       },
@@ -714,8 +735,8 @@ export function validateCreateTargetedBatchPayload(data = {}) {
     ok: true,
     creationGroupId,
     source: {
-      type: sourceType,
-      label: sourceLabel,
+      type: persistedSourceType,
+      label: persistedSourceLabel,
       sourceId,
       fileName,
     },

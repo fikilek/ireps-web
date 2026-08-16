@@ -1,5 +1,7 @@
 /* eslint-disable no-unused-vars, react-hooks/set-state-in-effect -- subscription effects reset route-scoped loading state. */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { skipToken } from "@reduxjs/toolkit/query";
 import { Link, useParams } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -11,8 +13,11 @@ import {
 } from "firebase/firestore";
 
 import { db, functions } from "../../firebase";
-import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
-import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
+import { useAuth } from "../../auth/useAuth";
+import {
+  useGetTargetedBatchAllocationDirectoryQuery,
+  useGetTargetedBatchAllocationMatrixByLmQuery,
+} from "../../redux/salesTargetedBatchApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 import {
   formatDateTime,
@@ -25,11 +30,18 @@ import {
 } from "./targeted-batches/allocation/TargetedBatchAllocationPrimitives";
 import styles from "./targeted-batches/allocation/targetedBatchAllocationStyles";
 import {
+  buildOrganisationAllocationMatrixResult,
+  getCanonicalBatchState,
+  getPendingAllocationProjectionMeters,
+  projectOrganisationAllocation,
+} from "./targeted-batches/allocation/allocationMatrixModel";
+import {
   asArray,
   buildTargetPayload,
   buildUsersById,
   enrichServiceProvidersWithMembers,
   enrichTeamsWithMembers,
+  getActorMncServiceProviderId,
   getProposedTrnType,
   getTargetLabel,
   getTargetOptionMicroText,
@@ -39,6 +51,8 @@ import {
   getUserRoleLabel,
   valueOrNav,
 } from "./targeted-batches/allocation/targetedBatchAllocationUtils";
+
+const EMPTY_LIST = Object.freeze([]);
 
 function timestampToIso(value) {
   if (!value) return null;
@@ -118,6 +132,251 @@ function MembersList({ target, maxItems = 4 }) {
   );
 }
 
+function formatCompactMetricNumber(value) {
+  const numeric = Number(value);
+  const safeValue = Number.isFinite(numeric) ? numeric : 0;
+  const rounded = Math.round((safeValue + Number.EPSILON) * 10) / 10;
+
+  return Number.isInteger(rounded)
+    ? rounded.toLocaleString("en-ZA")
+    : rounded.toLocaleString("en-ZA", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      });
+}
+
+function formatSignedMetricNumber(value) {
+  const numeric = Number(value);
+  const safeValue = Number.isFinite(numeric) ? numeric : 0;
+  const sign = safeValue > 0 ? "+" : "";
+  return `${sign}${formatCompactMetricNumber(safeValue)}`;
+}
+
+function formatPercentMetric(value) {
+  const numeric = Number(value);
+  const safeValue = Number.isFinite(numeric) ? numeric : 0;
+  return `${formatCompactMetricNumber(safeValue)}%`;
+}
+
+const METRIC_HELP = Object.freeze({
+  batches: {
+    title: "Batches",
+    body: "The number of Targeted Batches historically allocated to this TEAM/SP in the current project scope. Completed batches remain part of this total.",
+  },
+  assigned: {
+    title: "Assigned",
+    body: "The total number of meter rows historically allocated to this TEAM/SP. Completed work remains included because this is the cumulative project allocation total.",
+  },
+  completed: {
+    title: "Completed",
+    body: "The number of historically assigned meter rows that have completed field execution.",
+  },
+  activeOpen: {
+    title: "Active Open",
+    body: "The number of currently assigned meter rows that are still active and unfinished. This is the TEAM/SP's current open workload.",
+  },
+  rejectedUnresolved: {
+    title: "Rejected / Unresolved",
+    body: "The number of meter rows in rejected batches whose release or reallocation has not yet been resolved by the common Targeted Batch lifecycle rules. They remain visible separately and are not assumed to be available again.",
+  },
+  progress: {
+    title: "Progress",
+    body: "Completed meter rows divided by all historically assigned meter rows. A new unfinished allocation can temporarily reduce this percentage because Assigned increases before Completed does.",
+  },
+  projectShare: {
+    title: "Project Share",
+    body: "This TEAM/SP's percentage share of all historical meter-row allocation in the current comparison scope. It helps show whether cumulative project work is being distributed evenly.",
+  },
+  versusAverage: {
+    title: "Vs Average",
+    body: "How many historically assigned meters this TEAM/SP sits above or below the current average for eligible targets of the same type. Positive means above average; negative means below average.",
+  },
+});
+
+function MetricHelp({ help, targetType = "TEAM" }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const anchorRef = useRef(null);
+  const popoverRef = useRef(null);
+  const closeTimerRef = useRef(null);
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor || typeof window === "undefined") return;
+
+    const rect = anchor.getBoundingClientRect();
+    const popoverWidth = 285;
+    const margin = 8;
+    const left = Math.min(
+      Math.max(margin, rect.right - popoverWidth),
+      Math.max(margin, window.innerWidth - popoverWidth - margin),
+    );
+    const estimatedHeight = 190;
+    const shouldOpenAbove =
+      rect.bottom + estimatedHeight + margin > window.innerHeight &&
+      rect.top > estimatedHeight + margin;
+
+    setPosition({
+      left,
+      top: shouldOpenAbove ? rect.top - estimatedHeight - 6 : rect.bottom + 6,
+    });
+  }, []);
+
+  const openHelp = useCallback(() => {
+    clearCloseTimer();
+    updatePosition();
+    setIsOpen(true);
+  }, [clearCloseTimer, updatePosition]);
+
+  const scheduleClose = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => setIsOpen(false), 140);
+  }, [clearCloseTimer]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleViewportChange = () => updatePosition();
+    const handlePointerDown = (event) => {
+      if (
+        anchorRef.current?.contains(event.target) ||
+        popoverRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      setIsOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, updatePosition]);
+
+  useEffect(
+    () => () => {
+      clearCloseTimer();
+    },
+    [clearCloseTimer],
+  );
+
+  if (!help) return null;
+
+  const body = help.body.replace(/TEAM\/SP/g, targetType === "SP" ? "SP" : "TEAM");
+  const tooltip = isOpen && typeof document !== "undefined"
+    ? createPortal(
+        <span
+          ref={popoverRef}
+          style={{
+            ...styles.metricHelpPopover,
+            top: position.top,
+            left: position.left,
+          }}
+          role="tooltip"
+          onMouseEnter={clearCloseTimer}
+          onMouseLeave={scheduleClose}
+        >
+          <strong style={styles.metricHelpTitle}>{help.title}</strong>
+          <span style={styles.metricHelpText}>{body}</span>
+          <span style={styles.metricHelpProjectionNote}>
+            Plain value = current. Bracketed value = projected after allocating
+            the currently selected Targeted Batch.
+          </span>
+        </span>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <span
+      style={styles.metricHelpWrap}
+      onMouseEnter={openHelp}
+      onMouseLeave={scheduleClose}
+    >
+      <button
+        ref={anchorRef}
+        type="button"
+        style={styles.metricHelpButton}
+        aria-label={`Explain ${help.title}`}
+        aria-expanded={isOpen}
+        onFocus={openHelp}
+        onClick={(event) => {
+          event.stopPropagation();
+          openHelp();
+        }}
+      >
+        ?
+      </button>
+      {tooltip}
+    </span>
+  );
+}
+
+function WorkloadMetric({
+  label,
+  value,
+  projectedValue = null,
+  help = null,
+  targetType = "TEAM",
+}) {
+  return (
+    <span style={styles.workloadMetric}>
+      <span style={styles.workloadMetricHeader}>
+        <small style={styles.workloadMetricLabel}>{label}</small>
+        <MetricHelp help={help} targetType={targetType} />
+      </span>
+      <span style={styles.workloadMetricValueRow}>
+        <strong style={styles.workloadMetricValue}>{value}</strong>
+        {projectedValue !== null && projectedValue !== undefined ? (
+          <span style={styles.workloadProjectedValue}>({projectedValue})</span>
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
+function WorkloadBalanceMetric({
+  label,
+  value,
+  projectedValue = null,
+  help = null,
+  targetType = "TEAM",
+}) {
+  return (
+    <span style={styles.workloadBalanceItem}>
+      <span style={styles.workloadMetricHeader}>
+        <small>{label}</small>
+        <MetricHelp help={help} targetType={targetType} />
+      </span>
+      <span style={styles.workloadBalanceValueRow}>
+        <strong>{value}</strong>
+        {projectedValue !== null && projectedValue !== undefined ? (
+          <span style={styles.workloadProjectedValueSecondary}>
+            ({projectedValue})
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
 function getBatchBackendTarget(batch = {}) {
   const allocation = batch?.allocation || {};
   const target = allocation?.target || {};
@@ -164,6 +423,8 @@ function Td({ children, strong = false }) {
 
 export default function TargetedBatchAllocationPage() {
   const { tbId } = useParams();
+  const authContext = useAuth();
+  const actorMncServiceProviderId = getActorMncServiceProviderId(authContext);
 
   const [batch, setBatch] = useState(null);
   const [permanentRows, setPermanentRows] = useState([]);
@@ -240,25 +501,30 @@ export default function TargetedBatchAllocationPage() {
   }, [decodedTbId]);
 
   const sourceType = batch?.source?.type || "";
-  const isSalesSource = sourceType === "PREPAID_SALES";
+  const isSalesSource = ["PREPAID_SALES", "PREPAID_SALES_NON_GPS"].includes(
+    sourceType,
+  );
   const isConfirmed = batch?.creation?.state === "READY";
   const backendTarget = useMemo(() => getBatchBackendTarget(batch), [batch]);
   const isPermanentlyAllocated = Boolean(backendTarget?.id);
   const isAllocationLocked = isPermanentlyAllocated || isAllocating;
 
   const {
-    data: availableTeams = [],
-    isLoading: areTeamsLoading,
-    isError: areTeamsError,
-    error: teamsError,
-  } = useGetAvailableTeamsQuery({ limit: 500 });
+    data: allocationDirectory,
+    isError: isAllocationDirectoryError,
+    error: allocationDirectoryQueryError,
+  } = useGetTargetedBatchAllocationDirectoryQuery(
+    actorMncServiceProviderId || skipToken,
+  );
 
-  const {
-    data: availableServiceProviders = [],
-    isLoading: areServiceProvidersLoading,
-    isError: areServiceProvidersError,
-    error: serviceProvidersError,
-  } = useGetAvailableServiceProvidersQuery({ limit: 500 });
+  const availableTeams = Array.isArray(allocationDirectory?.teams)
+    ? allocationDirectory.teams
+    : EMPTY_LIST;
+  const availableServiceProviders = Array.isArray(
+    allocationDirectory?.serviceProviders,
+  )
+    ? allocationDirectory.serviceProviders
+    : EMPTY_LIST;
 
   const {
     data: usersDirectory = [],
@@ -266,6 +532,15 @@ export default function TargetedBatchAllocationPage() {
     isError: areUsersError,
     error: usersError,
   } = useGetUsersDirectoryQuery({ limit: 1000 });
+
+  const batchLmPcode = String(batch?.scope?.lmPcode || "").trim();
+  const {
+    data: allocationMatrixStream,
+    isError: isAllocationMatrixError,
+    error: allocationMatrixQueryError,
+  } = useGetTargetedBatchAllocationMatrixByLmQuery(
+    batchLmPcode || skipToken,
+  );
 
   const usersById = useMemo(
     () => buildUsersById(usersDirectory),
@@ -286,6 +561,39 @@ export default function TargetedBatchAllocationPage() {
     [availableServiceProviders, usersDirectory],
   );
 
+  const allocationMatrixBatches = Array.isArray(
+    allocationMatrixStream?.batches,
+  )
+    ? allocationMatrixStream.batches
+    : EMPTY_LIST;
+  const allocationMatrixRows = Array.isArray(allocationMatrixStream?.rows)
+    ? allocationMatrixStream.rows
+    : EMPTY_LIST;
+  const allocationMatrixResult = useMemo(
+    () =>
+      buildOrganisationAllocationMatrixResult({
+        batches: allocationMatrixBatches,
+        rows: allocationMatrixRows,
+        teams: availableTeamsWithMembers,
+        serviceProviders: availableServiceProvidersWithMembers,
+      }),
+    [
+      allocationMatrixBatches,
+      allocationMatrixRows,
+      availableTeamsWithMembers,
+      availableServiceProvidersWithMembers,
+    ],
+  );
+  const organisationWorkloads = allocationMatrixResult.organisations;
+  const allocationIntegrityIssues = allocationMatrixResult.integrityIssues;
+  const workloadByTarget = useMemo(
+    () =>
+      new Map(
+        organisationWorkloads.map((workload) => [workload.key, workload]),
+      ),
+    [organisationWorkloads],
+  );
+
   const targetOptions =
     targetType === "SP"
       ? availableServiceProvidersWithMembers
@@ -302,19 +610,38 @@ export default function TargetedBatchAllocationPage() {
   const currentTarget = backendTarget || selectedTargetPayload;
 
   const targetContextLoading =
-    areTeamsLoading || areServiceProvidersLoading || areUsersLoading;
+    allocationDirectory?.sync?.status === "syncing" || areUsersLoading;
 
   const targetContextError =
-    areTeamsError || areServiceProvidersError || areUsersError;
+    allocationDirectory?.sync?.status === "error" ||
+    isAllocationDirectoryError ||
+    areUsersError;
 
   const targetContextErrorMessage =
-    teamsError?.message ||
-    serviceProvidersError?.message ||
+    allocationDirectory?.sync?.error?.message ||
+    allocationDirectoryQueryError?.error ||
+    allocationDirectoryQueryError?.data?.message ||
     usersError?.message ||
-    teamsError?.data?.message ||
-    serviceProvidersError?.data?.message ||
     usersError?.data?.message ||
-    "Could not load TEAM/SP allocation targets.";
+    "Could not load the authority-scoped TEAM/SP allocation directory.";
+
+  const allocationMatrixError =
+    allocationMatrixStream?.sync?.error ||
+    (isAllocationMatrixError
+      ? {
+          message:
+            allocationMatrixQueryError?.error ||
+            allocationMatrixQueryError?.data?.message ||
+            "The live Allocation Matrix stream could not be opened.",
+        }
+      : null);
+  const allocationMatrixReady =
+    allocationMatrixStream?.sync?.status === "ready";
+  const pendingProjectionMeters = getPendingAllocationProjectionMeters({
+    batch,
+    rows: permanentRows,
+    rowsReady: !isBatchLoading,
+  });
 
   function handleTargetTypeChange(nextType) {
     if (isAllocationLocked) return;
@@ -632,6 +959,12 @@ export default function TargetedBatchAllocationPage() {
   }
 
   const finalReportStatus = batch?.finalReport?.status || "DRAFT";
+  const canonicalBatchState = getCanonicalBatchState(batch);
+  const sourceLabel =
+    batch?.source?.label ||
+    (sourceType === "PREPAID_SALES_NON_GPS"
+      ? "Prepaid Sales Non-GPS"
+      : "Prepaid Sales");
   const allocationStatus =
     batch?.allocation?.status || (currentTarget ? "PLANNED" : "NOT_STARTED");
   const allocateDisabled =
@@ -659,6 +992,13 @@ export default function TargetedBatchAllocationPage() {
           style={styles.backLink}
         >
           ← Back to TB Rows
+        </Link>
+
+        <Link
+          to={`/sales/allocation-matrix?tbId=${encodeURIComponent(batch.id)}`}
+          style={styles.matrixPageLink}
+        >
+          Allocation Matrix
         </Link>
 
         <Link
@@ -705,7 +1045,7 @@ export default function TargetedBatchAllocationPage() {
           />
           <SummaryDetailRow
             label="Source"
-            value={batch?.source?.label || "Prepaid Sales"}
+            value={sourceLabel}
           />
         </div>
 
@@ -720,6 +1060,7 @@ export default function TargetedBatchAllocationPage() {
             label="Batch Rows"
             value={formatNumber(permanentRows.length)}
           />
+          <InfoCard label="State" value={canonicalBatchState} />
           <InfoCard label="Allocation" value={allocationStatus} />
           <InfoCard
             label="Target"
@@ -741,6 +1082,24 @@ export default function TargetedBatchAllocationPage() {
 
       {targetContextError ? (
         <div style={styles.errorNotice}>{targetContextErrorMessage}</div>
+      ) : null}
+
+      {allocationMatrixError ? (
+        <div style={styles.matrixNotice}>
+          Allocation decision support is temporarily unavailable: {
+            allocationMatrixError?.message || "Allocation Matrix stream error."
+          }
+          {" "}The allocation backend remains authoritative.
+        </div>
+      ) : null}
+
+      {allocationIntegrityIssues.length > 0 ? (
+        <div style={styles.integrityNotice}>
+          <strong>Allocation integrity warning:</strong>{" "}
+          {allocationIntegrityIssues.length} batch(es) are quarantined from
+          workload totals. Review the Allocation Matrix for TB IDs and issue
+          codes before relying on project balancing figures.
+        </div>
       ) : null}
 
       {statusMessage ? (
@@ -812,29 +1171,42 @@ export default function TargetedBatchAllocationPage() {
                   const selected =
                     currentTarget?.id === target.id &&
                     currentTarget?.type === target.type;
+                  const workload =
+                    workloadByTarget.get(`${target.type}:${target.id}`) || null;
+                  const projection = workload
+                    ? projectOrganisationAllocation({
+                        organisation: workload,
+                        allOrganisations: organisationWorkloads,
+                        incomingMeters: pendingProjectionMeters,
+                      })
+                    : null;
 
                   return (
-                    <button
+                    <article
                       key={`${target.type}_${target.id}`}
-                      type="button"
-                      draggable={!isAllocationLocked}
-                      disabled={isAllocationLocked}
                       style={{
                         ...styles.targetOptionCard,
                         ...(selected
                           ? styles.targetOptionCardActive
                           : null),
                         ...(isAllocationLocked
-                          ? styles.disabledButton
+                          ? styles.targetOptionCardLocked
                           : null),
                       }}
-                      onClick={() => handleSelectTarget(target)}
-                      onDragStart={(event) =>
-                        handleTargetDragStart(event, target)
-                      }
-                      onDragEnd={handleTargetDragEnd}
-                      title={`Select or drag ${target.type} ${target.name} onto the complete Targeted Batch`}
                     >
+                      <button
+                        type="button"
+                        draggable={!isAllocationLocked}
+                        disabled={isAllocationLocked}
+                        style={styles.targetOptionSelectSurface}
+                        onClick={() => handleSelectTarget(target)}
+                        onDragStart={(event) =>
+                          handleTargetDragStart(event, target)
+                        }
+                        onDragEnd={handleTargetDragEnd}
+                        aria-label={`Select or drag ${target.type} ${target.name} onto the complete Targeted Batch`}
+                      />
+                      <div style={styles.targetOptionCardContent}>
                       <div style={styles.targetOptionHeader}>
                         <span style={styles.targetType}>{target.type}</span>
                         <strong style={styles.targetTitle}>
@@ -844,11 +1216,164 @@ export default function TargetedBatchAllocationPage() {
                       <p style={styles.targetSub}>
                         {getTargetOptionSubtitle(target)}
                       </p>
+
+                      <div style={styles.workloadBox}>
+                        {allocationMatrixReady ? (
+                          <>
+                            <div style={styles.workloadSectionHeader}>
+                              <span>PROJECT ALLOCATION</span>
+                              {Number(workload?.integrityIssueBatches || 0) > 0 ? (
+                                <span style={styles.workloadIntegrityWarning}>
+                                  {workload.integrityIssueBatches} integrity issue
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <div style={styles.workloadGrid}>
+                              <WorkloadMetric
+                                label="Batches"
+                                help={METRIC_HELP.batches}
+                                targetType={target.type}
+                                value={formatCompactMetricNumber(workload?.batches || 0)}
+                                projectedValue={
+                                  projection
+                                    ? formatCompactMetricNumber(
+                                        Number(workload?.batches || 0) + 1,
+                                      )
+                                    : null
+                                }
+                              />
+                              <WorkloadMetric
+                                label="Assigned"
+                                help={METRIC_HELP.assigned}
+                                targetType={target.type}
+                                value={formatCompactMetricNumber(
+                                  workload?.assignedMeters || 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatCompactMetricNumber(
+                                        projection.projectedAssigned,
+                                      )
+                                    : null
+                                }
+                              />
+                              <WorkloadMetric
+                                label="Completed"
+                                help={METRIC_HELP.completed}
+                                targetType={target.type}
+                                value={formatCompactMetricNumber(
+                                  workload?.completedMeters || 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatCompactMetricNumber(
+                                        workload?.completedMeters || 0,
+                                      )
+                                    : null
+                                }
+                              />
+                              <WorkloadMetric
+                                label="Active Open"
+                                help={METRIC_HELP.activeOpen}
+                                targetType={target.type}
+                                value={formatCompactMetricNumber(
+                                  workload?.remainingMeters || 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatCompactMetricNumber(
+                                        projection.projectedRemaining,
+                                      )
+                                    : null
+                                }
+                              />
+                              <WorkloadMetric
+                                label="Rejected / Unresolved"
+                                help={METRIC_HELP.rejectedUnresolved}
+                                targetType={target.type}
+                                value={formatCompactMetricNumber(
+                                  workload?.rejectedUnresolvedMeters || 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatCompactMetricNumber(
+                                        workload?.rejectedUnresolvedMeters || 0,
+                                      )
+                                    : null
+                                }
+                              />
+                              <WorkloadMetric
+                                label="Progress"
+                                help={METRIC_HELP.progress}
+                                targetType={target.type}
+                                value={formatPercentMetric(
+                                  workload?.progressPct || 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatPercentMetric(
+                                        projection.projectedAssigned > 0
+                                          ? (Number(workload?.completedMeters || 0) /
+                                              Number(
+                                                projection.projectedAssigned,
+                                              )) *
+                                              100
+                                          : 0,
+                                      )
+                                    : null
+                                }
+                              />
+                            </div>
+
+                            <div style={styles.workloadBalanceRow}>
+                              <WorkloadBalanceMetric
+                                label="Project share"
+                                help={METRIC_HELP.projectShare}
+                                targetType={target.type}
+                                value={formatPercentMetric(
+                                  workload?.projectSharePct || 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatPercentMetric(
+                                        projection.projectedProjectSharePct,
+                                      )
+                                    : null
+                                }
+                              />
+                              <WorkloadBalanceMetric
+                                label={`Vs ${target.type} avg`}
+                                help={METRIC_HELP.versusAverage}
+                                targetType={target.type}
+                                value={formatSignedMetricNumber(
+                                  workload?.varianceFromTypeAverage ?? 0,
+                                )}
+                                projectedValue={
+                                  projection
+                                    ? formatSignedMetricNumber(
+                                        projection.projectedVarianceFromTypeAverage,
+                                      )
+                                    : null
+                                }
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <div style={styles.workloadLoading}>
+                            {allocationMatrixError
+                              ? "Allocation history unavailable."
+                              : "Loading allocation history..."}
+                          </div>
+                        )}
+                      </div>
+
                       <MembersList target={target} maxItems={4} />
                       <span style={styles.targetMicro}>
                         {getTargetOptionMicroText(target)}
                       </span>
-                    </button>
+                      </div>
+                    </article>
                   );
                 })}
               </div>
@@ -856,7 +1381,7 @@ export default function TargetedBatchAllocationPage() {
           </section>
         </div>
 
-        <section style={styles.panel}>
+        <section style={{ ...styles.panel, ...styles.rightColumn }}>
           <div style={styles.panelHeader}>
             <div>
               <h3 style={styles.panelTitle}>Ready Targeted Batch</h3>
@@ -895,7 +1420,7 @@ export default function TargetedBatchAllocationPage() {
                 <span style={styles.groupName}>{batch.id}</span>
                 <div style={styles.groupMetricRow}>
                   <span>{formatNumber(permanentRows.length)} TB Rows</span>
-                  <span>{batch?.source?.label || "Prepaid Sales"}</span>
+                  <span>{sourceLabel}</span>
                   <span>{allocationStatus}</span>
                 </div>
               </button>

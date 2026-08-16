@@ -24,7 +24,13 @@ import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModa
 import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModal";
 import { formatNumber } from "./targeted-batches/targetedBatchUtils";
 
-const SOURCE_FILTER_OPTIONS = Object.values(TARGETED_BATCH_SOURCE_TYPES);
+const PREPAID_SALES_NON_GPS_SOURCE = "PREPAID_SALES_NON_GPS";
+const SOURCE_FILTER_OPTIONS = Array.from(
+  new Set([
+    ...Object.values(TARGETED_BATCH_SOURCE_TYPES),
+    PREPAID_SALES_NON_GPS_SOURCE,
+  ]),
+);
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const NON_GPS_PLANNING_MODE = "NON_GPS_STREET";
 const STATUS_FILTER_OPTIONS = Array.from(
@@ -84,7 +90,12 @@ function mapPermanentTargetedBatch(snapshot) {
 }
 
 function getSourceReference(upload) {
-  if (upload?.source?.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
+  if (
+    [
+      TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES,
+      PREPAID_SALES_NON_GPS_SOURCE,
+    ].includes(upload?.source?.type)
+  ) {
     const from = upload?.selection?.salesPeriodFrom || "NAv";
     const to = upload?.selection?.salesPeriodTo || "NAv";
     return `Sales ${from} to ${to}`;
@@ -112,7 +123,12 @@ function getBatchType(upload = {}) {
     .trim()
     .toUpperCase();
 
-  if (planningMode === NON_GPS_PLANNING_MODE) return "NON-GPS";
+  if (
+    planningMode === NON_GPS_PLANNING_MODE ||
+    upload?.source?.type === PREPAID_SALES_NON_GPS_SOURCE
+  ) {
+    return "NON-GPS";
+  }
 
   if (upload?.source?.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
     return "GPS";

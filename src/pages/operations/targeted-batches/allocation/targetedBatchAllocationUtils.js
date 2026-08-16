@@ -24,6 +24,15 @@ function firstText(...values) {
   return "";
 }
 
+export function getActorMncServiceProviderId(authContext = {}) {
+  return firstText(
+    authContext?.serviceProvider?.id,
+    authContext?.profile?.employment?.serviceProvider?.id,
+    authContext?.profile?.profile?.employment?.serviceProvider?.id,
+    authContext?.profile?.serviceProvider?.id,
+  );
+}
+
 export function getRowKey(row = {}, index = 0, batchId = "TB") {
   return firstText(
     row.tbRowId,
@@ -56,7 +65,13 @@ export function getRowOutcome(row = {}, sourceType = "") {
 
   if (outcome === "ACCEPT" || outcome === "ACCEPTED") return "ACCEPT";
   if (outcome === "REJECT" || outcome === "REJECTED") return "REJECT";
-  if (normalizeValue(sourceType) === "PREPAID_SALES") return "ACCEPT";
+  if (
+    ["PREPAID_SALES", "PREPAID_SALES_NON_GPS"].includes(
+      normalizeValue(sourceType),
+    )
+  ) {
+    return "ACCEPT";
+  }
   return "PENDING";
 }
 
