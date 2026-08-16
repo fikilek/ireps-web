@@ -2,11 +2,7 @@
 import { useMemo, useState } from "react";
 
 import { formatNumber } from "../salesUtils";
-import {
-  NGP_CLASSIFICATIONS,
-  NGP_SELECTION_MAX,
-  validateNgpSelection,
-} from "../models/nonGpsBatchPlanningModel";
+import { NGP_CLASSIFICATIONS } from "../models/nonGpsBatchPlanningModel";
 
 function classificationStyle(classification) {
   if (classification === NGP_CLASSIFICATIONS.OUTSTANDING) {
@@ -36,54 +32,18 @@ function includesSearch(target, searchText) {
   ].some((value) => String(value || "").toLowerCase().includes(needle));
 }
 
-export default function NonGpsStreetDetail({ street, onBack }) {
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [selectionError, setSelectionError] = useState("");
+export default function NonGpsStreetDetail({
+  street,
+  selectedIds = new Set(),
+  onToggleTarget,
+  onBack,
+}) {
   const [searchText, setSearchText] = useState("");
-
-  const selectedTargets = useMemo(
-    () =>
-      street.targets.filter(
-        (target) =>
-          selectedIds.has(target.id) &&
-          target.classification === NGP_CLASSIFICATIONS.OUTSTANDING,
-      ),
-    [selectedIds, street.targets],
-  );
-
-  const selectionValidation = useMemo(
-    () => validateNgpSelection(selectedTargets),
-    [selectedTargets],
-  );
 
   const visibleTargets = useMemo(
     () => street.targets.filter((target) => includesSearch(target, searchText)),
     [searchText, street.targets],
   );
-
-  function toggleTarget(target) {
-    if (target.classification !== NGP_CLASSIFICATIONS.OUTSTANDING) return;
-
-    setSelectionError("");
-
-    const next = new Set(selectedIds);
-
-    if (next.has(target.id)) {
-      next.delete(target.id);
-      setSelectedIds(next);
-      return;
-    }
-
-    if (next.size >= NGP_SELECTION_MAX) {
-      setSelectionError(
-        `A Non GPS planning selection is limited to ${NGP_SELECTION_MAX} Outstanding targets.`,
-      );
-      return;
-    }
-
-    next.add(target.id);
-    setSelectedIds(next);
-  }
 
   return (
     <section style={styles.panel}>
@@ -98,7 +58,7 @@ export default function NonGpsStreetDetail({ street, onBack }) {
           </h2>
           <p style={styles.subtitle}>
             The complete street population remains visible. Only Outstanding
-            targets can be selected.
+            targets can be selected for the current 1–20 meter batch.
           </p>
         </div>
 
@@ -138,47 +98,6 @@ export default function NonGpsStreetDetail({ street, onBack }) {
         </div>
       </div>
 
-      <div style={styles.selectionBar}>
-        <div>
-          <strong>
-            Selected: {formatNumber(selectedTargets.length)} / {NGP_SELECTION_MAX}
-          </strong>
-          <span style={styles.selectionHint}>
-            Select 1–20 Outstanding targets from this street only.
-          </span>
-        </div>
-
-        <div style={styles.selectionActions}>
-          <span
-            style={{
-              ...styles.selectionStatus,
-              ...(selectionValidation.ok
-                ? styles.selectionStatusReady
-                : styles.selectionStatusWaiting),
-            }}
-          >
-            {selectionValidation.ok ? "Selection ready" : "Select at least 1"}
-          </span>
-          <button
-            type="button"
-            style={styles.clearButton}
-            disabled={selectedTargets.length === 0}
-            onClick={() => {
-              setSelectedIds(new Set());
-              setSelectionError("");
-            }}
-          >
-            Clear Selection
-          </button>
-        </div>
-      </div>
-
-      {selectionError ? (
-        <div role="alert" style={styles.errorBox}>
-          {selectionError}
-        </div>
-      ) : null}
-
       <div style={styles.tableWrap}>
         <table style={styles.table}>
           <thead>
@@ -210,7 +129,7 @@ export default function NonGpsStreetDetail({ street, onBack }) {
                         type="checkbox"
                         checked={checked}
                         disabled={!selectable}
-                        onChange={() => toggleTarget(target)}
+                        onChange={() => onToggleTarget?.(target)}
                         aria-label={`Select ${target.meterNo || target.canonicalAddress}`}
                         title={
                           selectable

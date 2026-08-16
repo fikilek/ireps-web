@@ -25,6 +25,8 @@ import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModa
 import { formatNumber } from "./targeted-batches/targetedBatchUtils";
 
 const SOURCE_FILTER_OPTIONS = Object.values(TARGETED_BATCH_SOURCE_TYPES);
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+const NON_GPS_PLANNING_MODE = "NON_GPS_STREET";
 const STATUS_FILTER_OPTIONS = Array.from(
   new Set([
     ...Object.values(TARGETED_BATCH_UPLOAD_REGISTER_STATUSES),
@@ -103,6 +105,55 @@ function getUploadTotal(upload) {
 
 function getUploadFileDecision(upload) {
   return upload?.fileDecision || upload?.validation?.fileDecision || null;
+}
+
+function getBatchType(upload = {}) {
+  const planningMode = String(upload?.selection?.planningMode || "")
+    .trim()
+    .toUpperCase();
+
+  if (planningMode === NON_GPS_PLANNING_MODE) return "NON-GPS";
+
+  if (upload?.source?.type === TARGETED_BATCH_SOURCE_TYPES.PREPAID_SALES) {
+    return "GPS";
+  }
+
+  return "NAv";
+}
+
+function getWardLabel(upload = {}) {
+  return (
+    upload?.scope?.wardName ||
+    (upload?.scope?.wardNumber ? `Ward ${upload.scope.wardNumber}` : "NAv")
+  );
+}
+
+function getWardFilterValue(upload = {}) {
+  return `${getWardLabel(upload)} ${upload?.scope?.wardPcode || "NAv"}`;
+}
+
+function getCreatedBy(upload = {}) {
+  return String(upload?.metadata?.createdByUser || "").trim() || "NAv";
+}
+
+function compareTableValues(left, right) {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+
+  return String(left ?? "").localeCompare(String(right ?? ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function getSortValue(upload, sortKey) {
+  if (sortKey === "batchType") return getBatchType(upload);
+  if (sortKey === "allocation") return getAllocationState(upload).label;
+  if (sortKey === "total") return getUploadTotal(upload);
+  if (sortKey === "ward") return getWardFilterValue(upload);
+  if (sortKey === "createdBy") return getCreatedBy(upload);
+  return upload?.id || "";
 }
 
 function getAllocationState(upload = {}) {
@@ -225,6 +276,105 @@ function Th({ children }) {
   return <th style={styles.th}>{children}</th>;
 }
 
+function SortableTh({ label, sortKey, sortConfig, onSort }) {
+  const isActive = sortConfig.key === sortKey;
+  const indicator = isActive
+    ? sortConfig.direction === "asc"
+      ? " ▲"
+      : " ▼"
+    : "";
+
+  return (
+    <th style={styles.th}>
+      <button
+        type="button"
+        style={styles.sortHeaderButton}
+        onClick={() => onSort(sortKey)}
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        <span style={styles.sortIndicator}>{indicator}</span>
+      </button>
+    </th>
+  );
+}
+
+function PaginationControls({
+  currentPage,
+  pageSize,
+  totalPages,
+  totalRows,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  if (totalRows === 0) return null;
+
+  const startRow = (currentPage - 1) * pageSize + 1;
+  const endRow = Math.min(currentPage * pageSize, totalRows);
+
+  return (
+    <div style={styles.paginationBar}>
+      <div style={styles.paginationSummary}>
+        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+        {formatNumber(totalRows)}
+      </div>
+
+      <div style={styles.paginationControls}>
+        <label style={styles.pageSizeLabel}>
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            style={styles.pageSizeSelect}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+        >
+          First
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+        >
+          Previous
+        </button>
+        <span style={styles.pageCountLabel}>
+          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
+        </span>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          style={styles.paginationButton}
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
+        >
+          Last
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Td({ children, colSpan }) {
   return (
     <td style={styles.td} colSpan={colSpan}>
@@ -237,7 +387,7 @@ function HelpModal({ type, onClose }) {
   const content = {
     columns: {
       title: "TB Upload Register columns",
-      body: "TB Rows opens the active row-level review. Final Report remains marked DRAFT. TB ID is the Targeted Batch identifier and Total is the number of rows read from the source file or selected from Prepaid Sales.",
+      body: "Batch Type identifies Prepaid Sales batches as GPS or NON-GPS from their permanent planning mode. TB Rows opens the active row-level review. Created By shows the user recorded on the permanent Targeted Batch metadata. TB ID is the Targeted Batch identifier and Total is the number of rows read from the source file or selected from Prepaid Sales.",
     },
     fileRules: {
       title: "TB file rules",
@@ -299,6 +449,15 @@ export default function TargetedBatchesPage() {
   const [activeHelpModal, setActiveHelpModal] = useState(null);
   const [sourceFilter, setSourceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [tbIdFilter, setTbIdFilter] = useState("");
+  const [batchTypeFilter, setBatchTypeFilter] = useState("");
+  const [allocationFilter, setAllocationFilter] = useState("");
+  const [totalFilter, setTotalFilter] = useState("");
+  const [wardFilter, setWardFilter] = useState("");
+  const [createdByFilter, setCreatedByFilter] = useState("");
+  const [sortConfig, setSortConfig] = useState({ key: "", direction: "asc" });
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [permanentUploads, setPermanentUploads] = useState([]);
   const [isRegisterLoading, setIsRegisterLoading] = useState(true);
   const [registerLoadError, setRegisterLoadError] = useState("");
@@ -310,14 +469,6 @@ export default function TargetedBatchesPage() {
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
   const creationResult = location.state?.targetedBatchCreation;
-  const creationStatusMessage = creationResult?.success
-    ? `${formatNumber(creationResult.createdBatchCount || 0)} ward-scoped ` +
-      `Targeted Batch${
-        Number(creationResult.createdBatchCount || 0) === 1 ? "" : "es"
-      } created with ${formatNumber(
-        creationResult.createdRowCount || 0,
-      )} row(s).`
-    : "";
 
   useEffect(() => {
     setIsRegisterLoading(true);
@@ -361,13 +512,132 @@ export default function TargetedBatchesPage() {
 
   const uploads = permanentUploads;
 
+  const creationStatusMessage = useMemo(() => {
+    if (!creationResult?.success || isRegisterLoading) return "";
+
+    const createdBatchIds = new Set(
+      (Array.isArray(creationResult?.batches) ? creationResult.batches : [])
+        .map((batch) => batch?.tbId)
+        .filter(Boolean),
+    );
+    const createdUploads = uploads.filter((upload) =>
+      createdBatchIds.has(upload.id),
+    );
+    const batchTypes = new Set(createdUploads.map(getBatchType));
+    const batchTypeLabel =
+      batchTypes.size === 1 && batchTypes.has("NON-GPS")
+        ? "Non-GPS "
+        : batchTypes.size === 1 && batchTypes.has("GPS")
+          ? "GPS "
+          : "";
+    const createdBatchCount = Number(creationResult.createdBatchCount || 0);
+
+    return (
+      `${formatNumber(createdBatchCount)} ${batchTypeLabel}Targeted Batch${
+        createdBatchCount === 1 ? "" : "es"
+      } created with ${formatNumber(
+        creationResult.createdRowCount || 0,
+      )} row(s).`
+    );
+  }, [creationResult, isRegisterLoading, uploads]);
+
+  const wardFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(uploads.map((upload) => getWardLabel(upload))))
+        .filter(Boolean)
+        .sort(compareTableValues),
+    [uploads],
+  );
+
   const filteredUploads = useMemo(() => {
+    const normalizedTbIdFilter = tbIdFilter.trim().toLowerCase();
+    const normalizedTotalFilter = totalFilter.trim().toLowerCase();
+    const normalizedCreatedByFilter = createdByFilter.trim().toLowerCase();
+
     return uploads.filter((upload) => {
+      const allocationState = getAllocationState(upload);
+
       if (sourceFilter && upload?.source?.type !== sourceFilter) return false;
       if (statusFilter && upload?.status !== statusFilter) return false;
+      if (
+        normalizedTbIdFilter &&
+        !String(upload?.id || "")
+          .toLowerCase()
+          .includes(normalizedTbIdFilter)
+      ) {
+        return false;
+      }
+      if (batchTypeFilter && getBatchType(upload) !== batchTypeFilter) {
+        return false;
+      }
+      if (allocationFilter && allocationState.label !== allocationFilter) {
+        return false;
+      }
+      if (
+        normalizedTotalFilter &&
+        !String(getUploadTotal(upload)).includes(normalizedTotalFilter)
+      ) {
+        return false;
+      }
+      if (wardFilter && getWardLabel(upload) !== wardFilter) {
+        return false;
+      }
+      if (
+        normalizedCreatedByFilter &&
+        !getCreatedBy(upload).toLowerCase().includes(normalizedCreatedByFilter)
+      ) {
+        return false;
+      }
+
       return true;
     });
-  }, [uploads, sourceFilter, statusFilter]);
+  }, [
+    allocationFilter,
+    batchTypeFilter,
+    createdByFilter,
+    sourceFilter,
+    statusFilter,
+    tbIdFilter,
+    totalFilter,
+    uploads,
+    wardFilter,
+  ]);
+
+  const sortedUploads = useMemo(() => {
+    if (!sortConfig.key) return filteredUploads;
+
+    const directionMultiplier = sortConfig.direction === "desc" ? -1 : 1;
+
+    return [...filteredUploads].sort((left, right) =>
+      compareTableValues(
+        getSortValue(left, sortConfig.key),
+        getSortValue(right, sortConfig.key),
+      ) * directionMultiplier,
+    );
+  }, [filteredUploads, sortConfig]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedUploads.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = (safeCurrentPage - 1) * pageSize;
+  const pagedUploads = sortedUploads.slice(pageStart, pageStart + pageSize);
+
+  function resetToFirstPage() {
+    setCurrentPage(1);
+  }
+
+  function handleSort(sortKey) {
+    setSortConfig((current) => ({
+      key: sortKey,
+      direction:
+        current.key === sortKey && current.direction === "asc" ? "desc" : "asc",
+    }));
+    resetToFirstPage();
+  }
+
+  function handlePageSizeChange(nextPageSize) {
+    setPageSize(nextPageSize);
+    resetToFirstPage();
+  }
 
   const summary = useMemo(() => {
     const totalUploads = uploads.length;
@@ -659,7 +929,10 @@ export default function TargetedBatchesPage() {
           <select
             style={styles.filterInput}
             value={sourceFilter}
-            onChange={(event) => setSourceFilter(event.target.value)}
+            onChange={(event) => {
+              setSourceFilter(event.target.value);
+              resetToFirstPage();
+            }}
           >
             <option value="">All Sources</option>
             {SOURCE_FILTER_OPTIONS.map((source) => (
@@ -672,7 +945,10 @@ export default function TargetedBatchesPage() {
           <select
             style={styles.filterInput}
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            onChange={(event) => {
+              setStatusFilter(event.target.value);
+              resetToFirstPage();
+            }}
           >
             <option value="">All States</option>
             {STATUS_FILTER_OPTIONS.map((status) => (
@@ -683,24 +959,156 @@ export default function TargetedBatchesPage() {
           </select>
         </div>
 
+        <PaginationControls
+          currentPage={safeCurrentPage}
+          pageSize={pageSize}
+          totalPages={totalPages}
+          totalRows={sortedUploads.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={handlePageSizeChange}
+        />
+
         <div style={styles.tableWrap}>
           <table style={styles.table}>
             <thead>
               <tr>
-                <Th>TB ID</Th>
+                <SortableTh
+                  label="TB ID"
+                  sortKey="id"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTh
+                  label="Batch Type"
+                  sortKey="batchType"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
                 <Th>TB Rows</Th>
-                <Th>Allocation</Th>
-                <Th>Total</Th>
-                <Th>Ward</Th>
-                <Th>Final Report (DRAFT)</Th>
+                <SortableTh
+                  label="Allocation"
+                  sortKey="allocation"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTh
+                  label="Total"
+                  sortKey="total"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTh
+                  label="Ward"
+                  sortKey="ward"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTh
+                  label="Created By"
+                  sortKey="createdBy"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
                 <Th>Delete TB</Th>
+              </tr>
+              <tr>
+                <th style={styles.filterHeaderCell}>
+                  <input
+                    type="text"
+                    value={tbIdFilter}
+                    onChange={(event) => {
+                      setTbIdFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    placeholder="Filter TB ID"
+                    style={styles.columnFilterInput}
+                    aria-label="Filter TB ID"
+                  />
+                </th>
+                <th style={styles.filterHeaderCell}>
+                  <select
+                    value={batchTypeFilter}
+                    onChange={(event) => {
+                      setBatchTypeFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Batch Type"
+                  >
+                    <option value="">All</option>
+                    <option value="GPS">GPS</option>
+                    <option value="NON-GPS">NON-GPS</option>
+                  </select>
+                </th>
+                <th style={styles.filterHeaderCell} />
+                <th style={styles.filterHeaderCell}>
+                  <select
+                    value={allocationFilter}
+                    onChange={(event) => {
+                      setAllocationFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Allocation"
+                  >
+                    <option value="">All</option>
+                    <option value="NOT ALLOCATED">Not Allocated</option>
+                    <option value="ALLOCATED">Allocated</option>
+                  </select>
+                </th>
+                <th style={styles.filterHeaderCell}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={totalFilter}
+                    onChange={(event) => {
+                      setTotalFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    placeholder="Filter"
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Total"
+                  />
+                </th>
+                <th style={styles.filterHeaderCell}>
+                  <select
+                    value={wardFilter}
+                    onChange={(event) => {
+                      setWardFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Ward"
+                  >
+                    <option value="">All Wards</option>
+                    {wardFilterOptions.map((ward) => (
+                      <option key={ward} value={ward}>
+                        {ward}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th style={styles.filterHeaderCell}>
+                  <input
+                    type="text"
+                    value={createdByFilter}
+                    onChange={(event) => {
+                      setCreatedByFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    placeholder="Filter Created By"
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Created By"
+                  />
+                </th>
+                <th style={styles.filterHeaderCell} />
               </tr>
             </thead>
 
             <tbody>
-              {filteredUploads.length === 0 ? (
+              {sortedUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={7}>
+                  <Td colSpan={8}>
                     {uploads.length === 0
                       ? "No permanent Targeted Batches were found for this Local Municipality."
                       : "No permanent Targeted Batches match the selected filters."}
@@ -708,20 +1116,21 @@ export default function TargetedBatchesPage() {
                 </tr>
               ) : null}
 
-              {filteredUploads.map((upload) => {
-                const fileDecision = getUploadFileDecision(upload);
+              {pagedUploads.map((upload) => {
                 const creationReady = upload?.creation?.state === "READY";
                 const deleteEligibility = getDeleteEligibility(upload);
                 const allocationState = getAllocationState(upload);
-                const rejectionReason =
-                  upload?.creation?.failureMessage ||
-                  upload?.validation?.errors?.[0] ||
-                  null;
 
                 return (
                   <tr key={upload.id}>
                     <Td>
                       <div style={styles.strongCell}>{upload.id || "NAv"}</div>
+                    </Td>
+
+                    <Td>
+                      <strong style={styles.batchTypeCell}>
+                        {getBatchType(upload)}
+                      </strong>
                     </Td>
 
                     <Td>
@@ -793,29 +1202,14 @@ export default function TargetedBatchesPage() {
                     </Td>
 
                     <Td>
-                      <div style={styles.strongCell}>
-                        {upload?.scope?.wardName ||
-                          (upload?.scope?.wardNumber
-                            ? `Ward ${upload.scope.wardNumber}`
-                            : "NAv")}
-                      </div>
+                      <div style={styles.strongCell}>{getWardLabel(upload)}</div>
                       <div style={styles.mutedCell}>
                         {upload?.scope?.wardPcode || "NAv"}
                       </div>
                     </Td>
 
                     <Td>
-                      <button
-                        type="button"
-                        style={{
-                          ...styles.rowDraftButton,
-                          ...styles.disabledButton,
-                        }}
-                        disabled
-                        title="The TB Final Report page is still a draft."
-                      >
-                        Final Report (DRAFT)
-                      </button>
+                      <div style={styles.strongCell}>{getCreatedBy(upload)}</div>
                     </Td>
 
                     <Td>
@@ -840,6 +1234,15 @@ export default function TargetedBatchesPage() {
             </tbody>
           </table>
         </div>
+
+        <PaginationControls
+          currentPage={safeCurrentPage}
+          pageSize={pageSize}
+          totalPages={totalPages}
+          totalRows={sortedUploads.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={handlePageSizeChange}
+        />
 
         {draft ? (
           <div style={styles.registerFooter}>
@@ -1108,13 +1511,63 @@ const styles = {
     minWidth: 180,
     background: "#ffffff",
   },
+  paginationBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "10px 0",
+    flexWrap: "wrap",
+  },
+  paginationSummary: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  paginationControls: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 7,
+    flexWrap: "wrap",
+  },
+  pageSizeLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 7,
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  pageSizeSelect: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 9,
+    padding: "6px 8px",
+    background: "#ffffff",
+    color: "#334155",
+  },
+  paginationButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 9,
+    padding: "6px 9px",
+    background: "#ffffff",
+    color: "#475569",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  pageCountLabel: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
   tableWrap: {
     overflowX: "auto",
   },
   table: {
     width: "100%",
     borderCollapse: "collapse",
-    minWidth: 760,
+    minWidth: 980,
   },
   th: {
     textAlign: "left",
@@ -1124,6 +1577,37 @@ const styles = {
     borderBottom: "1px solid #e2e8f0",
     padding: "12px 10px",
     whiteSpace: "nowrap",
+  },
+  sortHeaderButton: {
+    border: 0,
+    padding: 0,
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    fontWeight: 900,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  sortIndicator: {
+    display: "inline-block",
+    minWidth: 12,
+  },
+  filterHeaderCell: {
+    background: "#f8fafc",
+    borderBottom: "1px solid #e2e8f0",
+    padding: "0 8px 10px",
+    verticalAlign: "top",
+  },
+  columnFilterInput: {
+    width: "100%",
+    minWidth: 90,
+    boxSizing: "border-box",
+    border: "1px solid #cbd5e1",
+    borderRadius: 8,
+    padding: "6px 7px",
+    background: "#ffffff",
+    color: "#334155",
+    fontSize: 11,
   },
   td: {
     fontSize: 12,
@@ -1212,6 +1696,11 @@ const styles = {
   strongCell: {
     color: "#0f172a",
     fontWeight: 900,
+  },
+  batchTypeCell: {
+    color: "#0f172a",
+    fontWeight: 900,
+    whiteSpace: "nowrap",
   },
   mutedCell: {
     marginTop: 3,

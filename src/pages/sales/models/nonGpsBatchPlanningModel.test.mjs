@@ -4,12 +4,15 @@ import test from "node:test";
 import {
   NGP_CLASSIFICATIONS,
   NGP_SELECTION_MAX,
+  NGP_TARGETED_BATCH_PLANNING_MODE,
+  buildNgpTargetedBatchDraftPlan,
   buildNonGpsBatchPlanningModel,
   classifyNonGpsSalesRow,
   compareStreetNumbers,
   formatAuthoritativeAddress,
   normalizePlanningKey,
   reconcileNgpVisibility,
+  updateNgpStreetSelection,
   validateNgpSelection,
 } from "./nonGpsBatchPlanningModel.js";
 import { inspectSalesTbRefsIntegrity } from "./salesTbRefsIntegrityModel.js";
@@ -31,11 +34,13 @@ function makeRow({
   tbRefsIntegrity = { valid: true, issues: [] },
   meterNo,
   accountNumber,
+  lmPcode = "ZA5241",
 } = {}) {
   return {
     id: id || `SALES_${Math.random()}`,
     meterNo: meterNo || id || "07100000000",
     accountNumber: accountNumber || `ACC_${id || "1"}`,
+    lmPcode,
     hasUsableGps: gps,
     town,
     adr: { strNo, strName, strType },
@@ -401,7 +406,7 @@ test("visibility reconciliation fails when any No-GPS row is omitted", () => {
   );
 });
 
-test("selection requires 1-20 Outstanding targets from exactly one street", () => {
+test("selection requires 1-20 unique Outstanding targets and may combine streets", () => {
   const model = buildNonGpsBatchPlanningModel([
     makeRow({ id: "A", strNo: "1" }),
     makeRow({ id: "B", strNo: "2" }),
@@ -424,8 +429,12 @@ test("selection requires 1-20 Outstanding targets from exactly one street", () =
     "NGP_SELECTION_NOT_OUTSTANDING",
   );
   assert.equal(
-    validateNgpSelection([outstanding[0], glencoeStreet.targets[0]]).code,
-    "NGP_SELECTION_MULTIPLE_STREETS",
+    validateNgpSelection([outstanding[0], glencoeStreet.targets[0]]).ok,
+    true,
+  );
+  assert.equal(
+    validateNgpSelection([outstanding[0], outstanding[0]]).code,
+    "NGP_SELECTION_DUPLICATE",
   );
 
   const tooMany = Array.from({ length: NGP_SELECTION_MAX + 1 }, (_, index) => ({
@@ -434,6 +443,85 @@ test("selection requires 1-20 Outstanding targets from exactly one street", () =
   }));
   assert.equal(validateNgpSelection(tooMany).code, "NGP_SELECTION_TOO_LARGE");
 });
+
+test("street selection fills only remaining batch capacity and toggles a fully selected street off", () => {
+  const model = buildNonGpsBatchPlanningModel(
+    Array.from({ length: 25 }, (_, index) =>
+      makeRow({
+        id: `STREET_${index + 1}`,
+        strNo: String(index + 1),
+        strName: "Ann",
+      }),
+    ),
+  );
+  const street = model.towns[0].streets[0];
+
+  const first = updateNgpStreetSelection({
+    selectedIds: new Set(),
+    streetTargets: street.targets,
+  });
+
+  assert.equal(first.selectedIds.size, 20);
+  assert.equal(first.streetSelectedCount, 20);
+  assert.equal(first.filledToCapacity, true);
+
+  const partialToggledOff = updateNgpStreetSelection({
+    selectedIds: first.selectedIds,
+    streetTargets: street.targets,
+  });
+  assert.equal(partialToggledOff.selectedIds.size, 0);
+  assert.equal(partialToggledOff.removedCount, 20);
+  assert.equal(partialToggledOff.streetSelectedCount, 0);
+  assert.equal(partialToggledOff.filledToCapacity, false);
+
+  const narrowedStreet = {
+    targets: street.targets.slice(0, 3),
+  };
+  const threeSelected = updateNgpStreetSelection({
+    selectedIds: new Set(),
+    streetTargets: narrowedStreet.targets,
+  });
+  assert.equal(threeSelected.selectedIds.size, 3);
+
+  const toggledOff = updateNgpStreetSelection({
+    selectedIds: threeSelected.selectedIds,
+    streetTargets: narrowedStreet.targets,
+  });
+  assert.equal(toggledOff.selectedIds.size, 0);
+  assert.equal(toggledOff.removedCount, 3);
+});
+
+test("NGP draft plan creates exactly one 1-20 PREPAID_SALES batch without ward scope", () => {
+  const model = buildNonGpsBatchPlanningModel([
+    makeRow({ id: "A100", town: "Dundee", strNo: "1", strName: "Acacia" }),
+    makeRow({ id: "B200", town: "Dundee", strNo: "2", strName: "Albert" }),
+  ]);
+  const targets = model.streetPlanningTargets.filter(
+    (target) => target.classification === NGP_CLASSIFICATIONS.OUTSTANDING,
+  );
+
+  const result = buildNgpTargetedBatchDraftPlan({
+    targets,
+    tbId: "TGB_20260816_044220_AB12",
+    lmPcode: "ZA5241",
+    lmName: "Endumeni",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.draft.proposedBatches.length, 1);
+  assert.equal(result.draft.displayRows.length, 2);
+  assert.equal(
+    result.draft.selection.planningMode,
+    NGP_TARGETED_BATCH_PLANNING_MODE,
+  );
+  assert.equal(result.draft.proposedBatches[0].scope.wardPcode, "");
+  assert.equal(result.draft.proposedBatches[0].scope.wardNumber, "");
+  assert.deepEqual(
+    result.draft.authoritativeIds.salesAllMeterIds,
+    result.draft.displayRows.map((row) => row.salesAllMeterId),
+  );
+});
+
 
 test("current regression shape reconciles 10,216 → 7,583 + 2,633 and 2,633 → 2,567 + 66", () => {
   const rows = [];

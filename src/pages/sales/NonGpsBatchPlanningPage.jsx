@@ -1,13 +1,24 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useMemo, useState } from "react";
+import { useDispatch } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetDemoSalesByLmPcodeQuery } from "../../redux/demoSalesApi";
+import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
+import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
 import NonGpsExceptions from "./components/NonGpsExceptions";
 import NonGpsStreetDetail from "./components/NonGpsStreetDetail";
 import NonGpsStreetPlanning from "./components/NonGpsStreetPlanning";
-import { buildNonGpsBatchPlanningModel } from "./models/nonGpsBatchPlanningModel";
+import {
+  NGP_CLASSIFICATIONS,
+  NGP_SELECTION_MAX,
+  buildNgpTargetedBatchDraftPlan,
+  buildNonGpsBatchPlanningModel,
+  updateNgpStreetSelection,
+  validateNgpSelection,
+} from "./models/nonGpsBatchPlanningModel";
 import {
   formatNumber,
   getActiveLmPcode,
@@ -19,17 +30,43 @@ const VIEW_MODES = Object.freeze({
   EXCEPTIONS: "EXCEPTIONS",
 });
 
-function SummaryCard({ label, value, subtitle }) {
-  return (
-    <div style={styles.summaryCard}>
+function SummaryCard({
+  label,
+  value,
+  subtitle,
+  active = false,
+  onClick = null,
+}) {
+  const content = (
+    <>
       <span style={styles.summaryLabel}>{label}</span>
       <strong style={styles.summaryValue}>{formatNumber(value || 0)}</strong>
       <span style={styles.summarySubtitle}>{subtitle}</span>
-    </div>
+    </>
+  );
+
+  if (!onClick) {
+    return <div style={styles.summaryCard}>{content}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      style={{
+        ...styles.summaryCard,
+        ...styles.summaryCardButton,
+        ...(active ? styles.summaryCardActive : null),
+      }}
+      onClick={onClick}
+    >
+      {content}
+    </button>
   );
 }
 
 export default function NonGpsBatchPlanningPage() {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { activeWorkbase, role } = useAuth();
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
@@ -37,6 +74,8 @@ export default function NonGpsBatchPlanningPage() {
   const [selectedTownKey, setSelectedTownKey] = useState("");
   const [selectedStreetKey, setSelectedStreetKey] = useState("");
   const [searchText, setSearchText] = useState("");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectionError, setSelectionError] = useState("");
 
   const {
     data: salesRows = [],
@@ -62,6 +101,26 @@ export default function NonGpsBatchPlanningPage() {
       selectedTown?.streets.find((street) => street.key === selectedStreetKey) ||
       null,
     [selectedStreetKey, selectedTown],
+  );
+
+  const selectedTargets = useMemo(
+    () =>
+      planningModel.streetPlanningTargets.filter(
+        (target) =>
+          target.classification === NGP_CLASSIFICATIONS.OUTSTANDING &&
+          selectedIds.has(target.id),
+      ),
+    [planningModel.streetPlanningTargets, selectedIds],
+  );
+
+  const activeSelectedIds = useMemo(
+    () => new Set(selectedTargets.map((target) => target.id)),
+    [selectedTargets],
+  );
+
+  const selectionValidation = useMemo(
+    () => validateNgpSelection(selectedTargets),
+    [selectedTargets],
   );
 
   function openPlanningView() {
@@ -95,6 +154,70 @@ export default function NonGpsBatchPlanningPage() {
   function backToStreets() {
     setSelectedStreetKey("");
     setSearchText("");
+  }
+
+  function toggleTarget(target) {
+    if (target?.classification !== NGP_CLASSIFICATIONS.OUTSTANDING) return;
+
+    setSelectionError("");
+    const nextSelectedIds = new Set(activeSelectedIds);
+
+    if (nextSelectedIds.has(target.id)) {
+      nextSelectedIds.delete(target.id);
+      setSelectedIds(nextSelectedIds);
+      return;
+    }
+
+    if (nextSelectedIds.size >= NGP_SELECTION_MAX) {
+      setSelectionError(
+        `One Non GPS Targeted Batch may contain at most ${NGP_SELECTION_MAX} meters.`,
+      );
+      return;
+    }
+
+    nextSelectedIds.add(target.id);
+    setSelectedIds(nextSelectedIds);
+  }
+
+  function toggleStreet(street) {
+    setSelectionError("");
+
+    const update = updateNgpStreetSelection({
+      selectedIds: activeSelectedIds,
+      streetTargets: street?.targets || [],
+    });
+
+    setSelectedIds(update.selectedIds);
+
+    if (update.filledToCapacity) {
+      setSelectionError(
+        `The batch is full at ${NGP_SELECTION_MAX} meters. Only the available slots from ${street?.streetLabel || "this street"} were selected.`,
+      );
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectionError("");
+  }
+
+  function reviewTargetedBatch() {
+    setSelectionError("");
+
+    const draftPlan = buildNgpTargetedBatchDraftPlan({
+      targets: selectedTargets,
+      tbId: buildTargetedBatchDraftId(),
+      lmPcode: activeLmPcode,
+      lmName: activeWorkbaseName,
+    });
+
+    if (!draftPlan.ok) {
+      setSelectionError(draftPlan.message || "The NGP batch selection is not valid.");
+      return;
+    }
+
+    dispatch(prepareTargetedBatchDraft(draftPlan.draft));
+    navigate("/operations/targeted-batches/draft");
   }
 
   return (
@@ -168,11 +291,15 @@ export default function NonGpsBatchPlanningPage() {
               label="Street Eligible"
               value={planningModel.counts.streetEligible}
               subtitle="Available for Town / street planning"
+              active={viewMode === VIEW_MODES.PLANNING}
+              onClick={openPlanningView}
             />
             <SummaryCard
               label="Exceptions"
               value={planningModel.counts.exceptions}
               subtitle="Visible but not selectable"
+              active={viewMode === VIEW_MODES.EXCEPTIONS}
+              onClick={openExceptionsView}
             />
             {planningModel.visibilityCounts.unplaced > 0 ? (
               <SummaryCard
@@ -190,37 +317,70 @@ export default function NonGpsBatchPlanningPage() {
             </section>
           ) : null}
 
-          <section style={styles.tabs}>
-            <button
-              type="button"
-              style={{
-                ...styles.tabButton,
-                ...(viewMode === VIEW_MODES.PLANNING
-                  ? styles.tabButtonActive
-                  : null),
-              }}
-              onClick={openPlanningView}
-            >
-              Street Planning
-            </button>
-            <button
-              type="button"
-              style={{
-                ...styles.tabButton,
-                ...(viewMode === VIEW_MODES.EXCEPTIONS
-                  ? styles.tabButtonActive
-                  : null),
-              }}
-              onClick={openExceptionsView}
-            >
-              Exceptions / Unplaced ({formatNumber(planningModel.visibilityCounts.exceptionView)})
-            </button>
-          </section>
+          {viewMode === VIEW_MODES.PLANNING ? (
+            <section style={styles.selectionBar}>
+              <div>
+                <strong>
+                  Selected: {formatNumber(selectedTargets.length)} /{" "}
+                  {NGP_SELECTION_MAX}
+                </strong>
+                <span style={styles.selectionHint}>
+                  Select Outstanding meters by street or individually. One
+                  operation creates one Targeted Batch.
+                </span>
+              </div>
+
+              <div style={styles.selectionActions}>
+                <span
+                  style={{
+                    ...styles.selectionStatus,
+                    ...(selectionValidation.ok
+                      ? styles.selectionStatusReady
+                      : styles.selectionStatusWaiting),
+                  }}
+                >
+                  {selectionValidation.ok ? "Selection ready" : "Select at least 1"}
+                </span>
+                <button
+                  type="button"
+                  style={styles.clearButton}
+                  disabled={selectedTargets.length === 0}
+                  onClick={clearSelection}
+                >
+                  Clear Selection
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.reviewButton,
+                    ...(!selectionValidation.ok
+                      ? styles.reviewButtonDisabled
+                      : null),
+                  }}
+                  disabled={!selectionValidation.ok}
+                  onClick={reviewTargetedBatch}
+                >
+                  Review Targeted Batch
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {selectionError && viewMode === VIEW_MODES.PLANNING ? (
+            <section role="alert" style={styles.selectionError}>
+              {selectionError}
+            </section>
+          ) : null}
 
           {viewMode === VIEW_MODES.EXCEPTIONS ? (
             <NonGpsExceptions exceptions={planningModel.exceptions} />
           ) : selectedStreet ? (
-            <NonGpsStreetDetail street={selectedStreet} onBack={backToStreets} />
+            <NonGpsStreetDetail
+              street={selectedStreet}
+              selectedIds={activeSelectedIds}
+              onToggleTarget={toggleTarget}
+              onBack={backToStreets}
+            />
           ) : (
             <NonGpsStreetPlanning
               towns={planningModel.towns}
@@ -230,6 +390,8 @@ export default function NonGpsBatchPlanningPage() {
               onOpenTown={openTown}
               onBackToTowns={backToTowns}
               onOpenStreet={openStreet}
+              selectedIds={activeSelectedIds}
+              onToggleStreet={toggleStreet}
             />
           )}
         </>
@@ -296,20 +458,81 @@ const styles = {
     background: "#ffffff",
     boxShadow: "0 6px 18px rgba(15, 23, 42, 0.05)",
   },
+  summaryCardButton: {
+    width: "100%",
+    appearance: "none",
+    textAlign: "left",
+    font: "inherit",
+    cursor: "pointer",
+  },
+  summaryCardActive: {
+    borderColor: "#93c5fd",
+    background: "#eff6ff",
+  },
   summaryLabel: { color: "#64748b", fontSize: "0.75rem", fontWeight: 900 },
   summaryValue: { color: "#0f172a", fontSize: "1.55rem" },
   summarySubtitle: { color: "#64748b", fontSize: "0.78rem" },
-  tabs: { display: "flex", gap: "0.5rem", flexWrap: "wrap" },
-  tabButton: {
-    border: "1px solid #cbd5e1",
+  selectionBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "0.85rem 0.95rem",
+    border: "1px solid #bfdbfe",
+    borderRadius: "0.8rem",
+    background: "#eff6ff",
+    color: "#1e3a8a",
+  },
+  selectionHint: {
+    display: "block",
+    marginTop: "0.2rem",
+    fontSize: "0.78rem",
+  },
+  selectionActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.6rem",
+    flexWrap: "wrap",
+  },
+  selectionStatus: {
     borderRadius: "999px",
+    padding: "0.32rem 0.58rem",
+    fontSize: "0.72rem",
+    fontWeight: 900,
+  },
+  selectionStatusReady: { background: "#dcfce7", color: "#166534" },
+  selectionStatusWaiting: { background: "#e2e8f0", color: "#475569" },
+  clearButton: {
+    border: "1px solid #93c5fd",
+    borderRadius: "0.6rem",
     background: "#ffffff",
-    color: "#475569",
+    color: "#1d4ed8",
+    padding: "0.5rem 0.7rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  reviewButton: {
+    border: "1px solid #1d4ed8",
+    borderRadius: "0.6rem",
+    background: "#1d4ed8",
+    color: "#ffffff",
     padding: "0.5rem 0.75rem",
     fontWeight: 800,
     cursor: "pointer",
   },
-  tabButtonActive: { background: "#dbeafe", color: "#1d4ed8", borderColor: "#93c5fd" },
+  reviewButtonDisabled: {
+    opacity: 0.5,
+    cursor: "not-allowed",
+  },
+  selectionError: {
+    padding: "0.75rem 0.85rem",
+    border: "1px solid #fecaca",
+    borderRadius: "0.7rem",
+    background: "#fef2f2",
+    color: "#991b1b",
+    fontSize: "0.84rem",
+    fontWeight: 700,
+  },
   statePanel: {
     padding: "1rem",
     border: "1px solid #dbe3ef",

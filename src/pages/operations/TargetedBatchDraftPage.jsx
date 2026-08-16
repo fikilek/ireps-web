@@ -9,6 +9,7 @@ import {
   clearTargetedBatchDraft,
   selectTargetedBatchDraft,
 } from "../../redux/targetedBatchDraftSlice";
+import { TARGETED_BATCH_PLANNING_MODES } from "../../redux/targetedBatchDraftModel";
 import TargetedBatchConfirmModal from "./targeted-batches/TargetedBatchConfirmModal";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
 import { downloadTargetedBatchDraft } from "./targeted-batches/targetedBatchUtils";
@@ -17,6 +18,9 @@ export default function TargetedBatchDraftPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const draft = useSelector(selectTargetedBatchDraft);
+  const isNgpDraft =
+    draft?.selection?.planningMode ===
+    TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET;
   const [isCreating, setIsCreating] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [creationFeedback, setCreationFeedback] = useState(null);
@@ -104,6 +108,22 @@ export default function TargetedBatchDraftPage() {
       }
 
       dispatch(clearTargetedBatchDraft());
+
+      if (isNgpDraft) {
+        navigate("/operations/targeted-batches", {
+          replace: true,
+          state: {
+            targetedBatchCreation: {
+              success: true,
+              creationGroupId: result?.creationGroupId || null,
+              createdBatchCount: permanentBatches.length,
+              createdRowCount: Number(result?.createdRowCount || 0),
+              batches: permanentBatches,
+            },
+          },
+        });
+        return;
+      }
 
       if (permanentBatches.length === 1) {
         navigate(

@@ -11,6 +11,7 @@ export const NGP_CLASSIFICATIONS = Object.freeze({
 });
 
 export const NGP_SELECTION_MAX = 20;
+export const NGP_TARGETED_BATCH_PLANNING_MODE = "NON_GPS_STREET";
 
 const INVALID_TEXT_VALUES = new Set(["", "NAV", "N/A", "NA", "NULL"]);
 
@@ -400,15 +401,23 @@ export function validateNgpSelection(targets = []) {
     };
   }
 
-  const streetKeys = new Set(
-    selectedTargets.map((target) => String(target?.streetKey || "")),
-  );
+  const targetIds = selectedTargets
+    .map((target) => String(target?.id || "").trim())
+    .filter(Boolean);
 
-  if (streetKeys.size !== 1 || streetKeys.has("")) {
+  if (targetIds.length !== selectedTargets.length) {
     return {
       ok: false,
-      code: "NGP_SELECTION_MULTIPLE_STREETS",
-      message: "A Non GPS planning selection must stay within one street.",
+      code: "NGP_SELECTION_ID_MISSING",
+      message: "Every selected target must have a Sales All Meters identity.",
+    };
+  }
+
+  if (new Set(targetIds).size !== targetIds.length) {
+    return {
+      ok: false,
+      code: "NGP_SELECTION_DUPLICATE",
+      message: "The same Sales target may not appear more than once.",
     };
   }
 
@@ -418,5 +427,281 @@ export function validateNgpSelection(targets = []) {
     message: `${selectedTargets.length} Outstanding target${
       selectedTargets.length === 1 ? "" : "s"
     } selected.`,
+  };
+}
+
+function normalizeSelectedIdSet(selectedIds) {
+  if (selectedIds instanceof Set) return new Set(selectedIds);
+  if (Array.isArray(selectedIds)) return new Set(selectedIds);
+  return new Set();
+}
+
+export function updateNgpStreetSelection({
+  selectedIds,
+  streetTargets = [],
+  maxSelection = NGP_SELECTION_MAX,
+}) {
+  const nextSelectedIds = normalizeSelectedIdSet(selectedIds);
+  const outstandingTargets = (Array.isArray(streetTargets) ? streetTargets : [])
+    .filter(
+      (target) => target?.classification === NGP_CLASSIFICATIONS.OUTSTANDING,
+    );
+
+  const outstandingIds = outstandingTargets
+    .map((target) => String(target?.id || "").trim())
+    .filter(Boolean);
+  const selectedStreetIds = outstandingIds.filter((id) =>
+    nextSelectedIds.has(id),
+  );
+
+  if (selectedStreetIds.length > 0) {
+    outstandingIds.forEach((id) => nextSelectedIds.delete(id));
+
+    return {
+      selectedIds: nextSelectedIds,
+      addedCount: 0,
+      removedCount: selectedStreetIds.length,
+      streetOutstandingCount: outstandingIds.length,
+      streetSelectedCount: 0,
+      filledToCapacity: false,
+    };
+  }
+
+  const capacity = Math.max(
+    0,
+    Number(maxSelection || NGP_SELECTION_MAX) - nextSelectedIds.size,
+  );
+  const idsToAdd = outstandingIds
+    .filter((id) => !nextSelectedIds.has(id))
+    .slice(0, capacity);
+
+  idsToAdd.forEach((id) => nextSelectedIds.add(id));
+
+  const streetSelectedCount = outstandingIds.filter((id) =>
+    nextSelectedIds.has(id),
+  ).length;
+
+  return {
+    selectedIds: nextSelectedIds,
+    addedCount: idsToAdd.length,
+    removedCount: 0,
+    streetOutstandingCount: outstandingIds.length,
+    streetSelectedCount,
+    filledToCapacity:
+      nextSelectedIds.size >= Number(maxSelection || NGP_SELECTION_MAX) &&
+      streetSelectedCount < outstandingIds.length,
+  };
+}
+
+function compareNgpTargets(left, right) {
+  const townComparison = compareNaturalValues(left?.town, right?.town);
+  if (townComparison !== 0) return townComparison;
+
+  const streetComparison = compareNaturalValues(
+    left?.streetLabel,
+    right?.streetLabel,
+  );
+  if (streetComparison !== 0) return streetComparison;
+
+  return compareStreetNumbers(left?.row, right?.row);
+}
+
+function getSelectionPeriod(targets, field, direction) {
+  const values = targets
+    .map((target) => String(target?.row?.[field] || "").trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (values.length === 0) return null;
+  return direction === "latest" ? values[values.length - 1] : values[0];
+}
+
+export function buildNgpTargetedBatchDraftPlan({
+  targets = [],
+  tbId,
+  lmPcode,
+  lmName,
+  selectionReason = "Selected from Non GPS Batch Planning",
+}) {
+  const selectedTargets = [...(Array.isArray(targets) ? targets : [])].sort(
+    compareNgpTargets,
+  );
+  const selectionValidation = validateNgpSelection(selectedTargets);
+
+  if (!selectionValidation.ok) {
+    return {
+      ok: false,
+      code: selectionValidation.code,
+      message: selectionValidation.message,
+      errors: [selectionValidation.message],
+    };
+  }
+
+  const normalizedTbId = String(tbId || "").trim().toUpperCase();
+  const normalizedLmPcode = String(lmPcode || "").trim().toUpperCase();
+
+  if (!/^TGB_[0-9]{8}_[0-9]{6}_[A-Z0-9]{4}$/.test(normalizedTbId)) {
+    return {
+      ok: false,
+      code: "NGP_TB_ID_INVALID",
+      message: "A valid Targeted Batch ID is required.",
+      errors: ["A valid Targeted Batch ID is required."],
+    };
+  }
+
+  if (!/^ZA[0-9]+$/.test(normalizedLmPcode)) {
+    return {
+      ok: false,
+      code: "NGP_LM_SCOPE_INVALID",
+      message: "A valid active Local Municipality is required.",
+      errors: ["A valid active Local Municipality is required."],
+    };
+  }
+
+  const mismatchedLmTargets = selectedTargets.filter(
+    (target) =>
+      String(target?.row?.lmPcode || "")
+        .trim()
+        .toUpperCase() !== normalizedLmPcode,
+  );
+
+  if (mismatchedLmTargets.length > 0) {
+    return {
+      ok: false,
+      code: "NGP_LM_SCOPE_MISMATCH",
+      message: "Every selected target must belong to the active LM.",
+      errors: ["Every selected target must belong to the active LM."],
+    };
+  }
+
+  const draftBatchKey = `NGP::${normalizedTbId}`;
+  const creationGroupId = normalizedTbId.replace(/^TGB_/, "TBCG_");
+  const salesAllMeterIds = selectedTargets.map((target) =>
+    String(target.id || "").trim(),
+  );
+
+  const rows = selectedTargets.map((target, index) => {
+    const sourceRow = target.row || {};
+    const adr = sourceRow.adr || {};
+
+    return {
+      id: target.id,
+      rowNo: String(index + 1),
+      batchRowNo: String(index + 1),
+      salesAllMeterId: target.id,
+      sourceSalesAllMeterId: target.id,
+      meterNo: target.meterNo,
+      meterNoNormalized: sourceRow.meterNoNormalized || target.meterNo,
+      accountNumber: target.accountNumber,
+      customerName: sourceRow.customerName || "",
+      addressLine1: target.canonicalAddress,
+      town: target.town,
+      lmPcode: normalizedLmPcode,
+      actionReason: selectionReason,
+      totalSalesC: sourceRow.totalSalesC || 0,
+      latestMonthSalesC: sourceRow.latestMonthSalesC || 0,
+      sales3MonthsC: sourceRow.sales3MonthsC || 0,
+      sales6MonthsC: sourceRow.sales6MonthsC || 0,
+      sales12MonthsC:
+        sourceRow.sales12MonthsC || sourceRow.latest12MonthsSalesC || 0,
+      monthlySalesC: sourceRow.monthlySalesC || {},
+      monthlyUnits: sourceRow.monthlyUnits || {},
+      monthsWithoutSales: sourceRow.monthsWithoutSales || 0,
+      lastPositiveSalesMonth: sourceRow.lastPositiveSalesMonth || null,
+      astId: sourceRow.astId || null,
+      astMatchStatus: sourceRow.astMatchStatus || "NOT_CHECKED",
+      proposedTrnType: sourceRow.proposedTrnType || null,
+      proposedTbId: normalizedTbId,
+      draftBatchKey,
+      batchSequence: 1,
+      wardPcode: "",
+      wardNumber: "",
+      wardName: "",
+      planning: {
+        mode: NGP_TARGETED_BATCH_PLANNING_MODE,
+        townKey: target.townKey,
+        streetKey: target.streetKey,
+        streetNameKey: target.streetNameKey,
+        strNo: String(adr.strNo ?? ""),
+        strName: String(adr.strName ?? ""),
+        strType: String(adr.strType ?? ""),
+      },
+    };
+  });
+
+  return {
+    ok: true,
+    code: "NGP_TB_DRAFT_READY",
+    message: `${rows.length} Outstanding target${
+      rows.length === 1 ? "" : "s"
+    } prepared for one Targeted Batch.`,
+    draft: {
+      id: normalizedTbId,
+      creationGroup: {
+        id: creationGroupId,
+        proposedBatchCount: 1,
+      },
+      source: {
+        type: "PREPAID_SALES",
+        label: "Prepaid Sales",
+        sourceId: null,
+        fileName: null,
+      },
+      scope: {
+        lmPcode: normalizedLmPcode,
+        lmName: String(lmName || "NAv"),
+      },
+      selection: {
+        reason: selectionReason,
+        salesPeriodFrom: getSelectionPeriod(
+          selectedTargets,
+          "salesPeriodFrom",
+          "earliest",
+        ),
+        salesPeriodTo: getSelectionPeriod(
+          selectedTargets,
+          "salesPeriodTo",
+          "latest",
+        ),
+        planningMode: NGP_TARGETED_BATCH_PLANNING_MODE,
+      },
+      authoritativeIds: {
+        salesAllMeterIds,
+        uploadRowIds: [],
+      },
+      proposedBatches: [
+        {
+          tbId: normalizedTbId,
+          draftBatchKey,
+          sequence: 1,
+          scope: {
+            lmPcode: normalizedLmPcode,
+            lmName: String(lmName || "NAv"),
+            wardPcode: "",
+            wardNumber: "",
+            wardName: "",
+          },
+          salesAllMeterIds,
+          rows,
+          validation: {
+            status: "PASSED",
+            oneWardOnly: false,
+          },
+        },
+      ],
+      displayRows: rows,
+      validation: {
+        status: "PASSED",
+        passed: true,
+        errors: [],
+        warnings: [],
+        duplicateRowNos: [],
+        duplicateMeterNos: [],
+        invalidRowDetails: [],
+        proposedBatchCount: 1,
+        wardGroupingApplied: false,
+        planningMode: NGP_TARGETED_BATCH_PLANNING_MODE,
+      },
+    },
   };
 }
