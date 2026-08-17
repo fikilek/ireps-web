@@ -187,6 +187,7 @@ test("electricity phase, subtype, category and placement mirror Formik choices",
   expectCode(deepMerge(baseElectricity(), { ast: { astData: { meter: { type: "smart" } } } }), "INVALID_METER_SUBTYPE");
   expectCode(deepMerge(baseElectricity(), { ast: { astData: { meter: { category: "Special" } } } }), "INVALID_METER_CATEGORY");
   expectCode(deepMerge(baseElectricity(), { ast: { location: { placement: " " } } }), "METER_PLACEMENT_REQUIRED");
+  expectPass(deepMerge(baseElectricity(), { ast: { location: { placement: "Inside Property" } } }));
 });
 
 test("canonical custom manufacturer is accepted without Formik helper field", () => {
@@ -276,7 +277,10 @@ test("literal Other keypad comment is rejected when serial number is absent", ()
   );
 });
 
-test("prepaid keypad supports no-photo and custom comments but still requires serial or comment", () => {
+test("prepaid keypad is optional but supplied values still require their evidence", () => {
+  expectCode(deepMerge(baseElectricity(), {
+    media: media("astNoPhoto", "sealPhoto", "astCbPhoto"),
+  }), "KEYPAD_PHOTO_REQUIRED");
   expectPass(deepMerge(baseElectricity(), {
     ast: { astData: { meter: { keypad: { serialNo: "", comment: "Keypad Missing" } } } },
     media: media("astNoPhoto", "sealPhoto", "astCbPhoto"),
@@ -285,9 +289,15 @@ test("prepaid keypad supports no-photo and custom comments but still requires se
     ast: { astData: { meter: { keypad: { serialNo: "", comment: "Custom keypad explanation" } } } },
     media: media("astNoPhoto", "sealPhoto", "astCbPhoto"),
   }));
-  expectCode(deepMerge(baseElectricity(), {
+  expectPass(deepMerge(baseElectricity(), {
     ast: { astData: { meter: { keypad: { serialNo: "", comment: "" } } } },
-  }), "KEYPAD_SERIAL_OR_COMMENT_REQUIRED");
+    media: media("astNoPhoto", "sealPhoto", "astCbPhoto"),
+  }));
+
+  const withoutKeypad = baseElectricity();
+  delete withoutKeypad.ast.astData.meter.keypad;
+  withoutKeypad.media = media("astNoPhoto", "sealPhoto", "astCbPhoto");
+  expectPass(withoutKeypad);
 });
 
 test("conventional electricity does not require keypad evidence", () => {
@@ -323,7 +333,10 @@ test("literal Other CB comment is rejected when CB size is absent", () => {
   );
 });
 
-test("CB supports no-photo and custom comments but still requires size or comment", () => {
+test("CB is optional but supplied values still require their evidence", () => {
+  expectCode(deepMerge(baseElectricity(), {
+    media: media("astNoPhoto", "sealPhoto", "keypadPhoto"),
+  }), "CB_PHOTO_REQUIRED");
   expectPass(deepMerge(baseElectricity(), {
     ast: { astData: { meter: { cb: { size: "", comment: "Circuit Breaker Inaccessible" } } } },
     media: media("astNoPhoto", "sealPhoto", "keypadPhoto"),
@@ -332,9 +345,15 @@ test("CB supports no-photo and custom comments but still requires size or commen
     ast: { astData: { meter: { cb: { size: "", comment: "Custom CB explanation" } } } },
     media: media("astNoPhoto", "sealPhoto", "keypadPhoto"),
   }));
-  expectCode(deepMerge(baseElectricity(), {
+  expectPass(deepMerge(baseElectricity(), {
     ast: { astData: { meter: { cb: { size: "", comment: "" } } } },
-  }), "CB_SIZE_OR_COMMENT_REQUIRED");
+    media: media("astNoPhoto", "sealPhoto", "keypadPhoto"),
+  }));
+
+  const withoutCb = baseElectricity();
+  delete withoutCb.ast.astData.meter.cb;
+  withoutCb.media = media("astNoPhoto", "sealPhoto", "keypadPhoto");
+  expectPass(withoutCb);
 });
 
 test("off-grid status is required and yes requires evidence", () => {
@@ -426,7 +445,7 @@ test("malformed media cannot satisfy evidence gates", () => {
   expectCode(deepMerge(baseElectricity(), { media: [{ tag: "astNoPhoto" }] }), "METER_PHOTO_REQUIRED");
 });
 
-test("Meter Installation stays on the unchanged legacy validator while both discovery paths share the new validator", async () => {
+test("Meter Installation keeps its creation pipeline while electricity infrastructure uses the dedicated parity validator", async () => {
   const source = await readFile(new URL("../index.js", import.meta.url), "utf8");
 
   const trigger = source.slice(
@@ -448,6 +467,12 @@ test("Meter Installation stays on the unchanged legacy validator while both disc
 
   assert.match(installation, /validateMeterCreationPayload\(\{/);
   assert.match(installation, /expectedTrnType: "METER_INSTALLATION"/);
-  assert.match(source, /"SEAL_EVIDENCE_REQUIRED"/);
-  assert.match(source, /"Electricity meter seal number and photo are required"/);
+  assert.match(
+    source,
+    /import \{\s*validateMeterInstallationElectricity,\s*\} from "\.\/meterInstallation\/validation\.js";/s,
+  );
+  assert.match(
+    source,
+    /validateMeterInstallationElectricity\(\{\s*meter,\s*location: ast\?\.location,\s*media,\s*\}\)/s,
+  );
 });

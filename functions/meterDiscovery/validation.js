@@ -4,6 +4,16 @@ const METER_DISCOVERY_STATUSES = new Set(["CONNECTED", "DISCONNECTED"]);
 const METER_CATEGORIES = new Set(["Normal", "Bulk"]);
 const METER_SUBTYPES = new Set(["prepaid", "conventional"]);
 const ELECTRICITY_PHASES = new Set(["single", "three"]);
+const ELECTRICITY_PLACEMENTS = new Set([
+  "Kiosk",
+  "Pole Top",
+  "Pole Bottom",
+  "Boundary Wall",
+  "Meter Room",
+  "Wall Indoors",
+  "Inside Property",
+  "Other",
+]);
 
 const OTHER_ANOMALY_VALUES = new Set([
   "Meter Blocked (By Munic)",
@@ -64,6 +74,26 @@ function buildFailureResult(code, message) {
     message: message || "Unknown error",
     trnId: "NAv",
   };
+}
+
+export function validateElectricityMeterPlacement(value) {
+  const placement = String(value || "").trim();
+
+  if (!hasRequiredText(placement)) {
+    return buildFailureResult(
+      "METER_PLACEMENT_REQUIRED",
+      "Electricity meter placement is required",
+    );
+  }
+
+  if (!ELECTRICITY_PLACEMENTS.has(placement)) {
+    return buildFailureResult(
+      "INVALID_METER_PLACEMENT",
+      "Electricity meter placement must use an approved Meter Placement option",
+    );
+  }
+
+  return null;
 }
 
 function validateGps(gps) {
@@ -130,12 +160,13 @@ function validateInfrastructureEvidence({
   photoMessage,
   nonCanonicalOtherCode,
   nonCanonicalOtherMessage,
+  required = true,
 }) {
   const hasValue = hasRequiredText(value);
   const hasComment = hasRequiredText(comment);
 
   if (!hasValue && !hasComment) {
-    return buildFailureResult(missingCode, missingMessage);
+    return required ? buildFailureResult(missingCode, missingMessage) : null;
   }
 
   if (!hasValue && String(comment || "").trim() === "Other") {
@@ -381,12 +412,10 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
     });
   }
 
-  if (!hasRequiredText(ast?.location?.placement)) {
-    return buildFailureResult(
-      "METER_PLACEMENT_REQUIRED",
-      "Electricity meter placement is required",
-    );
-  }
+  const placementError = validateElectricityMeterPlacement(
+    ast?.location?.placement,
+  );
+  if (placementError) return placementError;
 
   if (!ELECTRICITY_PHASES.has(meter?.phase)) {
     return buildFailureResult(
@@ -446,6 +475,7 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
     nonCanonicalOtherCode: "NON_CANONICAL_CB_COMMENT_OTHER",
     nonCanonicalOtherMessage:
       "Circuit Breaker comment must contain the canonical custom explanation, not Other",
+    required: false,
   });
   if (cbError) return cbError;
 
@@ -463,6 +493,7 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
       nonCanonicalOtherCode: "NON_CANONICAL_KEYPAD_COMMENT_OTHER",
       nonCanonicalOtherMessage:
         "Keypad comment must contain the canonical custom explanation, not Other",
+      required: false,
     });
     if (keypadError) return keypadError;
   }
@@ -498,4 +529,5 @@ export const METER_DISCOVERY_VALIDATION_METADATA = Object.freeze({
   sealCommentEvidence: SEAL_COMMENT_EVIDENCE,
   keypadCommentEvidence: KEYPAD_COMMENT_EVIDENCE,
   cbCommentEvidence: CB_COMMENT_EVIDENCE,
+  electricityPlacements: Object.freeze([...ELECTRICITY_PLACEMENTS]),
 });

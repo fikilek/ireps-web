@@ -140,6 +140,9 @@ import { submitInformalErfCallable } from "./informal-erfs/submitInformalErfCall
 import { updateUserCallable } from "./users/index.js";
 
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
+import {
+  validateMeterInstallationElectricity,
+} from "./meterInstallation/validation.js";
 
 initializeApp();
 const auth = getAuth();
@@ -1312,13 +1315,6 @@ function validateMeterCreationPayload({
   }
 
   if (meterType === "electricity") {
-    if (!hasRequiredText(ast?.location?.placement)) {
-      return buildFailureResult(
-        "METER_PLACEMENT_REQUIRED",
-        "Electricity meter placement is required",
-      );
-    }
-
     if (!["single", "three"].includes(meter?.phase)) {
       return buildFailureResult(
         "INVALID_METER_PHASE",
@@ -1326,36 +1322,12 @@ function validateMeterCreationPayload({
       );
     }
 
-    if (
-      !hasRequiredText(meter?.seal?.sealNo) ||
-      !hasTaggedMedia(media, "sealPhoto")
-    ) {
-      return buildFailureResult(
-        "SEAL_EVIDENCE_REQUIRED",
-        "Electricity meter seal number and photo are required",
-      );
-    }
-
-    if (
-      !hasRequiredText(meter?.cb?.size) ||
-      !hasTaggedMedia(media, "astCbPhoto")
-    ) {
-      return buildFailureResult(
-        "CB_EVIDENCE_REQUIRED",
-        "Electricity meter circuit breaker size and photo are required",
-      );
-    }
-
-    if (
-      meter?.type === "prepaid" &&
-      (!hasRequiredText(meter?.keypad?.serialNo) ||
-        !hasTaggedMedia(media, "keypadPhoto"))
-    ) {
-      return buildFailureResult(
-        "KEYPAD_EVIDENCE_REQUIRED",
-        "Prepaid electricity meters require keypad details and photo",
-      );
-    }
+    const electricityValidationError = validateMeterInstallationElectricity({
+      meter,
+      location: ast?.location,
+      media,
+    });
+    if (electricityValidationError) return electricityValidationError;
   }
 
   const creationReading =
