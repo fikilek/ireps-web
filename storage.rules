@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Report Platform v1: only the owner may directly access a canonical
+    // generated-report object. Backend/Admin SDK operations are validated
+    // separately and are not governed by client Storage Security Rules.
+    match /generated-reports/{ownerUid}/{reportType}/{reportId}/{fileName} {
+      allow read, write:
+        if request.auth != null
+        && request.auth.uid == ownerUid;
+    }
+
+    // Compatibility boundary: preserve the currently deployed authenticated
+    // read/write behaviour for every existing and future non-report path.
+    // generated-reports is explicitly excluded because Firebase allow rules
+    // are additive across every matching rule.
+    match /{topLevel}/{allPaths=**} {
+      allow read, write:
+        if request.auth != null
+        && topLevel != "generated-reports";
+    }
+  }
+}
