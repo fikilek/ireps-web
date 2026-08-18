@@ -1,14 +1,7 @@
-import * as XLSX from "xlsx";
+import { buildExcelArtifact } from "../reportPlatform/buildExcelArtifact.js";
+import { downloadBrowserArtifact } from "../reportPlatform/downloadBrowserArtifact.js";
 
 const NAV = "NAv";
-
-function sanitizeSheetName(value) {
-  const rawName = String(value || "Quick Download")
-    .replace(/[\\/?*\[\]:]/g, " ")
-    .trim();
-
-  return (rawName || "Quick Download").slice(0, 31);
-}
 
 function sanitizeFilePart(value) {
   return String(value || NAV)
@@ -32,19 +25,11 @@ function buildTimestamp(date = new Date()) {
   ].join("");
 }
 
-function normalizeCellValue(value) {
-  if (value === null || value === undefined || value === "") return NAV;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? NAV : value.toISOString();
-  if (Array.isArray(value)) return value.length ? value.join(", ") : NAV;
-  if (typeof value === "object") return JSON.stringify(value);
-  return value;
-}
-
-export function buildQuickDownloadFileName({ fileBaseName, scope }) {
+export function buildQuickDownloadFileName({ fileBaseName, scope, generatedAt = new Date() }) {
   const baseName = sanitizeFilePart(fileBaseName || "quick_download");
   const lmName = sanitizeFilePart(scope?.lmName || scope?.lmPcode || NAV);
   const wardName = sanitizeFilePart(scope?.wardLabel || scope?.wardPcode || NAV);
-  const timestamp = buildTimestamp();
+  const timestamp = buildTimestamp(generatedAt);
 
   return `${baseName}_${lmName}_${wardName}_${timestamp}.xlsx`;
 }
@@ -56,38 +41,14 @@ export function quickDownloadExcel({
   registryName = "Quick Download",
   scope = {},
 }) {
-  const exportHeaders = columns.map((column) => column.header);
-  const exportRows = rows.map((row, rowIndex) => {
-    return columns.reduce((accumulator, column) => {
-      const value =
-        typeof column.value === "function"
-          ? column.value(row, rowIndex)
-          : row?.[column.key];
-
-      accumulator[column.header] = normalizeCellValue(value);
-      return accumulator;
-    }, {});
+  const generatedAt = new Date();
+  const fileName = buildQuickDownloadFileName({ fileBaseName, scope, generatedAt });
+  const artifact = buildExcelArtifact({
+    rows,
+    columns,
+    fileName,
+    sheetName: registryName,
   });
 
-  const worksheet = XLSX.utils.json_to_sheet(exportRows, {
-    header: exportHeaders,
-    skipHeader: false,
-  });
-
-  const columnWidths = exportHeaders.map((header) => {
-    const maxContentLength = exportRows.reduce((maxLength, row) => {
-      const textLength = String(row?.[header] || "").length;
-      return Math.max(maxLength, textLength);
-    }, String(header).length);
-
-    return { wch: Math.min(Math.max(maxContentLength + 2, 12), 42) };
-  });
-
-  worksheet["!cols"] = columnWidths;
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(registryName));
-
-  const fileName = buildQuickDownloadFileName({ fileBaseName, scope });
-  XLSX.writeFile(workbook, fileName, { bookType: "xlsx" });
+  downloadBrowserArtifact(artifact);
 }
