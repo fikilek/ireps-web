@@ -1242,7 +1242,7 @@ export default function UserActivityReportPage() {
                     <td>{row.userName}</td>
                     <td>{row.serviceProviderName}</td>
                     <td>{row.teamName}</td>
-                    <td>{formatNumber(row.totalTrns)}</td>
+                    <td style={styles.totalTrnsValue}>{formatNumber(row.totalTrns)}</td>
                     <td>{formatNumber(row.meterDiscoveryTrns)}</td>
                     <td>{formatNumber(row.noAccessTrns)}</td>
                     <td>{formatNumber(row.meterInspectionTrns)}</td>
@@ -1420,6 +1420,10 @@ const styles = {
   headerFilterSpacer: {
     height: "2.15rem",
     marginTop: "0.4rem",
+  },
+  totalTrnsValue: {
+    color: "#2563eb",
+    fontWeight: 800,
   },
   paginationBar: {
     display: "flex",
