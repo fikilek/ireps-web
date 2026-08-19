@@ -275,24 +275,44 @@ function getRegistryAcceptedRejected(data = {}) {
   return "NAv";
 }
 
+function getRegistryAnomalyInfo(data = {}) {
+  const astAnomalies = data.ast?.anomalies || {};
+  const inspectionAnomalies =
+    data.inspection?.captured?.ast?.anomalies || {};
+
+  return {
+    anomaly: valueOrNav(astAnomalies.anomaly || inspectionAnomalies.anomaly),
+    anomalyDetail: valueOrNav(
+      astAnomalies.anomalyDetail || inspectionAnomalies.anomalyDetail,
+    ),
+  };
+}
+
 function normalizeTrnRegistryDoc(docSnap) {
   if (!docSnap || !docSnap.exists()) return null;
 
   const data = docSnap.data() || {};
   const metadata = data.metadata || {};
   const trnId = data.trnId || data.id || docSnap.id;
+  const anomalyInfo = getRegistryAnomalyInfo(data);
+  const meterNo = valueOrNav(data.ast?.astData?.astNo);
 
   return {
     trnId,
     trnType: normalizeRegistryCode(data.accessData?.trnType || data.trnType),
+    wardPcode: valueOrNav(data.accessData?.parents?.wardPcode),
     wardNo: getWardNoFromPcode(data.accessData?.parents?.wardPcode),
+    erfId: valueOrNav(data.accessData?.erfId),
     erfNo: valueOrNav(data.accessData?.erfNo),
     premiseAddress: valueOrNav(data.accessData?.premise?.address),
     hasAccess: normalizeRegistryCode(data.accessData?.access?.hasAccess),
     accessReason: valueOrNav(data.accessData?.access?.reason),
-    astNo: valueOrNav(data.ast?.astData?.astNo),
+    meterNo,
+    astNo: meterNo,
     meterType: normalizeRegistryCode(data.meterType),
     astState: normalizeRegistryCode(data.status?.state),
+    anomaly: anomalyInfo.anomaly,
+    anomalyDetail: anomalyInfo.anomalyDetail,
     mediaCount: asArray(data.media).length,
     originChannel: getRegistryOriginChannel(data),
     createdByUid: valueOrNav(metadata.createdByUid),

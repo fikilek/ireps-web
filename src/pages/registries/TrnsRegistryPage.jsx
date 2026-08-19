@@ -26,16 +26,6 @@ const TRN_TYPE_OPTIONS = [
   "METER_REMOVAL",
 ];
 
-const ACCESS_REASON_OPTIONS = [
-  "NAv",
-  "Locked Gate / No Key",
-  "Customer Refused Access",
-  "Vicious Dogs",
-  "Refused Entry by Occupant",
-  "Property Vacant",
-  "No One On Site",
-];
-
 const AST_STATE_OPTIONS = [
   "FIELD",
   "CONNECTED",
@@ -44,47 +34,27 @@ const AST_STATE_OPTIONS = [
   "NAv",
 ];
 
-const WORKFLOW_STATE_OPTIONS = [
-  "WAITING_BATCH_ACCEPTANCE",
-  "ACCEPTED",
-  "REJECTED",
-  "COMPLETED",
-  "NAv",
-];
-
-const ACCEPTED_REJECTED_OPTIONS = ["ACCEPTED", "REJECTED", "PENDING", "NAv"];
-
 const EMPTY_TRN_FILTERS = {
   trnId: "",
-  trnType: "ALL",
-  wardNo: "",
-  erfNo: "",
+  meterNo: "",
   premiseAddress: "",
+  erfNo: "",
+  wardNo: "",
+  mediaCount: "",
+  trnType: "ALL",
   hasAccess: "ALL",
-  accessReason: "ALL",
-  astNo: "",
+  accessReason: "",
   meterType: "ALL",
   astState: "ALL",
-  mediaCount: "",
-  originChannel: "ALL",
+  anomaly: "",
+  anomalyDetail: "",
   createdByUser: "",
-  createdForName: "",
-  acceptedRejected: "ALL",
-  completedByUser: "",
-  workflowState: "ALL",
 };
 
 const EMPTY_DATETIME_FILTER = {
   mode: "ALL",
   startDate: "",
   endDate: "",
-};
-
-const EMPTY_DATE_FILTERS = {
-  createdAt: EMPTY_DATETIME_FILTER,
-  issuedAt: EMPTY_DATETIME_FILTER,
-  executionStartedAt: EMPTY_DATETIME_FILTER,
-  completedAt: EMPTY_DATETIME_FILTER,
 };
 
 function getActiveLmPcode(activeWorkbase) {
@@ -156,7 +126,7 @@ function getRegistryLabel(value) {
     .trim()
     .replace(/[_-]+/g, " ");
 
-  if (!text || text.toUpperCase() === "NAV") return "NAv";
+  if (!text || ["NAV", "NA"].includes(text.toUpperCase())) return "NAv";
 
   return text
     .split(" ")
@@ -193,11 +163,7 @@ function isMissingSortValue(value) {
 function getSortValue(row, key) {
   if (key === "wardNo") return Number(row.wardNo);
   if (key === "mediaCount") return Number(row.mediaCount);
-  if (
-    ["createdAt", "issuedAt", "executionStartedAt", "completedAt"].includes(key)
-  ) {
-    return getDateMs(row[key]);
-  }
+  if (key === "createdAt") return getDateMs(row.createdAt);
 
   return row?.[key] ?? "";
 }
@@ -484,8 +450,8 @@ export default function TrnsRegistryPage() {
     "NAv";
 
   const [filters, setFilters] = useState(EMPTY_TRN_FILTERS);
-  const [dateFilters, setDateFilters] = useState(EMPTY_DATE_FILTERS);
-  const [activeDateFilterKey, setActiveDateFilterKey] = useState(null);
+  const [createdAtFilter, setCreatedAtFilter] = useState(EMPTY_DATETIME_FILTER);
+  const [isCreatedAtFilterOpen, setIsCreatedAtFilterOpen] = useState(false);
   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -508,32 +474,23 @@ export default function TrnsRegistryPage() {
 
       return (
         includesText(row.trnId, filters.trnId) &&
-        matchesSelect(row.trnType, filters.trnType) &&
-        includesText(row.wardNo, filters.wardNo) &&
-        includesText(row.erfNo, filters.erfNo) &&
+        includesText(row.meterNo, filters.meterNo) &&
         includesText(row.premiseAddress, filters.premiseAddress) &&
+        includesText(row.erfNo, filters.erfNo) &&
+        includesText(row.wardNo, filters.wardNo) &&
+        mediaMatches &&
+        matchesSelect(row.trnType, filters.trnType) &&
         matchesSelect(row.hasAccess, filters.hasAccess) &&
-        matchesSelect(row.accessReason, filters.accessReason) &&
-        includesText(row.astNo, filters.astNo) &&
+        includesText(row.accessReason, filters.accessReason) &&
         matchesSelect(row.meterType, filters.meterType) &&
         matchesSelect(row.astState, filters.astState) &&
-        mediaMatches &&
-        matchesSelect(row.originChannel, filters.originChannel) &&
+        includesText(row.anomaly, filters.anomaly) &&
+        includesText(row.anomalyDetail, filters.anomalyDetail) &&
         includesText(row.createdByUser, filters.createdByUser) &&
-        includesText(row.createdForName, filters.createdForName) &&
-        matchesSelect(row.acceptedRejected, filters.acceptedRejected) &&
-        includesText(row.completedByUser, filters.completedByUser) &&
-        matchesSelect(row.workflowState, filters.workflowState) &&
-        matchesDateFilter(row.createdAt, dateFilters.createdAt) &&
-        matchesDateFilter(row.issuedAt, dateFilters.issuedAt) &&
-        matchesDateFilter(
-          row.executionStartedAt,
-          dateFilters.executionStartedAt,
-        ) &&
-        matchesDateFilter(row.completedAt, dateFilters.completedAt)
+        matchesDateFilter(row.createdAt, createdAtFilter)
       );
     });
-  }, [trnRows, filters, dateFilters]);
+  }, [trnRows, filters, createdAtFilter]);
 
   const sortedTrnRows = useMemo(() => {
     return [...filteredTrnRows].sort((left, right) =>
@@ -581,59 +538,35 @@ export default function TrnsRegistryPage() {
   const quickDownloadColumns = useMemo(
     () => [
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
-      { header: "TRN Type", value: (row) => row.trnType || "NAv" },
-      { header: "Ward No", value: (row) => row.wardNo || "NAv" },
-      { header: "ERF No", value: (row) => row.erfNo || "NAv" },
+      { header: "Meter No", value: (row) => row.meterNo || "NAv" },
       {
-        header: "Premise Address",
+        header: "Address",
         value: (row) => row.premiseAddress || "NAv",
       },
+      { header: "ERF No", value: (row) => row.erfNo || "NAv" },
+      { header: "Ward No", value: (row) => row.wardNo || "NAv" },
+      { header: "Media Count", value: (row) => Number(row.mediaCount) || 0 },
+      { header: "TRN Type", value: (row) => row.trnType || "NAv" },
       { header: "Has Access", value: (row) => getAccessLabel(row.hasAccess) },
       {
-        header: "Access Reason",
+        header: "No Access Reason",
         value: (row) => row.accessReason || "NAv",
       },
-      { header: "AST No", value: (row) => row.astNo || "NAv" },
       {
         header: "Meter Type",
         value: (row) => getRegistryLabel(row.meterType),
       },
       { header: "AST State", value: (row) => row.astState || "NAv" },
-      { header: "Media Count", value: (row) => Number(row.mediaCount) || 0 },
+      { header: "Anomaly", value: (row) => row.anomaly || "NAv" },
       {
-        header: "Origin Channel",
-        value: (row) => row.originChannel || "NAv",
+        header: "Anomaly Detail",
+        value: (row) => row.anomalyDetail || "NAv",
       },
       {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
       },
       { header: "Created At", value: (row) => formatDateTime(row.createdAt) },
-      {
-        header: "Created For",
-        value: (row) => row.createdForName || "NAv",
-      },
-      { header: "Issued At", value: (row) => formatDateTime(row.issuedAt) },
-      {
-        header: "Accepted / Rejected",
-        value: (row) => row.acceptedRejected || "NAv",
-      },
-      {
-        header: "Execution Started At",
-        value: (row) => formatDateTime(row.executionStartedAt),
-      },
-      {
-        header: "Completed At",
-        value: (row) => formatDateTime(row.completedAt),
-      },
-      {
-        header: "Completed By User",
-        value: (row) => row.completedByUser || "NAv",
-      },
-      {
-        header: "Workflow State",
-        value: (row) => row.workflowState || "NAv",
-      },
     ],
     [],
   );
@@ -683,31 +616,17 @@ export default function TrnsRegistryPage() {
     setCurrentPage(1);
   }
 
-  function handleDateFilterApply(nextFilter) {
-    if (!activeDateFilterKey) return;
-
+  function handleCreatedAtFilterApply(nextFilter) {
     setCurrentPage(1);
-    setDateFilters((current) => ({
-      ...current,
-      [activeDateFilterKey]: nextFilter,
-    }));
-    setActiveDateFilterKey(null);
+    setCreatedAtFilter(nextFilter);
+    setIsCreatedAtFilterOpen(false);
   }
 
-  function handleDateFilterClear() {
-    if (!activeDateFilterKey) return;
-
+  function handleCreatedAtFilterClear() {
     setCurrentPage(1);
-    setDateFilters((current) => ({
-      ...current,
-      [activeDateFilterKey]: EMPTY_DATETIME_FILTER,
-    }));
-    setActiveDateFilterKey(null);
+    setCreatedAtFilter(EMPTY_DATETIME_FILTER);
+    setIsCreatedAtFilterOpen(false);
   }
-
-  const activeDateFilter = activeDateFilterKey
-    ? dateFilters[activeDateFilterKey]
-    : EMPTY_DATETIME_FILTER;
 
   return (
     <>
@@ -858,15 +777,10 @@ export default function TrnsRegistryPage() {
                 <thead>
                   <tr>
                     <GroupHeader colSpan={2}>TRN Identity</GroupHeader>
-                    <GroupHeader colSpan={3}>Geography</GroupHeader>
-                    <GroupHeader colSpan={2}>Access</GroupHeader>
-                    <GroupHeader colSpan={4}>Asset and Evidence</GroupHeader>
-                    <GroupHeader colSpan={5}>
-                      Origin, Assignment and Creation
-                    </GroupHeader>
-                    <GroupHeader colSpan={5}>
-                      Execution and Workflow
-                    </GroupHeader>
+                    <GroupHeader colSpan={5}>Location and Actions</GroupHeader>
+                    <GroupHeader colSpan={5}>TRN Detail</GroupHeader>
+                    <GroupHeader colSpan={2}>Findings</GroupHeader>
+                    <GroupHeader colSpan={2}>Creation</GroupHeader>
                   </tr>
 
                   <tr>
@@ -883,6 +797,85 @@ export default function TrnsRegistryPage() {
                         placeholder="TRN ID"
                       />
                     </th>
+
+                    <th>
+                      <SortButton
+                        label="Meter No"
+                        sortKey="meterNo"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.meterNo}
+                        onChange={(value) => updateFilter("meterNo", value)}
+                        placeholder="Meter No"
+                      />
+                    </th>
+
+                    <th>
+                      <SortButton
+                        label="Address"
+                        sortKey="premiseAddress"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.premiseAddress}
+                        onChange={(value) =>
+                          updateFilter("premiseAddress", value)
+                        }
+                        placeholder="Address"
+                      />
+                    </th>
+
+                    <th>
+                      <SortButton
+                        label="ERF No"
+                        sortKey="erfNo"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.erfNo}
+                        onChange={(value) => updateFilter("erfNo", value)}
+                        placeholder="ERF"
+                      />
+                    </th>
+
+                    <th>
+                      <SortButton
+                        label="Ward No"
+                        sortKey="wardNo"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.wardNo}
+                        onChange={(value) => updateFilter("wardNo", value)}
+                        placeholder="Ward"
+                      />
+                    </th>
+
+                    <th>
+                      <SortButton
+                        label="Media"
+                        sortKey="mediaCount"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        type="number"
+                        min="0"
+                        value={filters.mediaCount}
+                        onChange={(value) => updateFilter("mediaCount", value)}
+                        placeholder="Count"
+                      />
+                    </th>
+
+                    <th style={styles.iconHeaderCell}>
+                      <span style={styles.iconHeaderLabel}>TRN Report</span>
+                    </th>
+
                     <th>
                       <SortButton
                         label="TRN Type"
@@ -905,48 +898,6 @@ export default function TrnsRegistryPage() {
 
                     <th>
                       <SortButton
-                        label="Ward No"
-                        sortKey="wardNo"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.wardNo}
-                        onChange={(value) => updateFilter("wardNo", value)}
-                        placeholder="Ward"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="ERF No"
-                        sortKey="erfNo"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.erfNo}
-                        onChange={(value) => updateFilter("erfNo", value)}
-                        placeholder="ERF"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Premise Address"
-                        sortKey="premiseAddress"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.premiseAddress}
-                        onChange={(value) =>
-                          updateFilter("premiseAddress", value)
-                        }
-                        placeholder="Address"
-                      />
-                    </th>
-
-                    <th>
-                      <SortButton
                         label="Has Access"
                         sortKey="hasAccess"
                         sortConfig={sortConfig}
@@ -961,41 +912,23 @@ export default function TrnsRegistryPage() {
                         <option value="NO">NO</option>
                       </FilterSelect>
                     </th>
+
                     <th>
                       <SortButton
-                        label="Access Reason"
+                        label="No Access Reason"
                         sortKey="accessReason"
                         sortConfig={sortConfig}
                         onSort={handleSort}
                       />
-                      <FilterSelect
+                      <FilterInput
                         value={filters.accessReason}
                         onChange={(value) =>
                           updateFilter("accessReason", value)
                         }
-                      >
-                        <option value="ALL">ALL</option>
-                        {ACCESS_REASON_OPTIONS.map((reason) => (
-                          <option key={reason} value={reason}>
-                            {reason}
-                          </option>
-                        ))}
-                      </FilterSelect>
+                        placeholder="Reason"
+                      />
                     </th>
 
-                    <th>
-                      <SortButton
-                        label="AST No"
-                        sortKey="astNo"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.astNo}
-                        onChange={(value) => updateFilter("astNo", value)}
-                        placeholder="AST No"
-                      />
-                    </th>
                     <th>
                       <SortButton
                         label="Meter Type"
@@ -1010,8 +943,10 @@ export default function TrnsRegistryPage() {
                         <option value="ALL">ALL</option>
                         <option value="ELECTRICITY">ELECTRICITY</option>
                         <option value="WATER">WATER</option>
+                        <option value="NA">NA</option>
                       </FilterSelect>
                     </th>
+
                     <th>
                       <SortButton
                         label="AST State"
@@ -1031,41 +966,37 @@ export default function TrnsRegistryPage() {
                         ))}
                       </FilterSelect>
                     </th>
+
                     <th>
                       <SortButton
-                        label="Media Count"
-                        sortKey="mediaCount"
+                        label="Anomaly"
+                        sortKey="anomaly"
                         sortConfig={sortConfig}
                         onSort={handleSort}
                       />
                       <FilterInput
-                        type="number"
-                        min="0"
-                        value={filters.mediaCount}
-                        onChange={(value) => updateFilter("mediaCount", value)}
-                        placeholder="Count"
+                        value={filters.anomaly}
+                        onChange={(value) => updateFilter("anomaly", value)}
+                        placeholder="Anomaly"
                       />
                     </th>
 
                     <th>
                       <SortButton
-                        label="Origin Channel"
-                        sortKey="originChannel"
+                        label="Anomaly Detail"
+                        sortKey="anomalyDetail"
                         sortConfig={sortConfig}
                         onSort={handleSort}
                       />
-                      <FilterSelect
-                        value={filters.originChannel}
+                      <FilterInput
+                        value={filters.anomalyDetail}
                         onChange={(value) =>
-                          updateFilter("originChannel", value)
+                          updateFilter("anomalyDetail", value)
                         }
-                      >
-                        <option value="ALL">ALL</option>
-                        <option value="OFFICE">OFFICE</option>
-                        <option value="FIELD">FIELD</option>
-                        <option value="NAv">NAv</option>
-                      </FilterSelect>
+                        placeholder="Detail"
+                      />
                     </th>
+
                     <th>
                       <SortButton
                         label="Created By User"
@@ -1081,6 +1012,7 @@ export default function TrnsRegistryPage() {
                         placeholder="User"
                       />
                     </th>
+
                     <th>
                       <SortButton
                         label="Created At"
@@ -1089,120 +1021,9 @@ export default function TrnsRegistryPage() {
                         onSort={handleSort}
                       />
                       <DatetimeFilterButton
-                        filter={dateFilters.createdAt}
-                        onClick={() => setActiveDateFilterKey("createdAt")}
+                        filter={createdAtFilter}
+                        onClick={() => setIsCreatedAtFilterOpen(true)}
                       />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Created For"
-                        sortKey="createdForName"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.createdForName}
-                        onChange={(value) =>
-                          updateFilter("createdForName", value)
-                        }
-                        placeholder="User / team"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Issued At"
-                        sortKey="issuedAt"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <DatetimeFilterButton
-                        filter={dateFilters.issuedAt}
-                        onClick={() => setActiveDateFilterKey("issuedAt")}
-                      />
-                    </th>
-
-                    <th>
-                      <SortButton
-                        label="Accepted / Rejected"
-                        sortKey="acceptedRejected"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.acceptedRejected}
-                        onChange={(value) =>
-                          updateFilter("acceptedRejected", value)
-                        }
-                      >
-                        <option value="ALL">ALL</option>
-                        {ACCEPTED_REJECTED_OPTIONS.map((decision) => (
-                          <option key={decision} value={decision}>
-                            {decision}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Execution Started At"
-                        sortKey="executionStartedAt"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <DatetimeFilterButton
-                        filter={dateFilters.executionStartedAt}
-                        onClick={() =>
-                          setActiveDateFilterKey("executionStartedAt")
-                        }
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Completed At"
-                        sortKey="completedAt"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <DatetimeFilterButton
-                        filter={dateFilters.completedAt}
-                        onClick={() => setActiveDateFilterKey("completedAt")}
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Completed By User"
-                        sortKey="completedByUser"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.completedByUser}
-                        onChange={(value) =>
-                          updateFilter("completedByUser", value)
-                        }
-                        placeholder="User"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Workflow State"
-                        sortKey="workflowState"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.workflowState}
-                        onChange={(value) =>
-                          updateFilter("workflowState", value)
-                        }
-                      >
-                        <option value="ALL">ALL</option>
-                        {WORKFLOW_STATE_OPTIONS.map((state) => (
-                          <option key={state} value={state}>
-                            {state}
-                          </option>
-                        ))}
-                      </FilterSelect>
                     </th>
                   </tr>
                 </thead>
@@ -1210,7 +1031,7 @@ export default function TrnsRegistryPage() {
                 <tbody>
                   {sortedTrnRows.length === 0 ? (
                     <tr>
-                      <td colSpan={21} className="muted">
+                      <td colSpan={16} className="muted">
                         No TRNs match the current filters. Clear or adjust a
                         column filter above.
                       </td>
@@ -1219,28 +1040,44 @@ export default function TrnsRegistryPage() {
                     paginatedTrnRows.map((row) => (
                       <tr key={row.trnId}>
                         <td style={styles.idCell}>{row.trnId || "NAv"}</td>
-                        <td>{row.trnType || "NAv"}</td>
-                        <td>{row.wardNo || "NAv"}</td>
-                        <td>{row.erfNo || "NAv"}</td>
+                        <td style={styles.meterCell}>{row.meterNo || "NAv"}</td>
                         <td style={styles.addressCell}>
                           {row.premiseAddress || "NAv"}
                         </td>
+                        <td>{row.erfNo || "NAv"}</td>
+                        <td>{row.wardNo || "NAv"}</td>
+                        <td style={styles.iconCell}>
+                          <span
+                            aria-hidden="true"
+                            style={styles.actionIcon}
+                            title="Media gallery will be enabled in the next step"
+                          >
+                            📷
+                          </span>
+                          <strong>{formatNumber(row.mediaCount)}</strong>
+                        </td>
+                        <td style={styles.iconCell}>
+                          <span
+                            aria-hidden="true"
+                            style={styles.actionIcon}
+                            title="TRN Report preview will be enabled in the next step"
+                          >
+                            📄
+                          </span>
+                        </td>
+                        <td>{row.trnType || "NAv"}</td>
                         <td>{getAccessLabel(row.hasAccess)}</td>
                         <td>{row.accessReason || "NAv"}</td>
-                        <td>{row.astNo || "NAv"}</td>
                         <td>{getRegistryLabel(row.meterType)}</td>
                         <td>{row.astState || "NAv"}</td>
-                        <td>{formatNumber(row.mediaCount)}</td>
-                        <td>{row.originChannel || "NAv"}</td>
+                        <td style={styles.findingCell}>
+                          {row.anomaly || "NAv"}
+                        </td>
+                        <td style={styles.findingCell}>
+                          {row.anomalyDetail || "NAv"}
+                        </td>
                         <td>{row.createdByUser || "NAv"}</td>
                         <td>{formatDateTime(row.createdAt)}</td>
-                        <td>{row.createdForName || "NAv"}</td>
-                        <td>{formatDateTime(row.issuedAt)}</td>
-                        <td>{row.acceptedRejected || "NAv"}</td>
-                        <td>{formatDateTime(row.executionStartedAt)}</td>
-                        <td>{formatDateTime(row.completedAt)}</td>
-                        <td>{row.completedByUser || "NAv"}</td>
-                        <td>{row.workflowState || "NAv"}</td>
                       </tr>
                     ))
                   )}
@@ -1260,12 +1097,12 @@ export default function TrnsRegistryPage() {
         ) : null}
       </section>
 
-      {activeDateFilterKey ? (
+      {isCreatedAtFilterOpen ? (
         <DatetimeFilterModal
-          filter={activeDateFilter}
-          onApply={handleDateFilterApply}
-          onClear={handleDateFilterClear}
-          onClose={() => setActiveDateFilterKey(null)}
+          filter={createdAtFilter}
+          onApply={handleCreatedAtFilterApply}
+          onClear={handleCreatedAtFilterClear}
+          onClose={() => setIsCreatedAtFilterOpen(false)}
         />
       ) : null}
     </>
@@ -1286,7 +1123,7 @@ const styles = {
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
   registryTable: {
-    minWidth: "3900px",
+    minWidth: "2600px",
   },
   groupHeaderCell: {
     background: "#e2e8f0",
@@ -1333,16 +1170,47 @@ const styles = {
     background: "#ffffff",
     boxSizing: "border-box",
   },
+  iconHeaderCell: {
+    minWidth: "7rem",
+    textAlign: "center",
+    verticalAlign: "top",
+  },
+  iconHeaderLabel: {
+    display: "inline-block",
+    fontWeight: 900,
+    paddingTop: "0.1rem",
+  },
   idCell: {
     minWidth: "19rem",
     maxWidth: "25rem",
     overflowWrap: "anywhere",
     fontWeight: 750,
   },
+  meterCell: {
+    minWidth: "10rem",
+    fontWeight: 800,
+  },
   addressCell: {
     minWidth: "15rem",
     maxWidth: "22rem",
     whiteSpace: "normal",
+  },
+  findingCell: {
+    minWidth: "12rem",
+    maxWidth: "20rem",
+    whiteSpace: "normal",
+  },
+  iconCell: {
+    minWidth: "6rem",
+    textAlign: "center",
+    whiteSpace: "nowrap",
+  },
+  actionIcon: {
+    display: "inline-block",
+    marginRight: "0.35rem",
+    fontSize: "1rem",
+    lineHeight: 1,
+    verticalAlign: "middle",
   },
   paginationBar: {
     display: "flex",
