@@ -2,33 +2,16 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Report Platform v1 managed artifact ingress. The authenticated owner may
-    // create exactly one canonical object, but browser clients may not read,
-    // list, overwrite/update or delete managed reports after creation.
-    match /generated-reports/{ownerUid}/{reportType}/{reportId}/{fileName} {
-      allow write:
-        if request.auth != null
-        && request.auth.uid == ownerUid
-        && resource == null
-        && request.resource != null
-        && request.resource.size > 0
-        && (
-          request.resource.contentType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          || request.resource.contentType == "application/pdf"
-        )
-        && !("irepsReportState" in request.resource.metadata)
-        && !("irepsReportSchemaVersion" in request.resource.metadata)
-        && !("irepsReportManifestB64" in request.resource.metadata);
-    }
-
-    // Compatibility boundary: preserve the currently deployed authenticated
-    // read/write behaviour for every existing and future non-report path.
-    // generated-reports is explicitly excluded because Firebase allow rules
-    // are additive across every matching rule.
-    match /{topLevel}/{allPaths=**} {
-      allow read, write:
-        if request.auth != null
-        && topLevel != "generated-reports";
+    // TEMPORARY REPORT PLATFORM V1 SPRINT POLICY
+    //
+    // Authenticated Storage read/write access is intentionally retained while
+    // Report Platform functionality is completed and integration-tested.
+    //
+    // This is NOT the final Report Platform security model.
+    // Storage hardening is intentionally deferred to the final sprint security
+    // component and must be completed before final TEST/LIVE rollout.
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }
