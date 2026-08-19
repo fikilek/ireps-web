@@ -4,6 +4,7 @@ import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import DownloadButtons from "../../components/DownloadButtons";
+import { generateUserActivityManagedReport } from "./userActivityReportArtifact";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetRegistryTrnsByLmPcodeQuery } from "../../redux/trnsApi";
@@ -619,14 +620,16 @@ export default function UserActivityReportPage() {
   const dateRange = useMemo(() => resolveDateRange(activeDateFilter), [activeDateFilter]);
 
   const dateFilteredResult = useMemo(() => {
-    let missingCreatedAt = 0;
+    const missingCreatedAt = registryTrns.filter((trn) => {
+      const createdAt = trn?.createdAt ? new Date(trn.createdAt) : null;
+      return !createdAt || Number.isNaN(createdAt.getTime());
+    }).length;
 
     const rows = registryTrns.filter((trn) => {
       const createdAt = trn?.createdAt ? new Date(trn.createdAt) : null;
       const hasValidCreatedAt = createdAt && !Number.isNaN(createdAt.getTime());
 
       if (!hasValidCreatedAt) {
-        missingCreatedAt += 1;
         return activeDateFilter.preset === "ALL_TIME";
       }
 
@@ -909,6 +912,37 @@ export default function UserActivityReportPage() {
     [activeWorkbaseName, activeLmPcode, dateRange.label],
   );
 
+  const managedReportSourceScope = useMemo(() => {
+    const activeColumnFilters = Object.entries(columnFilters).reduce(
+      (filters, [key, value]) => {
+        if (value !== "") filters[key] = value;
+        return filters;
+      },
+      {},
+    );
+
+    return {
+      view: "FILTERED_SORTED_ROWS",
+      lmPcode: activeLmPcode || null,
+      lmName: activeWorkbaseName || null,
+      datePreset: activeDateFilter.preset,
+      dateRange: dateRange.label || "All Time",
+      columnFilters: activeColumnFilters,
+      sort: {
+        key: sortKey,
+        direction: sortDirection,
+      },
+    };
+  }, [
+    activeDateFilter.preset,
+    activeLmPcode,
+    activeWorkbaseName,
+    columnFilters,
+    dateRange.label,
+    sortDirection,
+    sortKey,
+  ]);
+
   const isLoading =
     isTrnsLoading || isTeamsLoading || isServiceProvidersLoading || isUsersLoading;
   const isFetching =
@@ -1025,6 +1059,15 @@ export default function UserActivityReportPage() {
     setIsDateModalOpen(false);
   }
 
+  async function handleUserActivityFullDownload() {
+    await generateUserActivityManagedReport({
+      rows: sortedRows,
+      columns: quickDownloadColumns,
+      scope: quickDownloadScope,
+      sourceScope: managedReportSourceScope,
+    });
+  }
+
   return (
     <>
       <header className="console-header">
@@ -1057,6 +1100,7 @@ export default function UserActivityReportPage() {
             columns={quickDownloadColumns}
             fileBaseName="user_activity_report"
             scope={quickDownloadScope}
+            onFullDownload={handleUserActivityFullDownload}
           />
         </div>
       </header>
