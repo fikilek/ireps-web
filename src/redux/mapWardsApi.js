@@ -1,5 +1,12 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
 
 import { db } from "../firebase";
 
@@ -31,6 +38,46 @@ export const mapWardsApi = createApi({
   reducerPath: "mapWardsApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getWardBoundaryByPcode: builder.query({
+      async queryFn(arg) {
+        const wardPcode = String(
+          typeof arg === "string" ? arg : arg?.wardPcode || "",
+        ).trim();
+
+        if (!wardPcode) return { data: null };
+
+        try {
+          const boundarySnapshot = await getDoc(
+            doc(db, WARDS_COLLECTION, wardPcode),
+          );
+
+          if (!boundarySnapshot.exists()) return { data: null };
+
+          return {
+            data: normalizeWardBoundaryRow(
+              boundarySnapshot.id,
+              boundarySnapshot.data(),
+            ),
+          };
+        } catch (error) {
+          console.error("mapWardsApi point lookup error:", {
+            wardPcode,
+            code: error?.code || "WARD_BOUNDARY_LOOKUP_FAILED",
+            message: error?.message || String(error),
+          });
+
+          return {
+            error: {
+              status: "WARD_BOUNDARY_LOOKUP_FAILED",
+              error:
+                error?.message ||
+                "Failed to load the authoritative ward boundary.",
+            },
+          };
+        }
+      },
+    }),
+
     getWardBoundariesByLm: builder.query({
       queryFn: () => ({ data: [] }),
 
@@ -84,4 +131,7 @@ export const mapWardsApi = createApi({
   }),
 });
 
-export const { useGetWardBoundariesByLmQuery } = mapWardsApi;
+export const {
+  useGetWardBoundaryByPcodeQuery,
+  useGetWardBoundariesByLmQuery,
+} = mapWardsApi;

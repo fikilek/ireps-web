@@ -1,6 +1,8 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
+  doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -187,6 +189,47 @@ export const mapErfsApi = createApi({
   baseQuery: fakeBaseQuery(),
 
   endpoints: (builder) => ({
+    getErfBoundaryById: builder.query({
+      async queryFn(arg) {
+        const erfId = String(
+          typeof arg === "string" ? arg : arg?.erfId || "",
+        ).trim();
+
+        if (!erfId) return { data: null };
+
+        try {
+          const boundarySnapshot = await getDoc(
+            doc(db, ERFS_COLLECTION, erfId),
+          );
+
+          if (!boundarySnapshot.exists()) return { data: null };
+
+          return {
+            data: normalizeErfViewportRow(
+              boundarySnapshot.id,
+              boundarySnapshot.data(),
+            ),
+          };
+        } catch (error) {
+          console.error("[MAP ERFS] ERF boundary point lookup failed.", {
+            erfId,
+            code: error?.code || "ERF_BOUNDARY_LOOKUP_FAILED",
+            message: error?.message || String(error),
+            stack: error?.stack || null,
+          });
+
+          return {
+            error: {
+              status: "ERF_BOUNDARY_LOOKUP_FAILED",
+              error:
+                error?.message ||
+                "Failed to load the authoritative ERF boundary.",
+            },
+          };
+        }
+      },
+    }),
+
     getVisibleErfsByWardViewport: builder.query({
       queryFn({ wardPcode, bounds } = {}) {
         if (!wardPcode || !bounds) {
@@ -355,5 +398,6 @@ export const mapErfsApi = createApi({
 });
 
 export const {
+  useGetErfBoundaryByIdQuery,
   useLazyGetVisibleErfsByWardViewportQuery,
 } = mapErfsApi;

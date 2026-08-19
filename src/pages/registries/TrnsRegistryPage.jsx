@@ -10,6 +10,7 @@ import {
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
 import DownloadButtons from "../../components/DownloadButtons";
+import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import TrnMediaGalleryModal from "./components/TrnMediaGalleryModal";
 
@@ -469,6 +470,7 @@ export default function TrnsRegistryPage() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);
   const [selectedMediaTrnId, setSelectedMediaTrnId] = useState(null);
+  const [selectedBoundary, setSelectedBoundary] = useState(null);
 
   const {
     data: trnRows = [],
@@ -551,7 +553,6 @@ export default function TrnsRegistryPage() {
 
   const quickDownloadColumns = useMemo(
     () => [
-      { header: "TRN ID", value: (row) => row.trnId || "NAv" },
       { header: "Meter No", value: (row) => row.meterNo || "NAv" },
       {
         header: "Address",
@@ -581,6 +582,7 @@ export default function TrnsRegistryPage() {
         value: (row) => row.createdByUser || "NAv",
       },
       { header: "Created At", value: (row) => formatDateTime(row.createdAt) },
+      { header: "TRN ID", value: (row) => row.trnId || "NAv" },
     ],
     [],
   );
@@ -790,28 +792,15 @@ export default function TrnsRegistryPage() {
               <table className="data-table" style={styles.registryTable}>
                 <thead>
                   <tr>
-                    <GroupHeader colSpan={2}>TRN Identity</GroupHeader>
+                    <GroupHeader colSpan={1}>TRN Identity</GroupHeader>
                     <GroupHeader colSpan={5}>Location and Actions</GroupHeader>
                     <GroupHeader colSpan={5}>TRN Detail</GroupHeader>
                     <GroupHeader colSpan={2}>Findings</GroupHeader>
                     <GroupHeader colSpan={2}>Creation</GroupHeader>
+                    <GroupHeader colSpan={1}>TRN Identity</GroupHeader>
                   </tr>
 
                   <tr>
-                    <th>
-                      <SortButton
-                        label="TRN ID"
-                        sortKey="trnId"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.trnId}
-                        onChange={(value) => updateFilter("trnId", value)}
-                        placeholder="TRN ID"
-                      />
-                    </th>
-
                     <th>
                       <SortButton
                         label="Meter No"
@@ -1039,6 +1028,20 @@ export default function TrnsRegistryPage() {
                         onClick={() => setIsCreatedAtFilterOpen(true)}
                       />
                     </th>
+
+                    <th>
+                      <SortButton
+                        label="TRN ID"
+                        sortKey="trnId"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.trnId}
+                        onChange={(value) => updateFilter("trnId", value)}
+                        placeholder="TRN ID"
+                      />
+                    </th>
                   </tr>
                 </thead>
 
@@ -1053,7 +1056,6 @@ export default function TrnsRegistryPage() {
                   ) : (
                     paginatedTrnRows.map((row) => (
                       <tr key={row.trnId}>
-                        <td style={styles.idCell}>{row.trnId || "NAv"}</td>
                         <td style={styles.meterCell}>
                           {isActionableValue(row.meterNo) ? (
                             <button
@@ -1071,8 +1073,54 @@ export default function TrnsRegistryPage() {
                         <td style={styles.addressCell}>
                           {row.premiseAddress || "NAv"}
                         </td>
-                        <td>{row.erfNo || "NAv"}</td>
-                        <td>{row.wardNo || "NAv"}</td>
+                        <td>
+                          {isActionableValue(row.erfId) &&
+                          isActionableValue(row.erfNo) ? (
+                            <button
+                              type="button"
+                              style={styles.geoLinkButton}
+                              onClick={() =>
+                                setSelectedBoundary({
+                                  mode: "ERF",
+                                  trnId: row.trnId,
+                                  erfId: row.erfId,
+                                  erfNo: row.erfNo,
+                                  wardPcode: row.wardPcode,
+                                  wardNo: row.wardNo,
+                                })
+                              }
+                              title={`Open ERF ${row.erfNo} boundary`}
+                            >
+                              {row.erfNo}
+                            </button>
+                          ) : (
+                            row.erfNo || "NAv"
+                          )}
+                        </td>
+                        <td>
+                          {isActionableValue(row.wardPcode) &&
+                          isActionableValue(row.wardNo) ? (
+                            <button
+                              type="button"
+                              style={styles.geoLinkButton}
+                              onClick={() =>
+                                setSelectedBoundary({
+                                  mode: "WARD",
+                                  trnId: row.trnId,
+                                  erfId: row.erfId,
+                                  erfNo: row.erfNo,
+                                  wardPcode: row.wardPcode,
+                                  wardNo: row.wardNo,
+                                })
+                              }
+                              title={`Open Ward ${row.wardNo} boundary`}
+                            >
+                              {row.wardNo}
+                            </button>
+                          ) : (
+                            row.wardNo || "NAv"
+                          )}
+                        </td>
                         <td style={styles.iconCell}>
                           {Number(row.mediaCount) > 0 ? (
                             <button
@@ -1127,6 +1175,7 @@ export default function TrnsRegistryPage() {
                         </td>
                         <td>{row.createdByUser || "NAv"}</td>
                         <td>{formatDateTime(row.createdAt)}</td>
+                        <td style={styles.idCell}>{row.trnId || "NAv"}</td>
                       </tr>
                     ))
                   )}
@@ -1167,6 +1216,23 @@ export default function TrnsRegistryPage() {
           key={selectedMediaTrnId}
           trnId={selectedMediaTrnId}
           onClose={() => setSelectedMediaTrnId(null)}
+        />
+      ) : null}
+
+      {selectedBoundary ? (
+        <BoundaryMapModal
+          key={`${selectedBoundary.mode}-${
+            selectedBoundary.mode === "ERF"
+              ? selectedBoundary.erfId
+              : selectedBoundary.wardPcode
+          }`}
+          mode={selectedBoundary.mode}
+          trnId={selectedBoundary.trnId}
+          erfId={selectedBoundary.erfId}
+          erfNo={selectedBoundary.erfNo}
+          wardPcode={selectedBoundary.wardPcode}
+          wardNo={selectedBoundary.wardNo}
+          onClose={() => setSelectedBoundary(null)}
         />
       ) : null}
     </>
@@ -1261,6 +1327,18 @@ const styles = {
     padding: 0,
     font: "inherit",
     fontWeight: 850,
+    textDecoration: "underline",
+    textUnderlineOffset: "0.15rem",
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  geoLinkButton: {
+    border: 0,
+    background: "transparent",
+    color: "#2563eb",
+    padding: 0,
+    font: "inherit",
+    fontWeight: 800,
     textDecoration: "underline",
     textUnderlineOffset: "0.15rem",
     cursor: "pointer",
