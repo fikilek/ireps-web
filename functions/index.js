@@ -144,6 +144,7 @@ import {
 } from "./reportPlatform/persistenceCallables.js";
 import {
   deleteGeneratedReportCallable,
+  getGeneratedReportDownloadCallable,
   listGeneratedReportsCallable,
 } from "./reportPlatform/generatedReportsCallables.js";
 import {
@@ -214,6 +215,7 @@ export {
   prepareGeneratedReportCallable,
   finalizeGeneratedReportCallable,
   listGeneratedReportsCallable,
+  getGeneratedReportDownloadCallable,
   deleteGeneratedReportCallable,
   onGeneratedReportsRetentionCleanup,
 };

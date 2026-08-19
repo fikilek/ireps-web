@@ -12,6 +12,7 @@ const REPORT_ID_PATTERN = /^RPT_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const MAX_PAGE_TOKEN_LENGTH = 4096;
+const DOWNLOAD_URL_TTL_MS = 5 * 60 * 1000;
 
 const SKIPPABLE_LIST_BUSINESS_CODES = new Set([
   "GENERATED_REPORT_PATH_INVALID",
@@ -155,7 +156,7 @@ function buildOwnerPrefix(ownerUid) {
   return `${GENERATED_REPORTS_ROOT}/${ownerUid}/`;
 }
 
-function buildCanonicalDeletePath(ownerUid, request) {
+function buildCanonicalReportPath(ownerUid, request) {
   const reportId = normalizeReportId(request.reportId);
   const reportType = requireTrimmedText(request.reportType, "reportType").toUpperCase();
   const fileName = requireTrimmedText(request.fileName, "fileName");
@@ -310,6 +311,95 @@ export async function listGeneratedReports({
   };
 }
 
+
+export async function createGeneratedReportDownload({
+  bucket,
+  callerUid,
+  data,
+  projectId,
+  now = new Date(),
+  validateReport = validateGeneratedReport,
+}) {
+  const ownerUid = normalizeCallerUid(callerUid);
+  const request = normalizeRequest(
+    data,
+    new Set(["reportId", "reportType", "fileName"]),
+  );
+  assertServerEnvironment(projectId);
+
+  const storagePath = buildCanonicalReportPath(ownerUid, request);
+
+  const validation = await validateReport({
+    bucket,
+    callerUid: ownerUid,
+    storagePath,
+    projectId,
+    now,
+    includeStorageVersion: true,
+  });
+
+  if (!validation?.storageVersion?.generation) {
+    fail("failed-precondition", "Generated report Storage version is unavailable.", {
+      businessCode: "REPORT_STORAGE_VERSION_INVALID",
+    });
+  }
+
+  if (!bucket || typeof bucket.file !== "function") {
+    fail("failed-precondition", "A valid Admin Storage bucket is required.", {
+      businessCode: "REPORT_STORAGE_BUCKET_INVALID",
+    });
+  }
+
+  const nowDate = now instanceof Date ? new Date(now.getTime()) : new Date(now);
+  if (Number.isNaN(nowDate.getTime())) {
+    fail("invalid-argument", "A valid server time is required.", {
+      businessCode: "REPORT_SERVER_TIME_INVALID",
+    });
+  }
+
+  const expiresAt = new Date(nowDate.getTime() + DOWNLOAD_URL_TTL_MS);
+  const file = bucket.file(storagePath, {
+    generation: validation.storageVersion.generation,
+  });
+
+  if (!file || typeof file.getSignedUrl !== "function") {
+    fail("failed-precondition", "Admin Storage signed URL access is unavailable.", {
+      businessCode: "REPORT_STORAGE_FILE_INVALID",
+    });
+  }
+
+  let downloadUrl;
+
+  try {
+    [downloadUrl] = await file.getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires: expiresAt,
+      promptSaveAs: validation.fileName,
+    });
+  } catch {
+    fail("unavailable", "Generated report download could not be authorized.", {
+      businessCode: "GENERATED_REPORT_DOWNLOAD_URL_FAILED",
+      reportId: validation.reportId,
+    });
+  }
+
+  if (typeof downloadUrl !== "string" || !downloadUrl) {
+    fail("unavailable", "Generated report download could not be authorized.", {
+      businessCode: "GENERATED_REPORT_DOWNLOAD_URL_FAILED",
+      reportId: validation.reportId,
+    });
+  }
+
+  return {
+    reportId: validation.reportId,
+    fileName: validation.fileName,
+    format: validation.format,
+    downloadUrl,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
 export async function deleteGeneratedReport({
   bucket,
   callerUid,
@@ -325,7 +415,7 @@ export async function deleteGeneratedReport({
   );
   assertServerEnvironment(projectId);
 
-  const storagePath = buildCanonicalDeletePath(ownerUid, request);
+  const storagePath = buildCanonicalReportPath(ownerUid, request);
 
   const validation = await validateReport({
     bucket,

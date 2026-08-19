@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { ReportPlatformError } from "../reportPlatform/contract.js";
 import {
+  createGeneratedReportDownload,
   deleteGeneratedReport,
   listGeneratedReports,
 } from "../reportPlatform/generatedReports.js";
@@ -58,15 +59,20 @@ class FakeBucket {
     apiResponse = undefined,
     getFilesError = null,
     deleteError = null,
+    signedUrlError = null,
+    signedUrl = "https://storage.example/signed-report",
   } = {}) {
     this.files = files;
     this.nextQuery = nextQuery;
     this.apiResponse = apiResponse;
     this.getFilesError = getFilesError;
     this.deleteError = deleteError;
+    this.signedUrlError = signedUrlError;
+    this.signedUrl = signedUrl;
     this.getFilesCalls = [];
     this.fileCalls = [];
     this.deleteCalls = [];
+    this.signedUrlCalls = [];
   }
 
   async getFiles(query) {
@@ -75,12 +81,27 @@ class FakeBucket {
     return [this.files, this.nextQuery, this.apiResponse];
   }
 
-  file(path) {
-    this.fileCalls.push(path);
+  file(path, options = undefined) {
+    this.fileCalls.push({
+      path,
+      options: options === undefined ? undefined : structuredClone(options),
+    });
     const bucket = this;
     return {
-      async delete(options) {
-        bucket.deleteCalls.push({ path, options: structuredClone(options) });
+      async getSignedUrl(signedUrlOptions) {
+        bucket.signedUrlCalls.push({
+          path,
+          fileOptions: options === undefined ? undefined : structuredClone(options),
+          signedUrlOptions: structuredClone(signedUrlOptions),
+        });
+        if (bucket.signedUrlError) throw bucket.signedUrlError;
+        return [bucket.signedUrl];
+      },
+      async delete(deleteOptions) {
+        bucket.deleteCalls.push({
+          path,
+          options: structuredClone(deleteOptions),
+        });
         if (bucket.deleteError) throw bucket.deleteError;
         return [{}];
       },
@@ -351,7 +372,7 @@ test("delete reconstructs the owner path, validates finalized object and uses ve
   assert.equal(validatorCalls[0].storagePath, PATH);
   assert.equal(validatorCalls[0].includeStorageVersion, true);
   assert.equal(Object.hasOwn(validatorCalls[0], "requireFinalized"), false);
-  assert.deepEqual(bucket.fileCalls, [PATH]);
+  assert.deepEqual(bucket.fileCalls, [{ path: PATH, options: undefined }]);
   assert.deepEqual(bucket.deleteCalls, [{
     path: PATH,
     options: {
@@ -492,8 +513,201 @@ test("delete converts a post-validation disappearance into not-found", async () 
   );
 });
 
-test("unknown environment fails closed before list/delete Storage access", async () => {
+
+
+test("download requires authentication before validation or Storage access", async () => {
+  const bucket = new FakeBucket();
+  let validatorCalls = 0;
+
+  await assertBusinessRejection(
+    createGeneratedReportDownload({
+      bucket,
+      callerUid: null,
+      data: {
+        reportId: REPORT_ID,
+        reportType: "USER_ACTIVITY",
+        fileName: "report.xlsx",
+      },
+      projectId: "ireps2",
+      now: NOW,
+      validateReport: async () => {
+        validatorCalls += 1;
+        return validationResult();
+      },
+    }),
+    "unauthenticated",
+    "REPORT_AUTH_REQUIRED",
+  );
+
+  assert.equal(validatorCalls, 0);
+  assert.equal(bucket.fileCalls.length, 0);
+});
+
+test("download rejects caller-controlled ownerUid/storagePath before validation or Storage", async () => {
+  const bucket = new FakeBucket();
+  let validatorCalls = 0;
+
+  for (const injected of [
+    { ownerUid: "user-2" },
+    { storagePath: PATH },
+  ]) {
+    await assertBusinessRejection(
+      createGeneratedReportDownload({
+        bucket,
+        callerUid: "user-1",
+        data: {
+          reportId: REPORT_ID,
+          reportType: "USER_ACTIVITY",
+          fileName: "report.xlsx",
+          ...injected,
+        },
+        projectId: "ireps2",
+        now: NOW,
+        validateReport: async () => {
+          validatorCalls += 1;
+          return validationResult();
+        },
+      }),
+      "invalid-argument",
+      "GENERATED_REPORTS_FIELD_NOT_ALLOWED",
+    );
+  }
+
+  assert.equal(validatorCalls, 0);
+  assert.equal(bucket.fileCalls.length, 0);
+});
+
+test("download validates exact owner report and signs the validated generation for five minutes", async () => {
+  const bucket = new FakeBucket();
+  const validatorCalls = [];
+
+  const result = await createGeneratedReportDownload({
+    bucket,
+    callerUid: "user-1",
+    data: {
+      reportId: REPORT_ID,
+      reportType: "user_activity",
+      fileName: "report.xlsx",
+    },
+    projectId: "ireps2",
+    now: NOW,
+    validateReport: async (args) => {
+      validatorCalls.push(args);
+      return validationResult({
+        storageVersion: { generation: "100", metageneration: "7" },
+      });
+    },
+  });
+
+  assert.equal(validatorCalls.length, 1);
+  assert.equal(validatorCalls[0].callerUid, "user-1");
+  assert.equal(validatorCalls[0].storagePath, PATH);
+  assert.equal(validatorCalls[0].includeStorageVersion, true);
+  assert.deepEqual(bucket.fileCalls, [{
+    path: PATH,
+    options: { generation: "100" },
+  }]);
+  assert.equal(bucket.signedUrlCalls.length, 1);
+  assert.equal(bucket.signedUrlCalls[0].path, PATH);
+  assert.deepEqual(bucket.signedUrlCalls[0].fileOptions, {
+    generation: "100",
+  });
+  assert.equal(bucket.signedUrlCalls[0].signedUrlOptions.version, "v4");
+  assert.equal(bucket.signedUrlCalls[0].signedUrlOptions.action, "read");
+  assert.equal(bucket.signedUrlCalls[0].signedUrlOptions.promptSaveAs, "report.xlsx");
+  assert.equal(
+    bucket.signedUrlCalls[0].signedUrlOptions.expires.toISOString(),
+    "2026-08-19T10:05:00.000Z",
+  );
+  assert.deepEqual(result, {
+    reportId: REPORT_ID,
+    fileName: "report.xlsx",
+    format: "XLSX",
+    downloadUrl: "https://storage.example/signed-report",
+    expiresAt: "2026-08-19T10:05:00.000Z",
+  });
+});
+
+test("download fails closed if validated Storage generation is unavailable", async () => {
+  const bucket = new FakeBucket();
+
+  await assertBusinessRejection(
+    createGeneratedReportDownload({
+      bucket,
+      callerUid: "user-1",
+      data: {
+        reportId: REPORT_ID,
+        reportType: "USER_ACTIVITY",
+        fileName: "report.xlsx",
+      },
+      projectId: "ireps2",
+      now: NOW,
+      validateReport: async () => validationResult(),
+    }),
+    "failed-precondition",
+    "REPORT_STORAGE_VERSION_INVALID",
+  );
+
+  assert.equal(bucket.fileCalls.length, 0);
+});
+
+test("download converts signed URL failures into a safe unavailable error", async () => {
+  const bucket = new FakeBucket({
+    signedUrlError: new Error("signBlob unavailable"),
+  });
+
+  await assertBusinessRejection(
+    createGeneratedReportDownload({
+      bucket,
+      callerUid: "user-1",
+      data: {
+        reportId: REPORT_ID,
+        reportType: "USER_ACTIVITY",
+        fileName: "report.xlsx",
+      },
+      projectId: "ireps2",
+      now: NOW,
+      validateReport: async () => validationResult({
+        storageVersion: { generation: "100", metageneration: "7" },
+      }),
+    }),
+    "unavailable",
+    "GENERATED_REPORT_DOWNLOAD_URL_FAILED",
+  );
+
+  assert.equal(bucket.signedUrlCalls.length, 1);
+});
+
+test("download rejects malformed canonical identity before validation or Storage", async () => {
+  const bucket = new FakeBucket();
+  let validatorCalls = 0;
+
+  await assert.rejects(
+    createGeneratedReportDownload({
+      bucket,
+      callerUid: "user-1",
+      data: {
+        reportId: REPORT_ID,
+        reportType: "USER_ACTIVITY",
+        fileName: "nested/report.xlsx",
+      },
+      projectId: "ireps2",
+      now: NOW,
+      validateReport: async () => {
+        validatorCalls += 1;
+        return validationResult();
+      },
+    }),
+    ReportPlatformError,
+  );
+
+  assert.equal(validatorCalls, 0);
+  assert.equal(bucket.fileCalls.length, 0);
+});
+
+test("unknown environment fails closed before list/download/delete Storage access", async () => {
   const listBucket = new FakeBucket();
+  const downloadBucket = new FakeBucket();
   const deleteBucket = new FakeBucket();
 
   await assertBusinessRejection(
@@ -502,6 +716,22 @@ test("unknown environment fails closed before list/delete Storage access", async
       callerUid: "user-1",
       data: {},
       projectId: "unknown-project",
+    }),
+    "failed-precondition",
+    "REPORT_ENVIRONMENT_UNKNOWN",
+  );
+
+  await assertBusinessRejection(
+    createGeneratedReportDownload({
+      bucket: downloadBucket,
+      callerUid: "user-1",
+      data: {
+        reportId: REPORT_ID,
+        reportType: "USER_ACTIVITY",
+        fileName: "report.xlsx",
+      },
+      projectId: "unknown-project",
+      now: NOW,
     }),
     "failed-precondition",
     "REPORT_ENVIRONMENT_UNKNOWN",
@@ -523,5 +753,6 @@ test("unknown environment fails closed before list/delete Storage access", async
   );
 
   assert.equal(listBucket.getFilesCalls.length, 0);
+  assert.equal(downloadBucket.fileCalls.length, 0);
   assert.equal(deleteBucket.fileCalls.length, 0);
 });

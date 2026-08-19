@@ -13,6 +13,14 @@ export default function ReportsLandingPage() {
       </p>
 
       <div className="placeholder-grid">
+        <Link className="module-card" to="/reports/generated">
+          <h3>Generated Reports</h3>
+          <p className="muted">
+            Download or delete your managed report artifacts before they expire
+            automatically after 3 days.
+          </p>
+        </Link>
+
         <Link className="module-card" to="/reports/no-access">
           <h3>No Access Report</h3>
           <p className="muted">

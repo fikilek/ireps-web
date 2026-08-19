@@ -21,6 +21,7 @@ import AccountsRegistryPage from "../pages/registries/AccountsRegistryPage";
 import MreadStagingPage from "../pages/registries/MreadStagingPage";
 
 import ReportsLandingPage from "../pages/reports/ReportsLandingPage";
+import GeneratedReportsPage from "../pages/reports/GeneratedReportsPage";
 import NoAccessReportPage from "../pages/reports/NoAccessReportPage";
 import UserActivityReportPage from "../pages/reports/UserActivityReportPage";
 import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
@@ -254,6 +255,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <ReportsLandingPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/reports/generated"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <GeneratedReportsPage />
               </RoleRoute>
             }
           />

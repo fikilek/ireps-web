@@ -4,6 +4,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { ReportPlatformError } from "./contract.js";
 import {
+  createGeneratedReportDownload,
   deleteGeneratedReport,
   listGeneratedReports,
 } from "./generatedReports.js";
@@ -30,6 +31,21 @@ function toHttpsError(error) {
 export const listGeneratedReportsCallable = onCall(async (request) => {
   try {
     return await listGeneratedReports({
+      bucket: getStorage().bucket(),
+      callerUid: request.auth?.uid,
+      data: request.data,
+      projectId: resolveProjectId(),
+      now: new Date(),
+    });
+  } catch (error) {
+    throw toHttpsError(error);
+  }
+});
+
+
+export const getGeneratedReportDownloadCallable = onCall(async (request) => {
+  try {
+    return await createGeneratedReportDownload({
       bucket: getStorage().bucket(),
       callerUid: request.auth?.uid,
       data: request.data,
