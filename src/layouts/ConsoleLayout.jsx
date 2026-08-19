@@ -180,6 +180,11 @@ const navSections = [
             path: "/reports/user-activity",
             allowedRoles: MANAGEMENT_ROLES,
           },
+          {
+            label: "Generated Reports",
+            path: "/reports/generated",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
         ],
       },
       {
