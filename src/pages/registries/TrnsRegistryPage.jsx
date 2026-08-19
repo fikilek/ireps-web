@@ -10,6 +10,7 @@ import {
   DatetimeFilterModal,
 } from "../../components/DatetimeFilter";
 import DownloadButtons from "../../components/DownloadButtons";
+import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -142,6 +143,16 @@ function getAccessLabel(value) {
   if (normalized === "YES") return "Yes";
   if (normalized === "NO") return "No";
   return "NAv";
+}
+
+function isActionableValue(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  return Boolean(
+    normalized && !["NAV", "N/AV", "N/A", "NA", "-"].includes(normalized),
+  );
 }
 
 function compareNatural(left, right) {
@@ -455,6 +466,7 @@ export default function TrnsRegistryPage() {
   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);
 
   const {
     data: trnRows = [],
@@ -1040,7 +1052,20 @@ export default function TrnsRegistryPage() {
                     paginatedTrnRows.map((row) => (
                       <tr key={row.trnId}>
                         <td style={styles.idCell}>{row.trnId || "NAv"}</td>
-                        <td style={styles.meterCell}>{row.meterNo || "NAv"}</td>
+                        <td style={styles.meterCell}>
+                          {isActionableValue(row.meterNo) ? (
+                            <button
+                              type="button"
+                              style={styles.meterLinkButton}
+                              onClick={() => setSelectedMeterTrnId(row.trnId)}
+                              title="Open meter details from this TRN"
+                            >
+                              {row.meterNo}
+                            </button>
+                          ) : (
+                            "NAv"
+                          )}
+                        </td>
                         <td style={styles.addressCell}>
                           {row.premiseAddress || "NAv"}
                         </td>
@@ -1103,6 +1128,13 @@ export default function TrnsRegistryPage() {
           onApply={handleCreatedAtFilterApply}
           onClear={handleCreatedAtFilterClear}
           onClose={() => setIsCreatedAtFilterOpen(false)}
+        />
+      ) : null}
+
+      {selectedMeterTrnId ? (
+        <MeterDeepDetailsModal
+          trnId={selectedMeterTrnId}
+          onClose={() => setSelectedMeterTrnId(null)}
         />
       ) : null}
     </>
@@ -1189,6 +1221,18 @@ const styles = {
   meterCell: {
     minWidth: "10rem",
     fontWeight: 800,
+  },
+  meterLinkButton: {
+    border: 0,
+    background: "transparent",
+    color: "#2563eb",
+    padding: 0,
+    font: "inherit",
+    fontWeight: 850,
+    textDecoration: "underline",
+    textUnderlineOffset: "0.15rem",
+    cursor: "pointer",
+    textAlign: "left",
   },
   addressCell: {
     minWidth: "15rem",

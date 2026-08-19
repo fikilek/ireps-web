@@ -1,6 +1,8 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
+  doc,
+  getDoc,
   limit as limitQuery,
   onSnapshot,
   query,
@@ -454,6 +456,29 @@ export const trnsApi = createApi({
   reducerPath: "trnsApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getTrnById: builder.query({
+      async queryFn(arg) {
+        const trnId = String(
+          typeof arg === "string" ? arg : arg?.trnId || "",
+        ).trim();
+
+        if (!trnId) return { data: null };
+
+        try {
+          const trnSnapshot = await getDoc(doc(db, TRNS_COLLECTION, trnId));
+          return { data: normalizeTrnDoc(trnSnapshot) };
+        } catch (error) {
+          console.error("trnsApi getTrnById read error:", error);
+          return {
+            error: {
+              status: "TRN_READ_FAILED",
+              error: error?.message || String(error),
+            },
+          };
+        }
+      },
+    }),
+
     getTrnsByTcId: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
@@ -600,6 +625,7 @@ export const trnsApi = createApi({
 });
 
 export const {
+  useGetTrnByIdQuery,
   useGetTrnsByTcIdQuery,
   useGetRegistryTrnsByLmPcodeQuery,
   useGetTrnsByLmPcodeWardPcodeQuery,
