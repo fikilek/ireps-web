@@ -142,6 +142,10 @@ import {
   finalizeGeneratedReportCallable,
   prepareGeneratedReportCallable,
 } from "./reportPlatform/persistenceCallables.js";
+import {
+  deleteGeneratedReportCallable,
+  listGeneratedReportsCallable,
+} from "./reportPlatform/generatedReportsCallables.js";
 
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
 import {
@@ -206,6 +210,8 @@ export {
   updateUserCallable,
   prepareGeneratedReportCallable,
   finalizeGeneratedReportCallable,
+  listGeneratedReportsCallable,
+  deleteGeneratedReportCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
