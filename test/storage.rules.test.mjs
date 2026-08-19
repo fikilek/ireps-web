@@ -9,6 +9,7 @@ import {
 import {
   deleteObject,
   getBytes,
+  listAll,
   ref,
   uploadBytes,
 } from "firebase/storage";
@@ -19,6 +20,8 @@ const OWNER_B = "UserB";
 const REPORT_PATH =
   "generated-reports/UserA/USER_ACTIVITY/RPT123/report.xlsx";
 const TEST_BYTES = new Uint8Array([73, 82, 69, 80, 83]);
+const XLSX_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 let testEnv;
 
@@ -34,9 +37,20 @@ function objectRef(storage, path) {
   return ref(storage, path);
 }
 
-async function upload(storage, path) {
-  return uploadBytes(objectRef(storage, path), TEST_BYTES, {
-    contentType: "application/octet-stream",
+async function upload(storage, path, {
+  bytes = TEST_BYTES,
+  contentType = "application/octet-stream",
+  customMetadata,
+} = {}) {
+  const metadata = { contentType };
+  if (customMetadata) metadata.customMetadata = customMetadata;
+  return uploadBytes(objectRef(storage, path), bytes, metadata);
+}
+
+async function uploadReport(storage, path = REPORT_PATH, options = {}) {
+  return upload(storage, path, {
+    contentType: XLSX_CONTENT_TYPE,
+    ...options,
   });
 }
 
@@ -46,6 +60,12 @@ async function read(storage, path) {
 
 async function remove(storage, path) {
   return deleteObject(objectRef(storage, path));
+}
+
+async function seedReport(path = REPORT_PATH, options = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await uploadReport(context.storage(), path, options);
+  });
 }
 
 before(async () => {
@@ -125,33 +145,80 @@ describe("existing non-report Storage compatibility", () => {
   });
 });
 
-describe("generated-reports owner isolation", () => {
-  test("owner can read, write and delete the exact canonical report object", async () => {
+describe("generated-reports create-only browser ingress", () => {
+  test("owner can create an exact canonical XLSX report object", async () => {
     const owner = storageForAuthenticatedUser(OWNER_A);
-
-    await assertSucceeds(upload(owner, REPORT_PATH));
-    await assertSucceeds(read(owner, REPORT_PATH));
-    await assertSucceeds(remove(owner, REPORT_PATH));
+    await assertSucceeds(uploadReport(owner));
   });
 
-  test("another authenticated user cannot read, overwrite or delete the owner's report", async () => {
+  test("owner can create an exact canonical PDF report object", async () => {
     const owner = storageForAuthenticatedUser(OWNER_A);
+    const path = "generated-reports/UserA/QUICK_TRN/RPT456/report.pdf";
+
+    await assertSucceeds(upload(owner, path, {
+      contentType: "application/pdf",
+    }));
+  });
+
+  test("another authenticated user cannot create inside the owner's path", async () => {
     const otherUser = storageForAuthenticatedUser(OWNER_B);
-
-    await assertSucceeds(upload(owner, REPORT_PATH));
-    await assertFails(read(otherUser, REPORT_PATH));
-    await assertFails(upload(otherUser, REPORT_PATH));
-    await assertFails(remove(otherUser, REPORT_PATH));
+    await assertFails(uploadReport(otherUser));
   });
 
-  test("unauthenticated users cannot access a canonical report object", async () => {
-    const owner = storageForAuthenticatedUser(OWNER_A);
+  test("unauthenticated user cannot create a generated report", async () => {
     const guest = storageForUnauthenticatedUser();
+    await assertFails(uploadReport(guest));
+  });
 
-    await assertSucceeds(upload(owner, REPORT_PATH));
-    await assertFails(read(guest, REPORT_PATH));
-    await assertFails(upload(guest, REPORT_PATH));
-    await assertFails(remove(guest, REPORT_PATH));
+  test("zero-byte generated reports are rejected", async () => {
+    const owner = storageForAuthenticatedUser(OWNER_A);
+    await assertFails(uploadReport(owner, REPORT_PATH, {
+      bytes: new Uint8Array(),
+    }));
+  });
+
+  test("unsupported generated-report MIME is rejected", async () => {
+    const owner = storageForAuthenticatedUser(OWNER_A);
+    await assertFails(upload(owner, REPORT_PATH, {
+      contentType: "application/octet-stream",
+    }));
+  });
+
+  for (const reservedKey of [
+    "irepsReportState",
+    "irepsReportSchemaVersion",
+    "irepsReportManifestB64",
+  ]) {
+    test(`browser cannot supply reserved metadata ${reservedKey}`, async () => {
+      const owner = storageForAuthenticatedUser(OWNER_A);
+      await assertFails(uploadReport(owner, REPORT_PATH, {
+        customMetadata: { [reservedKey]: "forged" },
+      }));
+    });
+  }
+
+  test("owner cannot directly read a managed report after creation", async () => {
+    const owner = storageForAuthenticatedUser(OWNER_A);
+    await seedReport();
+    await assertFails(read(owner, REPORT_PATH));
+  });
+
+  test("owner cannot list managed reports", async () => {
+    const owner = storageForAuthenticatedUser(OWNER_A);
+    await seedReport();
+    await assertFails(listAll(objectRef(owner, "generated-reports/UserA")));
+  });
+
+  test("owner cannot overwrite or update a managed report after creation", async () => {
+    const owner = storageForAuthenticatedUser(OWNER_A);
+    await seedReport();
+    await assertFails(uploadReport(owner));
+  });
+
+  test("owner cannot directly delete a managed report after creation", async () => {
+    const owner = storageForAuthenticatedUser(OWNER_A);
+    await seedReport();
+    await assertFails(remove(owner, REPORT_PATH));
   });
 
   const malformedPaths = [
@@ -166,7 +233,7 @@ describe("generated-reports owner isolation", () => {
       const owner = storageForAuthenticatedUser(OWNER_A);
 
       await assertFails(read(owner, path));
-      await assertFails(upload(owner, path));
+      await assertFails(uploadReport(owner, path));
       await assertFails(remove(owner, path));
     });
   }

@@ -53,6 +53,17 @@ export const REPORT_RETENTION_DAYS = Object.freeze({
   [REPORT_TYPES.MANAGEMENT_OPERATIONAL]: 3,
 });
 
+export const REPORT_FINALIZATION_STATE = "FINALIZED";
+export const REPORT_READY_STATUS = "READY";
+export const REPORT_MANIFEST_SCHEMA_VERSION = 1;
+export const REPORT_MANIFEST_MAX_ENCODED_BYTES = 6 * 1024;
+
+export const REPORT_STORAGE_METADATA_KEYS = Object.freeze({
+  STATE: "irepsReportState",
+  SCHEMA_VERSION: "irepsReportSchemaVersion",
+  MANIFEST_B64: "irepsReportManifestB64",
+});
+
 const PROJECT_ENVIRONMENTS = Object.freeze({
   ireps2: "DEV",
   "ireps-test": "TEST",

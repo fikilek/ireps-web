@@ -2,13 +2,23 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Report Platform v1: only the owner may directly access a canonical
-    // generated-report object. Backend/Admin SDK operations are validated
-    // separately and are not governed by client Storage Security Rules.
+    // Report Platform v1 managed artifact ingress. The authenticated owner may
+    // create exactly one canonical object, but browser clients may not read,
+    // list, overwrite/update or delete managed reports after creation.
     match /generated-reports/{ownerUid}/{reportType}/{reportId}/{fileName} {
-      allow read, write:
+      allow write:
         if request.auth != null
-        && request.auth.uid == ownerUid;
+        && request.auth.uid == ownerUid
+        && resource == null
+        && request.resource != null
+        && request.resource.size > 0
+        && (
+          request.resource.contentType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          || request.resource.contentType == "application/pdf"
+        )
+        && !("irepsReportState" in request.resource.metadata)
+        && !("irepsReportSchemaVersion" in request.resource.metadata)
+        && !("irepsReportManifestB64" in request.resource.metadata);
     }
 
     // Compatibility boundary: preserve the currently deployed authenticated

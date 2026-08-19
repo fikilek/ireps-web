@@ -1,11 +1,17 @@
 import {
+  REPORT_FINALIZATION_STATE,
+  REPORT_MANIFEST_MAX_ENCODED_BYTES,
+  REPORT_MANIFEST_SCHEMA_VERSION,
   REPORT_MIME_TYPES,
+  REPORT_READY_STATUS,
+  REPORT_STORAGE_METADATA_KEYS,
   deriveServerEnvironment,
   getReportRetentionDays,
 } from "./config.js";
 import {
   ReportPlatformError,
   parseGeneratedReportStoragePath,
+  validateReportProducerMetadata,
 } from "./contract.js";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -113,12 +119,163 @@ function normalizeCreatedAt(metadata) {
   return createdAt;
 }
 
+function normalizeStorageVersion(metadata) {
+  const generation = String(metadata?.generation || "").trim();
+  const metageneration = String(metadata?.metageneration || "").trim();
+
+  if (
+    !/^\d+$/.test(generation) ||
+    !/^\d+$/.test(metageneration) ||
+    BigInt(generation) <= 0n ||
+    BigInt(metageneration) <= 0n
+  ) {
+    fail("failed-precondition", "Generated report Storage version is invalid.", {
+      businessCode: "REPORT_STORAGE_VERSION_INVALID",
+    });
+  }
+
+  return {
+    generation,
+    metageneration,
+  };
+}
+
+function failInvalidFinalization(message, details = {}) {
+  fail("failed-precondition", message, {
+    businessCode: "REPORT_FINALIZATION_INVALID",
+    ...details,
+  });
+}
+
+function decodeManifest(encoded) {
+  if (typeof encoded !== "string" || !encoded) {
+    failInvalidFinalization("Generated report manifest is missing.");
+  }
+
+  if (Buffer.byteLength(encoded, "utf8") > REPORT_MANIFEST_MAX_ENCODED_BYTES) {
+    failInvalidFinalization("Generated report manifest exceeds the allowed size.");
+  }
+
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
+    failInvalidFinalization("Generated report manifest encoding is invalid.");
+  }
+
+  try {
+    const json = Buffer.from(encoded, "base64").toString("utf8");
+    const manifest = JSON.parse(json);
+
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      failInvalidFinalization("Generated report manifest must be an object.");
+    }
+
+    return manifest;
+  } catch (error) {
+    if (error instanceof ReportPlatformError) throw error;
+    failInvalidFinalization("Generated report manifest could not be decoded.");
+  }
+}
+
+function assertLifecycleMatches(manifestLifecycle, lifecycle) {
+  if (!manifestLifecycle || typeof manifestLifecycle !== "object" || Array.isArray(manifestLifecycle)) {
+    failInvalidFinalization("Generated report lifecycle manifest is invalid.");
+  }
+
+  const fields = [
+    "reportId",
+    "ownerUid",
+    "storagePath",
+    "actualContentType",
+    "actualSize",
+    "createdAt",
+    "expiresAt",
+    "environment",
+    "status",
+  ];
+
+  for (const field of fields) {
+    if (manifestLifecycle[field] !== lifecycle[field]) {
+      failInvalidFinalization("Generated report lifecycle manifest does not match Storage truth.", {
+        field,
+      });
+    }
+  }
+}
+
+function readFinalization(metadata, lifecycle, parsedPath, requireFinalized) {
+  const customMetadata = metadata?.metadata && typeof metadata.metadata === "object"
+    ? metadata.metadata
+    : {};
+
+  const state = customMetadata[REPORT_STORAGE_METADATA_KEYS.STATE];
+  const schemaVersion = customMetadata[REPORT_STORAGE_METADATA_KEYS.SCHEMA_VERSION];
+  const encodedManifest = customMetadata[REPORT_STORAGE_METADATA_KEYS.MANIFEST_B64];
+  const hasAnyMarker = Boolean(state || schemaVersion || encodedManifest);
+
+  if (!hasAnyMarker) {
+    if (requireFinalized) {
+      fail("failed-precondition", "Generated report has not been finalized.", {
+        businessCode: "REPORT_NOT_FINALIZED",
+      });
+    }
+
+    return {
+      isFinalized: false,
+      manifest: null,
+      report: null,
+    };
+  }
+
+  if (state !== REPORT_FINALIZATION_STATE) {
+    failInvalidFinalization("Generated report finalization state is invalid.");
+  }
+
+  if (String(schemaVersion) !== String(REPORT_MANIFEST_SCHEMA_VERSION)) {
+    failInvalidFinalization("Generated report manifest schema version is invalid.");
+  }
+
+  const manifest = decodeManifest(encodedManifest);
+
+  if (manifest.schemaVersion !== REPORT_MANIFEST_SCHEMA_VERSION) {
+    failInvalidFinalization("Generated report manifest schema version does not match.");
+  }
+
+  let report;
+  try {
+    report = validateReportProducerMetadata(manifest.report);
+  } catch (error) {
+    if (error instanceof ReportPlatformError) {
+      failInvalidFinalization("Generated report manifest report metadata is invalid.", {
+        causeBusinessCode: error.details?.businessCode || null,
+      });
+    }
+    throw error;
+  }
+
+  if (
+    report.reportType !== parsedPath.reportType ||
+    report.format !== parsedPath.format ||
+    report.fileName !== parsedPath.fileName
+  ) {
+    failInvalidFinalization("Generated report manifest identity does not match its Storage path.");
+  }
+
+  assertLifecycleMatches(manifest.lifecycle, lifecycle);
+
+  return {
+    isFinalized: true,
+    manifest,
+    report,
+  };
+}
+
 export async function validateGeneratedReport({
   bucket,
   callerUid,
   storagePath,
   projectId,
   now = new Date(),
+  requireFinalized = true,
+  includeStorageVersion = false,
 }) {
   const authenticatedUid = normalizeCallerUid(callerUid);
   const parsedPath = parseGeneratedReportStoragePath(storagePath);
@@ -139,6 +296,9 @@ export async function validateGeneratedReport({
 
   const serverNow = normalizeNow(now);
   const metadata = await readExactObjectMetadata(bucket, parsedPath.storagePath);
+  const storageVersion = includeStorageVersion
+    ? normalizeStorageVersion(metadata)
+    : null;
   const actualContentType = normalizeActualContentType(metadata);
   const actualSize = normalizeActualSize(metadata);
   const createdAt = normalizeCreatedAt(metadata);
@@ -166,18 +326,37 @@ export async function validateGeneratedReport({
     });
   }
 
-  return {
+  const lifecycle = {
     reportId: parsedPath.reportId,
     ownerUid: parsedPath.ownerUid,
-    reportType: parsedPath.reportType,
     storagePath: parsedPath.storagePath,
-    fileName: parsedPath.fileName,
-    format: parsedPath.format,
     actualContentType,
     actualSize,
     createdAt: createdAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
     environment,
-    status: "READY",
+    status: REPORT_READY_STATUS,
+  };
+
+  const finalization = readFinalization(
+    metadata,
+    lifecycle,
+    parsedPath,
+    requireFinalized,
+  );
+
+  return {
+    ...lifecycle,
+    ...(includeStorageVersion ? { storageVersion } : {}),
+    reportType: parsedPath.reportType,
+    fileName: parsedPath.fileName,
+    format: parsedPath.format,
+    report: finalization.report,
+    finalization: {
+      isFinalized: finalization.isFinalized,
+      schemaVersion: finalization.isFinalized
+        ? REPORT_MANIFEST_SCHEMA_VERSION
+        : null,
+    },
   };
 }

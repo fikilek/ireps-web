@@ -138,6 +138,10 @@ import { updateFwrMonitoringStatusCallable } from "./fwr-monitoring/updateFwrMon
 import { submitInformalErfCallable } from "./informal-erfs/submitInformalErfCallable.js";
 
 import { updateUserCallable } from "./users/index.js";
+import {
+  finalizeGeneratedReportCallable,
+  prepareGeneratedReportCallable,
+} from "./reportPlatform/persistenceCallables.js";
 
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
 import {
@@ -200,6 +204,8 @@ export {
   updateFwrMonitoringStatusCallable,
   submitInformalErfCallable,
   updateUserCallable,
+  prepareGeneratedReportCallable,
+  finalizeGeneratedReportCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
