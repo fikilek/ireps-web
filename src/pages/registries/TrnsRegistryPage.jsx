@@ -11,6 +11,7 @@ import {
 } from "../../components/DatetimeFilter";
 import DownloadButtons from "../../components/DownloadButtons";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
+import TrnMediaGalleryModal from "./components/TrnMediaGalleryModal";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -467,6 +468,7 @@ export default function TrnsRegistryPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);
+  const [selectedMediaTrnId, setSelectedMediaTrnId] = useState(null);
 
   const {
     data: trnRows = [],
@@ -1072,14 +1074,36 @@ export default function TrnsRegistryPage() {
                         <td>{row.erfNo || "NAv"}</td>
                         <td>{row.wardNo || "NAv"}</td>
                         <td style={styles.iconCell}>
-                          <span
-                            aria-hidden="true"
-                            style={styles.actionIcon}
-                            title="Media gallery will be enabled in the next step"
-                          >
-                            📷
-                          </span>
-                          <strong>{formatNumber(row.mediaCount)}</strong>
+                          {Number(row.mediaCount) > 0 ? (
+                            <button
+                              type="button"
+                              style={styles.mediaActionButton}
+                              onClick={() => setSelectedMediaTrnId(row.trnId)}
+                              title={`Open ${formatNumber(row.mediaCount)} media item${
+                                Number(row.mediaCount) === 1 ? "" : "s"
+                              } from this TRN`}
+                              aria-label={`Open ${formatNumber(
+                                row.mediaCount,
+                              )} media item${
+                                Number(row.mediaCount) === 1 ? "" : "s"
+                              } from TRN ${row.trnId}`}
+                            >
+                              <span aria-hidden="true" style={styles.actionIcon}>
+                                📷
+                              </span>
+                              <strong>{formatNumber(row.mediaCount)}</strong>
+                            </button>
+                          ) : (
+                            <span
+                              style={styles.mediaUnavailable}
+                              title="No media captured for this TRN"
+                            >
+                              <span aria-hidden="true" style={styles.actionIcon}>
+                                📷
+                              </span>
+                              <strong>0</strong>
+                            </span>
+                          )}
                         </td>
                         <td style={styles.iconCell}>
                           <span
@@ -1135,6 +1159,14 @@ export default function TrnsRegistryPage() {
         <MeterDeepDetailsModal
           trnId={selectedMeterTrnId}
           onClose={() => setSelectedMeterTrnId(null)}
+        />
+      ) : null}
+
+      {selectedMediaTrnId ? (
+        <TrnMediaGalleryModal
+          key={selectedMediaTrnId}
+          trnId={selectedMediaTrnId}
+          onClose={() => setSelectedMediaTrnId(null)}
         />
       ) : null}
     </>
@@ -1255,6 +1287,23 @@ const styles = {
     fontSize: "1rem",
     lineHeight: 1,
     verticalAlign: "middle",
+  },
+  mediaActionButton: {
+    border: 0,
+    background: "transparent",
+    color: "#2563eb",
+    padding: "0.2rem 0.35rem",
+    font: "inherit",
+    cursor: "pointer",
+    borderRadius: "0.45rem",
+    whiteSpace: "nowrap",
+  },
+  mediaUnavailable: {
+    display: "inline-flex",
+    alignItems: "center",
+    color: "#94a3b8",
+    padding: "0.2rem 0.35rem",
+    whiteSpace: "nowrap",
   },
   paginationBar: {
     display: "flex",
