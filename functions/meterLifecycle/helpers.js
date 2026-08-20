@@ -388,9 +388,22 @@ export function normalizeAssignmentTargets(assignment = {}) {
     );
 }
 
-export function validateAssignment(assignment = {}, trnType = "NAv") {
+export function validateAssignment(
+  assignment = {},
+  trnType = "NAv",
+  { originChannel = "" } = {},
+) {
   const instruction = assignment?.instruction || {};
   const targets = normalizeAssignmentTargets(assignment);
+  const normalizedTrnType = normalizeUpper(trnType);
+  const normalizedOriginChannel = normalizeUpper(originChannel);
+  const fieldInstructionOptional =
+    normalizedOriginChannel === "FIELD" &&
+    [
+      "METER_DISCONNECTION",
+      "METER_RECONNECTION",
+      "METER_REMOVAL",
+    ].includes(normalizedTrnType);
 
   if (!instruction?.code) {
     return {
@@ -400,7 +413,7 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
     };
   }
 
-  if (normalizeUpper(instruction.code) !== normalizeUpper(trnType)) {
+  if (normalizeUpper(instruction.code) !== normalizedTrnType) {
     return {
       ok: false,
       code: "ASSIGNMENT_INSTRUCTION_MISMATCH",
@@ -410,7 +423,8 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
 
   if (
     !String(instruction?.text || "").trim() &&
-    normalizeUpper(trnType) !== "METER_READING"
+    normalizedTrnType !== "METER_READING" &&
+    !fieldInstructionOptional
   ) {
     return {
       ok: false,
@@ -1955,7 +1969,10 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  if (
+    !instructionText &&
+    normalizeUpper(data?.origin?.channel) !== "FIELD"
+  ) {
     return {
       ok: false,
       code: "REMOVAL_INSTRUCTION_REQUIRED",
@@ -2673,7 +2690,10 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  if (
+    !instructionText &&
+    normalizeUpper(data?.origin?.channel) !== "FIELD"
+  ) {
     return {
       ok: false,
       code: "DISCONNECTION_INSTRUCTION_REQUIRED",
@@ -2954,7 +2974,10 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  if (
+    !instructionText &&
+    normalizeUpper(data?.origin?.channel) !== "FIELD"
+  ) {
     return {
       ok: false,
       code: "RECONNECTION_INSTRUCTION_REQUIRED",
