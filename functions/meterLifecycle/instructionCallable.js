@@ -112,10 +112,9 @@ async function resolveCreateInstructionAuthority({ db, request }) {
     profile?.serviceProvider?.isMnc === true;
 
   const isMng = role === "MNG";
-  const isMncSpv = role === "SPV" && isMnc;
 
   return {
-    ok: isMng || isMncSpv,
+    ok: isMng,
     role: role || "UNKNOWN",
     relationshipType: relationshipType || "UNKNOWN",
     clientType: clientType || "UNKNOWN",
@@ -266,7 +265,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
       if (!authority.ok) {
         return buildFailureResult(
           "UNAUTHORIZED_LCT_ORIGINATOR",
-          "Only MNG and SPV(MNC) can create lifecycle instructions",
+          "Only MNG can create lifecycle instructions",
           {
             actorRole: authority.role,
             actorRelationshipType: authority.relationshipType,

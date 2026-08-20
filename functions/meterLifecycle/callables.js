@@ -163,7 +163,7 @@ async function resolveDirectFieldAuthority({ db, request }) {
     !serviceProviderLooksMnc(actorSp || {});
 
   return {
-    ok: isSubc,
+    ok: role === "SPV",
     role,
     spId,
     isSubc,
@@ -472,7 +472,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       if (!fieldAuthority.ok) {
         return buildFailureResult(
           "UNAUTHORIZED_FIELD_ORIGIN",
-          "Only FWR or SPV(SUBC) actors can originate this lifecycle transaction from the field",
+          "Only FWR or SPV actors can originate this lifecycle transaction from the field",
           {
             trnId,
             trnType,
