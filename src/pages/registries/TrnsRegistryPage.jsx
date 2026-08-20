@@ -13,6 +13,7 @@ import DownloadButtons from "../../components/DownloadButtons";
 import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import TrnMediaGalleryModal from "./components/TrnMediaGalleryModal";
+import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -73,6 +74,147 @@ function getActiveLmPcode(activeWorkbase) {
 function formatNumber(value) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
+}
+
+function ReportDocumentIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={styles.reportIcon}
+    >
+      <path
+        d="M6.75 2.75h7.1l3.4 3.4v15.1H6.75a2 2 0 0 1-2-2V4.75a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.75 2.95v3.8h3.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.25 11h5.9M8.25 14.5h7.5M8.25 18h5.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MeterActionIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={styles.actionSvgIcon}
+    >
+      <rect
+        x="5"
+        y="3.5"
+        width="14"
+        height="17"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <rect
+        x="8"
+        y="6.5"
+        width="8"
+        height="4"
+        rx="1"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M9 15.25h6M9 18h3.25"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ErfActionIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={styles.actionSvgIcon}
+    >
+      <path
+        d="M5.2 6.6 10.4 3l8.4 3.2-1.7 10.9-7 3.2-5.4-5.2.5-8.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m10.4 3-.3 17.3M5.2 6.6l11.9 10.5M18.8 6.2 4.7 15.1"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        opacity="0.55"
+      />
+    </svg>
+  );
+}
+
+function WardActionIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={styles.actionSvgIcon}
+    >
+      <path
+        d="M12 21s6-5.3 6-11a6 6 0 1 0-12 0c0 5.7 6 11 6 11Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="12"
+        cy="10"
+        r="2.25"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function MediaActionIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={styles.mediaSvgIcon}
+    >
+      <path
+        d="M8.25 6.25 9.5 4.5h5l1.25 1.75H18a2 2 0 0 1 2 2v8.25a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8.25a2 2 0 0 1 2-2h2.25Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="12"
+        cy="12.25"
+        r="3.1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
 }
 
 function formatDateTime(value) {
@@ -155,6 +297,23 @@ function isActionableValue(value) {
   return Boolean(
     normalized && !["NAV", "N/AV", "N/A", "NA", "-"].includes(normalized),
   );
+}
+
+function getCompactTrnId(trnId, wardPcode) {
+  const fullTrnId = String(trnId || "").trim();
+  if (!isActionableValue(fullTrnId)) return "NAv";
+
+  const segments = fullTrnId.split("_").filter(Boolean);
+  const lastSegment = segments.at(-1) || "";
+  const suffix = lastSegment.slice(-4);
+  const ward = isActionableValue(wardPcode)
+    ? String(wardPcode).trim()
+    : segments.at(-2) || "";
+
+  if (ward && suffix) return `...${ward}_${suffix}`;
+  if (suffix) return `...${suffix}`;
+
+  return `...${fullTrnId.slice(-4)}`;
 }
 
 function compareNatural(left, right) {
@@ -468,8 +627,10 @@ export default function TrnsRegistryPage() {
   const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [showTrnId, setShowTrnId] = useState(true);
   const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);
   const [selectedMediaTrnId, setSelectedMediaTrnId] = useState(null);
+  const [selectedReportTrnId, setSelectedReportTrnId] = useState(null);
   const [selectedBoundary, setSelectedBoundary] = useState(null);
 
   const {
@@ -694,6 +855,15 @@ export default function TrnsRegistryPage() {
           </select>
         </label>
 
+        <label style={styles.columnVisibilityToggle}>
+          <input
+            type="checkbox"
+            checked={showTrnId}
+            onChange={(event) => setShowTrnId(event.target.checked)}
+          />
+          Show TRN ID
+        </label>
+
         <div className="filter-summary">
           <strong>
             {filters.trnType === "ALL" ? "All TRN Types" : filters.trnType}
@@ -789,18 +959,41 @@ export default function TrnsRegistryPage() {
             />
 
             <div className="table-wrap">
-              <table className="data-table" style={styles.registryTable}>
+              <table
+                className="data-table"
+                style={{
+                  ...styles.registryTable,
+                  minWidth: showTrnId ? "2600px" : "2420px",
+                }}
+              >
                 <thead>
                   <tr>
-                    <GroupHeader colSpan={1}>TRN Identity</GroupHeader>
+                    <GroupHeader colSpan={showTrnId ? 2 : 1}>
+                      TRN Identity
+                    </GroupHeader>
                     <GroupHeader colSpan={5}>Location and Actions</GroupHeader>
                     <GroupHeader colSpan={5}>TRN Detail</GroupHeader>
                     <GroupHeader colSpan={2}>Findings</GroupHeader>
                     <GroupHeader colSpan={2}>Creation</GroupHeader>
-                    <GroupHeader colSpan={1}>TRN Identity</GroupHeader>
                   </tr>
 
                   <tr>
+                    {showTrnId ? (
+                      <th>
+                        <SortButton
+                          label="TRN ID"
+                          sortKey="trnId"
+                          sortConfig={sortConfig}
+                          onSort={handleSort}
+                        />
+                        <FilterInput
+                          value={filters.trnId}
+                          onChange={(value) => updateFilter("trnId", value)}
+                          placeholder="TRN ID"
+                        />
+                      </th>
+                    ) : null}
+
                     <th>
                       <SortButton
                         label="Meter No"
@@ -1029,26 +1222,13 @@ export default function TrnsRegistryPage() {
                       />
                     </th>
 
-                    <th>
-                      <SortButton
-                        label="TRN ID"
-                        sortKey="trnId"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.trnId}
-                        onChange={(value) => updateFilter("trnId", value)}
-                        placeholder="TRN ID"
-                      />
-                    </th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {sortedTrnRows.length === 0 ? (
                     <tr>
-                      <td colSpan={16} className="muted">
+                      <td colSpan={showTrnId ? 16 : 15} className="muted">
                         No TRNs match the current filters. Clear or adjust a
                         column filter above.
                       </td>
@@ -1056,15 +1236,29 @@ export default function TrnsRegistryPage() {
                   ) : (
                     paginatedTrnRows.map((row) => (
                       <tr key={row.trnId}>
+                        {showTrnId ? (
+                          <td style={styles.idCell}>
+                            <span
+                              style={styles.trnIdDisplay}
+                              title={row.trnId || "NAv"}
+                            >
+                              {getCompactTrnId(row.trnId, row.wardPcode)}
+                            </span>
+                          </td>
+                        ) : null}
+
                         <td style={styles.meterCell}>
                           {isActionableValue(row.meterNo) ? (
                             <button
                               type="button"
-                              style={styles.meterLinkButton}
+                              style={styles.dataActionButton}
                               onClick={() => setSelectedMeterTrnId(row.trnId)}
                               title="Open meter details from this TRN"
                             >
-                              {row.meterNo}
+                              <span style={styles.dataActionIconWrap}>
+                                <MeterActionIcon />
+                              </span>
+                              <span>{row.meterNo}</span>
                             </button>
                           ) : (
                             "NAv"
@@ -1078,7 +1272,7 @@ export default function TrnsRegistryPage() {
                           isActionableValue(row.erfNo) ? (
                             <button
                               type="button"
-                              style={styles.geoLinkButton}
+                              style={styles.compactDataActionButton}
                               onClick={() =>
                                 setSelectedBoundary({
                                   mode: "ERF",
@@ -1091,7 +1285,10 @@ export default function TrnsRegistryPage() {
                               }
                               title={`Open ERF ${row.erfNo} boundary`}
                             >
-                              {row.erfNo}
+                              <span style={styles.dataActionIconWrap}>
+                                <ErfActionIcon />
+                              </span>
+                              <span>{row.erfNo}</span>
                             </button>
                           ) : (
                             row.erfNo || "NAv"
@@ -1102,7 +1299,7 @@ export default function TrnsRegistryPage() {
                           isActionableValue(row.wardNo) ? (
                             <button
                               type="button"
-                              style={styles.geoLinkButton}
+                              style={styles.compactDataActionButton}
                               onClick={() =>
                                 setSelectedBoundary({
                                   mode: "WARD",
@@ -1115,7 +1312,10 @@ export default function TrnsRegistryPage() {
                               }
                               title={`Open Ward ${row.wardNo} boundary`}
                             >
-                              {row.wardNo}
+                              <span style={styles.dataActionIconWrap}>
+                                <WardActionIcon />
+                              </span>
+                              <span>{row.wardNo}</span>
                             </button>
                           ) : (
                             row.wardNo || "NAv"
@@ -1136,31 +1336,31 @@ export default function TrnsRegistryPage() {
                                 Number(row.mediaCount) === 1 ? "" : "s"
                               } from TRN ${row.trnId}`}
                             >
-                              <span aria-hidden="true" style={styles.actionIcon}>
-                                📷
+                              <MediaActionIcon />
+                              <span style={styles.mediaCountBadge}>
+                                {formatNumber(row.mediaCount)}
                               </span>
-                              <strong>{formatNumber(row.mediaCount)}</strong>
                             </button>
                           ) : (
                             <span
                               style={styles.mediaUnavailable}
                               title="No media captured for this TRN"
                             >
-                              <span aria-hidden="true" style={styles.actionIcon}>
-                                📷
-                              </span>
-                              <strong>0</strong>
+                              <MediaActionIcon />
+                              <span style={styles.mediaCountBadgeMuted}>0</span>
                             </span>
                           )}
                         </td>
                         <td style={styles.iconCell}>
-                          <span
-                            aria-hidden="true"
-                            style={styles.actionIcon}
-                            title="TRN Report preview will be enabled in the next step"
+                          <button
+                            type="button"
+                            style={styles.reportActionButton}
+                            onClick={() => setSelectedReportTrnId(row.trnId)}
+                            title={`Open TRN report preview for ${row.trnId}`}
+                            aria-label={`Open TRN report preview for ${row.trnId}`}
                           >
-                            📄
-                          </span>
+                            <ReportDocumentIcon />
+                          </button>
                         </td>
                         <td>{row.trnType || "NAv"}</td>
                         <td>{getAccessLabel(row.hasAccess)}</td>
@@ -1175,7 +1375,6 @@ export default function TrnsRegistryPage() {
                         </td>
                         <td>{row.createdByUser || "NAv"}</td>
                         <td>{formatDateTime(row.createdAt)}</td>
-                        <td style={styles.idCell}>{row.trnId || "NAv"}</td>
                       </tr>
                     ))
                   )}
@@ -1216,6 +1415,14 @@ export default function TrnsRegistryPage() {
           key={selectedMediaTrnId}
           trnId={selectedMediaTrnId}
           onClose={() => setSelectedMediaTrnId(null)}
+        />
+      ) : null}
+
+      {selectedReportTrnId ? (
+        <TrnReportPreviewModal
+          key={selectedReportTrnId}
+          trnId={selectedReportTrnId}
+          onClose={() => setSelectedReportTrnId(null)}
         />
       ) : null}
 
@@ -1311,38 +1518,76 @@ const styles = {
     paddingTop: "0.1rem",
   },
   idCell: {
-    minWidth: "19rem",
-    maxWidth: "25rem",
-    overflowWrap: "anywhere",
+    minWidth: "12rem",
+    maxWidth: "15rem",
     fontWeight: 750,
+    whiteSpace: "nowrap",
+  },
+  trnIdDisplay: {
+    display: "inline-block",
+    cursor: "help",
+    whiteSpace: "nowrap",
+  },
+  columnVisibilityToggle: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    alignSelf: "end",
+    minHeight: "2.4rem",
+    color: "#334155",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
   },
   meterCell: {
     minWidth: "10rem",
     fontWeight: 800,
   },
-  meterLinkButton: {
-    border: 0,
-    background: "transparent",
-    color: "#2563eb",
-    padding: 0,
+  dataActionButton: {
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.48rem",
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    padding: "0.38rem 0.62rem",
     font: "inherit",
     fontWeight: 850,
-    textDecoration: "underline",
-    textUnderlineOffset: "0.15rem",
     cursor: "pointer",
+    borderRadius: "0.65rem",
     textAlign: "left",
+    whiteSpace: "nowrap",
   },
-  geoLinkButton: {
-    border: 0,
-    background: "transparent",
-    color: "#2563eb",
-    padding: 0,
+  compactDataActionButton: {
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.42rem",
+    border: "1px solid #bfdbfe",
+    background: "#f8fbff",
+    color: "#1d4ed8",
+    padding: "0.38rem 0.54rem",
     font: "inherit",
-    fontWeight: 800,
-    textDecoration: "underline",
-    textUnderlineOffset: "0.15rem",
+    fontWeight: 850,
     cursor: "pointer",
-    textAlign: "left",
+    borderRadius: "0.65rem",
+    whiteSpace: "nowrap",
+  },
+  dataActionIconWrap: {
+    width: "1.55rem",
+    height: "1.55rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: "0 0 auto",
+    borderRadius: "0.45rem",
+    background: "#dbeafe",
+  },
+  actionSvgIcon: {
+    display: "block",
+    width: "1.05rem",
+    height: "1.05rem",
   },
   addressCell: {
     minWidth: "15rem",
@@ -1366,22 +1611,92 @@ const styles = {
     lineHeight: 1,
     verticalAlign: "middle",
   },
-  mediaActionButton: {
-    border: 0,
-    background: "transparent",
-    color: "#2563eb",
-    padding: "0.2rem 0.35rem",
-    font: "inherit",
-    cursor: "pointer",
-    borderRadius: "0.45rem",
-    whiteSpace: "nowrap",
-  },
-  mediaUnavailable: {
+  reportActionButton: {
+    width: "2.5rem",
+    height: "2.5rem",
     display: "inline-flex",
     alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#2563eb",
+    padding: 0,
+    font: "inherit",
+    cursor: "pointer",
+    borderRadius: "0.65rem",
+  },
+  reportIcon: {
+    display: "block",
+    width: "1.5rem",
+    height: "1.5rem",
+  },
+  mediaActionButton: {
+    position: "relative",
+    width: "2.5rem",
+    height: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#2563eb",
+    padding: 0,
+    font: "inherit",
+    cursor: "pointer",
+    borderRadius: "0.65rem",
+  },
+  mediaSvgIcon: {
+    display: "block",
+    width: "1.45rem",
+    height: "1.45rem",
+  },
+  mediaCountBadge: {
+    position: "absolute",
+    top: "-0.38rem",
+    right: "-0.38rem",
+    minWidth: "1.15rem",
+    height: "1.15rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "2px solid #ffffff",
+    borderRadius: "999px",
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "0 0.2rem",
+    fontSize: "0.66rem",
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+  mediaUnavailable: {
+    position: "relative",
+    width: "2.5rem",
+    height: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #e2e8f0",
+    background: "#f8fafc",
     color: "#94a3b8",
-    padding: "0.2rem 0.35rem",
-    whiteSpace: "nowrap",
+    borderRadius: "0.65rem",
+  },
+  mediaCountBadgeMuted: {
+    position: "absolute",
+    top: "-0.38rem",
+    right: "-0.38rem",
+    minWidth: "1.15rem",
+    height: "1.15rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "2px solid #ffffff",
+    borderRadius: "999px",
+    background: "#cbd5e1",
+    color: "#475569",
+    padding: "0 0.2rem",
+    fontSize: "0.66rem",
+    fontWeight: 900,
+    lineHeight: 1,
   },
   paginationBar: {
     display: "flex",

@@ -150,6 +150,9 @@ import {
 import {
   onGeneratedReportsRetentionCleanup,
 } from "./reportPlatform/retentionCleanupSchedule.js";
+import {
+  getQuickTrnMediaCallable,
+} from "./reportPlatform/trnMediaCallables.js";
 
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
 import {
@@ -218,6 +221,7 @@ export {
   getGeneratedReportDownloadCallable,
   deleteGeneratedReportCallable,
   onGeneratedReportsRetentionCleanup,
+  getQuickTrnMediaCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
