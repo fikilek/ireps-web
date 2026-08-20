@@ -24,7 +24,8 @@
     "@turf/helpers": "^7.3.5",
     "@turf/kinks": "^7.3.5",
     "firebase-admin": "^13.6.0",
-    "firebase-functions": "^7.3.2"
+    "firebase-functions": "^7.3.2",
+    "nodemailer": "^9.0.3"
   },
   "private": true
 }

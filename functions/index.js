@@ -153,6 +153,9 @@ import {
 import {
   getQuickTrnMediaCallable,
 } from "./reportPlatform/trnMediaCallables.js";
+import {
+  sendGeneratedReportEmailCallable,
+} from "./reportPlatform/emailDeliveryCallable.js";
 
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
 import {
@@ -222,6 +225,7 @@ export {
   deleteGeneratedReportCallable,
   onGeneratedReportsRetentionCleanup,
   getQuickTrnMediaCallable,
+  sendGeneratedReportEmailCallable,
 };
 
 function buildPremiseUpdateMetadata(agentUid = "SYSTEM", agentName = "SYSTEM") {
