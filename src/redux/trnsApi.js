@@ -290,6 +290,21 @@ function getRegistryAnomalyInfo(data = {}) {
   };
 }
 
+function getRegistryMeterDiscoveryNormalisation(data = {}) {
+  const trnType = normalizeRegistryCode(
+    data.accessData?.trnType || data.trnType,
+  );
+
+  if (trnType !== "METER_DISCOVERY") return "NAv";
+
+  const actions = asArray(data.ast?.normalisation?.actionTaken)
+    .filter((action) => typeof action === "string")
+    .map((action) => action.trim())
+    .filter(Boolean);
+
+  return actions.length ? actions.join(" • ") : "NAv";
+}
+
 function normalizeTrnRegistryDoc(docSnap) {
   if (!docSnap || !docSnap.exists()) return null;
 
@@ -315,6 +330,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     astState: normalizeRegistryCode(data.status?.state),
     anomaly: anomalyInfo.anomaly,
     anomalyDetail: anomalyInfo.anomalyDetail,
+    normalisation: getRegistryMeterDiscoveryNormalisation(data),
     mediaCount: asArray(data.media).length,
     originChannel: getRegistryOriginChannel(data),
     createdByUid: valueOrNav(metadata.createdByUid),

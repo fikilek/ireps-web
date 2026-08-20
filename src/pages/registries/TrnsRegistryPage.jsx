@@ -52,6 +52,7 @@ const EMPTY_TRN_FILTERS = {
   astState: "ALL",
   anomaly: "",
   anomalyDetail: "",
+  normalisation: "",
   createdByUser: "",
 };
 
@@ -663,6 +664,7 @@ export default function TrnsRegistryPage() {
         matchesSelect(row.astState, filters.astState) &&
         includesText(row.anomaly, filters.anomaly) &&
         includesText(row.anomalyDetail, filters.anomalyDetail) &&
+        includesText(row.normalisation, filters.normalisation) &&
         includesText(row.createdByUser, filters.createdByUser) &&
         matchesDateFilter(row.createdAt, createdAtFilter)
       );
@@ -737,6 +739,10 @@ export default function TrnsRegistryPage() {
       {
         header: "Anomaly Detail",
         value: (row) => row.anomalyDetail || "NAv",
+      },
+      {
+        header: "Normalisation",
+        value: (row) => row.normalisation || "NAv",
       },
       {
         header: "Created By User",
@@ -963,7 +969,7 @@ export default function TrnsRegistryPage() {
                 className="data-table"
                 style={{
                   ...styles.registryTable,
-                  minWidth: showTrnId ? "2600px" : "2420px",
+                  minWidth: showTrnId ? "2780px" : "2600px",
                 }}
               >
                 <thead>
@@ -973,7 +979,7 @@ export default function TrnsRegistryPage() {
                     </GroupHeader>
                     <GroupHeader colSpan={5}>Location and Actions</GroupHeader>
                     <GroupHeader colSpan={5}>TRN Detail</GroupHeader>
-                    <GroupHeader colSpan={2}>Findings</GroupHeader>
+                    <GroupHeader colSpan={3}>Findings</GroupHeader>
                     <GroupHeader colSpan={2}>Creation</GroupHeader>
                   </tr>
 
@@ -1195,6 +1201,22 @@ export default function TrnsRegistryPage() {
 
                     <th>
                       <SortButton
+                        label="Normalisation"
+                        sortKey="normalisation"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterInput
+                        value={filters.normalisation}
+                        onChange={(value) =>
+                          updateFilter("normalisation", value)
+                        }
+                        placeholder="Normalisation"
+                      />
+                    </th>
+
+                    <th>
+                      <SortButton
                         label="Created By User"
                         sortKey="createdByUser"
                         sortConfig={sortConfig}
@@ -1228,7 +1250,7 @@ export default function TrnsRegistryPage() {
                 <tbody>
                   {sortedTrnRows.length === 0 ? (
                     <tr>
-                      <td colSpan={showTrnId ? 16 : 15} className="muted">
+                      <td colSpan={showTrnId ? 17 : 16} className="muted">
                         No TRNs match the current filters. Clear or adjust a
                         column filter above.
                       </td>
@@ -1373,6 +1395,9 @@ export default function TrnsRegistryPage() {
                         <td style={styles.findingCell}>
                           {row.anomalyDetail || "NAv"}
                         </td>
+                        <td style={styles.findingCell}>
+                          {row.normalisation || "NAv"}
+                        </td>
                         <td>{row.createdByUser || "NAv"}</td>
                         <td>{formatDateTime(row.createdAt)}</td>
                       </tr>
@@ -1460,7 +1485,7 @@ const styles = {
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
   registryTable: {
-    minWidth: "2600px",
+    minWidth: "2780px",
   },
   groupHeaderCell: {
     background: "#e2e8f0",
