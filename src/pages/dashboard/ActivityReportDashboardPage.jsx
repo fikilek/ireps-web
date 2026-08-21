@@ -4,6 +4,7 @@ import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetUserActivityRowsByLmQuery } from "../../redux/reportUserActivityApi";
+import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 
 import "./ActivityReportDashboardPage.css";
 
@@ -247,6 +248,77 @@ function getClassifiedActivityTotal(row) {
   return TRN_TYPES.reduce((sum, type) => sum + Number(row?.[type.key] || 0), 0);
 }
 
+function buildTeamsByUserUid(teams = []) {
+  const teamsByUserUid = new Map();
+
+  teams.forEach((team) => {
+    const teamId = String(team?.id || "").trim();
+    const teamName = String(team?.name || "").trim();
+
+    if (!teamId || !hasValue(teamName)) return;
+
+    (team?.memberUserIds || []).forEach((userUidValue) => {
+      const userUid = String(userUidValue || "").trim();
+      if (!userUid) return;
+
+      const memberships = teamsByUserUid.get(userUid) || [];
+      memberships.push({ id: teamId, name: teamName });
+      teamsByUserUid.set(userUid, memberships);
+    });
+  });
+
+  return teamsByUserUid;
+}
+
+function resolveActivityTeamAttribution(rows = [], teams = []) {
+  const teamsByUserUid = buildTeamsByUserUid(teams);
+
+  return rows.map((row) => {
+    const userUid = String(row?.userUid || "").trim();
+    const memberships = userUid ? teamsByUserUid.get(userUid) || [] : [];
+
+    const uniqueMemberships = Array.from(
+      new Map(
+        memberships.map((team) => [
+          team.id,
+          {
+            id: team.id,
+            name: team.name,
+          },
+        ]),
+      ).values(),
+    ).sort((left, right) => left.name.localeCompare(right.name));
+
+    if (uniqueMemberships.length === 1) {
+      return {
+        ...row,
+        teamId: uniqueMemberships[0].id,
+        teamName: uniqueMemberships[0].name,
+        teamNames: [uniqueMemberships[0].name],
+        teamAttributionStatus: "RESOLVED",
+      };
+    }
+
+    if (uniqueMemberships.length > 1) {
+      return {
+        ...row,
+        teamId: "MULTIPLE",
+        teamName: "Multiple Teams",
+        teamNames: uniqueMemberships.map((team) => team.name),
+        teamAttributionStatus: "MULTIPLE",
+      };
+    }
+
+    return {
+      ...row,
+      teamId: "NAv",
+      teamName: "Unassigned",
+      teamNames: [],
+      teamAttributionStatus: "UNASSIGNED",
+    };
+  });
+}
+
 function buildActivityModel(rows = [], filters = {}) {
   const filteredRows = rows
     .map((row) => ({ ...row, activityTotal: getClassifiedActivityTotal(row) }))
@@ -277,7 +349,9 @@ function buildActivityModel(rows = [], filters = {}) {
 
   filteredRows.forEach((row) => {
     if (hasValue(row?.serviceProviderName)) serviceProviders.add(row.serviceProviderName);
-    if (hasValue(row?.teamName)) teams.add(row.teamName);
+    if (row?.teamAttributionStatus === "RESOLVED" && hasValue(row?.teamName)) {
+      teams.add(row.teamName);
+    }
   });
 
   const users = [...filteredRows].sort(
@@ -289,7 +363,7 @@ function buildActivityModel(rows = [], filters = {}) {
   const teamMap = new Map();
 
   filteredRows.forEach((row) => {
-    const teamName = hasValue(row?.teamName) ? String(row.teamName).trim() : "Unassigned";
+    const teamName = String(row?.teamName || "Unassigned").trim() || "Unassigned";
     const current = teamMap.get(teamName) || {
       name: teamName,
       discovery: 0,
@@ -479,29 +553,39 @@ export default function ActivityReportDashboardPage() {
     error,
   } = useGetUserActivityRowsByLmQuery(activeLmPcode || skipToken);
 
+  const {
+    data: availableTeams = [],
+    isFetching: teamsIsFetching,
+  } = useGetAvailableTeamsQuery();
+
+  const attributedActivityRows = useMemo(
+    () => resolveActivityTeamAttribution(activityRows, availableTeams),
+    [activityRows, availableTeams],
+  );
+
   const filterOptions = useMemo(() => {
     const serviceProviders = Array.from(
       new Set(
-        activityRows
+        attributedActivityRows
           .map((row) => row?.serviceProviderName)
           .filter(hasValue),
       ),
     ).sort((left, right) => left.localeCompare(right));
 
     const teams = Array.from(
-      new Set(activityRows.map((row) => row?.teamName).filter(hasValue)),
+      new Set(attributedActivityRows.map((row) => row?.teamName).filter(hasValue)),
     ).sort((left, right) => left.localeCompare(right));
 
     return { serviceProviders, teams };
-  }, [activityRows]);
+  }, [attributedActivityRows]);
 
   const activity = useMemo(
     () =>
-      buildActivityModel(activityRows, {
+      buildActivityModel(attributedActivityRows, {
         serviceProvider: serviceProviderFilter,
         team: teamFilter,
       }),
-    [activityRows, serviceProviderFilter, teamFilter],
+    [attributedActivityRows, serviceProviderFilter, teamFilter],
   );
 
   if (!activeLmPcode) {
@@ -708,8 +792,8 @@ export default function ActivityReportDashboardPage() {
       </div>
 
       <footer className="activity-dashboard-footer">
-        <span className={isFetching ? "activity-refresh-icon spinning" : "activity-refresh-icon"}>↻</span>
-        Live User Activity read model · {activeLmPcode}
+        <span className={isFetching || teamsIsFetching ? "activity-refresh-icon spinning" : "activity-refresh-icon"}>↻</span>
+        Live User Activity + Teams streams · {activeLmPcode}
       </footer>
     </section>
   );
