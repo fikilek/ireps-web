@@ -92,17 +92,12 @@ export const DISCONNECTION_LEVELS = {
 export const DISCONNECTION_MEDIA_TAGS = {
   levelEvidence: "disconnectionLevelEvidence",
   previousDraftLevelEvidence: "levelEvidence",
-  meterReadingEvidence: "disconnectionMeterReadingEvidence",
-  tokenReadingPhoto: "tokenReadingPhoto",
-  safetyEvidence: "safetyEvidence",
+  supplyDisconnectedEvidence: "supplyDisconnectedEvidence",
   noAccessPhoto: "noAccessPhoto",
 };
 
 export const RECONNECTION_MEDIA_TAGS = {
   reconnectionEvidence: "reconnectionEvidence",
-  meterReadingEvidence: "reconnectionMeterReadingEvidence",
-  tokenReadingPhoto: "tokenReadingPhoto",
-  safetyEvidence: "safetyEvidence",
   noAccessPhoto: "noAccessPhoto",
 };
 
@@ -388,9 +383,22 @@ export function normalizeAssignmentTargets(assignment = {}) {
     );
 }
 
-export function validateAssignment(assignment = {}, trnType = "NAv") {
+export function validateAssignment(
+  assignment = {},
+  trnType = "NAv",
+  { originChannel = "" } = {},
+) {
   const instruction = assignment?.instruction || {};
   const targets = normalizeAssignmentTargets(assignment);
+  const normalizedTrnType = normalizeUpper(trnType);
+  const normalizedOriginChannel = normalizeUpper(originChannel);
+  const fieldInstructionOptional =
+    normalizedOriginChannel === "FIELD" &&
+    [
+      "METER_DISCONNECTION",
+      "METER_RECONNECTION",
+      "METER_REMOVAL",
+    ].includes(normalizedTrnType);
 
   if (!instruction?.code) {
     return {
@@ -400,7 +408,7 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
     };
   }
 
-  if (normalizeUpper(instruction.code) !== normalizeUpper(trnType)) {
+  if (normalizeUpper(instruction.code) !== normalizedTrnType) {
     return {
       ok: false,
       code: "ASSIGNMENT_INSTRUCTION_MISMATCH",
@@ -410,7 +418,8 @@ export function validateAssignment(assignment = {}, trnType = "NAv") {
 
   if (
     !String(instruction?.text || "").trim() &&
-    normalizeUpper(trnType) !== "METER_READING"
+    normalizedTrnType !== "METER_READING" &&
+    !fieldInstructionOptional
   ) {
     return {
       ok: false,
@@ -1955,7 +1964,10 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  if (
+    !instructionText &&
+    normalizeUpper(data?.origin?.channel) !== "FIELD"
+  ) {
     return {
       ok: false,
       code: "REMOVAL_INSTRUCTION_REQUIRED",
@@ -2313,9 +2325,13 @@ export function buildLifecycleTrnPayload({
     disconnection:
       trnType === "METER_DISCONNECTION"
         ? sanitizeMeterDisconnection(data?.disconnection || {}, {
-            isPrepaidMeter,
             noAccess,
           })
+        : undefined,
+
+    fieldComment:
+      ["METER_DISCONNECTION", "METER_RECONNECTION"].includes(trnType)
+        ? sanitizeFieldComment(data?.fieldComment || {})
         : undefined,
 
     executionOutcome: [
@@ -2331,7 +2347,6 @@ export function buildLifecycleTrnPayload({
     reconnection:
       trnType === "METER_RECONNECTION"
         ? sanitizeMeterReconnection(data?.reconnection || {}, {
-            isPrepaidMeter,
             noAccess,
           })
         : undefined,
@@ -2530,9 +2545,15 @@ export function sanitizeLifecycleExecutionOutcome(outcome = {}) {
 
 // SANITIZE FUNCTIONS
 
+export function sanitizeFieldComment(fieldComment = {}) {
+  return {
+    text: String(fieldComment?.text || "").trim(),
+  };
+}
+
 export function sanitizeMeterDisconnection(
   disconnection = {},
-  { isPrepaidMeter = false, noAccess = false } = {},
+  { noAccess = false } = {},
 ) {
   if (noAccess) {
     return {
@@ -2546,15 +2567,6 @@ export function sanitizeMeterDisconnection(
         answer: null,
         notes: "",
       },
-
-      meterReading: "",
-      tokenReading: "",
-      noReadingReason: "",
-
-      safetyConfirmed: {
-        answer: null,
-        notes: "",
-      },
     };
   }
 
@@ -2565,40 +2577,16 @@ export function sanitizeMeterDisconnection(
       answer: normalizeYesNo(disconnection?.supplyDisconnected?.answer),
       notes: String(disconnection?.supplyDisconnected?.notes || ""),
     },
-
-    meterReading: isPrepaidMeter
-      ? ""
-      : getFlatOrNestedReading(disconnection, "meterReading"),
-
-    tokenReading: isPrepaidMeter
-      ? String(disconnection?.tokenReading || "")
-      : "",
-
-    noReadingReason: selectValueToText(disconnection?.noReadingReason),
-
-    safetyConfirmed: {
-      answer: normalizeYesNo(disconnection?.safetyConfirmed?.answer),
-      notes: String(disconnection?.safetyConfirmed?.notes || ""),
-    },
   };
 }
 
 export function sanitizeMeterReconnection(
   reconnection = {},
-  { isPrepaidMeter = false, noAccess = false } = {},
+  { noAccess = false } = {},
 ) {
   if (noAccess) {
     return {
       supplyReconnected: {
-        answer: "",
-        notes: "",
-      },
-
-      meterReading: "",
-      tokenReading: "",
-      noReadingReason: "",
-
-      safetyConfirmed: {
         answer: "",
         notes: "",
       },
@@ -2609,21 +2597,6 @@ export function sanitizeMeterReconnection(
     supplyReconnected: {
       answer: normalizeYesNo(reconnection?.supplyReconnected?.answer),
       notes: String(reconnection?.supplyReconnected?.notes || ""),
-    },
-
-    meterReading: isPrepaidMeter
-      ? ""
-      : getFlatOrNestedReading(reconnection, "meterReading"),
-
-    tokenReading: isPrepaidMeter
-      ? String(reconnection?.tokenReading || "")
-      : "",
-
-    noReadingReason: selectValueToText(reconnection?.noReadingReason),
-
-    safetyConfirmed: {
-      answer: normalizeYesNo(reconnection?.safetyConfirmed?.answer),
-      notes: String(reconnection?.safetyConfirmed?.notes || ""),
     },
   };
 }
@@ -2649,14 +2622,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
     disconnection?.supplyDisconnected?.answer,
   );
 
-  const safetyConfirmed = normalizeYesNo(
-    disconnection?.safetyConfirmed?.answer,
-  );
-
-  const meterReading = getLifecycleReading(data, "disconnection");
-  const tokenReading = getLifecycleTokenReading(data, "disconnection");
-  const noReadingReason = getLifecycleNoReadingReason(data, "disconnection");
-
   if (currentState !== "CONNECTED") {
     return {
       ok: false,
@@ -2673,7 +2638,10 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  if (
+    !instructionText &&
+    normalizeUpper(data?.origin?.channel) !== "FIELD"
+  ) {
     return {
       ok: false,
       code: "DISCONNECTION_INSTRUCTION_REQUIRED",
@@ -2744,96 +2712,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (!safetyConfirmed) {
-    return {
-      ok: false,
-      code: "INVALID_DISCONNECTION_SAFETY_ANSWER",
-      message: "Safety confirmed answer must be yes or no",
-    };
-  }
-
-  if (safetyConfirmed !== "yes") {
-    return {
-      ok: false,
-      code: "DISCONNECTION_SAFETY_NOT_CONFIRMED",
-      message: "Safety must be confirmed before submit",
-    };
-  }
-
-  if (isPrepaidMeter && meterReading) {
-    return {
-      ok: false,
-      code: "INVALID_PREPAID_METER_READING",
-      message: "Prepaid meters must use token reading, not meter reading",
-    };
-  }
-
-  if (!isPrepaidMeter && tokenReading) {
-    return {
-      ok: false,
-      code: "INVALID_CONVENTIONAL_TOKEN_READING",
-      message: "Conventional meters must use meter reading, not token reading",
-    };
-  }
-
-  if (isPrepaidMeter && !tokenReading && !noReadingReason) {
-    return {
-      ok: false,
-      code: "TOKEN_READING_OR_REASON_REQUIRED",
-      message: "Token reading or no-reading reason is required",
-    };
-  }
-
-  if (!isPrepaidMeter && !meterReading && !noReadingReason) {
-    return {
-      ok: false,
-      code: "METER_READING_OR_REASON_REQUIRED",
-      message: "Meter reading or no-reading reason is required",
-    };
-  }
-
-  if (meterReading && !isNumericReading(meterReading)) {
-    return {
-      ok: false,
-      code: "INVALID_METER_READING",
-      message: "Meter reading must be numeric",
-    };
-  }
-
-  if (tokenReading && !isNumericReading(tokenReading)) {
-    return {
-      ok: false,
-      code: "INVALID_TOKEN_READING",
-      message: "Token reading must be numeric",
-    };
-  }
-
-  if (
-    meterReading &&
-    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.meterReadingEvidence, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_DISCONNECTION_READING_EVIDENCE",
-      message: "Disconnection meter reading evidence media is required",
-    };
-  }
-
-  if (
-    tokenReading &&
-    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.tokenReadingPhoto, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_TOKEN_READING_EVIDENCE",
-      message: "Token reading photo is required",
-    };
-  }
-
   if (
     !hasAnyMediaTag(
       data?.media,
@@ -2852,37 +2730,17 @@ export function validateMeterDisconnection({ data, astDoc }) {
   }
 
   if (
-    !hasMediaTag(data?.media, DISCONNECTION_MEDIA_TAGS.safetyEvidence, {
-      requireUrl: true,
-    })
+    !hasMediaTag(
+      data?.media,
+      DISCONNECTION_MEDIA_TAGS.supplyDisconnectedEvidence,
+      { requireUrl: true },
+    )
   ) {
     return {
       ok: false,
-      code: "MISSING_DISCONNECTION_SAFETY_EVIDENCE",
-      message: "Safety evidence media is required",
+      code: "MISSING_SUPPLY_DISCONNECTED_EVIDENCE",
+      message: "Supply disconnected evidence media is required",
     };
-  }
-
-  const astPatch = {};
-
-  if (!isPrepaidMeter && meterReading) {
-    astPatch.mreadings = buildLatestMreadingsCache({
-      astDoc,
-      reading: meterReading,
-      readingAt: getLifecycleReadingAt(data, "disconnection"),
-      trnId: data?.id,
-      source: "DISCONNECTION",
-    });
-  }
-
-  if (isPrepaidMeter && tokenReading) {
-    astPatch.treadings = buildLatestTreadingsCache({
-      astDoc,
-      tokenReading,
-      readingAt: getLifecycleReadingAt(data, "disconnection"),
-      trnId: data?.id,
-      source: "DISCONNECTION",
-    });
   }
 
   return {
@@ -2900,9 +2758,9 @@ export function validateMeterDisconnection({ data, astDoc }) {
       label: levelConfig.label,
     },
     nextAstState: "DISCONNECTED",
-    astPatch,
+    astPatch: {},
     astStatusChanged: currentState !== "DISCONNECTED",
-    astDataChanged: Object.keys(astPatch).length > 0,
+    astDataChanged: false,
   };
 }
 
@@ -2924,20 +2782,6 @@ export function validateMeterReconnection({ data, astDoc }) {
     reconnection?.supplyReconnected?.answer,
   );
 
-  const supplyReconnectedNotes = String(
-    reconnection?.supplyReconnected?.notes || "",
-  ).trim();
-
-  const safetyConfirmed = normalizeYesNo(reconnection?.safetyConfirmed?.answer);
-
-  const safetyConfirmedNotes = String(
-    reconnection?.safetyConfirmed?.notes || "",
-  ).trim();
-
-  const meterReading = getLifecycleReading(data, "reconnection");
-  const tokenReading = getLifecycleTokenReading(data, "reconnection");
-  const noReadingReason = getLifecycleNoReadingReason(data, "reconnection");
-
   if (currentState !== "DISCONNECTED") {
     return {
       ok: false,
@@ -2954,7 +2798,10 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  if (
+    !instructionText &&
+    normalizeUpper(data?.origin?.channel) !== "FIELD"
+  ) {
     return {
       ok: false,
       code: "RECONNECTION_INSTRUCTION_REQUIRED",
@@ -3016,112 +2863,6 @@ export function validateMeterReconnection({ data, astDoc }) {
     };
   }
 
-  if (!safetyConfirmed) {
-    return {
-      ok: false,
-      code: "INVALID_RECONNECTION_SAFETY_ANSWER",
-      message: "Safety confirmed answer must be yes or no",
-    };
-  }
-
-  if (safetyConfirmed !== "yes") {
-    return {
-      ok: false,
-      code: "RECONNECTION_SAFETY_NOT_CONFIRMED",
-      message: "Safety must be confirmed before submit",
-    };
-  }
-
-  if (supplyReconnected === "no" && !supplyReconnectedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION",
-      message: "Notes are required when supply reconnected is no",
-    };
-  }
-
-  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
-    return {
-      ok: false,
-      code: "NOTES_REQUIRED_FOR_FAILED_RECONNECTION_SAFETY",
-      message: "Notes are required when safety confirmed is no",
-    };
-  }
-
-  if (isPrepaidMeter && meterReading) {
-    return {
-      ok: false,
-      code: "INVALID_PREPAID_METER_READING",
-      message: "Prepaid meters must use token reading, not meter reading",
-    };
-  }
-
-  if (!isPrepaidMeter && tokenReading) {
-    return {
-      ok: false,
-      code: "INVALID_CONVENTIONAL_TOKEN_READING",
-      message: "Conventional meters must use meter reading, not token reading",
-    };
-  }
-
-  if (isPrepaidMeter && !tokenReading && !noReadingReason) {
-    return {
-      ok: false,
-      code: "TOKEN_READING_OR_REASON_REQUIRED",
-      message: "Token reading or no-reading reason is required",
-    };
-  }
-
-  if (!isPrepaidMeter && !meterReading && !noReadingReason) {
-    return {
-      ok: false,
-      code: "METER_READING_OR_REASON_REQUIRED",
-      message: "Meter reading or no-reading reason is required",
-    };
-  }
-
-  if (meterReading && !isNumericReading(meterReading)) {
-    return {
-      ok: false,
-      code: "INVALID_METER_READING",
-      message: "Meter reading must be numeric",
-    };
-  }
-
-  if (tokenReading && !isNumericReading(tokenReading)) {
-    return {
-      ok: false,
-      code: "INVALID_TOKEN_READING",
-      message: "Token reading must be numeric",
-    };
-  }
-
-  if (
-    meterReading &&
-    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.meterReadingEvidence, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_RECONNECTION_READING_EVIDENCE",
-      message: "Reconnection meter reading evidence media is required",
-    };
-  }
-
-  if (
-    tokenReading &&
-    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.tokenReadingPhoto, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_TOKEN_READING_EVIDENCE",
-      message: "Token reading photo is required",
-    };
-  }
-
   if (
     !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.reconnectionEvidence, {
       requireUrl: true,
@@ -3132,40 +2873,6 @@ export function validateMeterReconnection({ data, astDoc }) {
       code: "MISSING_RECONNECTION_EVIDENCE",
       message: "Reconnection evidence media is required",
     };
-  }
-
-  if (
-    !hasMediaTag(data?.media, RECONNECTION_MEDIA_TAGS.safetyEvidence, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_RECONNECTION_SAFETY_EVIDENCE",
-      message: "Safety evidence media is required",
-    };
-  }
-
-  const astPatch = {};
-
-  if (!isPrepaidMeter && meterReading) {
-    astPatch.mreadings = buildLatestMreadingsCache({
-      astDoc,
-      reading: meterReading,
-      readingAt: getLifecycleReadingAt(data, "reconnection"),
-      trnId: data?.id,
-      source: "RECONNECTION",
-    });
-  }
-
-  if (isPrepaidMeter && tokenReading) {
-    astPatch.treadings = buildLatestTreadingsCache({
-      astDoc,
-      tokenReading,
-      readingAt: getLifecycleReadingAt(data, "reconnection"),
-      trnId: data?.id,
-      source: "RECONNECTION",
-    });
   }
 
   return {
@@ -3179,11 +2886,12 @@ export function validateMeterReconnection({ data, astDoc }) {
       success: true,
     },
     nextAstState: "CONNECTED",
-    astPatch,
+    astPatch: {},
     astStatusChanged: currentState !== "CONNECTED",
-    astDataChanged: Object.keys(astPatch).length > 0,
+    astDataChanged: false,
   };
 }
+
 // new LCT helpers
 
 export function sanitizeGeofenceRefs(geofenceRefs = []) {

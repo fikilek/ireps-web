@@ -35,6 +35,141 @@ function readTrnType(trnData = {}) {
 
 const INSTRUCTION_MEDIA_TAG = "instructionMedia";
 
+const DIRECT_FIELD_DUAL_ORIGIN_TRN_TYPES = [
+  "METER_DISCONNECTION",
+  "METER_RECONNECTION",
+  "METER_REMOVAL",
+];
+
+function readFirstString(...values) {
+  for (const value of values) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
+
+  return "";
+}
+
+function getActorRole({ profile = {}, token = {} }) {
+  return normalizeUpper(
+    readFirstString(
+      token?.role,
+      token?.userRole,
+      token?.employmentRole,
+      token?.employment_role,
+      token?.irepsRole,
+      profile?.employment?.role,
+      profile?.role,
+      profile?.userRole,
+    ),
+  );
+}
+
+function getActorServiceProviderId({ profile = {}, token = {} }) {
+  return readFirstString(
+    token?.spId,
+    token?.serviceProviderId,
+    token?.employmentServiceProviderId,
+    profile?.employment?.serviceProvider?.id,
+    profile?.serviceProvider?.id,
+  );
+}
+
+function serviceProviderLooksMnc(serviceProvider = {}) {
+  const classification = normalizeUpper(
+    serviceProvider?.profile?.classification ||
+      serviceProvider?.classification ||
+      serviceProvider?.type,
+  );
+
+  if (classification === "MNC") return true;
+
+  const clients = Array.isArray(serviceProvider?.clients)
+    ? serviceProvider.clients
+    : [];
+
+  return clients.some(
+    (client) =>
+      normalizeUpper(client?.clientType) === "LM" &&
+      normalizeUpper(client?.relationshipType) === "MNC",
+  );
+}
+
+function serviceProviderLooksSubc(serviceProvider = {}) {
+  const clients = Array.isArray(serviceProvider?.clients)
+    ? serviceProvider.clients
+    : [];
+
+  return clients.some(
+    (client) =>
+      normalizeUpper(client?.clientType) === "SP" &&
+      normalizeUpper(client?.relationshipType) === "SUBC",
+  );
+}
+
+async function findActorProfile(db, uid) {
+  const candidatePaths = [
+    `users/${uid}`,
+    `userProfiles/${uid}`,
+    `profiles/${uid}`,
+  ];
+
+  for (const path of candidatePaths) {
+    const snap = await db.doc(path).get();
+
+    if (snap.exists) {
+      return snap.data() || {};
+    }
+  }
+
+  return {};
+}
+
+async function resolveDirectFieldAuthority({ db, request }) {
+  const uid = request?.auth?.uid;
+  const token = request?.auth?.token || {};
+  const profile = await findActorProfile(db, uid);
+  const role = getActorRole({ profile, token });
+  const spId = getActorServiceProviderId({ profile, token });
+
+  if (role === "FWR") {
+    return {
+      ok: true,
+      role,
+      spId: spId || "UNKNOWN",
+      isSubc: false,
+    };
+  }
+
+  if (role !== "SPV" || !spId) {
+    return {
+      ok: false,
+      role: role || "UNKNOWN",
+      spId: spId || "UNKNOWN",
+      isSubc: false,
+    };
+  }
+
+  const spSnap = await db.collection("serviceProviders").doc(spId).get();
+  const actorSp = spSnap.exists
+    ? {
+        id: spSnap.id,
+        ...spSnap.data(),
+      }
+    : null;
+
+  const isSubc =
+    serviceProviderLooksSubc(actorSp || {}) &&
+    !serviceProviderLooksMnc(actorSp || {});
+
+  return {
+    ok: role === "SPV",
+    role,
+    spId,
+    isSubc,
+  };
+}
+
 function isMeaningfulLifecycleText(value) {
   if (value === null || value === undefined) return false;
   const text = String(value).trim();
@@ -286,6 +421,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     const isWmsLifecycleExecution =
       WMS_EXECUTION_TRN_TYPES.includes(trnType) && instructionTrnId === trnId;
 
+    const originChannel = normalizeUpper(data?.origin?.channel);
+
     logger.info("onMeterLifecycleTrnCallable -- START", {
       trnId,
       instructionTrnId,
@@ -293,6 +430,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       astId,
       premiseId,
       actorUid,
+      originChannel,
       isWmsLifecycleExecution,
     });
 
@@ -320,7 +458,37 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     }
 
-    const assignmentCheck = validateAssignment(data?.assignment || {}, trnType);
+    const isDirectFieldDualOrigin =
+      !isWmsLifecycleExecution &&
+      originChannel === "FIELD" &&
+      DIRECT_FIELD_DUAL_ORIGIN_TRN_TYPES.includes(trnType);
+
+    if (isDirectFieldDualOrigin) {
+      const fieldAuthority = await resolveDirectFieldAuthority({
+        db,
+        request,
+      });
+
+      if (!fieldAuthority.ok) {
+        return buildFailureResult(
+          "UNAUTHORIZED_FIELD_ORIGIN",
+          "Only FWR or SPV actors can originate this lifecycle transaction from the field",
+          {
+            trnId,
+            trnType,
+            astId,
+            actorRole: fieldAuthority.role,
+            actorServiceProviderId: fieldAuthority.spId,
+          },
+        );
+      }
+    }
+
+    const assignmentCheck = validateAssignment(
+      data?.assignment || {},
+      trnType,
+      { originChannel },
+    );
 
     if (!assignmentCheck.ok) {
       return buildFailureResult(assignmentCheck.code, assignmentCheck.message, {
@@ -585,11 +753,17 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             : {}),
 
           ...(trnType === "METER_DISCONNECTION"
-            ? { disconnection: cleanExecution?.disconnection || {} }
+            ? {
+                disconnection: cleanExecution?.disconnection || {},
+                fieldComment: cleanExecution?.fieldComment || { text: "" },
+              }
             : {}),
 
           ...(trnType === "METER_RECONNECTION"
-            ? { reconnection: cleanExecution?.reconnection || {} }
+            ? {
+                reconnection: cleanExecution?.reconnection || {},
+                fieldComment: cleanExecution?.fieldComment || { text: "" },
+              }
             : {}),
 
           ...(trnType === "METER_REMOVAL"
