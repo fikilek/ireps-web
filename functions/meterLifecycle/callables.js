@@ -753,11 +753,17 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             : {}),
 
           ...(trnType === "METER_DISCONNECTION"
-            ? { disconnection: cleanExecution?.disconnection || {} }
+            ? {
+                disconnection: cleanExecution?.disconnection || {},
+                fieldComment: cleanExecution?.fieldComment || { text: "" },
+              }
             : {}),
 
           ...(trnType === "METER_RECONNECTION"
-            ? { reconnection: cleanExecution?.reconnection || {} }
+            ? {
+                reconnection: cleanExecution?.reconnection || {},
+                fieldComment: cleanExecution?.fieldComment || { text: "" },
+              }
             : {}),
 
           ...(trnType === "METER_REMOVAL"
