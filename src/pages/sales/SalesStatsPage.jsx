@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetDemoSalesByLmPcodeQuery } from "../../redux/demoSalesApi";
+import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import {
   useGetSalesOperationalStatsByLmQuery,
@@ -232,7 +232,7 @@ export default function SalesStatsPage() {
     isLoading: salesLoading,
     isFetching: salesFetching,
     error: salesError,
-  } = useGetDemoSalesByLmPcodeQuery(activeLmPcode, {
+  } = useGetSalesByLmPcodeQuery(activeLmPcode, {
     skip: !activeLmPcode,
   });
 

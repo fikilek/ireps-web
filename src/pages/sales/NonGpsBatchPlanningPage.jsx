@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetDemoSalesByLmPcodeQuery } from "../../redux/demoSalesApi";
+import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
 import NonGpsExceptions from "./components/NonGpsExceptions";
@@ -83,7 +83,7 @@ export default function NonGpsBatchPlanningPage() {
     isFetching,
     error,
     refetch,
-  } = useGetDemoSalesByLmPcodeQuery(activeLmPcode || skipToken);
+  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
 
   const planningModel = useMemo(
     () => buildNonGpsBatchPlanningModel(salesRows),

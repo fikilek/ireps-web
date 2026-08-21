@@ -31,7 +31,7 @@ import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
 import { mreadStagingApi } from "./mreadStagingApi";
 import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
 import targetedBatchDraftReducer from "./targetedBatchDraftSlice";
-import { demoSalesApi } from "./demoSalesApi";
+import { salesApi } from "./salesApi";
 import { salesTargetedBatchApi } from "./salesTargetedBatchApi";
 
 export const store = configureStore({
@@ -67,7 +67,7 @@ export const store = configureStore({
     [usersApi.reducerPath]: usersApi.reducer,
     [geofencesApi.reducerPath]: geofencesApi.reducer,
     [fwrLiveLocationsApi.reducerPath]: fwrLiveLocationsApi.reducer,
-    [demoSalesApi.reducerPath]: demoSalesApi.reducer,
+    [salesApi.reducerPath]: salesApi.reducer,
     [salesTargetedBatchApi.reducerPath]: salesTargetedBatchApi.reducer,
   },
 
@@ -100,7 +100,7 @@ export const store = configureStore({
       .concat(usersApi.middleware)
       .concat(geofencesApi.middleware)
       .concat(fwrLiveLocationsApi.middleware)
-      .concat(demoSalesApi.middleware)
+      .concat(salesApi.middleware)
       .concat(salesTargetedBatchApi.middleware),
 });
 
