@@ -872,7 +872,7 @@ function getOperationalWard(sales = {}, row = {}, batch = {}) {
   );
 }
 
-function getOperationalSalesCategory(sales = {}) {
+export function getOperationalSalesCategory(sales = {}) {
   return firstText(sales?.leakageCategory) || SALES_STATS_UNCATEGORISED;
 }
 

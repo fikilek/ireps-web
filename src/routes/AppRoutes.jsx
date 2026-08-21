@@ -7,6 +7,10 @@ import ConsoleLayout from "../layouts/ConsoleLayout";
 import AccessDeniedPage from "../pages/AccessDeniedPage";
 import ComingSoonPage from "../pages/ComingSoonPage";
 import DashboardPage from "../pages/DashboardPage";
+import ProjectPopulationDashboardPage from "../pages/dashboard/ProjectPopulationDashboardPage";
+import MetersRegistryDashboardPage from "../pages/dashboard/MetersRegistryDashboardPage";
+import TrnRegistryDashboardPage from "../pages/dashboard/TrnRegistryDashboardPage";
+import ActivityReportDashboardPage from "../pages/dashboard/ActivityReportDashboardPage";
 import LoginPage from "../pages/LoginPage";
 import PendingApprovalPage from "../pages/PendingApprovalPage";
 
@@ -99,10 +103,7 @@ export default function AppRoutes() {
             path="/dashboard/project-population"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Project Population"
-                  description="Project population dashboard and field progress overview."
-                />
+                <ProjectPopulationDashboardPage />
               </RoleRoute>
             }
           />
@@ -111,10 +112,7 @@ export default function AppRoutes() {
             path="/dashboard/meters"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Meters Registry"
-                  description="Meter registry dashboard and current meter-state overview."
-                />
+                <MetersRegistryDashboardPage />
               </RoleRoute>
             }
           />
@@ -123,10 +121,7 @@ export default function AppRoutes() {
             path="/dashboard/trns"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="TRN Registry"
-                  description="TRN production dashboard, daily statistics, and field trends."
-                />
+                <TrnRegistryDashboardPage />
               </RoleRoute>
             }
           />
@@ -135,10 +130,7 @@ export default function AppRoutes() {
             path="/dashboard/activity"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Activity Report"
-                  description="User, team, and service-provider activity dashboard."
-                />
+                <ActivityReportDashboardPage />
               </RoleRoute>
             }
           />
