@@ -974,11 +974,11 @@ export default function TrnsRegistryPage() {
               >
                 <thead>
                   <tr>
-                    <GroupHeader colSpan={showTrnId ? 2 : 1}>
+                    <GroupHeader colSpan={showTrnId ? 3 : 2}>
                       TRN Identity
                     </GroupHeader>
                     <GroupHeader colSpan={5}>Location and Actions</GroupHeader>
-                    <GroupHeader colSpan={5}>TRN Detail</GroupHeader>
+                    <GroupHeader colSpan={4}>TRN Detail</GroupHeader>
                     <GroupHeader colSpan={3}>Findings</GroupHeader>
                     <GroupHeader colSpan={2}>Creation</GroupHeader>
                   </tr>
@@ -1012,6 +1012,26 @@ export default function TrnsRegistryPage() {
                         onChange={(value) => updateFilter("meterNo", value)}
                         placeholder="Meter No"
                       />
+                    </th>
+
+                    <th>
+                      <SortButton
+                        label="TRN Type"
+                        sortKey="trnType"
+                        sortConfig={sortConfig}
+                        onSort={handleSort}
+                      />
+                      <FilterSelect
+                        value={filters.trnType}
+                        onChange={(value) => updateFilter("trnType", value)}
+                      >
+                        <option value="ALL">ALL</option>
+                        {TRN_TYPE_OPTIONS.map((trnType) => (
+                          <option key={trnType} value={trnType}>
+                            {trnType}
+                          </option>
+                        ))}
+                      </FilterSelect>
                     </th>
 
                     <th>
@@ -1078,25 +1098,6 @@ export default function TrnsRegistryPage() {
                       <span style={styles.iconHeaderLabel}>TRN Report</span>
                     </th>
 
-                    <th>
-                      <SortButton
-                        label="TRN Type"
-                        sortKey="trnType"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.trnType}
-                        onChange={(value) => updateFilter("trnType", value)}
-                      >
-                        <option value="ALL">ALL</option>
-                        {TRN_TYPE_OPTIONS.map((trnType) => (
-                          <option key={trnType} value={trnType}>
-                            {trnType}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </th>
 
                     <th>
                       <SortButton
@@ -1286,6 +1287,7 @@ export default function TrnsRegistryPage() {
                             "NAv"
                           )}
                         </td>
+                        <td>{row.trnType || "NAv"}</td>
                         <td style={styles.addressCell}>
                           {row.premiseAddress || "NAv"}
                         </td>
@@ -1384,7 +1386,6 @@ export default function TrnsRegistryPage() {
                             <ReportDocumentIcon />
                           </button>
                         </td>
-                        <td>{row.trnType || "NAv"}</td>
                         <td>{getAccessLabel(row.hasAccess)}</td>
                         <td>{row.accessReason || "NAv"}</td>
                         <td>{getRegistryLabel(row.meterType)}</td>
