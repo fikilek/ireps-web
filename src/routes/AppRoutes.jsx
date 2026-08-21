@@ -93,6 +93,56 @@ export default function AppRoutes() {
             }
           />
 
+          {/* DASHBOARD */}
+
+          <Route
+            path="/dashboard/project-population"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Project Population"
+                  description="Project population dashboard and field progress overview."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/meters"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Meters Registry"
+                  description="Meter registry dashboard and current meter-state overview."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/trns"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="TRN Registry"
+                  description="TRN production dashboard, daily statistics, and field trends."
+                />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/activity"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ComingSoonPage
+                  title="Activity Report"
+                  description="User, team, and service-provider activity dashboard."
+                />
+              </RoleRoute>
+            }
+          />
+
           <Route path="/access-denied" element={<AccessDeniedPage />} />
 
           {/* SALES */}
