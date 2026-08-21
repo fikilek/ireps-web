@@ -5,6 +5,7 @@ import { db } from "../firebase";
 
 const METER_REGISTRY_COLLECTION = "registry_meters";
 const METER_REGISTRY_WARD_FIELD = "parents.wardPcode";
+const METER_REGISTRY_LM_FIELD = "parents.lmPcode";
 
 function serializeRegistryDateValue(value) {
   if (!value || value === "NAv") return "NAv";
@@ -157,7 +158,60 @@ export const registryMetersApi = createApi({
         }
       },
     }),
+    getRegistryMetersByLm: builder.query({
+      queryFn: () => ({ data: [] }),
+
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        if (!lmPcode) return;
+
+        let unsubscribe = null;
+
+        try {
+          await cacheDataLoaded;
+
+          const registryMetersRef = collection(db, METER_REGISTRY_COLLECTION);
+
+          const registryMetersQuery = query(
+            registryMetersRef,
+            where(METER_REGISTRY_LM_FIELD, "==", lmPcode),
+          );
+
+          unsubscribe = onSnapshot(
+            registryMetersQuery,
+            (snapshot) => {
+              const rows = snapshot.docs
+                .map((documentSnapshot) =>
+                  normalizeMeterRegistryRow(
+                    documentSnapshot.id,
+                    documentSnapshot.data(),
+                  ),
+                )
+                .sort(sortMeterRows);
+
+              updateCachedData((draft) => {
+                draft.splice(0, draft.length, ...rows);
+              });
+            },
+            (error) => {
+              console.error("registryMetersApi LM stream error:", error);
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) {
+            unsubscribe();
+          }
+        }
+      },
+    }),
   }),
 });
 
-export const { useGetRegistryMetersByWardQuery } = registryMetersApi;
+export const {
+  useGetRegistryMetersByWardQuery,
+  useGetRegistryMetersByLmQuery,
+} = registryMetersApi;

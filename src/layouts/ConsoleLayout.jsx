@@ -113,6 +113,31 @@ const navSections = [
         ],
       },
       {
+        label: "Dashboard",
+        items: [
+          {
+            label: "Project Population",
+            path: "/dashboard/project-population",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Meters Registry",
+            path: "/dashboard/meters",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "TRN Registry",
+            path: "/dashboard/trns",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
+            label: "Activity Report",
+            path: "/dashboard/activity",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+        ],
+      },
+      {
         label: "Registries",
         items: [
           {

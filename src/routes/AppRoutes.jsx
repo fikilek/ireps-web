@@ -7,6 +7,10 @@ import ConsoleLayout from "../layouts/ConsoleLayout";
 import AccessDeniedPage from "../pages/AccessDeniedPage";
 import ComingSoonPage from "../pages/ComingSoonPage";
 import DashboardPage from "../pages/DashboardPage";
+import ProjectPopulationDashboardPage from "../pages/dashboard/ProjectPopulationDashboardPage";
+import MetersRegistryDashboardPage from "../pages/dashboard/MetersRegistryDashboardPage";
+import TrnRegistryDashboardPage from "../pages/dashboard/TrnRegistryDashboardPage";
+import ActivityReportDashboardPage from "../pages/dashboard/ActivityReportDashboardPage";
 import LoginPage from "../pages/LoginPage";
 import PendingApprovalPage from "../pages/PendingApprovalPage";
 
@@ -89,6 +93,44 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={ALL_OPERATIONAL_ROLES}>
                 <DashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          {/* DASHBOARD */}
+
+          <Route
+            path="/dashboard/project-population"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ProjectPopulationDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/meters"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MetersRegistryDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/trns"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TrnRegistryDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/activity"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ActivityReportDashboardPage />
               </RoleRoute>
             }
           />

@@ -5,7 +5,7 @@ import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetDemoSalesByLmPcodeQuery } from "../../redux/demoSalesApi";
+import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import SalesMetersTable from "./components/SalesMetersTable";
@@ -183,7 +183,7 @@ export default function PrepaidSales() {
     isFetching,
     error,
     refetch,
-  } = useGetDemoSalesByLmPcodeQuery(activeLmPcode || skipToken);
+  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
 
   useEffect(() => {
     setGpsFilter(GPS_FILTERS.ALL);

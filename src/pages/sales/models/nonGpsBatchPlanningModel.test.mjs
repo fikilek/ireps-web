@@ -575,7 +575,7 @@ function readSource(relativePath) {
 }
 
 test("Sales normalizer exposes authoritative adr and TB reference integrity", () => {
-  const source = readSource("../../../redux/demoSalesApi.js");
+  const source = readSource("../../../redux/salesApi.js");
 
   assert.match(source, /adr:\s*normalizeAuthoritativeAddress\(data\.adr\)/);
   assert.match(source, /strNo:\s*String\(value\.strNo \?\? ""\)/);
@@ -624,14 +624,14 @@ test("NGP route and Sales navigation entry are management-side only", () => {
   assert.match(layout, /path: "\/sales\/non-gps-batch-planning"/);
 });
 
-test("NGP React page reuses demoSalesApi and opens no direct Firestore listener", () => {
+test("NGP React page reuses salesApi and opens no direct Firestore listener", () => {
   const page = readSource("../NonGpsBatchPlanningPage.jsx");
   const planning = readSource("../components/NonGpsStreetPlanning.jsx");
   const detail = readSource("../components/NonGpsStreetDetail.jsx");
   const exceptions = readSource("../components/NonGpsExceptions.jsx");
   const allNgpSource = [page, planning, detail, exceptions].join("\n");
 
-  assert.match(page, /useGetDemoSalesByLmPcodeQuery/);
+  assert.match(page, /useGetSalesByLmPcodeQuery/);
   assert.doesNotMatch(allNgpSource, /from "firebase\/firestore"/);
   assert.doesNotMatch(allNgpSource, /onSnapshot\s*\(/);
   assert.doesNotMatch(allNgpSource, /getDocs\s*\(/);

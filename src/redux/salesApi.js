@@ -4,11 +4,11 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { inspectSalesTbRefsIntegrity } from "../pages/sales/models/salesTbRefsIntegrityModel";
 
-const DEMO_SALES_COLLECTION = "sales-all-meters";
+const SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
 const MAX_UPDATE_DIAGNOSTIC_LOGS = 10;
 
-const demoSalesStreams = new Map();
+const salesStreams = new Map();
 
 function asNumber(value) {
   const numberValue = Number(value);
@@ -311,7 +311,7 @@ function getTimestampMs(value) {
   return Number.isFinite(milliseconds) ? milliseconds : 0;
 }
 
-function normalizeDemoSalesRow(id, data = {}) {
+function normalizeSalesRow(id, data = {}) {
   const monthlySalesC =
     data.monthlySalesC && typeof data.monthlySalesC === "object"
       ? normalizeNumberMap(data.monthlySalesC)
@@ -455,7 +455,7 @@ function normalizeDemoSalesRow(id, data = {}) {
   };
 }
 
-function sortDemoSalesRows(left, right) {
+function sortSalesRows(left, right) {
   const updatedAtComparison =
     Number(right?.updatedAtMs || 0) - Number(left?.updatedAtMs || 0);
 
@@ -476,7 +476,7 @@ function normalizeLmPcode(value) {
 }
 
 function normalizeSnapshotDocument(documentSnapshot, lmPcode) {
-  const row = normalizeDemoSalesRow(
+  const row = normalizeSalesRow(
     documentSnapshot.id,
     documentSnapshot.data(),
   );
@@ -485,10 +485,10 @@ function normalizeSnapshotDocument(documentSnapshot, lmPcode) {
 }
 
 function buildRowsFromStream(stream) {
-  return Array.from(stream.rowsById.values()).sort(sortDemoSalesRows);
+  return Array.from(stream.rowsById.values()).sort(sortSalesRows);
 }
 
-function createDemoSalesStream(lmPcode) {
+function createSalesStream(lmPcode) {
   const normalizedLmPcode = normalizeLmPcode(lmPcode);
   const startedAtMs = Date.now();
 
@@ -506,7 +506,7 @@ function createDemoSalesStream(lmPcode) {
   };
 
   const salesQuery = query(
-    collection(db, DEMO_SALES_COLLECTION),
+    collection(db, SALES_COLLECTION),
     where("lmPcode", "==", normalizedLmPcode),
   );
 
@@ -551,7 +551,7 @@ function createDemoSalesStream(lmPcode) {
       const elapsedMs = Date.now() - startedAtMs;
 
       if (isInitialSnapshot) {
-        console.info("[demoSalesApi] Sales stream first snapshot", {
+        console.info("[salesApi] Sales stream first snapshot", {
           lmPcode: normalizedLmPcode,
           rows: stream.latestRows.length,
           fromCache,
@@ -564,7 +564,7 @@ function createDemoSalesStream(lmPcode) {
       ) {
         stream.updateDiagnosticCount += 1;
 
-        console.info("[demoSalesApi] Sales stream update", {
+        console.info("[salesApi] Sales stream update", {
           lmPcode: normalizedLmPcode,
           changedDocuments: changes.length,
           rows: stream.latestRows.length,
@@ -578,7 +578,7 @@ function createDemoSalesStream(lmPcode) {
       if (!fromCache && !stream.serverConfirmed) {
         stream.serverConfirmed = true;
 
-        console.info("[demoSalesApi] Sales stream server confirmed", {
+        console.info("[salesApi] Sales stream server confirmed", {
           lmPcode: normalizedLmPcode,
           rows: stream.latestRows.length,
           elapsedMs,
@@ -599,7 +599,7 @@ function createDemoSalesStream(lmPcode) {
         error: error?.message || "Could not load demo prepaid sales.",
       };
 
-      console.error("[demoSalesApi] Sales stream error", {
+      console.error("[salesApi] Sales stream error", {
         lmPcode: normalizedLmPcode,
         code: error?.code || null,
         message: stream.latestError.error,
@@ -611,13 +611,13 @@ function createDemoSalesStream(lmPcode) {
     },
   );
 
-  demoSalesStreams.set(normalizedLmPcode, stream);
+  salesStreams.set(normalizedLmPcode, stream);
   return stream;
 }
 
-function getOrCreateDemoSalesStream(lmPcode) {
+function getOrCreateSalesStream(lmPcode) {
   const normalizedLmPcode = normalizeLmPcode(lmPcode);
-  const existingStream = demoSalesStreams.get(normalizedLmPcode);
+  const existingStream = salesStreams.get(normalizedLmPcode);
 
   if (existingStream) {
     if (existingStream.releaseTimer) {
@@ -628,10 +628,10 @@ function getOrCreateDemoSalesStream(lmPcode) {
     return existingStream;
   }
 
-  return createDemoSalesStream(normalizedLmPcode);
+  return createSalesStream(normalizedLmPcode);
 }
 
-function scheduleDemoSalesStreamRelease(stream) {
+function scheduleSalesStreamRelease(stream) {
   if (stream.subscribers.size > 0 || stream.releaseTimer) return;
 
   stream.releaseTimer = setTimeout(() => {
@@ -641,15 +641,15 @@ function scheduleDemoSalesStreamRelease(stream) {
     }
 
     stream.unsubscribeFirestore();
-    demoSalesStreams.delete(stream.lmPcode);
+    salesStreams.delete(stream.lmPcode);
   }, STREAM_RELEASE_DELAY_MS);
 }
 
-function subscribeToDemoSalesStream(
+function subscribeToSalesStream(
   lmPcode,
   { onRows = null, onError = null } = {},
 ) {
-  const stream = getOrCreateDemoSalesStream(lmPcode);
+  const stream = getOrCreateSalesStream(lmPcode);
   const subscriber = { onRows, onError };
 
   stream.subscribers.add(subscriber);
@@ -666,7 +666,7 @@ function subscribeToDemoSalesStream(
 
   return () => {
     stream.subscribers.delete(subscriber);
-    scheduleDemoSalesStreamRelease(stream);
+    scheduleSalesStreamRelease(stream);
   };
 }
 
@@ -706,7 +706,7 @@ function readInitialSalesStream(lmPcode, signal) {
 
     signal?.addEventListener("abort", handleAbort, { once: true });
 
-    const streamUnsubscribe = subscribeToDemoSalesStream(
+    const streamUnsubscribe = subscribeToSalesStream(
       normalizedLmPcode,
       {
         onRows: ({ rows, fromCache }) => {
@@ -727,11 +727,11 @@ function readInitialSalesStream(lmPcode, signal) {
   });
 }
 
-export const demoSalesApi = createApi({
-  reducerPath: "demoSalesApi",
+export const salesApi = createApi({
+  reducerPath: "salesApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
-    getDemoSalesByLmPcode: builder.query({
+    getSalesByLmPcode: builder.query({
       queryFn: (lmPcode, { signal }) =>
         readInitialSalesStream(lmPcode, signal),
 
@@ -746,7 +746,7 @@ export const demoSalesApi = createApi({
         let cacheReady = false;
         let latestRows = null;
 
-        const unsubscribe = subscribeToDemoSalesStream(normalizedLmPcode, {
+        const unsubscribe = subscribeToSalesStream(normalizedLmPcode, {
           onRows: ({ rows }) => {
             latestRows = rows;
 
@@ -755,7 +755,7 @@ export const demoSalesApi = createApi({
             }
           },
           onError: (error) => {
-            console.error("[demoSalesApi] Cache stream error", {
+            console.error("[salesApi] Cache stream error", {
               lmPcode: normalizedLmPcode,
               message: error?.error || "Unknown Sales stream error.",
             });
@@ -772,7 +772,7 @@ export const demoSalesApi = createApi({
 
           await cacheEntryRemoved;
         } catch (error) {
-          console.error("[demoSalesApi] Cache lifecycle error", {
+          console.error("[salesApi] Cache lifecycle error", {
             lmPcode: normalizedLmPcode,
             message: error?.message || String(error),
           });
@@ -786,4 +786,4 @@ export const demoSalesApi = createApi({
   }),
 });
 
-export const { useGetDemoSalesByLmPcodeQuery } = demoSalesApi;
+export const { useGetSalesByLmPcodeQuery } = salesApi;
