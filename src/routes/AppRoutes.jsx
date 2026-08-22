@@ -11,6 +11,7 @@ import ProjectPopulationDashboardPage from "../pages/dashboard/ProjectPopulation
 import MetersRegistryDashboardPage from "../pages/dashboard/MetersRegistryDashboardPage";
 import TrnRegistryDashboardPage from "../pages/dashboard/TrnRegistryDashboardPage";
 import ActivityReportDashboardPage from "../pages/dashboard/ActivityReportDashboardPage";
+import AnomaliesDashboardPage from "../pages/dashboard/AnomaliesDashboardPage";
 import LoginPage from "../pages/LoginPage";
 import PendingApprovalPage from "../pages/PendingApprovalPage";
 
@@ -131,6 +132,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <ActivityReportDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/anomalies"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <AnomaliesDashboardPage />
               </RoleRoute>
             }
           />

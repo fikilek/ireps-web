@@ -135,6 +135,11 @@ const navSections = [
             path: "/dashboard/activity",
             allowedRoles: MANAGEMENT_ROLES,
           },
+          {
+            label: "Anomalies",
+            path: "/dashboard/anomalies",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
         ],
       },
       {
