@@ -751,13 +751,19 @@ export default function AnomaliesDashboardPage() {
     [trnRows],
   );
 
-  // Every Meter Discovery TRN carries its anomaly classification.
-  // The dashboard population is the full Meter Discovery population.
-  const anomalyRows = meterDiscoveryRows;
+  // NA / NAv means no anomaly classification for Meter Discovery.
+  // All other Meter Discovery anomaly values, including Meter Ok, remain in scope.
+  const anomalyRows = useMemo(
+    () =>
+      meterDiscoveryRows.filter(
+        (row) => !["NA", "NAV", "N/A"].includes(normalizeCode(row?.anomaly)),
+      ),
+    [meterDiscoveryRows],
+  );
 
   const mainBreakdown = useMemo(() => buildMainBreakdown(anomalyRows), [anomalyRows]);
   const affectedMeters = useMemo(() => getUniqueMeterCount(anomalyRows), [anomalyRows]);
-  const latestUpdate = useMemo(() => getLatestUpdate(meterDiscoveryRows), [meterDiscoveryRows]);
+  const latestUpdate = useMemo(() => getLatestUpdate(anomalyRows), [anomalyRows]);
 
   const todayKey = dateKey(new Date());
   const todayCount = useMemo(
