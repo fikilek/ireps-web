@@ -1,10 +1,11 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useMemo, useState } from "react";
-import { skipToken } from "@reduxjs/toolkit/query";
-
 import { useAuth } from "../../auth/useAuth";
-import { useGetUserActivityRowsByLmQuery } from "../../redux/reportUserActivityApi";
-import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
+import {
+  buildDashboardActivityModel,
+  filterDashboardUserRows,
+} from "../reports/activityAnalyticsModel";
+import useActivityAnalytics from "../reports/useActivityAnalytics";
 
 import "./ActivityReportDashboardPage.css";
 
@@ -17,6 +18,8 @@ const TRN_TYPES = [
   { key: "meterDisconnectionTrns", label: "Disconnection", tone: "slate", icon: "plug" },
   { key: "meterReconnectionTrns", label: "Reconnection", tone: "green", icon: "reconnect" },
 ];
+
+const ALL_TIME_DATE_FILTER = { preset: "ALL_TIME", customStart: "", customEnd: "" };
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -244,183 +247,6 @@ function KpiCard({ label, value, tone, icon, detail }) {
   );
 }
 
-function getClassifiedActivityTotal(row) {
-  return TRN_TYPES.reduce((sum, type) => sum + Number(row?.[type.key] || 0), 0);
-}
-
-function buildTeamsByUserUid(teams = []) {
-  const teamsByUserUid = new Map();
-
-  teams.forEach((team) => {
-    const teamId = String(team?.id || "").trim();
-    const teamName = String(team?.name || "").trim();
-
-    if (!teamId || !hasValue(teamName)) return;
-
-    (team?.memberUserIds || []).forEach((userUidValue) => {
-      const userUid = String(userUidValue || "").trim();
-      if (!userUid) return;
-
-      const memberships = teamsByUserUid.get(userUid) || [];
-      memberships.push({ id: teamId, name: teamName });
-      teamsByUserUid.set(userUid, memberships);
-    });
-  });
-
-  return teamsByUserUid;
-}
-
-function resolveActivityTeamAttribution(rows = [], teams = []) {
-  const teamsByUserUid = buildTeamsByUserUid(teams);
-
-  return rows.map((row) => {
-    const userUid = String(row?.userUid || "").trim();
-    const memberships = userUid ? teamsByUserUid.get(userUid) || [] : [];
-
-    const uniqueMemberships = Array.from(
-      new Map(
-        memberships.map((team) => [
-          team.id,
-          {
-            id: team.id,
-            name: team.name,
-          },
-        ]),
-      ).values(),
-    ).sort((left, right) => left.name.localeCompare(right.name));
-
-    if (uniqueMemberships.length === 1) {
-      return {
-        ...row,
-        teamId: uniqueMemberships[0].id,
-        teamName: uniqueMemberships[0].name,
-        teamNames: [uniqueMemberships[0].name],
-        teamAttributionStatus: "RESOLVED",
-      };
-    }
-
-    if (uniqueMemberships.length > 1) {
-      return {
-        ...row,
-        teamId: "MULTIPLE",
-        teamName: "Multiple Teams",
-        teamNames: uniqueMemberships.map((team) => team.name),
-        teamAttributionStatus: "MULTIPLE",
-      };
-    }
-
-    return {
-      ...row,
-      teamId: "NAv",
-      teamName: "Unassigned",
-      teamNames: [],
-      teamAttributionStatus: "UNASSIGNED",
-    };
-  });
-}
-
-function buildActivityModel(rows = [], filters = {}) {
-  const filteredRows = rows
-    .map((row) => ({ ...row, activityTotal: getClassifiedActivityTotal(row) }))
-    .filter((row) => {
-    if (row.activityTotal <= 0) return false;
-
-    if (
-      filters.serviceProvider &&
-      String(row?.serviceProviderName || "") !== filters.serviceProvider
-    ) {
-      return false;
-    }
-
-    if (filters.team && String(row?.teamName || "") !== filters.team) {
-      return false;
-    }
-
-    return true;
-  });
-
-  const totalActivity = filteredRows.reduce(
-    (sum, row) => sum + row.activityTotal,
-    0,
-  );
-
-  const serviceProviders = new Set();
-  const teams = new Set();
-
-  filteredRows.forEach((row) => {
-    if (hasValue(row?.serviceProviderName)) serviceProviders.add(row.serviceProviderName);
-    if (row?.teamAttributionStatus === "RESOLVED" && hasValue(row?.teamName)) {
-      teams.add(row.teamName);
-    }
-  });
-
-  const users = [...filteredRows].sort(
-    (left, right) =>
-      right.activityTotal - left.activityTotal ||
-      String(left?.userName || "").localeCompare(String(right?.userName || "")),
-  );
-
-  const teamMap = new Map();
-
-  filteredRows.forEach((row) => {
-    const teamName = String(row?.teamName || "Unassigned").trim() || "Unassigned";
-    const current = teamMap.get(teamName) || {
-      name: teamName,
-      discovery: 0,
-      inspection: 0,
-      other: 0,
-      total: 0,
-    };
-
-    current.discovery += Number(row?.meterDiscoveryTrns || 0);
-    current.inspection += Number(row?.meterInspectionTrns || 0);
-    current.other +=
-      Number(row?.noAccessTrns || 0) +
-      Number(row?.meterInstallationTrns || 0) +
-      Number(row?.meterRemovalTrns || 0) +
-      Number(row?.meterDisconnectionTrns || 0) +
-      Number(row?.meterReconnectionTrns || 0);
-    current.total += row.activityTotal;
-
-    teamMap.set(teamName, current);
-  });
-
-  const teamActivity = Array.from(teamMap.values()).sort(
-    (left, right) => right.total - left.total || left.name.localeCompare(right.name),
-  );
-
-  const typeTotals = TRN_TYPES.map((type) => ({
-    ...type,
-    count: filteredRows.reduce((sum, row) => sum + Number(row?.[type.key] || 0), 0),
-  }));
-
-  const latestRow = [...filteredRows]
-    .filter((row) => row?.updatedAt && String(row.updatedAt).toUpperCase() !== "NAV")
-    .sort((left, right) => {
-      const leftTime = toDate(left.updatedAt)?.getTime() || 0;
-      const rightTime = toDate(right.updatedAt)?.getTime() || 0;
-      return rightTime - leftTime;
-    })[0];
-
-  const topUser = users[0] || null;
-  const topTeam = teamActivity[0] || null;
-  const topType = [...typeTotals].sort((left, right) => right.count - left.count)[0] || null;
-
-  return {
-    rows: filteredRows,
-    totalActivity,
-    activeUsers: filteredRows.length,
-    serviceProviderCount: serviceProviders.size,
-    teamCount: teams.size,
-    users,
-    teamActivity,
-    typeTotals,
-    latestRow,
-    topUser,
-    topTeam,
-    topType,
-  };
-}
 
 function UserActivityChart({ users, totalActivity }) {
   const topUsers = users.slice(0, 10);
@@ -469,7 +295,7 @@ function TeamActivityChart({ teams }) {
           const otherWidth = (row.other / max) * 100;
 
           return (
-            <div className="activity-team-row" key={row.name}>
+            <div className="activity-team-row" key={row.id || row.name}>
               <span className="activity-team-name" title={row.name}>
                 {row.name}
               </span>
@@ -547,45 +373,39 @@ export default function ActivityReportDashboardPage() {
   const [teamFilter, setTeamFilter] = useState("");
 
   const {
-    data: activityRows = [],
+    userRows,
     isLoading,
     isFetching,
     error,
-  } = useGetUserActivityRowsByLmQuery(activeLmPcode || skipToken);
-
-  const {
-    data: availableTeams = [],
-    isFetching: teamsIsFetching,
-  } = useGetAvailableTeamsQuery();
-
-  const attributedActivityRows = useMemo(
-    () => resolveActivityTeamAttribution(activityRows, availableTeams),
-    [activityRows, availableTeams],
-  );
+  } = useActivityAnalytics({
+    lmPcode: activeLmPcode,
+    dateFilter: ALL_TIME_DATE_FILTER,
+  });
 
   const filterOptions = useMemo(() => {
     const serviceProviders = Array.from(
-      new Set(
-        attributedActivityRows
-          .map((row) => row?.serviceProviderName)
-          .filter(hasValue),
-      ),
+      new Set(userRows.map((row) => row?.serviceProviderName).filter(hasValue)),
     ).sort((left, right) => left.localeCompare(right));
 
     const teams = Array.from(
-      new Set(attributedActivityRows.map((row) => row?.teamName).filter(hasValue)),
+      new Set(userRows.map((row) => row?.activityTeamName).filter(hasValue)),
     ).sort((left, right) => left.localeCompare(right));
 
     return { serviceProviders, teams };
-  }, [attributedActivityRows]);
+  }, [userRows]);
 
-  const activity = useMemo(
+  const filteredUserRows = useMemo(
     () =>
-      buildActivityModel(attributedActivityRows, {
+      filterDashboardUserRows(userRows, {
         serviceProvider: serviceProviderFilter,
         team: teamFilter,
       }),
-    [attributedActivityRows, serviceProviderFilter, teamFilter],
+    [userRows, serviceProviderFilter, teamFilter],
+  );
+
+  const activity = useMemo(
+    () => buildDashboardActivityModel(filteredUserRows, TRN_TYPES),
+    [filteredUserRows],
   );
 
   if (!activeLmPcode) {
@@ -599,7 +419,7 @@ export default function ActivityReportDashboardPage() {
     );
   }
 
-  if (isLoading && activityRows.length === 0) {
+  if (isLoading && userRows.length === 0) {
     return (
       <section className="activity-dashboard-page">
         <div className="activity-state-card">
@@ -611,7 +431,7 @@ export default function ActivityReportDashboardPage() {
     );
   }
 
-  if (error && activityRows.length === 0) {
+  if (error && userRows.length === 0) {
     return (
       <section className="activity-dashboard-page">
         <div className="activity-state-card activity-state-card--error">
@@ -624,7 +444,7 @@ export default function ActivityReportDashboardPage() {
 
   const latestUser = activity.latestRow?.userName || "NAv";
   const latestText = activity.latestRow
-    ? `${formatDateTime(activity.latestRow.updatedAt)} by ${latestUser}`
+    ? `${formatDateTime(activity.latestRow.lastUpdatedAt)} by ${latestUser}`
     : "No activity timestamp available";
 
   const topUserShare =
@@ -792,8 +612,8 @@ export default function ActivityReportDashboardPage() {
       </div>
 
       <footer className="activity-dashboard-footer">
-        <span className={isFetching || teamsIsFetching ? "activity-refresh-icon spinning" : "activity-refresh-icon"}>↻</span>
-        Live User Activity + Teams streams · {activeLmPcode}
+        <span className={isFetching ? "activity-refresh-icon spinning" : "activity-refresh-icon"}>↻</span>
+        Live TRN + Users + Teams + Service Providers streams · {activeLmPcode}
       </footer>
     </section>
   );

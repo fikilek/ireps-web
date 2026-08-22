@@ -11,7 +11,6 @@ import { registryAccountsApi } from "./registryAccountsApi";
 import { reportAnomalyApi } from "./reportAnomalyApi";
 import { reportNoAccessApi } from "./reportNoAccessApi";
 import { reportNormalisationApi } from "./reportNormalisationApi";
-import { reportUserActivityApi } from "./reportUserActivityApi";
 import { mapLmsApi } from "./mapLmsApi";
 import { mapWardsApi } from "./mapWardsApi";
 import { mapGeofencesApi } from "./mapGeofencesApi";
@@ -47,7 +46,6 @@ export const store = configureStore({
     [mreadStagingApi.reducerPath]: mreadStagingApi.reducer,
 
     [reportNoAccessApi.reducerPath]: reportNoAccessApi.reducer,
-    [reportUserActivityApi.reducerPath]: reportUserActivityApi.reducer,
     [reportAnomalyApi.reducerPath]: reportAnomalyApi.reducer,
     [reportNormalisationApi.reducerPath]: reportNormalisationApi.reducer,
 
@@ -82,7 +80,6 @@ export const store = configureStore({
       .concat(mreadStagingCyclesApi.middleware)
       .concat(mreadStagingApi.middleware)
       .concat(reportNoAccessApi.middleware)
-      .concat(reportUserActivityApi.middleware)
       .concat(reportAnomalyApi.middleware)
       .concat(reportNormalisationApi.middleware)
       .concat(mapLmsApi.middleware)

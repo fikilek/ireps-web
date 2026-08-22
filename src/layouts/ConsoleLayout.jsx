@@ -276,11 +276,6 @@ const navSections = [
             allowedRoles: ADMIN_ROLES,
           },
           {
-            label: "Teams",
-            path: "/admin/teams",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
-          {
             label: "FWR Monitoring",
             path: "/admin/fwr-monitoring",
             allowedRoles: MANAGEMENT_ROLES,

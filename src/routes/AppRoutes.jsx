@@ -580,18 +580,6 @@ export default function AppRoutes() {
           />
 
           <Route
-            path="/admin/teams"
-            element={
-              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <ComingSoonPage
-                  title="Teams"
-                  description="LM-wide team visibility and management."
-                />
-              </RoleRoute>
-            }
-          />
-
-          <Route
             path="/admin/fwr-monitoring"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
@@ -642,11 +630,6 @@ export default function AppRoutes() {
                       title: "Users",
                       description:
                         "Review users, roles, onboarding, and authorisation.",
-                    },
-                    {
-                      title: "Teams",
-                      description:
-                        "Manage operational teams for work allocation.",
                     },
                     {
                       title: "Settings",

@@ -25,6 +25,7 @@ const SCOPE = {
 
 const SOURCE_SCOPE = {
   view: "FILTERED_SORTED_ROWS",
+  tableView: "USERS",
   lmPcode: "LM001",
   lmName: "Example LM",
   datePreset: "ALL_TIME",
@@ -172,6 +173,31 @@ test("persistence failure prevents browser download of an unmanaged artifact", a
   );
 
   assert.equal(downloads, 0);
+});
+
+
+test("managed report metadata preserves the selected TEAMS table view", () => {
+  const sourceScope = {
+    ...SOURCE_SCOPE,
+    tableView: "TEAMS",
+    columnFilters: { teamName: "Alpha Team" },
+  };
+
+  const result = buildUserActivityManagedReport({
+    rows: [{ teamName: "Alpha Team", totalTrns: 5 }],
+    columns: [
+      { header: "Team", value: (row) => row.teamName },
+      { header: "Total TRNs", value: (row) => row.totalTrns },
+    ],
+    scope: SCOPE,
+    sourceScope,
+    generatedAt: GENERATED_AT,
+    buildArtifact: fakeArtifactBuilder,
+  });
+
+  assert.equal(result.metadata.reportType, "USER_ACTIVITY");
+  assert.equal(result.metadata.sourceScope.tableView, "TEAMS");
+  assert.deepEqual(result.metadata.sourceScope.columnFilters, { teamName: "Alpha Team" });
 });
 
 test("managed User Activity generation rejects an empty report", async () => {
