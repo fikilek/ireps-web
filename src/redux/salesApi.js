@@ -433,6 +433,8 @@ function normalizeSalesRow(id, data = {}) {
     wardNumbers,
     wardNumberLabel: wardNumbers.length ? wardNumbers.join(", ") : "NAv",
     gpsMatchStatus: String(data.GpsMatchStatus || data.gpsMatchStatus || ""),
+    // Match the geofence creation trigger's lowercase Firestore eligibility gate.
+    geofenceGpsEligible: data.hasUsableGps === true,
     hasUsableGps:
       data.HasUsableGps === true ||
       data.hasUsableGps === true ||

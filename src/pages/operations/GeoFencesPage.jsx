@@ -8,6 +8,19 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import { useWarehouse } from "@/context/WarehouseContext";
 
+import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
+import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
+import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetErfsByWardQuery } from "../../redux/wardErfsApi";
+import {
+  GeofencePlanningLayerControls,
+  GeofencePlanningLayers,
+} from "./GeofencePlanningLayers";
+import {
+  buildGeofencePlanningDraftStats,
+  buildGeofencePlanningModel,
+} from "./geofencePlanningModel";
+
 import {
   useCreateGeoFenceMutation,
   useGetGeoFencesByWardQuery,
@@ -518,130 +531,6 @@ function getMeterPremiseMatchId(meter) {
   );
 }
 
-function getEntityPreviewPoint(entity) {
-  return (
-    toUsableLatLng(entity?.__point) ||
-    toUsableLatLng(entity?.__gps) ||
-    toUsableLatLng(entity?.geometry?.centroid) ||
-    toUsableLatLng(entity?.centroid) ||
-    toUsableLatLng(entity?.location?.gps) ||
-    toUsableLatLng(entity?.ast?.location?.gps) ||
-    toUsableLatLng(entity?.accessData?.gps) ||
-    toUsableLatLng(entity?.accessData?.location?.gps) ||
-    null
-  );
-}
-
-function getErfPreviewPoint(erf, geoLibrary = {}) {
-  const erfId = erf?.id || erf?.erfId || erf?.__erfId || "";
-  const geoEntry = erfId ? geoLibrary?.[erfId] : null;
-
-  return (
-    getEntityPreviewPoint(erf) ||
-    toUsableLatLng(geoEntry?.centroid) ||
-    null
-  );
-}
-
-function pointIsInsidePolygon(point, polygonPoints = []) {
-  const candidate = toUsableLatLng(point);
-  const polygon = (polygonPoints || []).map(toUsableLatLng).filter(Boolean);
-
-  if (!candidate || polygon.length < 3) return false;
-
-  const x = candidate.lng;
-  const y = candidate.lat;
-  let inside = false;
-
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].lng;
-    const yi = polygon[i].lat;
-    const xj = polygon[j].lng;
-    const yj = polygon[j].lat;
-
-    const intersects =
-      yi > y !== yj > y &&
-      x < ((xj - xi) * (y - yi)) / (yj - yi || Number.EPSILON) + xi;
-
-    if (intersects) inside = !inside;
-  }
-
-  return inside;
-}
-
-function buildDraftGeofencePreviewStats({
-  draftPoints = [],
-  erfs = [],
-  premises = [],
-  meters = [],
-  geoLibrary = {},
-}) {
-  const polygonPoints = (draftPoints || []).map(toUsableLatLng).filter(Boolean);
-
-  if (polygonPoints.length < 3) {
-    return {
-      erfs: 0,
-      premises: 0,
-      meters: 0,
-    };
-  }
-
-  const premiseById = new globalThis.Map();
-  const insidePremiseIds = new Set();
-
-  (premises || []).forEach((premise) => {
-    const premiseId = getPremiseMatchId(premise);
-    if (premiseId) premiseById.set(premiseId, premise);
-
-    const point = getEntityPreviewPoint(premise);
-    if (!point || !pointIsInsidePolygon(point, polygonPoints)) return;
-
-    if (premiseId) insidePremiseIds.add(premiseId);
-  });
-
-  const insideErfIds = new Set();
-
-  (erfs || []).forEach((erf) => {
-    const erfId = erf?.id || erf?.erfId || erf?.__erfId || "";
-    const point = getErfPreviewPoint(erf, geoLibrary);
-
-    if (!erfId || !point || !pointIsInsidePolygon(point, polygonPoints)) return;
-
-    insideErfIds.add(erfId);
-  });
-
-  const insideMeterIds = new Set();
-
-  (meters || []).forEach((meter, index) => {
-    const meterId =
-      meter?.id ||
-      meter?.astId ||
-      meter?.ast?.astData?.astId ||
-      meter?.ast?.astData?.astNo ||
-      meter?.astData?.astNo ||
-      `meter_${index}`;
-
-    const point = getEntityPreviewPoint(meter);
-    const premiseId = getMeterPremiseMatchId(meter);
-    const premise = premiseId ? premiseById.get(premiseId) : null;
-    const premisePoint = premise ? getEntityPreviewPoint(premise) : null;
-
-    const isInside =
-      (point && pointIsInsidePolygon(point, polygonPoints)) ||
-      (premisePoint && pointIsInsidePolygon(premisePoint, polygonPoints));
-
-    if (!isInside) return;
-
-    insideMeterIds.add(meterId);
-  });
-
-  return {
-    erfs: insideErfIds.size,
-    premises: insidePremiseIds.size,
-    meters: insideMeterIds.size,
-  };
-}
-
 /* =====================================================
    MAP LAYERS
    ===================================================== */
@@ -726,6 +615,7 @@ function ExistingGeoFenceLayer({
   geofences,
   selectedGeoFenceId,
   onSelectGeoFence,
+  interactive = true,
 }) {
   const map = useMap();
   const polygonsRef = useRef([]);
@@ -743,6 +633,7 @@ function ExistingGeoFenceLayer({
 
     polygonsRef.current.forEach((polygon) => polygon.setMap(null));
     polygonsRef.current = [];
+    const infoWindows = [];
 
     const polygons = (geofences || [])
       .map((geoFence) => {
@@ -759,32 +650,36 @@ function ExistingGeoFenceLayer({
           strokeWeight: selected ? 4 : 2,
           fillColor: selected ? "#dc2626" : "#10b981",
           fillOpacity: selected ? 0.18 : 0.15,
-          clickable: true,
+          clickable: interactive,
           zIndex: selected ? 80 : 60,
         });
 
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `
-            <div style="font-family: Arial, sans-serif; min-width: 200px;">
-              <strong>${geoFence.name || geoFence.id}</strong>
-              <div style="margin-top: 4px;">${geoFence.description || "NAv"}</div>
-              <hr />
-              <div>ERFs: ${geoFence?.counts?.erfs || 0}</div>
-              <div>Premises: ${geoFence?.counts?.premises || 0}</div>
-              <div>Meters: ${geoFence?.counts?.meters || 0}</div>
-            </div>
-          `,
-        });
-
-        polygon.addListener("click", (event) => {
-          onSelectGeoFence?.(geoFence);
-
-          infoWindow.setPosition(event.latLng);
-          infoWindow.open({
-            map,
-            shouldFocus: false,
+        if (interactive) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="font-family: Arial, sans-serif; min-width: 200px;">
+                <strong>${geoFence.name || geoFence.id}</strong>
+                <div style="margin-top: 4px;">${geoFence.description || "NAv"}</div>
+                <hr />
+                <div>ERFs: ${geoFence?.counts?.erfs || 0}</div>
+                <div>Premises: ${geoFence?.counts?.premises || 0}</div>
+                <div>Meters: ${geoFence?.counts?.meters || 0}</div>
+              </div>
+            `,
           });
-        });
+
+          infoWindows.push(infoWindow);
+
+          polygon.addListener("click", (event) => {
+            onSelectGeoFence?.(geoFence);
+
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open({
+              map,
+              shouldFocus: false,
+            });
+          });
+        }
 
         polygon.setMap(map);
 
@@ -795,10 +690,11 @@ function ExistingGeoFenceLayer({
     polygonsRef.current = polygons;
 
     return () => {
+      infoWindows.forEach((infoWindow) => infoWindow.close());
       polygonsRef.current.forEach((polygon) => polygon.setMap(null));
       polygonsRef.current = [];
     };
-  }, [map, geofences, selectedGeoFenceId, onSelectGeoFence]);
+  }, [map, geofences, selectedGeoFenceId, onSelectGeoFence, interactive]);
 
   useEffect(() => {
     if (!map || !selectedGeoFence) return;
@@ -847,6 +743,7 @@ function DraftGeoFenceLayer({ draftPoints }) {
           strokeWeight: 2,
         },
         zIndex: 170,
+        clickable: false,
       });
 
       return marker;
@@ -884,7 +781,7 @@ function DraftGeoFenceLayer({ draftPoints }) {
   return null;
 }
 
-function NoGeofenceMetersLayer({ meters }) {
+function NoGeofenceMetersLayer({ meters, interactive = true }) {
   const map = useMap();
   const markersRef = useRef([]);
 
@@ -893,6 +790,7 @@ function NoGeofenceMetersLayer({ meters }) {
 
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    const infoWindows = [];
 
     const markers = (meters || [])
       .map((meter) => {
@@ -921,31 +819,36 @@ function NoGeofenceMetersLayer({ meters }) {
             strokeColor: "#7c2d12",
             strokeWeight: 3,
           },
+          clickable: interactive,
           zIndex: 999,
         });
 
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `
-            <div style="font-family: Arial, sans-serif; min-width: 240px;">
-              <strong>${getMeterNo(meter)}</strong>
-              <div>AST: ${meter.__astId || meter.id || "NAv"}</div>
-              <div style="margin-top: 6px; color: #b45309; font-weight: 800;">
-                NO_GEOFENCE
+        if (interactive) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="font-family: Arial, sans-serif; min-width: 240px;">
+                <strong>${getMeterNo(meter)}</strong>
+                <div>AST: ${meter.__astId || meter.id || "NAv"}</div>
+                <div style="margin-top: 6px; color: #b45309; font-weight: 800;">
+                  NO_GEOFENCE
+                </div>
+                <div style="margin-top: 4px; font-size: 12px; color: #64748b;">
+                  This meter is in the ward but is not inside any geofence.
+                </div>
               </div>
-              <div style="margin-top: 4px; font-size: 12px; color: #64748b;">
-                This meter is in the ward but is not inside any geofence.
-              </div>
-            </div>
-          `,
-        });
-
-        marker.addListener("click", () => {
-          infoWindow.open({
-            anchor: marker,
-            map,
-            shouldFocus: false,
+            `,
           });
-        });
+
+          infoWindows.push(infoWindow);
+
+          marker.addListener("click", () => {
+            infoWindow.open({
+              anchor: marker,
+              map,
+              shouldFocus: false,
+            });
+          });
+        }
 
         return marker;
       })
@@ -954,15 +857,20 @@ function NoGeofenceMetersLayer({ meters }) {
     markersRef.current = markers;
 
     return () => {
+      infoWindows.forEach((infoWindow) => infoWindow.close());
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, [map, meters]);
+  }, [map, meters, interactive]);
 
   return null;
 }
 
-function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
+function SelectedGeofencePremiseMeterLinesLayer({
+  premises,
+  meters,
+  interactive = true,
+}) {
   const map = useMap();
   const linesRef = useRef([]);
 
@@ -971,6 +879,7 @@ function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
 
     linesRef.current.forEach((line) => line.setMap(null));
     linesRef.current = [];
+    const infoWindows = [];
 
     const premiseById = new globalThis.Map();
     // const premiseById = new globalThis.Map();
@@ -1010,31 +919,35 @@ function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
           strokeColor: "#475569",
           strokeOpacity: 0.72,
           strokeWeight: 2,
-          clickable: true,
+          clickable: interactive,
           zIndex: 125,
         });
 
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `
-            <div style="font-family: Arial, sans-serif; min-width: 220px;">
-              <strong>Premise → Meter</strong>
-              <div>Premise: ${
-                premiseItem.premise.__premiseId ||
-                premiseItem.premise.id ||
-                "NAv"
-              }</div>
-              <div>Meter: ${getMeterNo(meter)}</div>
-            </div>
-          `,
-        });
-
-        line.addListener("click", (event) => {
-          infoWindow.setPosition(event.latLng);
-          infoWindow.open({
-            map,
-            shouldFocus: false,
+        if (interactive) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="font-family: Arial, sans-serif; min-width: 220px;">
+                <strong>Premise → Meter</strong>
+                <div>Premise: ${
+                  premiseItem.premise.__premiseId ||
+                  premiseItem.premise.id ||
+                  "NAv"
+                }</div>
+                <div>Meter: ${getMeterNo(meter)}</div>
+              </div>
+            `,
           });
-        });
+
+          infoWindows.push(infoWindow);
+
+          line.addListener("click", (event) => {
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open({
+              map,
+              shouldFocus: false,
+            });
+          });
+        }
 
         line.setMap(map);
 
@@ -1045,15 +958,16 @@ function SelectedGeofencePremiseMeterLinesLayer({ premises, meters }) {
     linesRef.current = lines;
 
     return () => {
+      infoWindows.forEach((infoWindow) => infoWindow.close());
       linesRef.current.forEach((line) => line.setMap(null));
       linesRef.current = [];
     };
-  }, [map, premises, meters]);
+  }, [map, premises, meters, interactive]);
 
   return null;
 }
 
-function SelectedGeofenceMetersLayer({ meters }) {
+function SelectedGeofenceMetersLayer({ meters, interactive = true }) {
   const map = useMap();
   const zoom = useCurrentMapZoom(14);
   const markersRef = useRef([]);
@@ -1063,6 +977,7 @@ function SelectedGeofenceMetersLayer({ meters }) {
 
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    const infoWindows = [];
 
     const meterIcon = makeSvgMapIcon({ type: "meter", zoom });
 
@@ -1079,28 +994,33 @@ function SelectedGeofenceMetersLayer({ meters }) {
           map,
           title: `Meter: ${getMeterNo(meter)}`,
           icon: meterIcon,
+          clickable: interactive,
           zIndex: 145,
         });
 
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `
-            <div style="font-family: Arial, sans-serif; min-width: 220px;">
-              <strong>${getMeterNo(meter)}</strong>
-              <div>AST: ${meter.__astId || meter.id || "NAv"}</div>
-              <div style="margin-top: 6px; color: #0f766e; font-weight: 800;">
-                Meter inside selected geofence
+        if (interactive) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="font-family: Arial, sans-serif; min-width: 220px;">
+                <strong>${getMeterNo(meter)}</strong>
+                <div>AST: ${meter.__astId || meter.id || "NAv"}</div>
+                <div style="margin-top: 6px; color: #0f766e; font-weight: 800;">
+                  Meter inside selected geofence
+                </div>
               </div>
-            </div>
-          `,
-        });
-
-        marker.addListener("click", () => {
-          infoWindow.open({
-            anchor: marker,
-            map,
-            shouldFocus: false,
+            `,
           });
-        });
+
+          infoWindows.push(infoWindow);
+
+          marker.addListener("click", () => {
+            infoWindow.open({
+              anchor: marker,
+              map,
+              shouldFocus: false,
+            });
+          });
+        }
 
         return marker;
       })
@@ -1109,15 +1029,16 @@ function SelectedGeofenceMetersLayer({ meters }) {
     markersRef.current = markers;
 
     return () => {
+      infoWindows.forEach((infoWindow) => infoWindow.close());
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, [map, meters, zoom]);
+  }, [map, meters, zoom, interactive]);
 
   return null;
 }
 
-function SelectedGeofencePremisesLayer({ premises }) {
+function SelectedGeofencePremisesLayer({ premises, interactive = true }) {
   const map = useMap();
   const zoom = useCurrentMapZoom(14);
   const markersRef = useRef([]);
@@ -1127,6 +1048,7 @@ function SelectedGeofencePremisesLayer({ premises }) {
 
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    const infoWindows = [];
 
     const premiseIcon = makeSvgMapIcon({ type: "premise", zoom });
 
@@ -1145,28 +1067,33 @@ function SelectedGeofencePremisesLayer({ premises }) {
           map,
           title: `Premise: ${address}`,
           icon: premiseIcon,
+          clickable: interactive,
           zIndex: 150,
         });
 
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `
-            <div style="font-family: Arial, sans-serif; min-width: 220px;">
-              <strong>${address}</strong>
-              <div>Premise: ${premise.__premiseId || premise.id || "NAv"}</div>
-              <div style="margin-top: 6px; color: #2563eb; font-weight: 800;">
-                Premise inside selected geofence
+        if (interactive) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="font-family: Arial, sans-serif; min-width: 220px;">
+                <strong>${address}</strong>
+                <div>Premise: ${premise.__premiseId || premise.id || "NAv"}</div>
+                <div style="margin-top: 6px; color: #2563eb; font-weight: 800;">
+                  Premise inside selected geofence
+                </div>
               </div>
-            </div>
-          `,
-        });
-
-        marker.addListener("click", () => {
-          infoWindow.open({
-            anchor: marker,
-            map,
-            shouldFocus: false,
+            `,
           });
-        });
+
+          infoWindows.push(infoWindow);
+
+          marker.addListener("click", () => {
+            infoWindow.open({
+              anchor: marker,
+              map,
+              shouldFocus: false,
+            });
+          });
+        }
 
         return marker;
       })
@@ -1175,15 +1102,16 @@ function SelectedGeofencePremisesLayer({ premises }) {
     markersRef.current = markers;
 
     return () => {
+      infoWindows.forEach((infoWindow) => infoWindow.close());
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, [map, premises, zoom]);
+  }, [map, premises, zoom, interactive]);
 
   return null;
 }
 
-function SelectedGeofenceErfsLayer({ erfs }) {
+function SelectedGeofenceErfsLayer({ erfs, interactive = true }) {
   const map = useMap();
   const polygonsRef = useRef([]);
   const markersRef = useRef([]);
@@ -1199,6 +1127,7 @@ function SelectedGeofenceErfsLayer({ erfs }) {
 
     const polygons = [];
     const markers = [];
+    const infoWindows = [];
 
     (erfs || []).forEach((erf) => {
       const erfNo = getErfDisplayNo(erf);
@@ -1214,27 +1143,31 @@ function SelectedGeofenceErfsLayer({ erfs }) {
           strokeWeight: 1.5,
           fillColor: "#38bdf8",
           fillOpacity: 0.08,
-          clickable: true,
+          clickable: interactive,
           zIndex: 90,
         });
 
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `
-            <div style="font-family: Arial, sans-serif; min-width: 180px;">
-              <strong>ERF ${erfNo}</strong>
-              <div>${erf.__erfId || erf.id || "NAv"}</div>
-              <div>Inside selected geofence</div>
-            </div>
-          `,
-        });
-
-        polygon.addListener("click", (event) => {
-          infoWindow.setPosition(event.latLng);
-          infoWindow.open({
-            map,
-            shouldFocus: false,
+        if (interactive) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="font-family: Arial, sans-serif; min-width: 180px;">
+                <strong>ERF ${erfNo}</strong>
+                <div>${erf.__erfId || erf.id || "NAv"}</div>
+                <div>Inside selected geofence</div>
+              </div>
+            `,
           });
-        });
+
+          infoWindows.push(infoWindow);
+
+          polygon.addListener("click", (event) => {
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open({
+              map,
+              shouldFocus: false,
+            });
+          });
+        }
 
         polygon.setMap(map);
         polygons.push(polygon);
@@ -1263,6 +1196,7 @@ function SelectedGeofenceErfsLayer({ erfs }) {
             strokeColor: "#0284c7",
             strokeWeight: 1,
           },
+          clickable: interactive,
           zIndex: 95,
         });
 
@@ -1274,18 +1208,19 @@ function SelectedGeofenceErfsLayer({ erfs }) {
     markersRef.current = markers;
 
     return () => {
+      infoWindows.forEach((infoWindow) => infoWindow.close());
       polygonsRef.current.forEach((polygon) => polygon.setMap(null));
       markersRef.current.forEach((marker) => marker.setMap(null));
 
       polygonsRef.current = [];
       markersRef.current = [];
     };
-  }, [map, erfs]);
+  }, [map, erfs, interactive]);
 
   return null;
 }
 
-function TcFocusMeterLayer({ tcMeters, focusAstId }) {
+function TcFocusMeterLayer({ tcMeters, focusAstId, interactive = true }) {
   const map = useMap();
   const markerRef = useRef(null);
 
@@ -1330,6 +1265,7 @@ function TcFocusMeterLayer({ tcMeters, focusAstId }) {
         strokeColor: "#ffffff",
         strokeWeight: 4,
       },
+      clickable: interactive,
       zIndex: 220,
     });
 
@@ -1348,12 +1284,17 @@ function TcFocusMeterLayer({ tcMeters, focusAstId }) {
         markerRef.current = null;
       }
     };
-  }, [map, focusRow]);
+  }, [map, focusRow, interactive]);
 
   return null;
 }
 
-function UrlFocusPointLayer({ focusType, point, label }) {
+function UrlFocusPointLayer({
+  focusType,
+  point,
+  label,
+  interactive = true,
+}) {
   const map = useMap();
   const markerRef = useRef(null);
 
@@ -1390,27 +1331,41 @@ function UrlFocusPointLayer({ focusType, point, label }) {
         strokeColor: "#ffffff",
         strokeWeight: 4,
       },
+      clickable: interactive,
       zIndex: 240,
     });
 
-    const infoWindow = new window.google.maps.InfoWindow({
-      content: `
-        <div style="font-family: Arial, sans-serif; min-width: 220px;">
-          <strong>${label || normalizedFocusType}</strong>
-          <div style="margin-top: 6px; color: ${markerColor}; font-weight: 800;">
-            BGO ${normalizedFocusType} focus
-          </div>
-        </div>
-      `,
-    });
+    let openTimer = null;
+    let infoWindow = null;
 
-    marker.addListener("click", () => {
-      infoWindow.open({
-        anchor: marker,
-        map,
-        shouldFocus: false,
+    if (interactive) {
+      infoWindow = new window.google.maps.InfoWindow({
+        content: `
+          <div style="font-family: Arial, sans-serif; min-width: 220px;">
+            <strong>${label || normalizedFocusType}</strong>
+            <div style="margin-top: 6px; color: ${markerColor}; font-weight: 800;">
+              BGO ${normalizedFocusType} focus
+            </div>
+          </div>
+        `,
       });
-    });
+
+      marker.addListener("click", () => {
+        infoWindow.open({
+          anchor: marker,
+          map,
+          shouldFocus: false,
+        });
+      });
+
+      openTimer = window.setTimeout(() => {
+        infoWindow.open({
+          anchor: marker,
+          map,
+          shouldFocus: false,
+        });
+      }, 350);
+    }
 
     markerRef.current = marker;
 
@@ -1421,21 +1376,15 @@ function UrlFocusPointLayer({ focusType, point, label }) {
 
     map.setZoom(19);
 
-    window.setTimeout(() => {
-      infoWindow.open({
-        anchor: marker,
-        map,
-        shouldFocus: false,
-      });
-    }, 350);
-
     return () => {
+      if (openTimer) window.clearTimeout(openTimer);
+      infoWindow?.close();
       if (markerRef.current) {
         markerRef.current.setMap(null);
         markerRef.current = null;
       }
     };
-  }, [map, focusType, point, label]);
+  }, [map, focusType, point, label, interactive]);
 
   return null;
 }
@@ -1472,7 +1421,7 @@ export default function GeoFencesPage() {
 
   const { activeWorkbase } = useAuth();
   const { geoState, updateGeo } = useGeo();
-  const { available, all } = useWarehouse();
+  const { available } = useWarehouse();
 
   const selectedLm = geoState?.selectedLm || null;
   const selectedWard = geoState?.selectedWard || null;
@@ -1514,12 +1463,17 @@ export default function GeoFencesPage() {
     wardPcodeFromFocusAstId ||
     sanitizeScopeValue(getSelectedWardPcode(selectedWard));
 
+  const scopeReady = Boolean(lmPcode && wardPcode);
+
   const selectedWardDoc = useMemo(() => {
     const wards = Array.isArray(available?.wards) ? available.wards : [];
 
+    const matchingSelectedWard =
+      getWardPcode(selectedWard) === wardPcode ? selectedWard : null;
+
     return (
       wards.find((ward) => getWardPcode(ward) === wardPcode) ||
-      selectedWard ||
+      matchingSelectedWard ||
       null
     );
   }, [available, selectedWard, wardPcode]);
@@ -1559,6 +1513,17 @@ export default function GeoFencesPage() {
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftPoints, setDraftPoints] = useState([]);
+  const [planningLayerVisibility, setPlanningLayerVisibility] = useState({
+    erfs: false,
+    sales: false,
+    premises: false,
+    assets: false,
+  });
+  const [salesStateVisibility, setSalesStateVisibility] = useState({
+    notTouched: false,
+    inProgress: false,
+    completed: false,
+  });
 
   const { data: geofences = [], isLoading: geofencesLoading } =
     useGetGeoFencesByWardQuery(
@@ -1587,7 +1552,27 @@ export default function GeoFencesPage() {
 
   const { data: noGeofenceMeters = [] } = useGetNoGeofenceMetersByWardQuery(
     { lmPcode, wardPcode },
-    { skip: !lmPcode || !wardPcode },
+    { skip: !scopeReady },
+  );
+
+  const { data: planningErfs = [] } = useGetErfsByWardQuery(
+    { lmPcode, wardPcode },
+    { skip: !scopeReady },
+  );
+
+  const { data: planningPremises = [] } = useGetPremisesByWardQuery(
+    wardPcode,
+    { skip: !scopeReady },
+  );
+
+  const { data: planningAssets = [] } = useGetAstsByLmPcodeWardPcodeQuery(
+    { lmPcode, wardPcode },
+    { skip: !scopeReady },
+  );
+
+  const { data: planningSalesRows = [] } = useGetSalesByLmPcodeQuery(
+    lmPcode,
+    { skip: !lmPcode },
   );
 
   const { data: selectedGeofenceMeters = [] } =
@@ -1631,17 +1616,49 @@ export default function GeoFencesPage() {
     selectedGeofenceMeters.length,
   ]);
 
-  const draftPreviewStats = useMemo(() => {
-    return buildDraftGeofencePreviewStats({
-      draftPoints,
-      erfs: all?.erfs || [],
-      premises: all?.prems || [],
-      meters: all?.meters || [],
-      geoLibrary: all?.geoLibrary || {},
+  const planningModel = useMemo(() => {
+    return buildGeofencePlanningModel({
+      lmPcode,
+      wardPcode,
+      erfs: planningErfs,
+      premises: planningPremises,
+      assets: planningAssets,
+      salesRows: planningSalesRows,
+      noGeofenceMeters,
     });
-  }, [all, draftPoints]);
+  }, [
+    lmPcode,
+    wardPcode,
+    planningErfs,
+    planningPremises,
+    planningAssets,
+    planningSalesRows,
+    noGeofenceMeters,
+  ]);
 
-  const scopeReady = Boolean(lmPcode && wardPcode);
+  const draftPreviewStats = useMemo(() => {
+    return buildGeofencePlanningDraftStats({
+      draftPoints,
+      erfs: planningModel.erfs,
+      premises: planningModel.premises,
+      assets: planningModel.assets,
+      salesRecords: planningModel.salesRecords,
+    });
+  }, [draftPoints, planningModel]);
+
+  function handleTogglePlanningLayer(layer) {
+    setPlanningLayerVisibility((current) => ({
+      ...current,
+      [layer]: !current[layer],
+    }));
+  }
+
+  function handleToggleSalesState(state) {
+    setSalesStateVisibility((current) => ({
+      ...current,
+      [state]: !current[state],
+    }));
+  }
 
   function handleWardChange(event) {
     const nextWardPcode = sanitizeScopeValue(event?.target?.value);
@@ -1955,6 +1972,23 @@ export default function GeoFencesPage() {
               {draftPolygonReady ? "• Ready to save" : "• Minimum 3 required"}
             </span>
 
+            <span style={drawingStatsStyle}>
+              ERFs: <strong>{draftPreviewStats.erfs}</strong> • Sales:{" "}
+              <strong>{draftPreviewStats.sales.total}</strong>{" "}
+              (NT {draftPreviewStats.sales.notTouched}, IP{" "}
+              {draftPreviewStats.sales.inProgress}, C{" "}
+              {draftPreviewStats.sales.completed}) • Premises:{" "}
+              <strong>{draftPreviewStats.premises}</strong> • Assets:{" "}
+              <strong>{draftPreviewStats.assets}</strong>
+              {draftPreviewStats.sales.integrityExceptions > 0 ? (
+                <>
+                  {" "}
+                  • Sales integrity:{" "}
+                  <strong>{draftPreviewStats.sales.integrityExceptions}</strong>
+                </>
+              ) : null}
+            </span>
+
             <button
               onClick={handleUndoPoint}
               disabled={draftPoints.length === 0}
@@ -1988,6 +2022,15 @@ export default function GeoFencesPage() {
           </div>
         ) : null}
 
+        <GeofencePlanningLayerControls
+          model={planningModel}
+          visibility={planningLayerVisibility}
+          salesVisibility={salesStateVisibility}
+          onToggleLayer={handleTogglePlanningLayer}
+          onToggleSalesState={handleToggleSalesState}
+          isCreateMode={isCreateMode}
+        />
+
         <APIProvider apiKey={googleMapsApiKey}>
           <GoogleMap
             defaultCenter={mapCenter}
@@ -2009,29 +2052,52 @@ export default function GeoFencesPage() {
               geofences={geofences}
               selectedGeoFenceId={selectedGeoFenceId}
               onSelectGeoFence={setSelectedGeoFence}
+              interactive={!isCreateMode}
+            />
+
+            <GeofencePlanningLayers
+              model={planningModel}
+              visibility={planningLayerVisibility}
+              salesVisibility={salesStateVisibility}
+              isCreateMode={isCreateMode}
             />
 
             {selectedGeoFenceId ? (
               <>
-                <SelectedGeofenceErfsLayer erfs={selectedGeofenceErfs} />
+                <SelectedGeofenceErfsLayer
+                  erfs={selectedGeofenceErfs}
+                  interactive={!isCreateMode}
+                />
 
                 <SelectedGeofencePremiseMeterLinesLayer
                   premises={selectedGeofencePremises}
                   meters={selectedGeofenceMeters}
+                  interactive={!isCreateMode}
                 />
 
                 <SelectedGeofencePremisesLayer
                   premises={selectedGeofencePremises}
+                  interactive={!isCreateMode}
                 />
 
-                <SelectedGeofenceMetersLayer meters={selectedGeofenceMeters} />
+                <SelectedGeofenceMetersLayer
+                  meters={selectedGeofenceMeters}
+                  interactive={!isCreateMode}
+                />
               </>
             ) : null}
 
-            <NoGeofenceMetersLayer meters={noGeofenceMeters} />
+            <NoGeofenceMetersLayer
+              meters={noGeofenceMeters}
+              interactive={!isCreateMode}
+            />
 
             {isTcContext && focusAstId && !focusPoint ? (
-              <TcFocusMeterLayer tcMeters={tcMeters} focusAstId={focusAstId} />
+              <TcFocusMeterLayer
+                tcMeters={tcMeters}
+                focusAstId={focusAstId}
+                interactive={!isCreateMode}
+              />
             ) : null}
 
             {focusPoint ? (
@@ -2039,6 +2105,7 @@ export default function GeoFencesPage() {
                 focusType={focusType}
                 point={focusPoint}
                 label={focusDisplayLabel}
+                interactive={!isCreateMode}
               />
             ) : null}
 
@@ -2173,13 +2240,28 @@ export default function GeoFencesPage() {
             </div>
 
             <div style={countCardStyle}>
+              <span style={countLabelStyle}>Sales</span>
+              <strong style={countValueStyle}>{draftPreviewStats.sales.total}</strong>
+              <span style={countDetailStyle}>
+                NT {draftPreviewStats.sales.notTouched} • IP{" "}
+                {draftPreviewStats.sales.inProgress} • C{" "}
+                {draftPreviewStats.sales.completed}
+              </span>
+              {draftPreviewStats.sales.integrityExceptions > 0 ? (
+                <span style={integrityDetailStyle}>
+                  Integrity: {draftPreviewStats.sales.integrityExceptions}
+                </span>
+              ) : null}
+            </div>
+
+            <div style={countCardStyle}>
               <span style={countLabelStyle}>Premises</span>
               <strong style={countValueStyle}>{draftPreviewStats.premises}</strong>
             </div>
 
             <div style={countCardStyle}>
-              <span style={countLabelStyle}>Meters</span>
-              <strong style={countValueStyle}>{draftPreviewStats.meters}</strong>
+              <span style={countLabelStyle}>Assets</span>
+              <strong style={countValueStyle}>{draftPreviewStats.assets}</strong>
             </div>
           </div>
 
@@ -2232,25 +2314,35 @@ export default function GeoFencesPage() {
 
           <div style={countCardGridStyle}>
             <div style={countCardStyle}>
-              <span style={countLabelStyle}>ERFs covered</span>
+              <span style={countLabelStyle}>ERFs planned</span>
               <strong style={countValueStyle}>{createSuccess.stats.erfs}</strong>
             </div>
 
             <div style={countCardStyle}>
-              <span style={countLabelStyle}>Premises covered</span>
+              <span style={countLabelStyle}>Sales planned</span>
+              <strong style={countValueStyle}>{createSuccess.stats.sales.total}</strong>
+              <span style={countDetailStyle}>
+                NT {createSuccess.stats.sales.notTouched} • IP{" "}
+                {createSuccess.stats.sales.inProgress} • C{" "}
+                {createSuccess.stats.sales.completed}
+              </span>
+            </div>
+
+            <div style={countCardStyle}>
+              <span style={countLabelStyle}>Premises planned</span>
               <strong style={countValueStyle}>{createSuccess.stats.premises}</strong>
             </div>
 
             <div style={countCardStyle}>
-              <span style={countLabelStyle}>Meters covered</span>
-              <strong style={countValueStyle}>{createSuccess.stats.meters}</strong>
+              <span style={countLabelStyle}>Assets planned</span>
+              <strong style={countValueStyle}>{createSuccess.stats.assets}</strong>
             </div>
           </div>
 
           <p style={{ color: "#475569", marginTop: 16 }}>
-            iREPS has submitted the geofence creation request. ERFs, premises
-            and meters will update through the normal geofence membership
-            process.
+            iREPS has submitted the geofence creation request. These are the
+            planning-preview counts; authoritative ERF, premise, asset and Sales
+            membership will update through the normal geofence membership process.
             {createSuccess.isTcContext
               ? " TC readiness will also update automatically."
               : ""}
@@ -2390,6 +2482,28 @@ const drawingPanelStyle = {
   boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
 };
 
+const drawingStatsStyle = {
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const countDetailStyle = {
+  display: "block",
+  marginTop: 4,
+  color: "#475569",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const integrityDetailStyle = {
+  display: "block",
+  marginTop: 4,
+  color: "#b91c1c",
+  fontSize: 11,
+  fontWeight: 900,
+};
+
 const modalBackdropStyle = {
   position: "fixed",
   inset: 0,
@@ -2449,7 +2563,7 @@ const confirmIntroStyle = {
 
 const countCardGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
   gap: 12,
   marginBottom: 18,
 };
