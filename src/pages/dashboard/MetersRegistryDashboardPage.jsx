@@ -432,7 +432,7 @@ export default function MetersRegistryDashboardPage() {
     );
   }
 
-  if ((metersLoading || wardsLoading) && meterRows.length === 0) {
+  if (metersLoading || wardsLoading) {
     return (
       <div className="meter-dashboard-page meter-dashboard-page--executive">
         <LoadingState />

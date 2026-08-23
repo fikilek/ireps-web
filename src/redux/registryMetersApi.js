@@ -104,6 +104,78 @@ function sortMeterRows(a, b) {
   });
 }
 
+function buildRegistryMeterRows(snapshot) {
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeMeterRegistryRow(
+        documentSnapshot.id,
+        documentSnapshot.data(),
+      ),
+    )
+    .sort(sortMeterRows);
+}
+
+function readInitialRegistryMeterRows(registryMetersQuery, signal) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    const finish = (result) => {
+      if (settled) return;
+
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "Registry meter stream request was cancelled.",
+        },
+      });
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = onSnapshot(
+      registryMetersQuery,
+      (snapshot) => {
+        const rows = buildRegistryMeterRows(snapshot);
+        const fromCache = snapshot.metadata?.fromCache === true;
+
+        // An empty local cache is not proof that the registry is empty.
+        // Keep RTK Query in its initial loading state until Firestore
+        // confirms the first snapshot from the server.
+        if (fromCache && rows.length === 0) return;
+
+        finish({ data: rows });
+      },
+      (error) => {
+        finish({
+          error: {
+            status: "CUSTOM_ERROR",
+            error: error?.message || "Could not load the Meter Registry stream.",
+          },
+        });
+      },
+    );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
+  });
+}
+
 export const registryMetersApi = createApi({
   reducerPath: "registryMetersApi",
   baseQuery: fakeBaseQuery(),
@@ -159,7 +231,16 @@ export const registryMetersApi = createApi({
       },
     }),
     getRegistryMetersByLm: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: (lmPcode, { signal }) => {
+        if (!lmPcode) return { data: [] };
+
+        const registryMetersQuery = query(
+          collection(db, METER_REGISTRY_COLLECTION),
+          where(METER_REGISTRY_LM_FIELD, "==", lmPcode),
+        );
+
+        return readInitialRegistryMeterRows(registryMetersQuery, signal);
+      },
 
       async onCacheEntryAdded(
         lmPcode,
@@ -182,14 +263,7 @@ export const registryMetersApi = createApi({
           unsubscribe = onSnapshot(
             registryMetersQuery,
             (snapshot) => {
-              const rows = snapshot.docs
-                .map((documentSnapshot) =>
-                  normalizeMeterRegistryRow(
-                    documentSnapshot.id,
-                    documentSnapshot.data(),
-                  ),
-                )
-                .sort(sortMeterRows);
+              const rows = buildRegistryMeterRows(snapshot);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...rows);

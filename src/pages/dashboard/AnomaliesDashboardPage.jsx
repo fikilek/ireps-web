@@ -25,11 +25,12 @@ const TREND_GROUP_MODES = [
 ];
 
 const KNOWN_MAIN_COLORS = new Map([
+  ["METER OK", "#0f9f95"],
   ["METER NOT ON PORTAL", "#2563eb"],
   ["METER FAULTY", "#f97316"],
-  ["METER DAMAGED", "#dc2626"],
-  ["ILLEGALLY CONNECTED", "#7c3aed"],
-  ["OTHER", "#0f9f95"],
+  ["METER DAMAGED", "#7c3aed"],
+  ["ILLEGALLY CONNECTED", "#dc2626"],
+  ["OTHER", "#64748b"],
 ]);
 
 const FALLBACK_COLORS = [
@@ -883,7 +884,7 @@ export default function AnomaliesDashboardPage() {
     );
   }
 
-  if ((trnsLoading || usersLoading || teamsLoading) && trnRows.length === 0) {
+  if (trnsLoading || usersLoading || teamsLoading) {
     return (
       <div className="anomaly-dashboard-page">
         <LoadingState />

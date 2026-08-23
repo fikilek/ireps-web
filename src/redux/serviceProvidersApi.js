@@ -91,12 +91,91 @@ function resolveLimit(arg, fallback = 500) {
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
+function buildServiceProvidersQuery(maxResults) {
+  return query(
+    collection(db, SERVICE_PROVIDERS_COLLECTION),
+    limitQuery(maxResults),
+  );
+}
+
+function buildServiceProviderRows(snapshot) {
+  return snapshot.docs
+    .map((docSnapshot) => normalizeServiceProviderDoc(docSnapshot))
+    .filter(Boolean)
+    .filter((serviceProvider) => serviceProvider.status === "ACTIVE")
+    .filter((serviceProvider) => serviceProvider.isSubcontractor)
+    .sort(sortServiceProviders);
+}
+
+function readInitialServiceProviders(arg, signal) {
+  const maxResults = resolveLimit(arg, 500);
+  const serviceProvidersQuery = buildServiceProvidersQuery(maxResults);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    const finish = (result) => {
+      if (settled) return;
+
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "Service Provider directory stream request was cancelled.",
+        },
+      });
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = onSnapshot(
+      serviceProvidersQuery,
+      (snapshot) => {
+        const serviceProviders = buildServiceProviderRows(snapshot);
+        const fromCache = snapshot.metadata?.fromCache === true;
+
+        if (fromCache && serviceProviders.length === 0) return;
+
+        finish({ data: serviceProviders });
+      },
+      (error) => {
+        finish({
+          error: {
+            status: "CUSTOM_ERROR",
+            error:
+              error?.message ||
+              "Could not load the Service Provider directory stream.",
+          },
+        });
+      },
+    );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
+  });
+}
+
 export const serviceProvidersApi = createApi({
   reducerPath: "serviceProvidersApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getAvailableServiceProviders: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: (arg, { signal }) => readInitialServiceProviders(arg, signal),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -107,21 +186,12 @@ export const serviceProvidersApi = createApi({
         try {
           await cacheDataLoaded;
 
-          const collectionRef = collection(db, SERVICE_PROVIDERS_COLLECTION);
-          const serviceProvidersQuery = query(
-            collectionRef,
-            limitQuery(maxResults),
-          );
+          const serviceProvidersQuery = buildServiceProvidersQuery(maxResults);
 
           unsubscribe = onSnapshot(
             serviceProvidersQuery,
             (snapshot) => {
-              const serviceProviders = snapshot.docs
-                .map((docSnapshot) => normalizeServiceProviderDoc(docSnapshot))
-                .filter(Boolean)
-                .filter((serviceProvider) => serviceProvider.status === "ACTIVE")
-                .filter((serviceProvider) => serviceProvider.isSubcontractor)
-                .sort(sortServiceProviders);
+              const serviceProviders = buildServiceProviderRows(snapshot);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...serviceProviders);

@@ -454,6 +454,94 @@ function sortRegistryTrns(left, right) {
   return String(left?.trnId || "").localeCompare(String(right?.trnId || ""));
 }
 
+function resolveRegistryLmPcode(arg) {
+  return String(
+    typeof arg === "string" ? arg : arg?.lmPcode || "",
+  ).trim();
+}
+
+function buildRegistryTrnsQuery(lmPcode) {
+  return query(
+    collection(db, TRNS_COLLECTION),
+    where("accessData.parents.lmPcode", "==", lmPcode),
+  );
+}
+
+function buildRegistryTrnRows(snapshot) {
+  return mergeUniqueDocs(
+    [snapshot],
+    normalizeTrnRegistryDoc,
+  ).sort(sortRegistryTrns);
+}
+
+function readInitialRegistryTrns(arg, signal) {
+  const lmPcode = resolveRegistryLmPcode(arg);
+
+  if (!lmPcode) {
+    return Promise.resolve({ data: [] });
+  }
+
+  const trnsQuery = buildRegistryTrnsQuery(lmPcode);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    const finish = (result) => {
+      if (settled) return;
+
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "TRN registry stream request was cancelled.",
+        },
+      });
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = onSnapshot(
+      trnsQuery,
+      (snapshot) => {
+        const rows = buildRegistryTrnRows(snapshot);
+        const fromCache = snapshot.metadata?.fromCache === true;
+
+        // Do not interpret an empty local cache as an empty live TRN registry.
+        // Wait for the first server-confirmed snapshot before ending initial load.
+        if (fromCache && rows.length === 0) return;
+
+        finish({ data: rows });
+      },
+      (error) => {
+        finish({
+          error: {
+            status: "CUSTOM_ERROR",
+            error: error?.message || "Could not load the TRN Registry stream.",
+          },
+        });
+      },
+    );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
+  });
+}
+
 function buildTcIdQueries(tcId, maxResults) {
   const collectionRef = collection(db, TRNS_COLLECTION);
 
@@ -542,14 +630,12 @@ export const trnsApi = createApi({
     }),
 
     getRegistryTrnsByLmPcode: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: (arg, { signal }) => readInitialRegistryTrns(arg, signal),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
-        const lmPcode = String(
-          typeof arg === "string" ? arg : arg?.lmPcode || "",
-        ).trim();
+        const lmPcode = resolveRegistryLmPcode(arg);
 
         if (!lmPcode) return;
 
@@ -558,18 +644,12 @@ export const trnsApi = createApi({
         try {
           await cacheDataLoaded;
 
-          const trnsQuery = query(
-            collection(db, TRNS_COLLECTION),
-            where("accessData.parents.lmPcode", "==", lmPcode),
-          );
+          const trnsQuery = buildRegistryTrnsQuery(lmPcode);
 
           unsubscribe = onSnapshot(
             trnsQuery,
             (snapshot) => {
-              const trns = mergeUniqueDocs(
-                [snapshot],
-                normalizeTrnRegistryDoc,
-              ).sort(sortRegistryTrns);
+              const trns = buildRegistryTrnRows(snapshot);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...trns);

@@ -419,7 +419,7 @@ export default function ActivityReportDashboardPage() {
     );
   }
 
-  if (isLoading && userRows.length === 0) {
+  if (isLoading) {
     return (
       <section className="activity-dashboard-page">
         <div className="activity-state-card">

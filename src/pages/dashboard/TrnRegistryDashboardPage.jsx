@@ -985,7 +985,7 @@ export default function TrnRegistryDashboardPage() {
     );
   }
 
-  if ((trnsLoading || usersLoading || teamsLoading) && trnRows.length === 0) {
+  if (trnsLoading || usersLoading || teamsLoading) {
     return (
       <div className="trn-dashboard-page">
         <LoadingState />

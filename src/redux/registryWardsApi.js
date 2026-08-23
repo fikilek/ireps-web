@@ -84,12 +84,90 @@ function sortWardRows(a, b) {
   return String(a.wardName).localeCompare(String(b.wardName));
 }
 
+function buildRegistryWardRows(snapshot) {
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeWardRegistryRow(
+        documentSnapshot.id,
+        documentSnapshot.data(),
+      ),
+    )
+    .sort(sortWardRows);
+}
+
+function readInitialRegistryWardRows(registryWardsQuery, signal) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    const finish = (result) => {
+      if (settled) return;
+
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "Registry ward stream request was cancelled.",
+        },
+      });
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = onSnapshot(
+      registryWardsQuery,
+      (snapshot) => {
+        const rows = buildRegistryWardRows(snapshot);
+        const fromCache = snapshot.metadata?.fromCache === true;
+
+        if (fromCache && rows.length === 0) return;
+
+        finish({ data: rows });
+      },
+      (error) => {
+        finish({
+          error: {
+            status: "CUSTOM_ERROR",
+            error: error?.message || "Could not load the Ward Registry stream.",
+          },
+        });
+      },
+    );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
+  });
+}
+
 export const registryWardsApi = createApi({
   reducerPath: "registryWardsApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getRegistryWardsByLm: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: (lmPcode, { signal }) => {
+        if (!lmPcode) return { data: [] };
+
+        const registryWardsQuery = query(
+          collection(db, WARD_REGISTRY_COLLECTION),
+          where(WARD_REGISTRY_LM_FIELD, "==", lmPcode),
+        );
+
+        return readInitialRegistryWardRows(registryWardsQuery, signal);
+      },
 
       async onCacheEntryAdded(
         lmPcode,
@@ -112,14 +190,7 @@ export const registryWardsApi = createApi({
           unsubscribe = onSnapshot(
             registryWardsQuery,
             (snapshot) => {
-              const rows = snapshot.docs
-                .map((documentSnapshot) =>
-                  normalizeWardRegistryRow(
-                    documentSnapshot.id,
-                    documentSnapshot.data(),
-                  ),
-                )
-                .sort(sortWardRows);
+              const rows = buildRegistryWardRows(snapshot);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...rows);

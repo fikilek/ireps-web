@@ -95,6 +95,81 @@ function resolveLimit(arg, fallback = 1000) {
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
+function buildUsersQuery(maxResults) {
+  return query(
+    collection(db, USERS_COLLECTION),
+    limitQuery(maxResults),
+  );
+}
+
+function buildUserRows(snapshot) {
+  return snapshot.docs
+    .map((docSnapshot) => normalizeUserDoc(docSnapshot))
+    .filter(Boolean)
+    .sort(sortUsers);
+}
+
+function readInitialUsers(arg, signal) {
+  const maxResults = resolveLimit(arg, 1000);
+  const usersQuery = buildUsersQuery(maxResults);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    const finish = (result) => {
+      if (settled) return;
+
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "Users directory stream request was cancelled.",
+        },
+      });
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = onSnapshot(
+      usersQuery,
+      (snapshot) => {
+        const users = buildUserRows(snapshot);
+        const fromCache = snapshot.metadata?.fromCache === true;
+
+        if (fromCache && users.length === 0) return;
+
+        finish({ data: users });
+      },
+      (error) => {
+        finish({
+          error: {
+            status: "CUSTOM_ERROR",
+            error: error?.message || "Could not load the Users directory stream.",
+          },
+        });
+      },
+    );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
+  });
+}
+
 export const usersApi = createApi({
   reducerPath: "usersApi",
   baseQuery: fakeBaseQuery(),
@@ -127,7 +202,7 @@ export const usersApi = createApi({
     }),
 
     getUsersDirectory: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: (arg, { signal }) => readInitialUsers(arg, signal),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -138,16 +213,12 @@ export const usersApi = createApi({
         try {
           await cacheDataLoaded;
 
-          const collectionRef = collection(db, USERS_COLLECTION);
-          const usersQuery = query(collectionRef, limitQuery(maxResults));
+          const usersQuery = buildUsersQuery(maxResults);
 
           unsubscribe = onSnapshot(
             usersQuery,
             (snapshot) => {
-              const users = snapshot.docs
-                .map((docSnapshot) => normalizeUserDoc(docSnapshot))
-                .filter(Boolean)
-                .sort(sortUsers);
+              const users = buildUserRows(snapshot);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...users);

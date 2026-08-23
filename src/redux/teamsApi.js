@@ -86,12 +86,88 @@ function resolveLimit(arg, fallback = 500) {
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
+function buildTeamsQuery(maxResults) {
+  return query(
+    collection(db, TEAMS_COLLECTION),
+    limitQuery(maxResults),
+  );
+}
+
+function buildTeamRows(snapshot) {
+  return snapshot.docs
+    .map((docSnapshot) => normalizeTeamDoc(docSnapshot))
+    .filter(Boolean)
+    .filter((team) => team.status === "ACTIVE")
+    .sort(sortTeams);
+}
+
+function readInitialTeams(arg, signal) {
+  const maxResults = resolveLimit(arg, 500);
+  const teamsQuery = buildTeamsQuery(maxResults);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    const finish = (result) => {
+      if (settled) return;
+
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      finish({
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "Teams directory stream request was cancelled.",
+        },
+      });
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    const streamUnsubscribe = onSnapshot(
+      teamsQuery,
+      (snapshot) => {
+        const teams = buildTeamRows(snapshot);
+        const fromCache = snapshot.metadata?.fromCache === true;
+
+        if (fromCache && teams.length === 0) return;
+
+        finish({ data: teams });
+      },
+      (error) => {
+        finish({
+          error: {
+            status: "CUSTOM_ERROR",
+            error: error?.message || "Could not load the Teams directory stream.",
+          },
+        });
+      },
+    );
+
+    unsubscribe = streamUnsubscribe;
+
+    if (settled) {
+      unsubscribe();
+    }
+  });
+}
+
 export const teamsApi = createApi({
   reducerPath: "teamsApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getAvailableTeams: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: (arg, { signal }) => readInitialTeams(arg, signal),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -102,17 +178,12 @@ export const teamsApi = createApi({
         try {
           await cacheDataLoaded;
 
-          const collectionRef = collection(db, TEAMS_COLLECTION);
-          const teamsQuery = query(collectionRef, limitQuery(maxResults));
+          const teamsQuery = buildTeamsQuery(maxResults);
 
           unsubscribe = onSnapshot(
             teamsQuery,
             (snapshot) => {
-              const teams = snapshot.docs
-                .map((docSnapshot) => normalizeTeamDoc(docSnapshot))
-                .filter(Boolean)
-                .filter((team) => team.status === "ACTIVE")
-                .sort(sortTeams);
+              const teams = buildTeamRows(snapshot);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...teams);
