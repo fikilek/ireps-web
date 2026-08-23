@@ -1,15 +1,7 @@
-export const SALES_PLANNING_STATES = Object.freeze({
-  NOT_TOUCHED: "NOT_TOUCHED",
-  IN_PROGRESS: "IN_PROGRESS",
-  COMPLETED: "COMPLETED",
-  INTEGRITY_EXCEPTION: "INTEGRITY_EXCEPTION",
-});
-
-const VALID_FIELDWORK_STATUSES = new Set([
-  "NOT_STARTED",
-  "IN_PROGRESS",
-  "COMPLETED",
-]);
+import {
+  SALES_STATUSES,
+  classifySalesStatus,
+} from "../sales/models/salesStatusModel.js";
 
 const NORMAL_SALES_CATEGORY = "NORMAL - NO LEAKAGE FLAG";
 
@@ -209,50 +201,6 @@ function getErfPoint(erf = {}) {
   return normalizePoint(erf?.centroid || erf?.geometry?.centroid);
 }
 
-export function classifySalesPlanningState(sales = {}) {
-  const integrity = sales?.tbRefsIntegrity;
-
-  if (!integrity || integrity.valid !== true) {
-    return {
-      state: SALES_PLANNING_STATES.INTEGRITY_EXCEPTION,
-      issues: Array.isArray(integrity?.issues)
-        ? integrity.issues
-        : ["tbRefsIntegrity"],
-    };
-  }
-
-  const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
-  let hasInProgress = false;
-
-  for (const reference of refs) {
-    const fieldWork = reference?.fieldWork;
-    const rawStatus = fieldWork?.status;
-    const status = rawStatus
-      ? normalizePlanningScope(rawStatus)
-      : "NOT_STARTED";
-
-    if (!VALID_FIELDWORK_STATUSES.has(status)) {
-      return {
-        state: SALES_PLANNING_STATES.INTEGRITY_EXCEPTION,
-        issues: ["tbRefs.fieldWork.status"],
-      };
-    }
-
-    if (status === "COMPLETED") {
-      return { state: SALES_PLANNING_STATES.COMPLETED, issues: [] };
-    }
-
-    if (status === "IN_PROGRESS") hasInProgress = true;
-  }
-
-  return {
-    state: hasInProgress
-      ? SALES_PLANNING_STATES.IN_PROGRESS
-      : SALES_PLANNING_STATES.NOT_TOUCHED,
-    issues: [],
-  };
-}
-
 function salesCandidateMatchesScope(candidate, lmPcode, wardPcode) {
   return (
     normalizePlanningScope(candidate?.lmPcode) === lmPcode &&
@@ -319,12 +267,12 @@ export function buildSalesPlanningRecords({
 
     if (candidates.length === 0) continue;
 
-    const classification = classifySalesPlanningState(sales);
+    const classification = classifySalesStatus(sales);
 
     recordsById.set(salesId, {
       id: salesId,
       meterNo: cleanText(sales?.meterNo || sales?.meterNoNormalized) || "NAv",
-      state: classification.state,
+      status: classification.status,
       integrityIssues: classification.issues,
       candidates,
       raw: sales,
@@ -337,23 +285,23 @@ export function buildSalesPlanningRecords({
 export function summarizeSalesPlanningRecords(records = []) {
   const summary = {
     total: 0,
-    notTouched: 0,
+    notStarted: 0,
     inProgress: 0,
     completed: 0,
     integrityExceptions: 0,
   };
 
   (records || []).forEach((record) => {
-    switch (record?.state) {
-      case SALES_PLANNING_STATES.NOT_TOUCHED:
-        summary.notTouched += 1;
+    switch (record?.status) {
+      case SALES_STATUSES.NOT_STARTED:
+        summary.notStarted += 1;
         summary.total += 1;
         break;
-      case SALES_PLANNING_STATES.IN_PROGRESS:
+      case SALES_STATUSES.IN_PROGRESS:
         summary.inProgress += 1;
         summary.total += 1;
         break;
-      case SALES_PLANNING_STATES.COMPLETED:
+      case SALES_STATUSES.COMPLETED:
         summary.completed += 1;
         summary.total += 1;
         break;
@@ -460,7 +408,7 @@ function emptyDraftStats() {
     meters: 0,
     sales: {
       total: 0,
-      notTouched: 0,
+      notStarted: 0,
       inProgress: 0,
       completed: 0,
       integrityExceptions: 0,

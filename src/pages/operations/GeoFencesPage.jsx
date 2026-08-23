@@ -1519,8 +1519,8 @@ export default function GeoFencesPage() {
     premises: false,
     assets: false,
   });
-  const [salesStateVisibility, setSalesStateVisibility] = useState({
-    notTouched: false,
+  const [salesStatusVisibility, setSalesStatusVisibility] = useState({
+    notStarted: false,
     inProgress: false,
     completed: false,
   });
@@ -1653,10 +1653,10 @@ export default function GeoFencesPage() {
     }));
   }
 
-  function handleToggleSalesState(state) {
-    setSalesStateVisibility((current) => ({
+  function handleToggleSalesStatus(statusKey) {
+    setSalesStatusVisibility((current) => ({
       ...current,
-      [state]: !current[state],
+      [statusKey]: !current[statusKey],
     }));
   }
 
@@ -1975,8 +1975,8 @@ export default function GeoFencesPage() {
             <span style={drawingStatsStyle}>
               ERFs: <strong>{draftPreviewStats.erfs}</strong> • Sales:{" "}
               <strong>{draftPreviewStats.sales.total}</strong>{" "}
-              (NT {draftPreviewStats.sales.notTouched}, IP{" "}
-              {draftPreviewStats.sales.inProgress}, C{" "}
+              (Not Started {draftPreviewStats.sales.notStarted}, In Progress{" "}
+              {draftPreviewStats.sales.inProgress}, Completed{" "}
               {draftPreviewStats.sales.completed}) • Premises:{" "}
               <strong>{draftPreviewStats.premises}</strong> • Assets:{" "}
               <strong>{draftPreviewStats.assets}</strong>
@@ -2025,9 +2025,9 @@ export default function GeoFencesPage() {
         <GeofencePlanningLayerControls
           model={planningModel}
           visibility={planningLayerVisibility}
-          salesVisibility={salesStateVisibility}
+          salesStatusVisibility={salesStatusVisibility}
           onToggleLayer={handleTogglePlanningLayer}
-          onToggleSalesState={handleToggleSalesState}
+          onToggleSalesStatus={handleToggleSalesStatus}
           isCreateMode={isCreateMode}
         />
 
@@ -2058,7 +2058,7 @@ export default function GeoFencesPage() {
             <GeofencePlanningLayers
               model={planningModel}
               visibility={planningLayerVisibility}
-              salesVisibility={salesStateVisibility}
+              salesStatusVisibility={salesStatusVisibility}
               isCreateMode={isCreateMode}
             />
 
@@ -2243,8 +2243,8 @@ export default function GeoFencesPage() {
               <span style={countLabelStyle}>Sales</span>
               <strong style={countValueStyle}>{draftPreviewStats.sales.total}</strong>
               <span style={countDetailStyle}>
-                NT {draftPreviewStats.sales.notTouched} • IP{" "}
-                {draftPreviewStats.sales.inProgress} • C{" "}
+                Not Started {draftPreviewStats.sales.notStarted} • In Progress{" "}
+                {draftPreviewStats.sales.inProgress} • Completed{" "}
                 {draftPreviewStats.sales.completed}
               </span>
               {draftPreviewStats.sales.integrityExceptions > 0 ? (
@@ -2322,8 +2322,8 @@ export default function GeoFencesPage() {
               <span style={countLabelStyle}>Sales planned</span>
               <strong style={countValueStyle}>{createSuccess.stats.sales.total}</strong>
               <span style={countDetailStyle}>
-                NT {createSuccess.stats.sales.notTouched} • IP{" "}
-                {createSuccess.stats.sales.inProgress} • C{" "}
+                Not Started {createSuccess.stats.sales.notStarted} • In Progress{" "}
+                {createSuccess.stats.sales.inProgress} • Completed{" "}
                 {createSuccess.stats.sales.completed}
               </span>
             </div>

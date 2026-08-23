@@ -2,17 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  SALES_PLANNING_STATES,
   buildGeofencePlanningDraftStats,
   buildGeofencePlanningModel,
   buildSalesPlanningRecords,
-  classifySalesPlanningState,
   getCanonicalAstId,
   isNormalSalesPlanningCategory,
   normalizePlanningAssets,
   normalizePlanningPremises,
   summarizeSalesPlanningRecords,
 } from "./geofencePlanningModel.js";
+
+import {
+  SALES_STATUSES,
+  classifySalesStatus,
+} from "../sales/models/salesStatusModel.js";
 
 const LM = "ZA5241";
 const WARD = "ZA5241003";
@@ -123,7 +126,7 @@ test("Geofence planning Sales counts exclude Normal category rows", () => {
   assert.equal(model.salesRecords.length, 1);
   assert.equal(model.salesRecords[0].id, "CAT1");
   assert.equal(model.salesSummary.total, 1);
-  assert.equal(model.salesSummary.notTouched, 1);
+  assert.equal(model.salesSummary.notStarted, 1);
 });
 
 test("planning requires the raw backend-parity Sales GPS flag", () => {
@@ -205,54 +208,54 @@ test("multiple matching Sales candidates render but count one Sales document", (
   });
 
   assert.equal(stats.sales.total, 1);
-  assert.equal(stats.sales.notTouched, 1);
+  assert.equal(stats.sales.notStarted, 1);
 });
 
-test("Sales fieldwork precedence is COMPLETED over IN_PROGRESS over NOT TOUCHED", () => {
+test("Sales Status precedence is COMPLETED over IN_PROGRESS over NOT_STARTED", () => {
   assert.equal(
-    classifySalesPlanningState(salesRow()).state,
-    SALES_PLANNING_STATES.NOT_TOUCHED,
+    classifySalesStatus(salesRow()).status,
+    SALES_STATUSES.NOT_STARTED,
   );
 
   assert.equal(
-    classifySalesPlanningState(
+    classifySalesStatus(
       salesRow({ tbRefs: [tbRef("NOT_STARTED")] }),
-    ).state,
-    SALES_PLANNING_STATES.NOT_TOUCHED,
+    ).status,
+    SALES_STATUSES.NOT_STARTED,
   );
 
   assert.equal(
-    classifySalesPlanningState(
+    classifySalesStatus(
       salesRow({ tbRefs: [tbRef("NOT_STARTED"), tbRef("IN_PROGRESS")] }),
-    ).state,
-    SALES_PLANNING_STATES.IN_PROGRESS,
+    ).status,
+    SALES_STATUSES.IN_PROGRESS,
   );
 
   assert.equal(
-    classifySalesPlanningState(
+    classifySalesStatus(
       salesRow({ tbRefs: [tbRef("IN_PROGRESS"), tbRef("COMPLETED")] }),
-    ).state,
-    SALES_PLANNING_STATES.COMPLETED,
+    ).status,
+    SALES_STATUSES.COMPLETED,
   );
 });
 
 test("invalid tbRefs integrity and unknown fieldwork fail closed", () => {
-  const invalidIntegrity = classifySalesPlanningState(
+  const invalidIntegrity = classifySalesStatus(
     salesRow({
       tbRefsIntegrity: { valid: false, issues: ["tbRefs.0.id"] },
     }),
   );
   assert.equal(
-    invalidIntegrity.state,
-    SALES_PLANNING_STATES.INTEGRITY_EXCEPTION,
+    invalidIntegrity.status,
+    SALES_STATUSES.INTEGRITY_EXCEPTION,
   );
 
-  const unknownStatus = classifySalesPlanningState(
+  const unknownStatus = classifySalesStatus(
     salesRow({ tbRefs: [tbRef("BOGUS")] }),
   );
   assert.equal(
-    unknownStatus.state,
-    SALES_PLANNING_STATES.INTEGRITY_EXCEPTION,
+    unknownStatus.status,
+    SALES_STATUSES.INTEGRITY_EXCEPTION,
   );
 });
 
@@ -273,13 +276,13 @@ test("Sales valid total equals three operational buckets and excludes integrity"
 
   const summary = summarizeSalesPlanningRecords(records);
 
-  assert.equal(summary.notTouched, 1);
+  assert.equal(summary.notStarted, 1);
   assert.equal(summary.inProgress, 1);
   assert.equal(summary.completed, 1);
   assert.equal(summary.integrityExceptions, 1);
   assert.equal(
     summary.total,
-    summary.notTouched + summary.inProgress + summary.completed,
+    summary.notStarted + summary.inProgress + summary.completed,
   );
 });
 
@@ -378,7 +381,7 @@ test("general Assets renderer excludes no-geofence IDs without removing draft po
   assert.equal(model.draftStats.assets, 2);
 });
 
-test("draft stats include all Sales states regardless of rendering filters", () => {
+test("draft stats include all Sales statuses regardless of rendering filters", () => {
   const model = buildGeofencePlanningModel({
     lmPcode: LM,
     wardPcode: WARD,
@@ -396,7 +399,7 @@ test("draft stats include all Sales states regardless of rendering filters", () 
 
   assert.deepEqual(model.draftStats.sales, {
     total: 3,
-    notTouched: 1,
+    notStarted: 1,
     inProgress: 1,
     completed: 1,
     integrityExceptions: 1,

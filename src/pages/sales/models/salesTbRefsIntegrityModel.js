@@ -1,8 +1,6 @@
-const VALID_FIELD_WORK_STATUSES = new Set([
-  "NOT_STARTED",
-  "IN_PROGRESS",
-  "COMPLETED",
-]);
+import { SALES_OPERATIONAL_STATUSES } from "./salesStatusModel.js";
+
+const VALID_FIELD_WORK_STATUSES = new Set(SALES_OPERATIONAL_STATUSES);
 
 function isPlainObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;

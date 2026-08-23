@@ -1,25 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMap } from "@vis.gl/react-google-maps";
 
-import { SALES_PLANNING_STATES } from "./geofencePlanningModel";
+import {
+  SALES_STATUSES,
+  getSalesStatusLabel,
+} from "../sales/models/salesStatusModel.js";
 
 const ERF_LABEL_MIN_ZOOM = 17;
 
-const SALES_STATE_META = Object.freeze({
-  [SALES_PLANNING_STATES.NOT_TOUCHED]: {
-    label: "Not Touched",
+const SALES_STATUS_META = Object.freeze({
+  [SALES_STATUSES.NOT_STARTED]: {
+    label: getSalesStatusLabel(SALES_STATUSES.NOT_STARTED),
     color: "#64748b",
   },
-  [SALES_PLANNING_STATES.IN_PROGRESS]: {
-    label: "In Progress",
+  [SALES_STATUSES.IN_PROGRESS]: {
+    label: getSalesStatusLabel(SALES_STATUSES.IN_PROGRESS),
     color: "#f59e0b",
   },
-  [SALES_PLANNING_STATES.COMPLETED]: {
-    label: "Completed",
+  [SALES_STATUSES.COMPLETED]: {
+    label: getSalesStatusLabel(SALES_STATUSES.COMPLETED),
     color: "#16a34a",
   },
-  [SALES_PLANNING_STATES.INTEGRITY_EXCEPTION]: {
-    label: "Integrity Warning",
+  [SALES_STATUSES.INTEGRITY_EXCEPTION]: {
+    label: getSalesStatusLabel(SALES_STATUSES.INTEGRITY_EXCEPTION),
     color: "#dc2626",
   },
 });
@@ -55,16 +58,16 @@ function useCurrentZoom(defaultZoom = 14) {
   return zoom;
 }
 
-function stateIsVisible(state, salesVisibility) {
-  if (state === SALES_PLANNING_STATES.INTEGRITY_EXCEPTION) return true;
-  if (state === SALES_PLANNING_STATES.NOT_TOUCHED) {
-    return salesVisibility.notTouched;
+function statusIsVisible(status, salesStatusVisibility) {
+  if (status === SALES_STATUSES.INTEGRITY_EXCEPTION) return true;
+  if (status === SALES_STATUSES.NOT_STARTED) {
+    return salesStatusVisibility.notStarted;
   }
-  if (state === SALES_PLANNING_STATES.IN_PROGRESS) {
-    return salesVisibility.inProgress;
+  if (status === SALES_STATUSES.IN_PROGRESS) {
+    return salesStatusVisibility.inProgress;
   }
-  if (state === SALES_PLANNING_STATES.COMPLETED) {
-    return salesVisibility.completed;
+  if (status === SALES_STATUSES.COMPLETED) {
+    return salesStatusVisibility.completed;
   }
   return false;
 }
@@ -72,7 +75,7 @@ function stateIsVisible(state, salesVisibility) {
 export function GeofencePlanningLayers({
   model,
   visibility,
-  salesVisibility,
+  salesStatusVisibility,
   isCreateMode,
 }) {
   const map = useMap();
@@ -88,17 +91,17 @@ export function GeofencePlanningLayers({
     if (!visibility.sales) return [];
 
     return (model?.salesRecords || []).flatMap((record) => {
-      if (!stateIsVisible(record.state, salesVisibility)) return [];
+      if (!statusIsVisible(record.status, salesStatusVisibility)) return [];
 
       return (record.candidates || []).map((candidate) => ({
         ...candidate,
         salesId: record.id,
         meterNo: record.meterNo,
-        state: record.state,
+        status: record.status,
         integrityIssues: record.integrityIssues,
       }));
     });
-  }, [model?.salesRecords, salesVisibility, visibility.sales]);
+  }, [model?.salesRecords, salesStatusVisibility, visibility.sales]);
 
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;
@@ -206,14 +209,14 @@ export function GeofencePlanningLayers({
     clearMapObjects(salesMarkersRef);
 
     const markers = salesMarkers.map((item) => {
-      const meta = SALES_STATE_META[item.state] || SALES_STATE_META.INTEGRITY_EXCEPTION;
+      const meta = SALES_STATUS_META[item.status] || SALES_STATUS_META.INTEGRITY_EXCEPTION;
       const marker = new window.google.maps.Marker({
         position: item.point,
         map,
         title: `${item.meterNo} • ${meta.label}`,
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
-          scale: item.state === SALES_PLANNING_STATES.INTEGRITY_EXCEPTION ? 5 : 4,
+          scale: item.status === SALES_STATUSES.INTEGRITY_EXCEPTION ? 5 : 4,
           fillColor: meta.color,
           fillOpacity: 0.92,
           strokeColor: "#ffffff",
@@ -221,7 +224,7 @@ export function GeofencePlanningLayers({
         },
         clickable: !isCreateMode,
         zIndex:
-          item.state === SALES_PLANNING_STATES.INTEGRITY_EXCEPTION ? 132 : 112,
+          item.status === SALES_STATUSES.INTEGRITY_EXCEPTION ? 132 : 112,
       });
 
       if (!isCreateMode) {
@@ -239,7 +242,7 @@ export function GeofencePlanningLayers({
             <div style="font-family: Arial, sans-serif; min-width: 220px;">
               <strong>${escapeHtml(item.meterNo)}</strong>
               <div>Sales: ${escapeHtml(item.salesId)}</div>
-              <div>State: ${escapeHtml(meta.label)}</div>
+              <div>Sales Status: ${escapeHtml(meta.label)}</div>
               <div>Candidate ERF: ${escapeHtml(item.erfNumber || item.erfId || "NAv")}</div>
               ${integrity}
             </div>
@@ -365,14 +368,14 @@ function ToggleRow({ checked, label, count, onChange, dotColor = null }) {
 export function GeofencePlanningLayerControls({
   model,
   visibility,
-  salesVisibility,
+  salesStatusVisibility,
   onToggleLayer,
-  onToggleSalesState,
+  onToggleSalesStatus,
   isCreateMode,
 }) {
   const summary = model?.salesSummary || {
     total: 0,
-    notTouched: 0,
+    notStarted: 0,
     inProgress: 0,
     completed: 0,
     integrityExceptions: 0,
@@ -404,37 +407,37 @@ export function GeofencePlanningLayerControls({
       {visibility.sales ? (
         <div style={salesSubgroupStyle}>
           <ToggleRow
-            checked={salesVisibility.notTouched}
-            label="Not Touched"
-            count={summary.notTouched}
-            dotColor={SALES_STATE_META[SALES_PLANNING_STATES.NOT_TOUCHED].color}
-            onChange={() => onToggleSalesState("notTouched")}
+            checked={salesStatusVisibility.notStarted}
+            label={SALES_STATUS_META[SALES_STATUSES.NOT_STARTED].label}
+            count={summary.notStarted}
+            dotColor={SALES_STATUS_META[SALES_STATUSES.NOT_STARTED].color}
+            onChange={() => onToggleSalesStatus("notStarted")}
           />
           <ToggleRow
-            checked={salesVisibility.inProgress}
-            label="In Progress"
+            checked={salesStatusVisibility.inProgress}
+            label={SALES_STATUS_META[SALES_STATUSES.IN_PROGRESS].label}
             count={summary.inProgress}
-            dotColor={SALES_STATE_META[SALES_PLANNING_STATES.IN_PROGRESS].color}
-            onChange={() => onToggleSalesState("inProgress")}
+            dotColor={SALES_STATUS_META[SALES_STATUSES.IN_PROGRESS].color}
+            onChange={() => onToggleSalesStatus("inProgress")}
           />
           <ToggleRow
-            checked={salesVisibility.completed}
-            label="Completed"
+            checked={salesStatusVisibility.completed}
+            label={SALES_STATUS_META[SALES_STATUSES.COMPLETED].label}
             count={summary.completed}
-            dotColor={SALES_STATE_META[SALES_PLANNING_STATES.COMPLETED].color}
-            onChange={() => onToggleSalesState("completed")}
+            dotColor={SALES_STATUS_META[SALES_STATUSES.COMPLETED].color}
+            onChange={() => onToggleSalesStatus("completed")}
           />
           {summary.integrityExceptions > 0 ? (
-            <div style={integrityWarningStyle}>
+            <div style={integrityExceptionStyle}>
               <span
                 style={{
                   ...legendDotStyle,
                   background:
-                    SALES_STATE_META[SALES_PLANNING_STATES.INTEGRITY_EXCEPTION]
+                    SALES_STATUS_META[SALES_STATUSES.INTEGRITY_EXCEPTION]
                       .color,
                 }}
               />
-              Integrity warnings: <strong>{summary.integrityExceptions}</strong>
+              Integrity exceptions: <strong>{summary.integrityExceptions}</strong>
             </div>
           ) : null}
         </div>
@@ -504,7 +507,7 @@ const legendDotStyle = {
   flex: "0 0 auto",
 };
 
-const integrityWarningStyle = {
+const integrityExceptionStyle = {
   display: "flex",
   alignItems: "center",
   gap: 6,
