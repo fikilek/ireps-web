@@ -11,7 +11,8 @@ export default function TargetedBatchDetailDashboardPage() {
 
   const {
     batch,
-    rows,
+    metrics,
+    integrity,
     isLoading,
     loadError,
   } = useTargetedBatchDashboardData({ tbId: decodedTbId });
@@ -27,7 +28,8 @@ export default function TargetedBatchDetailDashboardPage() {
             {decodedTbId || "Targeted Batch Dashboard"}
           </h2>
           <p style={styles.description}>
-            Live operational dashboard for one permanent Targeted Batch.
+            Live operational dashboard for one permanent Targeted Batch using
+            the canonical Sales Targeted Batch field-work projection.
           </p>
         </div>
 
@@ -59,7 +61,8 @@ export default function TargetedBatchDetailDashboardPage() {
         <div style={styles.detailCardWrap}>
           <TargetedBatchDashboardCard
             batch={batch}
-            rows={rows}
+            metrics={metrics}
+            integrity={integrity}
             showDashboardAction={false}
           />
         </div>
