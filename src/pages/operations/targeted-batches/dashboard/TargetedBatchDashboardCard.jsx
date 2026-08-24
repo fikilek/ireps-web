@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 
 import {
   buildCoverageBar,
-  buildTargetedBatchMetrics,
   formatCoveragePercent,
   getBatchAllocationStatus,
   getBatchExecutionStatus,
@@ -18,6 +17,15 @@ import {
   formatNumber,
 } from "../targetedBatchUtils";
 import styles from "./targetedBatchDashboardStyles";
+
+const EMPTY_METRICS = Object.freeze({
+  originalMeters: 0,
+  metersFound: 0,
+  metersDifferent: 0,
+  premises: 0,
+  noAccessAttempts: 0,
+  metersWithNoAccess: 0,
+});
 
 function CoverageMetric({ label, fromValue, toValue }) {
   return (
@@ -43,22 +51,28 @@ function TbFunnel({ metrics }) {
     {
       label: "Original Meters",
       value: metrics.originalMeters,
+      coverageValue: metrics.originalMeters,
     },
     {
       label: "Meters Found",
       value: metrics.metersFound,
+      coverageValue: metrics.metersFound,
     },
     {
       label: "Meters Different",
       value: metrics.metersDifferent,
+      coverageValue: metrics.metersDifferent,
     },
     {
-      label: "Premises In Progress",
-      value: metrics.premisesInProgress,
+      label: "Premises",
+      value: metrics.premises,
+      coverageValue: metrics.premises,
     },
     {
       label: "No Access",
-      value: metrics.noAccess,
+      value: metrics.noAccessAttempts,
+      coverageValue: metrics.metersWithNoAccess,
+      percentSuffix: " affected",
     },
   ];
 
@@ -74,13 +88,14 @@ function TbFunnel({ metrics }) {
               {formatNumber(row.value)}
             </strong>
             <span style={styles.funnelBar}>
-              {buildCoverageBar(row.value, metrics.originalMeters)}
+              {buildCoverageBar(row.coverageValue, metrics.originalMeters)}
             </span>
             <strong style={styles.funnelPercent}>
               {formatCoveragePercent(
-                row.value,
+                row.coverageValue,
                 metrics.originalMeters,
               )}
+              {row.percentSuffix || ""}
             </strong>
           </div>
         ))}
@@ -108,11 +123,13 @@ function TbFunnel({ metrics }) {
         <span>
           No Access:{" "}
           <strong>
-            {formatCoveragePercent(
-              metrics.noAccess,
-              metrics.originalMeters,
-            )}{" "}
-            of original meters
+            {formatNumber(metrics.noAccessAttempts)} attempt(s) •{" "}
+            {formatNumber(metrics.metersWithNoAccess)} meter(s) affected ({
+              formatCoveragePercent(
+                metrics.metersWithNoAccess,
+                metrics.originalMeters,
+              )
+            })
           </strong>
         </span>
       </div>
@@ -122,10 +139,11 @@ function TbFunnel({ metrics }) {
 
 export default function TargetedBatchDashboardCard({
   batch,
-  rows = [],
+  metrics: metricsProp = null,
+  integrity = null,
 }) {
   const tbId = getBatchId(batch);
-  const metrics = buildTargetedBatchMetrics(batch, rows);
+  const metrics = metricsProp || EMPTY_METRICS;
   const target = getBatchTarget(batch);
   const allocated = isBatchAllocated(batch);
   const allocationStatus = getBatchAllocationStatus(batch);
@@ -138,6 +156,13 @@ export default function TargetedBatchDashboardCard({
     "Targeted Batch";
   const lmPcode = batch?.scope?.lmPcode || "NAv";
   const lmName = batch?.scope?.lmName || "NAv";
+  const integrityIssues = Array.isArray(integrity?.issues)
+    ? integrity.issues
+    : [];
+  const integrityTitle = integrityIssues
+    .slice(0, 12)
+    .map((issue) => `${issue.code}${issue.salesAllMeterId ? ` • ${issue.salesAllMeterId}` : ""}`)
+    .join("\n");
 
   return (
     <article style={styles.card}>
@@ -170,9 +195,17 @@ export default function TargetedBatchDashboardCard({
           <span style={styles.attentionPill}>
             {executionStatus}
           </span>
-          {metrics.noAccess > 0 ? (
+          {integrity?.issueCount > 0 ? (
+            <span
+              style={styles.dangerPill}
+              title={integrityTitle || "Targeted Batch metric integrity issue"}
+            >
+              INTEGRITY: {formatNumber(integrity.issueCount)}
+            </span>
+          ) : null}
+          {metrics.noAccessAttempts > 0 ? (
             <span style={styles.dangerPill}>
-              NO ACCESS: {formatNumber(metrics.noAccess)}
+              NO ACCESS: {formatNumber(metrics.noAccessAttempts)} ATTEMPT(S)
             </span>
           ) : null}
         </div>

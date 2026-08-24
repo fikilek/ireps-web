@@ -11,6 +11,7 @@ import {
 import { db } from "../firebase";
 import {
   buildSalesOperationalStatsReadModel,
+  buildTargetedBatchDashboardReadModel,
   buildTargetedBatchHeaders,
   buildTargetedBatchMapReadModel,
   buildTargetedBatchReport,
@@ -85,6 +86,27 @@ function createSalesOperationalStatsStreamState(status = "idle") {
         rows: status,
         sales: status === "ready" ? "ready" : "idle",
         premises: status === "ready" ? "ready" : "idle",
+      },
+      firstSnapshotAtMs: null,
+      lastSyncAtMs: null,
+      error: null,
+    },
+  };
+}
+
+function createTargetedBatchDashboardStreamState(status = "idle") {
+  return {
+    batches: [],
+    rows: [],
+    metricsByTbId: {},
+    integrityByTbId: {},
+    sync: {
+      status,
+      source: "firestore-stream",
+      sources: {
+        batches: status,
+        rows: status,
+        sales: status === "ready" ? "ready" : "idle",
       },
       firstSnapshotAtMs: null,
       lastSyncAtMs: null,
@@ -323,6 +345,20 @@ function resolveTargetedBatchMapArgs(arg) {
   };
 }
 
+function resolveTargetedBatchDashboardArgs(arg = {}) {
+  if (typeof arg === "string") {
+    return {
+      tbId: cleanText(arg),
+      lmPcode: "",
+    };
+  }
+
+  return {
+    tbId: cleanText(arg?.tbId),
+    lmPcode: cleanText(arg?.lmPcode),
+  };
+}
+
 function normalizeStreamError(error, source) {
   return {
     source: cleanText(source) || "unknown",
@@ -446,6 +482,285 @@ export const salesTargetedBatchApi = createApi({
       },
 
       keepUnusedDataFor: 300,
+    }),
+
+    getTargetedBatchDashboard: builder.query({
+      queryFn: (arg) => {
+        const { tbId, lmPcode } = resolveTargetedBatchDashboardArgs(arg);
+        return {
+          data: createTargetedBatchDashboardStreamState(
+            tbId || lmPcode ? "syncing" : "ready",
+          ),
+        };
+      },
+
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const { tbId, lmPcode } = resolveTargetedBatchDashboardArgs(arg);
+        if (!tbId && !lmPcode) return;
+
+        let active = true;
+        let unsubscribeBatches = () => {};
+        let unsubscribeRows = () => {};
+        let salesUnsubscribes = [];
+        let salesIdsKey = null;
+
+        const sourceStatuses = {
+          batches: "syncing",
+          rows: "syncing",
+          sales: "idle",
+        };
+        const sourceErrors = {};
+        const rawState = {
+          batches: [],
+          rows: [],
+          salesById: {},
+        };
+
+        const clearUnsubscribes = (unsubscribes) => {
+          unsubscribes.forEach((unsubscribe) => {
+            try {
+              unsubscribe();
+            } catch (error) {
+              console.warn(
+                "[SALES TARGETED BATCH API][DASHBOARD LISTENER CLEANUP]",
+                error,
+              );
+            }
+          });
+        };
+
+        const markSource = (source, status, error = null) => {
+          sourceStatuses[source] = status;
+
+          if (error) {
+            sourceErrors[source] = normalizeStreamError(error, source);
+          } else {
+            delete sourceErrors[source];
+          }
+        };
+
+        const publish = () => {
+          if (!active) return;
+
+          const syncedAtMs = Date.now();
+          const readModel = buildTargetedBatchDashboardReadModel({
+            batches: rawState.batches,
+            rows: rawState.rows,
+            salesById: rawState.salesById,
+          });
+          const firstError = Object.values(sourceErrors)[0] || null;
+
+          updateCachedData((draft) => {
+            draft.batches = readModel.batches;
+            draft.rows = readModel.rows;
+            draft.metricsByTbId = readModel.metricsByTbId;
+            draft.integrityByTbId = readModel.integrityByTbId;
+            draft.sync.status = getOverallReportStatus(sourceStatuses);
+            draft.sync.sources = { ...sourceStatuses };
+            draft.sync.firstSnapshotAtMs ??= syncedAtMs;
+            draft.sync.lastSyncAtMs = syncedAtMs;
+            draft.sync.error = firstError;
+          });
+        };
+
+        const handleSourceError = (source, error) => {
+          console.error(
+            `[SALES TARGETED BATCH API][DASHBOARD ${source.toUpperCase()} STREAM]`,
+            error,
+          );
+          markSource(source, "error", error);
+          publish();
+        };
+
+        const restartSalesListeners = () => {
+          if (!active) return;
+
+          const salesIds = getTargetedBatchSalesIds(rawState.rows);
+          const nextSalesIdsKey = salesIds.join("|");
+
+          if (nextSalesIdsKey === salesIdsKey) {
+            publish();
+            return;
+          }
+
+          salesIdsKey = nextSalesIdsKey;
+          clearUnsubscribes(salesUnsubscribes);
+          salesUnsubscribes = [];
+          rawState.salesById = {};
+
+          if (salesIds.length === 0) {
+            markSource("sales", "ready");
+            publish();
+            return;
+          }
+
+          markSource("sales", "syncing");
+          const chunks = chunkValues(salesIds);
+          const chunkResults = new Map();
+          const chunkErrors = new Set();
+
+          chunks.forEach((salesIdChunk, chunkIndex) => {
+            const unsubscribe = onSnapshot(
+              query(
+                collection(db, SALES_COLLECTION),
+                where(documentId(), "in", salesIdChunk),
+              ),
+              (snapshot) => {
+                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+
+                const rows = {};
+                snapshot.docs.forEach((salesSnapshot) => {
+                  rows[salesSnapshot.id] = {
+                    id: salesSnapshot.id,
+                    ...salesSnapshot.data(),
+                  };
+                });
+
+                chunkResults.set(chunkIndex, rows);
+                chunkErrors.delete(chunkIndex);
+                rawState.salesById = combineChunkMaps(chunkResults);
+
+                if (chunkResults.size === chunks.length) {
+                  markSource(
+                    "sales",
+                    chunkErrors.size > 0 ? "error" : "ready",
+                    chunkErrors.size > 0
+                      ? new Error(
+                          "One or more Targeted Batch Dashboard Sales streams failed.",
+                        )
+                      : null,
+                  );
+                }
+
+                publish();
+              },
+              (error) => {
+                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+
+                console.error(
+                  "[SALES TARGETED BATCH API][DASHBOARD SALES JOIN]",
+                  error,
+                );
+                chunkResults.set(chunkIndex, {});
+                chunkErrors.add(chunkIndex);
+                rawState.salesById = combineChunkMaps(chunkResults);
+                markSource("sales", "error", error);
+                publish();
+              },
+            );
+
+            salesUnsubscribes.push(unsubscribe);
+          });
+
+          publish();
+        };
+
+        try {
+          await cacheDataLoaded;
+
+          if (tbId) {
+            unsubscribeBatches = onSnapshot(
+              doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, tbId),
+              (snapshot) => {
+                if (!active) return;
+
+                rawState.batches = snapshot.exists()
+                  ? [{ id: snapshot.id, ...snapshot.data() }]
+                  : [];
+                markSource("batches", "ready");
+                publish();
+              },
+              (error) => handleSourceError("batches", error),
+            );
+
+            unsubscribeRows = onSnapshot(
+              query(
+                collection(db, TARGETED_BATCH_ROWS_COLLECTION),
+                where("tbId", "==", tbId),
+              ),
+              (snapshot) => {
+                if (!active) return;
+
+                rawState.rows = snapshot.docs.map((rowSnapshot) => ({
+                  id: rowSnapshot.id,
+                  ...rowSnapshot.data(),
+                }));
+                markSource("rows", "ready");
+                restartSalesListeners();
+              },
+              (error) => {
+                markSource("sales", "error", error);
+                handleSourceError("rows", error);
+              },
+            );
+          } else {
+            unsubscribeBatches = onSnapshot(
+              query(
+                collection(db, TARGETED_BATCH_UPLOADS_COLLECTION),
+                where("scope.lmPcode", "==", lmPcode),
+              ),
+              (snapshot) => {
+                if (!active) return;
+
+                rawState.batches = snapshot.docs.map((batchSnapshot) => ({
+                  id: batchSnapshot.id,
+                  ...batchSnapshot.data(),
+                }));
+                markSource("batches", "ready");
+                publish();
+              },
+              (error) => handleSourceError("batches", error),
+            );
+
+            unsubscribeRows = onSnapshot(
+              query(
+                collection(db, TARGETED_BATCH_ROWS_COLLECTION),
+                where("scope.lmPcode", "==", lmPcode),
+              ),
+              (snapshot) => {
+                if (!active) return;
+
+                rawState.rows = snapshot.docs.map((rowSnapshot) => ({
+                  id: rowSnapshot.id,
+                  ...rowSnapshot.data(),
+                }));
+                markSource("rows", "ready");
+                restartSalesListeners();
+              },
+              (error) => {
+                markSource("sales", "error", error);
+                handleSourceError("rows", error);
+              },
+            );
+          }
+        } catch (error) {
+          console.error(
+            "[SALES TARGETED BATCH API][DASHBOARD SETUP]",
+            error,
+          );
+
+          Object.keys(sourceStatuses).forEach((source) => {
+            if (sourceStatuses[source] !== "ready") {
+              markSource(source, "error", error);
+            }
+          });
+          publish();
+        }
+
+        try {
+          await cacheEntryRemoved;
+        } finally {
+          active = false;
+          unsubscribeBatches();
+          unsubscribeRows();
+          clearUnsubscribes(salesUnsubscribes);
+        }
+      },
+
+      keepUnusedDataFor: 0,
     }),
 
     getTargetedBatchReportById: builder.query({
@@ -1964,6 +2279,7 @@ export const {
   useGetTargetedBatchAllocationDirectoryQuery,
   useGetTargetedBatchAllocationMatrixByLmQuery,
   useGetTargetedBatchAllocationRowsByLmQuery,
+  useGetTargetedBatchDashboardQuery,
   useGetTargetedBatchHeadersByLmQuery,
   useGetTargetedBatchMapByIdQuery,
   useGetTargetedBatchReportByIdQuery,

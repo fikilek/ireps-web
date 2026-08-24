@@ -10,7 +10,6 @@ import {
   getActiveLmPcode,
   getBatchAllocationStatus,
   getBatchExecutionStatus,
-  groupRowsByTbId,
   TB_DASHBOARD_FILTER_ALL,
 } from "./targeted-batches/dashboard/targetedBatchDashboardModel";
 import styles from "./targeted-batches/dashboard/targetedBatchDashboardStyles";
@@ -29,12 +28,11 @@ export default function TargetedBatchDashboardPage() {
 
   const {
     batches,
-    rows,
+    metricsByTbId,
+    integrityByTbId,
     isLoading,
     loadError,
   } = useTargetedBatchDashboardData({ lmPcode });
-
-  const rowsByTbId = useMemo(() => groupRowsByTbId(rows), [rows]);
 
   const allocationOptions = useMemo(
     () =>
@@ -75,9 +73,9 @@ export default function TargetedBatchDashboardPage() {
           <h2 style={styles.title}>Targeted Batch Dashboard</h2>
           <p style={styles.description}>
             Live permanent Targeted Batch cards for {lmName} ({lmPcode || "NAv"}).
-            Each card follows the MD BGO operational view and tracks original
-            meters, meters found, meter mismatches, premises in progress and
-            No Access.
+            Each card uses the matching Sales Targeted Batch reference to track
+            original meters, meters found, meter mismatches, linked premises and
+            historical No Access attempts.
           </p>
         </div>
 
@@ -165,7 +163,8 @@ export default function TargetedBatchDashboardPage() {
               <TargetedBatchDashboardCard
                 key={batch.id}
                 batch={batch}
-                rows={rowsByTbId[batch.id] || []}
+                metrics={metricsByTbId[batch.id]}
+                integrity={integrityByTbId[batch.id]}
               />
             ))
           : null}

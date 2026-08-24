@@ -612,6 +612,474 @@ export function getTargetedBatchSalesIds(rows = []) {
   return uniqueNonBlank(rows.map((row) => row?.salesAllMeterId));
 }
 
+const TARGETED_BATCH_DASHBOARD_DERIVED_METRICS = Object.freeze([
+  "metersFound",
+  "metersDifferent",
+  "premises",
+  "noAccess",
+]);
+
+function createTargetedBatchDashboardMetricCompleteness() {
+  return {
+    originalMeters: true,
+    metersFound: true,
+    metersDifferent: true,
+    premises: true,
+    noAccess: true,
+  };
+}
+
+function hasDashboardValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value !== "string") return true;
+
+  const normalized = normalizeUpper(value);
+  return Boolean(normalized && !["NAV", "N/A", "NA", "-", "NULL", "UNDEFINED"].includes(normalized));
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function markDashboardMetricsIncomplete(completeness, metricKeys = []) {
+  metricKeys.forEach((metricKey) => {
+    if (Object.prototype.hasOwnProperty.call(completeness, metricKey)) {
+      completeness[metricKey] = false;
+    }
+  });
+}
+
+function pushTargetedBatchDashboardIssue({
+  issues,
+  completeness,
+  code,
+  tbId,
+  rowId = null,
+  salesAllMeterId = null,
+  metricKeys = [],
+  detail = "",
+}) {
+  markDashboardMetricsIncomplete(completeness, metricKeys);
+  issues.push({
+    code,
+    tbId: cleanText(tbId),
+    rowId: cleanText(rowId) || null,
+    salesAllMeterId: cleanText(salesAllMeterId) || null,
+    metrics: [...metricKeys],
+    detail: cleanText(detail) || null,
+  });
+}
+
+function getTargetedBatchDashboardReference(sales = {}, tbId = "") {
+  const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
+  const normalizedTbId = normalizeUpper(tbId);
+  const matches = refs.filter(
+    (reference) => normalizeUpper(reference?.id) === normalizedTbId,
+  );
+
+  return {
+    matches,
+    reference: matches.length === 1 ? matches[0] : null,
+  };
+}
+
+function getTargetedBatchDashboardRowsByBatch(rows = []) {
+  return rows.reduce((rowsByTbId, row) => {
+    const normalizedTbId = normalizeUpper(row?.tbId);
+    if (!normalizedTbId) return rowsByTbId;
+
+    if (!rowsByTbId[normalizedTbId]) rowsByTbId[normalizedTbId] = [];
+    rowsByTbId[normalizedTbId].push(row);
+    return rowsByTbId;
+  }, {});
+}
+
+function getTargetedBatchDashboardRowsBySalesId(rows = []) {
+  return rows.reduce((rowsBySalesId, row) => {
+    const salesAllMeterId = cleanText(row?.salesAllMeterId);
+    if (!salesAllMeterId) return rowsBySalesId;
+
+    if (!rowsBySalesId[salesAllMeterId]) rowsBySalesId[salesAllMeterId] = [];
+    rowsBySalesId[salesAllMeterId].push(row);
+    return rowsBySalesId;
+  }, {});
+}
+
+function validateTargetedBatchTerminalEvidence({
+  fieldWork,
+  issues,
+  completeness,
+  tbId,
+  rowId,
+  salesAllMeterId,
+}) {
+  const requiredFoundFields = [
+    ["meterId", "TB_FIELDWORK_METER_ID_MISSING"],
+    ["trnId", "TB_FIELDWORK_TRN_ID_MISSING"],
+    ["submittedAt", "TB_FIELDWORK_SUBMITTED_AT_MISSING"],
+    ["updatedAt", "TB_FIELDWORK_UPDATED_AT_MISSING"],
+  ];
+
+  requiredFoundFields.forEach(([fieldName, code]) => {
+    if (hasDashboardValue(fieldWork?.[fieldName])) return;
+
+    pushTargetedBatchDashboardIssue({
+      issues,
+      completeness,
+      code,
+      tbId,
+      rowId,
+      salesAllMeterId,
+      metricKeys: ["metersFound"],
+      detail: `Completed Meter Discovery is missing fieldWork.${fieldName}.`,
+    });
+  });
+}
+
+function buildTargetedBatchDashboardMetricsForBatch({
+  batch = {},
+  rows = [],
+  salesById = {},
+}) {
+  const tbId = cleanText(batch?.id || batch?.tbId);
+  const normalizedTbId = normalizeUpper(tbId);
+  const completeness = createTargetedBatchDashboardMetricCompleteness();
+  const issues = [];
+  const premiseIds = new Set();
+  let originalMeters = 0;
+  let metersFound = 0;
+  let metersDifferent = 0;
+  let noAccessAttempts = 0;
+  let metersWithNoAccess = 0;
+
+  const rowsBySalesId = getTargetedBatchDashboardRowsBySalesId(rows);
+  const uniqueSalesIds = Object.keys(rowsBySalesId).sort((left, right) =>
+    left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
+  );
+
+  const rowsMissingSalesId = rows.filter((row) => !cleanText(row?.salesAllMeterId));
+  rowsMissingSalesId.forEach((row) => {
+    pushTargetedBatchDashboardIssue({
+      issues,
+      completeness,
+      code: "ROW_SALES_ID_MISSING",
+      tbId,
+      rowId: row?.id,
+      metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS],
+      detail: "Permanent TB Row has no salesAllMeterId.",
+    });
+  });
+
+  uniqueSalesIds.forEach((salesAllMeterId) => {
+    const membershipRows = rowsBySalesId[salesAllMeterId];
+    const row = membershipRows[0] || {};
+    const rowId = cleanText(row?.id);
+
+    if (membershipRows.length > 1) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "DUPLICATE_SALES_MEMBERSHIP",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: TARGETED_BATCH_DASHBOARD_DERIVED_METRICS,
+        detail: `${membershipRows.length} permanent TB Rows reference the same Sales meter.`,
+      });
+    }
+
+    const sales = salesById[salesAllMeterId];
+    if (!sales) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "SALES_DOCUMENT_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS],
+        detail: "The permanent TB Row points to a Sales document that was not returned.",
+      });
+      return;
+    }
+
+    if (!Array.isArray(sales?.tbRefs)) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_REFS_MALFORMED",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS],
+        detail: "Sales tbRefs is not an array.",
+      });
+      return;
+    }
+
+    const { matches, reference } = getTargetedBatchDashboardReference(
+      sales,
+      normalizedTbId,
+    );
+
+    if (matches.length === 0) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_REF_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS],
+        detail: "Sales meter has no canonical tbRefs entry for this Targeted Batch.",
+      });
+      return;
+    }
+
+    if (matches.length > 1) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_REF_DUPLICATE",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS],
+        detail: `${matches.length} normalized tbRef.id values match this Targeted Batch.`,
+      });
+      return;
+    }
+
+    if (!hasDashboardValue(reference?.date)) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_REF_DATE_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS],
+        detail: "Canonical Targeted Batch reference has no creation date.",
+      });
+      return;
+    }
+
+    originalMeters += 1;
+
+    const hasFieldWorkProperty = Object.prototype.hasOwnProperty.call(
+      reference,
+      "fieldWork",
+    );
+
+    if (!hasFieldWorkProperty || reference?.fieldWork === null) return;
+
+    if (!isPlainObject(reference.fieldWork)) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_FIELDWORK_MALFORMED",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: TARGETED_BATCH_DASHBOARD_DERIVED_METRICS,
+        detail: "Sales tbRef.fieldWork is not an object.",
+      });
+      return;
+    }
+
+    const referenceRowId = cleanText(reference?.rowId || reference?.tbRowId);
+    if (!referenceRowId) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_FIELDWORK_ROW_ID_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: TARGETED_BATCH_DASHBOARD_DERIVED_METRICS,
+        detail: "fieldWork exists but the Sales Targeted Batch reference has no rowId.",
+      });
+      return;
+    }
+
+    if (membershipRows.length !== 1 || referenceRowId !== rowId) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_REF_ROW_MISMATCH",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: TARGETED_BATCH_DASHBOARD_DERIVED_METRICS,
+        detail: `Sales tbRef rowId ${referenceRowId || "NAv"} does not uniquely match the permanent TB Row.`,
+      });
+      return;
+    }
+
+    const fieldWork = reference.fieldWork;
+    const noAccess = fieldWork?.noAccess;
+
+    if (noAccess === undefined || noAccess === null) {
+      // Missing noAccess is the legitimate zero-attempt state.
+    } else if (!Array.isArray(noAccess)) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_NO_ACCESS_MALFORMED",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["noAccess"],
+        detail: "fieldWork.noAccess exists but is not an array.",
+      });
+    } else {
+      noAccessAttempts += noAccess.length;
+      if (noAccess.length > 0) metersWithNoAccess += 1;
+
+      if (noAccess.some((attempt) => !isPlainObject(attempt))) {
+        pushTargetedBatchDashboardIssue({
+          issues,
+          completeness,
+          code: "TB_NO_ACCESS_ENTRY_MALFORMED",
+          tbId,
+          rowId,
+          salesAllMeterId,
+          metricKeys: ["noAccess"],
+          detail: "One or more No Access history entries are malformed; array length was preserved.",
+        });
+      }
+    }
+
+    const status = normalizeUpper(fieldWork?.status);
+    const outcomeCode = normalizeUpper(fieldWork?.outcomeCode);
+    const discoveredMeterNo = cleanText(fieldWork?.discoveredMeterNo);
+    const completedDiscovery =
+      status === "COMPLETED" && outcomeCode === "METER_DISCOVERED";
+
+    if (status === "COMPLETED" && !outcomeCode) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_FIELDWORK_OUTCOME_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["metersFound", "metersDifferent", "premises"],
+        detail: "Completed fieldWork has no outcomeCode.",
+      });
+      return;
+    }
+
+    if (!completedDiscovery) return;
+
+    if (!hasDashboardValue(discoveredMeterNo)) {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_DISCOVERED_METER_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["metersFound", "metersDifferent", "premises"],
+        detail: "Completed METER_DISCOVERED fieldWork has no discoveredMeterNo.",
+      });
+      return;
+    }
+
+    metersFound += 1;
+
+    validateTargetedBatchTerminalEvidence({
+      fieldWork,
+      issues,
+      completeness,
+      tbId,
+      rowId,
+      salesAllMeterId,
+    });
+
+    if (typeof fieldWork?.meterMatch === "boolean") {
+      if (fieldWork.meterMatch === false) metersDifferent += 1;
+    } else {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_FIELDWORK_METER_MATCH_INVALID",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["metersDifferent"],
+        detail: "Completed Meter Discovery does not contain a boolean fieldWork.meterMatch.",
+      });
+    }
+
+    if (hasDashboardValue(fieldWork?.premiseId)) {
+      premiseIds.add(cleanText(fieldWork.premiseId));
+    } else {
+      pushTargetedBatchDashboardIssue({
+        issues,
+        completeness,
+        code: "TB_FIELDWORK_PREMISE_ID_MISSING",
+        tbId,
+        rowId,
+        salesAllMeterId,
+        metricKeys: ["premises"],
+        detail: "Completed Meter Discovery has no fieldWork.premiseId.",
+      });
+    }
+  });
+
+  const metrics = {
+    originalMeters,
+    metersFound,
+    metersDifferent,
+    premises: premiseIds.size,
+    noAccessAttempts,
+    metersWithNoAccess,
+    completeness: { ...completeness },
+  };
+
+  return {
+    metrics,
+    integrity: {
+      isComplete: Object.values(completeness).every(Boolean) && issues.length === 0,
+      issueCount: issues.length,
+      issues,
+      metricCompleteness: { ...completeness },
+    },
+  };
+}
+
+export function buildTargetedBatchDashboardReadModel({
+  batches = [],
+  rows = [],
+  salesById = {},
+} = {}) {
+  const rowsByTbId = getTargetedBatchDashboardRowsByBatch(rows);
+  const metricsByTbId = {};
+  const integrityByTbId = {};
+
+  batches.forEach((batch) => {
+    const tbId = cleanText(batch?.id || batch?.tbId);
+    if (!tbId) return;
+
+    const resolved = buildTargetedBatchDashboardMetricsForBatch({
+      batch,
+      rows: rowsByTbId[normalizeUpper(tbId)] || [],
+      salesById,
+    });
+
+    metricsByTbId[tbId] = resolved.metrics;
+    integrityByTbId[tbId] = resolved.integrity;
+  });
+
+  return {
+    batches,
+    rows,
+    metricsByTbId,
+    integrityByTbId,
+  };
+}
+
 export function getTargetedBatchPremiseIds({
   rows = [],
   salesById = {},
