@@ -844,12 +844,6 @@ export function resolveAuthoritativeSalesErfReference({
     draftRow?.erfId,
     draftRow?.refs?.erfId,
   );
-  const draftErfNo = readFirstText(
-    draftRow?.erfNo,
-    draftRow?.erfNumber,
-    draftRow?.property?.erfNo,
-  );
-
   let erfId = directErfId;
   let erfNo = directErfNo;
   let resolutionSource = directErfId ? "DIRECT_SALES_REFERENCE" : null;
@@ -902,15 +896,6 @@ export function resolveAuthoritativeSalesErfReference({
     );
   }
 
-  if (!erfNo) {
-    return {
-      ok: false,
-      code: "SALES_ERF_NUMBER_MISSING",
-      message: `The authoritative Sales source resolves to ERF ${erfId} but has no ERF number.`,
-      candidateErfIds: [erfId],
-    };
-  }
-
   if (draftErfId && draftErfId !== erfId) {
     return {
       ok: false,
@@ -920,14 +905,8 @@ export function resolveAuthoritativeSalesErfReference({
     };
   }
 
-  if (draftErfNo && draftErfNo !== erfNo) {
-    return {
-      ok: false,
-      code: "DRAFT_ERF_NUMBER_MISMATCH",
-      message: `The TB Draft ERF number ${draftErfNo} conflicts with authoritative ERF number ${erfNo}.`,
-      candidateErfIds: [erfId],
-    };
-  }
+  // erfId is the ERF identity. erfNo is descriptive only and must never
+  // determine Targeted Batch eligibility.
 
   return {
     ok: true,
@@ -1269,7 +1248,6 @@ function buildCanonicalErfNo(sg = {}) {
 export function validateAuthoritativeErfDocument({
   snapshot,
   expectedErfId,
-  expectedErfNo,
   expectedLmPcode,
   expectedWardPcode,
   expectedWardNumber,
@@ -1284,8 +1262,9 @@ export function validateAuthoritativeErfDocument({
 
   const source = snapshot.data() || {};
   const documentErfId = readFirstText(source?.erfId, snapshot.id);
+  // Canonical erfNo is retained only as optional descriptive row data.
+  // ERF identity and eligibility are validated by erfId and scope below.
   const authoritativeErfNo = buildCanonicalErfNo(source?.sg);
-  const proposedErfNo = normalizeText(expectedErfNo);
   const lmPcode = normalizeLmPcode(
     source?.admin?.localMunicipality?.pcode,
   );
@@ -1310,22 +1289,6 @@ export function validateAuthoritativeErfDocument({
     };
   }
 
-
-  if (!authoritativeErfNo) {
-    return {
-      ok: false,
-      code: "AUTHORITATIVE_ERF_NUMBER_MISSING",
-      message: `Authoritative ERF ${expectedErfId} has no canonical ERF number.`,
-    };
-  }
-
-  if (proposedErfNo && authoritativeErfNo !== proposedErfNo) {
-    return {
-      ok: false,
-      code: "AUTHORITATIVE_ERF_NUMBER_MISMATCH",
-      message: `Authoritative ERF ${expectedErfId} has ERF number ${authoritativeErfNo}, not ${proposedErfNo}.`,
-    };
-  }
   if (!lmPcode || lmPcode !== expectedLmPcode) {
     return {
       ok: false,

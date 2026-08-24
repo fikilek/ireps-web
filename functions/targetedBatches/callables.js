@@ -534,7 +534,6 @@ async function preflightPermanentBatch({ db, payload }) {
       const validation = validateAuthoritativeErfDocument({
         snapshot: erfSnapshotsById.get(erfId),
         expectedErfId: erfId,
-        expectedErfNo: record.erfReference.erfNo,
         expectedLmPcode: payload.scope.lmPcode,
         expectedWardPcode: payload.scope.wardPcode,
         expectedWardNumber: payload.scope.wardNumber,
