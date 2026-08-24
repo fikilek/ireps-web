@@ -23,6 +23,18 @@ const OTHER_ANOMALY_VALUES = new Set([
   "Keypad Faulty",
 ]);
 
+const NORMALISATION_ACTION_VALUES = new Set([
+  "none",
+  "New Meter Installed",
+  "Meter Removed",
+  "Meter Disconnected",
+  "Meter Reconnected",
+  "Tamper Removed",
+  "Keypad Normalised",
+  "Service Point Completed / Cable Installed",
+  "Meter Registered",
+]);
+
 const SEAL_COMMENT_EVIDENCE = Object.freeze({
   "Seal Missing": false,
   "Seal Broken": true,
@@ -432,17 +444,41 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
   }
 
   const normalisationActions = ast?.normalisation?.actionTaken;
-  if (!Array.isArray(normalisationActions)) {
+  if (!Array.isArray(normalisationActions) || normalisationActions.length === 0) {
     return buildFailureResult(
       "NORMALISATION_ACTIONS_REQUIRED",
-      "ast.normalisation.actionTaken must be an array",
+      "ast.normalisation.actionTaken must be a non-empty array",
     );
   }
 
-  if (normalisationActions.some((action) => typeof action !== "string")) {
+  if (
+    normalisationActions.some(
+      (action) =>
+        typeof action !== "string" ||
+        !NORMALISATION_ACTION_VALUES.has(action),
+    )
+  ) {
     return buildFailureResult(
       "INVALID_NORMALISATION_ACTION",
-      "ast.normalisation.actionTaken must contain only strings",
+      "ast.normalisation.actionTaken contains an unsupported action",
+    );
+  }
+
+  const uniqueNormalisationActions = new Set(normalisationActions);
+  if (uniqueNormalisationActions.size !== normalisationActions.length) {
+    return buildFailureResult(
+      "DUPLICATE_NORMALISATION_ACTION",
+      "ast.normalisation.actionTaken cannot contain duplicates",
+    );
+  }
+
+  if (
+    normalisationActions.includes("none") &&
+    normalisationActions.length !== 1
+  ) {
+    return buildFailureResult(
+      "NORMALISATION_NONE_NOT_EXCLUSIVE",
+      "Normalisation action none cannot be combined with another action",
     );
   }
 
@@ -526,6 +562,7 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
 
 export const METER_DISCOVERY_VALIDATION_METADATA = Object.freeze({
   otherAnomalyValues: Object.freeze([...OTHER_ANOMALY_VALUES]),
+  normalisationActionValues: Object.freeze([...NORMALISATION_ACTION_VALUES]),
   sealCommentEvidence: SEAL_COMMENT_EVIDENCE,
   keypadCommentEvidence: KEYPAD_COMMENT_EVIDENCE,
   cbCommentEvidence: CB_COMMENT_EVIDENCE,
