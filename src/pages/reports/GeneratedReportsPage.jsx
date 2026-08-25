@@ -434,15 +434,15 @@ const styles = {
     fontWeight: 800,
   },
   actionCell: {
-    padding: "0.75rem",
+    padding: "1rem 1.15rem",
     borderBottom: "1px solid #e2e8f0",
-    verticalAlign: "top",
-    minWidth: "190px",
+    verticalAlign: "middle",
+    minWidth: "210px",
   },
   actions: {
     display: "flex",
     alignItems: "center",
-    gap: "0.5rem",
+    gap: "0.65rem",
     flexWrap: "nowrap",
   },
   refreshButton: {
@@ -473,8 +473,8 @@ const styles = {
     cursor: "pointer",
   },
   downloadButton: {
-    minHeight: "34px",
-    padding: "0.45rem 0.8rem",
+    minHeight: "38px",
+    padding: "0.6rem 1rem",
     borderRadius: "8px",
     border: "1px solid #175cd3",
     background: "#175cd3",
@@ -487,8 +487,8 @@ const styles = {
     cursor: "pointer",
   },
   deleteButton: {
-    minHeight: "34px",
-    padding: "0.45rem 0.8rem",
+    minHeight: "38px",
+    padding: "0.6rem 1rem",
     borderRadius: "8px",
     border: "1px solid #f1b3ad",
     background: "#ffffff",
@@ -501,8 +501,8 @@ const styles = {
     cursor: "pointer",
   },
   paginationButton: {
-    minHeight: "34px",
-    padding: "0.45rem 0.8rem",
+    minHeight: "36px",
+    padding: "0.55rem 0.9rem",
     borderRadius: "8px",
     border: "1px solid #cbd5e1",
     background: "#ffffff",
@@ -523,6 +523,6 @@ const styles = {
     alignItems: "center",
     justifyContent: "flex-end",
     gap: "0.75rem",
-    paddingTop: "1rem",
+    padding: "1rem 1rem 0.85rem",
   },
 };
