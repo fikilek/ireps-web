@@ -86,55 +86,49 @@ function getLatestSalesUpdate(rows = []) {
 
 function buildPopulationReadModel(rows = []) {
   let withGps = 0;
-  let fieldTarget = 0;
+  let normalPopulation = 0;
 
   rows.forEach((row) => {
-    const hasGps = hasUsableSalesGps(row);
-
-    if (hasGps) {
+    if (hasUsableSalesGps(row)) {
       withGps += 1;
-      return;
     }
 
     const category = getOperationalSalesCategory(row);
-    if (!isNormalSalesCategory(category)) {
-      fieldTarget += 1;
+    if (isNormalSalesCategory(category)) {
+      normalPopulation += 1;
     }
   });
 
   const total = rows.length;
   const withoutGps = total - withGps;
+  const fieldTarget = Math.max(0, total - normalPopulation);
   const gpsCoverage = total > 0 ? (withGps / total) * 100 : 0;
   const withoutGpsShare = total > 0 ? (withoutGps / total) * 100 : 0;
+  const normalShare = total > 0 ? (normalPopulation / total) * 100 : 0;
   const fieldTargetShare = total > 0 ? (fieldTarget / total) * 100 : 0;
-  const fieldTargetOfNonGps =
-    withoutGps > 0 ? (fieldTarget / withoutGps) * 100 : 0;
 
-  const scopeReferenceTotal = total + fieldTarget;
-  const scopeAxisMax = Math.max(
-    1000,
-    Math.ceil(scopeReferenceTotal / 1000) * 1000,
-  );
-  const scopeTickOne = Math.round((scopeAxisMax * 5) / 12 / 1000) * 1000;
-  const scopeTickTwo = Math.round((scopeAxisMax * 10) / 12 / 1000) * 1000;
+  const scopeAxisMax = Math.max(1, total);
+  const scopeTickOne = Math.round(total * 0.25);
+  const scopeTickTwo = Math.round(total * 0.5);
+  const scopeTickThree = Math.round(total * 0.75);
 
   return {
     total,
     withGps,
     withoutGps,
+    normalPopulation,
     fieldTarget,
     gpsCoverage,
     withoutGpsShare,
+    normalShare,
     fieldTargetShare,
-    fieldTargetOfNonGps,
-    scopeReferenceTotal,
     scopeAxisMax,
     scopeTickOne,
     scopeTickTwo,
+    scopeTickThree,
     latestUpdate: getLatestSalesUpdate(rows),
   };
 }
-
 function Icon({ name }) {
   const common = {
     viewBox: "0 0 24 24",
@@ -321,17 +315,17 @@ export default function ProjectPopulationDashboardPage() {
     );
   }
 
-  const scopeDenominator = Math.max(1, population.scopeReferenceTotal);
+  const scopeDenominator = Math.max(1, population.total);
   const gpsScopeWidth = (population.withGps / scopeDenominator) * 100;
   const nonGpsScopeWidth = (population.withoutGps / scopeDenominator) * 100;
+  const normalScopeWidth = (population.normalPopulation / scopeDenominator) * 100;
   const targetScopeWidth = (population.fieldTarget / scopeDenominator) * 100;
-
   return (
     <div className="population-dashboard-page population-dashboard-page--executive">
       <header className="population-exec-header">
         <div>
-          <p className="population-exec-eyebrow">Dashboard v1 · Population Overview</p>
-          <h2>Dashboard v1 — Population Overview</h2>
+          <p className="population-exec-eyebrow">Dashboard v1 Â· Population Overview</p>
+          <h2>Dashboard v1 â€” Population Overview</h2>
           <p>
             Live project population, GPS readiness and field-discovery scope for {activeWorkbaseName}.
           </p>
@@ -437,7 +431,7 @@ export default function ProjectPopulationDashboardPage() {
             <article className="population-exec-panel population-exec-panel--scope">
               <div className="population-exec-panel__title">
                 <h3>Project Scope</h3>
-                <span className="population-info-dot" title="Population and field-discovery scope">i</span>
+                <span className="population-info-dot" title="Two distributions across the same total Sales population">i</span>
               </div>
 
               <div className="population-exec-scope-total">
@@ -445,51 +439,90 @@ export default function ProjectPopulationDashboardPage() {
                 <strong>{formatNumber(population.total)}</strong>
               </div>
 
-              <div className="population-exec-scope-bar" aria-hidden="true">
-                <span
-                  className="population-exec-scope-bar__gps"
-                  style={{ width: `${gpsScopeWidth}%` }}
-                />
-                <span
-                  className="population-exec-scope-bar__non-gps"
-                  style={{ width: `${nonGpsScopeWidth}%` }}
-                />
-                <span
-                  className="population-exec-scope-bar__target"
-                  style={{ width: `${targetScopeWidth}%` }}
-                />
+              <div className="population-exec-scope-comparison">
+                <div className="population-exec-scope-row">
+                  <div className="population-exec-scope-row__heading">
+                    <strong>GPS Distribution</strong>
+                    <span>Same {formatNumber(population.total)}-meter scale</span>
+                  </div>
+
+                  <div
+                    className="population-exec-scope-bar population-exec-scope-bar--comparison"
+                    role="img"
+                    aria-label={`${formatNumber(population.withGps)} with GPS and ${formatNumber(population.withoutGps)} without GPS`}
+                  >
+                    <span
+                      className="population-exec-scope-bar__gps"
+                      style={{ width: `${gpsScopeWidth}%` }}
+                    />
+                    <span
+                      className="population-exec-scope-bar__non-gps"
+                      style={{ width: `${nonGpsScopeWidth}%` }}
+                    />
+                  </div>
+
+                  <div className="population-exec-scope-row__legend">
+                    <div>
+                      <span><i className="population-exec-dot population-exec-dot--gps" />With GPS</span>
+                      <strong>{formatNumber(population.withGps)}</strong>
+                      <b>{formatPercent(population.gpsCoverage)}</b>
+                    </div>
+                    <div>
+                      <span><i className="population-exec-dot population-exec-dot--non-gps" />Without GPS</span>
+                      <strong>{formatNumber(population.withoutGps)}</strong>
+                      <b>{formatPercent(population.withoutGpsShare)}</b>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="population-exec-scope-row">
+                  <div className="population-exec-scope-row__heading">
+                    <strong>Sales Category Distribution</strong>
+                    <span>Normal vs all CATs excluding Normal</span>
+                  </div>
+
+                  <div
+                    className="population-exec-scope-bar population-exec-scope-bar--comparison"
+                    role="img"
+                    aria-label={`${formatNumber(population.normalPopulation)} Normal and ${formatNumber(population.fieldTarget)} All Categories excluding Normal`}
+                  >
+                    <span
+                      className="population-exec-scope-bar__normal"
+                      style={{ width: `${normalScopeWidth}%` }}
+                    />
+                    <span
+                      className="population-exec-scope-bar__target"
+                      style={{ width: `${targetScopeWidth}%` }}
+                    />
+                  </div>
+
+                  <div className="population-exec-scope-row__legend">
+                    <div>
+                      <span><i className="population-exec-dot population-exec-dot--normal" />Normal</span>
+                      <strong>{formatNumber(population.normalPopulation)}</strong>
+                      <b>{formatPercent(population.normalShare)}</b>
+                    </div>
+                    <div>
+                      <span><i className="population-exec-dot population-exec-dot--target" />All Categories</span>
+                      <strong>{formatNumber(population.fieldTarget)}</strong>
+                      <b>{formatPercent(population.fieldTargetShare)}</b>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="population-exec-axis" aria-hidden="true">
+              <div className="population-exec-axis population-exec-axis--shared" aria-hidden="true">
                 <span>0</span>
                 <span>{formatAxisNumber(population.scopeTickOne)}</span>
                 <span>{formatAxisNumber(population.scopeTickTwo)}</span>
+                <span>{formatAxisNumber(population.scopeTickThree)}</span>
                 <span>{formatAxisNumber(population.scopeAxisMax)}</span>
               </div>
 
-              <div className="population-exec-scope-metrics">
-                <div>
-                  <span><i className="population-exec-dot population-exec-dot--gps" />With GPS</span>
-                  <strong>{formatNumber(population.withGps)}</strong>
-                  <b>{formatPercent(population.gpsCoverage)}</b>
-                </div>
-                <div>
-                  <span><i className="population-exec-dot population-exec-dot--non-gps" />Without GPS</span>
-                  <strong>{formatNumber(population.withoutGps)}</strong>
-                  <b>{formatPercent(population.withoutGpsShare)}</b>
-                </div>
-                <div>
-                  <span><i className="population-exec-dot population-exec-dot--target" />Field Target</span>
-                  <strong>{formatNumber(population.fieldTarget)}</strong>
-                  <b>{formatPercent(population.fieldTargetShare)}</b>
-                </div>
-              </div>
-
               <p className="population-exec-scope-note">
-                Field Target is the non-GPS population excluding the normal Sales category and is shown as a scope reference.
+                Both bars use the same end-to-end Sales population scale. Field Target is all Sales meters excluding Normal.
               </p>
             </article>
-
             <article className="population-exec-panel population-exec-panel--notes">
               <div className="population-exec-notes-title">
                 <span className="population-exec-notes-icon"><Icon name="note" /></span>
@@ -504,7 +537,7 @@ export default function ProjectPopulationDashboardPage() {
               </ul>
 
               <div className="population-exec-notes-target">
-                {formatPercent(population.fieldTargetOfNonGps)} of the non-GPS population is in the current field target.
+                Field Target = Total Population - Normal ({formatNumber(population.total)} - {formatNumber(population.normalPopulation)} = {formatNumber(population.fieldTarget)}).
               </div>
 
               <ClipboardIllustration />
@@ -514,7 +547,7 @@ export default function ProjectPopulationDashboardPage() {
           <footer className="population-exec-footer">
             <span className={`population-live-dot${isFetching ? " population-live-dot--syncing" : ""}`} aria-hidden="true" />
             <span>
-              Last updated: {formatDateTime(population.latestUpdate)} · {isFetching ? "Syncing live Sales" : "Live Sales"} · {activeLmPcode}
+              Last updated: {formatDateTime(population.latestUpdate)} Â· {isFetching ? "Syncing live Sales" : "Live Sales"} Â· {activeLmPcode}
             </span>
           </footer>
         </>

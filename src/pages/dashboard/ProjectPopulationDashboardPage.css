@@ -745,3 +745,109 @@
     opacity: 0.35;
   }
 }
+/* Project Scope paired-distribution bars v3 */
+.population-exec-scope-comparison {
+  display: grid;
+  gap: 1.15rem;
+  margin-top: 1.1rem;
+}
+
+.population-exec-scope-row {
+  min-width: 0;
+}
+
+.population-exec-scope-row__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.population-exec-scope-row__heading strong {
+  color: #263650;
+  font-size: 0.82rem;
+}
+
+.population-exec-scope-row__heading span {
+  color: #6b7b94;
+  font-size: 0.66rem;
+  font-weight: 650;
+  text-align: right;
+}
+
+.population-exec-scope-bar--comparison {
+  height: 42px;
+  margin-top: 0.48rem;
+}
+
+.population-exec-scope-bar__normal {
+  background: linear-gradient(90deg, #64748b, #7c8ba1);
+}
+
+.population-exec-dot--normal {
+  background: #64748b;
+}
+
+.population-exec-scope-row__legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.55rem;
+}
+
+.population-exec-scope-row__legend > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.population-exec-scope-row__legend > div + div {
+  padding-left: 0.9rem;
+  border-left: 1px solid #e0e6ee;
+}
+
+.population-exec-scope-row__legend span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.38rem;
+  color: #35445d;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.population-exec-scope-row__legend strong {
+  color: #15213a;
+  font-size: 0.82rem;
+}
+
+.population-exec-scope-row__legend b {
+  color: #60708a;
+  font-size: 0.66rem;
+}
+
+.population-exec-axis--shared {
+  margin-top: 0.72rem;
+}
+
+@media (max-width: 760px) {
+  .population-exec-scope-row__heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .population-exec-scope-row__heading span {
+    text-align: left;
+  }
+
+  .population-exec-scope-row__legend {
+    gap: 0.45rem;
+  }
+
+  .population-exec-scope-row__legend > div {
+    grid-template-columns: 1fr;
+    gap: 0.12rem;
+  }
+}
