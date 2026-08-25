@@ -221,6 +221,10 @@ export default function GeneratedReportsPage() {
           <button
             type="button"
             className="ghost-button"
+            style={{
+              ...styles.refreshButton,
+              ...(isLoading ? styles.disabledButton : {}),
+            }}
             onClick={handleRefresh}
             disabled={isLoading}
           >
@@ -243,6 +247,7 @@ export default function GeneratedReportsPage() {
             <button
               type="button"
               className="ghost-button"
+              style={styles.secondaryButton}
               onClick={handleRefresh}
             >
               Try Again
@@ -314,11 +319,15 @@ export default function GeneratedReportsPage() {
                           {lifecycle.status || "NAv"}
                         </span>
                       </td>
-                      <td style={styles.cell}>
+                      <td style={styles.actionCell}>
                         <div style={styles.actions}>
                           <button
                             type="button"
                             className="ghost-button"
+                            style={{
+                              ...styles.downloadButton,
+                              ...(busy ? styles.disabledButton : {}),
+                            }}
                             onClick={() => handleDownload(entry)}
                             disabled={busy}
                           >
@@ -327,6 +336,10 @@ export default function GeneratedReportsPage() {
                           <button
                             type="button"
                             className="ghost-button"
+                            style={{
+                              ...styles.deleteButton,
+                              ...(busy ? styles.disabledButton : {}),
+                            }}
                             onClick={() => handleDelete(entry)}
                             disabled={busy}
                           >
@@ -346,6 +359,12 @@ export default function GeneratedReportsPage() {
           <button
             type="button"
             className="ghost-button"
+            style={{
+              ...styles.paginationButton,
+              ...(isLoading || previousPageTokens.length === 0
+                ? styles.disabledButton
+                : {}),
+            }}
             onClick={handlePreviousPage}
             disabled={isLoading || previousPageTokens.length === 0}
           >
@@ -359,6 +378,10 @@ export default function GeneratedReportsPage() {
           <button
             type="button"
             className="ghost-button"
+            style={{
+              ...styles.paginationButton,
+              ...(isLoading || !nextPageToken ? styles.disabledButton : {}),
+            }}
             onClick={handleNextPage}
             disabled={isLoading || !nextPageToken}
           >
@@ -410,10 +433,90 @@ const styles = {
     fontSize: "0.75rem",
     fontWeight: 800,
   },
+  actionCell: {
+    padding: "0.75rem",
+    borderBottom: "1px solid #e2e8f0",
+    verticalAlign: "top",
+    minWidth: "190px",
+  },
   actions: {
     display: "flex",
+    alignItems: "center",
     gap: "0.5rem",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
+  },
+  refreshButton: {
+    minHeight: "36px",
+    padding: "0.5rem 0.9rem",
+    borderRadius: "9px",
+    border: "1px solid #bfd3ff",
+    background: "#ffffff",
+    color: "#175cd3",
+    fontFamily: "inherit",
+    fontSize: "0.84rem",
+    fontWeight: 800,
+    lineHeight: 1,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  secondaryButton: {
+    minHeight: "36px",
+    padding: "0.5rem 0.9rem",
+    borderRadius: "9px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#1e3a5f",
+    fontFamily: "inherit",
+    fontSize: "0.84rem",
+    fontWeight: 700,
+    lineHeight: 1,
+    cursor: "pointer",
+  },
+  downloadButton: {
+    minHeight: "34px",
+    padding: "0.45rem 0.8rem",
+    borderRadius: "8px",
+    border: "1px solid #175cd3",
+    background: "#175cd3",
+    color: "#ffffff",
+    fontFamily: "inherit",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    lineHeight: 1,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  deleteButton: {
+    minHeight: "34px",
+    padding: "0.45rem 0.8rem",
+    borderRadius: "8px",
+    border: "1px solid #f1b3ad",
+    background: "#ffffff",
+    color: "#b42318",
+    fontFamily: "inherit",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    lineHeight: 1,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  paginationButton: {
+    minHeight: "34px",
+    padding: "0.45rem 0.8rem",
+    borderRadius: "8px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#175cd3",
+    fontFamily: "inherit",
+    fontSize: "0.82rem",
+    fontWeight: 700,
+    lineHeight: 1,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  disabledButton: {
+    opacity: 0.45,
+    cursor: "not-allowed",
   },
   pagination: {
     display: "flex",
