@@ -8,11 +8,19 @@ export default function ReportsLandingPage() {
       <h1>iREPS Operational Reports</h1>
 
       <p className="muted">
-        TRN-derived reports for field activity, access outcomes, anomalies, and
-        normalisation.
+        Operational, audit, revenue, and generated reports built from current
+        iREPS data.
       </p>
 
       <div className="placeholder-grid">
+        <Link className="module-card" to="/reports/general-monthly">
+          <h3>General Monthly Report</h3>
+          <p className="muted">
+            Generate the Endumeni meter, property, intervention, and revenue
+            workbook. Builder v0.1 uses a controlled 200-meter sample.
+          </p>
+        </Link>
+
         <Link className="module-card" to="/reports/generated">
           <h3>Generated Reports</h3>
           <p className="muted">

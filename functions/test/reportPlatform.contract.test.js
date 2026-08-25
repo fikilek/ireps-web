@@ -35,6 +35,20 @@ function quickTrn(overrides = {}) {
   };
 }
 
+function generalMonthlyReport(overrides = {}) {
+  return {
+    reportType: "GENERAL_MONTHLY_REPORT",
+    reportName: "General Monthly Report",
+    format: "XLSX",
+    sourceType: "REPORT",
+    sourceId: "ZA5241",
+    sourceScope: { lmPcode: "ZA5241", generationMode: "SAMPLE", sampleSize: 200 },
+    itemCount: 200,
+    fileName: "general_monthly_report_endumeni_sample_200_202608250851.xlsx",
+    ...overrides,
+  };
+}
+
 function assertBusinessError(callback, code, businessCode) {
   assert.throws(callback, (error) => {
     assert.ok(error instanceof ReportPlatformError);
@@ -47,6 +61,7 @@ function assertBusinessError(callback, code, businessCode) {
 test("producer contract accepts known report types and locked formats", () => {
   const user = validateReportProducerMetadata(userActivity());
   const trn = validateReportProducerMetadata(quickTrn());
+  const gmr = validateReportProducerMetadata(generalMonthlyReport());
 
   assert.equal(user.reportType, "USER_ACTIVITY");
   assert.equal(user.format, "XLSX");
@@ -58,6 +73,10 @@ test("producer contract accepts known report types and locked formats", () => {
 
   assert.equal(trn.reportType, "QUICK_TRN");
   assert.equal(trn.format, "PDF");
+
+  assert.equal(gmr.reportType, "GENERAL_MONTHLY_REPORT");
+  assert.equal(gmr.format, "XLSX");
+  assert.equal(gmr.itemCount, 200);
 });
 
 test("producer contract rejects unknown report types and locked-format mismatches", () => {
@@ -80,6 +99,15 @@ test("producer contract rejects unknown report types and locked-format mismatche
     () => validateReportProducerMetadata(quickTrn({
       format: "XLSX",
       fileName: "quick_trn.xlsx",
+    })),
+    "invalid-argument",
+    "REPORT_FORMAT_MISMATCH",
+  );
+
+  assertBusinessError(
+    () => validateReportProducerMetadata(generalMonthlyReport({
+      format: "PDF",
+      fileName: "general_monthly_report.pdf",
     })),
     "invalid-argument",
     "REPORT_FORMAT_MISMATCH",

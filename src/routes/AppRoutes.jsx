@@ -29,6 +29,7 @@ import ReportsLandingPage from "../pages/reports/ReportsLandingPage";
 import GeneratedReportsPage from "../pages/reports/GeneratedReportsPage";
 import NoAccessReportPage from "../pages/reports/NoAccessReportPage";
 import UserActivityReportPage from "../pages/reports/UserActivityReportPage";
+import GeneralMonthlyReportPage from "../pages/reports/GeneralMonthlyReportPage";
 import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
 import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 
@@ -334,6 +335,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <UserActivityReportPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/reports/general-monthly"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <GeneralMonthlyReportPage />
               </RoleRoute>
             }
           />

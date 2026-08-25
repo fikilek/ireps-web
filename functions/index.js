@@ -138,6 +138,7 @@ import { updateFwrMonitoringStatusCallable } from "./fwr-monitoring/updateFwrMon
 import { submitInformalErfCallable } from "./informal-erfs/submitInformalErfCallable.js";
 
 import { updateUserCallable } from "./users/index.js";
+import { generateGeneralMonthlyReportCallable } from "./reports/generalMonthlyReport.js";
 import {
   finalizeGeneratedReportCallable,
   prepareGeneratedReportCallable,
@@ -218,6 +219,7 @@ export {
   updateFwrMonitoringStatusCallable,
   submitInformalErfCallable,
   updateUserCallable,
+  generateGeneralMonthlyReportCallable,
   prepareGeneratedReportCallable,
   finalizeGeneratedReportCallable,
   listGeneratedReportsCallable,
