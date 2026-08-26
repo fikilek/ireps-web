@@ -92,7 +92,7 @@ export const DISCONNECTION_LEVELS = {
 export const DISCONNECTION_MEDIA_TAGS = {
   levelEvidence: "disconnectionLevelEvidence",
   previousDraftLevelEvidence: "levelEvidence",
-  supplyDisconnectedEvidence: "supplyDisconnectedEvidence",
+
   noAccessPhoto: "noAccessPhoto",
 };
 
@@ -2562,21 +2562,11 @@ export function sanitizeMeterDisconnection(
         label: "",
         otherText: "",
       },
-
-      supplyDisconnected: {
-        answer: null,
-        notes: "",
-      },
     };
   }
 
   return {
     level: normalizeCodeLabel(disconnection?.level || {}),
-
-    supplyDisconnected: {
-      answer: normalizeYesNo(disconnection?.supplyDisconnected?.answer),
-      notes: String(disconnection?.supplyDisconnected?.notes || ""),
-    },
   };
 }
 
@@ -2618,9 +2608,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
   const level = normalizeCodeLabel(disconnection?.level || {});
   const levelConfig = DISCONNECTION_LEVELS[level.code];
 
-  const supplyDisconnected = normalizeYesNo(
-    disconnection?.supplyDisconnected?.answer,
-  );
 
   if (currentState !== "CONNECTED") {
     return {
@@ -2696,21 +2683,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (!supplyDisconnected) {
-    return {
-      ok: false,
-      code: "INVALID_DISCONNECTION_ANSWER",
-      message: "Supply disconnected answer must be yes or no",
-    };
-  }
-
-  if (supplyDisconnected !== "yes") {
-    return {
-      ok: false,
-      code: "SUPPLY_DISCONNECTION_NOT_CONFIRMED",
-      message: "Supply must be confirmed as disconnected before submit",
-    };
-  }
 
   if (
     !hasAnyMediaTag(
@@ -2729,19 +2701,6 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (
-    !hasMediaTag(
-      data?.media,
-      DISCONNECTION_MEDIA_TAGS.supplyDisconnectedEvidence,
-      { requireUrl: true },
-    )
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_SUPPLY_DISCONNECTED_EVIDENCE",
-      message: "Supply disconnected evidence media is required",
-    };
-  }
 
   return {
     ok: true,
