@@ -23,16 +23,29 @@ const OTHER_ANOMALY_VALUES = new Set([
   "Keypad Faulty",
 ]);
 
-const NORMALISATION_ACTION_VALUES = new Set([
+const NORMALISATION_CANONICAL_ACTION_VALUES = Object.freeze([
   "none",
   "New Meter Installed",
   "Meter Removed",
-  "Meter Disconnected",
-  "Meter Reconnected",
+  "Illegal connection - meter disconnected",
+  "Illegal connection - meter reconnected",
+  "Meter faulty - meter replaced",
+  "Meter damaged - meter replaced",
   "Tamper Removed",
   "Keypad Normalised",
   "Service Point Completed / Cable Installed",
   "Meter Registered",
+]);
+
+// Retained for compatibility with Mobile versions released before Normalisation v3.
+const NORMALISATION_LEGACY_ACTION_VALUES = Object.freeze([
+  "Meter Disconnected",
+  "Meter Reconnected",
+]);
+
+const NORMALISATION_ACTION_VALUES = new Set([
+  ...NORMALISATION_CANONICAL_ACTION_VALUES,
+  ...NORMALISATION_LEGACY_ACTION_VALUES,
 ]);
 
 const SEAL_COMMENT_EVIDENCE = Object.freeze({

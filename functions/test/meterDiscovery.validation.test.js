@@ -368,16 +368,22 @@ test("off-grid status is required and yes requires evidence", () => {
   expectPass(deepMerge(baseElectricity(), { ast: { ogs: { hasOffGridSupply: "unknown" } } }));
 });
 
-test("normalisation accepts only canonical non-empty actions and preserves photo rules", () => {
+test("normalisation accepts canonical and legacy non-empty actions and preserves photo rules", () => {
   const canonicalActions = [
     "New Meter Installed",
     "Meter Removed",
-    "Meter Disconnected",
-    "Meter Reconnected",
+    "Illegal connection - meter disconnected",
+    "Illegal connection - meter reconnected",
+    "Meter faulty - meter replaced",
+    "Meter damaged - meter replaced",
     "Tamper Removed",
     "Keypad Normalised",
     "Service Point Completed / Cable Installed",
     "Meter Registered",
+  ];
+  const legacyActions = [
+    "Meter Disconnected",
+    "Meter Reconnected",
   ];
 
   expectCode(
@@ -403,7 +409,7 @@ test("normalisation accepts only canonical non-empty actions and preserves photo
     }),
   );
 
-  for (const action of canonicalActions) {
+  for (const action of [...canonicalActions, ...legacyActions]) {
     const withoutPhoto = deepMerge(baseElectricity(), {
       ast: { normalisation: { actionTaken: [action] } },
     });
@@ -426,6 +432,34 @@ test("normalisation accepts only canonical non-empty actions and preserves photo
       media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
     }),
   );
+
+  const v3MultiAction = [
+    "Illegal connection - meter disconnected",
+    "Meter faulty - meter replaced",
+  ];
+  expectCode(
+    deepMerge(baseElectricity(), {
+      ast: { normalisation: { actionTaken: v3MultiAction } },
+    }),
+    "NORMALISATION_PHOTO_REQUIRED",
+  );
+  expectPass(
+    deepMerge(baseElectricity(), {
+      ast: { normalisation: { actionTaken: v3MultiAction } },
+      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
+    }),
+  );
+});
+
+test("legacy pre-v3 queued normalisation actions remain accepted by backend", () => {
+  for (const action of ["Meter Disconnected", "Meter Reconnected"]) {
+    expectPass(
+      deepMerge(baseElectricity(), {
+        ast: { normalisation: { actionTaken: [action] } },
+        media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
+      }),
+    );
+  }
 });
 
 test("normalisation rejects unsupported, malformed, duplicate and mixed-none actions", () => {
@@ -485,17 +519,21 @@ test("normalisation rejects unsupported, malformed, duplicate and mixed-none act
   );
 });
 
-test("normalisation and other anomaly metadata expose the canonical values", () => {
+test("normalisation metadata exposes canonical and legacy accepted values", () => {
   assert.deepEqual(METER_DISCOVERY_VALIDATION_METADATA.normalisationActionValues, [
     "none",
     "New Meter Installed",
     "Meter Removed",
-    "Meter Disconnected",
-    "Meter Reconnected",
+    "Illegal connection - meter disconnected",
+    "Illegal connection - meter reconnected",
+    "Meter faulty - meter replaced",
+    "Meter damaged - meter replaced",
     "Tamper Removed",
     "Keypad Normalised",
     "Service Point Completed / Cable Installed",
     "Meter Registered",
+    "Meter Disconnected",
+    "Meter Reconnected",
   ]);
   assert.deepEqual(METER_DISCOVERY_VALIDATION_METADATA.otherAnomalyValues, [
     "Meter Blocked (By Munic)",
