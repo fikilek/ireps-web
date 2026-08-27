@@ -158,6 +158,7 @@ import {
   sendGeneratedReportEmailCallable,
 } from "./reportPlatform/emailDeliveryCallable.js";
 
+import { projectMeterDiscoveryAstMedia } from "./meterDiscovery/astMedia.js";
 import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
 import {
   validateMeterInstallationElectricity,
@@ -1732,7 +1733,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
             ...(creationData.treadings.length
               ? { treadings: creationData.treadings }
               : {}),
-            media: trnData.media || [],
+            media: projectMeterDiscoveryAstMedia(trnData.media || []),
             meterType,
             trnId,
             master: {

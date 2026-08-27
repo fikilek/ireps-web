@@ -4,6 +4,20 @@ const METER_DISCOVERY_STATUSES = new Set(["CONNECTED", "DISCONNECTED"]);
 const METER_CATEGORIES = new Set(["Normal", "Bulk"]);
 const METER_SUBTYPES = new Set(["prepaid", "conventional"]);
 const ELECTRICITY_PHASES = new Set(["single", "three"]);
+const METER_DISCOVERY_CONTRACT_VERSION = 2;
+const REMAINING_CREDIT_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
+const REMAINING_CREDIT_COMMENT_REASONS = new Set([
+  "Display blank / no reading",
+  "Display damaged",
+  "Display unreadable",
+  "Unable to obtain balance",
+  "Meter not responding",
+  "Other",
+]);
+const REMAINING_CREDIT_STANDARD_REASONS = new Set(
+  [...REMAINING_CREDIT_COMMENT_REASONS].filter((reason) => reason !== "Other"),
+);
+const REMAINING_CREDIT_OTHER_PREFIX = "Other:";
 const ELECTRICITY_PLACEMENTS = new Set([
   "Kiosk",
   "Pole Top",
@@ -231,6 +245,81 @@ function validateCanonicalReading({
   return null;
 }
 
+function validateRemainingCreditV2({ data, meter, media }) {
+  const contractVersion = Number(data?.meterDiscoveryContractVersion ?? 0);
+
+  if (
+    !Number.isFinite(contractVersion) ||
+    contractVersion < METER_DISCOVERY_CONTRACT_VERSION ||
+    meter?.type !== "prepaid"
+  ) {
+    return null;
+  }
+
+  const remainingCredit = String(meter?.remainingCredit ?? "").trim();
+  const remainingCreditComment = String(
+    meter?.remainingCreditComment ?? "",
+  ).trim();
+
+  if (remainingCredit) {
+    if (!REMAINING_CREDIT_PATTERN.test(remainingCredit)) {
+      return buildFailureResult(
+        "INVALID_REMAINING_CREDIT",
+        "Remaining Credit must be a signed decimal value",
+      );
+    }
+
+    if (remainingCreditComment) {
+      return buildFailureResult(
+        "REMAINING_CREDIT_COMMENT_NOT_ALLOWED",
+        "Remaining Credit reason must be blank when a value is captured",
+      );
+    }
+
+    if (!hasTaggedMedia(media, "remainingCreditPhoto")) {
+      return buildFailureResult(
+        "REMAINING_CREDIT_PHOTO_REQUIRED",
+        "Remaining Credit photo is required when a value is captured",
+      );
+    }
+
+    return null;
+  }
+
+  if (!remainingCreditComment) {
+    return buildFailureResult(
+      "REMAINING_CREDIT_COMMENT_REQUIRED",
+      "Remaining Credit reason is required when no value is captured",
+    );
+  }
+
+  if (REMAINING_CREDIT_STANDARD_REASONS.has(remainingCreditComment)) {
+    return null;
+  }
+
+  if (remainingCreditComment === "Other") {
+    return buildFailureResult(
+      "REMAINING_CREDIT_COMMENT_OTHER_REQUIRED",
+      "Specify the other Remaining Credit reason",
+    );
+  }
+
+  if (remainingCreditComment.startsWith(`${REMAINING_CREDIT_OTHER_PREFIX} `)) {
+    const otherReason = remainingCreditComment
+      .slice(REMAINING_CREDIT_OTHER_PREFIX.length)
+      .trim();
+
+    if (otherReason) {
+      return null;
+    }
+  }
+
+  return buildFailureResult(
+    "INVALID_REMAINING_CREDIT_COMMENT",
+    "Remaining Credit reason must use an approved option or Other with details",
+  );
+}
+
 /**
  * Validate the canonical Meter Discovery payload emitted by the mobile app.
  *
@@ -380,6 +469,13 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
       "Meter type must be prepaid or conventional",
     );
   }
+
+  const remainingCreditError = validateRemainingCreditV2({
+    data,
+    meter,
+    media,
+  });
+  if (remainingCreditError) return remainingCreditError;
 
   if (!METER_DISCOVERY_STATUSES.has(data?.status?.state)) {
     return buildFailureResult(
@@ -580,4 +676,8 @@ export const METER_DISCOVERY_VALIDATION_METADATA = Object.freeze({
   keypadCommentEvidence: KEYPAD_COMMENT_EVIDENCE,
   cbCommentEvidence: CB_COMMENT_EVIDENCE,
   electricityPlacements: Object.freeze([...ELECTRICITY_PLACEMENTS]),
+  remainingCreditCommentReasons: Object.freeze([
+    ...REMAINING_CREDIT_COMMENT_REASONS,
+  ]),
+  meterDiscoveryContractVersion: METER_DISCOVERY_CONTRACT_VERSION,
 });

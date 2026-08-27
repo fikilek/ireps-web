@@ -647,3 +647,120 @@ test("Meter Installation keeps its creation pipeline while electricity infrastru
     /validateMeterInstallationElectricity\(\{\s*meter,\s*location: ast\?\.location,\s*media,\s*\}\)/s,
   );
 });
+
+test("legacy prepaid Meter Discovery remains compatible without contract version", () => {
+  expectPass(baseElectricity());
+  expectPass(baseWater("prepaid"));
+});
+
+test("contract v2 prepaid electricity accepts Remaining Credit with photo", () => {
+  expectPass(
+    deepMerge(baseElectricity(), {
+      meterDiscoveryContractVersion: 2,
+      ast: {
+        astData: {
+          meter: {
+            remainingCredit: "12.50",
+            remainingCreditComment: "",
+          },
+        },
+      },
+      media: [
+        ...baseElectricity().media,
+        ...media("remainingCreditPhoto"),
+      ],
+    }),
+  );
+});
+
+test("contract v2 prepaid water accepts zero Remaining Credit with photo", () => {
+  const payload = baseWater("prepaid");
+  payload.meterDiscoveryContractVersion = 2;
+  payload.ast.astData.meter.remainingCredit = "0";
+  payload.ast.astData.meter.remainingCreditComment = "";
+  payload.media.push(...media("remainingCreditPhoto"));
+  expectPass(payload);
+});
+
+test("contract v2 prepaid accepts standard reason when credit is unavailable", () => {
+  for (const reason of METER_DISCOVERY_VALIDATION_METADATA.remainingCreditCommentReasons) {
+    if (reason === "Other") continue;
+
+    const payload = baseWater("prepaid");
+    payload.meterDiscoveryContractVersion = 2;
+    payload.ast.astData.meter.remainingCredit = "";
+    payload.ast.astData.meter.remainingCreditComment = reason;
+    expectPass(payload);
+  }
+});
+
+test("contract v2 prepaid Other reason requires and accepts canonical details", () => {
+  const missingDetail = baseWater("prepaid");
+  missingDetail.meterDiscoveryContractVersion = 2;
+  missingDetail.ast.astData.meter.remainingCredit = "";
+  missingDetail.ast.astData.meter.remainingCreditComment = "Other";
+  expectCode(missingDetail, "REMAINING_CREDIT_COMMENT_OTHER_REQUIRED");
+
+  const withDetail = baseWater("prepaid");
+  withDetail.meterDiscoveryContractVersion = 2;
+  withDetail.ast.astData.meter.remainingCredit = "";
+  withDetail.ast.astData.meter.remainingCreditComment =
+    "Other: Display is behind locked enclosure";
+  expectPass(withDetail);
+});
+
+test("contract v2 prepaid rejects invalid Remaining Credit contract states", () => {
+  const missingPhoto = baseElectricity();
+  missingPhoto.meterDiscoveryContractVersion = 2;
+  missingPhoto.ast.astData.meter.remainingCredit = "12.50";
+  missingPhoto.ast.astData.meter.remainingCreditComment = "";
+  expectCode(missingPhoto, "REMAINING_CREDIT_PHOTO_REQUIRED");
+
+  const invalidCredit = baseElectricity();
+  invalidCredit.meterDiscoveryContractVersion = 2;
+  invalidCredit.ast.astData.meter.remainingCredit = "12.";
+  invalidCredit.ast.astData.meter.remainingCreditComment = "";
+  invalidCredit.media.push(...media("remainingCreditPhoto"));
+  expectCode(invalidCredit, "INVALID_REMAINING_CREDIT");
+
+  const missingReason = baseElectricity();
+  missingReason.meterDiscoveryContractVersion = 2;
+  missingReason.ast.astData.meter.remainingCredit = "";
+  missingReason.ast.astData.meter.remainingCreditComment = "";
+  expectCode(missingReason, "REMAINING_CREDIT_COMMENT_REQUIRED");
+
+  const badReason = baseElectricity();
+  badReason.meterDiscoveryContractVersion = 2;
+  badReason.ast.astData.meter.remainingCredit = "";
+  badReason.ast.astData.meter.remainingCreditComment = "Not an approved reason";
+  expectCode(badReason, "INVALID_REMAINING_CREDIT_COMMENT");
+
+  const staleReason = baseElectricity();
+  staleReason.meterDiscoveryContractVersion = 2;
+  staleReason.ast.astData.meter.remainingCredit = "3";
+  staleReason.ast.astData.meter.remainingCreditComment = "Other";
+  staleReason.media.push(...media("remainingCreditPhoto"));
+  expectCode(staleReason, "REMAINING_CREDIT_COMMENT_NOT_ALLOWED");
+});
+
+test("contract v2 conventional Meter Discovery does not require Remaining Credit", () => {
+  const electricity = baseElectricity();
+  electricity.meterDiscoveryContractVersion = 2;
+  electricity.ast.astData.meter.type = "conventional";
+  electricity.ast.astData.meter.keypad = { serialNo: "", comment: "" };
+  electricity.media = electricity.media.filter((item) => item.tag !== "keypadPhoto");
+  expectPass(electricity);
+
+  const water = baseWater("conventional");
+  water.meterDiscoveryContractVersion = 2;
+  expectPass(water);
+});
+
+test("contract v2 Remaining Credit photo requires a usable URI or URL", () => {
+  const payload = baseElectricity();
+  payload.meterDiscoveryContractVersion = 2;
+  payload.ast.astData.meter.remainingCredit = "1";
+  payload.ast.astData.meter.remainingCreditComment = "";
+  payload.media.push({ tag: "remainingCreditPhoto" });
+  expectCode(payload, "REMAINING_CREDIT_PHOTO_REQUIRED");
+});
