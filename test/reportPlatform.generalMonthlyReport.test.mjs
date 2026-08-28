@@ -51,13 +51,21 @@ function makeRow(index) {
     ward: `Ward ${(index % 3) + 2}`,
     areaWorkbase: "Endumeni",
     erf: String(1000 + index),
+    streetNo: String(index + 1),
     streetNumber: String(index + 1),
-    streetName: "Example Street",
+    streetName: "Example",
+    streetType: "Street",
+    suburbName: "Example Suburb",
     fullAddress: `${index + 1} Example Street`,
+    batchId: index === 0 ? "AD HOC" : `TB_${index}`,
+    areaName: "Example Suburb",
     propertyType: "Residential",
+    propertyName: index === 1 ? null : `Property ${index}`,
+    propertyUnitNo: index === 1 ? null : `Unit ${index}`,
     investigationStatus: "Completed",
     investigationDate: "2026-06-15T10:00:00.000Z",
     fieldWorkerName: `Field Worker ${index}`,
+    fieldStatsTeam: index < 2 ? "Kaiser Team" : index < 5 ? "Peter Team" : "Unassigned",
     captureDate: "2026-06-15T10:00:00.000Z",
     gpsCoordinates: `-28.12${index}, 30.65${index}`,
     photoUrls: index === 0
@@ -74,9 +82,12 @@ function makeRow(index) {
     normalisation: index === 0
       ? "Meter number corrected • Address corrected"
       : null,
+    sealNo: index === 0 ? "SEAL-001" : null,
+    fieldComment: index === 0 ? "Customer present during audit." : null,
     propertyAccessible: "Yes",
     meterExists: "Yes",
     meterNumberVerified: invisible ? "Incorrect" : "Correct",
+    sameDifferent: invisible ? "Different" : "Same",
     meterAccessible: "Yes",
     meterKind: "prepaid",
     meterMode: "Prepaid",
@@ -195,32 +206,53 @@ test("GMR workbook contains Financial Analysis plus dedicated Field Data and Fie
 
 test("Field Data is independent from Financial Analysis and keeps only the currently approved columns", () => {
   const dataset = makeDataset();
+  dataset.zamoReport.photoColumnCount = 1;
+  dataset.rows[2].batchId = null;
+  dataset.rows[2].streetNo = null;
+  dataset.rows[2].streetName = null;
+  dataset.rows[2].streetType = null;
+  dataset.rows[2].suburbName = null;
+  dataset.rows[2].sameDifferent = null;
+  dataset.rows[2].sealNo = null;
+  dataset.rows[2].fieldComment = null;
   const artifact = buildGmrExcelArtifact({ dataset, fileName: "gmr_zamo.xlsx" });
   const workbook = XLSX.read(artifact.bytes, { type: "array", cellDates: true });
   const zamo = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1 });
 
   assert.deepEqual(zamo[0], [
-    "Original / Project Meter Number",
-    "Field-Found Meter Number",
-    "Address",
-    "GPS Coordinates",
-    "Field Worker Name",
     "Capture Date",
+    "Field Worker Name",
+    "Batch ID",
+    "Street No",
+    "Street Name",
+    "Street Type",
+    "SuburbName",
+    "GPS Coordinates",
+    "Ward",
     "Property Type",
+    "Property Name",
+    "Unit No",
     "Meter Mode",
     "Meter Phase",
+    "Original / Project Meter Number",
+    "Field-Found Meter Number",
+    "Same/Different",
     "Primary Finding",
     "Finding Explanation",
+    "Normalisation",
+    "Seal No",
+    "Comment",
     "Photo 1",
     "Photo 2",
     "Photo 3",
     "Photo 4",
     "Photo 5",
     "Photo 6",
-    "Normalisation",
   ]);
 
   [
+    "Address",
+    "Area Name",
     "Sales Category",
     "Target Category (1-8)",
     "Registry Visibility",
@@ -239,7 +271,27 @@ test("Field Data is independent from Financial Analysis and keeps only the curre
     assert.equal(zamo[0].includes(removedHeader), false);
   });
 
+  assert.equal(zamo[1][zamo[0].indexOf("Batch ID")], "AD HOC");
+  assert.equal(zamo[3][zamo[0].indexOf("Batch ID")], "AD HOC");
+  assert.equal(zamo[1][zamo[0].indexOf("Street No")], "1");
+  assert.equal(zamo[1][zamo[0].indexOf("Street Name")], "Example");
+  assert.equal(zamo[1][zamo[0].indexOf("Street Type")], "Street");
+  assert.equal(zamo[1][zamo[0].indexOf("SuburbName")], "Example Suburb");
+  assert.equal(zamo[3][zamo[0].indexOf("Street No")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Street Name")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Street Type")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("SuburbName")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Same/Different")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Seal No")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Comment")], "NAv");
   assert.equal(zamo[1][zamo[0].indexOf("Property Type")], "Residential");
+  assert.equal(zamo[1][zamo[0].indexOf("Property Name")], "Property 0");
+  assert.equal(zamo[1][zamo[0].indexOf("Unit No")], "Unit 0");
+  assert.equal(zamo[2][zamo[0].indexOf("Property Name")], "NAv");
+  assert.equal(zamo[2][zamo[0].indexOf("Unit No")], "NAv");
+  assert.equal(zamo[1][zamo[0].indexOf("Same/Different")], "Different");
+  assert.equal(zamo[1][zamo[0].indexOf("Seal No")], "SEAL-001");
+  assert.equal(zamo[1][zamo[0].indexOf("Comment")], "Customer present during audit.");
   assert.equal(zamo[1][zamo[0].indexOf("Meter Mode")], "Prepaid");
   assert.equal(zamo[1][zamo[0].indexOf("Meter Phase")], "Single Phase");
   assert.equal(zamo[1][zamo[0].indexOf("Primary Finding")], "Illegally Connected");
@@ -269,6 +321,11 @@ test("Field Stats counts each Field Data transaction exactly once in normalisati
   dataset.rows[0].fieldWorkerName = "Worker B";
   dataset.rows[1].fieldWorkerName = "Worker A";
   dataset.rows[2].fieldWorkerName = "Worker A";
+  dataset.rows[0].fieldStatsTeam = "Kaiser Team";
+  dataset.rows[1].fieldStatsTeam = "Kaiser Team";
+  dataset.rows[2].fieldStatsTeam = "Peter Team";
+  dataset.rows[3].primaryFinding = null;
+  dataset.rows[3].findingDetail = "Meter Damaged";
   dataset.rows[0].normalisation = "Meter Disconnection • Issue Fine";
   dataset.rows[1].normalisation = "Issue Fine";
   dataset.rows[2].normalisation = null;
@@ -317,6 +374,33 @@ test("Field Stats counts each Field Data transaction exactly once in normalisati
     totalAuditRow.slice(2),
     "Normalisation totals must reconcile to inspections completed for every field worker and overall.",
   );
+
+  const teamsHeaderIndex = stats.findIndex((row) => row[0] === "Teams" && row[1] === "METER STATUS");
+  assert.ok(teamsHeaderIndex > 0);
+  const teamsHeader = stats[teamsHeaderIndex];
+  assert.ok(teamsHeader.includes("Kaiser Team"));
+  assert.ok(teamsHeader.includes("Peter Team"));
+  assert.ok(teamsHeader.includes("Unassigned"));
+  const teamTotalColumnIndex = teamsHeader.indexOf("TOTAL");
+  assert.ok(teamTotalColumnIndex > 1);
+
+  const teamSection = stats.slice(teamsHeaderIndex + 1);
+  const teamIllegalRow = teamSection.find((row) => row[1] === "ILLEGALLY CONNECTED");
+  const teamDamagedRow = teamSection.find((row) => row[1] === "METER DAMAGED");
+  const teamFaultyRow = teamSection.find((row) => row[1] === "METER FAULTY");
+  const teamOkRow = teamSection.find((row) => row[1] === "METER OK");
+  const teamTotalRow = teamSection.find((row) => row[1] === "TOTAL: INSPECTIONS COMPLETED");
+
+  assert.ok(teamIllegalRow);
+  assert.ok(teamDamagedRow);
+  assert.ok(teamFaultyRow);
+  assert.ok(teamOkRow);
+  assert.ok(teamTotalRow);
+  assert.equal(teamTotalRow[teamTotalColumnIndex], dataset.rows.length);
+  assert.equal(teamIllegalRow[teamTotalColumnIndex], 2);
+  assert.equal(teamDamagedRow[teamTotalColumnIndex], 1);
+  assert.equal(teamFaultyRow[teamTotalColumnIndex], 0);
+  assert.equal(teamOkRow[teamTotalColumnIndex], 4);
 });
 
 test("GMR Excel preserves confirmed zero and renders missing purchase evidence as Not Available", () => {

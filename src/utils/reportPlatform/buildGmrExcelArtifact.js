@@ -23,9 +23,9 @@ const MASTER_SECTIONS = [
       column("ward", "Ward", "text", "Meter Registry / Premise Registry", "Ward derived from the authoritative ward PCode."),
       column("areaWorkbase", "Area / Workbase", "text", "GMR scope", "Operational workbase/area."),
       column("erf", "ERF", "text", "Meter Registry / Premise Registry", "Linked ERF number."),
-      column("streetNumber", "Street Number", "text", "Premise Registry", "Premise street number."),
-      column("streetName", "Street Name", "text", "Premise Registry", "Premise street name/type."),
-      column("fullAddress", "Full Address", "text", "Premise Registry / Sales", "Best available authoritative address."),
+      column("streetNumber", "Street Number", "text", "Premises", "Authoritative premise street number."),
+      column("streetName", "Street Name", "text", "Premises", "Authoritative premise street name."),
+      column("fullAddress", "Full Address", "text", "Premises / Sales", "Best available authoritative address."),
       column("batchAllocationReference", "Batch / Allocation Reference", "text", "Meter Discovery Targeted Batch context", "Targeted Batch and row reference when the discovery originated from a targeted batch."),
       column("team", "Team", "text", "Meter Discovery assignment", "Assigned/creating team where available."),
       column("serviceProvider", "Service Provider", "text", "Meter Discovery", "Service Provider captured on the Meter Discovery."),
@@ -40,7 +40,7 @@ const MASTER_SECTIONS = [
       column("propertyOccupiedActive", "Property Occupied / Active", "text", "Premise / field capture", "RSTE requested occupancy/active field; populated only when authoritative data exists."),
       column("propertyAccessible", "Property Accessible", "text", "Meter Discovery access", "Whether field access to the premise was recorded."),
       column("propertyCondition", "Property Condition", "text", "Premise / field capture", "RSTE requested property-condition field; populated only when authoritative data exists."),
-      column("propertyStatusFindingNotes", "Property Status / Finding Notes", "text", "Premise Registry", "Available premise-status context without inventing an RSTE classification."),
+      column("propertyStatusFindingNotes", "Property Status / Finding Notes", "text", "Premises", "Available premise-status context without inventing an RSTE classification."),
     ],
   },
   {
@@ -416,46 +416,65 @@ function buildFinancialSheet(rows = []) {
   return worksheet;
 }
 
-function getZamoReportBaseColumns() {
-  return [
-    column("originalProjectMeterNo", "Original / Project Meter Number", "text", "GMR", ""),
-    column("fieldFoundMeterNo", "Field-Found Meter Number", "text", "GMR", ""),
-  ];
-}
+const GMR_FIELD_DATA_PHOTO_COLUMN_COUNT = 6;
+const GMR_METER_STATUS_ORDER = [
+  "ILLEGALLY CONNECTED",
+  "METER DAMAGED",
+  "METER FAULTY",
+  "METER OK",
+];
 
-function getZamoReportColumns(photoColumnCount = 0) {
-  const baseColumns = getZamoReportBaseColumns();
-  const requestedColumns = [
-    column("fullAddress", "Address", "text", "Premise Registry / Sales", ""),
-    column("gpsCoordinates", "GPS Coordinates", "text", "Meter Discovery", ""),
-    column("fieldWorkerName", "Field Worker Name", "text", "Meter Discovery metadata", ""),
-    column("captureDate", "Capture Date", "date", "Meter Discovery metadata", ""),
-    column("propertyType", "Property Type", "text", "Premise Registry", ""),
-    column("meterMode", "Meter Mode", "text", "Meter Registry / Meter Discovery", ""),
-    column("meterPhase", "Meter Phase", "text", "Meter Registry / Meter Discovery", ""),
-    column("primaryFinding", "Primary Finding", "text", "Meter Discovery anomaly", ""),
-    column("findingDetail", "Finding Explanation", "text", "Meter Discovery anomaly detail", ""),
-  ];
-  const photoColumns = Array.from({ length: photoColumnCount }, (_, index) =>
+function getZamoReportColumns() {
+  const photoColumns = Array.from({ length: GMR_FIELD_DATA_PHOTO_COLUMN_COUNT }, (_, index) =>
     column(`photoUrls.${index}`, `Photo ${index + 1}`, "photo", "Meter Discovery media", ""),
   );
+
   return [
-    ...baseColumns,
-    ...requestedColumns,
-    ...photoColumns,
+    column("captureDate", "Capture Date", "date", "Meter Discovery metadata", ""),
+    column("fieldWorkerName", "Field Worker Name", "text", "Meter Discovery metadata", ""),
+    column("batchId", "Batch ID", "text", "Meter Discovery targeted batch context", ""),
+    column("streetNo", "Street No", "text", "Premises address.strNo", ""),
+    column("streetName", "Street Name", "text", "Premises address.strName", ""),
+    column("streetType", "Street Type", "text", "Premises address.strType", ""),
+    column("suburbName", "SuburbName", "text", "Premises address.suburbName", ""),
+    column("gpsCoordinates", "GPS Coordinates", "text", "Meter Discovery", ""),
+    column("ward", "Ward", "text", "Meter Registry / Premises", ""),
+    column("propertyType", "Property Type", "text", "Premises propertyType.type", ""),
+    column("propertyName", "Property Name", "text", "Premises propertyType.name", ""),
+    column("propertyUnitNo", "Unit No", "text", "Premises propertyType.unitNo", ""),
+    column("meterMode", "Meter Mode", "text", "Meter Registry / Meter Discovery", ""),
+    column("meterPhase", "Meter Phase", "text", "Meter Registry / Meter Discovery", ""),
+    column("originalProjectMeterNo", "Original / Project Meter Number", "text", "GMR", ""),
+    column("fieldFoundMeterNo", "Field-Found Meter Number", "text", "GMR", ""),
+    column("sameDifferent", "Same/Different", "text", "GMR meter reconciliation", ""),
+    column("primaryFinding", "Primary Finding", "text", "Meter Discovery anomaly", ""),
+    column("findingDetail", "Finding Explanation", "text", "Meter Discovery anomaly detail", ""),
     column("normalisation", "Normalisation", "text", "Meter Discovery normalisation", ""),
+    column("sealNo", "Seal No", "text", "Meter Discovery meter seal", ""),
+    column("fieldComment", "Comment", "text", "Meter Discovery General Comment", ""),
+    ...photoColumns,
   ];
 }
 
-function buildZamoReportData(rows = [], photoColumnCount = 0) {
-  const columns = getZamoReportColumns(photoColumnCount);
-  const values = rows.map((row) => columns.map((item) => {
-    if (item.type === "photo") {
-      const url = getPath(row, item.key);
-      return url ? item.header : "";
-    }
-    return normalizeCell(getPath(row, item.key), item.type);
-  }));
+function normalizeZamoFieldDataCell(row, item) {
+  if (item.type === "photo") {
+    const url = getPath(row, item.key);
+    return url ? item.header : "";
+  }
+
+  const value = getPath(row, item.key);
+  if (item.key === "batchId") {
+    return value === null || value === undefined || value === "" ? "AD HOC" : value;
+  }
+  const normalized = normalizeCell(value, item.type);
+  return normalized === GMR_NOT_AVAILABLE ? "NAv" : normalized;
+}
+
+function buildZamoReportData(rows = []) {
+  const columns = getZamoReportColumns();
+  const values = rows.map((row) => columns.map((item) =>
+    normalizeZamoFieldDataCell(row, item),
+  ));
 
   const records = values.map((rowValues) => Object.fromEntries(
     columns.map((item, index) => [item.header, rowValues[index]]),
@@ -464,8 +483,8 @@ function buildZamoReportData(rows = [], photoColumnCount = 0) {
   return { columns, values, records };
 }
 
-function buildZamoReportSheet(rows = [], photoColumnCount = 0) {
-  const data = buildZamoReportData(rows, photoColumnCount);
+function buildZamoReportSheet(rows = []) {
+  const data = buildZamoReportData(rows);
   const aoa = [data.columns.map((item) => item.header), ...data.values];
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
@@ -499,6 +518,20 @@ function zamoStatsLabel(value) {
   return text && text !== GMR_NOT_AVAILABLE ? text.toUpperCase() : GMR_NOT_AVAILABLE.toUpperCase();
 }
 
+function zamoMeterStatusLabel(row = {}) {
+  const primary = zamoStatsLabel(row?.primaryFinding);
+  if (primary !== GMR_NOT_AVAILABLE.toUpperCase()) return primary;
+  return zamoStatsLabel(row?.findingDetail);
+}
+
+function orderedZamoMeterStatuses(rows = []) {
+  const observed = new Set(rows.map((row) => zamoMeterStatusLabel(row)));
+  const additional = [...observed]
+    .filter((label) => !GMR_METER_STATUS_ORDER.includes(label))
+    .sort((left, right) => left.localeCompare(right));
+  return [...GMR_METER_STATUS_ORDER, ...additional];
+}
+
 function zamoNormalisationLabel(value) {
   return zamoStatsLabel(value);
 }
@@ -513,30 +546,50 @@ function zamoStatsPeriodLabel(generatedAt) {
   }).toUpperCase();
 }
 
-function buildZamoStatsSheet(zamoRecords = [], generatedAt) {
-  const workers = [...new Set(zamoRecords.map((record) => {
-    const value = String(record["Field Worker Name"] || "").trim();
+function buildZamoStatsSheet(rows = [], generatedAt) {
+  const workers = [...new Set(rows.map((row) => {
+    const value = String(row?.fieldWorkerName || "").trim();
     return value || GMR_NOT_AVAILABLE;
   }))].sort((left, right) => left.localeCompare(right));
+  const teams = [...new Set(rows.map((row) => {
+    const value = String(row?.fieldStatsTeam || "").trim();
+    return value || "Unassigned";
+  }))].sort((left, right) => left.localeCompare(right));
+  const statuses = orderedZamoMeterStatuses(rows);
 
   const workerCounts = new Map(workers.map((worker) => [worker, 0]));
-  const findingCounts = new Map();
+  const workerFindingCounts = new Map(
+    statuses.map((status) => [status, new Map(workers.map((worker) => [worker, 0]))]),
+  );
+  const teamCounts = new Map(teams.map((team) => [team, 0]));
+  const teamFindingCounts = new Map(
+    statuses.map((status) => [status, new Map(teams.map((team) => [team, 0]))]),
+  );
 
-  zamoRecords.forEach((record) => {
-    const worker = String(record["Field Worker Name"] || "").trim() || GMR_NOT_AVAILABLE;
+  rows.forEach((row) => {
+    const worker = String(row?.fieldWorkerName || "").trim() || GMR_NOT_AVAILABLE;
+    const team = String(row?.fieldStatsTeam || "").trim() || "Unassigned";
+    const finding = zamoMeterStatusLabel(row);
+
     workerCounts.set(worker, (workerCounts.get(worker) || 0) + 1);
+    teamCounts.set(team, (teamCounts.get(team) || 0) + 1);
 
-    const finding = zamoStatsLabel(record["Primary Finding"]);
-    if (!findingCounts.has(finding)) {
-      findingCounts.set(finding, new Map(workers.map((item) => [item, 0])));
+    if (!workerFindingCounts.has(finding)) {
+      workerFindingCounts.set(finding, new Map(workers.map((item) => [item, 0])));
     }
-    const counts = findingCounts.get(finding);
-    counts.set(worker, (counts.get(worker) || 0) + 1);
+    if (!teamFindingCounts.has(finding)) {
+      teamFindingCounts.set(finding, new Map(teams.map((item) => [item, 0])));
+    }
+    const workerStatusCounts = workerFindingCounts.get(finding);
+    const teamStatusCounts = teamFindingCounts.get(finding);
+    workerStatusCounts.set(worker, (workerStatusCounts.get(worker) || 0) + 1);
+    teamStatusCounts.set(team, (teamStatusCounts.get(team) || 0) + 1);
   });
 
   const period = zamoStatsPeriodLabel(generatedAt);
-  const lastColumnIndex = workers.length + 2;
-  const lastColumnLetter = XLSX.utils.encode_col(lastColumnIndex);
+  const maxGroupColumns = Math.max(workers.length, teams.length);
+  const lastColumnIndex = maxGroupColumns + 2;
+  const lastColumnLetter = XLSX.utils.encode_col(workers.length + 2);
   const aoa = [];
   const merges = [];
 
@@ -544,18 +597,17 @@ function buildZamoStatsSheet(zamoRecords = [], generatedAt) {
   merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: lastColumnIndex } });
   aoa.push(["ITEM", "METER STATUS", ...workers, "TOTAL"]);
 
-  [...findingCounts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .forEach(([finding, counts], index) => {
-      const values = workers.map((worker) => counts.get(worker) || 0);
-      aoa.push([index + 1, finding, ...values, values.reduce((sum, value) => sum + value, 0)]);
-    });
+  statuses.forEach((finding, index) => {
+    const counts = workerFindingCounts.get(finding) || new Map();
+    const values = workers.map((worker) => counts.get(worker) || 0);
+    aoa.push([index + 1, finding, ...values, values.reduce((sum, value) => sum + value, 0)]);
+  });
 
   aoa.push([
     "",
     "TOTAL: INSPECTIONS COMPLETED",
     ...workers.map((worker) => workerCounts.get(worker) || 0),
-    zamoRecords.length,
+    rows.length,
   ]);
   const auditEndRow = aoa.length;
   aoa.push([]);
@@ -565,9 +617,9 @@ function buildZamoStatsSheet(zamoRecords = [], generatedAt) {
   merges.push({ s: { r: normalisationTitleRow, c: 0 }, e: { r: normalisationTitleRow, c: lastColumnIndex } });
 
   const actionCounts = new Map();
-  zamoRecords.forEach((record) => {
-    const worker = String(record["Field Worker Name"] || "").trim() || GMR_NOT_AVAILABLE;
-    const label = zamoNormalisationLabel(record.Normalisation);
+  rows.forEach((row) => {
+    const worker = String(row?.fieldWorkerName || "").trim() || GMR_NOT_AVAILABLE;
+    const label = zamoNormalisationLabel(row?.normalisation);
     if (!actionCounts.has(label)) {
       actionCounts.set(label, new Map(workers.map((item) => [item, 0])));
     }
@@ -587,7 +639,22 @@ function buildZamoStatsSheet(zamoRecords = [], generatedAt) {
     "",
     "TOTAL: NORMALISATION",
     ...workerNormalisationTotals,
-    zamoRecords.length,
+    rows.length,
+  ]);
+
+  aoa.push([]);
+  aoa.push([]);
+  aoa.push(["Teams", "METER STATUS", ...teams, "TOTAL"]);
+  statuses.forEach((finding, index) => {
+    const counts = teamFindingCounts.get(finding) || new Map();
+    const values = teams.map((team) => counts.get(team) || 0);
+    aoa.push([index + 1, finding, ...values, values.reduce((sum, value) => sum + value, 0)]);
+  });
+  aoa.push([
+    "",
+    "TOTAL: INSPECTIONS COMPLETED",
+    ...teams.map((team) => teamCounts.get(team) || 0),
+    rows.length,
   ]);
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
@@ -595,7 +662,7 @@ function buildZamoStatsSheet(zamoRecords = [], generatedAt) {
   worksheet["!cols"] = [
     { wch: 8 },
     { wch: 42 },
-    ...workers.map(() => ({ wch: 18 })),
+    ...Array.from({ length: maxGroupColumns }, () => ({ wch: 18 })),
     { wch: 12 },
   ];
   worksheet["!freeze"] = { xSplit: 2, ySplit: 2, topLeftCell: "C3", activePane: "bottomRight", state: "frozen" };
@@ -722,14 +789,11 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   );
   XLSX.utils.book_append_sheet(workbook, intervention.worksheet, sheetName("Intervention & Recovery Detail"));
   XLSX.utils.book_append_sheet(workbook, buildFinancialSheet(dataset.rows), sheetName("Financial Analysis"));
-  const zamoReport = buildZamoReportSheet(
-    dataset.rows,
-    Number(dataset?.zamoReport?.photoColumnCount || 0),
-  );
+  const zamoReport = buildZamoReportSheet(dataset.rows);
   XLSX.utils.book_append_sheet(workbook, zamoReport.worksheet, sheetName("Field Data"));
   XLSX.utils.book_append_sheet(
     workbook,
-    buildZamoStatsSheet(zamoReport.data.records, dataset.generatedAt),
+    buildZamoStatsSheet(dataset.rows, dataset.generatedAt),
     sheetName("Field Stats"),
   );
   XLSX.utils.book_append_sheet(workbook, buildExceptionsSheet(dataset.exceptions || []), sheetName("Reconciliation Exceptions"));
