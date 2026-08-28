@@ -28,6 +28,15 @@ function nullableText(value) {
   return text;
 }
 
+function titleCaseAddressPart(value) {
+  const text = nullableText(value);
+  if (!text) return null;
+
+  return text
+    .toLowerCase()
+    .replace(/(^|[\s\-'])\p{L}/gu, (match) => match.toUpperCase());
+}
+
 function normalizeUpper(value) {
   return cleanText(value).toUpperCase();
 }
@@ -316,19 +325,55 @@ export function buildZamoReportPhotoConfig(rows = []) {
   };
 }
 
-function getPremisePropertyType(premise = {}, registry = {}) {
-  const premisePropertyType = premise?.propertyType;
-  const registryPropertyType = registry?.premisePropertyType;
+function getPremisePropertyType(premise = {}) {
+  return nullableText(premise?.propertyType?.type);
+}
 
-  return (
-    nullableText(premisePropertyType?.name) ||
-    nullableText(premisePropertyType?.type) ||
-    (typeof premisePropertyType === "string" ? nullableText(premisePropertyType) : null) ||
-    nullableText(registryPropertyType?.name) ||
-    nullableText(registryPropertyType?.type) ||
-    (typeof registryPropertyType === "string" ? nullableText(registryPropertyType) : null) ||
-    null
-  );
+function getPremisePropertyName(premise = {}) {
+  return nullableText(premise?.propertyType?.name);
+}
+
+function getPremisePropertyUnitNo(premise = {}) {
+  return nullableText(premise?.propertyType?.unitNo);
+}
+
+export function buildGmrTeamMembershipIndex(teams = []) {
+  const teamsByUserUid = new Map();
+
+  teams.forEach((team) => {
+    const data = team?.data || team || {};
+    const teamId = cleanText(team?.id || data?.id);
+    const teamName = nullableText(data?.team?.name || data?.name || teamId);
+    const status = normalizeUpper(data?.team?.status || data?.status);
+    if (!teamId || !teamName || teamName === "-" || status !== "ACTIVE") return;
+
+    const memberUserIds = Array.isArray(data?.scope?.memberUserIds)
+      ? data.scope.memberUserIds
+      : Array.isArray(data?.memberUserIds)
+        ? data.memberUserIds
+        : [];
+
+    Array.from(new Set(memberUserIds.map((uid) => cleanText(uid)).filter(Boolean)))
+      .forEach((userUid) => {
+        const memberships = teamsByUserUid.get(userUid) || [];
+        memberships.push({ id: teamId, name: teamName });
+        teamsByUserUid.set(userUid, memberships);
+      });
+  });
+
+  return teamsByUserUid;
+}
+
+export function resolveGmrFieldStatsTeam(userUid, teamsByUserUid = new Map()) {
+  const cleanUid = cleanText(userUid);
+  const memberships = cleanUid ? teamsByUserUid.get(cleanUid) || [] : [];
+  const uniqueMemberships = Array.from(
+    new Map(memberships.map((team) => [team.id, team])).values(),
+  ).sort((left, right) => left.name.localeCompare(right.name));
+
+  if (uniqueMemberships.length === 1) return uniqueMemberships[0].name;
+  if (uniqueMemberships.length > 1) return "Multiple";
+  return "Unassigned";
 }
 
 function displayMeterMode(value) {
@@ -363,8 +408,8 @@ function buildFullAddress(premise = {}, registry = {}, sales = {}) {
   const premiseAddress = premise?.address || {};
   const parts = [
     nullableText(premiseAddress?.strNo),
-    nullableText(premiseAddress?.strName),
-    nullableText(premiseAddress?.strType),
+    titleCaseAddressPart(premiseAddress?.strName),
+    titleCaseAddressPart(premiseAddress?.strType),
   ].filter(Boolean);
 
   if (parts.length) return parts.join(" ");
@@ -765,6 +810,7 @@ export function buildCanonicalGmrMeterRow({
   fieldSalesEntry,
   sourceSalesEntry,
   lifecycleTrns = [],
+  fieldStatsTeam = "Unassigned",
 }) {
   const discovery = discoveryEntry?.data || {};
   const premise = premiseEntry?.data || {};
@@ -802,6 +848,11 @@ export function buildCanonicalGmrMeterRow({
     ? originalProjectMeterNo === fieldFoundMeterNo
       ? "Correct"
       : "Incorrect"
+    : null;
+  const sameDifferent = originalProjectMeterNo && fieldFoundMeterNo
+    ? originalProjectMeterNo === fieldFoundMeterNo
+      ? "Same"
+      : "Different"
     : null;
   const rawMeterKind = nullableText(
     registry?.meterKind || discovery?.ast?.astData?.meter?.type,
@@ -852,15 +903,19 @@ export function buildCanonicalGmrMeterRow({
     wardPcode,
     areaWorkbase: GMR_LM_NAME,
     erf: nullableText(registry?.erfNo || discovery?.accessData?.erfNo || premise?.erfNo),
+    streetNo: nullableText(premise?.address?.strNo),
     streetNumber: nullableText(premise?.address?.strNo),
-    streetName: [nullableText(premise?.address?.strName), nullableText(premise?.address?.strType)]
-      .filter(Boolean)
-      .join(" ") || null,
+    streetName: titleCaseAddressPart(premise?.address?.strName),
+    streetType: titleCaseAddressPart(premise?.address?.strType),
+    suburbName: nullableText(premise?.address?.suburbName),
     fullAddress,
+    areaName: nullableText(premise?.address?.suburbName),
+    batchId: nullableText(targetedContext?.tbId) || "AD HOC",
     batchAllocationReference: targetedContext?.tbId
       ? `${targetedContext.tbId}${targetedContext?.rowId ? ` / ${targetedContext.rowId}` : ""}`
       : null,
     team: resolveTeamName(discovery),
+    fieldStatsTeam: nullableText(fieldStatsTeam) || "Unassigned",
     serviceProvider: nullableText(discovery?.serviceProvider?.name),
     investigationStatus: discoveryEntry ? "Completed" : null,
     investigationDate,
@@ -869,18 +924,23 @@ export function buildCanonicalGmrMeterRow({
     gpsCoordinates: getDiscoveryGpsCoordinates(discovery),
     photoUrls: getDiscoveryPhotoUrls(discovery),
     normalisation: getDiscoveryNormalisation(discovery),
+    sealNo: nullableText(discovery?.ast?.astData?.meter?.seal?.sealNo),
+    fieldComment: nullableText(discovery?.fieldComment?.text),
 
     propertyExists: null,
-    propertyType: getPremisePropertyType(premise, registry),
+    propertyType: getPremisePropertyType(premise),
+    propertyName: getPremisePropertyName(premise),
+    propertyUnitNo: getPremisePropertyUnitNo(premise),
     propertyOccupiedActive: null,
     propertyAccessible: normalizeUpper(discovery?.accessData?.access?.hasAccess) === "YES" ? "Yes" : null,
     propertyCondition: null,
     propertyStatusFindingNotes: premise?.occupancy?.status
-      ? `Premise registry occupancy status: ${premise.occupancy.status}`
+      ? `Premises occupancy status: ${premise.occupancy.status}`
       : null,
 
     meterExists: fieldFoundMeterNo ? "Yes" : null,
     meterNumberVerified,
+    sameDifferent,
     meterOperational: null,
     meterAccessible: normalizeUpper(discovery?.accessData?.access?.hasAccess) === "YES" ? "Yes" : null,
     meterInstallation: null,
@@ -934,13 +994,14 @@ export async function buildGeneralMonthlyReportDataset({
   if (lmPcode !== GMR_LM_PCODE) {
     throw new RangeError(`GMR Builder v0.1 is locked to ${GMR_LM_PCODE}.`);
   }
-  const [registrySnapshot, trnSnapshot] = await Promise.all([
+  const [registrySnapshot, trnSnapshot, teamsSnapshot] = await Promise.all([
     db.collection("registry_meters")
       .where("parents.lmPcode", "==", lmPcode)
       .get(),
     db.collection("trns")
       .where("accessData.parents.lmPcode", "==", lmPcode)
       .get(),
+    db.collection("teams").get(),
   ]);
 
   const registryMeters = registrySnapshot.docs.map((snapshot) => ({
@@ -948,6 +1009,12 @@ export async function buildGeneralMonthlyReportDataset({
     ...(snapshot.data() || {}),
   }));
   const selection = selectGmrPopulationMeters(registryMeters);
+  const teamsByUserUid = buildGmrTeamMembershipIndex(
+    teamsSnapshot.docs.map((snapshot) => ({
+      id: snapshot.id,
+      data: snapshot.data() || {},
+    })),
+  );
 
   const trnById = new Map();
   const lifecycleByAstId = new Map();
@@ -977,7 +1044,7 @@ export async function buildGeneralMonthlyReportDataset({
   });
 
   const premiseIds = selection.selected.map((registry) => registry?.premiseId);
-  const premisesById = await getDocsByIds(db, "registry_premises", premiseIds);
+  const premisesById = await getDocsByIds(db, "premises", premiseIds);
 
   const fieldSalesIds = [];
   const sourceSalesIds = [];
@@ -1014,6 +1081,10 @@ export async function buildGeneralMonthlyReportDataset({
     const sourceSalesEntry = configuredSourceSalesEntry || fieldSalesEntry || null;
     const lifecycleTrns = lifecycleByAstId.get(meterId) || [];
 
+    const fieldStatsTeam = resolveGmrFieldStatsTeam(
+      discoveryEntry?.data?.metadata?.createdByUid,
+      teamsByUserUid,
+    );
     const row = buildCanonicalGmrMeterRow({
       registry,
       discoveryEntry,
@@ -1021,6 +1092,7 @@ export async function buildGeneralMonthlyReportDataset({
       fieldSalesEntry,
       sourceSalesEntry,
       lifecycleTrns,
+      fieldStatsTeam,
     });
     rows.push(row);
     interventionEvents.push(...row.lifecycleEvents);
@@ -1039,9 +1111,9 @@ export async function buildGeneralMonthlyReportDataset({
       exceptions.push(buildException({
         meter: row,
         type: "PREMISE_REGISTRY_NOT_FOUND",
-        source: "registry_meters -> registry_premises",
+        source: "registry_meters -> premises",
         severity: "ERROR",
-        details: "The linked Premise Registry row was not found.",
+        details: "The linked authoritative Premises document was not found.",
       }));
     }
 

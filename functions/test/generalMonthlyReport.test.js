@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildCanonicalGmrMeterRow,
+  buildGmrTeamMembershipIndex,
   buildZamoReportPhotoConfig,
   GMR_MONTH_KEYS,
+  resolveGmrFieldStatsTeam,
   selectGmrPopulationMeters,
 } from "../reports/generalMonthlyReport.js";
 
@@ -58,6 +61,22 @@ test("GMR full population includes every Endumeni registry meter in deterministi
   );
 });
 
+test("GMR premise enrichment reads the authoritative premises collection", () => {
+  const source = readFileSync(
+    new URL("../reports/generalMonthlyReport.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /getDocsByIds\(db,\s*"premises",\s*premiseIds\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /getDocsByIds\(db,\s*"registry_premises",\s*premiseIds\)/,
+  );
+});
+
 test("Invisible field-found meter can retain project Sales history through targetedBatchContext", () => {
   const registry = registryMeter(1, "INVISIBLE");
   registry.meterNo = "FIELD999";
@@ -80,7 +99,11 @@ test("Invisible field-found meter can retain project Sales history through targe
       ast: {
         astData: {
           astNo: "FIELD999",
-          meter: { type: "prepaid", phase: "single" },
+          meter: {
+            type: "prepaid",
+            phase: "single",
+            seal: { sealNo: "SEAL-001" },
+          },
         },
         anomalies: {
           anomaly: "Illegally Connected",
@@ -102,8 +125,10 @@ test("Invisible field-found meter can retain project Sales history through targe
       },
       metadata: {
         createdAt: "2026-06-15T10:00:00.000Z",
+        createdByUid: "USER_1",
         createdByUser: "Field Worker One",
       },
+      fieldComment: { text: "Meter audit completed with customer present." },
       media: [
         { url: "https://example.test/photo-1.jpg" },
         { url: "https://example.test/photo-2.jpg" },
@@ -116,8 +141,13 @@ test("Invisible field-found meter can retain project Sales history through targe
     id: registry.premiseId,
     data: {
       erfNo: registry.erfNo,
-      address: { strNo: "1", strName: "Example", strType: "Street" },
-      propertyType: { name: "Residential", type: "RESIDENTIAL" },
+      address: {
+        strNo: "14A",
+        strName: "vAN rENSBURG",
+        strType: "sTREET",
+        suburbName: "Example Suburb",
+      },
+      propertyType: { name: "Block A", type: "Residential", unitNo: "A1" },
       occupancy: { status: "Accessed" },
       parents: registry.parents,
     },
@@ -145,6 +175,7 @@ test("Invisible field-found meter can retain project Sales history through targe
     fieldSalesEntry: null,
     sourceSalesEntry,
     lifecycleTrns: [],
+    fieldStatsTeam: "Kaiser Team",
   });
 
   assert.equal(row.registryVisibility, "Invisible");
@@ -159,6 +190,13 @@ test("Invisible field-found meter can retain project Sales history through targe
   assert.equal(row.monthlyPurchases["2026-05"], 250);
   assert.equal(row.monthlyPurchases["2026-03"], null);
   assert.equal(row.meterNumberVerified, "Incorrect");
+  assert.equal(row.sameDifferent, "Different");
+  assert.equal(row.batchId, "TB_1");
+  assert.equal(row.streetNo, "14A");
+  assert.equal(row.streetName, "Van Rensburg");
+  assert.equal(row.streetType, "Street");
+  assert.equal(row.suburbName, "Example Suburb");
+  assert.equal(row.fullAddress, "14A Van Rensburg Street");
   assert.equal(row.primaryFinding, "Illegally Connected");
   assert.equal(row.findingDetail, "Straight Connection (Meter Bypass)");
   assert.equal(row.fieldWorkerName, "Field Worker One");
@@ -170,8 +208,100 @@ test("Invisible field-found meter can retain project Sales history through targe
   ]);
   assert.equal(row.normalisation, "Meter number corrected • Address corrected");
   assert.equal(row.propertyType, "Residential");
+  assert.equal(row.propertyName, "Block A");
+  assert.equal(row.propertyUnitNo, "A1");
+  assert.equal(row.sealNo, "SEAL-001");
+  assert.equal(row.fieldComment, "Meter audit completed with customer present.");
+  assert.equal(row.fieldStatsTeam, "Kaiser Team");
   assert.equal(row.meterMode, "Prepaid");
   assert.equal(row.meterPhase, "Single Phase");
+});
+
+test("GMR Field Stats team attribution follows current team membership with Unassigned and Multiple handling", () => {
+  const index = buildGmrTeamMembershipIndex([
+    {
+      id: "TEAM_KAISER",
+      data: {
+        team: { name: "Kaiser Team", status: "ACTIVE" },
+        scope: { memberUserIds: ["USER_1", "USER_MULTI"] },
+      },
+    },
+    {
+      id: "TEAM_PETER",
+      data: {
+        team: { name: "Peter Team", status: "ACTIVE" },
+        scope: { memberUserIds: ["USER_2", "USER_MULTI"] },
+      },
+    },
+    {
+      id: "TEAM_INACTIVE",
+      data: {
+        team: { name: "Inactive Team", status: "INACTIVE" },
+        scope: { memberUserIds: ["USER_3"] },
+      },
+    },
+    {
+      id: "TEAM_STATUS_MISSING",
+      data: {
+        team: { name: "Status Missing Team" },
+        scope: { memberUserIds: ["USER_4"] },
+      },
+    },
+  ]);
+
+  assert.equal(resolveGmrFieldStatsTeam("USER_1", index), "Kaiser Team");
+  assert.equal(resolveGmrFieldStatsTeam("USER_2", index), "Peter Team");
+  assert.equal(resolveGmrFieldStatsTeam("USER_MULTI", index), "Multiple");
+  assert.equal(resolveGmrFieldStatsTeam("USER_3", index), "Unassigned");
+  assert.equal(resolveGmrFieldStatsTeam("USER_4", index), "Unassigned");
+  assert.equal(resolveGmrFieldStatsTeam("USER_UNKNOWN", index), "Unassigned");
+});
+
+test("GMR Same/Different stays unavailable when either meter number is missing", () => {
+  const registry = registryMeter(77, "INVISIBLE");
+  registry.meterNo = "FIELD_ONLY_001";
+  registry.meterKind = "prepaid";
+  registry.meterType = "electricity";
+  registry.meterPhase = "single";
+
+  const row = buildCanonicalGmrMeterRow({
+    registry,
+    discoveryEntry: {
+      id: registry.id,
+      data: {
+        accessData: {
+          trnType: "METER_DISCOVERY",
+          access: { hasAccess: "yes" },
+          parents: registry.parents,
+          erfNo: registry.erfNo,
+          premise: { id: registry.premiseId },
+        },
+        ast: {
+          astData: {
+            astNo: "FIELD_ONLY_001",
+            meter: { type: "prepaid", phase: "single" },
+          },
+          anomalies: {
+            anomaly: "Meter Ok",
+            anomalyDetail: "Meter Ok",
+          },
+          location: { gps: { lat: -28.1, lng: 30.6 } },
+        },
+        metadata: {
+          createdAt: "2026-06-15T10:00:00.000Z",
+          createdByUser: "Field Worker One",
+        },
+      },
+    },
+    premiseEntry: null,
+    fieldSalesEntry: null,
+    sourceSalesEntry: null,
+    lifecycleTrns: [],
+  });
+
+  assert.equal(row.originalProjectMeterNo, null);
+  assert.equal(row.fieldFoundMeterNo, "FIELD_ONLY_001");
+  assert.equal(row.sameDifferent, null);
 });
 
 test("Zamo Report photo columns follow current observed data up to the fixed six-photo ceiling", () => {
@@ -232,6 +362,8 @@ test("GMR row keeps confirmed financial zero separate from missing financial dat
     lifecycleTrns: [],
   });
 
+  assert.equal(row.batchId, "AD HOC");
+  assert.equal(row.sameDifferent, "Same");
   assert.equal(row.monthlyPurchases["2026-05"], 0);
   assert.equal(row.monthlyPurchases["2026-06"], 123.45);
   assert.equal(row.monthlyPurchases["2026-04"], null);
