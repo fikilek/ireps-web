@@ -140,6 +140,11 @@ const navSections = [
             path: "/dashboard/anomalies",
             allowedRoles: MANAGEMENT_ROLES,
           },
+          {
+            label: "Customer Categories",
+            path: "/dashboard/customer-categories",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
         ],
       },
       {
