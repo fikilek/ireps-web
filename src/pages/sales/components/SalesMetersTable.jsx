@@ -534,7 +534,14 @@ export default function SalesMetersTable({
   const classifiedRows = useMemo(
     () =>
       rows.map((row) => {
-        const classification = classifySalesStatus(row);
+        const classification = row?.salesWorkStatus
+          ? {
+              status: row.salesWorkStatus,
+              issues: Array.isArray(row?.salesWorkStatusIssues)
+                ? row.salesWorkStatusIssues
+                : [],
+            }
+          : classifySalesStatus(row);
 
         return {
           ...row,

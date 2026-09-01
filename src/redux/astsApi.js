@@ -52,6 +52,32 @@ function resolveLimit(arg, fallback = 5000) {
     : fallback;
 }
 
+function createSalesWorkStatusAstStreamState(status = "idle") {
+  return {
+    items: [],
+    sync: {
+      status,
+      fromCache: null,
+      error: null,
+    },
+  };
+}
+
+function mapSalesWorkStatusAstDoc(docSnap) {
+  const data = docSnap.data() || {};
+
+  return {
+    id: docSnap.id,
+    meterNo:
+      data?.ast?.astData?.astNo ||
+      data?.astData?.astNo ||
+      data?.master?.id ||
+      "",
+    masterId: data?.master?.id || "",
+    lmPcode: data?.accessData?.parents?.lmPcode || "",
+  };
+}
+
 export const astsApi = createApi({
   reducerPath: "astsApi",
   baseQuery: fakeBaseQuery(),
@@ -98,6 +124,68 @@ export const astsApi = createApi({
         await cacheEntryRemoved;
         unsubscribe();
       },
+    }),
+
+    getSalesWorkStatusAstsByLmPcode: builder.query({
+      queryFn: (lmPcode) => ({
+        data: createSalesWorkStatusAstStreamState(
+          resolveLmPcode(lmPcode) ? "syncing" : "ready",
+        ),
+      }),
+
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const normalizedLmPcode = resolveLmPcode(lmPcode);
+        if (!normalizedLmPcode) return;
+
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          const astsQuery = query(
+            collection(db, "asts"),
+            where("accessData.parents.lmPcode", "==", normalizedLmPcode),
+          );
+
+          unsubscribe = onSnapshot(
+            astsQuery,
+            { includeMetadataChanges: true },
+            (snapshot) => {
+              const fromCache = snapshot.metadata?.fromCache === true;
+              const items = snapshot.docs.map(mapSalesWorkStatusAstDoc);
+
+              updateCachedData((draft) => {
+                draft.items = items;
+                draft.sync.status = fromCache ? "syncing" : "ready";
+                draft.sync.fromCache = fromCache;
+                draft.sync.error = null;
+              });
+            },
+            (error) => {
+              console.error("âŒ [SALES_WORK_STATUS_AST_STREAM_ERROR]:", error);
+
+              updateCachedData((draft) => {
+                draft.sync.status = "error";
+                draft.sync.error = {
+                  code: error?.code || "AST_STREAM_ERROR",
+                  message:
+                    error?.message ||
+                    "Could not load AST evidence for Sales work status.",
+                };
+              });
+            },
+          );
+
+          await cacheEntryRemoved;
+        } finally {
+          unsubscribe();
+        }
+      },
+
+      keepUnusedDataFor: 30,
     }),
 
     getAstById: builder.query({
@@ -186,5 +274,6 @@ export const astsApi = createApi({
 export const {
   useGetAstByIdQuery,
   useGetAstsByLmPcodeQuery,
+  useGetSalesWorkStatusAstsByLmPcodeQuery,
   useGetAstsByLmPcodeWardPcodeQuery,
 } = astsApi;

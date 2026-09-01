@@ -5,6 +5,8 @@ import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
+import { useGetSalesWorkStatusAstsByLmPcodeQuery } from "../../redux/astsApi";
+import { useGetRegistryMetersByLmQuery } from "../../redux/registryMetersApi";
 import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
@@ -14,6 +16,7 @@ import {
   hasUsableSalesGps,
   matchesSalesGpsFilter,
 } from "./models/salesGpsModel";
+import { buildSalesTableWorkStatusRows } from "./models/salesTableWorkStatusModel.js";
 import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
   buildMonthKeys,
@@ -40,7 +43,7 @@ function SalesLoadingState() {
       <div>
         <h2 style={styles.loadingTitle}>Loading prepaid sales...</h2>
         <p style={styles.loadingText}>
-          Connecting to the live Sales stream and preparing meter records.
+          Reconciling live Sales, Meter Registry and AST evidence.
         </p>
       </div>
     </section>
@@ -185,6 +188,45 @@ export default function PrepaidSales() {
     refetch,
   } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
 
+  const {
+    data: registryRows = [],
+    isLoading: registryLoading,
+    error: registryError,
+  } = useGetRegistryMetersByLmQuery(activeLmPcode || skipToken);
+
+  const { data: salesWorkStatusAstStream = null } =
+    useGetSalesWorkStatusAstsByLmPcodeQuery(activeLmPcode || skipToken);
+
+  const salesWorkStatusAstRows = salesWorkStatusAstStream?.items || [];
+  const salesWorkStatusAstSync = salesWorkStatusAstStream?.sync || {};
+  const salesWorkStatusError =
+    error || registryError || salesWorkStatusAstSync.error || null;
+  const salesWorkStatusReady =
+    Boolean(activeLmPcode) &&
+    !isLoading &&
+    !registryLoading &&
+    !salesWorkStatusError &&
+    salesWorkStatusAstSync.status === "ready";
+
+  const salesWorkStatusRows = useMemo(
+    () =>
+      salesWorkStatusReady
+        ? buildSalesTableWorkStatusRows({
+            salesRows,
+            registryRows,
+            astRows: salesWorkStatusAstRows,
+            lmPcode: activeLmPcode,
+          })
+        : [],
+    [
+      activeLmPcode,
+      registryRows,
+      salesRows,
+      salesWorkStatusAstRows,
+      salesWorkStatusReady,
+    ],
+  );
+
   useEffect(() => {
     setGpsFilter(GPS_FILTERS.ALL);
     setSelectedIds(new Set());
@@ -197,7 +239,7 @@ export default function PrepaidSales() {
   const earliestMonthKey = monthKeys[monthKeys.length - 1] || "2023-12";
 
   const gpsSummary = useMemo(() => {
-    return salesRows.reduce(
+    return salesWorkStatusRows.reduce(
       (accumulator, row) => {
         accumulator.totalMeters += 1;
 
@@ -212,11 +254,14 @@ export default function PrepaidSales() {
         withoutGps: 0,
       },
     );
-  }, [salesRows]);
+  }, [salesWorkStatusRows]);
 
   const gpsFilteredRows = useMemo(
-    () => salesRows.filter((row) => matchesSalesGpsFilter(row, gpsFilter)),
-    [gpsFilter, salesRows],
+    () =>
+      salesWorkStatusRows.filter((row) =>
+        matchesSalesGpsFilter(row, gpsFilter),
+      ),
+    [gpsFilter, salesWorkStatusRows],
   );
 
   const selectedRows = useMemo(() => {
@@ -430,26 +475,28 @@ export default function PrepaidSales() {
         </section>
       ) : null}
 
-      {error ? (
+      {salesWorkStatusError ? (
         <section style={{ ...styles.statePanel, ...styles.errorPanel }}>
-          <h2>Could not load prepaid sales</h2>
+          <h2>Could not reconcile Sales work status</h2>
           <p>
-            Check Firestore access to sales-all-meters and confirm that the
-            records contain lmPcode {activeLmPcode}.
+            Sales, Meter Registry and AST evidence must all be available before
+            Completed / In Progress / Not Started can be shown safely.
           </p>
         </section>
       ) : null}
 
-      {isLoading ? <SalesLoadingState /> : null}
+      {activeLmPcode && !salesWorkStatusError && !salesWorkStatusReady ? (
+        <SalesLoadingState />
+      ) : null}
 
-      {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
+      {salesWorkStatusReady && activeLmPcode && salesRows.length === 0 ? (
         <section style={styles.statePanel}>
           <h2>No prepaid sales found</h2>
           <p>No Sales All meters were returned for {activeLmPcode}.</p>
         </section>
       ) : null}
 
-      {salesRows.length > 0 ? (
+      {salesWorkStatusReady && salesWorkStatusRows.length > 0 ? (
         <>
           <section style={styles.summaryGrid}>
             <SummaryCard
