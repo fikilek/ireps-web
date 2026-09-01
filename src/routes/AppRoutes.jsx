@@ -12,6 +12,8 @@ import MetersRegistryDashboardPage from "../pages/dashboard/MetersRegistryDashbo
 import TrnRegistryDashboardPage from "../pages/dashboard/TrnRegistryDashboardPage";
 import ActivityReportDashboardPage from "../pages/dashboard/ActivityReportDashboardPage";
 import AnomaliesDashboardPage from "../pages/dashboard/AnomaliesDashboardPage";
+import CustomerCategoriesDashboardPage from "../pages/dashboard/CustomerCategoriesDashboardPage";
+import CustomerCategoryDashboardPage from "../pages/dashboard/CustomerCategoryDashboardPage";
 import LoginPage from "../pages/LoginPage";
 import PendingApprovalPage from "../pages/PendingApprovalPage";
 
@@ -142,6 +144,24 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <AnomaliesDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/customer-categories"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <CustomerCategoriesDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/dashboard/customer-categories/:categoryKey"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <CustomerCategoryDashboardPage />
               </RoleRoute>
             }
           />
