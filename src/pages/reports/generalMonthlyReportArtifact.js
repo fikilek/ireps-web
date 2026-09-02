@@ -16,6 +16,11 @@ function timestampForFileName(value) {
   return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}`;
 }
 
+function cleanReportMonth(value) {
+  const text = String(value || "").trim();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(text) ? text : null;
+}
+
 export function buildGeneralMonthlyReportFileName({
   dataset,
   generatedAt = new Date(),
@@ -25,9 +30,12 @@ export function buildGeneralMonthlyReportFileName({
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "") || "endumeni";
-  const populationSize = Number(dataset?.populationSize || dataset?.rows?.length || 0);
+  const reportMonth = cleanReportMonth(dataset?.reportMonth);
+  if (!reportMonth) {
+    throw new TypeError("A valid GMR reportMonth is required.");
+  }
 
-  return `general_monthly_report_${lmName}_full_${populationSize}_${timestampForFileName(generatedAt)}.xlsx`;
+  return `general_monthly_report_${lmName}_${reportMonth}_${timestampForFileName(generatedAt)}.xlsx`;
 }
 
 function assertDataset(dataset) {
@@ -39,6 +47,12 @@ function assertDataset(dataset) {
   }
   if (!Array.isArray(dataset.rows) || dataset.rows.length === 0) {
     throw new RangeError("GMR Builder v0.1 requires at least one meter row.");
+  }
+  if (!Array.isArray(dataset.fieldRows)) {
+    throw new TypeError("The GMR dataset fieldRows are required.");
+  }
+  if (!cleanReportMonth(dataset.reportMonth)) {
+    throw new TypeError("The GMR dataset reportMonth is invalid.");
   }
 }
 
@@ -76,7 +90,13 @@ export function buildGeneralMonthlyManagedReport({
     sourceScope: {
       lmPcode: dataset?.municipality?.lmPcode || null,
       lmName: dataset?.municipality?.lmName || null,
-      generationMode: dataset?.generationMode || "FULL_FIELD_POPULATION",
+      generationMode: dataset?.generationMode || "MONTHLY_GMR",
+      reportMonth: dataset.reportMonth,
+      reportingPeriodLabel: dataset?.reportingPeriodLabel || null,
+      activityScope: dataset?.activityScope || null,
+      monthlyDiscoveryCount: summary.monthlyDiscoveryCount ?? dataset.fieldRows.length,
+      monthlyInterventionEventCount:
+        summary.monthlyInterventionEventCount ?? dataset?.interventionEvents?.length ?? 0,
       populationSize: dataset?.populationSize || dataset.rows.length,
       populationTotal: summary.populationTotal ?? null,
       visiblePopulation: summary.visiblePopulation ?? null,

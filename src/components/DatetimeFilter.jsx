@@ -33,13 +33,17 @@ export function getDatetimeFilterLabel(filter = EMPTY_DATETIME_FILTER) {
   return "All dates";
 }
 
-export function DatetimeFilterButton({ filter, onClick }) {
+export function DatetimeFilterButton({
+  filter,
+  onClick,
+  fieldLabel = "updatedAt",
+}) {
   return (
     <button
       type="button"
       style={styles.filterButton}
       onClick={onClick}
-      title="Filter updatedAt"
+      title={`Filter ${fieldLabel}`}
     >
       {getDatetimeFilterLabel(filter)}
     </button>
@@ -51,6 +55,7 @@ export function DatetimeFilterModal({
   onApply,
   onClear,
   onClose,
+  fieldLabel = "updatedAt",
 }) {
   const [customStartDate, setCustomStartDate] = useState(
     filter?.mode === "CUSTOM" ? filter?.startDate || "" : "",
@@ -114,7 +119,7 @@ export function DatetimeFilterModal({
           <div>
             <p style={styles.eyebrow}>Date / Time Filter</p>
             <h2 id="datetime-filter-title" style={styles.title}>
-              Filter updatedAt
+              Filter {fieldLabel}
             </h2>
             <p style={styles.subtitle}>
               Choose the time period for rows to show.
@@ -128,19 +133,39 @@ export function DatetimeFilterModal({
 
         <div style={styles.body}>
           <div style={styles.presetGrid}>
-            <button type="button" style={styles.presetButton} onClick={() => applyPreset("TODAY")}>
+            <button
+              type="button"
+              style={styles.presetButton}
+              onClick={() => applyPreset("TODAY")}
+            >
               Today
             </button>
-            <button type="button" style={styles.presetButton} onClick={() => applyPreset("YESTERDAY")}>
+            <button
+              type="button"
+              style={styles.presetButton}
+              onClick={() => applyPreset("YESTERDAY")}
+            >
               Yesterday
             </button>
-            <button type="button" style={styles.presetButton} onClick={() => applyPreset("PAST_3_DAYS")}>
+            <button
+              type="button"
+              style={styles.presetButton}
+              onClick={() => applyPreset("PAST_3_DAYS")}
+            >
               Past 3 days
             </button>
-            <button type="button" style={styles.presetButton} onClick={() => applyPreset("THIS_WEEK")}>
+            <button
+              type="button"
+              style={styles.presetButton}
+              onClick={() => applyPreset("THIS_WEEK")}
+            >
               This calendar week
             </button>
-            <button type="button" style={styles.presetButton} onClick={() => applyPreset("THIS_MONTH")}>
+            <button
+              type="button"
+              style={styles.presetButton}
+              onClick={() => applyPreset("THIS_MONTH")}
+            >
               This calendar month
             </button>
           </div>
@@ -169,7 +194,11 @@ export function DatetimeFilterModal({
               </label>
             </div>
 
-            <button type="button" style={styles.applyButton} onClick={applyCustom}>
+            <button
+              type="button"
+              style={styles.applyButton}
+              onClick={applyCustom}
+            >
               Apply custom
             </button>
           </div>
