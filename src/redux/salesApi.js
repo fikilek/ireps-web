@@ -333,6 +333,7 @@ function normalizeSalesRow(id, data = {}) {
   const derivedSales12MonthsC = sumLatestMonths(monthlySalesC, monthKeys, 12);
   const derivedSales2024C = sumCalendarYear(monthlySalesC, 2024);
   const derivedSales2025C = sumCalendarYear(monthlySalesC, 2025);
+  const rawTbRefs = data.tbRefs !== undefined ? data.tbRefs : data.TbRefs;
   const derivedSales2026C = sumCalendarYear(monthlySalesC, 2026);
 
   const customerName = data.customerName || data.Customer || data.Surname || "";
@@ -383,6 +384,10 @@ function normalizeSalesRow(id, data = {}) {
     createdAtMs: getTimestampMs(data.createdAt),
     updatedAtMs: getTimestampMs(data.updatedAt),
     demoData: data.demoData !== false,
+    masterVisibility:
+      typeof data?.master?.visibility === "string"
+        ? data.master.visibility
+        : null,
     astId: data.astId || null,
     astMatchStatus: String(data.astMatchStatus || "NOT_CHECKED"),
     proposedTrnType: data.proposedTrnType || null,
@@ -442,10 +447,8 @@ function normalizeSalesRow(id, data = {}) {
     geofenceRefs: normalizeGeofenceRefs(
       data.geofenceRefs || data.GeoFenceRefs || [],
     ),
-    tbRefs: normalizeTbRefs(data.tbRefs || data.TbRefs || []),
-    tbRefsIntegrity: inspectSalesTbRefsIntegrity(
-      data.tbRefs !== undefined ? data.tbRefs : data.TbRefs,
-    ),
+    tbRefs: normalizeTbRefs(rawTbRefs),
+    tbRefsIntegrity: inspectSalesTbRefsIntegrity(rawTbRefs),
     leakageCategory: String(
       data.leakageCategory || data.Leakage_Category || "",
     ).trim(),

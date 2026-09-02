@@ -2,173 +2,90 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SALES_STATUSES } from "./salesStatusModel.js";
+import { inspectSalesTbRefsIntegrity } from "./salesTbRefsIntegrityModel.js";
 import {
   buildSalesTableWorkStatusRows,
   classifySalesTableWorkStatus,
-  normalizeSalesWorkStatusMeterNo,
 } from "./salesTableWorkStatusModel.js";
 
-const LM = "ZA5241";
-const METER = "38646963";
-const AST_ID = "TRN_MDIS_38646963";
+const timestamp = (seconds) => ({ seconds, nanoseconds: 0 });
 
-function sales(overrides = {}) {
+function inProgress(overrides = {}) {
   return {
-    id: METER,
-    meterNo: METER,
-    meterNoNormalized: METER,
-    lmPcode: LM,
-    tbRefs: [],
-    tbRefsIntegrity: { valid: true, issues: [] },
+    id: "TGB_1",
+    rowId: "ROW_1",
+    date: timestamp(1),
+    fieldWork: { status: "IN_PROGRESS", updatedAt: timestamp(2) },
     ...overrides,
   };
 }
 
-function registry(overrides = {}) {
+function completed(overrides = {}) {
   return {
-    id: AST_ID,
-    meterId: AST_ID,
-    meterNo: METER,
-    lmPcode: LM,
+    id: "TGB_DONE",
+    rowId: "ROW_DONE",
+    date: timestamp(1),
+    fieldWork: {
+      status: "COMPLETED",
+      outcomeCode: "METER_DISCOVERED",
+      outcomeLabel: "Meter discovered",
+      premiseId: "P1",
+      meterId: "M1",
+      trnId: "TRN1",
+      meterMatch: false,
+      submittedAt: timestamp(2),
+      updatedAt: timestamp(2),
+    },
     ...overrides,
   };
 }
 
-function ast(overrides = {}) {
+function salesRow({ masterVisibility = "INVISIBLE", tbRefs = [] } = {}) {
   return {
-    id: AST_ID,
-    meterNo: METER,
-    masterId: METER,
-    lmPcode: LM,
-    ...overrides,
+    id: "07142661326",
+    masterVisibility,
+    tbRefs,
+    tbRefsIntegrity: inspectSalesTbRefsIntegrity(tbRefs),
   };
 }
 
-test("meter identity uses canonical whitespace-free uppercase letters/digits", () => {
-  assert.equal(normalizeSalesWorkStatusMeterNo(" 38 646 963 "), METER);
-  assert.equal(normalizeSalesWorkStatusMeterNo("abc123"), "ABC123");
-  assert.equal(normalizeSalesWorkStatusMeterNo("38-646"), "");
-});
-
-test("Sales + reconciled Registry + AST is COMPLETED even with no Targeted Batch", () => {
-  assert.equal(
-    classifySalesTableWorkStatus({
-      sales: sales(),
-      registryMatches: [registry()],
-      astMatches: [ast()],
-      expectedLmPcode: LM,
-    }).status,
-    SALES_STATUSES.COMPLETED,
-  );
-});
-
-test("genuine TB field work with no Registry or AST is IN_PROGRESS", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales({
-      tbRefs: [
-        {
-          id: "TGB_1",
-          fieldWork: { status: "IN_PROGRESS" },
-        },
-      ],
-    }),
-    registryMatches: [],
-    astMatches: [],
-    expectedLmPcode: LM,
+for (const [name, row, expected] of [
+  ["VISIBLE without tbRefs", salesRow({ masterVisibility: "VISIBLE" }), SALES_STATUSES.COMPLETED],
+  ["VISIBLE with IN_PROGRESS", salesRow({ masterVisibility: "VISIBLE", tbRefs: [inProgress()] }), SALES_STATUSES.COMPLETED],
+  ["VISIBLE with malformed tbRefs", { masterVisibility: "VISIBLE", tbRefs: "bad", tbRefsIntegrity: inspectSalesTbRefsIntegrity("bad") }, SALES_STATUSES.COMPLETED],
+  ["INVISIBLE with canonical IN_PROGRESS", salesRow({ tbRefs: [inProgress()] }), SALES_STATUSES.IN_PROGRESS],
+  ["allocation only", salesRow({ tbRefs: [{ id: "TGB_1", date: timestamp(1) }] }), SALES_STATUSES.NOT_STARTED],
+  ["different-meter completed", salesRow({ tbRefs: [completed()] }), SALES_STATUSES.NOT_STARTED],
+  ["same-meter completed", salesRow({ tbRefs: [completed({ fieldWork: { ...completed().fieldWork, meterMatch: true } })] }), SALES_STATUSES.NOT_STARTED],
+  ["completed history plus IN_PROGRESS", salesRow({ tbRefs: [completed(), inProgress()] }), SALES_STATUSES.IN_PROGRESS],
+  ["lowercase status", salesRow({ tbRefs: [inProgress({ fieldWork: { status: "in_progress", updatedAt: timestamp(2) } })] }), SALES_STATUSES.NOT_STARTED],
+  ["padded status", salesRow({ tbRefs: [inProgress({ fieldWork: { status: " IN_PROGRESS ", updatedAt: timestamp(2) } })] }), SALES_STATUSES.NOT_STARTED],
+  ["missing rowId", salesRow({ tbRefs: [inProgress({ rowId: undefined })] }), SALES_STATUSES.NOT_STARTED],
+  ["no tbRefs", { masterVisibility: "INVISIBLE" }, SALES_STATUSES.NOT_STARTED],
+  ["lowercase visibility", salesRow({ masterVisibility: "visible" }), SALES_STATUSES.NOT_STARTED],
+  ["padded visibility", salesRow({ masterVisibility: " VISIBLE " }), SALES_STATUSES.NOT_STARTED],
+  ["null visibility", salesRow({ masterVisibility: null }), SALES_STATUSES.NOT_STARTED],
+]) {
+  test(name, () => {
+    assert.equal(classifySalesTableWorkStatus(row), expected);
   });
+}
 
-  assert.equal(result.status, SALES_STATUSES.IN_PROGRESS);
+test("malformed sibling recovery uses correlation identity rather than array index", () => {
+  const row = salesRow({ tbRefs: [{ id: "BROKEN" }, inProgress()] });
+  assert.equal(row.tbRefsIntegrity.valid, false);
+  assert.equal(classifySalesTableWorkStatus(row), SALES_STATUSES.IN_PROGRESS);
 });
 
-test("untouched Sales meter with no Registry, AST or field work is NOT_STARTED", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales(),
-    registryMatches: [],
-    astMatches: [],
-    expectedLmPcode: LM,
-  });
-
-  assert.equal(result.status, SALES_STATUSES.NOT_STARTED);
+test("canonical null wins over a legacy-looking normalized reference", () => {
+  const row = { masterVisibility: "INVISIBLE", tbRefs: [], tbRefsIntegrity: inspectSalesTbRefsIntegrity(null) };
+  assert.equal(classifySalesTableWorkStatus(row), SALES_STATUSES.NOT_STARTED);
 });
 
-test("AST without Meter Registry is quarantined as an integrity exception", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales(),
-    registryMatches: [],
-    astMatches: [ast()],
-    expectedLmPcode: LM,
-  });
-
-  assert.equal(result.status, SALES_STATUSES.INTEGRITY_EXCEPTION);
-  assert.ok(result.issues.includes("AST_WITHOUT_METER_REGISTRY"));
-});
-
-test("Meter Registry without AST is quarantined as an integrity exception", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales(),
-    registryMatches: [registry()],
-    astMatches: [],
-    expectedLmPcode: LM,
-  });
-
-  assert.equal(result.status, SALES_STATUSES.INTEGRITY_EXCEPTION);
-  assert.ok(result.issues.includes("METER_REGISTRY_WITHOUT_AST"));
-});
-
-test("Registry and AST must resolve to the same AST identity", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales(),
-    registryMatches: [registry({ meterId: "AST_OTHER", id: "AST_OTHER" })],
-    astMatches: [ast()],
-    expectedLmPcode: LM,
-  });
-
-  assert.equal(result.status, SALES_STATUSES.INTEGRITY_EXCEPTION);
-  assert.ok(result.issues.includes("REGISTRY_AST_ID_MISMATCH"));
-});
-
-test("multiple authoritative matches are quarantined", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales(),
-    registryMatches: [registry()],
-    astMatches: [ast(), ast({ id: "AST_SECOND" })],
-    expectedLmPcode: LM,
-  });
-
-  assert.equal(result.status, SALES_STATUSES.INTEGRITY_EXCEPTION);
-  assert.ok(result.issues.includes("MULTIPLE_AST_MATCHES"));
-});
-
-test("TB COMPLETED alone cannot substitute for Registry + AST completion", () => {
-  const result = classifySalesTableWorkStatus({
-    sales: sales({
-      tbRefs: [
-        {
-          id: "TGB_1",
-          fieldWork: { status: "COMPLETED" },
-        },
-      ],
-    }),
-    registryMatches: [],
-    astMatches: [],
-    expectedLmPcode: LM,
-  });
-
-  assert.equal(result.status, SALES_STATUSES.INTEGRITY_EXCEPTION);
-  assert.ok(
-    result.issues.includes("TB_COMPLETED_WITHOUT_RECONCILED_REGISTRY_AST"),
-  );
-});
-
-test("builder reconciles a completed-outside-batch Sales row", () => {
-  const [row] = buildSalesTableWorkStatusRows({
-    salesRows: [sales()],
-    registryRows: [registry()],
-    astRows: [ast()],
-    lmPcode: LM,
-  });
-
+test("builder adds only the public three-state work status", () => {
+  const input = salesRow({ masterVisibility: "VISIBLE" });
+  const [row] = buildSalesTableWorkStatusRows({ salesRows: [input] });
   assert.equal(row.salesWorkStatus, SALES_STATUSES.COMPLETED);
-  assert.deepEqual(row.salesWorkStatusIssues, []);
-  assert.equal(row.salesWorkStatusEvidence.astId, AST_ID);
+  assert.equal(Object.hasOwn(row, "salesWorkStatusIssues"), false);
+  assert.equal(Object.hasOwn(row, "salesWorkStatusEvidence"), false);
 });

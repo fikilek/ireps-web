@@ -6,6 +6,7 @@ import {
   validateAuthoritativeErfDocument,
   validateAuthoritativeSalesDocument,
 } from "../targetedBatches/helpers.js";
+import { buildTargetedBatchRowDoc } from "../targetedBatches/documentFactory.js";
 
 const SALES_ID = "01023670951";
 const LM_PCODE = "ZA5241";
@@ -62,8 +63,67 @@ const draftRow = {
   erfNo: "386/9",
 };
 
+function buildRowWithVisibility({ serverVisibility, clientVisibility }) {
+  return buildTargetedBatchRowDoc({
+    payload: {
+      tbId: "TGB_VISIBILITY_TEST",
+      source: { type: "PREPAID_SALES", fileName: "sales.xlsx" },
+      scope: {
+        lmPcode: LM_PCODE,
+        lmName: "Endumeni",
+        wardPcode: WARD_PCODE,
+        wardNumber: WARD_NUMBER,
+        wardName: "Ward 2",
+      },
+      selection: { reason: "Visibility precedence test" },
+    },
+    draftRow: {
+      ...draftRow,
+      masterVisibility: clientVisibility,
+    },
+    salesSource: {
+      meterNo: SALES_ID,
+      meterNoNormalized: SALES_ID,
+      master: { visibility: serverVisibility },
+    },
+    erfReference: { erfNo: "386/9" },
+    salesAllMeterId: SALES_ID,
+    rowNo: 1,
+    creationDate: new Date("2026-09-02T00:00:00.000Z"),
+    actorUid: "TEST_USER",
+    actorName: "Test User",
+  });
+}
+
 test("Targeted Batch canonical Sales source is sales-all-meters", () => {
   assert.equal(TARGETED_BATCH_COLLECTIONS.sales, "sales-all-meters");
+});
+
+test("authoritative VISIBLE overrides conflicting client INVISIBLE", () => {
+  const result = buildRowWithVisibility({
+    serverVisibility: " visible ",
+    clientVisibility: "INVISIBLE",
+  });
+
+  assert.equal(result.meter.masterVisibility, "VISIBLE");
+});
+
+test("authoritative INVISIBLE overrides conflicting client VISIBLE", () => {
+  const result = buildRowWithVisibility({
+    serverVisibility: " invisible ",
+    clientVisibility: "VISIBLE",
+  });
+
+  assert.equal(result.meter.masterVisibility, "INVISIBLE");
+});
+
+test("client visibility remains the fallback when server visibility is falsy", () => {
+  const result = buildRowWithVisibility({
+    serverVisibility: "",
+    clientVisibility: " visible ",
+  });
+
+  assert.equal(result.meter.masterVisibility, "VISIBLE");
 });
 
 test("canonical Sales All missing lmPcode is rejected", () => {

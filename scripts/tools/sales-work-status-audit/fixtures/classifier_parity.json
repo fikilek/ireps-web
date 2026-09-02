@@ -1,0 +1,19 @@
+{
+  "meterIdentity": [
+    { "raw": " 071 234 5678 ", "expected": "0712345678" },
+    { "raw": "ab12", "expected": "AB12" },
+    { "raw": "A-B", "expected": "" },
+    { "raw": "café", "expected": "" },
+    { "raw": "\u00a0A\ufeff1\u2028", "expected": "A1" },
+    { "raw": "", "expected": "" }
+  ],
+  "validInProgressReference": {
+    "id": "TB-1",
+    "rowId": "ROW-1",
+    "date": { "seconds": 1, "nanoseconds": 0 },
+    "fieldWork": {
+      "status": "IN_PROGRESS",
+      "updatedAt": { "seconds": 2, "nanoseconds": 0 }
+    }
+  }
+}

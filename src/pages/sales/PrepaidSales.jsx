@@ -5,8 +5,6 @@ import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesWorkStatusAstsByLmPcodeQuery } from "../../redux/astsApi";
-import { useGetRegistryMetersByLmQuery } from "../../redux/registryMetersApi";
 import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
@@ -26,6 +24,8 @@ import {
   getMonthLabel,
 } from "./salesUtils";
 
+const EMPTY_SALES_ROWS = [];
+
 function SalesLoadingState() {
   return (
     <section style={styles.loadingPanel} aria-live="polite" aria-busy="true">
@@ -42,9 +42,7 @@ function SalesLoadingState() {
 
       <div>
         <h2 style={styles.loadingTitle}>Loading prepaid sales...</h2>
-        <p style={styles.loadingText}>
-          Reconciling live Sales, Meter Registry and AST evidence.
-        </p>
+        <p style={styles.loadingText}>Loading live Sales meters.</p>
       </div>
     </section>
   );
@@ -181,50 +179,28 @@ export default function PrepaidSales() {
   const [targetBatchScopeError, setTargetBatchScopeError] = useState("");
 
   const {
-    data: salesRows = [],
+    currentData: currentSalesRows,
     isLoading,
     isFetching,
     error,
     refetch,
   } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
 
-  const {
-    data: registryRows = [],
-    isLoading: registryLoading,
-    error: registryError,
-  } = useGetRegistryMetersByLmQuery(activeLmPcode || skipToken);
-
-  const { data: salesWorkStatusAstStream = null } =
-    useGetSalesWorkStatusAstsByLmPcodeQuery(activeLmPcode || skipToken);
-
-  const salesWorkStatusAstRows = salesWorkStatusAstStream?.items || [];
-  const salesWorkStatusAstSync = salesWorkStatusAstStream?.sync || {};
-  const salesWorkStatusError =
-    error || registryError || salesWorkStatusAstSync.error || null;
+  const salesRows = Array.isArray(currentSalesRows)
+    ? currentSalesRows
+    : EMPTY_SALES_ROWS;
+  const salesWorkStatusError = activeLmPcode && error ? error : null;
   const salesWorkStatusReady =
     Boolean(activeLmPcode) &&
-    !isLoading &&
-    !registryLoading &&
-    !salesWorkStatusError &&
-    salesWorkStatusAstSync.status === "ready";
+    Array.isArray(currentSalesRows) &&
+    !salesWorkStatusError;
 
   const salesWorkStatusRows = useMemo(
     () =>
       salesWorkStatusReady
-        ? buildSalesTableWorkStatusRows({
-            salesRows,
-            registryRows,
-            astRows: salesWorkStatusAstRows,
-            lmPcode: activeLmPcode,
-          })
+        ? buildSalesTableWorkStatusRows({ salesRows })
         : [],
-    [
-      activeLmPcode,
-      registryRows,
-      salesRows,
-      salesWorkStatusAstRows,
-      salesWorkStatusReady,
-    ],
+    [salesRows, salesWorkStatusReady],
   );
 
   useEffect(() => {
@@ -477,11 +453,8 @@ export default function PrepaidSales() {
 
       {salesWorkStatusError ? (
         <section style={{ ...styles.statePanel, ...styles.errorPanel }}>
-          <h2>Could not reconcile Sales work status</h2>
-          <p>
-            Sales, Meter Registry and AST evidence must all be available before
-            Completed / In Progress / Not Started can be shown safely.
-          </p>
+          <h2>Could not load Sales work status</h2>
+          <p>Live Sales meters could not be loaded.</p>
         </section>
       ) : null}
 
