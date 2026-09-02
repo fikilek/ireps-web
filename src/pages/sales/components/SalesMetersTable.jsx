@@ -8,13 +8,6 @@ import SalesRangeFilterModal from "./SalesRangeFilterModal";
 import MultiSelectFilter from "./MultiSelectFilter";
 import { hasUsableSalesGps } from "../models/salesGpsModel";
 import {
-  SALES_STATUSES,
-  SALES_STATUS_FILTER_OPTIONS,
-  classifySalesStatus,
-  getSalesStatusLabel,
-  getSalesStatusSortRank,
-} from "../models/salesStatusModel.js";
-import {
   TARGET_FILTERS,
   compareNatural,
   EMPTY_SALES_RANGE_FILTER,
@@ -35,6 +28,33 @@ const DEFAULT_SORT = { key: "updatedAt", direction: "desc" };
 const WARD_FILTER_NAV = "__NAV__";
 const ALL_CATS_EXCLUDING_NORMAL_FILTER = "__ALL_CATS_EXCLUDING_NORMAL__";
 const NORMAL_SALES_CATEGORY = "Normal - No Leakage Flag";
+const SALES_TABLE_WORK_STATUSES = {
+  NOT_STARTED: "NOT_STARTED",
+  IN_PROGRESS: "IN_PROGRESS",
+  COMPLETED: "COMPLETED",
+};
+const SALES_TABLE_WORK_STATUS_FILTER_OPTIONS = [
+  { value: SALES_TABLE_WORK_STATUSES.NOT_STARTED, label: "Not Started" },
+  { value: SALES_TABLE_WORK_STATUSES.IN_PROGRESS, label: "In Progress" },
+  { value: SALES_TABLE_WORK_STATUSES.COMPLETED, label: "Completed" },
+];
+const SALES_TABLE_WORK_STATUS_RANKS = {
+  [SALES_TABLE_WORK_STATUSES.NOT_STARTED]: 0,
+  [SALES_TABLE_WORK_STATUSES.IN_PROGRESS]: 1,
+  [SALES_TABLE_WORK_STATUSES.COMPLETED]: 2,
+};
+
+function getSalesTableWorkStatusLabel(status) {
+  return (
+    SALES_TABLE_WORK_STATUS_FILTER_OPTIONS.find(
+      (option) => option.value === status,
+    )?.label || "—"
+  );
+}
+
+function getSalesTableWorkStatusSortRank(status) {
+  return SALES_TABLE_WORK_STATUS_RANKS[status] ?? 3;
+}
 
 const SALES_CATEGORY_ORDER = [
   NORMAL_SALES_CATEGORY,
@@ -82,7 +102,7 @@ const COLUMN_OPTIONS = [
   { key: "wardNo", label: "Ward No" },
   { key: "geofence", label: "Geofences" },
   { key: "tbRefs", label: "TB IDs" },
-  { key: "salesStatus", label: "Sales Status" },
+  { key: "salesStatus", label: "Work Status" },
   { key: "leakageCategory", label: "Sales Category" },
   { key: "riskTier", label: "Risk Tier" },
   { key: "riskScore", label: "Risk Score" },
@@ -447,7 +467,7 @@ function getSortValue(row, sortKey) {
   if (sortKey === "geofence") return getRowGeofenceLabel(row);
   if (sortKey === "tbRefs") return getRowTbRefs(row).length;
   if (sortKey === "salesStatus") {
-    return getSalesStatusSortRank(row?.salesStatus);
+    return getSalesTableWorkStatusSortRank(row?.salesStatus);
   }
   if (sortKey === "leakageCategory") return row?.leakageCategory || "";
   if (sortKey === "riskTier") return row?.riskTier || "";
@@ -533,15 +553,10 @@ export default function SalesMetersTable({
 
   const classifiedRows = useMemo(
     () =>
-      rows.map((row) => {
-        const classification = classifySalesStatus(row);
-
-        return {
-          ...row,
-          salesStatus: classification.status,
-          salesStatusIssues: classification.issues,
-        };
-      }),
+      rows.map((row) => ({
+        ...row,
+        salesStatus: row?.salesWorkStatus,
+      })),
     [rows],
   );
 
@@ -1260,14 +1275,14 @@ export default function SalesMetersTable({
                   }}
                 >
                   <SortButton
-                    label="Sales Status"
+                    label="Work Status"
                     sortKey="salesStatus"
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
                   <MultiSelectFilter
                     allLabel="All statuses"
-                    ariaLabel="Filter Sales meters by Sales Status"
+                    ariaLabel="Filter Sales meters by Work Status"
                     menuMinWidth={240}
                     onChange={(values) =>
                       updateFilter(
@@ -1275,7 +1290,7 @@ export default function SalesMetersTable({
                         Array.isArray(values) ? values : [],
                       )
                     }
-                    options={SALES_STATUS_FILTER_OPTIONS}
+                    options={SALES_TABLE_WORK_STATUS_FILTER_OPTIONS}
                     selectedCountLabel="statuses selected"
                     style={styles.headerSelect}
                     value={filters.salesStatuses}
@@ -1647,26 +1662,24 @@ export default function SalesMetersTable({
                         ...getStickyStyle("salesStatus", stickyLayout),
                         textAlign: "center",
                       }}
-                      title={
-                        row.salesStatus === SALES_STATUSES.INTEGRITY_EXCEPTION &&
-                        row.salesStatusIssues?.length
-                          ? `Integrity Exception: ${row.salesStatusIssues.join(", ")}`
-                          : getSalesStatusLabel(row.salesStatus)
-                      }
+                      title={getSalesTableWorkStatusLabel(row.salesStatus)}
                     >
                       <span
                         style={{
                           ...styles.salesStatusBadge,
-                          ...(row.salesStatus === SALES_STATUSES.NOT_STARTED
+                          ...(row.salesStatus ===
+                          SALES_TABLE_WORK_STATUSES.NOT_STARTED
                             ? styles.salesStatusNotStarted
-                            : row.salesStatus === SALES_STATUSES.IN_PROGRESS
+                            : row.salesStatus ===
+                                SALES_TABLE_WORK_STATUSES.IN_PROGRESS
                               ? styles.salesStatusInProgress
-                              : row.salesStatus === SALES_STATUSES.COMPLETED
+                              : row.salesStatus ===
+                                  SALES_TABLE_WORK_STATUSES.COMPLETED
                                 ? styles.salesStatusCompleted
-                                : styles.salesStatusIntegrityException),
+                                : null),
                         }}
                       >
-                        {getSalesStatusLabel(row.salesStatus)}
+                        {getSalesTableWorkStatusLabel(row.salesStatus)}
                       </span>
                     </td>
                   ) : null}
@@ -2127,11 +2140,6 @@ const styles = {
     borderColor: "#86efac",
     background: "#f0fdf4",
     color: "#166534",
-  },
-  salesStatusIntegrityException: {
-    borderColor: "#fca5a5",
-    background: "#fef2f2",
-    color: "#991b1b",
   },
   categoryCell: {
     overflow: "hidden",

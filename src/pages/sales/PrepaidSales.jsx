@@ -14,6 +14,7 @@ import {
   hasUsableSalesGps,
   matchesSalesGpsFilter,
 } from "./models/salesGpsModel";
+import { buildSalesTableWorkStatusRows } from "./models/salesTableWorkStatusModel.js";
 import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
   buildMonthKeys,
@@ -22,6 +23,8 @@ import {
   getActiveWorkbaseName,
   getMonthLabel,
 } from "./salesUtils";
+
+const EMPTY_SALES_ROWS = [];
 
 function SalesLoadingState() {
   return (
@@ -39,9 +42,7 @@ function SalesLoadingState() {
 
       <div>
         <h2 style={styles.loadingTitle}>Loading prepaid sales...</h2>
-        <p style={styles.loadingText}>
-          Connecting to the live Sales stream and preparing meter records.
-        </p>
+        <p style={styles.loadingText}>Loading live Sales meters.</p>
       </div>
     </section>
   );
@@ -178,12 +179,29 @@ export default function PrepaidSales() {
   const [targetBatchScopeError, setTargetBatchScopeError] = useState("");
 
   const {
-    data: salesRows = [],
+    currentData: currentSalesRows,
     isLoading,
     isFetching,
     error,
     refetch,
   } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
+
+  const salesRows = Array.isArray(currentSalesRows)
+    ? currentSalesRows
+    : EMPTY_SALES_ROWS;
+  const salesWorkStatusError = activeLmPcode && error ? error : null;
+  const salesWorkStatusReady =
+    Boolean(activeLmPcode) &&
+    Array.isArray(currentSalesRows) &&
+    !salesWorkStatusError;
+
+  const salesWorkStatusRows = useMemo(
+    () =>
+      salesWorkStatusReady
+        ? buildSalesTableWorkStatusRows({ salesRows })
+        : [],
+    [salesRows, salesWorkStatusReady],
+  );
 
   useEffect(() => {
     setGpsFilter(GPS_FILTERS.ALL);
@@ -197,7 +215,7 @@ export default function PrepaidSales() {
   const earliestMonthKey = monthKeys[monthKeys.length - 1] || "2023-12";
 
   const gpsSummary = useMemo(() => {
-    return salesRows.reduce(
+    return salesWorkStatusRows.reduce(
       (accumulator, row) => {
         accumulator.totalMeters += 1;
 
@@ -212,11 +230,14 @@ export default function PrepaidSales() {
         withoutGps: 0,
       },
     );
-  }, [salesRows]);
+  }, [salesWorkStatusRows]);
 
   const gpsFilteredRows = useMemo(
-    () => salesRows.filter((row) => matchesSalesGpsFilter(row, gpsFilter)),
-    [gpsFilter, salesRows],
+    () =>
+      salesWorkStatusRows.filter((row) =>
+        matchesSalesGpsFilter(row, gpsFilter),
+      ),
+    [gpsFilter, salesWorkStatusRows],
   );
 
   const selectedRows = useMemo(() => {
@@ -430,26 +451,25 @@ export default function PrepaidSales() {
         </section>
       ) : null}
 
-      {error ? (
+      {salesWorkStatusError ? (
         <section style={{ ...styles.statePanel, ...styles.errorPanel }}>
-          <h2>Could not load prepaid sales</h2>
-          <p>
-            Check Firestore access to sales-all-meters and confirm that the
-            records contain lmPcode {activeLmPcode}.
-          </p>
+          <h2>Could not load Sales work status</h2>
+          <p>Live Sales meters could not be loaded.</p>
         </section>
       ) : null}
 
-      {isLoading ? <SalesLoadingState /> : null}
+      {activeLmPcode && !salesWorkStatusError && !salesWorkStatusReady ? (
+        <SalesLoadingState />
+      ) : null}
 
-      {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
+      {salesWorkStatusReady && activeLmPcode && salesRows.length === 0 ? (
         <section style={styles.statePanel}>
           <h2>No prepaid sales found</h2>
           <p>No Sales All meters were returned for {activeLmPcode}.</p>
         </section>
       ) : null}
 
-      {salesRows.length > 0 ? (
+      {salesWorkStatusReady && salesWorkStatusRows.length > 0 ? (
         <>
           <section style={styles.summaryGrid}>
             <SummaryCard

@@ -70,7 +70,7 @@ function validateNoAccessEntries(value, path, issues) {
   });
 }
 
-export function inspectSalesTbRefsIntegrity(value) {
+function inspectAggregateSalesTbRefsIntegrity(value) {
   if (value === undefined || value === null) {
     return { valid: true, issues: [] };
   }
@@ -220,4 +220,93 @@ export function inspectSalesTbRefsIntegrity(value) {
   });
 
   return { valid: issues.length === 0, issues };
+}
+
+function cleanText(value) {
+  return String(value ?? "").trim();
+}
+
+export function buildSalesTbRefCorrelationKey(reference) {
+  if (!isPlainObject(reference)) return "";
+
+  const id = cleanText(reference.id || reference.tbId || "");
+  const rowId = cleanText(reference.rowId || reference.tbRowId || "");
+
+  return id ? `${id}::${rowId}` : "";
+}
+
+function buildDuplicateLogicalIdentity(reference) {
+  if (!isPlainObject(reference)) return "";
+  return cleanText(reference.id).toUpperCase();
+}
+
+function inspectEntry(reference, index) {
+  const aggregate = inspectAggregateSalesTbRefsIntegrity([reference]);
+  const issues = aggregate.issues.map((issue) =>
+    issue.replace(/^tbRefs\.0/, `tbRefs.${index}`),
+  );
+
+  return {
+    index,
+    correlationKey: buildSalesTbRefCorrelationKey(reference),
+    duplicateKey: buildDuplicateLogicalIdentity(reference),
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+function groupEntryIndexes(entries, keyName) {
+  const groups = new Map();
+
+  entries.forEach((entry) => {
+    const key = entry[keyName];
+    if (!key) return;
+    groups.set(key, [...(groups.get(key) || []), entry.index]);
+  });
+
+  return groups;
+}
+
+export function inspectSalesTbRefsIntegrity(value) {
+  const aggregate = inspectAggregateSalesTbRefsIntegrity(value);
+
+  if (!Array.isArray(value)) {
+    return { ...aggregate, entries: [], entriesByKey: {} };
+  }
+
+  const entries = value.map(inspectEntry);
+  const duplicateGroups = groupEntryIndexes(entries, "duplicateKey");
+  const correlationGroups = groupEntryIndexes(entries, "correlationKey");
+
+  entries.forEach((entry) => {
+    const duplicateGroupSize = entry.duplicateKey
+      ? duplicateGroups.get(entry.duplicateKey)?.length || 0
+      : 0;
+    const correlationGroupSize = entry.correlationKey
+      ? correlationGroups.get(entry.correlationKey)?.length || 0
+      : 0;
+
+    entry.duplicateGroupSize = duplicateGroupSize;
+    entry.correlationGroupSize = correlationGroupSize;
+    entry.duplicateLogicalIdentity = duplicateGroupSize > 1;
+    entry.correlationAmbiguous = correlationGroupSize > 1;
+    entry.classifiable =
+      entry.valid && duplicateGroupSize === 1 && correlationGroupSize === 1;
+  });
+
+  const entriesByKey = {};
+
+  correlationGroups.forEach((indexes, correlationKey) => {
+    const members = indexes.map((index) => entries[index]);
+    entriesByKey[correlationKey] = {
+      correlationKey,
+      indexes,
+      issues: members.flatMap((entry) => entry.issues),
+      valid: members.length === 1 && members[0].valid,
+      classifiable: members.length === 1 && members[0].classifiable,
+      correlationAmbiguous: members.length > 1,
+    };
+  });
+
+  return { ...aggregate, entries, entriesByKey };
 }
