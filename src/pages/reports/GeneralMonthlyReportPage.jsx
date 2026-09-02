@@ -6,7 +6,7 @@ import { functions } from "../../firebase";
 import { generateGeneralMonthlyReportManaged } from "./generalMonthlyReportArtifact.js";
 
 const GMR_LM_PCODE = "ZA5241";
-const GMR_GENERATION_MODE = "FULL_FIELD_POPULATION";
+const GMR_GENERATION_MODE = "MONTHLY_GMR";
 
 const GMR_JOURNEY = [
   "Field capture",
@@ -20,11 +20,11 @@ const GMR_JOURNEY = [
 ];
 
 const GMR_STORY_MESSAGES = [
-  "Field discoveries provide the meter, field worker, finding, GPS and evidence trail.",
+  "Field Data and Field Stats are limited to Meter Discovery submissions in the selected reporting month.",
   "Premise information adds the property and address context around every field-found meter.",
-  "Municipal sales history is reconciled without converting unavailable evidence into a false zero.",
+  "Municipal sales history is retained across every available month without converting unavailable evidence into a false zero.",
   "Findings and normalisation actions are preserved so the workbook can be traced back to field evidence.",
-  "Field Data and Field Stats are assembled from the same canonical meter population.",
+  "Completed disconnection and reconnection events are allocated to the selected reporting month.",
   "The finished XLSX is saved through Generated Reports before the browser download is started.",
 ];
 
@@ -53,12 +53,41 @@ function formatCompletedAt(value) {
   }).format(value);
 }
 
+function formatReportMonth(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "Reporting month";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  return date.toLocaleString("en-ZA", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function currentJohannesburgMonthKey() {
+  const parts = new Intl.DateTimeFormat("en-ZA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  return year && month ? `${year}-${month}` : "";
+}
+
+function reportMonthTooltip(reportMonth) {
+  if (!reportMonth) return "Select the GMR reporting month.";
+  const label = formatReportMonth(reportMonth);
+  return `This is the ${label} General Monthly Report. Its operational transaction figures represent work submitted/completed in ${label}, while its meter, premise and sales/purchase information retains the supporting history necessary to understand those transactions.`;
+}
+
 function errorMessage(error) {
   const message = String(error?.message || "").trim();
   return message || "The General Monthly Report could not be generated.";
 }
 
 export default function GeneralMonthlyReportPage() {
+  const [reportMonth, setReportMonth] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");
@@ -68,6 +97,8 @@ export default function GeneralMonthlyReportPage() {
   const [storyMessageIndex, setStoryMessageIndex] = useState(0);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const startedAtRef = useRef(null);
+  const maxReportMonth = currentJohannesburgMonthKey();
+  const selectedMonthLabel = reportMonth ? formatReportMonth(reportMonth) : "";
 
   useEffect(() => {
     if (!isGenerating) return undefined;
@@ -101,7 +132,7 @@ export default function GeneralMonthlyReportPage() {
   }, [isSuccessModalOpen]);
 
   async function handleGenerate() {
-    if (isGenerating) return;
+    if (isGenerating || !reportMonth) return;
 
     startedAtRef.current = Date.now();
     setElapsedSeconds(0);
@@ -111,16 +142,17 @@ export default function GeneralMonthlyReportPage() {
     setError("");
     setLastResult(null);
     setGenerationSummary(null);
-    setStatusMessage("Preparing the full Endumeni GMR field population...");
+    setStatusMessage(`Preparing the ${selectedMonthLabel} Endumeni GMR...`);
 
     try {
       const response = await requestGmrDataset({
         lmPcode: GMR_LM_PCODE,
         mode: GMR_GENERATION_MODE,
+        reportMonth,
       });
       const dataset = response?.data;
 
-      if (!dataset || !Array.isArray(dataset.rows)) {
+      if (!dataset || !Array.isArray(dataset.rows) || !Array.isArray(dataset.fieldRows)) {
         throw new Error("GMR dataset generation returned an invalid response.");
       }
 
@@ -149,8 +181,8 @@ export default function GeneralMonthlyReportPage() {
       });
       setStatusMessage(
         managed.downloaded
-          ? "GMR generated successfully, saved to Generated Reports, and downloaded."
-          : "GMR generated successfully and saved to Generated Reports. The browser did not start the download automatically.",
+          ? `${dataset.reportingPeriodLabel || selectedMonthLabel} GMR generated successfully, saved to Generated Reports, and downloaded.`
+          : `${dataset.reportingPeriodLabel || selectedMonthLabel} GMR generated successfully and saved to Generated Reports. The browser did not start the download automatically.`,
       );
       setIsSuccessModalOpen(true);
     } catch (generationError) {
@@ -163,6 +195,8 @@ export default function GeneralMonthlyReportPage() {
   }
 
   const summary = lastResult?.dataset?.summary || null;
+  const lastReportMonthLabel = lastResult?.dataset?.reportingPeriodLabel ||
+    (lastResult?.dataset?.reportMonth ? formatReportMonth(lastResult.dataset.reportMonth) : null);
 
   return (
     <>
@@ -226,8 +260,8 @@ export default function GeneralMonthlyReportPage() {
           <p className="eyebrow">Reports</p>
           <h1>General Monthly Report</h1>
           <p className="muted">
-            Builder v0.1 generates a point-in-time Endumeni audit and revenue
-            workbook for the full current field meter population.
+            Generates the full current Endumeni meter context with operational
+            TRN activity allocated to the selected reporting month.
           </p>
           <Link className="text-link" to="/reports">
             ← Back to Reports
@@ -247,13 +281,26 @@ export default function GeneralMonthlyReportPage() {
             <div className="muted">Municipality</div>
             <strong>Endumeni</strong>
           </div>
+          <div title={reportMonthTooltip(reportMonth)}>
+            <div className="muted">Reporting Month</div>
+            <input
+              type="month"
+              value={reportMonth}
+              max={maxReportMonth || undefined}
+              onChange={(event) => setReportMonth(event.target.value)}
+              disabled={isGenerating}
+              title={reportMonthTooltip(reportMonth)}
+              aria-label="Reporting Month"
+              style={styles.monthInput}
+            />
+          </div>
           <div>
             <div className="muted">Generation Mode</div>
-            <strong>Full Field Population</strong>
+            <strong>Monthly GMR</strong>
           </div>
           <div>
             <div className="muted">Population Rule</div>
-            <strong>All current Endumeni Meter Registry / Assets meters</strong>
+            <strong>Full meter population; TRN activity filtered to the selected month</strong>
           </div>
           <div>
             <div className="muted">Output</div>
@@ -266,9 +313,13 @@ export default function GeneralMonthlyReportPage() {
             type="button"
             className="secondary-button"
             onClick={handleGenerate}
-            disabled={isGenerating}
+            disabled={isGenerating || !reportMonth}
           >
-            {isGenerating ? "Generating GMR..." : "Generate GMR"}
+            {isGenerating
+              ? "Generating GMR..."
+              : reportMonth
+                ? `Generate ${selectedMonthLabel} GMR`
+                : "Select Reporting Month"}
           </button>
         </div>
       </section>
@@ -324,16 +375,17 @@ export default function GeneralMonthlyReportPage() {
             <div style={styles.factGrid}>
               {generationSummary ? (
                 <>
-                  <GenerationFact label="Meters loaded" value={generationSummary.selectedTotal} />
-                  <GenerationFact label="Visible" value={generationSummary.visibleSelected} />
-                  <GenerationFact label="Invisible" value={generationSummary.invisibleSelected} />
+                  <GenerationFact label="Full meter population" value={generationSummary.selectedTotal} />
+                  <GenerationFact label="Monthly discoveries" value={generationSummary.monthlyDiscoveryCount} />
+                  <GenerationFact label="Monthly interventions" value={generationSummary.monthlyInterventionEventCount} />
+                  <GenerationFact label="Reporting month" value={selectedMonthLabel} />
                 </>
               ) : (
                 <>
                   <GenerationFact label="Municipality" value="Endumeni" />
-                  <GenerationFact label="Population" value="Full field" />
+                  <GenerationFact label="Reporting month" value={selectedMonthLabel || "Selected month"} />
+                  <GenerationFact label="Population" value="Full meter population" />
                   <GenerationFact label="Output" value="XLSX" />
-                  <GenerationFact label="Missing data" value="Not Available" />
                 </>
               )}
             </div>
@@ -362,7 +414,7 @@ export default function GeneralMonthlyReportPage() {
       {summary ? (
         <section className="panel">
           <p className="eyebrow">Last Generated Report</p>
-          <h2>Full field population snapshot</h2>
+          <h2>{lastReportMonthLabel ? `${lastReportMonthLabel} GMR` : "GMR"} — full meter population snapshot</h2>
 
           <div style={styles.populationEquation}>
             <SummaryCard label="Total Meters" value={summary.selectedTotal} />
@@ -370,6 +422,11 @@ export default function GeneralMonthlyReportPage() {
             <SummaryCard label="Visible" value={summary.visibleSelected} />
             <div style={styles.equationSymbol} aria-hidden="true">+</div>
             <SummaryCard label="Invisible" value={summary.invisibleSelected} />
+          </div>
+
+          <div style={styles.activitySummaryGrid}>
+            <SummaryCard label="Monthly Meter Discoveries" value={summary.monthlyDiscoveryCount} />
+            <SummaryCard label="Monthly DCN / RCN Events" value={summary.monthlyInterventionEventCount} />
           </div>
 
           <p className="muted" style={styles.footerText}>
@@ -397,14 +454,19 @@ export default function GeneralMonthlyReportPage() {
               General Monthly Report Generated Successfully
             </h2>
             <p className="muted" style={styles.modalIntro}>
-              The Endumeni workbook has been built and saved to Generated Reports.
+              The {lastReportMonthLabel || "selected month"} Endumeni workbook has been built and saved to Generated Reports.
             </p>
 
             <div style={styles.modalStatsGrid}>
               <ModalStat label="Processing time" value={formatDuration(lastResult.durationSeconds)} />
               <ModalStat label="Meters processed" value={formatNumber(lastResult.dataset?.summary?.selectedTotal)} />
-              <ModalStat label="Visible" value={formatNumber(lastResult.dataset?.summary?.visibleSelected)} />
-              <ModalStat label="Invisible" value={formatNumber(lastResult.dataset?.summary?.invisibleSelected)} />
+              <ModalStat label="Monthly discoveries" value={formatNumber(lastResult.dataset?.summary?.monthlyDiscoveryCount)} />
+              <ModalStat label="Monthly interventions" value={formatNumber(lastResult.dataset?.summary?.monthlyInterventionEventCount)} />
+            </div>
+
+            <div style={styles.generatedReceipt}>
+              <span className="muted">Reporting Month</span>
+              <strong>{lastReportMonthLabel || "Not Available"}</strong>
             </div>
 
             <div style={styles.generatedReceipt}>
@@ -476,6 +538,19 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
     gap: "16px",
+  },
+  monthInput: {
+    width: "100%",
+    maxWidth: "220px",
+    minHeight: "40px",
+    marginTop: "4px",
+    padding: "8px 10px",
+    border: "1px solid rgba(148, 163, 184, 0.5)",
+    borderRadius: "10px",
+    background: "#ffffff",
+    font: "inherit",
+    fontWeight: 700,
+    color: "#1e293b",
   },
   actions: {
     display: "flex",
@@ -658,6 +733,13 @@ const styles = {
     gap: "12px",
     marginTop: "16px",
     maxWidth: "860px",
+  },
+  activitySummaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "12px",
+    marginTop: "12px",
+    maxWidth: "600px",
   },
   equationSymbol: {
     display: "grid",

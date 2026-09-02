@@ -87,7 +87,7 @@ const MASTER_SECTIONS = [
       column("latestDisconnectedBy", "Latest Disconnected By", "text", "METER_DISCONNECTION TRNs", "User recorded as completing the latest disconnection."),
       column("reconnected", "Reconnected", "text", "METER_RECONNECTION TRNs", "Whether a completed reconnection has been recorded."),
       column("latestReconnectionDate", "Latest Reconnection Date", "date", "METER_RECONNECTION TRNs", "Latest completed reconnection date."),
-      column("latestReconnectedBy", "Latest Reconnected By", "text", "METER_RECONNECTION TRNs", "User recorded as completing the latest reconnection."),
+      column("latestReconnectedBy", "Latest Reconnected By", "text", "METER_RECONNECTION TRNs", "User recorded as reconnecting the meter."),
       column("fineIssued", "Fine Issued", "text", "Fine/recovery source", "Whether a fine has been issued. External fine source is not yet connected in v0.1."),
       column("latestFineReference", "Latest Fine Reference", "text", "Fine/recovery source", "Latest fine reference when the fine source is connected."),
       column("latestFineIssuedDate", "Latest Fine Issued Date", "date", "Fine/recovery source", "Latest fine-issued date."),
@@ -231,7 +231,7 @@ export function getGmrMasterColumnDefinitions(monthKeys = []) {
 }
 
 function buildMasterSheet(rows, monthKeys) {
-  const sections = buildMasterColumns(monthKeys);
+  const sections = buildMasterColumns(monthKeys).filter((section) => section.columns.length > 0);
   const columns = sections.flatMap((section) => section.columns);
   const sectionHeader = [];
   const merges = [];
@@ -254,9 +254,11 @@ function buildMasterSheet(rows, monthKeys) {
     { cellDates: true },
   );
   worksheet["!merges"] = merges;
-  worksheet["!autofilter"] = {
-    ref: `A2:${XLSX.utils.encode_col(columns.length - 1)}${rows.length + 2}`,
-  };
+  if (columns.length) {
+    worksheet["!autofilter"] = {
+      ref: `A2:${XLSX.utils.encode_col(columns.length - 1)}${rows.length + 2}`,
+    };
+  }
   setColumnWidths(worksheet, columns);
   applyColumnFormats(worksheet, columns, 2, rows.length);
   return worksheet;
@@ -290,9 +292,11 @@ function buildDashboardSheet(dataset) {
     ["Municipality", dataset?.municipality?.lmName || GMR_NOT_AVAILABLE],
     ["LM PCode", dataset?.municipality?.lmPcode || GMR_NOT_AVAILABLE],
     ["Generation Mode", dataset?.generationMode || GMR_NOT_AVAILABLE],
+    ["Reporting Month", dataset?.reportingPeriodLabel || dataset?.reportMonth || GMR_NOT_AVAILABLE],
     ["Generated At", toExcelDate(dataset?.generatedAt) || GMR_NOT_AVAILABLE],
+    ["Activity Scope", dataset?.activityScope || GMR_NOT_AVAILABLE],
     [],
-    ["Population Metric", "Value"],
+    ["Full Meter Population Metric", "Value"],
     ["Total Meters", summary.selectedTotal ?? rows.length],
     ["Visible", summary.visibleSelected ?? GMR_NOT_AVAILABLE],
     ["Invisible", summary.invisibleSelected ?? GMR_NOT_AVAILABLE],
@@ -302,25 +306,28 @@ function buildDashboardSheet(dataset) {
     ["Field-Found Sales Matched", summary.fieldFoundSalesMatchedSelected ?? GMR_NOT_AVAILABLE],
     ["Sales History Available", summary.salesHistoryAvailableSelected ?? GMR_NOT_AVAILABLE],
     ["Premises Linked", summary.premiseLinkedSelected ?? GMR_NOT_AVAILABLE],
-    ["Meters With Interventions", summary.metersWithInterventions ?? GMR_NOT_AVAILABLE],
-    ["Intervention Events", summary.interventionEventCount ?? GMR_NOT_AVAILABLE],
+    [],
+    ["Selected-Month Activity Metric", "Value"],
+    ["Meter Discovery Records", summary.monthlyDiscoveryCount ?? 0],
+    ["Completed DCN / RCN Events", summary.monthlyInterventionEventCount ?? 0],
+    ["Meters With Monthly Interventions", summary.metersWithInterventions ?? 0],
     ["Reconciliation / Data Gap Rows", summary.exceptionCount ?? GMR_NOT_AVAILABLE],
     [],
   ];
 
-  appendDistributionRows(aoa, "Sales Category", rows, "salesCategory", rows.length);
-  appendDistributionRows(aoa, "Ward", rows, "ward", rows.length);
-  appendDistributionRows(aoa, "Primary Finding", rows, "primaryFinding", rows.length);
-  appendDistributionRows(aoa, "Latest Purchasing Status", rows, "latestPurchasingStatus", rows.length);
+  appendDistributionRows(aoa, "Sales Category — Full Population", rows, "salesCategory", rows.length);
+  appendDistributionRows(aoa, "Ward — Full Population", rows, "ward", rows.length);
+  appendDistributionRows(aoa, "Primary Finding — Selected Month", dataset.fieldRows || [], "primaryFinding", (dataset.fieldRows || []).length);
+  appendDistributionRows(aoa, "Latest Purchasing Status — Full Population", rows, "latestPurchasingStatus", rows.length);
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
-  worksheet["!cols"] = [{ wch: 36 }, { wch: 22 }, { wch: 18 }];
+  worksheet["!cols"] = [{ wch: 40 }, { wch: 28 }, { wch: 18 }];
 
   for (let row = 0; row < aoa.length; row += 1) {
     const percentCell = worksheet[XLSX.utils.encode_cell({ r: row, c: 2 })];
     if (percentCell && typeof percentCell.v === "number") percentCell.z = "0.0%";
   }
-  const generatedAtCell = worksheet.A5 ? worksheet.B5 : null;
+  const generatedAtCell = worksheet.B6;
   if (generatedAtCell && generatedAtCell.v instanceof Date) {
     generatedAtCell.z = "yyyy-mm-dd hh:mm";
   }
@@ -489,7 +496,7 @@ function buildZamoReportSheet(rows = []) {
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
   worksheet["!autofilter"] = {
-    ref: `A1:${XLSX.utils.encode_col(data.columns.length - 1)}${aoa.length}`,
+    ref: `A1:${XLSX.utils.encode_col(data.columns.length - 1)}${Math.max(1, aoa.length)}`,
   };
   setColumnWidths(worksheet, data.columns);
   applyColumnFormats(worksheet, data.columns, 1, rows.length);
@@ -536,17 +543,19 @@ function zamoNormalisationLabel(value) {
   return zamoStatsLabel(value);
 }
 
-function zamoStatsPeriodLabel(generatedAt) {
-  const parsed = generatedAt ? new Date(generatedAt) : new Date();
+function zamoStatsPeriodLabel(reportMonth) {
+  const match = String(reportMonth || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "GMR";
+  const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
   if (Number.isNaN(parsed.getTime())) return "GMR";
   return parsed.toLocaleString("en-ZA", {
     month: "long",
     year: "numeric",
-    timeZone: "Africa/Johannesburg",
+    timeZone: "UTC",
   }).toUpperCase();
 }
 
-function buildZamoStatsSheet(rows = [], generatedAt) {
+function buildZamoStatsSheet(rows = [], reportMonth) {
   const workers = [...new Set(rows.map((row) => {
     const value = String(row?.fieldWorkerName || "").trim();
     return value || GMR_NOT_AVAILABLE;
@@ -586,7 +595,7 @@ function buildZamoStatsSheet(rows = [], generatedAt) {
     teamStatusCounts.set(team, (teamStatusCounts.get(team) || 0) + 1);
   });
 
-  const period = zamoStatsPeriodLabel(generatedAt);
+  const period = zamoStatsPeriodLabel(reportMonth);
   const maxGroupColumns = Math.max(workers.length, teams.length);
   const lastColumnIndex = maxGroupColumns + 2;
   const lastColumnLetter = XLSX.utils.encode_col(workers.length + 2);
@@ -605,7 +614,7 @@ function buildZamoStatsSheet(rows = [], generatedAt) {
 
   aoa.push([
     "",
-    "TOTAL: INSPECTIONS COMPLETED",
+    "TOTAL: METER DISCOVERY RECORDS",
     ...workers.map((worker) => workerCounts.get(worker) || 0),
     rows.length,
   ]);
@@ -652,7 +661,7 @@ function buildZamoStatsSheet(rows = [], generatedAt) {
   });
   aoa.push([
     "",
-    "TOTAL: INSPECTIONS COMPLETED",
+    "TOTAL: METER DISCOVERY RECORDS",
     ...teams.map((team) => teamCounts.get(team) || 0),
     rows.length,
   ]);
@@ -687,12 +696,12 @@ function buildExceptionsSheet(exceptions = []) {
     columns.map((item) => normalizeCell(getPath(row, item.key), item.type)),
   )];
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
-  worksheet["!autofilter"] = { ref: `A1:I${aoa.length}` };
+  worksheet["!autofilter"] = { ref: `A1:I${Math.max(1, aoa.length)}` };
   setColumnWidths(worksheet, columns);
   return worksheet;
 }
 
-function buildDictionarySheet(masterColumns, interventionColumns) {
+function buildDictionarySheet(masterColumns, interventionColumns, dataset) {
   const headers = [
     "Dataset",
     "Section",
@@ -704,7 +713,52 @@ function buildDictionarySheet(masterColumns, interventionColumns) {
     "Missing Value Rule",
     "Purpose / Definition",
   ];
-  const rows = [];
+  const rows = [
+    [
+      "GMR Reporting Period",
+      "Reporting Month",
+      1,
+      "N/A",
+      "Reporting Month",
+      "period",
+      "GMR request",
+      "Required before generation.",
+      `Selected reporting period: ${dataset?.reportingPeriodLabel || dataset?.reportMonth || GMR_NOT_AVAILABLE}. Field Data and Field Stats contain registry-linked Meter Discovery submissions whose server metadata.createdAt falls in this Johannesburg calendar month.`,
+    ],
+    [
+      "GMR Reporting Period",
+      "Interventions",
+      2,
+      "N/A",
+      "Monthly Intervention Date",
+      "date",
+      "METER_DISCONNECTION / METER_RECONNECTION workflow",
+      "Completed lifecycle TRNs without a valid workflow.completedAt are not allocated to a reporting month and are surfaced as reconciliation exceptions.",
+      "Intervention & Recovery Detail contains completed Meter Disconnection and Meter Reconnection work whose workflow.completedAt falls in the selected Johannesburg reporting month. Office issue/update timestamps do not allocate work to a month.",
+    ],
+    [
+      "GMR Reporting Period",
+      "Supporting Context",
+      3,
+      "N/A",
+      "Full Meter / Sales Context",
+      "rule",
+      "Meter Registry / Premises / Sales",
+      "Existing source missing-value rules remain unchanged.",
+      "The full current meter population and all available Sales/purchase history remain supporting context. The selected reporting month filters TRN-driven activity, not the meter population or purchase-history horizon.",
+    ],
+    [
+      "GMR Reporting Period",
+      "Submission Semantics",
+      4,
+      "N/A",
+      "Meter Discovery Submission Date",
+      "date",
+      "METER_DISCOVERY metadata.createdAt",
+      "Discovery records without a valid metadata.createdAt cannot be allocated to a reporting month.",
+      "For this GMR version, Meter Discovery belongs to the month in which the submitted transaction was created on the server. Offline field capture completed earlier but submitted later belongs to the server-submission month.",
+    ],
+  ];
 
   masterColumns.forEach((item, index) => {
     rows.push([
@@ -750,7 +804,10 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   if (!Array.isArray(dataset.rows) || dataset.rows.length === 0) {
     throw new RangeError("GMR Excel generation requires at least one meter row.");
   }
-  if (!Array.isArray(dataset.monthKeys) || dataset.monthKeys.length === 0) {
+  if (!Array.isArray(dataset.fieldRows)) {
+    throw new TypeError("GMR dataset fieldRows are required.");
+  }
+  if (!Array.isArray(dataset.monthKeys)) {
     throw new TypeError("GMR dataset monthKeys are required.");
   }
   if (typeof fileName !== "string" || !fileName.endsWith(".xlsx")) {
@@ -760,6 +817,7 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   const workbook = XLSX.utils.book_new();
   const masterColumns = getGmrMasterColumnDefinitions(dataset.monthKeys);
   const intervention = buildInterventionSheet(dataset.interventionEvents || []);
+  const fieldRows = dataset.fieldRows;
 
   XLSX.utils.book_append_sheet(workbook, buildDashboardSheet(dataset), sheetName("GMR Dashboard"));
   XLSX.utils.book_append_sheet(workbook, buildMasterSheet(dataset.rows, dataset.monthKeys), sheetName("GMR Master Meter"));
@@ -789,15 +847,19 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   );
   XLSX.utils.book_append_sheet(workbook, intervention.worksheet, sheetName("Intervention & Recovery Detail"));
   XLSX.utils.book_append_sheet(workbook, buildFinancialSheet(dataset.rows), sheetName("Financial Analysis"));
-  const zamoReport = buildZamoReportSheet(dataset.rows);
+  const zamoReport = buildZamoReportSheet(fieldRows);
   XLSX.utils.book_append_sheet(workbook, zamoReport.worksheet, sheetName("Field Data"));
   XLSX.utils.book_append_sheet(
     workbook,
-    buildZamoStatsSheet(dataset.rows, dataset.generatedAt),
+    buildZamoStatsSheet(fieldRows, dataset.reportMonth),
     sheetName("Field Stats"),
   );
   XLSX.utils.book_append_sheet(workbook, buildExceptionsSheet(dataset.exceptions || []), sheetName("Reconciliation Exceptions"));
-  XLSX.utils.book_append_sheet(workbook, buildDictionarySheet(masterColumns, intervention.columns), sheetName("Data Dictionary"));
+  XLSX.utils.book_append_sheet(
+    workbook,
+    buildDictionarySheet(masterColumns, intervention.columns, dataset),
+    sheetName("Data Dictionary"),
+  );
 
   const bytes = toUint8Array(
     XLSX.write(workbook, {

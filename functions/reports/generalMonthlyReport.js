@@ -4,7 +4,7 @@ import { getFirestore } from "firebase-admin/firestore";
 
 export const GMR_LM_PCODE = "ZA5241";
 export const GMR_LM_NAME = "Endumeni";
-export const GMR_GENERATION_MODE = "FULL_FIELD_POPULATION";
+export const GMR_GENERATION_MODE = "MONTHLY_GMR";
 export const GMR_REPORT_TYPE = "GENERAL_MONTHLY_REPORT";
 export const GMR_SCHEMA_VERSION = 1;
 export const GMR_ZAMO_PHOTO_HARD_CEILING = 6;
@@ -14,6 +14,8 @@ const GMR_LIFECYCLE_TYPES = new Set([
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
 ]);
+const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
+const GMR_ACTIVITY_SCOPE = "REGISTRY_LINKED_DISCOVERY_AND_COMPLETED_DCN_RCN";
 
 function cleanText(value) {
   if (value === null || value === undefined) return "";
@@ -76,9 +78,11 @@ function timestampToIso(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function monthKeyFromIso(value) {
-  const iso = timestampToIso(value);
-  return iso ? iso.slice(0, 7) : null;
+function isValidMonthKey(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return false;
+  const month = Number(match[2]);
+  return month >= 1 && month <= 12;
 }
 
 function addMonths(monthKey, delta) {
@@ -91,19 +95,103 @@ function addMonths(monthKey, delta) {
   return `${year}-${month}`;
 }
 
-function buildMonthKeys() {
-  const keys = [];
-  let cursor = "2023-12";
+function johannesburgMonthKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const shifted = new Date(date.getTime() + JOHANNESBURG_OFFSET_MS);
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
-  while (cursor && cursor <= "2026-08") {
+function reportMonthLabel(reportMonth) {
+  if (!isValidMonthKey(reportMonth)) return null;
+  const [year, month] = reportMonth.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-ZA", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function getGmrReportMonthWindow(reportMonth) {
+  if (!isValidMonthKey(reportMonth)) {
+    throw new RangeError("GMR reporting month must use YYYY-MM format.");
+  }
+
+  const [year, month] = reportMonth.split("-").map(Number);
+  const startMs = Date.UTC(year, month - 1, 1) - JOHANNESBURG_OFFSET_MS;
+  const endMs = Date.UTC(year, month, 1) - JOHANNESBURG_OFFSET_MS;
+
+  return {
+    reportMonth,
+    reportingPeriodLabel: reportMonthLabel(reportMonth),
+    startIso: new Date(startMs).toISOString(),
+    endIso: new Date(endMs).toISOString(),
+    startMs,
+    endMs,
+  };
+}
+
+export function validateGmrReportMonth(reportMonth, now = new Date()) {
+  const window = getGmrReportMonthWindow(reportMonth);
+  const currentMonth = johannesburgMonthKey(now);
+  if (!currentMonth || reportMonth > currentMonth) {
+    throw new RangeError("GMR reporting month cannot be in the future.");
+  }
+  return window;
+}
+
+export function isTimestampInGmrReportMonth(value, reportMonthOrWindow) {
+  const iso = timestampToIso(value);
+  if (!iso) return false;
+  const milliseconds = new Date(iso).getTime();
+  if (!Number.isFinite(milliseconds)) return false;
+  const window = typeof reportMonthOrWindow === "string"
+    ? getGmrReportMonthWindow(reportMonthOrWindow)
+    : reportMonthOrWindow;
+  return Boolean(
+    window &&
+    Number.isFinite(window.startMs) &&
+    Number.isFinite(window.endMs) &&
+    milliseconds >= window.startMs &&
+    milliseconds < window.endMs
+  );
+}
+
+function monthKeyFromIso(value) {
+  const iso = timestampToIso(value);
+  return iso ? johannesburgMonthKey(iso) : null;
+}
+
+export function buildGmrMonthKeysFromSales(salesDocs = []) {
+  const items = salesDocs instanceof Map
+    ? [...salesDocs.values()]
+    : Array.isArray(salesDocs)
+      ? salesDocs
+      : [];
+  const observed = new Set();
+
+  items.forEach((item) => {
+    const sales = item?.data || item || {};
+    [sales?.monthlySalesC, sales?.Sales].forEach((source) => {
+      if (!source || typeof source !== "object" || Array.isArray(source)) return;
+      Object.keys(source).forEach((key) => {
+        if (isValidMonthKey(key)) observed.add(key);
+      });
+    });
+  });
+
+  const sorted = [...observed].sort();
+  if (!sorted.length) return [];
+
+  const keys = [];
+  let cursor = sorted[0];
+  const last = sorted.at(-1);
+  while (cursor && cursor <= last) {
     keys.push(cursor);
     cursor = addMonths(cursor, 1);
   }
-
   return keys;
 }
-
-export const GMR_MONTH_KEYS = Object.freeze(buildMonthKeys());
 
 function compareRegistryMeters(left = {}, right = {}) {
   const leftWard = cleanText(left?.parents?.wardPcode);
@@ -253,10 +341,7 @@ function getLifecycleEventDate(trn = {}) {
 }
 
 function getDiscoveryDate(discovery = {}) {
-  return (
-    timestampToIso(discovery?.metadata?.createdAt) ||
-    timestampToIso(discovery?.metadata?.updatedAt)
-  );
+  return timestampToIso(discovery?.metadata?.createdAt);
 }
 
 function getDiscoveryFieldWorker(discovery = {}) {
@@ -473,15 +558,21 @@ function targetCategoryFlag(value) {
 
 function getMonthlyPurchaseRands(sales = {}, monthKey) {
   const monthlySalesC = sales?.monthlySalesC;
-  if (monthlySalesC && typeof monthlySalesC === "object") {
-    if (!Object.prototype.hasOwnProperty.call(monthlySalesC, monthKey)) return null;
+  if (
+    monthlySalesC &&
+    typeof monthlySalesC === "object" &&
+    Object.prototype.hasOwnProperty.call(monthlySalesC, monthKey)
+  ) {
     const cents = Number(monthlySalesC[monthKey]);
     return Number.isFinite(cents) ? cents / 100 : null;
   }
 
   const legacySales = sales?.Sales;
-  if (legacySales && typeof legacySales === "object") {
-    if (!Object.prototype.hasOwnProperty.call(legacySales, monthKey)) return null;
+  if (
+    legacySales &&
+    typeof legacySales === "object" &&
+    Object.prototype.hasOwnProperty.call(legacySales, monthKey)
+  ) {
     const rands = Number(legacySales[monthKey]);
     return Number.isFinite(rands) ? rands : null;
   }
@@ -489,8 +580,8 @@ function getMonthlyPurchaseRands(sales = {}, monthKey) {
   return null;
 }
 
-function buildMonthlyPurchases(sales = {}) {
-  return GMR_MONTH_KEYS.reduce((result, monthKey) => {
+function buildMonthlyPurchases(sales = {}, monthKeys = []) {
+  return monthKeys.reduce((result, monthKey) => {
     result[monthKey] = getMonthlyPurchaseRands(sales, monthKey);
     return result;
   }, {});
@@ -507,7 +598,12 @@ function getThreeMonthAverage(monthlyPurchases, anchorMonth, offsets) {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
-function buildFinancialAnalytics({ monthlyPurchases, investigationDate, hasSalesHistory }) {
+function buildFinancialAnalytics({
+  monthlyPurchases,
+  investigationDate,
+  hasSalesHistory,
+  monthKeys = [],
+}) {
   if (!hasSalesHistory) {
     return {
       purchasesAfterInvestigation: null,
@@ -539,7 +635,7 @@ function buildFinancialAnalytics({ monthlyPurchases, investigationDate, hasSales
   const postAverage = getThreeMonthAverage(monthlyPurchases, investigationMonth, [1, 2, 3]);
 
   const monthsAfterInvestigation = investigationMonth
-    ? GMR_MONTH_KEYS.filter((monthKey) => monthKey > investigationMonth)
+    ? monthKeys.filter((monthKey) => monthKey > investigationMonth)
     : [];
   const availablePostValues = monthsAfterInvestigation
     .map((monthKey) => monthlyPurchases?.[monthKey])
@@ -550,12 +646,12 @@ function buildFinancialAnalytics({ monthlyPurchases, investigationDate, hasSales
       ? "Yes"
       : "No";
 
-  const availableMonths = GMR_MONTH_KEYS.filter((monthKey) =>
+  const availableMonths = monthKeys.filter((monthKey) =>
     Number.isFinite(monthlyPurchases?.[monthKey]),
   );
   const latestMonth = availableMonths.at(-1) || null;
-  const latestIndex = latestMonth ? GMR_MONTH_KEYS.indexOf(latestMonth) : -1;
-  const previousMonth = latestIndex > 0 ? GMR_MONTH_KEYS[latestIndex - 1] : null;
+  const latestIndex = latestMonth ? monthKeys.indexOf(latestMonth) : -1;
+  const previousMonth = latestIndex > 0 ? monthKeys[latestIndex - 1] : null;
   const latestValue = latestMonth ? monthlyPurchases[latestMonth] : null;
   const previousValue = previousMonth && Number.isFinite(monthlyPurchases?.[previousMonth])
     ? monthlyPurchases[previousMonth]
@@ -572,9 +668,9 @@ function buildFinancialAnalytics({ monthlyPurchases, investigationDate, hasSales
     .find((monthKey) => monthlyPurchases[monthKey] > 0) || null;
 
   let consecutiveZeroPurchaseMonths = 0;
-  const latestAvailableIndex = latestMonth ? GMR_MONTH_KEYS.indexOf(latestMonth) : -1;
+  const latestAvailableIndex = latestMonth ? monthKeys.indexOf(latestMonth) : -1;
   for (let index = latestAvailableIndex; index >= 0; index -= 1) {
-    const value = monthlyPurchases[GMR_MONTH_KEYS[index]];
+    const value = monthlyPurchases[monthKeys[index]];
     if (!Number.isFinite(value)) break;
     if (value !== 0) break;
     consecutiveZeroPurchaseMonths += 1;
@@ -630,6 +726,14 @@ function buildFinancialAnalytics({ monthlyPurchases, investigationDate, hasSales
 
 function isCompletedLifecycleEvent(event = {}) {
   return normalizeUpper(event?.workflowState) === "COMPLETED" && event?.success !== false;
+}
+
+function isMonthlyCompletedLifecycleTrn(trn = {}, reportWindow) {
+  return (
+    GMR_LIFECYCLE_TYPES.has(getTrnType(trn)) &&
+    normalizeUpper(trn?.workflow?.state) === "COMPLETED" &&
+    isTimestampInGmrReportMonth(trn?.workflow?.completedAt, reportWindow)
+  );
 }
 
 function buildLifecycleEvent({ trnId, trn = {}, meterRowContext = {} }) {
@@ -811,12 +915,16 @@ export function buildCanonicalGmrMeterRow({
   sourceSalesEntry,
   lifecycleTrns = [],
   fieldStatsTeam = "Unassigned",
+  monthKeys = null,
 }) {
   const discovery = discoveryEntry?.data || {};
   const premise = premiseEntry?.data || {};
   const fieldSales = fieldSalesEntry?.data || {};
   const sourceSales = sourceSalesEntry?.data || {};
   const targetedContext = discovery?.targetedBatchContext || {};
+  const effectiveMonthKeys = Array.isArray(monthKeys)
+    ? monthKeys
+    : buildGmrMonthKeysFromSales([sourceSales]);
 
   const fieldFoundMeterNo = normalizeMeterNo(
     registry?.meterNo || discovery?.ast?.astData?.astNo,
@@ -830,7 +938,7 @@ export function buildCanonicalGmrMeterRow({
   const salesHistorySourceMeterNo = sourceSalesEntry
     ? getSalesMeterNo(sourceSalesEntry.id, sourceSales)
     : null;
-  const monthlyPurchases = buildMonthlyPurchases(sourceSales);
+  const monthlyPurchases = buildMonthlyPurchases(sourceSales, effectiveMonthKeys);
   const salesHistoryAvailable = hasAnySalesHistory(monthlyPurchases);
   const salesCategory = getSalesCategory(sourceSales);
   const targetCategory = targetCategoryFlag(salesCategory);
@@ -885,6 +993,7 @@ export function buildCanonicalGmrMeterRow({
     monthlyPurchases,
     investigationDate,
     hasSalesHistory: salesHistoryAvailable,
+    monthKeys: effectiveMonthKeys,
   });
 
   return {
@@ -988,12 +1097,15 @@ function fieldSalesIdForMeter(registry = {}) {
 export async function buildGeneralMonthlyReportDataset({
   db,
   lmPcode = GMR_LM_PCODE,
+  reportMonth,
   generatedAt = new Date(),
 }) {
   if (!db) throw new TypeError("Firestore db is required.");
   if (lmPcode !== GMR_LM_PCODE) {
     throw new RangeError(`GMR Builder v0.1 is locked to ${GMR_LM_PCODE}.`);
   }
+  const reportWindow = validateGmrReportMonth(reportMonth, generatedAt);
+
   const [registrySnapshot, trnSnapshot, teamsSnapshot] = await Promise.all([
     db.collection("registry_meters")
       .where("parents.lmPcode", "==", lmPcode)
@@ -1034,13 +1146,21 @@ export async function buildGeneralMonthlyReportDataset({
   });
 
   const discoveryByMeterId = new Map();
+  const monthlyDiscoveryMeterIds = new Set();
   selection.selected.forEach((registry) => {
     const meterId = cleanText(registry?.id || registry?.meterId);
     const candidate = trnById.get(meterId) || null;
-    discoveryByMeterId.set(
-      meterId,
-      candidate && getTrnType(candidate.data) === "METER_DISCOVERY" ? candidate : null,
-    );
+    const discoveryEntry = candidate && getTrnType(candidate.data) === "METER_DISCOVERY"
+      ? candidate
+      : null;
+    discoveryByMeterId.set(meterId, discoveryEntry);
+
+    if (
+      discoveryEntry &&
+      isTimestampInGmrReportMonth(discoveryEntry?.data?.metadata?.createdAt, reportWindow)
+    ) {
+      monthlyDiscoveryMeterIds.add(meterId);
+    }
   });
 
   const premiseIds = selection.selected.map((registry) => registry?.premiseId);
@@ -1062,10 +1182,13 @@ export async function buildGeneralMonthlyReportDataset({
     "sales-all-meters",
     [...fieldSalesIds, ...sourceSalesIds],
   );
+  const monthKeys = buildGmrMonthKeysFromSales(salesById);
 
   const rows = [];
+  const fieldRows = [];
   const interventionEvents = [];
   const exceptions = [];
+  const monthlyInterventionMeterIds = new Set();
 
   for (const registry of selection.selected) {
     const meterId = cleanText(registry?.id || registry?.meterId);
@@ -1093,9 +1216,47 @@ export async function buildGeneralMonthlyReportDataset({
       sourceSalesEntry,
       lifecycleTrns,
       fieldStatsTeam,
+      monthKeys,
     });
     rows.push(row);
-    interventionEvents.push(...row.lifecycleEvents);
+
+    if (monthlyDiscoveryMeterIds.has(meterId)) {
+      fieldRows.push(row);
+    }
+
+    const monthlyLifecycleIds = new Set(
+      lifecycleTrns
+        .filter((entry) => isMonthlyCompletedLifecycleTrn(entry.data, reportWindow))
+        .map((entry) => entry.id),
+    );
+    const monthlyEvents = row.lifecycleEvents.filter((event) => monthlyLifecycleIds.has(event.eventId));
+    if (monthlyEvents.length) monthlyInterventionMeterIds.add(meterId);
+    interventionEvents.push(...monthlyEvents);
+
+    if (discoveryEntry && !timestampToIso(discoveryEntry?.data?.metadata?.createdAt)) {
+      exceptions.push(buildException({
+        meter: row,
+        type: "METER_DISCOVERY_CREATED_AT_MISSING",
+        source: "trns.metadata.createdAt",
+        severity: "ERROR",
+        details: "The Meter Discovery TRN has no valid metadata.createdAt and cannot be allocated to a reporting month.",
+      }));
+    }
+
+    lifecycleTrns.forEach((entry) => {
+      if (
+        normalizeUpper(entry?.data?.workflow?.state) === "COMPLETED" &&
+        !timestampToIso(entry?.data?.workflow?.completedAt)
+      ) {
+        exceptions.push(buildException({
+          meter: row,
+          type: "LIFECYCLE_COMPLETED_AT_MISSING",
+          source: `${getTrnType(entry.data)}.workflow.completedAt`,
+          severity: "ERROR",
+          details: `Completed lifecycle TRN ${entry.id} has no valid workflow.completedAt and is excluded from monthly intervention activity.`,
+        }));
+      }
+    });
 
     if (!discoveryEntry) {
       exceptions.push(buildException({
@@ -1156,9 +1317,9 @@ export async function buildGeneralMonthlyReportDataset({
       exceptions.push(buildException({
         meter: row,
         type: "SALES_HISTORY_NOT_AVAILABLE",
-        source: "sales-all-meters.monthlySalesC",
+        source: "sales-all-meters.monthlySalesC / Sales",
         severity: "WARNING",
-        details: "The Sales source exists but contains no usable monthly purchase history in the GMR reporting window.",
+        details: "The Sales source exists but contains no usable monthly purchase history.",
       }));
     }
   }
@@ -1177,15 +1338,17 @@ export async function buildGeneralMonthlyReportDataset({
     }));
   }
 
-  const zamoReport = buildZamoReportPhotoConfig(rows);
+  const zamoReport = buildZamoReportPhotoConfig(fieldRows);
 
   const summary = {
     ...selection.summary,
     premiseLinkedSelected: rows.filter((row) => row.iRepsPremiseId).length,
     fieldFoundSalesMatchedSelected: rows.filter((row) => row.fieldFoundMeterInSales === "Yes").length,
     salesHistoryAvailableSelected: rows.filter((row) => row.salesHistoryAvailable === "Yes").length,
+    monthlyDiscoveryCount: fieldRows.length,
+    monthlyInterventionEventCount: interventionEvents.length,
     interventionEventCount: interventionEvents.length,
-    metersWithInterventions: rows.filter((row) => row.interventionCount > 0).length,
+    metersWithInterventions: monthlyInterventionMeterIds.size,
     targetCategorySelected: rows.filter((row) => row.targetCategory === "Yes").length,
     normalCategorySelected: rows.filter(
       (row) => normalizeUpper(row.salesCategory) === "NORMAL - NO LEAKAGE FLAG",
@@ -1193,23 +1356,27 @@ export async function buildGeneralMonthlyReportDataset({
     categoryNotAvailableSelected: rows.filter((row) => !row.salesCategory).length,
     exceptionCount: exceptions.length,
     wardCounts: getWardCounts(rows),
-    findingCounts: getFindingCounts(rows),
+    findingCounts: getFindingCounts(fieldRows),
   };
 
   return {
     schemaVersion: GMR_SCHEMA_VERSION,
     reportType: GMR_REPORT_TYPE,
     generatedAt: generatedAt.toISOString(),
+    reportMonth: reportWindow.reportMonth,
+    reportingPeriodLabel: reportWindow.reportingPeriodLabel,
+    activityScope: GMR_ACTIVITY_SCOPE,
     municipality: {
       lmPcode: GMR_LM_PCODE,
       lmName: GMR_LM_NAME,
     },
     generationMode: GMR_GENERATION_MODE,
     populationSize: rows.length,
-    monthKeys: [...GMR_MONTH_KEYS],
+    monthKeys,
     summary,
     zamoReport,
     rows,
+    fieldRows,
     interventionEvents,
     exceptions,
   };
@@ -1222,9 +1389,8 @@ export const generateGeneralMonthlyReportCallable = onCall(
   },
   async (request) => {
     const lmPcode = cleanText(request?.data?.lmPcode || GMR_LM_PCODE);
-    const mode = normalizeUpper(
-      request?.data?.mode || GMR_GENERATION_MODE,
-    );
+    const mode = normalizeUpper(request?.data?.mode);
+    const reportMonth = cleanText(request?.data?.reportMonth);
 
     if (lmPcode !== GMR_LM_PCODE) {
       throw new HttpsError(
@@ -1235,34 +1401,46 @@ export const generateGeneralMonthlyReportCallable = onCall(
     if (mode !== GMR_GENERATION_MODE) {
       throw new HttpsError(
         "invalid-argument",
-        "GMR Builder v0.1 generates the full current Endumeni field population.",
+        "GMR Builder v0.1 requires MONTHLY_GMR generation mode.",
       );
+    }
+
+    const generatedAt = new Date();
+    let reportWindow;
+    try {
+      reportWindow = validateGmrReportMonth(reportMonth, generatedAt);
+    } catch (error) {
+      throw new HttpsError("invalid-argument", error.message);
     }
 
     const db = getFirestore();
     const actor = await assertGmrAccess({ db, request, lmPcode });
-    const generatedAt = new Date();
 
     logger.info("generateGeneralMonthlyReportCallable -- START", {
       actorUid: actor.uid,
       actorRole: actor.role,
       lmPcode,
       generationMode: GMR_GENERATION_MODE,
+      reportMonth: reportWindow.reportMonth,
     });
 
     try {
       const dataset = await buildGeneralMonthlyReportDataset({
         db,
         lmPcode,
+        reportMonth: reportWindow.reportMonth,
         generatedAt,
       });
 
       logger.info("generateGeneralMonthlyReportCallable -- SUCCESS", {
         actorUid: actor.uid,
         lmPcode,
+        reportMonth: dataset.reportMonth,
         selectedTotal: dataset.summary.selectedTotal,
         visibleSelected: dataset.summary.visibleSelected,
         invisibleSelected: dataset.summary.invisibleSelected,
+        monthlyDiscoveryCount: dataset.summary.monthlyDiscoveryCount,
+        monthlyInterventionEventCount: dataset.summary.monthlyInterventionEventCount,
         exceptionCount: dataset.summary.exceptionCount,
         zamoPhotoObservedMax: dataset?.zamoReport?.observedMaxPhotoCount ?? 0,
         zamoPhotoColumnCount: dataset?.zamoReport?.photoColumnCount ?? 0,
@@ -1274,6 +1452,7 @@ export const generateGeneralMonthlyReportCallable = onCall(
       logger.error("generateGeneralMonthlyReportCallable -- ERROR", {
         actorUid: actor.uid,
         lmPcode,
+        reportMonth: reportWindow.reportMonth,
         generationMode: GMR_GENERATION_MODE,
         message: error?.message || String(error),
         stack: error?.stack || "",
