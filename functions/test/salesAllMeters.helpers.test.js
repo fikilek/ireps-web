@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   SALES_ALL_METERS_CONFLICT_CODES as CODES,
   SALES_ALL_METERS_OUTCOMES as OUTCOMES,
+  buildSalesAllMetersOperationalMetadataPatch,
   classifySalesAllMetersSync,
   deriveSalesAllMetersVisibilityFromMaster,
 } from "../salesAllMeters/helpers.js";
@@ -75,6 +76,34 @@ function contour(overrides = {}) {
     erfCandidates: [],
     erfNumbers: [],
     missingErfNumbers: [],
+    ...overrides,
+  };
+}
+
+function salesMetadata(overrides = {}) {
+  return {
+    createdAt: { seconds: 1786200000, nanoseconds: 0 },
+    createdByUid: "SPU_1",
+    createdByUser: "System Power User",
+    updatedAt: { seconds: 1786200100, nanoseconds: 0 },
+    updatedByUid: "SPU_1",
+    updatedByUser: "System Power User",
+    ...overrides,
+  };
+}
+
+function monthlyCategories(overrides = {}) {
+  return {
+    "2026-06": {
+      leakageCategory: "CAT4 - Dormant / Low Purchase",
+      riskTier: "Medium Risk",
+      riskScore: 6,
+    },
+    "2026-07": {
+      leakageCategory: "Normal - No Leakage Flag",
+      riskTier: "Low Risk",
+      riskScore: 0,
+    },
     ...overrides,
   };
 }
@@ -220,6 +249,111 @@ test("unknown additive root is forward-compatible", () => {
   assert.equal(result.patch, null);
 });
 
+test("month-scoped category history is accepted without requiring contiguous months", () => {
+  const result = classify(contour({
+    monthlyCategories: monthlyCategories({
+      "2026-09": {
+        leakageCategory: "CAT2 - Irregular Purchase",
+        riskTier: "High Risk",
+        riskScore: 8,
+      },
+    }),
+  }));
+  assert.equal(result.outcome, OUTCOMES.UNCHANGED);
+  assert.equal(result.patch, null);
+});
+
+test("monthlyCategories-aware Contour target may omit transitional legacy category scalars", () => {
+  const existing = contour({ monthlyCategories: monthlyCategories() });
+  delete existing.leakageCategory;
+  delete existing.riskTier;
+  delete existing.riskScore;
+  const result = classify(existing);
+  assert.equal(result.outcome, OUTCOMES.UNCHANGED);
+  assert.equal(result.patch, null);
+});
+
+for (const [name, value, expectedPath] of [
+  ["non-map root", [], "monthlyCategories"],
+  ["invalid month key", { July2026: { leakageCategory: "CAT1", riskTier: "High", riskScore: 1 } }, "monthlyCategories.July2026"],
+  ["non-map entry", { "2026-07": "CAT1" }, "monthlyCategories.2026-07"],
+  ["missing required member", { "2026-07": { leakageCategory: "CAT1", riskTier: "High" } }, "monthlyCategories.2026-07"],
+  ["extra member", { "2026-07": { leakageCategory: "CAT1", riskTier: "High", riskScore: 1, current: true } }, "monthlyCategories.2026-07"],
+  ["blank category", { "2026-07": { leakageCategory: " ", riskTier: "High", riskScore: 1 } }, "monthlyCategories.2026-07.leakageCategory"],
+  ["blank risk tier", { "2026-07": { leakageCategory: "CAT1", riskTier: " ", riskScore: 1 } }, "monthlyCategories.2026-07.riskTier"],
+  ["non-integer risk score", { "2026-07": { leakageCategory: "CAT1", riskTier: "High", riskScore: 1.5 } }, "monthlyCategories.2026-07.riskScore"],
+  ["negative risk score", { "2026-07": { leakageCategory: "CAT1", riskTier: "High", riskScore: -1 } }, "monthlyCategories.2026-07.riskScore"],
+]) {
+  test(`monthlyCategories rejects ${name}`, () => {
+    const result = classify(contour({ monthlyCategories: value }));
+    assert.equal(result.outcome, OUTCOMES.CONFLICT);
+    assert.equal(result.code, CODES.GOVERNED_FIELD_TYPE_INVALID);
+    assert.ok(result.conflictingPaths.includes(expectedPath));
+  });
+}
+
+test("legacy Sales documents without metadata remain valid during transition", () => {
+  assert.equal(classify(contour()).outcome, OUTCOMES.UNCHANGED);
+});
+
+test("complete six-field Sales metadata contract is accepted", () => {
+  const result = classify(contour({ metadata: salesMetadata() }));
+  assert.equal(result.outcome, OUTCOMES.UNCHANGED);
+});
+
+for (const [name, value, expectedPath] of [
+  ["non-map root", [], "metadata"],
+  ["missing field", (() => { const value = salesMetadata(); delete value.createdByUid; return value; })(), "metadata"],
+  ["extra field", salesMetadata({ createdByLabel: "legacy" }), "metadata"],
+  ["invalid createdAt", salesMetadata({ createdAt: "2026-09-04" }), "metadata.createdAt"],
+  ["blank creator UID", salesMetadata({ createdByUid: " " }), "metadata.createdByUid"],
+  ["invalid updatedAt", salesMetadata({ updatedAt: null }), "metadata.updatedAt"],
+  ["blank updater user", salesMetadata({ updatedByUser: " " }), "metadata.updatedByUser"],
+]) {
+  test(`metadata rejects ${name}`, () => {
+    const result = classify(contour({ metadata: value }));
+    assert.equal(result.outcome, OUTCOMES.CONFLICT);
+    assert.equal(result.code, CODES.GOVERNED_FIELD_TYPE_INVALID);
+    assert.ok(result.conflictingPaths.includes(expectedPath));
+  });
+}
+
+test("operational metadata patch is empty before the Sales metadata contract is active", () => {
+  assert.deepEqual(buildSalesAllMetersOperationalMetadataPatch({
+    existing: contour(),
+    operationTimestamp: { seconds: 1786200200, nanoseconds: 0 },
+    actorUid: "USER_1",
+    actorUser: "Field User",
+  }), {});
+});
+
+test("operational metadata patch updates only updated* fields and preserves creation ownership", () => {
+  const existing = contour({ metadata: salesMetadata() });
+  const operationTimestamp = { seconds: 1786200200, nanoseconds: 0 };
+  const patch = buildSalesAllMetersOperationalMetadataPatch({
+    existing,
+    operationTimestamp,
+    actorUid: "USER_2",
+    actorUser: "Field User Two",
+  });
+  assert.deepEqual(patch, {
+    "metadata.updatedAt": operationTimestamp,
+    "metadata.updatedByUid": "USER_2",
+    "metadata.updatedByUser": "Field User Two",
+  });
+  assert.equal(existing.metadata.createdByUid, "SPU_1");
+  assert.equal(existing.metadata.createdByUser, "System Power User");
+});
+
+test("operational metadata patch fails closed when an active metadata root is malformed", () => {
+  assert.throws(() => buildSalesAllMetersOperationalMetadataPatch({
+    existing: contour({ metadata: { updatedByUid: "USER_1" } }),
+    operationTimestamp: { seconds: 1786200200, nanoseconds: 0 },
+    actorUid: "USER_1",
+    actorUser: "Field User",
+  }), /metadata contract is invalid/);
+});
+
 test("lmPcode is a mandatory protected Sales All field", () => {
   const missing = contour();
   delete missing.lmPcode;
@@ -272,7 +406,8 @@ test("bridge source uses transaction rereads, exact update, and surfaces fatal f
   );
   assert.match(bridge, /validateExistingMeterMaster/);
   assert.match(bridge, /classifySalesAllMetersSync/);
-  assert.match(bridge, /tx\.update\(salesRef, decision\.patch\)/);
+  assert.match(bridge, /buildSalesAllMetersOperationalMetadataPatch/);
+  assert.match(bridge, /tx\.update\(salesRef, \{ \.\.\.decision\.patch, \.\.\.metadataPatch \}\)/);
   assert.doesNotMatch(bridge, /tx\.set\(/);
   assert.match(masterUpdate, /const masterSnap = await tx\.get\(masterRef\)/);
   assert.match(masterUpdate, /const salesSnap = await tx\.get\(salesRef\)/);

@@ -27,6 +27,9 @@ import {
   validateCreateTargetedBatchPayload,
   validateExistingTbRow,
 } from "./helpers.js";
+import {
+  buildSalesAllMetersOperationalMetadataPatch,
+} from "../salesAllMeters/helpers.js";
 
 import {
   buildCreationFailurePatch,
@@ -793,11 +796,20 @@ async function createPreflightedBatch({
         const currentRowSnapshots = await transaction.getAll(
           ...chunk.map((record) => record.rowRef),
         );
+        const currentSalesSnapshots = await transaction.getAll(
+          ...chunk.map((record) => record.salesRef),
+        );
         const currentRowsById = new Map(
           currentRowSnapshots
             .filter((snapshot) => snapshot.exists)
             .map((snapshot) => [snapshot.id, snapshot]),
         );
+        const currentSalesById = new Map(
+          currentSalesSnapshots
+            .filter((snapshot) => snapshot.exists)
+            .map((snapshot) => [snapshot.id, snapshot]),
+        );
+        const salesOperationTimestamp = Timestamp.now();
 
         chunk.forEach((record) => {
           const currentRowSnapshot = currentRowsById.get(record.rowDoc.id);
@@ -823,8 +835,18 @@ async function createPreflightedBatch({
             transaction.create(record.rowRef, record.rowDoc);
           }
 
+          const currentSales =
+            currentSalesById.get(record.salesAllMeterId)?.data() || {};
+          const salesMetadataPatch = buildSalesAllMetersOperationalMetadataPatch({
+            existing: currentSales,
+            operationTimestamp: salesOperationTimestamp,
+            actorUid,
+            actorUser: actorName,
+          });
+
           transaction.update(record.salesRef, {
             tbRefs: FieldValue.arrayUnion(salesTbRef),
+            ...salesMetadataPatch,
           });
         });
       });

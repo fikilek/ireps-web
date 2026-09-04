@@ -9,6 +9,9 @@ import {
   normalizeText,
   normalizeUpper,
 } from "./helpers.js";
+import {
+  buildSalesAllMetersOperationalMetadataPatch,
+} from "../salesAllMeters/helpers.js";
 
 export const SALES_TARGETED_BATCH_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 
@@ -373,7 +376,16 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
     const salesAppend = buildSalesAppend({tbRefs: sales.tbRefs, input,
       premiseId, actorName: actor.name, now});
     transaction.create(trnRef, buildTrn({input, row, actor, premiseId, now}));
-    transaction.update(salesRef, {tbRefs: salesAppend.tbRefs});
+    const salesMetadataPatch = buildSalesAllMetersOperationalMetadataPatch({
+      existing: sales,
+      operationTimestamp: now,
+      actorUid: actor.uid,
+      actorUser: actor.name,
+    });
+    transaction.update(salesRef, {
+      tbRefs: salesAppend.tbRefs,
+      ...salesMetadataPatch,
+    });
     const rowPatch = {
       "metadata.updatedAt": now,
       "metadata.updatedByUid": actor.uid,

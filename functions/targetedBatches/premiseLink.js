@@ -8,6 +8,9 @@ import {
   normalizeText,
   normalizeUpper,
 } from "./helpers.js";
+import {
+  buildSalesAllMetersOperationalMetadataPatch,
+} from "../salesAllMeters/helpers.js";
 
 export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 export const TARGETED_BATCH_PREMISE_OPERATION_TYPE = "METER_DISCOVERY";
@@ -836,8 +839,15 @@ export async function createOrLinkTargetedBatchPremise({
     }
 
     if (!salesTbRefResult.alreadyLinked) {
+      const salesMetadataPatch = buildSalesAllMetersOperationalMetadataPatch({
+        existing: sales,
+        operationTimestamp: now,
+        actorUid,
+        actorUser: actorName,
+      });
       transaction.update(salesRef, {
         tbRefs: salesTbRefResult.updatedTbRefs,
+        ...salesMetadataPatch,
       });
     }
 
@@ -1634,8 +1644,16 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     "metadata.updatedByUser": actorName,
   });
 
+  const salesMetadataPatch = buildSalesAllMetersOperationalMetadataPatch({
+    existing: sales,
+    operationTimestamp: now,
+    actorUid,
+    actorUser: actorName,
+  });
+
   transaction.update(salesRef, {
     tbRefs: salesCompletion.updatedTbRefs,
+    ...salesMetadataPatch,
   });
 
   const parentPatch = {

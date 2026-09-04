@@ -3,7 +3,7 @@
 /* eslint-disable no-undef */
 
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
 
 import {
   collectGeoFenceErfUpdates,
@@ -214,6 +214,9 @@ export const onGeoFenceCreated = onDocumentCreated(
         db,
         updates: salesMembership.updates,
         conflicts: salesMembership.conflicts,
+        operationTimestamp: Timestamp.now(),
+        actorUid: "SYSTEM",
+        actorUser: "onGeoFenceCreated",
       });
 
       console.log("onGeoFenceCreated ---- Sales All updates", {

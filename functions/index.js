@@ -129,6 +129,7 @@ import {
 import {
   SALES_ALL_METERS_OUTCOMES,
   SalesAllMetersConflictError,
+  buildSalesAllMetersOperationalMetadataPatch,
   classifySalesAllMetersSync,
 } from "./salesAllMeters/helpers.js";
 
@@ -1501,9 +1502,10 @@ async function syncSalesAllMetersFromMaster({
   }
 
   if (salesSnap.exists) {
+    const salesData = salesSnap.data() || {};
     const decision = classifySalesAllMetersSync({
       meterId: normalizedMeterNo,
-      existing: salesSnap.data(),
+      existing: salesData,
       targetExists: true,
       desiredVisibility: visibility,
       sourceWriter,
@@ -1512,7 +1514,21 @@ async function syncSalesAllMetersFromMaster({
       throw new SalesAllMetersConflictError(decision);
     }
     if (decision.outcome === SALES_ALL_METERS_OUTCOMES.UPDATED) {
-      tx.update(salesRef, decision.patch);
+      const actorUid =
+        masterData?.metadata?.updatedByUid ||
+        masterData?.metadata?.createdByUid ||
+        "SYSTEM";
+      const actorUser =
+        masterData?.metadata?.updatedByUser ||
+        masterData?.metadata?.createdByUser ||
+        sourceWriter;
+      const metadataPatch = buildSalesAllMetersOperationalMetadataPatch({
+        existing: salesData,
+        operationTimestamp: Timestamp.now(),
+        actorUid,
+        actorUser,
+      });
+      tx.update(salesRef, { ...decision.patch, ...metadataPatch });
     }
     return decision;
   } else if (salesId) {

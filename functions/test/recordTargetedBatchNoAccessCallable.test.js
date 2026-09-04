@@ -174,6 +174,28 @@ test("no-premise attempt creates canonical TRN and atomically starts row and par
   assert.equal(db.writes.some((write) => write.ref.path.startsWith("premises/")), false);
 });
 
+test("no-access Sales write maintains updated* metadata when Sales metadata is active", async () => {
+  const docs = fixture();
+  docs[`sales-all-meters/${SALES}`].metadata = {
+    createdAt: Timestamp.fromDate(new Date("2026-06-01T08:00:00.000Z")),
+    createdByUid: "SPU_1",
+    createdByUser: "System Power User",
+    updatedAt: Timestamp.fromDate(new Date("2026-07-01T08:00:00.000Z")),
+    updatedByUid: "SPU_1",
+    updatedByUser: "System Power User",
+  };
+  const db = new FakeDb(docs);
+
+  await record(db);
+
+  const sales = db.read(`sales-all-meters/${SALES}`);
+  assert.equal(sales.metadata.createdByUid, "SPU_1");
+  assert.equal(sales.metadata.createdByUser, "System Power User");
+  assertTimestampEqual(sales.metadata.updatedAt, NOW);
+  assert.equal(sales.metadata.updatedByUid, "U1");
+  assert.equal(sales.metadata.updatedByUser, "Field Worker");
+});
+
 test("premise is derived from row, preserved in TRN, and client mismatch fails", async () => {
   const okDb = new FakeDb(fixture({premiseId: "PREM_1"}));
   await record(okDb, request({premiseId: "PREM_1"}));
@@ -203,7 +225,7 @@ test("exact correlation and Sales shape failures produce zero writes", async () 
   const wrongRow = fixture();
   wrongRow[`sales-all-meters/${SALES}`].tbRefs[1].rowId = "OTHER_ROW";
   const wrongRowDb = new FakeDb(wrongRow);
-  await assert.rejects(record(wrongRowDb), {code: "SALES_TB_REF_NOT_FOUND"});
+  await assert.rejects(record(wrongRowDb), {code: "SALES_TB_REF_ROW_CONFLICT"});
   assert.equal(wrongRowDb.writes.length, 0);
   for (const value of ["bad", {noAccess: "bad"}]) {
     const docs = fixture();
@@ -274,9 +296,9 @@ test("same trnId is idempotent; conflicting identity fails closed", async () => 
   assert.equal(db.writes.length, writes);
 });
 
-test("meter-linked and terminal rows reject with zero writes", async () => {
+test("Sales fieldWork meter-linked and terminal rows reject with zero writes", async () => {
   const meterDocs = fixture();
-  meterDocs[`tb_rows/${ROW}`].refs.meterId = "METER_1";
+  meterDocs[`sales-all-meters/${SALES}`].tbRefs[1].fieldWork.meterId = "METER_1";
   const meterDb = new FakeDb(meterDocs);
   await assert.rejects(record(meterDb), {code: "TARGETED_BATCH_METER_ALREADY_LINKED"});
   assert.equal(meterDb.writes.length, 0);
