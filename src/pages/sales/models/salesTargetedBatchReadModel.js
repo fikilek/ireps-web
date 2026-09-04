@@ -1,3 +1,5 @@
+import { resolveLatestSalesCategory } from "./salesCategoryModel.js";
+
 export function cleanText(value) {
   return String(value ?? "").trim();
 }
@@ -1341,7 +1343,10 @@ function getOperationalWard(sales = {}, row = {}, batch = {}) {
 }
 
 export function getOperationalSalesCategory(sales = {}) {
-  return firstText(sales?.leakageCategory) || SALES_STATS_UNCATEGORISED;
+  return (
+    firstText(resolveLatestSalesCategory(sales)?.leakageCategory) ||
+    SALES_STATS_UNCATEGORISED
+  );
 }
 
 function getOperationalGeofenceRefs(sales = {}) {

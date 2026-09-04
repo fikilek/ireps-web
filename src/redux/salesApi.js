@@ -3,6 +3,11 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
 import { inspectSalesTbRefsIntegrity } from "../pages/sales/models/salesTbRefsIntegrityModel";
+import {
+  getGovernedCategoryMonths,
+  normalizeSalesMonthlyCategories,
+  resolveLatestSalesCategory,
+} from "../pages/sales/models/salesCategoryModel";
 
 const SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
@@ -19,14 +24,7 @@ function hasFiniteNumber(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value));
 }
 
-function asOptionalNumber(value) {
-  if (value === null || value === undefined || String(value).trim() === "") {
-    return null;
-  }
 
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : null;
-}
 
 function normalizeNumberMap(value = {}) {
   return Object.entries(value || {}).reduce((accumulator, [key, itemValue]) => {
@@ -322,6 +320,13 @@ function normalizeSalesRow(id, data = {}) {
       ? normalizeNumberMap(data.monthlyUnits)
       : normalizeNumberMap(data.Units);
 
+  const monthlyCategories = normalizeSalesMonthlyCategories(
+    data.monthlyCategories,
+  );
+  const categoryRow = { monthlyCategories };
+  const categoryMonthKeys = getGovernedCategoryMonths(categoryRow);
+  const latestCategory = resolveLatestSalesCategory(categoryRow);
+
   const monthKeys = getSortedMonthKeys(monthlySalesC, monthlyUnits);
   const latestMonthKey = monthKeys[0] || "";
   const earliestMonthKey = monthKeys[monthKeys.length - 1] || "";
@@ -429,6 +434,9 @@ function normalizeSalesRow(id, data = {}) {
       : derivedTotalUnits,
     monthlySalesC,
     monthlyUnits,
+    monthlyCategories,
+    categoryMonthKeys,
+    latestCategoryMonth: latestCategory?.monthKey || "",
     salesPeriodFrom: String(data.salesPeriodFrom || earliestMonthKey),
     salesPeriodTo: String(data.salesPeriodTo || latestMonthKey),
     sourceFileName: String(data.sourceFileName || "END 2026-07-29.xlsx"),
@@ -449,11 +457,9 @@ function normalizeSalesRow(id, data = {}) {
     ),
     tbRefs: normalizeTbRefs(rawTbRefs),
     tbRefsIntegrity: inspectSalesTbRefsIntegrity(rawTbRefs),
-    leakageCategory: String(
-      data.leakageCategory || data.Leakage_Category || "",
-    ).trim(),
-    riskTier: String(data.riskTier || data.Risk_Tier || "").trim(),
-    riskScore: asOptionalNumber(data.riskScore ?? data.Risk_Score),
+    leakageCategory: latestCategory?.leakageCategory || "",
+    riskTier: latestCategory?.riskTier || "",
+    riskScore: latestCategory?.riskScore ?? null,
     trnBatchIds: uniqueNonBlank(
       Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
     ),
