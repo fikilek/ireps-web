@@ -1,0 +1,700 @@
+{
+  "rows": [
+    {
+      "id": "07100000001",
+      "meterNo": "07100000001",
+      "meterNoNormalized": "07100000001",
+      "accountNumber": "ACC_0",
+      "lmPcode": "ZA5241",
+      "hasUsableGps": false,
+      "town": "Dundee",
+      "adr": {
+        "strNo": "1",
+        "strName": "Mckenzie",
+        "strType": "Street"
+      },
+      "tbRefs": [],
+      "tbRefsIntegrity": {
+        "valid": true,
+        "issues": []
+      },
+      "monthlySalesC": {
+        "2026-06": 0,
+        "2026-07": 12000
+      },
+      "monthlyUnits": {
+        "2026-07": 35
+      }
+    },
+    {
+      "id": "07100000002",
+      "meterNo": "07100000002",
+      "meterNoNormalized": "07100000002",
+      "accountNumber": "ACC_1",
+      "lmPcode": "ZA5241",
+      "hasUsableGps": false,
+      "town": "Dundee",
+      "adr": {
+        "strNo": "2",
+        "strName": "Mckenzie",
+        "strType": "Street"
+      },
+      "tbRefs": [],
+      "tbRefsIntegrity": {
+        "valid": true,
+        "issues": []
+      },
+      "monthlySalesC": {
+        "2026-06": 0,
+        "2026-07": 12000
+      },
+      "monthlyUnits": {
+        "2026-07": 35
+      }
+    }
+  ],
+  "model": {
+    "gpsSummary": {
+      "total": 2,
+      "usableGps": 0,
+      "noGps": 2
+    },
+    "noGpsTargets": [
+      {
+        "row": {
+          "id": "07100000001",
+          "meterNo": "07100000001",
+          "meterNoNormalized": "07100000001",
+          "accountNumber": "ACC_0",
+          "lmPcode": "ZA5241",
+          "hasUsableGps": false,
+          "town": "Dundee",
+          "adr": {
+            "strNo": "1",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          },
+          "tbRefs": [],
+          "tbRefsIntegrity": {
+            "valid": true,
+            "issues": []
+          },
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          }
+        },
+        "id": "07100000001",
+        "meterNo": "07100000001",
+        "accountNumber": "ACC_0",
+        "town": "Dundee",
+        "townKey": "dundee",
+        "streetNameKey": "mckenzie",
+        "streetKey": "dundee::mckenzie",
+        "streetLabel": "Mckenzie Street",
+        "canonicalAddress": "1 Mckenzie Street",
+        "classification": "OUTSTANDING",
+        "exceptionReasons": [],
+        "selectable": true
+      },
+      {
+        "row": {
+          "id": "07100000002",
+          "meterNo": "07100000002",
+          "meterNoNormalized": "07100000002",
+          "accountNumber": "ACC_1",
+          "lmPcode": "ZA5241",
+          "hasUsableGps": false,
+          "town": "Dundee",
+          "adr": {
+            "strNo": "2",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          },
+          "tbRefs": [],
+          "tbRefsIntegrity": {
+            "valid": true,
+            "issues": []
+          },
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          }
+        },
+        "id": "07100000002",
+        "meterNo": "07100000002",
+        "accountNumber": "ACC_1",
+        "town": "Dundee",
+        "townKey": "dundee",
+        "streetNameKey": "mckenzie",
+        "streetKey": "dundee::mckenzie",
+        "streetLabel": "Mckenzie Street",
+        "canonicalAddress": "2 Mckenzie Street",
+        "classification": "OUTSTANDING",
+        "exceptionReasons": [],
+        "selectable": true
+      }
+    ],
+    "streetEligibleTargets": [
+      {
+        "row": {
+          "id": "07100000001",
+          "meterNo": "07100000001",
+          "meterNoNormalized": "07100000001",
+          "accountNumber": "ACC_0",
+          "lmPcode": "ZA5241",
+          "hasUsableGps": false,
+          "town": "Dundee",
+          "adr": {
+            "strNo": "1",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          },
+          "tbRefs": [],
+          "tbRefsIntegrity": {
+            "valid": true,
+            "issues": []
+          },
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          }
+        },
+        "id": "07100000001",
+        "meterNo": "07100000001",
+        "accountNumber": "ACC_0",
+        "town": "Dundee",
+        "townKey": "dundee",
+        "streetNameKey": "mckenzie",
+        "streetKey": "dundee::mckenzie",
+        "streetLabel": "Mckenzie Street",
+        "canonicalAddress": "1 Mckenzie Street",
+        "classification": "OUTSTANDING",
+        "exceptionReasons": [],
+        "selectable": true
+      },
+      {
+        "row": {
+          "id": "07100000002",
+          "meterNo": "07100000002",
+          "meterNoNormalized": "07100000002",
+          "accountNumber": "ACC_1",
+          "lmPcode": "ZA5241",
+          "hasUsableGps": false,
+          "town": "Dundee",
+          "adr": {
+            "strNo": "2",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          },
+          "tbRefs": [],
+          "tbRefsIntegrity": {
+            "valid": true,
+            "issues": []
+          },
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          }
+        },
+        "id": "07100000002",
+        "meterNo": "07100000002",
+        "accountNumber": "ACC_1",
+        "town": "Dundee",
+        "townKey": "dundee",
+        "streetNameKey": "mckenzie",
+        "streetKey": "dundee::mckenzie",
+        "streetLabel": "Mckenzie Street",
+        "canonicalAddress": "2 Mckenzie Street",
+        "classification": "OUTSTANDING",
+        "exceptionReasons": [],
+        "selectable": true
+      }
+    ],
+    "streetPlanningTargets": [
+      {
+        "row": {
+          "id": "07100000001",
+          "meterNo": "07100000001",
+          "meterNoNormalized": "07100000001",
+          "accountNumber": "ACC_0",
+          "lmPcode": "ZA5241",
+          "hasUsableGps": false,
+          "town": "Dundee",
+          "adr": {
+            "strNo": "1",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          },
+          "tbRefs": [],
+          "tbRefsIntegrity": {
+            "valid": true,
+            "issues": []
+          },
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          }
+        },
+        "id": "07100000001",
+        "meterNo": "07100000001",
+        "accountNumber": "ACC_0",
+        "town": "Dundee",
+        "townKey": "dundee",
+        "streetNameKey": "mckenzie",
+        "streetKey": "dundee::mckenzie",
+        "streetLabel": "Mckenzie Street",
+        "canonicalAddress": "1 Mckenzie Street",
+        "classification": "OUTSTANDING",
+        "exceptionReasons": [],
+        "selectable": true
+      },
+      {
+        "row": {
+          "id": "07100000002",
+          "meterNo": "07100000002",
+          "meterNoNormalized": "07100000002",
+          "accountNumber": "ACC_1",
+          "lmPcode": "ZA5241",
+          "hasUsableGps": false,
+          "town": "Dundee",
+          "adr": {
+            "strNo": "2",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          },
+          "tbRefs": [],
+          "tbRefsIntegrity": {
+            "valid": true,
+            "issues": []
+          },
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          }
+        },
+        "id": "07100000002",
+        "meterNo": "07100000002",
+        "accountNumber": "ACC_1",
+        "town": "Dundee",
+        "townKey": "dundee",
+        "streetNameKey": "mckenzie",
+        "streetKey": "dundee::mckenzie",
+        "streetLabel": "Mckenzie Street",
+        "canonicalAddress": "2 Mckenzie Street",
+        "classification": "OUTSTANDING",
+        "exceptionReasons": [],
+        "selectable": true
+      }
+    ],
+    "classifiedExceptions": [],
+    "unplacedTargets": [],
+    "exceptions": [],
+    "towns": [
+      {
+        "key": "dundee",
+        "town": "Dundee",
+        "counters": {
+          "total": 2,
+          "outstanding": 2,
+          "alreadyBatched": 0,
+          "discovered": 0
+        },
+        "streetCount": 1,
+        "streets": [
+          {
+            "key": "dundee::mckenzie",
+            "townKey": "dundee",
+            "town": "Dundee",
+            "streetNameKey": "mckenzie",
+            "streetLabel": "Mckenzie Street",
+            "counters": {
+              "total": 2,
+              "outstanding": 2,
+              "alreadyBatched": 0,
+              "discovered": 0
+            },
+            "targets": [
+              {
+                "row": {
+                  "id": "07100000001",
+                  "meterNo": "07100000001",
+                  "meterNoNormalized": "07100000001",
+                  "accountNumber": "ACC_0",
+                  "lmPcode": "ZA5241",
+                  "hasUsableGps": false,
+                  "town": "Dundee",
+                  "adr": {
+                    "strNo": "1",
+                    "strName": "Mckenzie",
+                    "strType": "Street"
+                  },
+                  "tbRefs": [],
+                  "tbRefsIntegrity": {
+                    "valid": true,
+                    "issues": []
+                  },
+                  "monthlySalesC": {
+                    "2026-06": 0,
+                    "2026-07": 12000
+                  },
+                  "monthlyUnits": {
+                    "2026-07": 35
+                  }
+                },
+                "id": "07100000001",
+                "meterNo": "07100000001",
+                "accountNumber": "ACC_0",
+                "town": "Dundee",
+                "townKey": "dundee",
+                "streetNameKey": "mckenzie",
+                "streetKey": "dundee::mckenzie",
+                "streetLabel": "Mckenzie Street",
+                "canonicalAddress": "1 Mckenzie Street",
+                "classification": "OUTSTANDING",
+                "exceptionReasons": [],
+                "selectable": true
+              },
+              {
+                "row": {
+                  "id": "07100000002",
+                  "meterNo": "07100000002",
+                  "meterNoNormalized": "07100000002",
+                  "accountNumber": "ACC_1",
+                  "lmPcode": "ZA5241",
+                  "hasUsableGps": false,
+                  "town": "Dundee",
+                  "adr": {
+                    "strNo": "2",
+                    "strName": "Mckenzie",
+                    "strType": "Street"
+                  },
+                  "tbRefs": [],
+                  "tbRefsIntegrity": {
+                    "valid": true,
+                    "issues": []
+                  },
+                  "monthlySalesC": {
+                    "2026-06": 0,
+                    "2026-07": 12000
+                  },
+                  "monthlyUnits": {
+                    "2026-07": 35
+                  }
+                },
+                "id": "07100000002",
+                "meterNo": "07100000002",
+                "accountNumber": "ACC_1",
+                "town": "Dundee",
+                "townKey": "dundee",
+                "streetNameKey": "mckenzie",
+                "streetKey": "dundee::mckenzie",
+                "streetLabel": "Mckenzie Street",
+                "canonicalAddress": "2 Mckenzie Street",
+                "classification": "OUTSTANDING",
+                "exceptionReasons": [],
+                "selectable": true
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "counts": {
+      "noGps": 2,
+      "streetEligible": 2,
+      "exceptions": 0
+    },
+    "visibilityCounts": {
+      "streetPlanning": 2,
+      "exceptions": 0,
+      "unplaced": 0,
+      "exceptionView": 0
+    },
+    "reconciles": true
+  },
+  "plan": {
+    "ok": true,
+    "code": "NGP_TB_DRAFT_READY",
+    "message": "2 Outstanding targets prepared for one Targeted Batch.",
+    "draft": {
+      "id": "TGB_20260906_045500_AB12",
+      "creationGroup": {
+        "id": "TBCG_20260906_045500_AB12",
+        "proposedBatchCount": 1
+      },
+      "source": {
+        "type": "PREPAID_SALES",
+        "label": "Prepaid Sales",
+        "sourceId": null,
+        "fileName": null
+      },
+      "scope": {
+        "lmPcode": "ZA5241",
+        "lmName": "Endumeni"
+      },
+      "selection": {
+        "reason": "Selected from Non GPS Batch Planning",
+        "salesPeriodFrom": null,
+        "salesPeriodTo": null,
+        "planningMode": "NON_GPS_STREET"
+      },
+      "authoritativeIds": {
+        "salesAllMeterIds": [
+          "07100000001",
+          "07100000002"
+        ],
+        "uploadRowIds": []
+      },
+      "proposedBatches": [
+        {
+          "tbId": "TGB_20260906_045500_AB12",
+          "draftBatchKey": "NGP::TGB_20260906_045500_AB12",
+          "sequence": 1,
+          "scope": {
+            "lmPcode": "ZA5241",
+            "lmName": "Endumeni",
+            "wardPcode": "",
+            "wardNumber": "",
+            "wardName": ""
+          },
+          "salesAllMeterIds": [
+            "07100000001",
+            "07100000002"
+          ],
+          "rows": [
+            {
+              "id": "07100000001",
+              "rowNo": "1",
+              "batchRowNo": "1",
+              "salesAllMeterId": "07100000001",
+              "sourceSalesAllMeterId": "07100000001",
+              "meterNo": "07100000001",
+              "meterNoNormalized": "07100000001",
+              "accountNumber": "ACC_0",
+              "customerName": "",
+              "addressLine1": "1 Mckenzie Street",
+              "town": "Dundee",
+              "lmPcode": "ZA5241",
+              "actionReason": "Selected from Non GPS Batch Planning",
+              "totalSalesC": 0,
+              "latestMonthSalesC": 0,
+              "sales3MonthsC": 0,
+              "sales6MonthsC": 0,
+              "sales12MonthsC": 0,
+              "monthlySalesC": {
+                "2026-06": 0,
+                "2026-07": 12000
+              },
+              "monthlyUnits": {
+                "2026-07": 35
+              },
+              "monthsWithoutSales": 0,
+              "lastPositiveSalesMonth": null,
+              "astId": null,
+              "astMatchStatus": "NOT_CHECKED",
+              "proposedTrnType": null,
+              "proposedTbId": "TGB_20260906_045500_AB12",
+              "draftBatchKey": "NGP::TGB_20260906_045500_AB12",
+              "batchSequence": 1,
+              "wardPcode": "",
+              "wardNumber": "",
+              "wardName": "",
+              "planning": {
+                "mode": "NON_GPS_STREET",
+                "townKey": "dundee",
+                "streetKey": "dundee::mckenzie",
+                "streetNameKey": "mckenzie",
+                "strNo": "1",
+                "strName": "Mckenzie",
+                "strType": "Street"
+              }
+            },
+            {
+              "id": "07100000002",
+              "rowNo": "2",
+              "batchRowNo": "2",
+              "salesAllMeterId": "07100000002",
+              "sourceSalesAllMeterId": "07100000002",
+              "meterNo": "07100000002",
+              "meterNoNormalized": "07100000002",
+              "accountNumber": "ACC_1",
+              "customerName": "",
+              "addressLine1": "2 Mckenzie Street",
+              "town": "Dundee",
+              "lmPcode": "ZA5241",
+              "actionReason": "Selected from Non GPS Batch Planning",
+              "totalSalesC": 0,
+              "latestMonthSalesC": 0,
+              "sales3MonthsC": 0,
+              "sales6MonthsC": 0,
+              "sales12MonthsC": 0,
+              "monthlySalesC": {
+                "2026-06": 0,
+                "2026-07": 12000
+              },
+              "monthlyUnits": {
+                "2026-07": 35
+              },
+              "monthsWithoutSales": 0,
+              "lastPositiveSalesMonth": null,
+              "astId": null,
+              "astMatchStatus": "NOT_CHECKED",
+              "proposedTrnType": null,
+              "proposedTbId": "TGB_20260906_045500_AB12",
+              "draftBatchKey": "NGP::TGB_20260906_045500_AB12",
+              "batchSequence": 1,
+              "wardPcode": "",
+              "wardNumber": "",
+              "wardName": "",
+              "planning": {
+                "mode": "NON_GPS_STREET",
+                "townKey": "dundee",
+                "streetKey": "dundee::mckenzie",
+                "streetNameKey": "mckenzie",
+                "strNo": "2",
+                "strName": "Mckenzie",
+                "strType": "Street"
+              }
+            }
+          ],
+          "validation": {
+            "status": "PASSED",
+            "oneWardOnly": false
+          }
+        }
+      ],
+      "displayRows": [
+        {
+          "id": "07100000001",
+          "rowNo": "1",
+          "batchRowNo": "1",
+          "salesAllMeterId": "07100000001",
+          "sourceSalesAllMeterId": "07100000001",
+          "meterNo": "07100000001",
+          "meterNoNormalized": "07100000001",
+          "accountNumber": "ACC_0",
+          "customerName": "",
+          "addressLine1": "1 Mckenzie Street",
+          "town": "Dundee",
+          "lmPcode": "ZA5241",
+          "actionReason": "Selected from Non GPS Batch Planning",
+          "totalSalesC": 0,
+          "latestMonthSalesC": 0,
+          "sales3MonthsC": 0,
+          "sales6MonthsC": 0,
+          "sales12MonthsC": 0,
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          },
+          "monthsWithoutSales": 0,
+          "lastPositiveSalesMonth": null,
+          "astId": null,
+          "astMatchStatus": "NOT_CHECKED",
+          "proposedTrnType": null,
+          "proposedTbId": "TGB_20260906_045500_AB12",
+          "draftBatchKey": "NGP::TGB_20260906_045500_AB12",
+          "batchSequence": 1,
+          "wardPcode": "",
+          "wardNumber": "",
+          "wardName": "",
+          "planning": {
+            "mode": "NON_GPS_STREET",
+            "townKey": "dundee",
+            "streetKey": "dundee::mckenzie",
+            "streetNameKey": "mckenzie",
+            "strNo": "1",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          }
+        },
+        {
+          "id": "07100000002",
+          "rowNo": "2",
+          "batchRowNo": "2",
+          "salesAllMeterId": "07100000002",
+          "sourceSalesAllMeterId": "07100000002",
+          "meterNo": "07100000002",
+          "meterNoNormalized": "07100000002",
+          "accountNumber": "ACC_1",
+          "customerName": "",
+          "addressLine1": "2 Mckenzie Street",
+          "town": "Dundee",
+          "lmPcode": "ZA5241",
+          "actionReason": "Selected from Non GPS Batch Planning",
+          "totalSalesC": 0,
+          "latestMonthSalesC": 0,
+          "sales3MonthsC": 0,
+          "sales6MonthsC": 0,
+          "sales12MonthsC": 0,
+          "monthlySalesC": {
+            "2026-06": 0,
+            "2026-07": 12000
+          },
+          "monthlyUnits": {
+            "2026-07": 35
+          },
+          "monthsWithoutSales": 0,
+          "lastPositiveSalesMonth": null,
+          "astId": null,
+          "astMatchStatus": "NOT_CHECKED",
+          "proposedTrnType": null,
+          "proposedTbId": "TGB_20260906_045500_AB12",
+          "draftBatchKey": "NGP::TGB_20260906_045500_AB12",
+          "batchSequence": 1,
+          "wardPcode": "",
+          "wardNumber": "",
+          "wardName": "",
+          "planning": {
+            "mode": "NON_GPS_STREET",
+            "townKey": "dundee",
+            "streetKey": "dundee::mckenzie",
+            "streetNameKey": "mckenzie",
+            "strNo": "2",
+            "strName": "Mckenzie",
+            "strType": "Street"
+          }
+        }
+      ],
+      "validation": {
+        "status": "PASSED",
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "duplicateRowNos": [],
+        "duplicateMeterNos": [],
+        "invalidRowDetails": [],
+        "proposedBatchCount": 1,
+        "wardGroupingApplied": false,
+        "planningMode": "NON_GPS_STREET"
+      }
+    }
+  },
+  "sourceHashes": {
+    "src/pages/operations/TargetedBatchDraftPage.jsx": "8a226d54a290f6e9a7c43d88cf55b6497cc342823e21b92892b3b3c5cf0e4b86",
+    "src/redux/targetedBatchDraftModel.js": "134e184ed58a29bb8b72ffa10f0ac7aa195f5b1e3cffab3d1ae429c28d6e20a4",
+    "src/pages/sales/models/nonGpsBatchPlanningModel.js": "959dc41a588193eaaa8e684b7ac6fe791ea6a5556424febf905f93956dbba05d"
+  }
+}

@@ -17,8 +17,9 @@ function normalizeCategoryEntry(value) {
     return null;
   }
 
-  const leakageCategory = String(value.leakageCategory ?? "").trim();
-  const riskTier = String(value.riskTier ?? "").trim();
+  if (typeof value.leakageCategory !== "string" || typeof value.riskTier !== "string") return null;
+  const leakageCategory = value.leakageCategory.trim();
+  const riskTier = value.riskTier.trim();
   const riskScore = value.riskScore;
 
   if (!leakageCategory || !riskTier) return null;
@@ -67,4 +68,9 @@ export function resolveLatestSalesCategory(row = {}) {
   return latestMonthKey
     ? resolveSalesCategoryForMonth(row, latestMonthKey)
     : null;
+}
+
+export function projectSalesCategoryMonth(row, month) {
+  const entry = resolveSalesCategoryForMonth(row, month);
+  return { ...row, categoryMonth: month, categoryAvailable: Boolean(entry), leakageCategory: entry?.leakageCategory ?? null, riskTier: entry?.riskTier ?? null, riskScore: entry?.riskScore ?? null };
 }

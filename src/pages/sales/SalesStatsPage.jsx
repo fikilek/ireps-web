@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import {
   useGetSalesOperationalStatsByLmQuery,
@@ -226,13 +226,18 @@ export default function SalesStatsPage() {
   const { activeWorkbase } = useAuth();
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+  const readScope = useSalesReadScope(activeLmPcode);
+  const scopeKey = JSON.stringify(readScope);
+  const [monthSelection, setMonthSelection] = useState({});
+  const selectedMonth = monthSelection.scope === scopeKey ? monthSelection.month : undefined;
 
   const {
     data: salesRows = [],
     isLoading: salesLoading,
     isFetching: salesFetching,
     error: salesError,
-  } = useGetSalesByLmPcodeQuery(activeLmPcode, {
+    categoryMonth,
+  } = useGetSalesCategoryViewQuery({ lmPcode: activeLmPcode, month: selectedMonth }, {
     skip: !activeLmPcode,
   });
 
@@ -250,7 +255,7 @@ export default function SalesStatsPage() {
     isLoading: operationalStatsLoading,
     isFetching: operationalStatsFetching,
     error: operationalStatsQueryError,
-  } = useGetSalesOperationalStatsByLmQuery(activeLmPcode, {
+  } = useGetSalesOperationalStatsByLmQuery({ lmPcode: activeLmPcode, month: categoryMonth }, {
     skip: !activeLmPcode,
   });
 
@@ -305,9 +310,10 @@ export default function SalesStatsPage() {
     () =>
       buildSalesPopulationRows({
         salesRows,
+        selectedMonth: categoryMonth,
         geofenceNameById,
       }),
-    [salesRows, geofenceNameById],
+    [salesRows, categoryMonth, geofenceNameById],
   );
 
   const filterOptions = useMemo(() => {
@@ -562,9 +568,7 @@ export default function SalesStatsPage() {
     [filteredTargetedRows],
   );
 
-  const operationalStatsSettled = ["ready", "error"].includes(
-    operationalStatsSync?.status,
-  );
+  const operationalStatsSettled = operationalStatsSync?.status === "ready";
   const allReady =
     !salesLoading &&
     !salesFetching &&
@@ -608,7 +612,7 @@ export default function SalesStatsPage() {
 
         <div style={styles.liveBadge}>
           <span style={styles.liveDot} />
-          {allReady ? "Live dashboard" : "Joining live dashboard data..."}
+          {displayError ? "Dashboard unavailable" : allReady ? "Live dashboard" : "Joining live dashboard data..."}
         </div>
       </header>
 
@@ -620,6 +624,8 @@ export default function SalesStatsPage() {
 
       {displayError ? <div style={styles.errorState}>{displayError}</div> : null}
 
+      <label>Category month <input type="month" value={categoryMonth || ""} onChange={event => setMonthSelection({ scope: scopeKey, month: event.target.value })} /></label>
+      <p role="status">{salesPopulationRows.filter(row => row.categoryAvailable).length} of {salesPopulationRows.length} Sales documents have a valid {categoryMonth} category. Unavailable categories are excluded from category groups.</p>
       <section style={styles.filtersPanel}>
         <div style={styles.filtersHeader}>
           <div>
@@ -750,6 +756,7 @@ export default function SalesStatsPage() {
         </div>
       </section>
 
+      {!displayError && allReady ? <>
       <div style={styles.kpiGrid}>
         <KpiCard
           label="Targeted Batches"
@@ -1099,6 +1106,7 @@ export default function SalesStatsPage() {
           </div>
         </article>
       </section>
+      </> : <p role="status">{displayError ? "Analytics withheld because a required read failed." : "Waiting for all required reads before displaying analytics."}</p>}
     </section>
   );
 }

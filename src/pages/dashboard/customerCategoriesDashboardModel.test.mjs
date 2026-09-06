@@ -3,14 +3,28 @@ import test from "node:test";
 
 import {
   CUSTOMER_CATEGORIES_BASELINE_MONTH_KEYS,
-  CUSTOMER_CATEGORIES_CURRENT_SNAPSHOT_MONTH_KEY,
   CUSTOMER_CATEGORIES_RECOVERY_MONTHS,
-  buildCustomerCategoriesDashboardModel,
+  buildCustomerCategoriesDashboardModel as buildSelectedMonth,
   countInvisibleOperationalMeters,
   getCustomerCategoryShortCode,
   isNormalCustomerCategory,
   toCustomerCategoryKey,
 } from "./customerCategoriesDashboardModel.js";
+
+const buildCustomerCategoriesDashboardModel = (rows, month = "2026-06") => buildSelectedMonth(rows, month);
+
+test("overview changes category only with the explicit month; unavailable rows are not field targets", () => {
+  const entry = leakageCategory => ({ leakageCategory, riskTier: "High", riskScore: 0 });
+  const rows = [{ monthlyCategories: { "2026-06": entry("CAT1"), "2026-08": entry("CAT4") }, leakageCategory: "LEGACY", monthlySalesC: {} }, { leakageCategory: "CAT5" }];
+  const june = buildSelectedMonth(rows, "2026-06");
+  const august = buildSelectedMonth(rows, "2026-08");
+  assert.deepEqual(june.categories.map(value => value.label), ["CAT1"]);
+  assert.deepEqual(august.categories.map(value => value.label), ["CAT4"]);
+  assert.equal(august.categoryUnavailableCount, 1);
+  assert.equal(august.fieldTarget, 1);
+  assert.equal(buildSelectedMonth(rows, "2026-07").fieldTarget, 0);
+  assert.equal(buildSelectedMonth(rows, "2026-07").categoryUnavailableCount, 2);
+});
 
 function salesRow({
   leakageCategory = "CAT1 - Zero Purchaser",
@@ -20,7 +34,8 @@ function salesRow({
   wardNumbers = [],
 } = {}) {
   return {
-    leakageCategory,
+    leakageCategory: "SCALAR MUST BE IGNORED",
+    monthlyCategories: { "2026-06": { leakageCategory, riskTier: "High", riskScore: 1 } },
     hasUsableGps,
     monthlySalesC,
     geofenceRefs,
@@ -205,7 +220,7 @@ test("recovery tracker exposes only the authoritative June snapshot and no fake 
   );
 
   const june = model.recoveryMonths.find(
-    (month) => month.key === CUSTOMER_CATEGORIES_CURRENT_SNAPSHOT_MONTH_KEY,
+    (month) => month.key === "2026-06",
   );
   assert.equal(june.isAvailable, true);
   assert.equal(june.revenueC, 850_00);

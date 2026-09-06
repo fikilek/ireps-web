@@ -1,4 +1,4 @@
-import { resolveLatestSalesCategory } from "./salesCategoryModel.js";
+import { resolveSalesCategoryForMonth } from "./salesCategoryModel.js";
 
 export function cleanText(value) {
   return String(value ?? "").trim();
@@ -405,12 +405,14 @@ function getOriginalAddressParts(row = {}, sales = {}) {
   const explicitStrNo = firstText(
     row?.location?.strNo,
     row?.location?.address?.strNo,
+    sales?.adr?.strNo,
     sales?.strNo,
     sales?.address?.strNo,
   );
   const explicitStrName = firstText(
     row?.location?.strName,
     row?.location?.address?.strName,
+    sales?.adr?.strName,
     sales?.strName,
     sales?.address?.strName,
   );
@@ -1327,7 +1329,6 @@ export function buildTargetedBatchReport({
 const SALES_STATS_UNASSIGNED_WARD = "Ward Not Assigned";
 const SALES_STATS_UNASSIGNED_GEOFENCE_ID = "__GEOFENCE_NOT_ASSIGNED__";
 const SALES_STATS_UNASSIGNED_GEOFENCE_NAME = "Geofence Not Assigned";
-const SALES_STATS_UNCATEGORISED = "Uncategorised";
 
 function getOperationalWard(sales = {}, row = {}, batch = {}) {
   return (
@@ -1342,11 +1343,18 @@ function getOperationalWard(sales = {}, row = {}, batch = {}) {
   );
 }
 
-export function getOperationalSalesCategory(sales = {}) {
-  return (
-    firstText(resolveLatestSalesCategory(sales)?.leakageCategory) ||
-    SALES_STATS_UNCATEGORISED
-  );
+export function getOperationalSalesCategory(sales, month = sales?.categoryMonth, readError = null) {
+  const entry = readError ? null : resolveSalesCategoryForMonth(sales, month);
+  return {
+    status: readError ? "read-error" : !sales ? "missing-document" : entry ? "available" : "category-unavailable",
+    documentExists: readError ? null : Boolean(sales),
+    categoryMonth: month ?? null,
+    categoryAvailable: Boolean(entry),
+    leakageCategory: entry?.leakageCategory ?? null,
+    riskTier: entry?.riskTier ?? null,
+    riskScore: entry?.riskScore ?? null,
+    error: readError,
+  };
 }
 
 function getOperationalGeofenceRefs(sales = {}) {
@@ -1411,6 +1419,8 @@ export function buildSalesOperationalStatsReadModel({
   rows = [],
   salesById = {},
   premiseById = {},
+  salesReadErrors = {},
+  selectedMonth,
 }) {
   const batchById = Object.fromEntries(
     batches.map((batch) => [cleanText(batch?.id), batch]),
@@ -1428,6 +1438,7 @@ export function buildSalesOperationalStatsReadModel({
       const batch = batchById[tbId] || {};
       const salesId = cleanText(row?.salesAllMeterId);
       const sales = salesById[salesId] || {};
+      const categoryState = getOperationalSalesCategory(salesById[salesId], selectedMonth ?? sales?.categoryMonth, salesReadErrors[salesId]);
       const batchHeader = normalizedBatchById[tbId] || null;
       const normalizedRow = normalizeTargetedBatchReportRow({
         row,
@@ -1441,7 +1452,9 @@ export function buildSalesOperationalStatsReadModel({
         ...normalizedRow,
         analytics: {
           ward: getOperationalWard(sales, row, batch),
-          category: getOperationalSalesCategory(sales),
+          category: categoryState.leakageCategory,
+          categoryState,
+          categoryAvailable: categoryState.categoryAvailable,
           geofenceRefs: getOperationalGeofenceRefs(sales),
           salesPeriod:
             batchHeader?.selection?.salesPeriodLabel || "NAv",

@@ -49,7 +49,8 @@ test("canonical Web Sales readers stream Sales All", async () => {
   assert.match(salesApi, /useGetSalesByLmPcodeQuery/);
   assert.doesNotMatch(salesApi, /demo_sales_meters|demoSalesApi|DEMO_SALES_COLLECTION/);
 
-  assert.match(prepaidSales, /useGetSalesByLmPcodeQuery/);
+  assert.match(prepaidSales, /useGetSalesCategoryViewQuery/);
+  assert.match(salesApi, /function useGetSalesCategoryViewQuery[\s\S]*useGetSalesByLmPcodeQuery\(scope, options\)/);
   assert.match(prepaidSales, /from "\.\.\/\.\.\/redux\/salesApi"/);
   assert.doesNotMatch(prepaidSales, /demoSalesApi|useGetDemoSalesByLmPcodeQuery/);
 

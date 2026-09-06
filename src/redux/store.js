@@ -2,6 +2,8 @@
 
 import { configureStore } from "@reduxjs/toolkit";
 import { setupListeners } from "@reduxjs/toolkit/query";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "../firebase";
 
 import { registryErfsApi } from "./registryErfsApi";
 import { registryMetersApi } from "./registryMetersApi";
@@ -30,7 +32,7 @@ import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
 import { mreadStagingApi } from "./mreadStagingApi";
 import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
 import targetedBatchDraftReducer from "./targetedBatchDraftSlice";
-import { salesApi } from "./salesApi";
+import { salesApi, setSalesReadSession } from "./salesApi";
 import { salesTargetedBatchApi } from "./salesTargetedBatchApi";
 
 export const store = configureStore({
@@ -102,3 +104,16 @@ export const store = configureStore({
 });
 
 setupListeners(store.dispatch);
+
+// Invalidate only Sales reads when the account changes. Operational drafts and
+// AuthProvider retain their existing ownership.
+const stopSalesAuthObserver = onAuthStateChanged(auth, user => {
+  if (setSalesReadSession(user?.uid ?? null)) {
+    store.dispatch(salesApi.util.resetApiState());
+    store.dispatch(salesTargetedBatchApi.util.resetApiState());
+  }
+});
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  stopSalesAuthObserver();
+  setSalesReadSession(null);
+});

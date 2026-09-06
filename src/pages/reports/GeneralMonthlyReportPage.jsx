@@ -4,6 +4,7 @@ import { httpsCallable } from "firebase/functions";
 
 import { functions } from "../../firebase";
 import { generateGeneralMonthlyReportManaged } from "./generalMonthlyReportArtifact.js";
+import { getDefaultReportMonth } from "./generalMonthlyReportMonthModel.js";
 
 const GMR_LM_PCODE = "ZA5241";
 const GMR_GENERATION_MODE = "MONTHLY_GMR";
@@ -87,7 +88,7 @@ function errorMessage(error) {
 }
 
 export default function GeneralMonthlyReportPage() {
-  const [reportMonth, setReportMonth] = useState("");
+  const [reportMonth, setReportMonth] = useState(() => getDefaultReportMonth());
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");

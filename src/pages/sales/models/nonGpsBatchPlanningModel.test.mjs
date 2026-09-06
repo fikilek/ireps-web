@@ -632,6 +632,8 @@ test("NGP React page reuses salesApi and opens no direct Firestore listener", ()
   const allNgpSource = [page, planning, detail, exceptions].join("\n");
 
   assert.match(page, /useGetSalesByLmPcodeQuery/);
+  assert.match(page, /useGetSalesByLmPcodeQuery\(activeLmPcode \? \{ lmPcode: activeLmPcode \} : skipToken\)/);
+  assert.doesNotMatch(allNgpSource, /useGetSalesGovernanceQuery|useGetSalesCategoryViewQuery/);
   assert.doesNotMatch(allNgpSource, /from "firebase\/firestore"/);
   assert.doesNotMatch(allNgpSource, /onSnapshot\s*\(/);
   assert.doesNotMatch(allNgpSource, /getDocs\s*\(/);

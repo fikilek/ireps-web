@@ -9,6 +9,41 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { projectSalesCategoryMonth } from "../pages/sales/models/salesCategoryModel";
+import { useMemo } from "react";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { useSalesReadScope, isSalesReadScopeCurrent, registerSalesSessionCleanup } from "./salesApi";
+import { getDefaultSalesMonth } from "../pages/sales/models/salesMonthModel.js";
+
+export function projectSalesMapForMonth(rows, month) {
+  return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, projectSalesCategoryMonth(row, month)]));
+}
+
+// RTK owns cache lifetime; account changes also end these read-only listeners.
+function scopedSalesQuery(config) {
+  return {
+    ...config,
+    queryFn: (scope, ...rest) => isSalesReadScopeCurrent(scope)
+      ? config.queryFn(scope.query, ...rest)
+      : { error: { status: "CUSTOM_ERROR", error: "Sales read scope is unavailable." } },
+    async onCacheEntryAdded(scope, lifecycle) {
+      if (!isSalesReadScopeCurrent(scope)) return;
+      let endSession;
+      const sessionEnded = new Promise(resolve => { endSession = resolve; });
+      const unregister = registerSalesSessionCleanup(endSession);
+      try {
+        await config.onCacheEntryAdded(scope.query, {
+          ...lifecycle,
+          selectedMonth: scope.month,
+          isCurrent: () => isSalesReadScopeCurrent(scope),
+          updateCachedData: update => { if (isSalesReadScopeCurrent(scope)) lifecycle.updateCachedData(update); },
+          cacheEntryRemoved: Promise.race([lifecycle.cacheEntryRemoved, sessionEnded]),
+        });
+      } finally { unregister(); }
+    },
+  };
+}
+
 import {
   buildSalesOperationalStatsReadModel,
   buildTargetedBatchDashboardReadModel,
@@ -403,7 +438,9 @@ function getOverallReportStatus(sourceStatuses) {
 export const salesTargetedBatchApi = createApi({
   reducerPath: "salesTargetedBatchApi",
   baseQuery: fakeBaseQuery(),
-  endpoints: (builder) => ({
+  endpoints: (rtkBuilder) => {
+    const builder = { query: config => rtkBuilder.query(scopedSalesQuery(config)) };
+    return ({
     getTargetedBatchHeadersByLm: builder.query({
       queryFn: (lmPcode) => ({
         data: createTargetedBatchHeadersStreamState(
@@ -413,7 +450,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         lmPcode,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
       ) {
         const normalizedLmPcode = cleanText(lmPcode);
         if (!normalizedLmPcode) return;
@@ -423,6 +460,7 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           const batchesQuery = query(
             collection(db, TARGETED_BATCH_UPLOADS_COLLECTION),
@@ -432,7 +470,7 @@ export const salesTargetedBatchApi = createApi({
           unsubscribe = onSnapshot(
             batchesQuery,
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               const syncedAtMs = Date.now();
               const items = buildTargetedBatchHeaders(snapshot.docs);
@@ -446,7 +484,7 @@ export const salesTargetedBatchApi = createApi({
               });
             },
             (error) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               console.error(
                 "[SALES TARGETED BATCH API][HEADER STREAM]",
@@ -496,7 +534,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         arg,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent, selectedMonth },
       ) {
         const { tbId, lmPcode } = resolveTargetedBatchDashboardArgs(arg);
         if (!tbId && !lmPcode) return;
@@ -543,7 +581,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const syncedAtMs = Date.now();
           const readModel = buildTargetedBatchDashboardReadModel({
@@ -576,7 +614,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const restartSalesListeners = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const salesIds = getTargetedBatchSalesIds(rawState.rows);
           const nextSalesIdsKey = salesIds.join("|");
@@ -609,7 +647,7 @@ export const salesTargetedBatchApi = createApi({
                 where(documentId(), "in", salesIdChunk),
               ),
               (snapshot) => {
-                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+                if (!active || !isCurrent() || nextSalesIdsKey !== salesIdsKey) return;
 
                 const rows = {};
                 snapshot.docs.forEach((salesSnapshot) => {
@@ -621,7 +659,7 @@ export const salesTargetedBatchApi = createApi({
 
                 chunkResults.set(chunkIndex, rows);
                 chunkErrors.delete(chunkIndex);
-                rawState.salesById = combineChunkMaps(chunkResults);
+                rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
 
                 if (chunkResults.size === chunks.length) {
                   markSource(
@@ -638,7 +676,7 @@ export const salesTargetedBatchApi = createApi({
                 publish();
               },
               (error) => {
-                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+                if (!active || !isCurrent() || nextSalesIdsKey !== salesIdsKey) return;
 
                 console.error(
                   "[SALES TARGETED BATCH API][DASHBOARD SALES JOIN]",
@@ -646,7 +684,7 @@ export const salesTargetedBatchApi = createApi({
                 );
                 chunkResults.set(chunkIndex, {});
                 chunkErrors.add(chunkIndex);
-                rawState.salesById = combineChunkMaps(chunkResults);
+                rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
                 markSource("sales", "error", error);
                 publish();
               },
@@ -660,12 +698,13 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           if (tbId) {
             unsubscribeBatches = onSnapshot(
               doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, tbId),
               (snapshot) => {
-                if (!active) return;
+                if (!active || !isCurrent()) return;
 
                 rawState.batches = snapshot.exists()
                   ? [{ id: snapshot.id, ...snapshot.data() }]
@@ -682,7 +721,7 @@ export const salesTargetedBatchApi = createApi({
                 where("tbId", "==", tbId),
               ),
               (snapshot) => {
-                if (!active) return;
+                if (!active || !isCurrent()) return;
 
                 rawState.rows = snapshot.docs.map((rowSnapshot) => ({
                   id: rowSnapshot.id,
@@ -703,7 +742,7 @@ export const salesTargetedBatchApi = createApi({
                 where("scope.lmPcode", "==", lmPcode),
               ),
               (snapshot) => {
-                if (!active) return;
+                if (!active || !isCurrent()) return;
 
                 rawState.batches = snapshot.docs.map((batchSnapshot) => ({
                   id: batchSnapshot.id,
@@ -721,7 +760,7 @@ export const salesTargetedBatchApi = createApi({
                 where("scope.lmPcode", "==", lmPcode),
               ),
               (snapshot) => {
-                if (!active) return;
+                if (!active || !isCurrent()) return;
 
                 rawState.rows = snapshot.docs.map((rowSnapshot) => ({
                   id: rowSnapshot.id,
@@ -772,7 +811,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         tbId,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent, selectedMonth },
       ) {
         const normalizedTbId = cleanText(tbId);
         if (!normalizedTbId) return;
@@ -816,7 +855,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const syncedAtMs = Date.now();
           const report = buildTargetedBatchReport({
@@ -861,7 +900,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const restartPremiseListeners = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const premiseIds = getTargetedBatchPremiseIds({
             rows: rawState.rows,
@@ -895,7 +934,7 @@ export const salesTargetedBatchApi = createApi({
                 where(documentId(), "in", premiseIdChunk),
               ),
               (snapshot) => {
-                if (!active || nextPremiseIdsKey !== premiseIdsKey) return;
+                if (!active || !isCurrent() || nextPremiseIdsKey !== premiseIdsKey) return;
 
                 const rows = {};
                 snapshot.docs.forEach((premiseSnapshot) => {
@@ -922,7 +961,7 @@ export const salesTargetedBatchApi = createApi({
                 publish();
               },
               (error) => {
-                if (!active || nextPremiseIdsKey !== premiseIdsKey) return;
+                if (!active || !isCurrent() || nextPremiseIdsKey !== premiseIdsKey) return;
 
                 console.error(
                   "[SALES TARGETED BATCH API][PREMISE JOIN]",
@@ -943,7 +982,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const restartSalesListeners = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const salesIds = getTargetedBatchSalesIds(rawState.rows);
           const nextSalesIdsKey = salesIds.join("|");
@@ -977,7 +1016,7 @@ export const salesTargetedBatchApi = createApi({
                 where(documentId(), "in", salesIdChunk),
               ),
               (snapshot) => {
-                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+                if (!active || !isCurrent() || nextSalesIdsKey !== salesIdsKey) return;
 
                 const rows = {};
                 snapshot.docs.forEach((salesSnapshot) => {
@@ -989,7 +1028,7 @@ export const salesTargetedBatchApi = createApi({
 
                 chunkResults.set(chunkIndex, rows);
                 chunkErrors.delete(chunkIndex);
-                rawState.salesById = combineChunkMaps(chunkResults);
+                rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
 
                 if (chunkResults.size === chunks.length) {
                   markSource(
@@ -1005,7 +1044,7 @@ export const salesTargetedBatchApi = createApi({
                 publish();
               },
               (error) => {
-                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+                if (!active || !isCurrent() || nextSalesIdsKey !== salesIdsKey) return;
 
                 console.error(
                   "[SALES TARGETED BATCH API][SALES JOIN]",
@@ -1013,7 +1052,7 @@ export const salesTargetedBatchApi = createApi({
                 );
                 chunkResults.set(chunkIndex, {});
                 chunkErrors.add(chunkIndex);
-                rawState.salesById = combineChunkMaps(chunkResults);
+                rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
                 markSource("sales", "error", error);
                 if (chunkResults.size === chunks.length) {
                   restartPremiseListeners();
@@ -1030,11 +1069,12 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeBatch = onSnapshot(
             doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, normalizedTbId),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.batch = snapshot.exists()
                 ? {
@@ -1054,7 +1094,7 @@ export const salesTargetedBatchApi = createApi({
               where("tbId", "==", normalizedTbId),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.rows = snapshot.docs
                 .map((rowSnapshot) => ({
@@ -1082,7 +1122,7 @@ export const salesTargetedBatchApi = createApi({
               where("targetedBatchContext.tbId", "==", normalizedTbId),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.noAccessTrns = snapshot.docs.map((trnSnapshot) => ({
                 id: trnSnapshot.id,
@@ -1131,7 +1171,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         lmPcode,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent, selectedMonth },
       ) {
         const normalizedLmPcode = cleanText(lmPcode);
         if (!normalizedLmPcode) return;
@@ -1155,6 +1195,7 @@ export const salesTargetedBatchApi = createApi({
           batches: [],
           rows: [],
           salesById: {},
+          salesReadErrors: {},
           premiseById: {},
         };
 
@@ -1172,13 +1213,15 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const syncedAtMs = Date.now();
           const readModel = buildSalesOperationalStatsReadModel({
             batches: rawState.batches,
             rows: rawState.rows,
             salesById: rawState.salesById,
+            salesReadErrors: rawState.salesReadErrors,
+            selectedMonth,
             premiseById: rawState.premiseById,
           });
           const firstError = Object.values(sourceErrors)[0] || null;
@@ -1214,7 +1257,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const restartPremiseListeners = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const premiseIds = getSalesOperationalPremiseIds({
             rows: rawState.rows,
@@ -1247,7 +1290,7 @@ export const salesTargetedBatchApi = createApi({
                 where(documentId(), "in", premiseIdChunk),
               ),
               (snapshot) => {
-                if (!active || nextPremiseIdsKey !== premiseIdsKey) return;
+                if (!active || !isCurrent() || nextPremiseIdsKey !== premiseIdsKey) return;
 
                 const rows = {};
                 snapshot.docs.forEach((premiseSnapshot) => {
@@ -1274,7 +1317,7 @@ export const salesTargetedBatchApi = createApi({
                 publish();
               },
               (error) => {
-                if (!active || nextPremiseIdsKey !== premiseIdsKey) return;
+                if (!active || !isCurrent() || nextPremiseIdsKey !== premiseIdsKey) return;
 
                 console.error(
                   "[SALES TARGETED BATCH API][STATS PREMISE JOIN]",
@@ -1295,7 +1338,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const restartSalesListeners = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const salesIds = getTargetedBatchSalesIds(rawState.rows);
           const nextSalesIdsKey = salesIds.join("|");
@@ -1309,6 +1352,7 @@ export const salesTargetedBatchApi = createApi({
           clearUnsubscribes(salesUnsubscribes);
           salesUnsubscribes = [];
           rawState.salesById = {};
+          rawState.salesReadErrors = {};
 
           if (salesIds.length === 0) {
             markSource("sales", "ready");
@@ -1329,7 +1373,7 @@ export const salesTargetedBatchApi = createApi({
                 where(documentId(), "in", salesIdChunk),
               ),
               (snapshot) => {
-                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+                if (!active || !isCurrent() || nextSalesIdsKey !== salesIdsKey) return;
 
                 const rows = {};
                 snapshot.docs.forEach((salesSnapshot) => {
@@ -1341,7 +1385,8 @@ export const salesTargetedBatchApi = createApi({
 
                 chunkResults.set(chunkIndex, rows);
                 chunkErrors.delete(chunkIndex);
-                rawState.salesById = combineChunkMaps(chunkResults);
+                for (const id of salesIdChunk) delete rawState.salesReadErrors[id];
+                rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
 
                 if (chunkResults.size === chunks.length) {
                   markSource(
@@ -1357,7 +1402,7 @@ export const salesTargetedBatchApi = createApi({
                 publish();
               },
               (error) => {
-                if (!active || nextSalesIdsKey !== salesIdsKey) return;
+                if (!active || !isCurrent() || nextSalesIdsKey !== salesIdsKey) return;
 
                 console.error(
                   "[SALES TARGETED BATCH API][STATS SALES JOIN]",
@@ -1365,7 +1410,8 @@ export const salesTargetedBatchApi = createApi({
                 );
                 chunkResults.set(chunkIndex, {});
                 chunkErrors.add(chunkIndex);
-                rawState.salesById = combineChunkMaps(chunkResults);
+                for (const id of salesIdChunk) rawState.salesReadErrors[id] = normalizeStreamError(error, "sales");
+                rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
                 markSource("sales", "error", error);
                 if (chunkResults.size === chunks.length) {
                   restartPremiseListeners();
@@ -1382,6 +1428,7 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeBatches = onSnapshot(
             query(
@@ -1389,7 +1436,7 @@ export const salesTargetedBatchApi = createApi({
               where("scope.lmPcode", "==", normalizedLmPcode),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.batches = snapshot.docs.map((batchSnapshot) => ({
                 id: batchSnapshot.id,
@@ -1407,7 +1454,7 @@ export const salesTargetedBatchApi = createApi({
               where("scope.lmPcode", "==", normalizedLmPcode),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.rows = snapshot.docs.map((rowSnapshot) => ({
                 id: rowSnapshot.id,
@@ -1460,7 +1507,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         lmPcode,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
       ) {
         const normalizedLmPcode = cleanText(lmPcode);
         if (!normalizedLmPcode) return;
@@ -1474,7 +1521,7 @@ export const salesTargetedBatchApi = createApi({
         const raw = { batches: [], rows: [] };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
           const syncedAtMs = Date.now();
           const status = getOverallReportStatus(statuses);
 
@@ -1574,6 +1621,7 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeBatches = onSnapshot(
             query(
@@ -1581,7 +1629,7 @@ export const salesTargetedBatchApi = createApi({
               where("scope.lmPcode", "==", normalizedLmPcode),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               raw.batches = snapshot.docs.map((batchSnapshot) => ({
                 id: batchSnapshot.id,
                 ...batchSnapshot.data(),
@@ -1591,7 +1639,7 @@ export const salesTargetedBatchApi = createApi({
               restartIntegrityRowStreams(raw.batches);
             },
             (error) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               console.error(
                 "[SALES TARGETED BATCH API][ALLOCATION MATRIX BATCH STREAM]",
                 error,
@@ -1629,7 +1677,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         lmPcode,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
       ) {
         const normalizedLmPcode = cleanText(lmPcode);
         if (!normalizedLmPcode) return;
@@ -1639,6 +1687,7 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeRows = onSnapshot(
             query(
@@ -1646,7 +1695,7 @@ export const salesTargetedBatchApi = createApi({
               where("scope.lmPcode", "==", normalizedLmPcode),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               const syncedAtMs = Date.now();
               const rows = snapshot.docs.map((rowSnapshot) => ({
                 id: rowSnapshot.id,
@@ -1708,7 +1757,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         tbId,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
       ) {
         const normalizedTbId = cleanText(tbId);
         if (!normalizedTbId) return;
@@ -1721,7 +1770,7 @@ export const salesTargetedBatchApi = createApi({
         const raw = { batch: null, rows: [] };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
           const syncedAtMs = Date.now();
           const values = Object.values(statuses);
           const status = values.some((value) => value === "syncing")
@@ -1749,11 +1798,12 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeBatch = onSnapshot(
             doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, normalizedTbId),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               raw.batch = snapshot.exists()
                 ? { id: snapshot.id, ...snapshot.data() }
                 : null;
@@ -1768,7 +1818,7 @@ export const salesTargetedBatchApi = createApi({
               where("tbId", "==", normalizedTbId),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               raw.rows = snapshot.docs.map((rowSnapshot) => ({
                 id: rowSnapshot.id,
                 ...rowSnapshot.data(),
@@ -1803,7 +1853,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         mncServiceProviderId,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
       ) {
         const actorMncId = cleanText(mncServiceProviderId);
         if (!actorMncId) return;
@@ -1816,7 +1866,7 @@ export const salesTargetedBatchApi = createApi({
         const raw = { teams: [], serviceProviders: [] };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
           const syncedAtMs = Date.now();
           const values = Object.values(statuses);
           const status = values.some((value) => value === "syncing")
@@ -1845,6 +1895,7 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeTeams = onSnapshot(
             query(
@@ -1852,7 +1903,7 @@ export const salesTargetedBatchApi = createApi({
               where("ownership.mncServiceProviderId", "==", actorMncId),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               raw.teams = snapshot.docs
                 .map(normalizeAllocationTeamSnapshot)
                 .filter(Boolean)
@@ -1875,7 +1926,7 @@ export const salesTargetedBatchApi = createApi({
           unsubscribeServiceProviders = onSnapshot(
             collection(db, "serviceProviders"),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
               raw.serviceProviders = snapshot.docs
                 .map((serviceProviderSnapshot) =>
                   normalizeAllocationServiceProviderSnapshot(
@@ -1926,7 +1977,7 @@ export const salesTargetedBatchApi = createApi({
 
       async onCacheEntryAdded(
         arg,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
       ) {
         const { tbId: normalizedTbId, lmPcode: expectedLmPcode } =
           resolveTargetedBatchMapArgs(arg);
@@ -1999,7 +2050,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const publish = () => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const syncedAtMs = Date.now();
           const readModel = buildTargetedBatchMapReadModel({
@@ -2096,7 +2147,7 @@ export const salesTargetedBatchApi = createApi({
         };
 
         const restartAssetListeners = (source, ids) => {
-          if (!active) return;
+          if (!active || !isCurrent()) return;
 
           const assetStream = assetStreams[source];
           const nextIdsKey = ids.join("|");
@@ -2194,11 +2245,12 @@ export const salesTargetedBatchApi = createApi({
 
         try {
           await cacheDataLoaded;
+          if (!isCurrent()) return;
 
           unsubscribeBatch = onSnapshot(
             doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, normalizedTbId),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.batch = snapshot.exists()
                 ? {
@@ -2218,7 +2270,7 @@ export const salesTargetedBatchApi = createApi({
               where("tbId", "==", normalizedTbId),
             ),
             (snapshot) => {
-              if (!active) return;
+              if (!active || !isCurrent()) return;
 
               rawState.rows = snapshot.docs
                 .map((rowSnapshot) => ({
@@ -2270,17 +2322,26 @@ export const salesTargetedBatchApi = createApi({
 
       keepUnusedDataFor: 300,
     }),
-  }),
+  });
+  },
 });
 
-export const {
-  useGetSalesOperationalStatsByLmQuery,
-  useGetTargetedBatchAllocationContextByIdQuery,
-  useGetTargetedBatchAllocationDirectoryQuery,
-  useGetTargetedBatchAllocationMatrixByLmQuery,
-  useGetTargetedBatchAllocationRowsByLmQuery,
-  useGetTargetedBatchDashboardQuery,
-  useGetTargetedBatchHeadersByLmQuery,
-  useGetTargetedBatchMapByIdQuery,
-  useGetTargetedBatchReportByIdQuery,
-} = salesTargetedBatchApi;
+function useScopedTargetedBatchRead(endpoint, query, options) {
+  const readScope = useSalesReadScope(typeof query === "object" ? query?.lmPcode : undefined);
+  const scopeKey = readScope ? JSON.stringify([readScope, typeof query === "object" ? { lmPcode: query?.lmPcode, tbId: query?.tbId } : query]) : "";
+  const defaultMonth = useMemo(() => { void scopeKey; return getDefaultSalesMonth(); }, [scopeKey]);
+  const month = query && typeof query === "object" && query.month !== undefined ? query.month : defaultMonth;
+  const normalizedQuery = endpoint === "useGetSalesOperationalStatsByLmQuery" && typeof query === "object" ? query.lmPcode : query;
+  const enabled = readScope && query !== skipToken && !options?.skip;
+  const result = salesTargetedBatchApi[endpoint](enabled ? { ...readScope, query: normalizedQuery, month } : skipToken, options);
+  return { ...result, data: enabled ? result.currentData : undefined, currentData: enabled ? result.currentData : undefined };
+}
+export function useGetSalesOperationalStatsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesOperationalStatsByLmQuery", arg, options); }
+export function useGetTargetedBatchAllocationContextByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationContextByIdQuery", arg, options); }
+export function useGetTargetedBatchAllocationDirectoryQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationDirectoryQuery", arg, options); }
+export function useGetTargetedBatchAllocationMatrixByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationMatrixByLmQuery", arg, options); }
+export function useGetTargetedBatchAllocationRowsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationRowsByLmQuery", arg, options); }
+export function useGetTargetedBatchDashboardQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchDashboardQuery", arg, options); }
+export function useGetTargetedBatchHeadersByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchHeadersByLmQuery", arg, options); }
+export function useGetTargetedBatchMapByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchMapByIdQuery", arg, options); }
+export function useGetTargetedBatchReportByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchReportByIdQuery", arg, options); }

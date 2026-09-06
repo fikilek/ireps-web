@@ -232,6 +232,7 @@ export function buildSalesPlanningRecords({
   if (!normalizedLmPcode || !normalizedWardPcode) return [];
 
   for (const sales of Array.isArray(salesRows) ? salesRows : []) {
+    if (sales?.categoryAvailable !== true) continue;
     if (isNormalSalesPlanningCategory(sales)) continue;
     if (sales?.geofenceGpsEligible !== true) continue;
 

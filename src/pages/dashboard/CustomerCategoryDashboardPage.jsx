@@ -1,12 +1,13 @@
+import { resolveSalesMonthSelection, salesCategorySearch } from "../sales/models/salesMonthModel.js";
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import { useGetRegistryTrnsByLmPcodeQuery } from "../../redux/trnsApi";
 import {
   formatCompactCurrencyFromCents,
@@ -504,7 +505,7 @@ function PurchaseTrendPanel({ model }) {
           </aside>
 
           <p className="customer-category-detail-purchase-note">
-            CAT meter counts are shown only where the monthly category snapshot is authoritative. The current Sales category snapshot is anchored to its latest sales period; earlier monthly counts are not inferred. Municipal purchases use the full prepaid Sales population for the month.
+            CAT meter counts use the selected category month. Counts for other months are not inferred from purchases. Municipal purchases use the full prepaid Sales population for the month.
           </p>
         </>
       ) : (
@@ -1146,13 +1147,19 @@ export default function CustomerCategoryDashboardPage() {
   const [openKpiInfo, setOpenKpiInfo] = useState(null);
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+  const location = useLocation();
+  const readScope = useSalesReadScope(activeLmPcode);
+  const scopeKey = JSON.stringify(readScope);
+  const monthSelection = useMemo(() => { void scopeKey; return resolveSalesMonthSelection(location.search); }, [location.search, scopeKey]);
+  const categoryMonth = monthSelection.month;
+  const monthPicker = <label>Category month <input type="month" value={categoryMonth || ""} onChange={event => navigate(`${location.pathname}?month=${encodeURIComponent(event.target.value)}`)} /></label>;
 
   const {
     data: salesRows = [],
     isLoading: salesLoading,
     isFetching: salesFetching,
     error: salesError,
-  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
+  } = useGetSalesCategoryViewQuery(activeLmPcode ? { lmPcode: activeLmPcode, month: categoryMonth } : skipToken);
 
   const {
     data: trnRows = [],
@@ -1169,15 +1176,17 @@ export default function CustomerCategoryDashboardPage() {
   } = useGetGeoFencesByLmQuery(activeLmPcode || skipToken);
 
   const model = useMemo(
-    () => buildCustomerCategoryDashboardModel(salesRows, trnRows, categoryKey),
-    [salesRows, trnRows, categoryKey],
+    () => buildCustomerCategoryDashboardModel(salesRows, trnRows, categoryKey, categoryMonth),
+    [salesRows, trnRows, categoryKey, categoryMonth],
   );
 
-  const goBack = () => navigate("/dashboard/customer-categories");
+  const goBack = () => navigate(`/dashboard/customer-categories${monthSelection.valid ? salesCategorySearch(categoryMonth) : location.search}`);
 
   if (!activeLmPcode) {
     return <div className="customer-category-detail-page"><StateCard title="No active workbase selected" detail="Select an active workbase before opening an Individual Category Dashboard." onBack={goBack} /></div>;
   }
+
+  if (!monthSelection.valid) return <div role="alert"><h2>Invalid category month</h2>{monthPicker}<p>Select one valid YYYY-MM month.</p></div>;
 
   if (salesLoading) {
     return <div className="customer-category-detail-page"><StateCard title="Loading Individual Category..." detail="Connecting to the live Sales stream for the active workbase." /></div>;
@@ -1188,7 +1197,7 @@ export default function CustomerCategoryDashboardPage() {
   }
 
   if (!model.found) {
-    return <div className="customer-category-detail-page"><StateCard title="Category not found" detail="This category is not present in the current authoritative non-Normal Sales population." onBack={goBack} /></div>;
+    return <div className="customer-category-detail-page">{monthPicker}<StateCard title={model.categoryAvailableCount ? "Category not found for selected month" : "Selected-month categories unavailable"} detail={`Category month: ${categoryMonth}. ${model.categoryUnavailableCount} Sales records have unavailable categories.`} onBack={goBack} /></div>;
   }
 
   const latestPurchaseLabel = model.latestMonthKey ? `${getMonthLabel(model.latestMonthKey)} Purchases` : "Latest Purchases";
@@ -1200,6 +1209,8 @@ export default function CustomerCategoryDashboardPage() {
           <p className="customer-category-detail-eyebrow">Dashboard · Customer Categories · {model.shortCode}</p>
           <div className="customer-category-detail-title-row">
             <h2>{model.shortCode} Dashboard</h2>
+            {monthPicker}
+            <p>{model.categoryAvailableCount} records have a valid {categoryMonth} category; {model.categoryUnavailableCount} unavailable.</p>
             <button type="button" onClick={goBack}><Icon name="arrow" /> All Categories</button>
           </div>
           <p className="customer-category-detail-authoritative">{model.categoryLabel}</p>

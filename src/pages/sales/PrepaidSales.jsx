@@ -5,7 +5,7 @@ import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import SalesMetersTable from "./components/SalesMetersTable";
@@ -174,6 +174,10 @@ export default function PrepaidSales() {
   }, [location.search]);
 
   const [gpsFilter, setGpsFilter] = useState(GPS_FILTERS.ALL);
+  const [monthSelection, setMonthSelection] = useState({});
+  const salesReadScope = useSalesReadScope(activeLmPcode);
+  const salesScopeKey = JSON.stringify(salesReadScope);
+  const selectedCategoryMonth = monthSelection.scope === salesScopeKey ? monthSelection.month : undefined;
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isTargetBatchModalOpen, setIsTargetBatchModalOpen] = useState(false);
   const [targetBatchScopeError, setTargetBatchScopeError] = useState("");
@@ -184,7 +188,8 @@ export default function PrepaidSales() {
     isFetching,
     error,
     refetch,
-  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
+    categoryMonth,
+  } = useGetSalesCategoryViewQuery(activeLmPcode ? { lmPcode: activeLmPcode, month: selectedCategoryMonth } : skipToken);
 
   const salesRows = Array.isArray(currentSalesRows)
     ? currentSalesRows
@@ -208,7 +213,7 @@ export default function PrepaidSales() {
     setSelectedIds(new Set());
     setIsTargetBatchModalOpen(false);
     setTargetBatchScopeError("");
-  }, [activeLmPcode]);
+  }, [salesScopeKey]);
 
   const monthKeys = useMemo(() => buildMonthKeys(salesRows), [salesRows]);
   const latestMonthKey = monthKeys[0] || "2026-02";
@@ -410,6 +415,8 @@ export default function PrepaidSales() {
         <div>
           <div style={styles.heroEyebrowRow}>
             <p style={styles.heroEyebrow}>Sales Table</p>
+            <label>Category month <input type="month" value={categoryMonth || ""} onChange={event => setMonthSelection({ scope: salesScopeKey, month: event.target.value })} /></label>
+            <span>{salesRows.filter(row => row.categoryAvailable).length} of {salesRows.length} records have this month's category; unavailable values show NAv.</span>
           </div>
 
           <h1 style={styles.heroTitle}>

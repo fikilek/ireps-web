@@ -2,10 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  buildCustomerCategoryDashboardModel,
+  buildCustomerCategoryDashboardModel as buildSelectedMonth,
   normalizeCustomerCategoryRouteKey,
 } from "./customerCategoryDashboardModel.js";
 import { toCustomerCategoryKey } from "./customerCategoriesDashboardModel.js";
+
+const buildCustomerCategoryDashboardModel = (rows, trns, key, month = "2026-06") => buildSelectedMonth(rows, trns, key, month);
+
+test("detail category month can precede purchase display range and is never inferred from salesPeriodTo", () => {
+  const row = { id: "M1", meterNo: "M1", salesPeriodTo: "2026-08", monthlySalesC: { "2026-08": 0 }, monthlyCategories: { "2026-02": { leakageCategory: "CAT1", riskTier: "High", riskScore: 1 }, "2026-08": { leakageCategory: "CAT2", riskTier: "High", riskScore: 2 } } };
+  const model = buildSelectedMonth([row], [], toCustomerCategoryKey("CAT1"), "2026-02");
+  assert.equal(model.found, true);
+  assert.equal(model.currentCategorySnapshotMonthKey, "2026-02");
+  assert.equal(model.purchaseMonths[0].categoryMeterCount, null);
+  assert.equal(buildSelectedMonth([row], [], toCustomerCategoryKey("CAT1"), "2026-08").found, false);
+  assert.equal(buildSelectedMonth([row], [], toCustomerCategoryKey("CAT1"), "2026-07").categoryUnavailableCount, 1);
+});
 
 function salesRow({
   meterNo,
@@ -15,12 +27,14 @@ function salesRow({
   geofenceRefs = [],
   wardNumbers = [],
   salesPeriodTo = "",
+  categoryMonth = "2026-06",
 }) {
   return {
     id: meterNo,
     meterNo,
     meterNoNormalized: meterNo,
-    leakageCategory,
+    leakageCategory: "SCALAR MUST BE IGNORED",
+    monthlyCategories: { [categoryMonth]: { leakageCategory, riskTier: "High", riskScore: 1 } },
     hasUsableGps,
     monthlySalesC,
     geofenceRefs,
@@ -232,18 +246,21 @@ test("purchase recovery compares CAT purchases with the full prepaid Sales popul
       leakageCategory: "CAT2 - Ghost Purchaser",
       monthlySalesC: { "2026-06": 10_00, "2026-07": 20_00, "2026-08": 30_00 },
       salesPeriodTo: "2026-08",
+      categoryMonth: "2026-08",
     }),
     salesRow({
       meterNo: "1002",
       leakageCategory: "CAT2 - Ghost Purchaser",
       monthlySalesC: { "2026-06": 5_00, "2026-07": 6_00, "2026-08": 7_00 },
       salesPeriodTo: "2026-08",
+      categoryMonth: "2026-08",
     }),
     salesRow({
       meterNo: "2001",
       leakageCategory: "Normal - No Leakage Flag",
       monthlySalesC: { "2026-06": 100_00, "2026-07": 110_00, "2026-08": 120_00 },
       salesPeriodTo: "2026-08",
+      categoryMonth: "2026-08",
     }),
   ];
 
@@ -251,6 +268,7 @@ test("purchase recovery compares CAT purchases with the full prepaid Sales popul
     rows,
     [],
     toCustomerCategoryKey("CAT2 - Ghost Purchaser"),
+    "2026-08",
   );
 
   assert.deepEqual(
