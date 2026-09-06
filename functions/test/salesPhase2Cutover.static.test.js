@@ -37,14 +37,22 @@ test("Geofence CREATE reads canonical Sales All GPS field and uses atomic member
   assert.doesNotMatch(membership, /geofenceRefs:\s*nextGeoFenceRefs/);
 });
 
-test("both Web Sales readers stream Sales All", async () => {
-  const tableApi = await read("../../src/redux/demoSalesApi.js");
+test("canonical Web Sales readers stream Sales All", async () => {
+  const salesApi = await read("../../src/redux/salesApi.js");
   const reportingApi = await read("../../src/redux/salesTargetedBatchApi.js");
+  const prepaidSales = await read("../../src/pages/sales/PrepaidSales.jsx");
 
-  assert.match(tableApi, /const DEMO_SALES_COLLECTION = "sales-all-meters"/);
-  assert.match(tableApi, /onSnapshot\(/);
-  assert.match(tableApi, /where\("lmPcode",\s*"==",\s*normalizedLmPcode\)/);
-  assert.doesNotMatch(tableApi, /const DEMO_SALES_COLLECTION = "demo_sales_meters"/);
+  assert.match(salesApi, /const SALES_COLLECTION = "sales-all-meters"/);
+  assert.match(salesApi, /onSnapshot\(/);
+  assert.match(salesApi, /where\("lmPcode",\s*"==",\s*normalizedLmPcode\)/);
+  assert.match(salesApi, /getSalesByLmPcode:\s*builder\.query/);
+  assert.match(salesApi, /useGetSalesByLmPcodeQuery/);
+  assert.doesNotMatch(salesApi, /demo_sales_meters|demoSalesApi|DEMO_SALES_COLLECTION/);
+
+  assert.match(prepaidSales, /useGetSalesCategoryViewQuery/);
+  assert.match(salesApi, /function useGetSalesCategoryViewQuery[\s\S]*useGetSalesByLmPcodeQuery\(scope, options\)/);
+  assert.match(prepaidSales, /from "\.\.\/\.\.\/redux\/salesApi"/);
+  assert.doesNotMatch(prepaidSales, /demoSalesApi|useGetDemoSalesByLmPcodeQuery/);
 
   assert.match(reportingApi, /const SALES_COLLECTION = "sales-all-meters"/);
   assert.match(reportingApi, /onSnapshot\(/);

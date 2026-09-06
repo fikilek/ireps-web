@@ -62,7 +62,6 @@ function docs(targetType = "TEAM", targetId = "TEAM_1") {
   result["tb_rows/OTHER"] = { tbId: "OTHER", rowNo: 1, salesAllMeterId: "SALE_1" };
   result["sales-all-meters/SALE_1"] = { secret: "never returned", tbRefs: [
     { id: TB, rowId: "ROW_1", fieldWork: {} },
-    { id: TB, rowId: "ROW_2", fieldWork: { noAccess: [{}, {}] } },
   ] };
   result["sales-all-meters/SALE_2"] = { tbRefs: [{ id: TB, rowId: "ROW_3", fieldWork: { noAccess: [] } }] };
   return result;
@@ -90,11 +89,11 @@ test("orders, filters, limits and paginates without duplicates or omissions", as
   await assert.rejects(getTargetedBatchRows({ db, request: request({ tbId: TB, cursor: { rowNo: 0, id: "" } }) }), { code: "invalid-argument" });
 });
 
-test("enriches from exact Sales tbRef and deduplicates reads without writes", async () => {
+test("enriches from governed batch-level Sales tbRef and deduplicates reads without writes", async () => {
   const db = new FakeDb(docs());
   const before = structuredClone(db.documents);
   const result = await getTargetedBatchRows({ db, request: request({ tbId: TB }) });
-  assert.deepEqual(result.rows.map((row) => row.noAccessCount), [0, 2, 0]);
+  assert.deepEqual(result.rows.map((row) => row.noAccessCount), [0, 0, 0]);
   assert.ok(result.rows.every((row) => row.noAccessSourceStatus === "OK"));
   assert.deepEqual(db.getAllCalls, [["SALE_1", "SALE_2"]]);
   assert.equal(result.diagnostics.firestoreWrites, 0);
@@ -103,17 +102,17 @@ test("enriches from exact Sales tbRef and deduplicates reads without writes", as
   assert.ok(result.rows.every((row) => row.secret === undefined && row.tbRefs === undefined));
 });
 
-test("reports all integrity states and never maps them to zero", () => {
+test("reports integrity status while keeping a safe numeric No Access count", () => {
   const row = { id: "ROW", tbId: TB, salesAllMeterId: "SALE" };
   const cases = [
     [enrichTargetedBatchRow({ ...row, salesAllMeterId: "" }), SALES_DOCUMENT_ID_MISSING],
     [enrichTargetedBatchRow(row), "SALES_DOCUMENT_MISSING"],
-    [enrichTargetedBatchRow(row, snap("SALE", { tbRefs: [{ id: TB, rowId: "WRONG" }] })), "TB_REFERENCE_MISSING"],
+    [enrichTargetedBatchRow(row, snap("SALE", { tbRefs: [{ id: "OTHER_TB", rowId: "WRONG" }] })), "TB_REFERENCE_MISSING"],
     [enrichTargetedBatchRow(row, snap("SALE", { tbRefs: [{ id: TB, rowId: "ROW", fieldWork: "bad" }] })), "FIELDWORK_INVALID"],
     [enrichTargetedBatchRow(row, snap("SALE", { tbRefs: [{ id: TB, rowId: "ROW", fieldWork: { noAccess: "bad" } }] })), "FIELDWORK_INVALID"],
   ];
   cases.forEach(([result, status]) => {
     assert.equal(result.noAccessSourceStatus, status);
-    assert.equal(result.noAccessCount, null);
+    assert.equal(result.noAccessCount, 0);
   });
 });

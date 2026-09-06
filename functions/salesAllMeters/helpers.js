@@ -37,11 +37,20 @@ const MONTHLY_SOURCE_FIELDS = [
   "erfNumbers", "missingErfNumbers",
 ];
 
-const CONTOUR_REQUIRED_FIELDS = [...REQUIRED_CORE_FIELDS, ...MONTHLY_SOURCE_FIELDS];
+const LEGACY_CATEGORY_FIELDS = new Set(["leakageCategory", "riskTier", "riskScore"]);
+const CONTOUR_REQUIRED_FIELDS = [
+  ...REQUIRED_CORE_FIELDS,
+  ...MONTHLY_SOURCE_FIELDS.filter((field) => !LEGACY_CATEGORY_FIELDS.has(field)),
+];
 const GOVERNED_PROVIDERS = new Set(["conlog", "contour"]);
 const CANONICAL_ID = /^[A-Z0-9]+$/;
 const MONTH_KEY = /^\d{4}-(0[1-9]|1[0-2])$/;
 const TIMEZONE_ISO = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/;
+const MONTHLY_CATEGORY_FIELDS = ["leakageCategory", "riskTier", "riskScore"];
+const SALES_METADATA_FIELDS = [
+  "createdAt", "createdByUid", "createdByUser",
+  "updatedAt", "updatedByUid", "updatedByUser",
+];
 
 const isObject = (value) => Boolean(value) && typeof value === "object" &&
   !Array.isArray(value);
@@ -147,6 +156,94 @@ function isFirestoreTimestampLike(value) {
   return Number.isInteger(seconds) &&
     Number.isInteger(nanoseconds) &&
     nanoseconds >= 0 && nanoseconds <= 999999999;
+}
+
+function validateMonthlyCategories(value, unsafe) {
+  if (!isPlainObject(value)) {
+    unsafe.push("monthlyCategories");
+    return;
+  }
+
+  for (const [month, entry] of Object.entries(value)) {
+    const path = `monthlyCategories.${month}`;
+    if (!MONTH_KEY.test(month)) {
+      unsafe.push(path);
+      continue;
+    }
+    if (!isPlainObject(entry)) {
+      unsafe.push(path);
+      continue;
+    }
+
+    const keys = Object.keys(entry).sort();
+    const expectedKeys = [...MONTHLY_CATEGORY_FIELDS].sort();
+    if (keys.length !== expectedKeys.length ||
+        keys.some((key, index) => key !== expectedKeys[index])) {
+      unsafe.push(path);
+      continue;
+    }
+
+    if (!isNonblankString(entry.leakageCategory)) {
+      unsafe.push(`${path}.leakageCategory`);
+    }
+    if (!isNonblankString(entry.riskTier)) {
+      unsafe.push(`${path}.riskTier`);
+    }
+    if (!Number.isInteger(entry.riskScore) || entry.riskScore < 0) {
+      unsafe.push(`${path}.riskScore`);
+    }
+  }
+}
+
+function validateSalesMetadata(value, unsafe) {
+  if (!isPlainObject(value)) {
+    unsafe.push("metadata");
+    return;
+  }
+
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [...SALES_METADATA_FIELDS].sort();
+  if (keys.length !== expectedKeys.length ||
+      keys.some((key, index) => key !== expectedKeys[index])) {
+    unsafe.push("metadata");
+    return;
+  }
+
+  if (!isFirestoreTimestampLike(value.createdAt)) unsafe.push("metadata.createdAt");
+  if (!isNonblankString(value.createdByUid)) unsafe.push("metadata.createdByUid");
+  if (!isNonblankString(value.createdByUser)) unsafe.push("metadata.createdByUser");
+  if (!isFirestoreTimestampLike(value.updatedAt)) unsafe.push("metadata.updatedAt");
+  if (!isNonblankString(value.updatedByUid)) unsafe.push("metadata.updatedByUid");
+  if (!isNonblankString(value.updatedByUser)) unsafe.push("metadata.updatedByUser");
+}
+
+export function buildSalesAllMetersOperationalMetadataPatch({
+  existing,
+  operationTimestamp,
+  actorUid,
+  actorUser,
+}) {
+  if (!isObject(existing) || !Object.hasOwn(existing, "metadata")) return {};
+
+  const unsafe = [];
+  validateSalesMetadata(existing.metadata, unsafe);
+  if (unsafe.length) {
+    throw new TypeError(
+      `Sales All Meters metadata contract is invalid at: ${[...new Set(unsafe)].join(", ")}`,
+    );
+  }
+  if (!isFirestoreTimestampLike(operationTimestamp)) {
+    throw new TypeError("Sales All Meters metadata update requires a Firestore Timestamp.");
+  }
+  if (!isNonblankString(actorUid) || !isNonblankString(actorUser)) {
+    throw new TypeError("Sales All Meters metadata update requires actor UID and user name.");
+  }
+
+  return {
+    "metadata.updatedAt": operationTimestamp,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorUser,
+  };
 }
 
 function validateNoAccessEntries(value, path, unsafe) {
@@ -460,6 +557,12 @@ export function validateExistingSalesAllMetersTarget({
   if (Object.hasOwn(existing, "tbRefs")) validateTbRefs(existing.tbRefs, unsafe);
   if (Object.hasOwn(existing, "geofenceRefs")) {
     validateGeofenceRefs(existing.geofenceRefs, unsafe);
+  }
+  if (Object.hasOwn(existing, "monthlyCategories")) {
+    validateMonthlyCategories(existing.monthlyCategories, unsafe);
+  }
+  if (Object.hasOwn(existing, "metadata")) {
+    validateSalesMetadata(existing.metadata, unsafe);
   }
 
   if (Object.hasOwn(existing, "accountNumber") && existing.accountNumber !== existing.accountNo) {

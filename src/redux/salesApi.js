@@ -1,14 +1,59 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
-import { db } from "../firebase";
+import { db, functions } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { useMemo, useSyncExternalStore } from "react";
+import { getDefaultSalesMonth } from "../pages/sales/models/salesMonthModel.js";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { useAuth } from "../auth/useAuth";
 import { inspectSalesTbRefsIntegrity } from "../pages/sales/models/salesTbRefsIntegrityModel";
+import {
+  getGovernedCategoryMonths,
+  normalizeSalesMonthlyCategories,
+  projectSalesCategoryMonth,
+} from "../pages/sales/models/salesCategoryModel";
 
 const SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
 const MAX_UPDATE_DIAGNOSTIC_LOGS = 10;
 
 const salesStreams = new Map();
+let salesSession = { uid: null, generation: 0 };
+const sessionSubscribers = new Set();
+const sessionCleanups = new Set();
+const subscribeSession = listener => { sessionSubscribers.add(listener); return () => sessionSubscribers.delete(listener); };
+export const getSalesReadSession = () => salesSession;
+export function isSalesReadScopeCurrent(scope) {
+  return Boolean(scope?.uid) && scope.uid === salesSession.uid && scope.session === salesSession.generation;
+}
+export function registerSalesSessionCleanup(cleanup) {
+  sessionCleanups.add(cleanup);
+  return () => sessionCleanups.delete(cleanup);
+}
+export function setSalesReadSession(uid) {
+  if (salesSession.uid === uid) return false;
+  salesSession = { uid, generation: salesSession.generation + 1 };
+  for (const cleanup of sessionCleanups) cleanup();
+  sessionCleanups.clear();
+  for (const stream of salesStreams.values()) {
+    stream.closed = true;
+    clearTimeout(stream.releaseTimer);
+    stream.unsubscribeFirestore();
+    for (const subscriber of stream.subscribers) subscriber.onError?.({ status: "CUSTOM_ERROR", error: "Sales session ended." });
+  }
+  salesStreams.clear();
+  for (const listener of sessionSubscribers) listener();
+  return true;
+}
+export function useSalesReadScope(lmPcode) {
+  const { uid } = useAuth();
+  const session = useSyncExternalStore(subscribeSession, getSalesReadSession);
+  return useMemo(() => uid && uid === session.uid
+    ? { uid, session: session.generation, lmPcode }
+    : null, [uid, session, lmPcode]);
+}
+function salesStreamKey(scope) { return JSON.stringify([scope.uid, scope.session, scope.lmPcode]); }
 
 function asNumber(value) {
   const numberValue = Number(value);
@@ -19,14 +64,7 @@ function hasFiniteNumber(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value));
 }
 
-function asOptionalNumber(value) {
-  if (value === null || value === undefined || String(value).trim() === "") {
-    return null;
-  }
 
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : null;
-}
 
 function normalizeNumberMap(value = {}) {
   return Object.entries(value || {}).reduce((accumulator, [key, itemValue]) => {
@@ -311,7 +349,7 @@ function getTimestampMs(value) {
   return Number.isFinite(milliseconds) ? milliseconds : 0;
 }
 
-function normalizeSalesRow(id, data = {}) {
+export function normalizeSalesRow(id, data = {}) {
   const monthlySalesC =
     data.monthlySalesC && typeof data.monthlySalesC === "object"
       ? normalizeNumberMap(data.monthlySalesC)
@@ -321,6 +359,12 @@ function normalizeSalesRow(id, data = {}) {
     data.monthlyUnits && typeof data.monthlyUnits === "object"
       ? normalizeNumberMap(data.monthlyUnits)
       : normalizeNumberMap(data.Units);
+
+  const monthlyCategories = normalizeSalesMonthlyCategories(
+    data.monthlyCategories,
+  );
+  const categoryRow = { monthlyCategories };
+  const categoryMonthKeys = getGovernedCategoryMonths(categoryRow);
 
   const monthKeys = getSortedMonthKeys(monthlySalesC, monthlyUnits);
   const latestMonthKey = monthKeys[0] || "";
@@ -336,7 +380,7 @@ function normalizeSalesRow(id, data = {}) {
   const rawTbRefs = data.tbRefs !== undefined ? data.tbRefs : data.TbRefs;
   const derivedSales2026C = sumCalendarYear(monthlySalesC, 2026);
 
-  const customerName = data.customerName || data.Customer || data.Surname || "";
+  const customerName = data.customerName || data.customerSurname || data.Customer || data.Surname || "";
 
   const erfNumbers = Array.isArray(data.ErfNumbers)
     ? data.ErfNumbers
@@ -376,14 +420,33 @@ function normalizeSalesRow(id, data = {}) {
     ),
     sgCode: String(data.sgCode || "").trim(),
     erfNo: String(data.erfNo || "").trim(),
-    accountNumber: String(data.accountNumber || data.AccountNumber || ""),
+    accountNumber: String(data.accountNo ?? data.accountNumber ?? data.AccountNumber ?? ""),
     customerName: String(customerName),
     lmPcode: String(data.lmPcode || ""),
-    createdAt: toSerializableTimestamp(data.createdAt),
-    updatedAt: toSerializableTimestamp(data.updatedAt),
-    createdAtMs: getTimestampMs(data.createdAt),
-    updatedAtMs: getTimestampMs(data.updatedAt),
-    demoData: data.demoData !== false,
+    provider: data.provider ?? null,
+    customerNo: data.customerNo ?? null,
+    customerSurname: data.customerSurname ?? null,
+    accountNo: data.accountNo ?? null,
+    accountNormalized: data.accountNormalized ?? null,
+    monthlyTotalsC: normalizeNumberMap(data.monthlyTotalsC),
+    totalAmountC: data.totalAmountC ?? null,
+    salesStatus: data.salesStatus ?? null,
+    previousMeterNumber: data.previousMeterNumber ?? null,
+    installationDate: data.installationDate ?? null,
+    previousInstallationDate: data.previousInstallationDate ?? null,
+    metadata: data.metadata ? {
+      createdAt: toSerializableTimestamp(data.metadata.createdAt),
+      createdByUid: data.metadata.createdByUid ?? null,
+      createdByUser: data.metadata.createdByUser ?? null,
+      updatedAt: toSerializableTimestamp(data.metadata.updatedAt),
+      updatedByUid: data.metadata.updatedByUid ?? null,
+      updatedByUser: data.metadata.updatedByUser ?? null,
+    } : null,
+    createdAt: toSerializableTimestamp(data.metadata?.createdAt),
+    updatedAt: toSerializableTimestamp(data.metadata?.updatedAt),
+    createdAtMs: getTimestampMs(data.metadata?.createdAt),
+    updatedAtMs: getTimestampMs(data.metadata?.updatedAt),
+    demoData: data.demoData ?? null,
     masterVisibility:
       typeof data?.master?.visibility === "string"
         ? data.master.visibility
@@ -429,9 +492,11 @@ function normalizeSalesRow(id, data = {}) {
       : derivedTotalUnits,
     monthlySalesC,
     monthlyUnits,
+    monthlyCategories,
+    categoryMonthKeys,
     salesPeriodFrom: String(data.salesPeriodFrom || earliestMonthKey),
     salesPeriodTo: String(data.salesPeriodTo || latestMonthKey),
-    sourceFileName: String(data.sourceFileName || "END 2026-07-29.xlsx"),
+    sourceFileName: String(data.sourceFileName || ""),
     sourceRow: asNumber(data.sourceRow || data.SourceEndRow),
     erfNumbers,
     erfCandidates,
@@ -440,6 +505,7 @@ function normalizeSalesRow(id, data = {}) {
     gpsMatchStatus: String(data.GpsMatchStatus || data.gpsMatchStatus || ""),
     // Match the geofence creation trigger's lowercase Firestore eligibility gate.
     geofenceGpsEligible: data.hasUsableGps === true,
+    gpsAvailable: typeof data.hasUsableGps === "boolean" || typeof data.HasUsableGps === "boolean" || erfCandidates.some(candidate => candidate.hasValidGps),
     hasUsableGps:
       data.HasUsableGps === true ||
       data.hasUsableGps === true ||
@@ -449,11 +515,6 @@ function normalizeSalesRow(id, data = {}) {
     ),
     tbRefs: normalizeTbRefs(rawTbRefs),
     tbRefsIntegrity: inspectSalesTbRefsIntegrity(rawTbRefs),
-    leakageCategory: String(
-      data.leakageCategory || data.Leakage_Category || "",
-    ).trim(),
-    riskTier: String(data.riskTier || data.Risk_Tier || "").trim(),
-    riskScore: asOptionalNumber(data.riskScore ?? data.Risk_Score),
     trnBatchIds: uniqueNonBlank(
       Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],
     ),
@@ -493,11 +554,13 @@ function buildRowsFromStream(stream) {
   return Array.from(stream.rowsById.values()).sort(sortSalesRows);
 }
 
-function createSalesStream(lmPcode) {
-  const normalizedLmPcode = normalizeLmPcode(lmPcode);
+function createSalesStream(scope) {
+  const normalizedLmPcode = normalizeLmPcode(scope.lmPcode);
   const startedAtMs = Date.now();
 
   const stream = {
+    key: salesStreamKey(scope),
+    scope,
     lmPcode: normalizedLmPcode,
     subscribers: new Set(),
     rowsById: new Map(),
@@ -518,6 +581,7 @@ function createSalesStream(lmPcode) {
   stream.unsubscribeFirestore = onSnapshot(
     salesQuery,
     (snapshot) => {
+      if (stream.closed || !isSalesReadScopeCurrent(scope)) return;
       const normalizationStartedAtMs = Date.now();
       const isInitialSnapshot = !stream.initialized;
       const changes = isInitialSnapshot
@@ -599,9 +663,11 @@ function createSalesStream(lmPcode) {
       }
     },
     (error) => {
+      if (stream.closed || !isSalesReadScopeCurrent(scope)) return;
+      stream.latestRows = null;
       stream.latestError = {
         status: "CUSTOM_ERROR",
-        error: error?.message || "Could not load demo prepaid sales.",
+        error: error?.message || "Could not load Sales.",
       };
 
       console.error("[salesApi] Sales stream error", {
@@ -616,13 +682,21 @@ function createSalesStream(lmPcode) {
     },
   );
 
-  salesStreams.set(normalizedLmPcode, stream);
+  salesStreams.set(stream.key, stream);
   return stream;
 }
 
-function getOrCreateSalesStream(lmPcode) {
-  const normalizedLmPcode = normalizeLmPcode(lmPcode);
-  const existingStream = salesStreams.get(normalizedLmPcode);
+function getOrCreateSalesStream(scope) {
+  const existingStream = salesStreams.get(salesStreamKey(scope));
+
+  if (existingStream?.latestError) {
+    clearTimeout(existingStream.releaseTimer);
+    existingStream.closed = true;
+    existingStream.unsubscribeFirestore();
+    const replacement = createSalesStream(scope);
+    replacement.subscribers = existingStream.subscribers;
+    return replacement;
+  }
 
   if (existingStream) {
     if (existingStream.releaseTimer) {
@@ -633,10 +707,11 @@ function getOrCreateSalesStream(lmPcode) {
     return existingStream;
   }
 
-  return createSalesStream(normalizedLmPcode);
+  return createSalesStream(scope);
 }
 
 function scheduleSalesStreamRelease(stream) {
+  stream = salesStreams.get(stream.key) || stream;
   if (stream.subscribers.size > 0 || stream.releaseTimer) return;
 
   stream.releaseTimer = setTimeout(() => {
@@ -646,15 +721,15 @@ function scheduleSalesStreamRelease(stream) {
     }
 
     stream.unsubscribeFirestore();
-    salesStreams.delete(stream.lmPcode);
+    if (salesStreams.get(stream.key) === stream) salesStreams.delete(stream.key);
   }, STREAM_RELEASE_DELAY_MS);
 }
 
 function subscribeToSalesStream(
-  lmPcode,
+  scope,
   { onRows = null, onError = null } = {},
 ) {
-  const stream = getOrCreateSalesStream(lmPcode);
+  const stream = getOrCreateSalesStream(scope);
   const subscriber = { onRows, onError };
 
   stream.subscribers.add(subscriber);
@@ -675,11 +750,11 @@ function subscribeToSalesStream(
   };
 }
 
-function readInitialSalesStream(lmPcode, signal) {
-  const normalizedLmPcode = normalizeLmPcode(lmPcode);
+function readInitialSalesStream(scope, signal) {
+  const normalizedLmPcode = normalizeLmPcode(scope?.lmPcode);
 
-  if (!normalizedLmPcode) {
-    return Promise.resolve({ data: [] });
+  if (!normalizedLmPcode || !isSalesReadScopeCurrent(scope)) {
+    return Promise.resolve({ error: { status: "CUSTOM_ERROR", error: "Sales read scope is unavailable." } });
   }
 
   return new Promise((resolve) => {
@@ -712,13 +787,13 @@ function readInitialSalesStream(lmPcode, signal) {
     signal?.addEventListener("abort", handleAbort, { once: true });
 
     const streamUnsubscribe = subscribeToSalesStream(
-      normalizedLmPcode,
+      scope,
       {
         onRows: ({ rows, fromCache }) => {
           const hasUsableInitialResult = !fromCache || rows.length > 0;
 
           if (!hasUsableInitialResult) return;
-          finish({ data: rows });
+          finish({ data: { rows, streamError: null } });
         },
         onError: (error) => finish({ error }),
       },
@@ -736,30 +811,42 @@ export const salesApi = createApi({
   reducerPath: "salesApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getSalesGovernance: builder.query({
+      async queryFn({ lmPcode }) {
+        try { return { data: (await httpsCallable(functions, "getSalesGovernedMonths")({ lmPcode, provider: "contour" })).data }; }
+        catch (error) { return { error: { status: "CUSTOM_ERROR", error: error.message } }; }
+      },
+      keepUnusedDataFor: 60,
+    }),
     getSalesByLmPcode: builder.query({
-      queryFn: (lmPcode, { signal }) =>
-        readInitialSalesStream(lmPcode, signal),
+      queryFn: (scope, { signal }) =>
+        readInitialSalesStream(scope, signal),
 
       async onCacheEntryAdded(
-        lmPcode,
+        scope,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
-        const normalizedLmPcode = normalizeLmPcode(lmPcode);
+        const normalizedLmPcode = normalizeLmPcode(scope.lmPcode);
 
-        if (!normalizedLmPcode) return;
+        if (!normalizedLmPcode || !isSalesReadScopeCurrent(scope)) return;
 
         let cacheReady = false;
         let latestRows = null;
+        let latestError = null;
 
-        const unsubscribe = subscribeToSalesStream(normalizedLmPcode, {
+        const unsubscribe = subscribeToSalesStream(scope, {
           onRows: ({ rows }) => {
             latestRows = rows;
+            latestError = null;
 
             if (cacheReady) {
-              updateCachedData(() => rows);
+              updateCachedData(() => ({ rows, streamError: null }));
             }
           },
           onError: (error) => {
+            latestRows = null;
+            latestError = error;
+            if (cacheReady && isSalesReadScopeCurrent(scope)) updateCachedData(() => ({ rows: [], streamError: error }));
             console.error("[salesApi] Cache stream error", {
               lmPcode: normalizedLmPcode,
               message: error?.error || "Unknown Sales stream error.",
@@ -771,8 +858,11 @@ export const salesApi = createApi({
           await cacheDataLoaded;
           cacheReady = true;
 
+          if (!isSalesReadScopeCurrent(scope)) return;
+          if (latestError) updateCachedData(() => ({ rows: [], streamError: latestError }));
+
           if (latestRows) {
-            updateCachedData(() => latestRows);
+            updateCachedData(() => ({ rows: latestRows, streamError: null }));
           }
 
           await cacheEntryRemoved;
@@ -791,4 +881,30 @@ export const salesApi = createApi({
   }),
 });
 
-export const { useGetSalesByLmPcodeQuery } = salesApi;
+export function useGetSalesGovernanceQuery(scope, options) {
+  const readScope = useSalesReadScope(scope?.lmPcode);
+  const enabled = readScope && scope !== skipToken && scope?.lmPcode && !options?.skip;
+  const result = salesApi.useGetSalesGovernanceQuery(enabled ? readScope : skipToken, options);
+  return { ...result, data: enabled ? result.currentData : undefined, currentData: enabled ? result.currentData : undefined };
+}
+export function useGetSalesByLmPcodeQuery(scope, options) {
+  const readScope = useSalesReadScope(scope?.lmPcode);
+  const raw = salesApi.useGetSalesByLmPcodeQuery(readScope && scope !== skipToken && scope?.lmPcode ? readScope : skipToken, options);
+  const enabled = readScope && scope !== skipToken && scope?.lmPcode && !options?.skip;
+  const current = enabled ? raw.currentData : undefined;
+  const error = raw.error || current?.streamError;
+  const rows = !enabled || error ? undefined : current?.rows;
+  return { ...raw, data: rows, currentData: rows, error,
+    isError: Boolean(error), isSuccess: raw.isSuccess && !error,
+    status: error ? "rejected" : raw.status };
+}
+
+export function useGetSalesCategoryViewQuery(scope, options) {
+  const raw = useGetSalesByLmPcodeQuery(scope, options);
+  const readScope = useSalesReadScope(scope?.lmPcode);
+  const scopeKey = readScope ? JSON.stringify(readScope) : "";
+  const defaultMonth = useMemo(() => { void scopeKey; return getDefaultSalesMonth(); }, [scopeKey]);
+  const month = scope?.month === undefined ? defaultMonth : scope.month;
+  const rows = useMemo(() => raw.currentData?.map(row => projectSalesCategoryMonth(row, month)), [raw.currentData, month]);
+  return { ...raw, data: rows, currentData: rows, categoryMonth: month };
+}

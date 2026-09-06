@@ -20,7 +20,13 @@ const polygonPoints = [
   { latitude: -28.0, longitude: 29.0 },
 ];
 
-function salesDoc({ id = "SALE_1", latitude = -28.5, longitude = 29.5, geofenceRefs } = {}) {
+function salesDoc({
+  id = "SALE_1",
+  latitude = -28.5,
+  longitude = 29.5,
+  geofenceRefs,
+  metadata,
+} = {}) {
   const data = {
     hasUsableGps: true,
     lmPcode: "ZA5241",
@@ -33,6 +39,7 @@ function salesDoc({ id = "SALE_1", latitude = -28.5, longitude = 29.5, geofenceR
     }],
   };
   if (geofenceRefs !== undefined) data.geofenceRefs = geofenceRefs;
+  if (metadata !== undefined) data.metadata = metadata;
 
   return {
     id,
@@ -155,4 +162,42 @@ test("membership commit emits one geofenceRefs atomic transform and touches no o
   assert.equal(writes.length, 1);
   assert.deepEqual(Object.keys(writes[0].payload), ["geofenceRefs"]);
   assert.ok(writes[0].payload.geofenceRefs);
+});
+
+test("membership commit maintains Sales updated* metadata when the contract is active", async () => {
+  const writes = [];
+  const operationTimestamp = { seconds: 1786200300, nanoseconds: 0 };
+  const metadata = {
+    createdAt: { seconds: 1786200000, nanoseconds: 0 },
+    createdByUid: "SPU_1",
+    createdByUser: "System Power User",
+    updatedAt: { seconds: 1786200100, nanoseconds: 0 },
+    updatedByUid: "SPU_1",
+    updatedByUser: "System Power User",
+  };
+  const db = {
+    batch() {
+      return {
+        update(ref, payload) {
+          writes.push({ ref, payload });
+        },
+        async commit() {},
+      };
+    },
+  };
+
+  const collected = collect(salesDoc({ metadata }));
+  await commitGeoFenceSalesMembershipUpdates({
+    db,
+    updates: collected.updates,
+    operationTimestamp,
+    actorUid: "SYSTEM",
+    actorUser: "onGeoFenceCreated",
+  });
+
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].payload["metadata.updatedAt"], operationTimestamp);
+  assert.equal(writes[0].payload["metadata.updatedByUid"], "SYSTEM");
+  assert.equal(writes[0].payload["metadata.updatedByUser"], "onGeoFenceCreated");
+  assert.equal(metadata.createdByUid, "SPU_1");
 });

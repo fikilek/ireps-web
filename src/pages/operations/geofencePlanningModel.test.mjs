@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { projectSalesCategoryMonth } from "../sales/models/salesCategoryModel.js";
 
 import {
   buildGeofencePlanningDraftStats,
@@ -48,17 +49,28 @@ function salesRow({
   tbRefs = [],
   tbRefsIntegrity = { valid: true, issues: [] },
 } = {}) {
-  return {
+  return projectSalesCategoryMonth({
     id,
     meterNo: `METER_${id}`,
     leakageCategory,
+    monthlyCategories: { "2026-08": { leakageCategory, riskTier: "High", riskScore: 1 } },
     geofenceGpsEligible,
     hasUsableGps,
     erfCandidates,
     tbRefs,
     tbRefsIntegrity,
-  };
+  }, "2026-08");
 }
+
+test("missing, invalid and scalar-only categories never become geofence targets", () => {
+  const valid = salesRow();
+  for (const row of [
+    { ...valid, categoryAvailable: false, leakageCategory: null, riskTier: null, riskScore: null },
+    projectSalesCategoryMonth({ ...valid, monthlyCategories: {} }, "2026-08"),
+    projectSalesCategoryMonth({ ...valid, monthlyCategories: { "2026-08": { leakageCategory: "CAT1", riskTier: "High", riskScore: 1, extra: 1 } } }, "2026-08"),
+    { ...valid, categoryAvailable: undefined },
+  ]) assert.deepEqual(buildSalesPlanningRecords({ salesRows: [row], lmPcode: LM, wardPcode: WARD }), []);
+});
 
 function tbRef(status) {
   return {

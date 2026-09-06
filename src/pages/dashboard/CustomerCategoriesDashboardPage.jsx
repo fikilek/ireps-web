@@ -1,14 +1,15 @@
+import { resolveSalesMonthSelection, salesCategorySearch } from "../sales/models/salesMonthModel.js";
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetAstsByLmPcodeQuery } from "../../redux/astsApi";
 import { useGetRegistryMetersByLmQuery } from "../../redux/registryMetersApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import {
   formatCompactCurrencyFromCents,
   formatNumber,
@@ -1166,7 +1167,7 @@ function RecoveryJourney({ model }) {
 
         <div className="customer-category-recovery__note">
           <strong>Actual snapshot:</strong>
-          <span> June uses the current authoritative Sales categories and June Sales revenue. July–September remain empty until authoritative monthly category snapshots are available.</span>
+          <span> Only the selected category month is shown as available. Other months are not inferred from purchases or neighbouring categories.</span>
         </div>
       </div>
     </article>
@@ -1191,13 +1192,19 @@ export default function CustomerCategoriesDashboardPage() {
   const [openKpiInfo, setOpenKpiInfo] = useState(null);
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+  const location = useLocation();
+  const readScope = useSalesReadScope(activeLmPcode);
+  const scopeKey = JSON.stringify(readScope);
+  const monthSelection = useMemo(() => { void scopeKey; return resolveSalesMonthSelection(location.search); }, [location.search, scopeKey]);
+  const categoryMonth = monthSelection.month;
+  const monthPicker = <label>Category month <input type="month" value={categoryMonth || ""} onChange={event => navigate(`${location.pathname}?month=${encodeURIComponent(event.target.value)}`)} /></label>;
 
   const {
     data: salesRows = [],
     isLoading,
     isFetching,
     error,
-  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
+  } = useGetSalesCategoryViewQuery(activeLmPcode ? { lmPcode: activeLmPcode, month: categoryMonth } : skipToken);
 
   const {
     data: registryMeters = [],
@@ -1219,8 +1226,8 @@ export default function CustomerCategoriesDashboardPage() {
   } = useGetGeoFencesByLmQuery(activeLmPcode || skipToken);
 
   const model = useMemo(
-    () => buildCustomerCategoriesDashboardModel(salesRows),
-    [salesRows],
+    () => buildCustomerCategoriesDashboardModel(salesRows, categoryMonth),
+    [salesRows, categoryMonth],
   );
 
   const invisibleMeters = useMemo(
@@ -1247,6 +1254,8 @@ export default function CustomerCategoriesDashboardPage() {
     );
   }
 
+  if (!monthSelection.valid) return <div role="alert"><h2>Invalid category month</h2>{monthPicker}<p>Select one valid YYYY-MM month.</p></div>;
+
   if (isLoading) {
     return <div className="customer-categories-dashboard-page"><LoadingState /></div>;
   }
@@ -1270,6 +1279,8 @@ export default function CustomerCategoriesDashboardPage() {
         <div>
           <p className="customer-categories-eyebrow">Dashboard · Customer Categories</p>
           <h2>Customer Categories Dashboard</h2>
+          {monthPicker}
+          <p>{model.categoryAvailableCount} of {salesRows.length} records have a valid {categoryMonth} category; {model.categoryUnavailableCount} unavailable.</p>
           <p>
             Live view of all non-Normal Sales meters, category composition, baseline purchases and geographic readiness for {activeWorkbaseName}.
           </p>
@@ -1333,7 +1344,7 @@ export default function CustomerCategoriesDashboardPage() {
       {model.fieldTarget === 0 ? (
         <section className="customer-category-state-card">
           <div>
-            <h2>No non-Normal Sales categories found</h2>
+            <h2>{model.categoryAvailableCount ? "No non-Normal Sales categories found" : "Selected-month categories unavailable"}</h2>
             <p>The active Sales population contains no Field Target rows for {activeLmPcode}.</p>
           </div>
         </section>
@@ -1343,7 +1354,7 @@ export default function CustomerCategoriesDashboardPage() {
             <CategoryComposition
               model={model}
               onSelectCategory={(category) =>
-                navigate(`/dashboard/customer-categories/${category.key}`)
+                navigate(`/dashboard/customer-categories/${category.key}${salesCategorySearch(categoryMonth)}`)
               }
             />
             <PurchaseBaseline model={model} />
@@ -1373,7 +1384,7 @@ export default function CustomerCategoriesDashboardPage() {
       ) : null}
 
       <footer className="customer-categories-footer">
-        <span>Authoritative source: live Sales · Category: leakageCategory · Normal excluded using Project Population parity.</span>
+        <span>Categories use the selected month’s Sales classification. Normal and unavailable categories are excluded from Field Target.</span>
         <span>{model.reconcilesToFieldTarget ? "✓ Category reconciliation passed" : "⚠ Category reconciliation review required"}</span>
       </footer>
     </div>

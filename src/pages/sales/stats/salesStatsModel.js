@@ -1,3 +1,5 @@
+import { getOperationalSalesCategory } from "../models/salesTargetedBatchReadModel.js";
+
 export const ALL_FILTER = "ALL";
 export const UNASSIGNED_WARD = "Ward Not Assigned";
 export const UNASSIGNED_GEOFENCE_ID = "__GEOFENCE_NOT_ASSIGNED__";
@@ -13,7 +15,6 @@ export const SALES_CATEGORY_ORDER = Object.freeze([
   "CAT5 - Stopped Purchasing",
   "CAT6 - Low kWh per Rand",
   "CAT8 - Energy Without Purchase",
-  UNCATEGORISED,
 ]);
 
 export function cleanText(value) {
@@ -99,8 +100,8 @@ export function getBatchSalesPeriod(batch = {}) {
   return from || to || "NAv";
 }
 
-export function getSalesCategory(sales = {}) {
-  return firstText(sales?.leakageCategory) || UNCATEGORISED;
+export function getSalesCategory(sales = {}, selectedMonth = sales?.categoryMonth) {
+  return getOperationalSalesCategory(sales, selectedMonth).leakageCategory;
 }
 
 export function getWard(sales = {}, row = {}, batch = {}) {
@@ -377,7 +378,9 @@ export function buildTargetedDashboardRows({
       tbId: cleanText(row?.tbId),
       salesId: cleanText(row?.source?.salesId),
       ward: firstText(analytics?.ward, row?.scope?.wardLabel) || UNASSIGNED_WARD,
-      category: firstText(analytics?.category) || UNCATEGORISED,
+      category: analytics?.categoryState?.categoryAvailable === true ? analytics.categoryState.leakageCategory : null,
+      categoryState: analytics?.categoryState ?? { status: "read-error", categoryAvailable: false, leakageCategory: null, riskTier: null, riskScore: null },
+      categoryAvailable: analytics?.categoryState?.categoryAvailable === true,
       geofenceRefs: geofenceRefs.length
         ? geofenceRefs
         : [
@@ -411,11 +414,14 @@ export function buildTargetedDashboardRows({
 export function buildSalesPopulationRows({
   salesRows = [],
   geofenceNameById = {},
+  selectedMonth,
 }) {
   return salesRows.map((sales) => ({
     id: cleanText(sales?.id),
     sales,
-    category: getSalesCategory(sales),
+    category: getSalesCategory(sales, selectedMonth ?? sales?.categoryMonth),
+    categoryState: getOperationalSalesCategory(sales, selectedMonth ?? sales?.categoryMonth),
+    categoryAvailable: getOperationalSalesCategory(sales, selectedMonth ?? sales?.categoryMonth).categoryAvailable,
     ward: getWard(sales),
     geofenceRefs: getGeofenceRefs(sales, geofenceNameById),
     salesPeriod: getSalesPeriod(sales),
@@ -427,7 +433,7 @@ export function sortCategories(values = []) {
     SALES_CATEGORY_ORDER.map((category, index) => [category, index]),
   );
 
-  return Array.from(new Set(values)).sort((left, right) => {
+  return Array.from(new Set(values.filter(value => typeof value === "string" && value))).sort((left, right) => {
     const leftIndex = order.has(left) ? order.get(left) : 999;
     const rightIndex = order.has(right) ? order.get(right) : 999;
 
@@ -445,7 +451,7 @@ export function countBy(values = []) {
 }
 
 export function buildCategoryDistribution(rows = []) {
-  const counts = countBy(rows.map((row) => row.category));
+  const counts = countBy(rows.filter(row => row.categoryAvailable === true).map((row) => row.category));
   const total = rows.length;
 
   return sortCategories(Object.keys(counts)).map((category) => ({
@@ -468,14 +474,15 @@ export function buildCategoryMatrix(rows = [], groupAccessor) {
           id: group.id,
           name: group.name,
           total: 0,
+          categoryUnavailable: 0,
           categories: {},
         });
       }
 
       const target = groupMap.get(group.id);
       target.total += 1;
-      target.categories[row.category] =
-        Number(target.categories[row.category] || 0) + 1;
+      if (row.categoryAvailable === true) target.categories[row.category] = Number(target.categories[row.category] || 0) + 1;
+      else target.categoryUnavailable += 1;
     });
   });
 

@@ -65,20 +65,6 @@ function sumMonth(rows, monthKey) {
   );
 }
 
-function getCurrentCategorySnapshotMonthKey(selectedRows = [], latestMonthKey = "") {
-  if (!latestMonthKey || !selectedRows.length) return "";
-
-  const periodToValues = new Set(
-    selectedRows
-      .map((row) => cleanText(row?.salesPeriodTo))
-      .filter((monthKey) => /^\d{4}-\d{2}$/.test(monthKey)),
-  );
-
-  if (periodToValues.size !== 1) return "";
-  const [snapshotMonthKey] = Array.from(periodToValues);
-  return snapshotMonthKey === latestMonthKey ? snapshotMonthKey : "";
-}
-
 function getDistinctGeofenceRefs(row = {}) {
   const seen = new Set();
 
@@ -208,22 +194,23 @@ export function buildCustomerCategoryDashboardModel(
   salesRows = [],
   trnRows = [],
   routeCategoryKey = "",
+  selectedMonth,
 ) {
   const normalizedRouteKey = normalizeCustomerCategoryRouteKey(routeCategoryKey);
   const rows = Array.isArray(salesRows) ? salesRows : [];
 
   const fieldTargetRows = rows.filter((row) => {
-    const category = getOperationalSalesCategory(row);
-    return !isNormalCustomerCategory(category);
+    const category = getOperationalSalesCategory(row, selectedMonth);
+    return category.categoryAvailable && !isNormalCustomerCategory(category.leakageCategory);
   });
 
   const selectedRows = fieldTargetRows.filter((row) => {
-    const category = getOperationalSalesCategory(row);
+    const category = getOperationalSalesCategory(row, selectedMonth).leakageCategory;
     return toCustomerCategoryKey(category) === normalizedRouteKey;
   });
 
   const firstCategoryValue = selectedRows.length
-    ? getOperationalSalesCategory(selectedRows[0])
+    ? getOperationalSalesCategory(selectedRows[0], selectedMonth).leakageCategory
     : safeDecodeURIComponent(routeCategoryKey);
   const categoryLabel = cleanText(firstCategoryValue) || "Customer Category";
   const shortCode = getCustomerCategoryShortCode(categoryLabel);
@@ -264,10 +251,7 @@ export function buildCustomerCategoryDashboardModel(
   const purchaseMonthKeys = monthKeys.slice(-CUSTOMER_CATEGORY_ROLLING_MONTH_COUNT);
   const latestMonthKey = purchaseMonthKeys[purchaseMonthKeys.length - 1] || "";
   const previousMonthKey = purchaseMonthKeys[purchaseMonthKeys.length - 2] || "";
-  const currentCategorySnapshotMonthKey = getCurrentCategorySnapshotMonthKey(
-    selectedRows,
-    latestMonthKey,
-  );
+  const currentCategorySnapshotMonthKey = selectedMonth;
   const purchaseMonths = purchaseMonthKeys.map((monthKey) => {
     const categorySalesC = sumMonth(selectedRows, monthKey);
     return {
@@ -299,6 +283,9 @@ export function buildCustomerCategoryDashboardModel(
   const gpsWithout = Math.max(0, categoryTotal - gpsReady);
 
   return {
+    selectedMonth,
+    categoryAvailableCount: rows.filter(row => getOperationalSalesCategory(row, selectedMonth).categoryAvailable).length,
+    categoryUnavailableCount: rows.filter(row => !getOperationalSalesCategory(row, selectedMonth).categoryAvailable).length,
     found: categoryTotal > 0,
     categoryKey: normalizedRouteKey,
     categoryLabel,

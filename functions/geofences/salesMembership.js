@@ -7,6 +7,9 @@ import { FieldValue } from "firebase-admin/firestore";
 import {
   doesEntityBelongToGeoFence,
 } from "./helpers.js";
+import {
+  buildSalesAllMetersOperationalMetadataPatch,
+} from "../salesAllMeters/helpers.js";
 
 
 function chunkArray(items = [], size = 200) {
@@ -167,6 +170,7 @@ export const collectGeoFenceSalesUpdates = ({
     updates.push({
       ref: salesDoc.ref,
       geoFenceRef: canonicalRef,
+      existing: sales,
     });
   }
 
@@ -183,6 +187,9 @@ export const commitGeoFenceSalesMembershipUpdates = async ({
   updates = [],
   conflicts = [],
   batchSize = 200,
+  operationTimestamp,
+  actorUid,
+  actorUser,
 }) => {
   if (Array.isArray(conflicts) && conflicts.length > 0) {
     const error = new Error(
@@ -205,8 +212,15 @@ export const commitGeoFenceSalesMembershipUpdates = async ({
     const batch = db.batch();
 
     for (const update of chunk) {
+      const salesMetadataPatch = buildSalesAllMetersOperationalMetadataPatch({
+        existing: update.existing,
+        operationTimestamp,
+        actorUid,
+        actorUser,
+      });
       batch.update(update.ref, {
         geofenceRefs: FieldValue.arrayUnion(update.geoFenceRef),
+        ...salesMetadataPatch,
       });
     }
 

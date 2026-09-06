@@ -591,6 +591,35 @@ test("authoritative TB-row source address is stored when mobile context has no s
   );
 });
 
+test("premise-start Sales write maintains updated* metadata when Sales metadata is active", async () => {
+  const fixture = buildLinkedFixture();
+  fixture.documents[`sales-all-meters/${fixture.salesDocId}`].metadata = {
+    createdAt: { seconds: 1780272000, nanoseconds: 0 },
+    createdByUid: "SPU_1",
+    createdByUser: "System Power User",
+    updatedAt: { seconds: 1782864000, nanoseconds: 0 },
+    updatedByUid: "SPU_1",
+    updatedByUser: "System Power User",
+  };
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+
+  await createOrLinkTargetedBatchPremise({
+    db,
+    premiseRef,
+    premisePayload: buildPremisePayload(fixture),
+    actorUid: "USER_1",
+    actorName: "Field Worker One",
+  });
+
+  const sales = db.read(`sales-all-meters/${fixture.salesDocId}`);
+  assert.equal(sales.metadata.createdByUid, "SPU_1");
+  assert.equal(sales.metadata.createdByUser, "System Power User");
+  assert.ok(sales.metadata.updatedAt);
+  assert.equal(sales.metadata.updatedByUid, "USER_1");
+  assert.equal(sales.metadata.updatedByUser, "Field Worker One");
+});
+
 test("authoritative TB-row source address overrides a conflicting mobile source address", async () => {
   const fixture = buildLinkedFixture();
   const db = new FakeFirestore(fixture.documents);

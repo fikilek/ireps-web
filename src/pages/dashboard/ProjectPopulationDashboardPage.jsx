@@ -1,16 +1,15 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesCategoryViewQuery, useGetSalesGovernanceQuery, useSalesReadScope } from "../../redux/salesApi";
 import {
   formatNumber,
   getActiveLmPcode,
   getActiveWorkbaseName,
 } from "../sales/salesUtils";
-import { hasUsableSalesGps } from "../sales/models/salesGpsModel";
-import { getOperationalSalesCategory } from "../sales/models/salesTargetedBatchReadModel";
+import { buildSalesPopulationReadModel } from "../sales/models/salesPopulationModel";
 
 import "./ProjectPopulationDashboardPage.css";
 
@@ -51,84 +50,6 @@ function formatDateTime(value) {
   }).format(date);
 }
 
-function isNormalSalesCategory(value) {
-  const normalized = String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[_]+/g, " ");
-
-  return (
-    normalized === "NORMAL" ||
-    normalized.startsWith("NORMAL ") ||
-    normalized.startsWith("NORMAL-") ||
-    normalized.includes("NO LEAKAGE FLAG")
-  );
-}
-
-function getLatestSalesUpdate(rows = []) {
-  let latestMs = 0;
-
-  rows.forEach((row) => {
-    const candidates = [
-      Number(row?.updatedAtMs || 0),
-      Number(row?.createdAtMs || 0),
-    ];
-
-    candidates.forEach((candidate) => {
-      if (Number.isFinite(candidate) && candidate > latestMs) {
-        latestMs = candidate;
-      }
-    });
-  });
-
-  return latestMs > 0 ? new Date(latestMs) : null;
-}
-
-function buildPopulationReadModel(rows = []) {
-  let withGps = 0;
-  let normalPopulation = 0;
-
-  rows.forEach((row) => {
-    if (hasUsableSalesGps(row)) {
-      withGps += 1;
-    }
-
-    const category = getOperationalSalesCategory(row);
-    if (isNormalSalesCategory(category)) {
-      normalPopulation += 1;
-    }
-  });
-
-  const total = rows.length;
-  const withoutGps = total - withGps;
-  const fieldTarget = Math.max(0, total - normalPopulation);
-  const gpsCoverage = total > 0 ? (withGps / total) * 100 : 0;
-  const withoutGpsShare = total > 0 ? (withoutGps / total) * 100 : 0;
-  const normalShare = total > 0 ? (normalPopulation / total) * 100 : 0;
-  const fieldTargetShare = total > 0 ? (fieldTarget / total) * 100 : 0;
-
-  const scopeAxisMax = Math.max(1, total);
-  const scopeTickOne = Math.round(total * 0.25);
-  const scopeTickTwo = Math.round(total * 0.5);
-  const scopeTickThree = Math.round(total * 0.75);
-
-  return {
-    total,
-    withGps,
-    withoutGps,
-    normalPopulation,
-    fieldTarget,
-    gpsCoverage,
-    withoutGpsShare,
-    normalShare,
-    fieldTargetShare,
-    scopeAxisMax,
-    scopeTickOne,
-    scopeTickTwo,
-    scopeTickThree,
-    latestUpdate: getLatestSalesUpdate(rows),
-  };
-}
 function Icon({ name }) {
   const common = {
     viewBox: "0 0 24 24",
@@ -265,8 +186,12 @@ function LoadingState() {
 }
 
 export default function ProjectPopulationDashboardPage() {
+  const [monthSelection, setMonthSelection] = useState({});
   const { activeWorkbase } = useAuth();
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
+  const readScope = useSalesReadScope(activeLmPcode);
+  const scopeKey = JSON.stringify(readScope);
+  const selectedMonth = monthSelection.scope === scopeKey ? monthSelection.month : undefined;
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
 
   const {
@@ -274,12 +199,14 @@ export default function ProjectPopulationDashboardPage() {
     isLoading,
     isFetching,
     error,
-  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
+    categoryMonth,
+  } = useGetSalesCategoryViewQuery(activeLmPcode ? { lmPcode: activeLmPcode, month: selectedMonth } : skipToken);
 
-  const population = useMemo(
-    () => buildPopulationReadModel(salesRows),
-    [salesRows],
-  );
+  const { currentData: governance, error: governanceError, isLoading: governanceLoading, isFetching: governanceFetching } = useGetSalesGovernanceQuery(activeLmPcode ? { lmPcode: activeLmPcode } : skipToken);
+  const population = useMemo(() => buildSalesPopulationReadModel({
+    snapshots: governance?.snapshots, month: categoryMonth, lmPcode: activeLmPcode, salesRows,
+  }), [governance, categoryMonth, activeLmPcode, salesRows]);
+  const monthPicker = <label>Population month <input type="month" value={categoryMonth || ""} onChange={event => setMonthSelection({ scope: scopeKey, month: event.target.value })} /></label>;
 
   if (!activeLmPcode) {
     return (
@@ -294,7 +221,7 @@ export default function ProjectPopulationDashboardPage() {
     );
   }
 
-  if (isLoading) {
+  if (isLoading || governanceLoading) {
     return (
       <div className="population-dashboard-page population-dashboard-page--executive">
         <LoadingState />
@@ -302,13 +229,15 @@ export default function ProjectPopulationDashboardPage() {
     );
   }
 
-  if (error) {
+  if (error || governanceError || population.status !== "ready") {
     return (
       <div className="population-dashboard-page population-dashboard-page--executive">
         <section className="population-state-card population-state-card--error">
           <div>
-            <h2>Could not load Project Population</h2>
-            <p>The live Sales stream could not be loaded for {activeLmPcode}.</p>
+            <h2>Population {population.status === "invalid" ? "evidence invalid" : "unavailable"}</h2>
+            {monthPicker}
+            <p>{error ? "Sales attributes could not be read." : governanceError ? "Verified population evidence could not be read." : population.error}</p>
+            <p>Membership totals are withheld until the selected snapshot is available. This page does not complete Stage 11 acceptance.</p>
           </div>
         </section>
       </div>
@@ -334,7 +263,7 @@ export default function ProjectPopulationDashboardPage() {
         <div className="population-exec-header__controls" aria-label="Population snapshot scope">
           <div className="population-exec-date-control">
             <Icon name="calendar" />
-            <span>{formatSnapshotDate()}</span>
+            {monthPicker}
           </div>
           <div className="population-exec-filter-control" title="Full active LM Sales population">
             <Icon name="filter" />
@@ -342,6 +271,15 @@ export default function ProjectPopulationDashboardPage() {
           </div>
         </div>
       </header>
+
+      <section className="population-state-card" aria-label="Population evidence and Sales coverage">
+        <div><h2>Supplier population — {categoryMonth}</h2>
+          <p>{population.total} verified members. Sales documents: {population.availableDocuments} ({formatPercent(population.documentCoverage)} coverage). Missing documents: {population.missingDocuments}.</p>
+          <p>GPS unknown: {population.gpsUnknown}. Exact-month category unavailable: {population.categoryUnavailable}. Unknown attributes are excluded from readiness groups.</p>
+          <p>Monthly movement analysis and full Stage 11 acceptance remain pending.</p>
+          {governanceFetching && <p>Refreshing population evidence…</p>}
+        </div>
+      </section>
 
       {population.total === 0 ? (
         <section className="population-state-card">
@@ -393,7 +331,7 @@ export default function ProjectPopulationDashboardPage() {
               <div className="population-exec-donut-wrap">
                 <div
                   className="population-exec-donut"
-                  style={{ "--gps-share": `${population.gpsCoverage * 3.6}deg` }}
+                  style={{ background: `conic-gradient(#0f9f95 0deg ${population.gpsCoverage * 3.6}deg, #f97316 ${population.gpsCoverage * 3.6}deg ${(population.gpsCoverage + population.withoutGpsShare) * 3.6}deg, #cbd5e1 ${(population.gpsCoverage + population.withoutGpsShare) * 3.6}deg 360deg)` }}
                   role="img"
                   aria-label={`${formatPercent(population.gpsCoverage)} with GPS and ${formatPercent(population.withoutGpsShare)} without GPS`}
                 >
@@ -520,7 +458,7 @@ export default function ProjectPopulationDashboardPage() {
               </div>
 
               <p className="population-exec-scope-note">
-                Both bars use the same end-to-end Sales population scale. Field Target is all Sales meters excluding Normal.
+                Both bars use the same end-to-end Sales population scale. Field Target includes only members with a valid non-Normal category for this month. Unavailable attributes remain outside the coloured groups.
               </p>
             </article>
             <article className="population-exec-panel population-exec-panel--notes">
@@ -537,7 +475,7 @@ export default function ProjectPopulationDashboardPage() {
               </ul>
 
               <div className="population-exec-notes-target">
-                Field Target = Total Population - Normal ({formatNumber(population.total)} - {formatNumber(population.normalPopulation)} = {formatNumber(population.fieldTarget)}).
+                Field Target = available categories - Normal ({formatNumber(population.categoryAvailable)} - {formatNumber(population.normalPopulation)} = {formatNumber(population.fieldTarget)}).
               </div>
 
               <ClipboardIllustration />

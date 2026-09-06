@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
 import NonGpsExceptions from "./components/NonGpsExceptions";
@@ -69,12 +69,19 @@ export default function NonGpsBatchPlanningPage() {
   const navigate = useNavigate();
   const { activeWorkbase, role } = useAuth();
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
+  const readScope = useSalesReadScope(activeLmPcode);
+  const scopeKey = JSON.stringify(readScope);
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
   const [viewMode, setViewMode] = useState(VIEW_MODES.PLANNING);
   const [selectedTownKey, setSelectedTownKey] = useState("");
   const [selectedStreetKey, setSelectedStreetKey] = useState("");
   const [searchText, setSearchText] = useState("");
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selection, setSelection] = useState({});
+  const selectedIds = useMemo(() => selection.scope === scopeKey ? selection.ids : new Set(), [selection, scopeKey]);
+  const setSelectedIds = next => setSelection(previous => ({
+    scope: scopeKey,
+    ids: typeof next === "function" ? next(previous.scope === scopeKey ? previous.ids : new Set()) : next,
+  }));
   const [selectionError, setSelectionError] = useState("");
 
   const {
@@ -83,7 +90,7 @@ export default function NonGpsBatchPlanningPage() {
     isFetching,
     error,
     refetch,
-  } = useGetSalesByLmPcodeQuery(activeLmPcode || skipToken);
+  } = useGetSalesByLmPcodeQuery(activeLmPcode ? { lmPcode: activeLmPcode } : skipToken);
 
   const planningModel = useMemo(
     () => buildNonGpsBatchPlanningModel(salesRows),

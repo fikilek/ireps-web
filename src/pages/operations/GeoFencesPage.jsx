@@ -10,7 +10,7 @@ import { useWarehouse } from "@/context/WarehouseContext";
 
 import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
-import { useGetSalesByLmPcodeQuery } from "../../redux/salesApi";
+import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import { useGetErfsByWardQuery } from "../../redux/wardErfsApi";
 import {
   GeofencePlanningLayerControls,
@@ -1570,8 +1570,12 @@ export default function GeoFencesPage() {
     { skip: !scopeReady },
   );
 
-  const { data: planningSalesRows = [] } = useGetSalesByLmPcodeQuery(
-    lmPcode,
+  const salesReadScope = useSalesReadScope(lmPcode);
+  const salesScopeKey = JSON.stringify(salesReadScope);
+  const [salesMonthSelection, setSalesMonthSelection] = useState({});
+  const selectedSalesMonth = salesMonthSelection.scope === salesScopeKey ? salesMonthSelection.month : undefined;
+  const { data: planningSalesRows = [], categoryMonth: salesCategoryMonth, error: planningSalesError, isLoading: planningSalesLoading } = useGetSalesCategoryViewQuery(
+    { lmPcode, month: selectedSalesMonth },
     { skip: !lmPcode },
   );
 
@@ -2022,6 +2026,10 @@ export default function GeoFencesPage() {
           </div>
         ) : null}
 
+        <div role="status">
+          <label>Sales category month <input type="month" value={salesCategoryMonth || ""} onChange={event => setSalesMonthSelection({ scope: salesScopeKey, month: event.target.value })} /></label>
+          {planningSalesError ? " Sales planning unavailable: Sales read failed." : planningSalesLoading ? " Loading Sales planning…" : ` ${planningSalesRows.filter(row => row.categoryAvailable).length} of ${planningSalesRows.length} Sales records have this month's category. Unavailable categories are excluded from targeting.`}
+        </div>
         <GeofencePlanningLayerControls
           model={planningModel}
           visibility={planningLayerVisibility}

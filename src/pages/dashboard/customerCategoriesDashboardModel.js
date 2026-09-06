@@ -16,10 +16,6 @@ export const CUSTOMER_CATEGORIES_RECOVERY_MONTHS = Object.freeze([
   Object.freeze({ key: "2026-09", label: "September" }),
 ]);
 
-// The current authoritative Sales category values describe the June snapshot.
-// Future months must remain unavailable until an authoritative category snapshot
-// exists for that month; purchase values alone are not enough to infer migration.
-export const CUSTOMER_CATEGORIES_CURRENT_SNAPSHOT_MONTH_KEY = "2026-06";
 
 function cleanText(value) {
   return String(value ?? "").trim();
@@ -154,6 +150,7 @@ export function countInvisibleOperationalMeters(
 
 export function buildCustomerCategoriesDashboardModel(
   rows = [],
+  selectedMonth,
   baselineMonthKeys = CUSTOMER_CATEGORIES_BASELINE_MONTH_KEYS,
 ) {
   const fieldTargetRows = [];
@@ -163,16 +160,20 @@ export function buildCustomerCategoriesDashboardModel(
   let gpsReady = 0;
   let baselinePrimarySalesC = 0;
   let normalPopulation = 0;
+  let categoryAvailableCount = 0;
   let recoveryMonthRevenueC = 0;
 
   const salesRows = Array.isArray(rows) ? rows : [];
 
   for (const row of salesRows) {
-    const category = getOperationalSalesCategory(row);
+    const categoryState = getOperationalSalesCategory(row, selectedMonth);
+    if (!categoryState.categoryAvailable) continue;
+    categoryAvailableCount++;
+    const category = categoryState.leakageCategory;
 
     recoveryMonthRevenueC += getSalesMonthC(
       row,
-      CUSTOMER_CATEGORIES_CURRENT_SNAPSHOT_MONTH_KEY,
+      selectedMonth,
     );
 
     if (isNormalCustomerCategory(category)) {
@@ -262,7 +263,7 @@ export function buildCustomerCategoriesDashboardModel(
   );
 
   const recoveryMonths = CUSTOMER_CATEGORIES_RECOVERY_MONTHS.map((month) => {
-    const isAvailable = month.key === CUSTOMER_CATEGORIES_CURRENT_SNAPSHOT_MONTH_KEY;
+    const isAvailable = month.key === selectedMonth && categoryAvailableCount > 0;
 
     return {
       ...month,
@@ -288,6 +289,9 @@ export function buildCustomerCategoriesDashboardModel(
   const topWards = buildRankedRows(wardCounts);
 
   return {
+    selectedMonth,
+    categoryAvailableCount,
+    categoryUnavailableCount: salesRows.length - categoryAvailableCount,
     fieldTarget,
     categoryCount: categories.length,
     categories,
