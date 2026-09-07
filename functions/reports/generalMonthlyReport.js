@@ -542,8 +542,10 @@ function getSalesCustomerName(sales = {}) {
   );
 }
 
-function getSalesCategory(sales = {}) {
-  return nullableText(sales?.leakageCategory || sales?.Leakage_Category);
+function getSalesCategory(sales = {}, reportMonth) {
+  const entry = sales?.monthlyCategories?.[reportMonth];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).sort().join(",") !== "leakageCategory,riskScore,riskTier" || typeof entry.leakageCategory !== "string" || !entry.leakageCategory.trim() || typeof entry.riskTier !== "string" || !entry.riskTier.trim() || !Number.isInteger(entry.riskScore) || entry.riskScore < 0) return null;
+  return entry.leakageCategory.trim();
 }
 
 function isTargetSalesCategory(value) {
@@ -916,6 +918,7 @@ export function buildCanonicalGmrMeterRow({
   lifecycleTrns = [],
   fieldStatsTeam = "Unassigned",
   monthKeys = null,
+  reportMonth = null,
 }) {
   const discovery = discoveryEntry?.data || {};
   const premise = premiseEntry?.data || {};
@@ -940,7 +943,7 @@ export function buildCanonicalGmrMeterRow({
     : null;
   const monthlyPurchases = buildMonthlyPurchases(sourceSales, effectiveMonthKeys);
   const salesHistoryAvailable = hasAnySalesHistory(monthlyPurchases);
-  const salesCategory = getSalesCategory(sourceSales);
+  const salesCategory = getSalesCategory(sourceSales, reportMonth);
   const targetCategory = targetCategoryFlag(salesCategory);
   const investigationDate = getDiscoveryDate(discovery);
   const anomaly = nullableText(discovery?.ast?.anomalies?.anomaly);
@@ -1217,6 +1220,7 @@ export async function buildGeneralMonthlyReportDataset({
       lifecycleTrns,
       fieldStatsTeam,
       monthKeys,
+      reportMonth: reportWindow.reportMonth,
     });
     rows.push(row);
 
