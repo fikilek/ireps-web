@@ -86,6 +86,8 @@ function makeRow(index) {
     meterExists: "Yes",
     meterNumberVerified: invisible ? "Incorrect" : "Correct",
     sameDifferent: invisible ? "Different" : "Same",
+    meterPlacement: index === 0 ? "Kiosk" : index === 1 ? null : "Pole Bottom",
+    remainingCredit: index === 0 ? "12.5" : index === 1 ? "0" : null,
     meterAccessible: "Yes",
     meterKind: "prepaid",
     meterMode: "Prepaid",
@@ -214,14 +216,33 @@ test("Field Data keeps its approved columns while using fieldRows instead of ful
   const zamo = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
 
   assert.deepEqual(zamo[0], [
-    "Capture Date", "Field Worker Name", "Batch ID", "Street No", "Street Name",
+    "Capture Date", "Field Worker Name", "Sales Category", "Batch ID", "Street No", "Street Name",
     "Street Type", "SuburbName", "GPS Coordinates", "Ward", "Property Type",
-    "Property Name", "Unit No", "Meter Mode", "Meter Phase",
-    "Original / Project Meter Number", "Field-Found Meter Number", "Same/Different",
+    "Property Name", "Unit No", "Meter Mode", "Meter Phase", "Meter Placement",
+    "Original / Project Meter Number", "Field-Found Meter Number", "Same/Different", "Remaining Credit",
     "Primary Finding", "Finding Explanation", "Normalisation", "Seal No", "Comment",
     "Photo 1", "Photo 2", "Photo 3", "Photo 4", "Photo 5", "Photo 6",
   ]);
   assert.equal(zamo.length, 3);
+  assert.equal(zamo[0].length, 31);
+  assert.equal(zamo[0].indexOf("Sales Category") + 1, zamo[0].indexOf("Batch ID"));
+  assert.equal(zamo[0].indexOf("Meter Placement") + 1, zamo[0].indexOf("Original / Project Meter Number"));
+  assert.equal(zamo[0].indexOf("Same/Different") + 1, zamo[0].indexOf("Remaining Credit"));
+  assert.equal(zamo[1][zamo[0].indexOf("Sales Category")], "Normal - No Leakage Flag");
+  assert.equal(zamo[1][zamo[0].indexOf("Meter Placement")], "Kiosk");
+  assert.equal(zamo[1][zamo[0].indexOf("Remaining Credit")], "12.5");
+  assert.equal(zamo[2][zamo[0].indexOf("Meter Placement")], "NAv");
+  assert.equal(zamo[2][zamo[0].indexOf("Remaining Credit")], "0");
+
+  const fieldDataSheet = workbook.Sheets["Field Data"];
+  assert.equal(fieldDataSheet["!autofilter"].ref, "A1:AE3");
+  const remainingCreditCol = zamo[0].indexOf("Remaining Credit");
+  const credit12Cell = fieldDataSheet[XLSX.utils.encode_cell({ r: 1, c: remainingCreditCol })];
+  const creditZeroCell = fieldDataSheet[XLSX.utils.encode_cell({ r: 2, c: remainingCreditCol })];
+  assert.equal(credit12Cell.t, "s");
+  assert.equal(credit12Cell.v, "12.5");
+  assert.equal(creditZeroCell.t, "s");
+  assert.equal(creditZeroCell.v, "0");
 
   const master = workbook.Sheets["GMR Master Meter"];
   const range = XLSX.utils.decode_range(master["!ref"]);
@@ -236,6 +257,8 @@ test("Field Data preserves AD HOC, NAv and photo hyperlink behaviour", () => {
   dataset.fieldRows[2].streetType = null;
   dataset.fieldRows[2].suburbName = null;
   dataset.fieldRows[2].sameDifferent = null;
+  dataset.fieldRows[2].meterPlacement = null;
+  dataset.fieldRows[2].remainingCredit = null;
   dataset.fieldRows[2].sealNo = null;
   dataset.fieldRows[2].fieldComment = null;
   const { workbook } = workbookFrom(dataset, "gmr_values.xlsx");
@@ -244,6 +267,8 @@ test("Field Data preserves AD HOC, NAv and photo hyperlink behaviour", () => {
   assert.equal(zamo[3][zamo[0].indexOf("Batch ID")], "AD HOC");
   assert.equal(zamo[3][zamo[0].indexOf("Street No")], "NAv");
   assert.equal(zamo[3][zamo[0].indexOf("Same/Different")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Meter Placement")], "NAv");
+  assert.equal(zamo[3][zamo[0].indexOf("Remaining Credit")], "NAv");
   const photo1Col = zamo[0].indexOf("Photo 1");
   const photoCell = workbook.Sheets["Field Data"][XLSX.utils.encode_cell({ r: 1, c: photo1Col })];
   assert.equal(photoCell.l.Target, "https://example.test/photo-1.jpg");
@@ -282,6 +307,8 @@ test("zero selected-month activity still generates valid Field Data and Field St
 
   const fieldData = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
   assert.equal(fieldData.length, 1);
+  assert.equal(fieldData[0].length, 31);
+  assert.equal(workbook.Sheets["Field Data"]["!autofilter"].ref, "A1:AE1");
   const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
   assert.equal(stats[0][0], "AUGUST 2026 - METER AUDIT");
   const total = stats.find((row) => row[1] === "TOTAL: METER DISCOVERY RECORDS");

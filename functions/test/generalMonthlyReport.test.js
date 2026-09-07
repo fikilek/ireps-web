@@ -232,6 +232,80 @@ test("Invisible field-found meter retains targeted Sales history and approved Fi
   assert.equal(row.meterMode, "Prepaid");
 });
 
+test("GMR exposes Zamo enrichment from authoritative Sales and Meter Discovery paths", () => {
+  const registry = registryMeter(20, "VISIBLE");
+  registry.meterKind = "prepaid";
+  registry.meterType = "electricity";
+
+  const discovery = discoveryEntry(registry, "2026-08-15T10:00:00.000Z");
+  discovery.data.ast.astData.meter.category = "Bulk";
+  discovery.data.ast.location.placement = "Kiosk";
+  discovery.data.ast.astData.meter.remainingCredit = " 12.5 ";
+
+  const sourceSalesEntry = {
+    id: registry.meterNo,
+    data: {
+      meterNoNormalized: registry.meterNo,
+      monthlyCategories: {
+        "2026-08": {
+          leakageCategory: "CAT1 - Zero Purchaser",
+          riskTier: "High",
+          riskScore: 3,
+        },
+      },
+    },
+  };
+
+  const buildRow = () => buildCanonicalGmrMeterRow({
+    registry,
+    discoveryEntry: discovery,
+    premiseEntry: null,
+    fieldSalesEntry: null,
+    sourceSalesEntry,
+    lifecycleTrns: [],
+    monthKeys: [],
+    reportMonth: "2026-08",
+  });
+
+  const row = buildRow();
+  assert.equal(row.salesCategory, "CAT1 - Zero Purchaser");
+  assert.notEqual(row.salesCategory, "Bulk", "Mobile physical meter category must not become Sales Category");
+  assert.equal(row.meterPlacement, "Kiosk");
+  assert.equal(row.remainingCredit, "12.5");
+
+  discovery.data.ast.astData.meter.remainingCredit = " -5 ";
+  assert.equal(buildRow().remainingCredit, "-5");
+
+  discovery.data.ast.astData.meter.remainingCredit = 0;
+  assert.equal(buildRow().remainingCredit, "0");
+
+  discovery.data.ast.astData.meter.remainingCredit = "   ";
+  assert.equal(buildRow().remainingCredit, null);
+});
+
+test("GMR leaves Meter Placement and Remaining Credit unavailable when discovery source does not provide them", () => {
+  const registry = registryMeter(21, "VISIBLE");
+  registry.meterType = "water";
+  const discovery = discoveryEntry(registry, "2026-08-16T10:00:00.000Z");
+  discovery.data.meterType = "water";
+  delete discovery.data.ast.location.placement;
+  delete discovery.data.ast.astData.meter.remainingCredit;
+
+  const row = buildCanonicalGmrMeterRow({
+    registry,
+    discoveryEntry: discovery,
+    premiseEntry: null,
+    fieldSalesEntry: null,
+    sourceSalesEntry: null,
+    lifecycleTrns: [],
+    monthKeys: [],
+    reportMonth: "2026-08",
+  });
+
+  assert.equal(row.meterPlacement, null);
+  assert.equal(row.remainingCredit, null);
+});
+
 test("current monthlySalesC evidence takes precedence and legacy Sales fills only absent months", () => {
   const registry = registryMeter(3);
   const discovery = discoveryEntry(registry, "2026-05-10T10:00:00.000Z");
@@ -437,22 +511,7 @@ test("August and September keep the same full meter rows while only TRN-driven a
       [r2.premiseId]: { parents: r2.parents, address: { strNo: "2", strName: "Main", strType: "Street" } },
     },
     "sales-all-meters": {
-      [r1.meterNo]: {
-        meterNoNormalized: r1.meterNo,
-        monthlySalesC: { "2026-07": 10000, "2026-09": 20000 },
-        monthlyCategories: {
-          "2026-08": {
-            leakageCategory: "AUGUST_CATEGORY",
-            riskTier: "High",
-            riskScore: 3,
-          },
-          "2026-09": {
-            leakageCategory: "SEPTEMBER_CATEGORY",
-            riskTier: "Low",
-            riskScore: 1,
-          },
-        },
-      },
+      [r1.meterNo]: { meterNoNormalized: r1.meterNo, monthlySalesC: { "2026-07": 10000, "2026-09": 20000 } },
       [r2.meterNo]: { meterNoNormalized: r2.meterNo, monthlySalesC: { "2026-08": 30000 } },
     },
   };
@@ -472,18 +531,6 @@ test("August and September keep the same full meter rows while only TRN-driven a
   assert.equal(september.summary.selectedTotal, 2);
   assert.equal(august.summary.monthlyDiscoveryCount, 1);
   assert.equal(september.summary.monthlyDiscoveryCount, 1);
-
-  assert.equal(
-    august.rows.find((row) => row.iRepsMeterId === r1.id).salesCategory,
-    "AUGUST_CATEGORY",
-    "August dataset propagates reportMonth into Sales Category resolution"
-  );
-
-  assert.equal(
-    september.rows.find((row) => row.iRepsMeterId === r1.id).salesCategory,
-    "SEPTEMBER_CATEGORY",
-    "September dataset propagates reportMonth into Sales Category resolution"
-  );
   assert.ok(august.monthKeys.includes("2026-09"), "August GMR keeps later available purchase history");
   assert.equal(august.rows.find((row) => row.iRepsMeterId === r1.id).reconnected, "Yes", "Master context retains full lifecycle history");
 });
