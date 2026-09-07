@@ -1058,6 +1058,8 @@ export function buildCanonicalGmrMeterRow({
     meterInstallation: null,
     expectedMeterTypeTechnology: null,
     fieldMeterTypeTechnology: fieldTechnology(discovery, registry),
+    meterPlacement: nullableText(discovery?.ast?.location?.placement),
+    remainingCredit: nullableText(discovery?.ast?.astData?.meter?.remainingCredit),
     meterKind: rawMeterKind,
     meterMode: displayMeterMode(rawMeterKind),
     meterPhase: displayMeterPhase(rawMeterPhase),
