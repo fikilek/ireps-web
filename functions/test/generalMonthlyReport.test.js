@@ -437,7 +437,22 @@ test("August and September keep the same full meter rows while only TRN-driven a
       [r2.premiseId]: { parents: r2.parents, address: { strNo: "2", strName: "Main", strType: "Street" } },
     },
     "sales-all-meters": {
-      [r1.meterNo]: { meterNoNormalized: r1.meterNo, monthlySalesC: { "2026-07": 10000, "2026-09": 20000 } },
+      [r1.meterNo]: {
+        meterNoNormalized: r1.meterNo,
+        monthlySalesC: { "2026-07": 10000, "2026-09": 20000 },
+        monthlyCategories: {
+          "2026-08": {
+            leakageCategory: "AUGUST_CATEGORY",
+            riskTier: "High",
+            riskScore: 3,
+          },
+          "2026-09": {
+            leakageCategory: "SEPTEMBER_CATEGORY",
+            riskTier: "Low",
+            riskScore: 1,
+          },
+        },
+      },
       [r2.meterNo]: { meterNoNormalized: r2.meterNo, monthlySalesC: { "2026-08": 30000 } },
     },
   };
@@ -457,6 +472,18 @@ test("August and September keep the same full meter rows while only TRN-driven a
   assert.equal(september.summary.selectedTotal, 2);
   assert.equal(august.summary.monthlyDiscoveryCount, 1);
   assert.equal(september.summary.monthlyDiscoveryCount, 1);
+
+  assert.equal(
+    august.rows.find((row) => row.iRepsMeterId === r1.id).salesCategory,
+    "AUGUST_CATEGORY",
+    "August dataset propagates reportMonth into Sales Category resolution"
+  );
+
+  assert.equal(
+    september.rows.find((row) => row.iRepsMeterId === r1.id).salesCategory,
+    "SEPTEMBER_CATEGORY",
+    "September dataset propagates reportMonth into Sales Category resolution"
+  );
   assert.ok(august.monthKeys.includes("2026-09"), "August GMR keeps later available purchase history");
   assert.equal(august.rows.find((row) => row.iRepsMeterId === r1.id).reconnected, "Yes", "Master context retains full lifecycle history");
 });
