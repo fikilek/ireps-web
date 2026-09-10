@@ -1,6 +1,8 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import DownloadButtons from "../../../components/DownloadButtons";
+
 import MeterLocationModal from "./MeterLocationModal";
 import SalesTbRefsModal from "./SalesTbRefsModal";
 import SalesGpsMapSection from "./SalesGpsMapSection";
@@ -513,6 +515,7 @@ export default function SalesMetersTable({
   rows = [],
   monthKeys = [],
   targetFilter = TARGET_FILTERS.ALL,
+  downloadScope = {},
   selectedIds,
   onSelectedIdsChange,
 }) {
@@ -771,6 +774,100 @@ export default function SalesMetersTable({
   const paginatedRows = useMemo(
     () => sortedRows.slice(pageStartIndex, pageEndIndex),
     [sortedRows, pageStartIndex, pageEndIndex],
+  );
+
+  const quickDownloadColumns = useMemo(
+    () => [
+      {
+        header: "Meter Number",
+        value: (row) => row?.meterNo || "NAv",
+      },
+      {
+        header: "Ward No",
+        value: (row) => row?.wardNumberLabel || "NAv",
+      },
+      {
+        header: "Geofences",
+        value: (row) => getRowGeofenceLabel(row) || "No geofence",
+      },
+      {
+        header: "TB IDs",
+        value: (row) =>
+          getRowTbRefs(row)
+            .map((ref) => ref.id)
+            .filter(Boolean)
+            .join(", ") || "No TB",
+      },
+      {
+        header: "Work Status",
+        value: (row) => getSalesTableWorkStatusLabel(row?.salesStatus),
+      },
+      {
+        header: "Sales Category",
+        value: (row) => row?.leakageCategory || "NAv",
+      },
+      {
+        header: "Risk Tier",
+        value: (row) => row?.riskTier || "NAv",
+      },
+      {
+        header: "Risk Score",
+        value: (row) =>
+          row?.riskScore === null ||
+          row?.riskScore === undefined ||
+          row?.riskScore === ""
+            ? "NAv"
+            : Number(row.riskScore),
+      },
+      {
+        header: "Address",
+        value: (row) => row?.addressLine1 || "NAv",
+      },
+      {
+        header: "Town",
+        value: (row) => row?.town || "NAv",
+      },
+      {
+        header: "SG Code",
+        value: (row) => row?.sgCode || "NAv",
+      },
+      {
+        header: "Erf No",
+        value: (row) => row?.erfNo || "NAv",
+      },
+      {
+        header: "Total Sales (R)",
+        value: (row) => Number(row?.totalSalesC || 0) / 100,
+      },
+      {
+        header: "Latest 12 Months (R)",
+        value: (row) => Number(row?.latest12MonthsSalesC || 0) / 100,
+      },
+      {
+        header: "Total Sales 2024 (R)",
+        value: (row) => Number(row?.sales2024C || 0) / 100,
+      },
+      {
+        header: "Total Sales 2025 (R)",
+        value: (row) => Number(row?.sales2025C || 0) / 100,
+      },
+      {
+        header: "Total Sales 2026 (R)",
+        value: (row) => Number(row?.sales2026C || 0) / 100,
+      },
+      ...monthKeys.map((monthKey) => ({
+        header: `${getMonthLabel(monthKey)} (R)`,
+        value: (row) => Number(row?.monthlySalesC?.[monthKey] || 0) / 100,
+      })),
+      {
+        header: "Updated At",
+        value: (row) =>
+          Number(row?.updatedAtMs || 0) > 0
+            ? new Date(Number(row.updatedAtMs)).toISOString()
+            : "NAv",
+      },
+    ],
+    [monthKeys],
   );
 
   const selectedIdSet = selectedIds || new Set();
@@ -1078,6 +1175,15 @@ export default function SalesMetersTable({
           >
             {showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}
           </button>
+
+          <DownloadButtons
+            registryName="Sales Table"
+            rowsLabel="meters"
+            visibleRows={sortedRows}
+            columns={quickDownloadColumns}
+            fileBaseName="sales_table"
+            scope={downloadScope}
+          />
 
           <button type="button" style={styles.resetButton} onClick={resetColumnFilters}>
             Reset Column Filters
