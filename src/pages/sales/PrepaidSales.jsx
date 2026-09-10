@@ -219,6 +219,16 @@ export default function PrepaidSales() {
   const latestMonthKey = monthKeys[0] || "2026-02";
   const earliestMonthKey = monthKeys[monthKeys.length - 1] || "2023-12";
 
+  const quickDownloadScope = useMemo(
+    () => ({
+      lmName: activeWorkbaseName,
+      lmPcode: activeLmPcode || "NAv",
+      wardLabel: "All wards",
+      wardPcode: "NAv",
+    }),
+    [activeWorkbaseName, activeLmPcode],
+  );
+
   const gpsSummary = useMemo(() => {
     return salesWorkStatusRows.reduce(
       (accumulator, row) => {
@@ -505,6 +515,7 @@ export default function PrepaidSales() {
           <SalesMetersTable
             rows={gpsFilteredRows}
             monthKeys={monthKeys}
+            downloadScope={quickDownloadScope}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
             initialTbId={dashboardMapContext.tbId}
