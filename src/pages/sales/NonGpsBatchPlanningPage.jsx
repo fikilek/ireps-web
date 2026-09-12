@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -8,11 +8,11 @@ import { useAuth } from "../../auth/useAuth";
 import { useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
+import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import NonGpsExceptions from "./components/NonGpsExceptions";
 import NonGpsStreetDetail from "./components/NonGpsStreetDetail";
 import NonGpsStreetPlanning from "./components/NonGpsStreetPlanning";
 import {
-  NGP_CLASSIFICATIONS,
   NGP_SELECTION_MAX,
   buildNgpTargetedBatchDraftPlan,
   buildNonGpsBatchPlanningModel,
@@ -114,7 +114,7 @@ export default function NonGpsBatchPlanningPage() {
     () =>
       planningModel.streetPlanningTargets.filter(
         (target) =>
-          target.classification === NGP_CLASSIFICATIONS.OUTSTANDING &&
+          target.batchable === true &&
           selectedIds.has(target.id),
       ),
     [planningModel.streetPlanningTargets, selectedIds],
@@ -123,6 +123,75 @@ export default function NonGpsBatchPlanningPage() {
   const activeSelectedIds = useMemo(
     () => new Set(selectedTargets.map((target) => target.id)),
     [selectedTargets],
+  );
+
+
+  const batchabilityBySalesId = useMemo(
+    () => new Map(planningModel.noGpsTargets.map((target) => [
+      target.id,
+      { row: target.row, batchable: target.batchable,
+        reason: target.batchabilityReason, membership: target.membership },
+    ])),
+    [planningModel.noGpsTargets],
+  );
+
+  useEffect(() => {
+    if (isLoading || error || selectedIds.size === 0) return;
+
+    const nextSelectedIds = new Set(selectedIds);
+    const removed = [];
+
+    selectedIds.forEach((id) => {
+      const current = batchabilityBySalesId.get(id);
+      if (current?.batchable === true) return;
+
+      nextSelectedIds.delete(id);
+      removed.push({
+        id,
+        meterNo: current?.row?.meterNo || id,
+        reason:
+          current?.reason ||
+          "Sales meter is no longer available in the current planning scope",
+      });
+    });
+
+    if (removed.length === 0) return;
+
+    // Persist live invalidation so removed IDs cannot silently reappear later.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelection({ scope: scopeKey, ids: nextSelectedIds });
+
+    if (removed.length === 1) {
+      setSelectionError(
+        `Meter ${removed[0].meterNo} was removed from the selection because it is no longer batchable: ${removed[0].reason}.`,
+      );
+    } else {
+      setSelectionError(
+        `${removed.length} meters were removed from the selection because they are no longer batchable: ${removed
+          .map((item) => `${item.meterNo} (${item.reason})`)
+          .join("; ")}.`,
+      );
+    }
+  }, [batchabilityBySalesId, error, isLoading, scopeKey, selectedIds]);
+
+  const selectedDownloadColumns = useMemo(
+    () => [
+      { header: "Meter Number", value: (target) => target.meterNo || "NAv" },
+      {
+        header: "Address",
+        value: (target) => target.canonicalAddress || "NAv",
+      },
+      { header: "Town / Area", value: (target) => target.town || "NAv" },
+      {
+        header: "Street",
+        value: (target) => target.streetLabel || "NAv",
+      },
+      {
+        header: "Sales Meter Status",
+        value: (target) => target.salesWorkStatus || "NAv",
+      },
+    ],
+    [],
   );
 
   const selectionValidation = useMemo(
@@ -164,7 +233,7 @@ export default function NonGpsBatchPlanningPage() {
   }
 
   function toggleTarget(target) {
-    if (target?.classification !== NGP_CLASSIFICATIONS.OUTSTANDING) return;
+    if (target?.batchable !== true) return;
 
     setSelectionError("");
     const nextSelectedIds = new Set(activeSelectedIds);
@@ -177,7 +246,7 @@ export default function NonGpsBatchPlanningPage() {
 
     if (nextSelectedIds.size >= NGP_SELECTION_MAX) {
       setSelectionError(
-        `One Non GPS Targeted Batch may contain at most ${NGP_SELECTION_MAX} meters.`,
+        `One Non GPS Targeted Batch may contain at most ${NGP_SELECTION_MAX} meters. Deselect a meter before selecting another.`,
       );
       return;
     }
@@ -194,13 +263,19 @@ export default function NonGpsBatchPlanningPage() {
       streetTargets: street?.targets || [],
     });
 
-    setSelectedIds(update.selectedIds);
+    if (update.blockedByCapacity) {
+      const requestedLabel =
+        update.requestedCount === 1 ? "meter is" : "meters are";
+      const slotsLabel =
+        update.remainingCapacity === 1 ? "slot remains" : "slots remain";
 
-    if (update.filledToCapacity) {
       setSelectionError(
-        `The batch is full at ${NGP_SELECTION_MAX} meters. Only the available slots from ${street?.streetLabel || "this street"} were selected.`,
+        `${update.requestedCount} batchable ${requestedLabel} available on ${street?.streetLabel || "this street"}, but only ${update.remainingCapacity} batch ${slotsLabel}. Select individual meters or reduce the current selection.`,
       );
+      return;
     }
+
+    setSelectedIds(update.selectedIds);
   }
 
   function clearSelection() {
@@ -208,7 +283,23 @@ export default function NonGpsBatchPlanningPage() {
     setSelectionError("");
   }
 
-  function reviewTargetedBatch() {
+  function downloadSelected() {
+    if (selectedTargets.length === 0) return;
+
+    quickDownloadExcel({
+      rows: selectedTargets,
+      columns: selectedDownloadColumns,
+      fileBaseName: "selected_non_gps_sales_meters",
+      registryName: "Selected Non GPS Sales Meters",
+      scope: {
+        lmName: activeWorkbaseName,
+        lmPcode: activeLmPcode || "NAv",
+        wardLabel: "Non GPS Targeted Meter Selection",
+      },
+    });
+  }
+
+  function createTargetBatch() {
     setSelectionError("");
 
     const draftPlan = buildNgpTargetedBatchDraftPlan({
@@ -324,55 +415,6 @@ export default function NonGpsBatchPlanningPage() {
             </section>
           ) : null}
 
-          {viewMode === VIEW_MODES.PLANNING ? (
-            <section style={styles.selectionBar}>
-              <div>
-                <strong>
-                  Selected: {formatNumber(selectedTargets.length)} /{" "}
-                  {NGP_SELECTION_MAX}
-                </strong>
-                <span style={styles.selectionHint}>
-                  Select Outstanding meters by street or individually. One
-                  operation creates one Targeted Batch.
-                </span>
-              </div>
-
-              <div style={styles.selectionActions}>
-                <span
-                  style={{
-                    ...styles.selectionStatus,
-                    ...(selectionValidation.ok
-                      ? styles.selectionStatusReady
-                      : styles.selectionStatusWaiting),
-                  }}
-                >
-                  {selectionValidation.ok ? "Selection ready" : "Select at least 1"}
-                </span>
-                <button
-                  type="button"
-                  style={styles.clearButton}
-                  disabled={selectedTargets.length === 0}
-                  onClick={clearSelection}
-                >
-                  Clear Selection
-                </button>
-                <button
-                  type="button"
-                  style={{
-                    ...styles.reviewButton,
-                    ...(!selectionValidation.ok
-                      ? styles.reviewButtonDisabled
-                      : null),
-                  }}
-                  disabled={!selectionValidation.ok}
-                  onClick={reviewTargetedBatch}
-                >
-                  Review Targeted Batch
-                </button>
-              </div>
-            </section>
-          ) : null}
-
           {selectionError && viewMode === VIEW_MODES.PLANNING ? (
             <section role="alert" style={styles.selectionError}>
               {selectionError}
@@ -383,7 +425,9 @@ export default function NonGpsBatchPlanningPage() {
             <NonGpsExceptions exceptions={planningModel.exceptions} />
           ) : selectedStreet ? (
             <NonGpsStreetDetail
+              key={scopeKey + selectedStreet.key}
               street={selectedStreet}
+              lmPcode={activeLmPcode}
               selectedIds={activeSelectedIds}
               onToggleTarget={toggleTarget}
               onBack={backToStreets}
@@ -401,6 +445,44 @@ export default function NonGpsBatchPlanningPage() {
               onToggleStreet={toggleStreet}
             />
           )}
+
+          {viewMode === VIEW_MODES.PLANNING && selectedTargets.length > 0 ? (
+            <section style={styles.selectionBar}>
+              <div>
+                <strong style={styles.selectionCount}>
+                  {formatNumber(selectedTargets.length)} meters selected
+                </strong>
+                <span style={styles.selectionHint}>
+                  Selection is retained while paging and filtering.
+                </span>
+              </div>
+
+              <div style={styles.selectionActions}>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={clearSelection}
+                >
+                  Clear Selection
+                </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={downloadSelected}
+                >
+                  Download Selected
+                </button>
+                <button
+                  type="button"
+                  style={styles.primaryButton}
+                  disabled={!selectionValidation.ok}
+                  onClick={createTargetBatch}
+                >
+                  Create Target Batch
+                </button>
+              </div>
+            </section>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -411,7 +493,7 @@ const styles = {
   page: {
     display: "grid",
     gap: "1rem",
-    padding: "1rem 1.25rem 4rem",
+    padding: "1rem 1.25rem 5.5rem",
   },
   hero: {
     display: "flex",
@@ -480,56 +562,55 @@ const styles = {
   summaryValue: { color: "#0f172a", fontSize: "1.55rem" },
   summarySubtitle: { color: "#64748b", fontSize: "0.78rem" },
   selectionBar: {
+    position: "fixed",
+    right: "1.25rem",
+    bottom: "1rem",
+    left: "calc(250px + 1.25rem)",
+    zIndex: 40,
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: "1rem",
-    padding: "0.85rem 0.95rem",
-    border: "1px solid #bfdbfe",
-    borderRadius: "0.8rem",
-    background: "#eff6ff",
-    color: "#1e3a8a",
+    padding: "0.85rem 1rem",
+    borderRadius: "0.95rem",
+    background: "#0f172a",
+    color: "#ffffff",
+    boxShadow: "0 20px 40px rgba(15, 23, 42, 0.28)",
+    flexWrap: "wrap",
+  },
+  selectionCount: {
+    display: "block",
+    fontSize: "0.95rem",
   },
   selectionHint: {
     display: "block",
     marginTop: "0.2rem",
-    fontSize: "0.78rem",
+    color: "#cbd5e1",
+    fontSize: "0.75rem",
   },
   selectionActions: {
     display: "flex",
     alignItems: "center",
-    gap: "0.6rem",
+    gap: "0.5rem",
     flexWrap: "wrap",
   },
-  selectionStatus: {
-    borderRadius: "999px",
-    padding: "0.32rem 0.58rem",
-    fontSize: "0.72rem",
-    fontWeight: 900,
-  },
-  selectionStatusReady: { background: "#dcfce7", color: "#166534" },
-  selectionStatusWaiting: { background: "#e2e8f0", color: "#475569" },
-  clearButton: {
-    border: "1px solid #93c5fd",
-    borderRadius: "0.6rem",
-    background: "#ffffff",
-    color: "#1d4ed8",
-    padding: "0.5rem 0.7rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  reviewButton: {
-    border: "1px solid #1d4ed8",
-    borderRadius: "0.6rem",
-    background: "#1d4ed8",
+  primaryButton: {
+    border: "1px solid #2563eb",
+    borderRadius: "0.7rem",
+    padding: "0.55rem 0.75rem",
+    background: "#2563eb",
     color: "#ffffff",
-    padding: "0.5rem 0.75rem",
-    fontWeight: 800,
+    fontWeight: 850,
     cursor: "pointer",
   },
-  reviewButtonDisabled: {
-    opacity: 0.5,
-    cursor: "not-allowed",
+  secondaryButton: {
+    border: "1px solid rgba(148, 163, 184, 0.5)",
+    borderRadius: "0.7rem",
+    padding: "0.55rem 0.75rem",
+    background: "#ffffff",
+    color: "#0f172a",
+    fontWeight: 850,
+    cursor: "pointer",
   },
   selectionError: {
     padding: "0.75rem 0.85rem",

@@ -1,0 +1,51 @@
+/* Shared presentation for the Town, Street and Meter KPI sections. */
+.non-gps-kpi-section {
+  padding: 1rem 1.5rem 0;
+}
+
+.non-gps-kpi-section--batching {
+  padding-block: 1.25rem;
+}
+
+.non-gps-kpi-heading {
+  margin: 0 0 0.75rem;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.non-gps-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.non-gps-kpi-grid--batching {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.non-gps-kpi-card {
+  display: grid;
+  align-content: start;
+  gap: 0.22rem;
+  min-height: 4.25rem;
+  padding: 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+}
+
+.non-gps-kpi-label {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.non-gps-kpi-value {
+  color: #0f172a;
+  font-size: 1.25rem;
+  line-height: 1.2;
+}

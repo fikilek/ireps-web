@@ -2,6 +2,9 @@ import {
   hasUsableSalesGps,
   isSalesWithoutUsableGps,
 } from "./salesGpsModel.js";
+import { SALES_STATUSES } from "./salesStatusModel.js";
+import { classifySalesTableWorkStatus } from "./salesTableWorkStatusModel.js";
+import { resolveSalesTargetedBatchMembership } from "./salesTargetedBatchMembershipModel.js";
 
 export const NGP_CLASSIFICATIONS = Object.freeze({
   DISCOVERED: "DISCOVERED",
@@ -121,6 +124,83 @@ export function hasCompletedMeterDiscovery(row = {}) {
   });
 }
 
+export function evaluateNgpBatchability(row = {}, membership = resolveSalesTargetedBatchMembership(row)) {
+  const salesId = String(row?.id || "").trim();
+  const salesWorkStatus = classifySalesTableWorkStatus(row);
+
+  if (!salesId) {
+    return {
+      batchable: false,
+      code: "SALES_ID_MISSING",
+      reason: "Sales meter identity is missing",
+    };
+  }
+
+  if (salesWorkStatus === SALES_STATUSES.COMPLETED) {
+    return {
+      batchable: false,
+      code: "SALES_STATUS_COMPLETED",
+      reason: "COMPLETED — not batchable",
+    };
+  }
+
+  if (salesWorkStatus === SALES_STATUSES.IN_PROGRESS) {
+    return {
+      batchable: false,
+      code: "SALES_STATUS_IN_PROGRESS",
+      reason: "IN_PROGRESS — not batchable",
+    };
+  }
+
+  if (membership.state === "UNRESOLVED") {
+    return {
+      batchable: false,
+      code: "TARGETED_BATCH_MEMBERSHIP_UNRESOLVED",
+      reason: membership.reason,
+    };
+  }
+  if (membership.state === "MEMBER") {
+    return {
+      batchable: false,
+      code: membership.source === "SCALAR"
+        ? "CURRENT_TARGETED_BATCH" : "EXISTING_TARGETED_BATCH_REFERENCE",
+      reason: membership.reason,
+    };
+  }
+
+  // Malformed tbRefs block batching independently of current membership (18.2).
+  if (row?.tbRefsIntegrity?.valid === false) {
+    return {
+      batchable: false,
+      code: "TB_REFERENCE_INTEGRITY_INVALID",
+      reason: getTbReferenceIntegrityReasons(row).join("; "),
+    };
+  }
+
+  if (hasUsableSalesGps(row)) {
+    return {
+      batchable: false,
+      code: "GPS_AVAILABLE",
+      reason: "GPS is available — use Sales Table",
+    };
+  }
+
+  const addressExceptionReasons = getAddressExceptionReasons(row);
+  if (addressExceptionReasons.length > 0) {
+    return {
+      batchable: false,
+      code: "PLANNING_ADDRESS_INVALID",
+      reason: addressExceptionReasons.join("; "),
+    };
+  }
+
+  return {
+    batchable: true,
+    code: "BATCHABLE",
+    reason: "Batchable Sales meter",
+  };
+}
+
 export function classifyNonGpsSalesRow(row = {}) {
   if (hasUsableSalesGps(row)) {
     return {
@@ -151,7 +231,18 @@ export function classifyNonGpsSalesRow(row = {}) {
     };
   }
 
-  if (getNormalizedTbRefs(row).length > 0) {
+  const membership = resolveSalesTargetedBatchMembership(row);
+
+  if (membership.state === "UNRESOLVED" && membership.source === "SCALAR") {
+    return {
+      classification: NGP_CLASSIFICATIONS.EXCEPTION,
+      exceptionReasons: [membership.reason],
+      selectable: false,
+    };
+  }
+
+  // TB-R037: current membership decides, not the mere presence of old tbRefs.
+  if (membership.state !== "NONE") {
     return {
       classification: NGP_CLASSIFICATIONS.ALREADY_BATCHED,
       exceptionReasons: [],
@@ -168,6 +259,9 @@ export function classifyNonGpsSalesRow(row = {}) {
 
 function buildTarget(row) {
   const classification = classifyNonGpsSalesRow(row);
+  const salesWorkStatus = classifySalesTableWorkStatus(row);
+  const membership = resolveSalesTargetedBatchMembership(row);
+  const batchability = evaluateNgpBatchability(row, membership);
   const townKey = normalizePlanningKey(row?.town);
   const streetNameKey = normalizePlanningKey(row?.adr?.strName);
 
@@ -183,14 +277,23 @@ function buildTarget(row) {
       townKey && streetNameKey ? `${townKey}::${streetNameKey}` : "",
     streetLabel: formatStreetLabel(row),
     canonicalAddress: formatAuthoritativeAddress(row),
+    salesWorkStatus,
     classification: classification.classification,
     exceptionReasons: classification.exceptionReasons,
-    selectable: classification.selectable,
+    membership,
+    batchable: batchability.batchable,
+    batchabilityCode: batchability.code,
+    batchabilityReason: batchability.reason,
+    // Transitional alias for older NGP consumers. Checkbox logic must use
+    // batchable rather than the legacy OUTSTANDING classification.
+    selectable: batchability.batchable,
   };
 }
 
-function incrementCounters(counters, classification) {
+function incrementCounters(counters, classification, salesWorkStatus, batchable) {
   counters.total += 1;
+  if (batchable) counters.batchable += 1;
+  else counters.notBatchable += 1;
 
   if (classification === NGP_CLASSIFICATIONS.OUTSTANDING) {
     counters.outstanding += 1;
@@ -199,14 +302,27 @@ function incrementCounters(counters, classification) {
   } else if (classification === NGP_CLASSIFICATIONS.DISCOVERED) {
     counters.discovered += 1;
   }
+
+  if (salesWorkStatus === SALES_STATUSES.NOT_STARTED) {
+    counters.notStarted += 1;
+  } else if (salesWorkStatus === SALES_STATUSES.IN_PROGRESS) {
+    counters.inProgress += 1;
+  } else if (salesWorkStatus === SALES_STATUSES.COMPLETED) {
+    counters.completed += 1;
+  }
 }
 
 function createCounters() {
   return {
     total: 0,
+    batchable: 0,
+    notBatchable: 0,
     outstanding: 0,
     alreadyBatched: 0,
     discovered: 0,
+    notStarted: 0,
+    inProgress: 0,
+    completed: 0,
   };
 }
 
@@ -285,8 +401,18 @@ export function buildNonGpsBatchPlanningModel(rows = []) {
     }
 
     street.targets.push(target);
-    incrementCounters(street.counters, target.classification);
-    incrementCounters(town.counters, target.classification);
+    incrementCounters(
+      street.counters,
+      target.classification,
+      target.salesWorkStatus,
+      target.batchable,
+    );
+    incrementCounters(
+      town.counters,
+      target.classification,
+      target.salesWorkStatus,
+      target.batchable,
+    );
   });
 
   const towns = Array.from(townsByKey.values())
@@ -377,7 +503,7 @@ export function validateNgpSelection(targets = []) {
     return {
       ok: false,
       code: "NGP_SELECTION_EMPTY",
-      message: "Select at least one Outstanding target.",
+      message: "Select at least one batchable Sales meter.",
     };
   }
 
@@ -385,19 +511,15 @@ export function validateNgpSelection(targets = []) {
     return {
       ok: false,
       code: "NGP_SELECTION_TOO_LARGE",
-      message: `Select no more than ${NGP_SELECTION_MAX} Outstanding targets.`,
+      message: `Select no more than ${NGP_SELECTION_MAX} batchable Sales meters.`,
     };
   }
 
-  if (
-    selectedTargets.some(
-      (target) => target?.classification !== NGP_CLASSIFICATIONS.OUTSTANDING,
-    )
-  ) {
+  if (selectedTargets.some((target) => target?.batchable !== true)) {
     return {
       ok: false,
-      code: "NGP_SELECTION_NOT_OUTSTANDING",
-      message: "Only Outstanding targets may be selected.",
+      code: "NGP_SELECTION_NOT_BATCHABLE",
+      message: "Only batchable Sales meters may be selected.",
     };
   }
 
@@ -424,7 +546,7 @@ export function validateNgpSelection(targets = []) {
   return {
     ok: true,
     code: "NGP_SELECTION_READY",
-    message: `${selectedTargets.length} Outstanding target${
+    message: `${selectedTargets.length} batchable Sales meter${
       selectedTargets.length === 1 ? "" : "s"
     } selected.`,
   };
@@ -442,54 +564,69 @@ export function updateNgpStreetSelection({
   maxSelection = NGP_SELECTION_MAX,
 }) {
   const nextSelectedIds = normalizeSelectedIdSet(selectedIds);
-  const outstandingTargets = (Array.isArray(streetTargets) ? streetTargets : [])
-    .filter(
-      (target) => target?.classification === NGP_CLASSIFICATIONS.OUTSTANDING,
-    );
-
-  const outstandingIds = outstandingTargets
+  const batchableTargets = (Array.isArray(streetTargets) ? streetTargets : [])
+    .filter((target) => target?.batchable === true);
+  const batchableIds = batchableTargets
     .map((target) => String(target?.id || "").trim())
     .filter(Boolean);
-  const selectedStreetIds = outstandingIds.filter((id) =>
+  const selectedStreetIds = batchableIds.filter((id) =>
     nextSelectedIds.has(id),
   );
+  const allStreetBatchableSelected =
+    batchableIds.length > 0 &&
+    selectedStreetIds.length === batchableIds.length;
 
-  if (selectedStreetIds.length > 0) {
-    outstandingIds.forEach((id) => nextSelectedIds.delete(id));
+  if (allStreetBatchableSelected) {
+    batchableIds.forEach((id) => nextSelectedIds.delete(id));
 
     return {
       selectedIds: nextSelectedIds,
       addedCount: 0,
       removedCount: selectedStreetIds.length,
-      streetOutstandingCount: outstandingIds.length,
+      streetBatchableCount: batchableIds.length,
       streetSelectedCount: 0,
-      filledToCapacity: false,
+      blockedByCapacity: false,
+      requestedCount: 0,
+      remainingCapacity: Math.max(
+        0,
+        Number(maxSelection || NGP_SELECTION_MAX) - nextSelectedIds.size,
+      ),
     };
   }
 
-  const capacity = Math.max(
+  const idsToAdd = batchableIds.filter((id) => !nextSelectedIds.has(id));
+  const remainingCapacity = Math.max(
     0,
     Number(maxSelection || NGP_SELECTION_MAX) - nextSelectedIds.size,
   );
-  const idsToAdd = outstandingIds
-    .filter((id) => !nextSelectedIds.has(id))
-    .slice(0, capacity);
+
+  if (idsToAdd.length > remainingCapacity) {
+    return {
+      selectedIds: nextSelectedIds,
+      addedCount: 0,
+      removedCount: 0,
+      streetBatchableCount: batchableIds.length,
+      streetSelectedCount: selectedStreetIds.length,
+      blockedByCapacity: true,
+      requestedCount: idsToAdd.length,
+      remainingCapacity,
+    };
+  }
 
   idsToAdd.forEach((id) => nextSelectedIds.add(id));
-
-  const streetSelectedCount = outstandingIds.filter((id) =>
-    nextSelectedIds.has(id),
-  ).length;
 
   return {
     selectedIds: nextSelectedIds,
     addedCount: idsToAdd.length,
     removedCount: 0,
-    streetOutstandingCount: outstandingIds.length,
-    streetSelectedCount,
-    filledToCapacity:
-      nextSelectedIds.size >= Number(maxSelection || NGP_SELECTION_MAX) &&
-      streetSelectedCount < outstandingIds.length,
+    streetBatchableCount: batchableIds.length,
+    streetSelectedCount: batchableIds.length,
+    blockedByCapacity: false,
+    requestedCount: idsToAdd.length,
+    remainingCapacity: Math.max(
+      0,
+      Number(maxSelection || NGP_SELECTION_MAX) - nextSelectedIds.size,
+    ),
   };
 }
 
@@ -632,7 +769,7 @@ export function buildNgpTargetedBatchDraftPlan({
   return {
     ok: true,
     code: "NGP_TB_DRAFT_READY",
-    message: `${rows.length} Outstanding target${
+    message: `${rows.length} batchable Sales meter${
       rows.length === 1 ? "" : "s"
     } prepared for one Targeted Batch.`,
     draft: {

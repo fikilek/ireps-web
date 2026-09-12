@@ -48,6 +48,7 @@ import {
   buildSalesOperationalStatsReadModel,
   buildTargetedBatchDashboardReadModel,
   buildTargetedBatchHeaders,
+  buildTargetedBatchDetailsReadModel,
   buildTargetedBatchMapReadModel,
   buildTargetedBatchReport,
   cleanText,
@@ -441,6 +442,161 @@ export const salesTargetedBatchApi = createApi({
   endpoints: (rtkBuilder) => {
     const builder = { query: config => rtkBuilder.query(scopedSalesQuery(config)) };
     return ({
+    getTargetedBatchDetailsById: builder.query({
+      queryFn: () => ({
+        data: {
+          details: null,
+          sync: { status: "syncing", sources: { batch: "syncing", geofence: "idle" }, error: null },
+        },
+      }),
+      async onCacheEntryAdded(
+        { tbId, lmPcode },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
+      ) {
+        const validId = (value) => typeof value === "string" &&
+          value.trim().length > 0 && !value.includes("/") &&
+    [...value].every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127) &&
+          ![".", ".."].includes(value.trim());
+        const normalizedTbId = cleanText(tbId);
+        const expectedLm = cleanText(lmPcode);
+        let active = true;
+        let unsubscribeBatch = () => {};
+        let unsubscribeGeofence = () => {};
+        let geofenceGeneration = 0;
+        let currentGeofenceId = null;
+        let batch = null;
+        let geofence = null;
+        const statuses = { batch: "syncing", geofence: "idle" };
+        const errors = {};
+        const isActive = () => active && isCurrent();
+
+        const publish = () => {
+          if (!isActive()) return;
+          const error = errors.batch || errors.geofence || null;
+          const status = error ? "error"
+            : Object.values(statuses).some((value) => value === "syncing" || value === "idle")
+              ? "syncing" : "ready";
+          const details = buildTargetedBatchDetailsReadModel({ tbId: normalizedTbId, batch, geofence });
+          updateCachedData((draft) => {
+            draft.details = details;
+            draft.sync = { status, sources: { ...statuses }, error };
+          });
+        };
+
+        const clearGeofence = () => {
+          geofenceGeneration += 1;
+          unsubscribeGeofence();
+          unsubscribeGeofence = () => {};
+          currentGeofenceId = null;
+          geofence = null;
+          statuses.geofence = "ready";
+          delete errors.geofence;
+        };
+
+        const syncGeofence = () => {
+          const rawId = batch?.geofenceId;
+          if (rawId === undefined || rawId === null || rawId === "") {
+            clearGeofence();
+            return;
+          }
+          if (!validId(rawId)) {
+            clearGeofence();
+            statuses.geofence = "error";
+            errors.geofence = normalizeStreamError(
+              { code: "INVALID_GEOFENCE_ID", message: "The recorded geofence ID is invalid." }, "geofence");
+            return;
+          }
+          const id = rawId.trim();
+          if (id === currentGeofenceId) return;
+          clearGeofence();
+          currentGeofenceId = id;
+          statuses.geofence = "syncing";
+          const generation = geofenceGeneration;
+          try {
+            unsubscribeGeofence = onSnapshot(
+              doc(db, "geo_fences", id),
+              (snapshot) => {
+                if (!isActive() || generation !== geofenceGeneration) return;
+                const data = snapshot.exists() ? snapshot.data() : null;
+                if (data && cleanText(data.parents?.lmPcode) !== expectedLm) {
+                  geofence = null;
+                  statuses.geofence = "error";
+                  errors.geofence = normalizeStreamError(
+                    { code: "GEOFENCE_SCOPE_MISMATCH", message: "The recorded geofence is outside this planning scope." }, "geofence");
+                } else {
+                  geofence = data ? { ...data, id: snapshot.id } : null;
+                  statuses.geofence = "ready";
+                  delete errors.geofence;
+                }
+                publish();
+              },
+              (error) => {
+                if (!isActive() || generation !== geofenceGeneration) return;
+                geofence = null;
+                statuses.geofence = "error";
+                errors.geofence = normalizeStreamError(error, "geofence");
+                publish();
+              },
+            );
+          } catch (error) {
+            statuses.geofence = "error";
+            errors.geofence = normalizeStreamError(error, "geofence");
+          }
+        };
+
+        try {
+          await cacheDataLoaded;
+          if (!isActive()) return;
+          if (!validId(tbId) || !expectedLm) {
+            throw { code: "INVALID_BATCH_DETAILS_SCOPE", message: "Batch details require a valid ID and planning scope." };
+          }
+          unsubscribeBatch = onSnapshot(
+            doc(db, TARGETED_BATCH_UPLOADS_COLLECTION, normalizedTbId),
+            (snapshot) => {
+              if (!isActive()) return;
+              const data = snapshot.exists() ? snapshot.data() : null;
+              if (data && (cleanText(data.scope?.lmPcode) !== expectedLm ||
+                  (data.id != null && cleanText(data.id) !== normalizedTbId))) {
+                batch = null;
+                clearGeofence();
+                statuses.batch = "error";
+                errors.batch = normalizeStreamError(
+                  { code: "BATCH_DETAILS_SCOPE_MISMATCH", message: "Batch details do not match this planning scope." }, "batch");
+              } else {
+                batch = data;
+                statuses.batch = "ready";
+                delete errors.batch;
+                syncGeofence();
+              }
+              publish();
+            },
+            (error) => {
+              if (!isActive()) return;
+              batch = null;
+              clearGeofence();
+              statuses.batch = "error";
+              errors.batch = normalizeStreamError(error, "batch");
+              publish();
+            },
+          );
+        } catch (error) {
+          batch = null;
+          clearGeofence();
+          statuses.batch = "error";
+          errors.batch = normalizeStreamError(error, "batch");
+          publish();
+        }
+        try {
+          await cacheEntryRemoved;
+        } finally {
+          active = false;
+          unsubscribeBatch();
+          clearGeofence();
+        }
+      },
+      keepUnusedDataFor: 0,
+    }),
+
     getTargetedBatchHeadersByLm: builder.query({
       queryFn: (lmPcode) => ({
         data: createTargetedBatchHeadersStreamState(
@@ -2345,3 +2501,7 @@ export function useGetTargetedBatchDashboardQuery(arg, options) { return useScop
 export function useGetTargetedBatchHeadersByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchHeadersByLmQuery", arg, options); }
 export function useGetTargetedBatchMapByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchMapByIdQuery", arg, options); }
 export function useGetTargetedBatchReportByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchReportByIdQuery", arg, options); }
+
+export function useGetTargetedBatchDetailsByIdQuery(arg, options) {
+  return useScopedTargetedBatchRead("useGetTargetedBatchDetailsByIdQuery", arg, options);
+}

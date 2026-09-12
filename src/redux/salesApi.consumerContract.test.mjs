@@ -123,3 +123,25 @@ test("a failed listener can be refetched and its stale callbacks cannot overwrit
   assert.equal(api.useGetSalesByLmPcodeQuery({ lmPcode: "ZA5241" }).data, undefined);
   api.setSalesReadSession(null);
 });
+
+test("current membership projection preserves absence, null and invalid scalar evidence", async () => {
+  const { api } = await fixture();
+  const absent = api.normalizeSalesRow("1", {});
+  assert.equal(Object.hasOwn(absent, "targetedBatchId"), false);
+  for (const value of [null, "TGB_20260912_100000_AAAA", ""]) {
+    const row = api.normalizeSalesRow("1", { targetedBatchId: value });
+    assert.equal(Object.hasOwn(row, "targetedBatchId"), true);
+    assert.equal(row.targetedBatchId, value);
+  }
+  for (const value of [undefined, {}, [], 12, false, { seconds: 123, nanoseconds: 0 }]) {
+    const row = api.normalizeSalesRow("1", { targetedBatchId: value });
+    assert.equal(row.targetedBatchIdInvalid, true);
+    assert.equal(Object.hasOwn(row, "targetedBatchId"), false);
+  }
+  const legacyField = api.normalizeSalesRow("1", { activeTargetedBatchId: "TGB_20260912_100000_AAAA" });
+  assert.equal(Object.hasOwn(legacyField, "activeTargetedBatchId"), false);
+  const invalid = api.normalizeSalesRow("1", { tbRefs: [{ id: "" }] });
+  assert.equal(invalid.tbRefs.length, 0);
+  assert.equal(invalid.tbRefsIntegrity.valid, false);
+  api.setSalesReadSession(null);
+});

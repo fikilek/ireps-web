@@ -2024,3 +2024,28 @@ export function buildTargetedBatchMapReadModel({
   };
 }
 
+
+// Small visibility projection. Document identity and parent metadata are the
+// only authorities; Sales spatial references and update actors are not inputs.
+export function buildTargetedBatchDetailsReadModel({ tbId, batch, geofence = null }) {
+  if (!batch) return null;
+  const textOrNull = (value) => typeof value === "string" && value.trim()
+    ? value.trim() : null;
+  const geofenceId = textOrNull(batch.geofenceId);
+  let createdAtMs = null;
+  try {
+    const value = toMillis(batch.metadata?.createdAt);
+    if (Number.isFinite(value) && value > 0) createdAtMs = value;
+  } catch {
+    // Invalid legacy metadata remains unavailable rather than a fabricated date.
+  }
+  return {
+    id: cleanText(tbId),
+    createdAtMs,
+    createdByUid: textOrNull(batch.metadata?.createdByUid),
+    createdByUser: textOrNull(batch.metadata?.createdByUser),
+    geofenceId,
+    geofenceName: geofenceId && geofence?.id === geofenceId
+      ? textOrNull(geofence.name) : null,
+  };
+}

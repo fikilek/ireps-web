@@ -2,25 +2,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { formatNumber } from "../salesUtils";
+import NonGpsBatchingSummary from "./NonGpsBatchingSummary";
+import "./NonGpsKpi.css";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 5;
 
 const EMPTY_TOWN_FILTERS = Object.freeze({
   town: "",
   streets: "",
   meters: "",
-  outstanding: "",
-  alreadyBatched: "",
-  discovered: "",
+  notStarted: "",
+  inProgress: "",
+  completed: "",
+  batchable: "",
+  notBatchable: "",
 });
 
 const EMPTY_STREET_FILTERS = Object.freeze({
   street: "",
   total: "",
-  outstanding: "",
-  alreadyBatched: "",
-  discovered: "",
+  notStarted: "",
+  inProgress: "",
+  completed: "",
+  batchable: "",
+  notBatchable: "",
 });
 
 function includesSearch(value, searchText) {
@@ -74,12 +80,7 @@ function SortButton({ label, sortKey, sortConfig, onSort }) {
   );
 }
 
-function ColumnFilter({
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}) {
+function ColumnFilter({ value, onChange, placeholder, type = "text" }) {
   return (
     <input
       type={type}
@@ -94,27 +95,66 @@ function ColumnFilter({
   );
 }
 
+function SelectColumnFilter({ value, onChange, options = [], allLabel, ariaLabel }) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      style={styles.headerInput}
+      aria-label={ariaLabel}
+    >
+      <option value="">{allLabel}</option>
+      {options.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function CountCell({ value }) {
   return <td style={styles.numberCell}>{formatNumber(value || 0)}</td>;
 }
 
-function StreetSelectionCheckbox({
-  street,
-  selectedIds,
-  onToggleStreet,
-}) {
-  const checkboxRef = useRef(null);
-  const outstandingTargets = (street?.targets || []).filter(
-    (target) => target?.selectable === true,
+function SalesStatusSummary({ title = "Sales Meter Status", counters = {} }) {
+  const items = [
+    ["Meters", counters.total],
+    ["Not Started", counters.notStarted],
+    ["In Progress", counters.inProgress],
+    ["Completed", counters.completed],
+  ];
+
+  return (
+    <div className="non-gps-kpi-section">
+      <p className="non-gps-kpi-heading">{title}</p>
+      <div className="non-gps-kpi-grid">
+        {items.map(([label, value]) => (
+          <div key={label} className="non-gps-kpi-card">
+            <span className="non-gps-kpi-label">{label}</span>
+            <strong className="non-gps-kpi-value">
+              {formatNumber(value || 0)}
+            </strong>
+          </div>
+        ))}
+      </div>
+    </div>
   );
-  const selectedCount = outstandingTargets.filter((target) =>
+}
+
+function StreetSelectionCheckbox({ street, selectedIds, onToggleStreet }) {
+  const checkboxRef = useRef(null);
+  const batchableTargets = (street?.targets || []).filter(
+    (target) => target?.batchable === true,
+  );
+  const selectedCount = batchableTargets.filter((target) =>
     selectedIds?.has(target.id),
   ).length;
   const allSelected =
-    outstandingTargets.length > 0 &&
-    selectedCount === outstandingTargets.length;
+    batchableTargets.length > 0 &&
+    selectedCount === batchableTargets.length;
   const partiallySelected =
-    selectedCount > 0 && selectedCount < outstandingTargets.length;
+    selectedCount > 0 && selectedCount < batchableTargets.length;
 
   useEffect(() => {
     if (checkboxRef.current) {
@@ -127,16 +167,18 @@ function StreetSelectionCheckbox({
       ref={checkboxRef}
       type="checkbox"
       checked={allSelected}
-      disabled={outstandingTargets.length === 0}
+      disabled={batchableTargets.length === 0}
       onChange={() => onToggleStreet?.(street)}
-      aria-label={`Select Outstanding meters on ${street?.streetLabel || "street"}`}
+      aria-label={`Select batchable Sales meters on ${street?.streetLabel || "street"}`}
       aria-checked={partiallySelected ? "mixed" : allSelected}
       title={
-        outstandingTargets.length === 0
-          ? "No Outstanding meters are available on this street"
+        batchableTargets.length === 0
+          ? "No batchable Sales meters are available on this street"
           : partiallySelected
-            ? `${selectedCount} of ${outstandingTargets.length} Outstanding meters selected`
-            : `Select Outstanding meters on this street`
+            ? `${selectedCount} of ${batchableTargets.length} batchable Sales meters selected — select the remaining meters`
+            : allSelected
+              ? "Deselect all batchable Sales meters on this street"
+              : "Select all batchable Sales meters on this street"
       }
     />
   );
@@ -226,22 +268,22 @@ function getTownSortValue(town, key) {
   if (key === "town") return town?.town || "";
   if (key === "streets") return Number(town?.streetCount || 0);
   if (key === "meters") return Number(town?.counters?.total || 0);
-  if (key === "outstanding") return Number(town?.counters?.outstanding || 0);
-  if (key === "alreadyBatched") {
-    return Number(town?.counters?.alreadyBatched || 0);
-  }
-  if (key === "discovered") return Number(town?.counters?.discovered || 0);
+  if (key === "notStarted") return Number(town?.counters?.notStarted || 0);
+  if (key === "inProgress") return Number(town?.counters?.inProgress || 0);
+  if (key === "completed") return Number(town?.counters?.completed || 0);
+  if (key === "batchable") return Number(town?.counters?.batchable || 0);
+  if (key === "notBatchable") return Number(town?.counters?.notBatchable || 0);
   return town?.town || "";
 }
 
 function getStreetSortValue(street, key) {
   if (key === "street") return street?.streetLabel || "";
   if (key === "total") return Number(street?.counters?.total || 0);
-  if (key === "outstanding") return Number(street?.counters?.outstanding || 0);
-  if (key === "alreadyBatched") {
-    return Number(street?.counters?.alreadyBatched || 0);
-  }
-  if (key === "discovered") return Number(street?.counters?.discovered || 0);
+  if (key === "notStarted") return Number(street?.counters?.notStarted || 0);
+  if (key === "inProgress") return Number(street?.counters?.inProgress || 0);
+  if (key === "completed") return Number(street?.counters?.completed || 0);
+  if (key === "batchable") return Number(street?.counters?.batchable || 0);
+  if (key === "notBatchable") return Number(street?.counters?.notBatchable || 0);
   return street?.streetLabel || "";
 }
 
@@ -259,6 +301,7 @@ function sortRows(rows, sortConfig, getSortValue) {
 function TownHeader({
   sortConfig,
   filters,
+  townOptions,
   onSort,
   onFilterChange,
 }) {
@@ -291,35 +334,43 @@ function TownHeader({
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Outstanding"
-            sortKey="outstanding"
+            label="Not Started"
+            sortKey="notStarted"
             sortConfig={sortConfig}
             onSort={onSort}
           />
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Already Batched"
-            sortKey="alreadyBatched"
+            label="In Progress"
+            sortKey="inProgress"
             sortConfig={sortConfig}
             onSort={onSort}
           />
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Discovered"
-            sortKey="discovered"
+            label="Completed"
+            sortKey="completed"
             sortConfig={sortConfig}
             onSort={onSort}
           />
+        </th>
+        <th style={styles.headerCell}>
+          <SortButton label="Batchable" sortKey="batchable" sortConfig={sortConfig} onSort={onSort} />
+        </th>
+        <th style={styles.headerCell}>
+          <SortButton label="Not Batchable" sortKey="notBatchable" sortConfig={sortConfig} onSort={onSort} />
         </th>
       </tr>
       <tr>
         <th style={styles.filterCell}>
-          <ColumnFilter
+          <SelectColumnFilter
             value={filters.town}
             onChange={(value) => onFilterChange("town", value)}
-            placeholder="Filter Town / Area"
+            options={townOptions}
+            allLabel="All towns"
+            ariaLabel="Filter Town / Area"
           />
         </th>
         <th style={styles.filterCell}>
@@ -340,39 +391,44 @@ function TownHeader({
         </th>
         <th style={styles.filterCell}>
           <ColumnFilter
-            value={filters.outstanding}
-            onChange={(value) => onFilterChange("outstanding", value)}
+            value={filters.notStarted}
+            onChange={(value) => onFilterChange("notStarted", value)}
             placeholder="Exact count"
             type="number"
           />
         </th>
         <th style={styles.filterCell}>
           <ColumnFilter
-            value={filters.alreadyBatched}
-            onChange={(value) => onFilterChange("alreadyBatched", value)}
+            value={filters.inProgress}
+            onChange={(value) => onFilterChange("inProgress", value)}
             placeholder="Exact count"
             type="number"
           />
         </th>
         <th style={styles.filterCell}>
           <ColumnFilter
-            value={filters.discovered}
-            onChange={(value) => onFilterChange("discovered", value)}
+            value={filters.completed}
+            onChange={(value) => onFilterChange("completed", value)}
             placeholder="Exact count"
             type="number"
           />
+        </th>
+        <th style={styles.filterCell}>
+          <ColumnFilter value={filters.batchable}
+            onChange={(value) => onFilterChange("batchable", value)}
+            placeholder="Filter Batchable count" type="number" />
+        </th>
+        <th style={styles.filterCell}>
+          <ColumnFilter value={filters.notBatchable}
+            onChange={(value) => onFilterChange("notBatchable", value)}
+            placeholder="Filter Not Batchable count" type="number" />
         </th>
       </tr>
     </thead>
   );
 }
 
-function StreetHeader({
-  sortConfig,
-  filters,
-  onSort,
-  onFilterChange,
-}) {
+function StreetHeader({ sortConfig, filters, onSort, onFilterChange }) {
   return (
     <thead>
       <tr>
@@ -387,7 +443,7 @@ function StreetHeader({
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Total"
+            label="Meters"
             sortKey="total"
             sortConfig={sortConfig}
             onSort={onSort}
@@ -395,27 +451,33 @@ function StreetHeader({
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Outstanding"
-            sortKey="outstanding"
+            label="Not Started"
+            sortKey="notStarted"
             sortConfig={sortConfig}
             onSort={onSort}
           />
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Already Batched"
-            sortKey="alreadyBatched"
+            label="In Progress"
+            sortKey="inProgress"
             sortConfig={sortConfig}
             onSort={onSort}
           />
         </th>
         <th style={styles.headerCell}>
           <SortButton
-            label="Discovered"
-            sortKey="discovered"
+            label="Completed"
+            sortKey="completed"
             sortConfig={sortConfig}
             onSort={onSort}
           />
+        </th>
+        <th style={styles.headerCell}>
+          <SortButton label="Batchable" sortKey="batchable" sortConfig={sortConfig} onSort={onSort} />
+        </th>
+        <th style={styles.headerCell}>
+          <SortButton label="Not Batchable" sortKey="notBatchable" sortConfig={sortConfig} onSort={onSort} />
         </th>
       </tr>
       <tr>
@@ -437,27 +499,37 @@ function StreetHeader({
         </th>
         <th style={styles.filterCell}>
           <ColumnFilter
-            value={filters.outstanding}
-            onChange={(value) => onFilterChange("outstanding", value)}
+            value={filters.notStarted}
+            onChange={(value) => onFilterChange("notStarted", value)}
             placeholder="Exact count"
             type="number"
           />
         </th>
         <th style={styles.filterCell}>
           <ColumnFilter
-            value={filters.alreadyBatched}
-            onChange={(value) => onFilterChange("alreadyBatched", value)}
+            value={filters.inProgress}
+            onChange={(value) => onFilterChange("inProgress", value)}
             placeholder="Exact count"
             type="number"
           />
         </th>
         <th style={styles.filterCell}>
           <ColumnFilter
-            value={filters.discovered}
-            onChange={(value) => onFilterChange("discovered", value)}
+            value={filters.completed}
+            onChange={(value) => onFilterChange("completed", value)}
             placeholder="Exact count"
             type="number"
           />
+        </th>
+        <th style={styles.filterCell}>
+          <ColumnFilter value={filters.batchable}
+            onChange={(value) => onFilterChange("batchable", value)}
+            placeholder="Filter Batchable count" type="number" />
+        </th>
+        <th style={styles.filterCell}>
+          <ColumnFilter value={filters.notBatchable}
+            onChange={(value) => onFilterChange("notBatchable", value)}
+            placeholder="Filter Not Batchable count" type="number" />
         </th>
       </tr>
     </thead>
@@ -493,25 +565,55 @@ export default function NonGpsStreetPlanning({
     ...EMPTY_STREET_FILTERS,
   });
 
+  const townOptions = useMemo(
+    () =>
+      [...new Set(
+        towns
+          .map((town) => String(town?.town || "").trim())
+          .filter(Boolean),
+      )].sort((left, right) =>
+        left.localeCompare(right, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      ),
+    [towns],
+  );
+
   const selectedTown =
     towns.find((town) => town.key === selectedTownKey) || null;
+
+  const townStatusCounters = useMemo(
+    () =>
+      towns.reduce(
+        (totals, town) => ({
+          total: totals.total + Number(town?.counters?.total || 0),
+          notStarted:
+            totals.notStarted + Number(town?.counters?.notStarted || 0),
+          inProgress:
+            totals.inProgress + Number(town?.counters?.inProgress || 0),
+          completed:
+            totals.completed + Number(town?.counters?.completed || 0),
+          batchable: totals.batchable + Number(town?.counters?.batchable || 0),
+          notBatchable: totals.notBatchable + Number(town?.counters?.notBatchable || 0),
+        }),
+        { total: 0, notStarted: 0, inProgress: 0, completed: 0, batchable: 0, notBatchable: 0 },
+      ),
+    [towns],
+  );
 
   const filteredTowns = useMemo(() => {
     const rows = towns.filter(
       (town) =>
         includesSearch(town.town, searchText) &&
-        includesSearch(town.town, townFilters.town) &&
+        (!townFilters.town || town.town === townFilters.town) &&
         matchesCountFilter(town.streetCount, townFilters.streets) &&
         matchesCountFilter(town.counters.total, townFilters.meters) &&
-        matchesCountFilter(
-          town.counters.outstanding,
-          townFilters.outstanding,
-        ) &&
-        matchesCountFilter(
-          town.counters.alreadyBatched,
-          townFilters.alreadyBatched,
-        ) &&
-        matchesCountFilter(town.counters.discovered, townFilters.discovered),
+        matchesCountFilter(town.counters.notStarted, townFilters.notStarted) &&
+        matchesCountFilter(town.counters.inProgress, townFilters.inProgress) &&
+        matchesCountFilter(town.counters.completed, townFilters.completed) &&
+        matchesCountFilter(town.counters.batchable, townFilters.batchable) &&
+        matchesCountFilter(town.counters.notBatchable, townFilters.notBatchable),
     );
 
     return sortRows(rows, townSort, getTownSortValue);
@@ -536,17 +638,16 @@ export default function NonGpsStreetPlanning({
         includesSearch(street.streetLabel, streetFilters.street) &&
         matchesCountFilter(street.counters.total, streetFilters.total) &&
         matchesCountFilter(
-          street.counters.outstanding,
-          streetFilters.outstanding,
+          street.counters.notStarted,
+          streetFilters.notStarted,
         ) &&
         matchesCountFilter(
-          street.counters.alreadyBatched,
-          streetFilters.alreadyBatched,
+          street.counters.inProgress,
+          streetFilters.inProgress,
         ) &&
-        matchesCountFilter(
-          street.counters.discovered,
-          streetFilters.discovered,
-        ),
+        matchesCountFilter(street.counters.completed, streetFilters.completed) &&
+        matchesCountFilter(street.counters.batchable, streetFilters.batchable) &&
+        matchesCountFilter(street.counters.notBatchable, streetFilters.notBatchable),
     );
 
     return sortRows(rows, streetSort, getStreetSortValue);
@@ -626,18 +727,39 @@ export default function NonGpsStreetPlanning({
           />
         </div>
 
+        <SalesStatusSummary counters={townStatusCounters} />
+        <NonGpsBatchingSummary counters={townStatusCounters} />
+        {(searchText || Object.values(townFilters).some(Boolean)) && (
+          <button type="button" style={styles.backButton} onClick={() => {
+            setTownFilters({ ...EMPTY_TOWN_FILTERS }); setTownPage(1); onSearchTextChange?.("");
+          }}>Clear All Filters</button>
+        )}
+
+        <PaginationControls
+          currentPage={safeTownPage}
+          pageSize={townPageSize}
+          totalPages={townTotalPages}
+          totalRows={filteredTowns.length}
+          onPageChange={setTownPage}
+          onPageSizeChange={(value) => {
+            setTownPageSize(value);
+            setTownPage(1);
+          }}
+        />
+
         <div style={styles.tableWrap}>
           <table style={styles.table}>
             <TownHeader
               sortConfig={townSort}
               filters={townFilters}
+              townOptions={townOptions}
               onSort={(key) => updateSort(setTownSort, key)}
               onFilterChange={updateTownFilter}
             />
             <tbody>
               {pagedTowns.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={styles.emptyCell}>
+                  <td colSpan={8} style={styles.emptyCell}>
                     No Town / Area matches the current filters.
                   </td>
                 </tr>
@@ -655,9 +777,11 @@ export default function NonGpsStreetPlanning({
                     </td>
                     <CountCell value={town.streetCount} />
                     <CountCell value={town.counters.total} />
-                    <CountCell value={town.counters.outstanding} />
-                    <CountCell value={town.counters.alreadyBatched} />
-                    <CountCell value={town.counters.discovered} />
+                    <CountCell value={town.counters.notStarted} />
+                    <CountCell value={town.counters.inProgress} />
+                    <CountCell value={town.counters.completed} />
+                  <CountCell value={town.counters.batchable} />
+                  <CountCell value={town.counters.notBatchable} />
                   </tr>
                 ))
               )}
@@ -707,6 +831,29 @@ export default function NonGpsStreetPlanning({
         />
       </div>
 
+      <SalesStatusSummary
+        title={`Sales Meter Status — ${selectedTown.town || "Town / Area"}`}
+        counters={selectedTown.counters}
+      />
+      <NonGpsBatchingSummary counters={selectedTown.counters} />
+      {(searchText || Object.values(streetFilters).some(Boolean)) && (
+        <button type="button" style={styles.backButton} onClick={() => {
+          setStreetFilters({ ...EMPTY_STREET_FILTERS }); setStreetPage(1); onSearchTextChange?.("");
+        }}>Clear All Filters</button>
+      )}
+
+      <PaginationControls
+        currentPage={safeStreetPage}
+        pageSize={streetPageSize}
+        totalPages={streetTotalPages}
+        totalRows={filteredStreets.length}
+        onPageChange={setStreetPage}
+        onPageSizeChange={(value) => {
+          setStreetPageSize(value);
+          setStreetPage(1);
+        }}
+      />
+
       <div style={styles.tableWrap}>
         <table style={styles.table}>
           <StreetHeader
@@ -718,7 +865,7 @@ export default function NonGpsStreetPlanning({
           <tbody>
             {pagedStreets.length === 0 ? (
               <tr>
-                <td colSpan={6} style={styles.emptyCell}>
+                <td colSpan={8} style={styles.emptyCell}>
                   No street matches the current filters.
                 </td>
               </tr>
@@ -742,9 +889,11 @@ export default function NonGpsStreetPlanning({
                     </button>
                   </td>
                   <CountCell value={street.counters.total} />
-                  <CountCell value={street.counters.outstanding} />
-                  <CountCell value={street.counters.alreadyBatched} />
-                  <CountCell value={street.counters.discovered} />
+                  <CountCell value={street.counters.notStarted} />
+                  <CountCell value={street.counters.inProgress} />
+                  <CountCell value={street.counters.completed} />
+                  <CountCell value={street.counters.batchable} />
+                  <CountCell value={street.counters.notBatchable} />
                 </tr>
               ))
             )}

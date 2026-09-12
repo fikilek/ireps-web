@@ -306,6 +306,7 @@ function normalizeTbRefs(value = []) {
       };
     })
     .filter((item) => {
+      if (!item) return false;
       const key = `${item.id}::${item.rowId || ""}`;
 
       if (seen.has(key)) return false;
@@ -513,6 +514,13 @@ export function normalizeSalesRow(id, data = {}) {
     geofenceRefs: normalizeGeofenceRefs(
       data.geofenceRefs || data.GeoFenceRefs || [],
     ),
+    // Preserve absent/null/string distinctions without serializing malformed
+    // objects (for example a Timestamp) into apparently valid scalar IDs.
+    ...(Object.hasOwn(data, "targetedBatchId")
+      ? data.targetedBatchId === null || typeof data.targetedBatchId === "string"
+        ? { targetedBatchId: data.targetedBatchId }
+        : { targetedBatchIdInvalid: true }
+      : {}),
     tbRefs: normalizeTbRefs(rawTbRefs),
     tbRefsIntegrity: inspectSalesTbRefsIntegrity(rawTbRefs),
     trnBatchIds: uniqueNonBlank(
