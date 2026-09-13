@@ -9,19 +9,19 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "bbox.minLat",
-          "order": "ASCENDING"
-        },
-        {
           "fieldPath": "bbox.maxLat",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "bbox.minLng",
+          "fieldPath": "bbox.maxLng",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "bbox.maxLng",
+          "fieldPath": "bbox.minLat",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bbox.minLng",
           "order": "ASCENDING"
         }
       ]
