@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "tbId": "TGB_20260913_120000_AB12",
+  "stamp": { "seconds": 1789257600, "nanoseconds": 0 },
+  "actor": { "uid": "SUPERVISOR1", "user": "Test Supervisor", "role": "MNG" },
+  "profile": {
+    "displayName": "Test Supervisor",
+    "employment": { "role": "MNG" },
+    "access": { "activeWorkbase": { "id": "ZA5241" }, "workbases": [{ "id": "ZA5241" }] }
+  },
+  "scope": { "lmPcode": "ZA5241", "lmName": "Endumeni", "wardPcode": "ZA5241001", "wardNumber": "1", "wardName": "Ward 1" },
+  "sales": {
+    "master": { "id": "00123", "visibility": "INVISIBLE" },
+    "meterNo": "00123",
+    "meterNoNormalized": "00123",
+    "lmPcode": "ZA5241",
+    "provider": "conlog",
+    "town": "Dundee",
+    "adr": { "strNo": "01A", "strName": "Smith", "strType": "Street" },
+    "addressLine1": "01A Smith Street",
+    "accountNo": "DISPLAY-ONLY",
+    "customerName": "Test Customer",
+    "monthlyTotalsC": { "2026-07": 1000, "2026-08": 0 },
+    "monthlyUnits": { "2026-07": 10, "2026-08": 0 },
+    "totalAmountC": 1000,
+    "salesStatus": "NOT_STARTED",
+    "hasUsableGps": false,
+    "erfCandidates": [],
+    "tbRefs": [],
+    "monthlyCategories": { "2026-08": { "leakageCategory": "Test category", "riskTier": "Low", "riskScore": 1 } }
+  },
+  "ward": {
+    "pcode": "ZA5241001", "code": "1", "name": "Ward 1",
+    "parents": { "localMunicipalityId": "ZA5241" },
+    "geometry": { "type": "Polygon", "coordinates": [[[30,-29],[31,-29],[31,-28],[30,-28],[30,-29]]] }
+  },
+  "erf": {
+    "erfId": "ERF1", "sg": { "parcelNo": "123", "portion": 0 },
+    "admin": { "country": { "pcode": "ZA" }, "province": { "pcode": "ZA5" }, "districtMunicipality": { "pcode": "ZA524" }, "localMunicipality": { "pcode": "ZA5241", "name": "Endumeni" }, "ward": { "pcode": "ZA5241001", "name": "Ward 1" } },
+    "centroid": { "lat": -28.5, "lng": 30.5 },
+    "bbox": { "minLat": -28.6, "maxLat": -28.4, "minLng": 30.4, "maxLng": 30.6 },
+    "geometry": { "type": "Polygon", "coordinates": [[[30.4,-28.6],[30.6,-28.6],[30.6,-28.4],[30.4,-28.4],[30.4,-28.6]]] }
+  },
+  "fencePoints": [[30.3,-28.7],[30.7,-28.7],[30.7,-28.3],[30.3,-28.3]]
+}

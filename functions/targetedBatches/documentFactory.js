@@ -4,28 +4,12 @@ import {
   normalizeMeterNo,
   normalizeMonth,
   normalizeText,
-  normalizeUpper,
 } from "./helpers.js";
 
-function asNonNegativeInteger(value) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return 0;
-  return Math.max(0, Math.round(numberValue));
-}
 
-function asNonNegativeNumber(value) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return 0;
-  return Math.max(0, numberValue);
-}
 
-function normalizeMonthMap(value = {}, valueMapper = asNonNegativeInteger) {
-  return Object.entries(value || {}).reduce((result, [key, itemValue]) => {
-    const month = normalizeMonth(key);
-    if (month) result[month] = valueMapper(itemValue);
-    return result;
-  }, {});
-}
+
+
 
 function getFirstText(...values) {
   for (const value of values) {
@@ -61,8 +45,9 @@ export function buildTargetedBatchParentDoc({
   const totalRows = payload.expectedRows;
 
   return {
-    schemaVersion: "0.2.0",
+    schemaVersion: "0.3.0",
     id: payload.tbId,
+    geofenceId: payload.geofenceId,
     status: "READY_FOR_ALLOCATION",
     source: {
       type: payload.source.type,
@@ -79,7 +64,7 @@ export function buildTargetedBatchParentDoc({
     },
     creationGroup: {
       id: payload.creationGroupId,
-      batchCount: payload.creationGroupBatchCount,
+      batchCount: 1,
     },
     selection: {
       reason: payload.selection.reason,
@@ -94,13 +79,13 @@ export function buildTargetedBatchParentDoc({
       warnings: payload.validation.warnings,
     },
     creation: {
-      state: TARGETED_BATCH_CREATION_STATES.creating,
+      state: TARGETED_BATCH_CREATION_STATES.ready,
       fingerprint,
       expectedRows: totalRows,
-      createdRows: 0,
-      linkedSalesRecords: 0,
+      createdRows: totalRows,
+      linkedSalesRecords: totalRows,
       startedAt: creationDate,
-      completedAt: null,
+      completedAt: creationDate,
       failureCode: null,
       failureMessage: null,
     },
@@ -147,7 +132,7 @@ export function buildTargetedBatchParentDoc({
 
 export function buildTargetedBatchRowDoc({
   payload,
-  draftRow,
+  draftRow: _draftRow,
   salesSource,
   erfReference,
   salesAllMeterId,
@@ -157,32 +142,22 @@ export function buildTargetedBatchRowDoc({
   actorName,
 }) {
   const id = buildTbRowId(payload.tbId, rowNo);
-  const numberRaw = getFirstText(
-    salesSource?.meterNo,
-    salesSource?.MeterNumber,
-    draftRow?.meterNo,
-    salesAllMeterId,
-  );
-  const numberNormalized = normalizeMeterNo(
-    getFirstText(
-      salesSource?.meterNoNormalized,
-      salesSource?.meterNo,
-      salesSource?.MeterNumber,
-      draftRow?.meterNoNormalized,
-      salesAllMeterId,
-    ),
-  );
-  const masterVisibility = normalizeUpper(
-    salesSource?.master?.visibility ||
-      draftRow?.masterVisibility ||
-      draftRow?.master?.visibility,
-  );
-  const sourceLine = Number(
-    draftRow?.sourceRow || draftRow?.sourceLine || salesSource?.sourceRow || 0,
-  );
+  const numberRaw = getFirstText(salesSource.meterNo);
+  const numberNormalized = normalizeMeterNo(salesSource.meterNoNormalized);
+  const masterVisibility = salesSource.master?.visibility;
+  const sourceLine = salesSource.sourceRow;
+  const months = salesSource.monthlySalesC ?? salesSource.monthlyTotalsC;
+  if (!months || typeof months !== "object" || Array.isArray(months) || Object.entries(months).some(([month, value]) => !normalizeMonth(month) || !Number.isInteger(value) || value < 0)) throw new Error("Fresh Sales monthly totals are missing or invalid");
+  const monthKeys = Object.keys(months).sort().reverse();
+  const sumMonths = n => monthKeys.slice(0, n).reduce((total, month) => total + months[month], 0);
+  const lastPositiveSalesMonth = monthKeys.find(month => months[month] > 0) || null;
+  const ngp = payload.source.type === "PREPAID_SALES_NON_GPS";
+  const planningKey = value => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const townKey = ngp ? planningKey(salesSource.town) : null;
+  const streetKey = ngp ? `${townKey}::${planningKey(salesSource.adr?.strName)}` : null;
 
   return {
-    schemaVersion: "0.2.0",
+    schemaVersion: "0.3.0",
     id,
     tbId: payload.tbId,
     rowNo,
@@ -192,11 +167,7 @@ export function buildTargetedBatchRowDoc({
       recordId: salesAllMeterId,
       sourceLine:
         Number.isInteger(sourceLine) && sourceLine > 0 ? sourceLine : null,
-      fileName: getFirstNullableText(
-        draftRow?.sourceFileName,
-        salesSource?.sourceFileName,
-        payload.source.fileName,
-      ),
+      fileName: getFirstNullableText(salesSource.sourceFileName),
     },
     scope: {
       lmPcode: payload.scope.lmPcode,
@@ -217,37 +188,19 @@ export function buildTargetedBatchRowDoc({
         : null,
     },
     customer: {
-      accountNumber: getFirstText(
-        draftRow?.accountNumber,
-        draftRow?.accountNo,
-        salesSource?.accountNumber,
-        salesSource?.AccountNumber,
-        salesSource?.accountNo,
-      ),
-      customerName: getFirstText(
-        draftRow?.customerName,
-        salesSource?.customerName,
-        salesSource?.Customer,
-        salesSource?.Surname,
-      ),
+      accountNumber: getFirstText(salesSource.accountNo, salesSource.accountNumber),
+      customerName: getFirstText(salesSource.customerName, salesSource.customerSurname),
     },
     property: {
       erfNo: getFirstNullableText(erfReference?.erfNo),
     },
     location: {
       erfNo: getFirstNullableText(erfReference?.erfNo),
-      addressLine1: getFirstText(
-        draftRow?.addressLine1,
-        salesSource?.addressLine1,
-        salesSource?.AddressLine1,
-        salesSource?.PostalAddress1,
-      ),
-      town: getFirstText(
-        draftRow?.town,
-        salesSource?.town,
-        salesSource?.Town,
-        salesSource?.PostalAddressTown,
-      ),
+      addressLine1: getFirstText(salesSource.addressLine1),
+      town: getFirstText(salesSource.town),
+      strNo: getFirstText(salesSource.adr?.strNo),
+      strName: getFirstText(salesSource.adr?.strName),
+      strType: getFirstText(salesSource.adr?.strType),
       sgCode: getFirstText(salesSource?.sgCode),
       wardNumberLabel: getFirstText(
         payload.scope.wardName,
@@ -263,48 +216,19 @@ export function buildTargetedBatchRowDoc({
     selection: {
       actionReason: payload.selection.reason,
       planningMode: payload.selection.planningMode || "WARD_ERF",
-      townKey: getFirstNullableText(draftRow?.planning?.townKey),
-      streetKey: getFirstNullableText(draftRow?.planning?.streetKey),
+      townKey,
+      streetKey,
     },
     salesSnapshot: {
-      totalSalesC: asNonNegativeInteger(
-        draftRow?.totalSalesC ??
-          draftRow?.totalAmountC ??
-          salesSource?.totalSalesC ??
-          salesSource?.totalAmountC,
-      ),
-      latestMonthSalesC: asNonNegativeInteger(
-        draftRow?.latestMonthSalesC ?? salesSource?.latestMonthSalesC,
-      ),
-      sales3MonthsC: asNonNegativeInteger(
-        draftRow?.sales3MonthsC ?? salesSource?.sales3MonthsC,
-      ),
-      sales6MonthsC: asNonNegativeInteger(
-        draftRow?.sales6MonthsC ?? salesSource?.sales6MonthsC,
-      ),
-      sales12MonthsC: asNonNegativeInteger(
-        draftRow?.sales12MonthsC ??
-          draftRow?.latest12MonthsSalesC ??
-          salesSource?.sales12MonthsC ??
-          salesSource?.latest12MonthsSalesC,
-      ),
-      monthsWithoutSales: asNonNegativeInteger(
-        draftRow?.monthsWithoutSales ?? salesSource?.monthsWithoutSales,
-      ),
-      lastPositiveSalesMonth: normalizeMonth(
-        draftRow?.lastPositiveSalesMonth || salesSource?.lastPositiveSalesMonth,
-      ),
-      monthlySalesC: normalizeMonthMap(
-        draftRow?.monthlySalesC ||
-          draftRow?.monthlyTotalsC ||
-          salesSource?.monthlySalesC ||
-          salesSource?.monthlyTotalsC,
-        asNonNegativeInteger,
-      ),
-      monthlyUnits: normalizeMonthMap(
-        draftRow?.monthlyUnits || salesSource?.monthlyUnits,
-        asNonNegativeNumber,
-      ),
+      totalSalesC: sumMonths(monthKeys.length),
+      latestMonthSalesC: sumMonths(1),
+      sales3MonthsC: sumMonths(3),
+      sales6MonthsC: sumMonths(6),
+      sales12MonthsC: sumMonths(12),
+      monthsWithoutSales: lastPositiveSalesMonth ? monthKeys.indexOf(lastPositiveSalesMonth) : monthKeys.length,
+      lastPositiveSalesMonth,
+      monthlySalesC: { ...months },
+      monthlyUnits: strictMonthlyUnits(salesSource.monthlyUnits),
     },
     allocation: {
       allocatable: true,
@@ -324,8 +248,8 @@ export function buildTargetedBatchRowDoc({
     },
     refs: {
       erfId: getFirstNullableText(erfReference?.erfId),
-      premiseId: getFirstNullableText(draftRow?.premiseId),
-      meterId: getFirstNullableText(draftRow?.astId, draftRow?.meterId),
+      premiseId: null,
+      meterId: null,
       trnId: null,
     },
     metadata: buildMetadata({ creationDate, actorUid, actorName }),
@@ -387,4 +311,9 @@ export function buildCreationFailurePatch({
     "metadata.updatedByUid": actorUid,
     "metadata.updatedByUser": actorName,
   };
+}
+
+function strictMonthlyUnits(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.entries(value).some(([month, units]) => !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || typeof units !== "number" || !Number.isFinite(units) || units < 0)) throw new Error("Sales monthly units are invalid");
+  return { ...value };
 }
