@@ -1,9 +1,14 @@
 const actionButton = { minHeight: "2.5rem", fontFamily: "inherit", fontSize: "0.875rem", lineHeight: 1.25 };
+// One highlight for a draft meter: the ring on its map icon and the bar on its row's left edge (rules TB-R040).
+export const DRAFT_HIGHLIGHT_COLOR = "#facc15";
+export const DRAFT_HIGHLIGHT_WIDTH = 5;
 export const draftReviewStyles = {
   twoPane: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 440px), 1fr))", gap: "1rem", alignItems: "start", padding: "1rem" },
   pane: { minWidth: 0 },
   draftTable: { width: "100%", minWidth: 650, borderCollapse: "separate", borderSpacing: 0, fontSize: "0.8rem" },
   inlineReason: { display: "block", marginTop: 6, color: "#92400e" },
+  // Meter Number is the TB Draft list's one approved fixed column (rules 18.3).
+  fixedFirstColumn: { position: "sticky", left: 0, zIndex: 1 },
   panel: {
     background: "#ffffff",
     border: "1px solid rgba(148, 163, 184, 0.28)",

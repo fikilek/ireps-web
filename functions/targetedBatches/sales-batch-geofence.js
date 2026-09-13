@@ -71,7 +71,7 @@ export async function assessSalesBatch({ db, request, codec }) {
     const fingerprint = materialHash(material);
     const confirmationProof = codec.sign({ kind: "CONFIRMATION", ...proofScope({ db, actor, intent }), fingerprint, material });
     // No coordinates, raw Sales or signed geocode envelopes enter permanent documents.
-    return { success: true, tbId: intent.tbId, fingerprint, confirmationProof, expiresAt: Math.min(codec.verify(confirmationProof).expiresAt, ...assessment.rows.filter(row => row.ready && row.expiresAt).map(row => row.expiresAt)), includedIds: assessment.includedIds, rows: assessment.rows.map(({ evidence: _evidence, ...row }) => row), leftOut: assessment.leftOut, scope: assessment.contexts.get(assessment.includedIds[0]).scope, materialIdentity: canonicalJson(material) };
+    return { success: true, tbId: intent.tbId, fingerprint, confirmationProof, includedIds: assessment.includedIds, rows: assessment.rows.map(({ evidence: _evidence, ...row }) => row), leftOut: assessment.leftOut, scope: assessment.contexts.get(assessment.includedIds[0]).scope, materialIdentity: canonicalJson(material) };
   });
 }
 export const assessSalesTargetedBatchCallable = onCall({ secrets: [salesBatchProofKey], timeoutSeconds: 180, memory: "1GiB" }, async request => {

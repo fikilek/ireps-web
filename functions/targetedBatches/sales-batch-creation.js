@@ -23,7 +23,7 @@ export function creationPayload(intent, scope, count, geofenceId) {
 export async function createSalesBatch({ db, request, codec, now = () => Timestamp.now() }) {
   const intent = requireBatchIntent(request.data);
   const expected = { kind: "CONFIRMATION", project: db.projectId, actorUid: request.auth?.uid, tbId: intent.tbId, lmPcode: intent.lmPcode, source: intent.source };
-  const confirmed = codec.verify(intent.confirmationProof, expected, { allowExpired: true });
+  const confirmed = codec.verify(intent.confirmationProof, expected);
   if (materialHash(confirmed.material) !== confirmed.fingerprint || intent.geofenceId !== confirmed.material.geofenceId || intent.fingerprint !== confirmed.fingerprint || canonicalJson(intent.includedIds) !== canonicalJson(confirmed.material.includedIds) || canonicalJson(intent.salesIds) !== canonicalJson(confirmed.material.retainedIds) || intent.reason !== confirmed.material.reason || (intent.salesPeriodFrom ?? null) !== confirmed.material.salesPeriodFrom || (intent.salesPeriodTo ?? null) !== confirmed.material.salesPeriodTo) throw batchError("CONFIRMATION_INTENT_CHANGED", "The request differs from the exact confirmed meter list or intent");
   return db.runTransaction(async tx => {
     const read = snapshotReader(tx), actor = await readBatchActor({ db, request, lmPcode: intent.lmPcode, read });

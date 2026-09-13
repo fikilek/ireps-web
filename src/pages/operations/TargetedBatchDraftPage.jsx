@@ -34,8 +34,6 @@ function SalesDraftSession({ draft }) {
   const [assess, assessState] = useAssessSalesTargetedBatchMutation(), [create, createState] = useCreateSalesTargetedBatchMutation();
   const [feedback, setFeedback] = useState(""), [recheck, setRecheck] = useState(0), [resolvedSignature, setResolvedSignature] = useState("");
   const [resolutionFailure, setResolutionFailure] = useState(null);
-  const [tick, setTick] = useState(() => Date.now());
-  useEffect(() => { const timer = setInterval(() => setTick(Date.now()), 5000); return () => clearInterval(timer); }, []);
   const ids = JSON.stringify(draft.retainedIds), resolved = Object.values(draft.resolutions);
   const erfIds = [...new Set(resolved.map(row => row.erfId).filter(Boolean))].sort();
   const wardIds = [...new Set(resolved.map(row => row.scope?.wardPcode).filter(Boolean))].sort();
@@ -74,11 +72,11 @@ function SalesDraftSession({ draft }) {
   const geometry = useMemo(() => draftGeometry(drawing.points, draft.savedFence), [drawing.points, draft.savedFence]);
   const currentResolutionFailure = resolutionFailure?.key === JSON.stringify([signature, ids, recheck]) ? resolutionFailure : null;
   const model = useMemo(() => projectSalesDraft(draft, live, { geometry, resolutionsCurrent: signature === resolvedSignature,
-    resolving: resolveState.isLoading, resolutionFailure: currentResolutionFailure, now: tick }),
-  [draft, live, geometry, signature, resolvedSignature, resolveState.isLoading, currentResolutionFailure, tick]);
+    resolving: resolveState.isLoading, resolutionFailure: currentResolutionFailure }),
+  [draft, live, geometry, signature, resolvedSignature, resolveState.isLoading, currentResolutionFailure]);
   const identity = confirmationIdentity(draft, live);
   const confirmation = draft.confirmation;
-  const stale = !live?.ready || resolveState.isLoading || Boolean(currentResolutionFailure) || confirmation?.identity !== identity || tick > (confirmation?.expiresAt || 0);
+  const stale = !live?.ready || resolveState.isLoading || Boolean(currentResolutionFailure) || confirmation?.identity !== identity;
   const busy = resolveState.isLoading || saveState.isLoading || assessState.isLoading || createState.isLoading;
 
   async function saveFence(payload) {
@@ -95,7 +93,7 @@ function SalesDraftSession({ draft }) {
       const result = await assess(input).unwrap();
       if (!mounted.current) return;
       if (confirmationIdentity(latest.current.draft, latest.current.live) !== capturedIdentity) { setFeedback("Draft data changed during assessment. Select Create again."); return; }
-      dispatch(setSalesDraftConfirmation({ tbId: draft.id, confirmation: { ...result, identity: capturedIdentity, expiresAt: result.expiresAt, input: { ...input, confirmationProof: result.confirmationProof, fingerprint: result.fingerprint, includedIds: result.includedIds } } }));
+      dispatch(setSalesDraftConfirmation({ tbId: draft.id, confirmation: { ...result, identity: capturedIdentity, input: { ...input, confirmationProof: result.confirmationProof, fingerprint: result.fingerprint, includedIds: result.includedIds } } }));
     } catch (error) { if (!mounted.current) return; setFeedback(error.error || "The current draft is not ready for confirmation."); }
   }
   async function commitConfirmed(input) {

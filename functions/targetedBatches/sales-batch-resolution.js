@@ -9,7 +9,6 @@ import { isSubcontractorServiceProvider } from "./helpers.js";
 
 export const salesBatchProofKey = defineSecret("SALES_TARGETED_BATCH_PROOF_KEY");
 export const MAX_ERF_CANDIDATES = 200;
-export const PROOF_TTL_MS = 15 * 60 * 1000;
 export function batchError(code, message) { const error = new Error(message); error.code = code; return error; }
 export function canonicalJson(value) {
   const normalize = item => {
@@ -21,14 +20,17 @@ export function canonicalJson(value) {
   return JSON.stringify(normalize(value));
 }
 export const materialHash = value => crypto.createHash("sha256").update(canonicalJson(value)).digest("hex").toUpperCase();
-export function createProofCodec(key, now = () => Date.now()) {
+// Evidence has no time limit (rules 18.4, 1.3.6). It is refused only when what it binds
+// really changed: the actor and draft scope here, and the Sales record, ERF and Ward
+// hashes where it is used.
+export function createProofCodec(key) {
   if (typeof key !== "string" || key.length < 32) throw batchError("PROOF_CONFIGURATION_REQUIRED", "The Targeted Batch proof key must be configured");
   return {
     sign(data) {
-      const encoded = Buffer.from(canonicalJson({ ...data, expiresAt: now() + PROOF_TTL_MS })).toString("base64url");
+      const encoded = Buffer.from(canonicalJson(data)).toString("base64url");
       return `${encoded}.${crypto.createHmac("sha256", key).update(encoded).digest("base64url")}`;
     },
-    verify(token, expected = {}, { allowExpired = false } = {}) {
+    verify(token, expected = {}) {
       if (typeof token !== "string" || token.length > 200000) throw batchError("INVALID_PROOF", "Resolution or confirmation evidence is missing");
       const parts = token.split(".");
       if (parts.length !== 2) throw batchError("INVALID_PROOF", "Invalid evidence");
@@ -37,7 +39,6 @@ export function createProofCodec(key, now = () => Date.now()) {
       if (signature.length !== actual.length || !crypto.timingSafeEqual(signature, actual)) throw batchError("INVALID_PROOF", "Evidence signature is invalid");
       let data;
       try { data = JSON.parse(Buffer.from(parts[0], "base64url").toString()); } catch { throw batchError("INVALID_PROOF", "Invalid evidence"); }
-      if (!Number.isFinite(data.expiresAt) || (!allowExpired && data.expiresAt <= now())) throw batchError("PROOF_EXPIRED", "Resolution expired; reassessing the retained draft is required");
       for (const [name, value] of Object.entries(expected)) if (data[name] !== value) throw batchError("PROOF_SCOPE_MISMATCH", "Evidence belongs to another actor, scope or proposal");
       return data;
     },
@@ -175,7 +176,7 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
       const context = await readErfContext({ db, erfId, lmPcode: intent.lmPcode });
       if (!nonblank(salesStreetAddress(sales)) || !nonblank(sales.town)) throw batchError("ROW_ADDRESS_INCOMPLETE", "The draft address is incomplete");
       const proof = codec.sign({ kind: "RESOLUTION", ...proofScope({ db, actor, intent }), salesId, salesHash: materialHash(sales), erfId, geometryHash: context.geometryHash, wardHash: context.wardHash, point, evidence });
-      rows.push({ salesId, meterNo: sales.meterNo, address: composeSalesGeocodingAddress(sales), ready: true, code: "RESOLVED", reason: "Coordinates and ERF resolved", erfId, point, pointSource: saved.established || evidence ? "GEOCODED" : "PIPELINE", scope: context.scope, centroid: context.centroid, expiresAt: codec.verify(proof).expiresAt, proof });
+      rows.push({ salesId, meterNo: sales.meterNo, address: composeSalesGeocodingAddress(sales), ready: true, code: "RESOLVED", reason: "Coordinates and ERF resolved", erfId, point, pointSource: saved.established || evidence ? "GEOCODED" : "PIPELINE", scope: context.scope, centroid: context.centroid, proof });
     } catch (error) {
       rows.push({ salesId, meterNo: sales?.meterNo || salesId, address: sales ? composeSalesGeocodingAddress(sales) : "", ready: false, code: error.code || "RESOLUTION_INCOMPLETE", reason: error.code ? error.message : "Resolution is incomplete", point: null, erfId: null, ...known, proof: null });
     }
@@ -212,7 +213,7 @@ export async function readDraftAssessment({ db, intent, codec, actor, read = sna
         if (!erfId) throw batchError(policy.batchable ? "RESOLUTION_REQUIRED" : policy.code, policy.batchable ? "Coordinates and ERF must be resolved" : policy.reason);
         const context = await readErfContext({ db, erfId, lmPcode: intent.lmPcode, read }); contexts.set(salesId, context);
         material.push([salesId, "ERF", materialHash(context.erf), "WARD", materialHash(context.ward)]);
-        row = { ...row, erfId, point, scope: context.scope, centroid: context.centroid, evidence, expiresAt: proof?.expiresAt ?? null };
+        row = { ...row, erfId, point, scope: context.scope, centroid: context.centroid, evidence };
         if (proofError) throw proofError;
         if (!policy.batchable) throw batchError(policy.code, policy.reason);
         if (!proof && !saved.established && intent.source !== "PREPAID_SALES") throw batchError("RESOLUTION_REQUIRED", "Verified geocoding evidence is required");

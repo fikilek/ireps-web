@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { acceptGoogleGeocode, geocodeSalesAddress } from "../targetedBatches/sales-batch-geocoding.js";
 import { createProofCodec, findContainingErf, recordFailedLookup } from "../targetedBatches/sales-batch-resolution.js";
 import { composeSalesGeocodingAddress } from "../salesAllMeters/sales-batch-policy.js";
@@ -21,11 +22,17 @@ test("provider failures expose no raw error or key, with bounded attempts",async
   const result=await geocodeSalesAddress({sales:sales(),apiKey:"mock-private-value",fetchImpl:async()=>{calls++;throw new Error("mock-private-value");}});
   assert.equal(calls,2);assert.equal(result.code,"GEOCODING_UNAVAILABLE");assert.equal(JSON.stringify(result).includes("mock-private-value"),false);
 });
-test("signed evidence binds identity, refuses forgery and expiry, permits identified completed retry",()=>{
-  let clock=0;const codec=createProofCodec("a".repeat(32),()=>clock);const token=codec.sign({kind:"RESOLUTION",actorUid:"A",salesId:"00123"});
+test("signed evidence binds identity, refuses forgery, and has no time limit (rules 18.4)",()=>{
+  const codec=createProofCodec("a".repeat(32));const token=codec.sign({kind:"RESOLUTION",actorUid:"A",salesId:"00123"});
   assert.equal(codec.verify(token,{actorUid:"A"}).salesId,"00123");
   assert.throws(()=>codec.verify(token,{actorUid:"B"}));assert.throws(()=>codec.verify(token+"bad"));
-  clock=1e9;assert.throws(()=>codec.verify(token));assert.equal(codec.verify(token,{}, {allowExpired:true}).salesId,"00123");
+  assert.equal("expiresAt" in codec.verify(token),false);
+  const realNow=Date.now;Date.now=()=>realNow()+365*24*60*60*1000;
+  try{assert.equal(codec.verify(token,{actorUid:"A"}).salesId,"00123");}finally{Date.now=realNow;}
+  // A note signed before 1.3.6 still carries an old expiresAt; it is no longer refused for it.
+  const legacyBody=Buffer.from(JSON.stringify({actorUid:"A",expiresAt:1,kind:"RESOLUTION",salesId:"00123"})).toString("base64url");
+  const legacy=`${legacyBody}.${crypto.createHmac("sha256","a".repeat(32)).update(legacyBody).digest("base64url")}`;
+  assert.equal(codec.verify(legacy,{actorUid:"A"}).salesId,"00123");
 });
 test("overlapping ERFs are a completed MULTIPLE_ERFS outcome, capped or failed queries are incomplete",async()=>{
   const geometry={type:"Polygon",coordinates:[[[0,0],[10,0],[10,10],[0,10],[0,0]]]};

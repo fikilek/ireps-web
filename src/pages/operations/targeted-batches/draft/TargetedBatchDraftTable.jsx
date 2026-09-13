@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useMemo, useState } from "react";
 import TargetedBatchDraftFilters from "./TargetedBatchDraftFilters";
-import { draftReviewStyles as styles, draftButtonStyle } from "./targetedBatchDraftReviewStyles";
+import { draftReviewStyles as styles, draftButtonStyle, DRAFT_HIGHLIGHT_COLOR, DRAFT_HIGHLIGHT_WIDTH } from "./targetedBatchDraftReviewStyles";
 const columns = [ { key: "meterNo", label: "Meter Number" }, { key: "address", label: "Address" }, { key: "coordinates", label: "GPS Coordinates" }, { key: "erfId", label: "ERF ID" } ];
 export default function TargetedBatchDraftTable({ rows = [], onRemove, disabled = false, topActions, highlightedId, onHighlight }) {
   const [filters, setFilters] = useState({}), [sort, setSort] = useState({ key: "meterNo", direction: 1 });
@@ -25,11 +25,11 @@ export default function TargetedBatchDraftTable({ rows = [], onRemove, disabled 
     </div>
   </div>;
   return <div style={styles.pane}>{controls(true)}<div style={styles.tableWrap}>
-    <table style={styles.draftTable}><thead><tr>{columns.map(column => <th key={column.key} scope="col" style={styles.headerCell} aria-sort={sort.key === column.key ? sort.direction === 1 ? "ascending" : "descending" : "none"}>
+    <table style={styles.draftTable}><thead><tr>{columns.map((column, index) => <th key={column.key} scope="col" style={index === 0 ? { ...styles.headerCell, left: 0, zIndex: 3 } : styles.headerCell} aria-sort={sort.key === column.key ? sort.direction === 1 ? "ascending" : "descending" : "none"}>
       <button type="button" style={draftButtonStyle()} onClick={() => setSort({ key: column.key, direction: sort.key === column.key ? -sort.direction : 1 })}>{column.label} {sort.key === column.key ? sort.direction === 1 ? "↑" : "↓" : "↕"}</button>
     </th>)}</tr><TargetedBatchDraftFilters columns={columns} filters={filters} onChange={(key,value) => { setFilters(current => ({...current,[key]:value})); setPage(1); }}/></thead>
-    <tbody>{shown.map(row => <tr key={row.salesId} data-sales-id={row.salesId} onMouseEnter={() => onHighlight?.(row.salesId)} onMouseLeave={() => onHighlight?.(null)} style={{ background: highlightedId === row.salesId ? "#dbeafe" : undefined, outline: highlightedId === row.salesId ? "2px solid #2563eb" : undefined }}>
-      <td style={styles.bodyCell}><strong>{row.meterNo}</strong><br/><button type="button" style={draftButtonStyle(disabled)} disabled={disabled} onClick={() => onRemove(row.salesId)} aria-label={`Remove meter ${row.meterNo}`}>Remove</button>
+    <tbody>{shown.map(row => <tr key={row.salesId} data-sales-id={row.salesId} onMouseEnter={() => onHighlight?.(row.salesId)} onMouseLeave={() => onHighlight?.(null)}>
+      <td style={{ ...styles.bodyCell, ...styles.fixedFirstColumn, boxShadow: highlightedId === row.salesId ? `inset ${DRAFT_HIGHLIGHT_WIDTH}px 0 0 ${DRAFT_HIGHLIGHT_COLOR}` : undefined }}><strong>{row.meterNo}</strong><br/><button type="button" style={draftButtonStyle(disabled)} disabled={disabled} onClick={() => onRemove(row.salesId)} aria-label={`Remove meter ${row.meterNo}`}>Remove</button>
         {!row.ready && <span style={styles.inlineReason}>{row.reason}</span>}</td>
       <td style={styles.bodyCell}>{row.address || "Unavailable"}{row.scope && <small style={styles.inlineReason}>{row.scope.wardName} · {row.scope.wardPcode}</small>}</td>
       <td style={styles.bodyCell}>{row.coordinates || "Unavailable"}{row.pointSource === "GEOCODED" && <small style={styles.inlineReason}>Position from address</small>}</td>

@@ -33,7 +33,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const standardDraftName = composeGeofenceName(draftWardNumber, geofenceNamePart(draftName));
   const draftPoints = drawing.points, draftPolygonReady = draftPoints.length >= 3, canSaveDraft = Boolean(standardDraftName && model.canSave && !busy);
   const createState = { isLoading: saving };
-  // The draft model is rebuilt every few seconds (evidence expiry). Key the map inputs on
+  // The draft model is rebuilt whenever any draft data changes. Key the map inputs on
   // what the map actually shows, so markers and labels are not redrawn needlessly.
   const meterKey = JSON.stringify(model.rows.map(row => mapPoint(row.point)).filter(Boolean));
   const meterPoints = useMemo(() => JSON.parse(meterKey), [meterKey]);

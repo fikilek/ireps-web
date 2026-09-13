@@ -26,7 +26,7 @@ export default function TargetedBatchConfirmModal({ draft, confirmation, isCreat
       <ul>{included.map(row => <li key={row.salesId}>{row.meterNo} · {row.address} · {row.erfId}</li>)}</ul>
       <h3>Left out ({leftOut.length})</h3><ul>{leftOut.map(row => <li key={row.salesId}>{row.meterNo} · {salesDraftMessage(row.reason)}</li>)}</ul>
       <p>OK creates this single batch with exactly the included meters.</p>
-      {stale && <p role="alert">Draft data changed or evidence expired. Cancel and select Create again to review the current list.</p>}
+      {stale && <p role="alert">Draft data changed. Cancel and select Create again to review the current list.</p>}
       <button ref={cancel} type="button" style={draftButtonStyle(isCreating)} disabled={isCreating} onClick={onCancel}>Cancel</button>
       <button type="button" style={draftButtonStyle(isCreating || stale || included.length === 0, true)} disabled={isCreating || stale || included.length === 0} onClick={onConfirm}>{isCreating ? <BusySpinner label="Creating…" size={14} inverse asStatus={false}/> : "OK"}</button>
     </div></div></div>;

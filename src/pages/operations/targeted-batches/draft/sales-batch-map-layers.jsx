@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useMap } from "@vis.gl/react-google-maps";
 import { mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
+import { DRAFT_HIGHLIGHT_COLOR, DRAFT_HIGHLIGHT_WIDTH } from "./targetedBatchDraftReviewStyles.js";
 
 export default function SalesBatchMapLayers({ rows, highlightedId, onHighlight }) {
   const map = useMap(), markers = useRef(new Map());
@@ -15,7 +16,7 @@ export default function SalesBatchMapLayers({ rows, highlightedId, onHighlight }
     const listener = map.addListener("idle", () => { if (map.getZoom() > 19) map.setZoom(19); listener.remove(); });
     return () => listener.remove();
   }, [map, cameraKey]);
-  // Draft rows are rebuilt every few seconds (evidence expiry). Redraw the markers only
+  // Draft rows are rebuilt whenever any draft data changes. Redraw the markers only
   // when something they show changes, not on every rebuild (rules 18.7, 1.3.4).
   const markerKey = JSON.stringify(rows.flatMap(row => {
     const point = mapPoint(row.point);
@@ -36,7 +37,7 @@ export default function SalesBatchMapLayers({ rows, highlightedId, onHighlight }
     return () => { listeners.forEach(listener => listener.remove()); currentMarkers.forEach(({ marker }) => marker.setMap(null)); currentMarkers.clear(); };
   }, [map, markerKey, onHighlight]);
   useEffect(() => {
-    markers.current.forEach(({ marker, icon }, id) => { const selected = id === highlightedId; marker.setIcon(selected ? { ...icon, scale: 19, strokeColor: "#facc15", strokeWeight: 5 } : icon); marker.setZIndex(selected ? 1000 : 200); });
+    markers.current.forEach(({ marker, icon }, id) => { const selected = id === highlightedId; marker.setIcon(selected ? { ...icon, scale: 19, strokeColor: DRAFT_HIGHLIGHT_COLOR, strokeWeight: DRAFT_HIGHLIGHT_WIDTH } : icon); marker.setZIndex(selected ? 1000 : 200); });
   }, [highlightedId, markerKey]);
   return null;
 }

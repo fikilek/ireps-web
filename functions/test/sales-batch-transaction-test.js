@@ -22,11 +22,10 @@ const f=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json
 // Production geometry is JSON text: Firestore cannot store nested arrays.
 f.erf.geometry=JSON.stringify(f.erf.geometry);
 f.ward.geometry=JSON.stringify(f.ward.geometry);
-let clock=Date.now();const codec=createProofCodec("test-only-proof-key-not-a-real-secret",()=>clock);
+const codec=createProofCodec("test-only-proof-key-not-a-real-secret");
 const request=data=>({auth:{uid:f.actor.uid,token:{}},data});
 const geocode=async()=>({ok:true,point:{latitude:-28.5,longitude:30.5},provider:"Google Geocoding API"});
 beforeEach(async()=>{
-  clock=Date.now();
   const response=await fetch(`http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`,{method:"DELETE"});assert.equal(response.ok,true);
   await Promise.all([db.doc(`users/${f.actor.uid}`).set(f.profile),db.doc("ireps_erfs/ERF1").set(f.erf),db.doc("wards/ZA5241001").set(f.ward)]);
 });
@@ -63,7 +62,7 @@ for(const source of ["PREPAID_SALES","PREPAID_SALES_NON_GPS"])for(const n of [1,
   assert.equal((await db.doc(`sales-all-meters/${id}/batchHistory/${f.tbId}__BATCHED`).get()).exists,true);
  }
  const again=await createSalesBatch({db,request:request(intent),codec});assert.equal(again.reused,true);
- clock+=10000000;assert.equal((await createSalesBatch({db,request:request(intent),codec})).reused,true);
+ assert.equal((await createSalesBatch({db,request:request(intent),codec})).reused,true);
 });
 test("competing creators reread the same Sales: exactly one complete batch wins",async()=>{
  const ids=await seed();const first=await prepare(ids),second=await prepare(ids,{tbId:"TGB_20260913_120001_AB12"});
@@ -239,7 +238,7 @@ test("concurrent identical fence requests produce exactly one ordinary auto ID",
  const fence=docs.docs[0].data();assert.match(fence.id,/^[A-Za-z0-9]{20}$/);assert.equal(fence.name,"Gf W1 Test named fence");assert.equal(fence.description,"Owner description");assert.equal(fence.status,"ACTIVE");
  assert.deepEqual(Object.keys(fence.targetedBatch).sort(),["fingerprint","geometryHash","linkState","salesIds","tbId"]);
  assert.equal(fence.purpose,undefined);assert.equal(fence.proposedTbId,undefined);
- clock+=10000000;assert.equal((await saveFence({db,request:request({...intent,points:f.fencePoints}),codec})).reused,true);
+ assert.equal((await saveFence({db,request:request({...intent,points:f.fencePoints}),codec})).reused,true);
 });
 test("different simultaneous fence intents cannot reserve two geofences for one tbId",async()=>{
  const ids=await seed(2),intent=await resolveIntent(ids);

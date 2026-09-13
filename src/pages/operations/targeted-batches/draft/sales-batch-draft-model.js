@@ -54,7 +54,9 @@ export function salesDraftReturnPath(source) {
 }
 
 // Missing or ineligible rows remain visible until the operator explicitly removes them.
-export function projectSalesDraft(draft, live, { geometry = null, resolutionsCurrent = true, resolving = false, resolutionFailure = null, now = Date.now() } = {}) {
+// A located meter has no time limit (rules 18.4); it goes back to "Not located yet" only
+// when its Sales record, ERF or Ward really changes.
+export function projectSalesDraft(draft, live, { geometry = null, resolutionsCurrent = true, resolving = false, resolutionFailure = null } = {}) {
   const validFence = draft.savedFence?.status === "ACTIVE" && draft.savedFence?.targetedBatch?.tbId === draft.id;
   const oldFence = draft.savedFence?.status === "BATCH_ONLY";
   const rows = draft.retainedIds.map(salesId => {
@@ -70,7 +72,6 @@ export function projectSalesDraft(draft, live, { geometry = null, resolutionsCur
     if (resolutionFailure) return { ...row, ...resolutionFailure };
     if (!resolutionsCurrent) return { ...row, code: "RESOLUTION_REQUIRED", reason: "Not located yet. Press Locate meters again." };
     if (!resolved?.ready || !row.point || !row.erfId) return { ...row, reason: resolved?.reason || "Locating meters…" };
-    if (!Number.isFinite(resolved.expiresAt) || now >= resolved.expiresAt) return { ...row, reason: "Location check expired. Press Locate meters again." };
     const erf = live.erfs[row.erfId], ward = live.wards[row.scope?.wardPcode];
     if (!erf || !ward) return { ...row, reason: "ERF or Ward data is unavailable" };
     if (validFence && !draft.savedFence.targetedBatch.salesIds.includes(salesId)) return { ...row, reason: "Outside the saved population; start a new draft to include this meter" };
