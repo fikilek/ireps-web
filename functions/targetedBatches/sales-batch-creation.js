@@ -74,7 +74,8 @@ export async function createSalesBatch({ db, request, codec, now = () => Timesta
     // All authoritative reads and checks complete before the first write. 3N+2 writes.
     tx.create(parentRef, parent);
     for (const write of writes) { tx.create(write.rowRef, write.rowDoc); tx.create(write.historyRef, write.history); tx.update(write.salesRef, write.patch); }
-    tx.update(fenceRef, { "targetedBatch.linkState": "LINKED", "metadata.updatedAt": at, "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.user });
+    // Geofence metadata keeps the ordinary geofence convention (ISO strings), unlike Sales/TB metadata.
+    tx.update(fenceRef, { "targetedBatch.linkState": "LINKED", "metadata.updatedAt": at.toDate().toISOString(), "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.user });
     return { success: true, code: "TARGETED_BATCH_CREATED", creationState: "READY", tbId: intent.tbId, rowCount: included.length, reused: false };
   });
 }
