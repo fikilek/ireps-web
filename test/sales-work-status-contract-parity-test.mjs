@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {execFileSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
-import {classifySalesWorkStatus,resolveSalesTargetedBatchMembership,inspectSalesTbRefsIntegrity} from "../functions/salesAllMeters/sales-batch-policy.js";
+import {classifySalesWorkStatus,resolveSalesTargetedBatchMembership,inspectSalesTbRefsIntegrity,composeSalesGeocodingAddress,inspectErfLookup} from "../functions/salesAllMeters/sales-batch-policy.js";
 import {classifyNonGpsSalesRow} from "../src/pages/sales/models/nonGpsBatchPlanningModel.js";
 const corpus=JSON.parse(fs.readFileSync(new URL("../scripts/tools/sales-work-status-audit/fixtures/classifier_parity.json",import.meta.url),"utf8"));
 test("A23 JS/Python share all statuses, membership and integrity without mutation",()=>{
@@ -25,4 +25,17 @@ test("Sales projection module has no persistence or Mobile dependency",()=>{
  const source=fs.readFileSync(new URL("../src/redux/salesApi.js",import.meta.url),"utf8");
  assert.doesNotMatch(source,/\b(setDoc|updateDoc|addDoc|deleteDoc|writeBatch|runTransaction)\s*\(/);
  assert.doesNotMatch(source,/ireps-mobile/);
+});
+
+test("shared province/placeholder address and stale flag agree with the offline Python mirror", () => {
+ const audit=fileURLToPath(new URL("../scripts/tools/sales-work-status-audit/",import.meta.url));
+ const base={id:"00123",meterNo:"00123",meterNoNormalized:"00123",master:{id:"00123",visibility:"INVISIBLE"},lmPcode:"ZA5241",town:"DUNDEE",adr:{strNo:"14",strName:"Bulwer",strType:"-"},tbRefs:[],hasUsableGps:false};
+ const flag={version:1,outcome:"NO_EXACT_POSITION",provider:"Google Geocoding API",attemptedAt:{seconds:1,nanoseconds:0},attemptedByUid:"U1",attemptedByUser:"User"};
+ const cases=Array.from({length:9},(_,i)=>({...base,lmPcode:`ZA${i+1}241`}));
+ for(const type of [null,"","-"," - ","N/A","NAV","NA","NULL","UNDEFINED","Road"])cases.push({...base,adr:{...base.adr,strType:type}});
+ cases.push({...base,lmPcode:"ZA0241"});
+ for(const address of [composeSalesGeocodingAddress(base),"14 Bulwer, DUNDEE, ZA5241, South Africa"])cases.push({...base,erfLookup:{...flag,address}});
+ const code='import sys,json; from sales_work_status_classifier import compose_sales_geocoding_address,classify_non_gps_sales_row; cases=json.load(sys.stdin); print(json.dumps([{ "address":compose_sales_geocoding_address(c),"selectable":classify_non_gps_sales_row(c,c,"NOT_STARTED")["selectable"]} for c in cases]))';
+ const python=JSON.parse(execFileSync("python",["-B","-c",code],{cwd:audit,input:JSON.stringify(cases),encoding:"utf8"}));
+ cases.forEach((item,index)=>assert.deepEqual(python[index],{address:composeSalesGeocodingAddress(item),selectable:!inspectErfLookup(item).flagged}));
 });

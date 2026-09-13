@@ -125,6 +125,7 @@ export async function recordFailedLookup({ db, request, intent, salesId, address
     const ref = db.doc(`sales-all-meters/${salesId}`), snapshot = await read(ref);
     if (!snapshot.exists) throw batchError("SALES_MISSING", "Sales meter disappeared before recording the lookup");
     const sales = snapshot.data();
+    if (!composeSalesGeocodingAddress(sales)) throw batchError("GEOCODING_CONFIGURATION_ERROR", "The Sales LM has no configured province for geocoding; no failed-lookup flag was written");
     if (composeSalesGeocodingAddress(sales) !== address) throw batchError("SALES_ADDRESS_CHANGED", "Sales address changed during lookup");
     const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
     if (!policy.batchable && policy.code !== "NEEDS_MANUAL_ERFING") throw batchError(policy.code, policy.reason);
@@ -144,6 +145,7 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
       const snapshot = await db.doc(`sales-all-meters/${salesId}`).get();
       if (!snapshot.exists) throw batchError("SALES_MISSING", "Sales meter is unavailable");
       sales = snapshot.data();
+      if (!composeSalesGeocodingAddress(sales)) throw batchError("GEOCODING_CONFIGURATION_ERROR", "The Sales LM has no configured province for geocoding; no failed-lookup flag was written");
       const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
       const saved = inspectSavedErfDecision(sales);
       const existingPipeline = intent.source === "PREPAID_SALES" ? singlePipelineErf(sales) : null;
@@ -192,6 +194,7 @@ export async function readDraftAssessment({ db, intent, codec, actor, read = sna
       row = { ...row, code: policy.code, reason: policy.reason };
       // Establish Ward even for an occupied/ineligible retained row. It cannot hide a second Ward.
       try {
+        if (!composeSalesGeocodingAddress(sales)) throw batchError("GEOCODING_CONFIGURATION_ERROR", "The Sales LM has no configured province for geocoding; no failed-lookup flag was written");
         const saved = inspectSavedErfDecision(sales);
         const pipeline = intent.source === "PREPAID_SALES" ? singlePipelineErf(sales) : null;
         let evidence = null, erfId = saved.established ? saved.erfId : pipeline?.ok ? pipeline.erfId : null;

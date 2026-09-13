@@ -55,7 +55,7 @@ test("Batchability separates business admission from capacity and unresolved ERF
 });
 test("failed lookup uses exact authoritative address, becomes stale on address change", () => {
   const row = source();
-  assert.equal(composeSalesGeocodingAddress(row), "01A Smith Street, Dundee, ZA5241, South Africa");
+  assert.equal(composeSalesGeocodingAddress(row), "01A Smith Street, Dundee, KwaZulu-Natal, South Africa");
   for (const outcome of ["NO_EXACT_POSITION", "NO_ERF", "MULTIPLE_ERFS"]) {
     const flagged = { ...row, erfLookup: { version: 1, outcome, address: composeSalesGeocodingAddress(row), provider: "Google Geocoding API", attemptedAt: stamp, attemptedByUid: "U1", attemptedByUser: "Supervisor" } };
     assert.equal(inspectErfLookup(flagged).flagged, true);

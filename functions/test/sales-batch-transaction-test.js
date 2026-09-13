@@ -212,3 +212,13 @@ test("historical GPS batch above 30 retains the existing whole-batch allocation 
  assert.equal(result.success,true,JSON.stringify(result));assert.equal(result.allocatedRows,31);
  assert.ok((await db.collection("tb_rows").where("tbId","==",f.tbId).get()).docs.every(doc=>doc.data().allocation.status==="ALLOCATED"));assert.deepEqual((await db.doc(`sales-all-meters/${ids[0]}`).get()).data(),before);
 });
+
+test("unknown geocoding province reports configuration failure and leaves persisted Sales untouched",async()=>{
+ const ids=await seed();await db.doc(`sales-all-meters/${ids[0]}`).update({lmPcode:"ZA0241"});
+ await db.doc(`users/${f.actor.uid}`).update({"access.activeWorkbase":{id:"ZA0241"},"access.workbases":[{id:"ZA0241"}]});
+ const ref=db.doc(`sales-all-meters/${ids[0]}`),before=await ref.get();
+ const result=await resolveSalesBatch({db,request:request({tbId:f.tbId,lmPcode:"ZA0241",source:"PREPAID_SALES_NON_GPS",salesIds:ids}),codec,geocode:()=>assert.fail("Unknown province cannot call Google")});
+ assert.equal(result.rows[0].code,"GEOCODING_CONFIGURATION_ERROR");assert.equal(result.rows[0].ready,false);
+ const after=await ref.get();assert.deepEqual(after.data(),before.data());assert.equal(after.updateTime.isEqual(before.updateTime),true);
+ assert.equal((await db.collection("tb_uploads").get()).size,0);assert.equal((await db.collection("geo_fences").get()).size,0);
+});

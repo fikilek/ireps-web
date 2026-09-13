@@ -519,6 +519,22 @@ def has_usable_sales_gps(data):
     candidates = data.get("erfCandidates", [])
     return isinstance(candidates, list) and any(isinstance(c, dict) and valid(c.get("Latitude", c.get("latitude")),90) and valid(c.get("Longitude", c.get("longitude")),180) for c in candidates)
 
+def compose_sales_geocoding_address(data):
+    # Audit mirror of the pure shared JS composer; constrained by parity tests.
+    provinces = {"ZA1": "Western Cape", "ZA2": "Eastern Cape", "ZA3": "Northern Cape",
+                 "ZA4": "Free State", "ZA5": "KwaZulu-Natal", "ZA6": "North West",
+                 "ZA7": "Gauteng", "ZA8": "Mpumalanga", "ZA9": "Limpopo"}
+    code = data.get("lmPcode")
+    code = code.strip() if isinstance(code, str) else ""
+    province = provinces.get(code[:3]) if re.fullmatch(r"ZA[1-9][0-9]+", code) else None
+    if not province: return ""
+    placeholders = {"", "-", "NAV", "N/A", "NA", "NULL", "UNDEFINED"}
+    street = " ".join(value.strip() for key in ("strNo", "strName", "strType")
+                      if isinstance(value := get_path(data, "adr", key), str) and value.strip().upper() not in placeholders)
+    town = data.get("town")
+    return ", ".join(filter(None, [street, town.strip() if isinstance(town, str) else "", province, "South Africa"]))
+
+
 def classify_non_gps_sales_row(data, new_row, sales_work_status):
     result = {"isNoGps": not has_usable_sales_gps(data), "classification": None, "exceptionReasons": [], "selectable": False}
     if not result["isNoGps"]: return result
@@ -538,7 +554,7 @@ def classify_non_gps_sales_row(data, new_row, sales_work_status):
     result["exceptionReasons"] = reasons
     result["selectable"] = not reasons
     lookup = data.get("erfLookup")
-    address = ", ".join(filter(None,[" ".join(str(get_path(data,"adr",key) or "").strip() for key in ("strNo","strName","strType")).strip(),str(data.get("town") or "").strip(),str(data.get("lmPcode") or "").strip(),"South Africa"]))
-    if isinstance(lookup,dict) and lookup.get("address") == address:
+    address = compose_sales_geocoding_address(data)
+    if address and isinstance(lookup,dict) and lookup.get("address") == address:
         result["selectable"] = False; result["exceptionReasons"].append(f"Needs manual ERFing — {lookup.get('outcome')}")
     return result

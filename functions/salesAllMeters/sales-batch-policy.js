@@ -161,9 +161,23 @@ const meaningful = value => nonblank(value) && !meaningless.has(value.trim().toU
 export function salesStreetAddress(row = {}) {
   return [row.adr?.strNo, row.adr?.strName, row.adr?.strType].filter(meaningful).map(value => value.trim()).join(" ");
 }
-// One exact composition for the provider, failed-lookup flag and its UI predicate.
+export function salesStreetType(row = {}) {
+  return meaningful(row.adr?.strType) ? row.adr.strType.trim() : "";
+}
+// South African province pcodes are the ZA prefix and first numeric digit.
+// Keep this pure: the same address is used by Web, Google and the TB9 predicate.
+const provinceNames = Object.freeze({
+  ZA1: "Western Cape", ZA2: "Eastern Cape", ZA3: "Northern Cape",
+  ZA4: "Free State", ZA5: "KwaZulu-Natal", ZA6: "North West",
+  ZA7: "Gauteng", ZA8: "Mpumalanga", ZA9: "Limpopo",
+});
 export function composeSalesGeocodingAddress(row = {}) {
-  return [salesStreetAddress(row), typeof row.town === "string" ? row.town.trim() : "", typeof row.lmPcode === "string" ? row.lmPcode.trim() : "", "South Africa"].filter(Boolean).join(", ");
+  const code = typeof row.lmPcode === "string" ? row.lmPcode.trim() : "";
+  const province = /^ZA[1-9][0-9]+$/.test(code) ? provinceNames[code.slice(0, 3)] : null;
+  // An unknown province cannot form a provider/flag address. Callers report a
+  // configuration error; returning an empty string also keeps UI reads safe.
+  if (!province) return "";
+  return [salesStreetAddress(row), typeof row.town === "string" ? row.town.trim() : "", province, "South Africa"].filter(Boolean).join(", ");
 }
 export function inspectErfLookup(row = {}) {
   if (!Object.hasOwn(row, "erfLookup")) return { valid: true, flagged: false, outcome: null };
