@@ -84,6 +84,8 @@ import { onDeleteUnacceptedBgoCallable } from "./bgo/deleteCallable.js";
 import { onBgoChildTrnExecutionSummaryWritten } from "./bgo/executionSummaryTrigger.js";
 
 import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
+export { resolveSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-resolution.js";
+export { assessSalesTargetedBatchCallable, saveSalesTargetedBatchGeofenceCallable } from "./targetedBatches/sales-batch-geofence.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
@@ -3436,6 +3438,7 @@ async function recomputeGeoFenceCountsForIds({
     }
 
     const geoFence = geoFenceSnap.data() || {};
+    if (geoFence.status !== "ACTIVE") continue;
     const lmPcode = geoFence?.parents?.lmPcode || null;
     const wardPcode = geoFence?.parents?.wardPcode || null;
 
