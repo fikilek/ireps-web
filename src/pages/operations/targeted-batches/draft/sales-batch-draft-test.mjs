@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {buildRetainedSalesDraft,projectSalesDraft,confirmationIdentity,salesDraftIntent,salesDraftResolutionFailure} from "./sales-batch-draft-model.js";
+import {buildRetainedSalesDraft,projectSalesDraft,confirmationIdentity,salesDraftIntent,salesDraftResolutionFailure,salesDraftMessage,salesDraftReturnPath} from "./sales-batch-draft-model.js";
 const f=JSON.parse(fs.readFileSync(new URL("../../../../../functions/test/fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 function fixture(n=1){
  const ids=Array.from({length:n},(_,i)=>`00${123+i}`),rows=ids.map(id=>({...f.sales,id,meterNo:id,meterNoNormalized:id,master:{...f.sales.master,id}}));
@@ -47,7 +47,7 @@ test("undeployed, offline and blocked resolver calls have plain matching row sta
   {code:"functions/internal",error:"internal"}, new TypeError("Failed to fetch"), {},
  ]) {
   const failure=salesDraftResolutionFailure(error,draft.source.type);
-  assert.equal(failure.reason,"Geocoding service unavailable. Your draft is unchanged. Try Recheck resolution.");
+  assert.equal(failure.reason,"Couldn't locate meters right now. Your draft is unchanged. Press Locate meters again.");
   const result=projectSalesDraft(draft,live,{now:1000,resolutionsCurrent:false,resolutionFailure:failure,geometry:f.ward.geometry});
   assert.equal(result.rows.length,2); assert.deepEqual(result.readyIds,[]);
   assert.equal(Boolean(result.canSave),false); assert.equal(Boolean(result.canCreate),false);
@@ -62,9 +62,9 @@ test("undeployed, offline and blocked resolver calls have plain matching row sta
 test("waiting, pending, unavailable and successful recheck remain distinct even after a prior success", () => {
  const {draft,live}=fixture();
  const failure=salesDraftResolutionFailure({code:"functions/internal"},draft.source.type);
- assert.match(projectSalesDraft(draft,live,{now:1000,resolutionsCurrent:false}).rows[0].reason,/has not been checked/);
+ assert.match(projectSalesDraft(draft,live,{now:1000,resolutionsCurrent:false}).rows[0].reason,/Not located yet/);
  const pending=projectSalesDraft(draft,live,{now:1000,resolving:true,resolutionFailure:failure});
- assert.equal(pending.rows[0].code,"RESOLUTION_PENDING"); assert.equal(pending.rows[0].reason,"Checking coordinates and ERF…");
+ assert.equal(pending.rows[0].code,"RESOLUTION_PENDING"); assert.equal(pending.rows[0].reason,"Locating meters…");
  assert.deepEqual(pending.readyIds,[]);
  const failed=projectSalesDraft(draft,live,{now:1000,resolutionFailure:failure});
  assert.equal(failed.rows[0].code,"RESOLUTION_SERVICE_UNAVAILABLE"); assert.deepEqual(failed.readyIds,[]);
@@ -81,5 +81,20 @@ test("service errors retain genuine policy reasons and completed lookup outcomes
  assert.equal(projectSalesDraft(draft,live,{now:1000}).rows[1].reason,"Needs manual ERFing — NO_EXACT_POSITION");
  const denied=salesDraftResolutionFailure({code:"ACTOR_SCOPE_INVALID",error:"Select the authorized LM."},draft.source.type);
  assert.deepEqual(denied,{code:"ACTOR_SCOPE_INVALID",reason:"Select the authorized LM."});
- assert.match(salesDraftResolutionFailure({code:"functions/internal"},"PREPAID_SALES").reason,/^Resolution service unavailable/);
+ assert.match(salesDraftResolutionFailure({code:"functions/internal"},"PREPAID_SALES").reason,/^Couldn't locate meters right now/);
+});
+
+test("TB Draft translates provider and policy messages without changing internal codes or source records", () => {
+ const {draft,live,ids}=fixture();
+ for(const message of ["Geocoding is unavailable; no failed-lookup flag was written", "Resolution is incomplete", "Sales data changed; resolution must be reassessed", "Coordinates and ERF must be resolved", "Verified geocoding evidence is required", "Targeted Batch reference integrity is unresolved", "Recheck resolution", "Geocoded position"]) {
+  draft.resolutions[ids[0]]={ready:false,code:"RESOLUTION_INCOMPLETE",reason:message};
+  const before=structuredClone(draft);
+  const row=projectSalesDraft(draft,live,{now:1000}).rows[0];
+  assert.doesNotMatch(row.reason,/resolv|resolution|geocod/i);
+  assert.equal(row.code,"RESOLUTION_INCOMPLETE");assert.deepEqual(draft,before);
+  assert.doesNotMatch(salesDraftMessage(message),/resolv|resolution|geocod/i);
+ }
+ assert.equal(projectSalesDraft(fixture().draft,fixture().live,{now:2000}).rows[0].reason,"Location check expired. Press Locate meters again.");
+ assert.equal(salesDraftReturnPath("PREPAID_SALES_NON_GPS"),"/sales/non-gps-batch-planning");
+ assert.equal(salesDraftReturnPath("PREPAID_SALES"),"/sales/table");
 });

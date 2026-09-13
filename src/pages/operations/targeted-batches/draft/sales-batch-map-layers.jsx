@@ -1,15 +1,15 @@
 import { useEffect } from "react";
 import { useMap } from "@vis.gl/react-google-maps";
 import { normalizeBatchGeometry } from "../../../../../functions/geofences/sales-batch-geometry.js";
-import { draftReviewStyles as styles } from "./targetedBatchDraftReviewStyles";
+import { draftReviewStyles as styles, draftButtonStyle } from "./targetedBatchDraftReviewStyles";
 
 export function SalesBatchDrawingControls({ drawing, saved, disabled, canSave, onSave }) {
   return <div style={styles.headerActions}>
-    <button type="button" disabled={disabled || saved} onClick={() => drawing.setDrawing(true)}>Draw</button>
-    <button type="button" disabled={disabled || saved || !drawing.points.length} onClick={drawing.undo}>Undo</button>
-    <button type="button" disabled={disabled || saved || !drawing.points.length} onClick={drawing.clear}>Clear</button>
-    <button type="button" disabled={disabled || saved || drawing.points.length < 3} onClick={drawing.finish}>Complete</button>
-    <button type="button" disabled={disabled || saved || !drawing.complete || !canSave} onClick={onSave}>Save geofence</button>
+    <button type="button" style={draftButtonStyle(disabled || saved)} disabled={disabled || saved} onClick={() => drawing.setDrawing(true)}>Draw</button>
+    <button type="button" style={draftButtonStyle(disabled || saved || !drawing.points.length)} disabled={disabled || saved || !drawing.points.length} onClick={drawing.undo}>Undo</button>
+    <button type="button" style={draftButtonStyle(disabled || saved || !drawing.points.length)} disabled={disabled || saved || !drawing.points.length} onClick={drawing.clear}>Clear</button>
+    <button type="button" style={draftButtonStyle(disabled || saved || drawing.points.length < 3)} disabled={disabled || saved || drawing.points.length < 3} onClick={drawing.finish}>Complete</button>
+    <button type="button" style={draftButtonStyle(disabled || saved || !drawing.complete || !canSave)} disabled={disabled || saved || !drawing.complete || !canSave} onClick={onSave}>Save geofence</button>
     <span>{saved ? "Saved geofence · population fixed" : drawing.drawing ? "Click the map to add vertices" : `${drawing.points.length} vertices`}</span>
     {drawing.error && <span role="alert">{drawing.error}</span>}
   </div>;
@@ -47,7 +47,7 @@ export default function SalesBatchMapLayers({ ward, rows, geometry, drawing, poi
     if (!map) return;
     const markers = rows.filter(row => row.point).map(row => new window.google.maps.Marker({ map,
       position: { lat: row.point.latitude, lng: row.point.longitude },
-      title: `${row.meterNo} · ${row.pointSource === "GEOCODED" ? "Geocoded position" : "Sales GPS"} · ${row.reason}`,
+      title: `${row.meterNo} · ${row.pointSource === "GEOCODED" ? "Position from address" : "Sales GPS"} · ${row.reason}`,
       label: { text: row.pointSource === "GEOCODED" ? "G" : "S", color: "white" },
       icon: { path: row.salesWorkStatus === "IN_PROGRESS" ? "M 0,-1 L 1,1 L -1,1 Z" : row.salesWorkStatus === "COMPLETED" ? "M -1,-1 L 1,-1 L 1,1 L -1,1 Z" : window.google.maps.SymbolPath.CIRCLE,
         fillColor: row.salesWorkStatus === "IN_PROGRESS" ? "#b45309" : row.salesWorkStatus === "COMPLETED" ? "#0f766e" : "#2563eb", fillOpacity: 1, strokeColor: row.ready ? "white" : "#7c2d12", strokeWeight: row.ready ? 2 : 4, scale: 13 },

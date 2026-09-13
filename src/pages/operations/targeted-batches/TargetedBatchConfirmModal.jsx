@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { salesDraftMessage } from "./draft/sales-batch-draft-model";
+import { draftButtonStyle } from "./draft/targetedBatchDraftReviewStyles";
 export default function TargetedBatchConfirmModal({ draft, confirmation, isCreating, stale, onCancel, onConfirm }) {
   const dialog = useRef(null), cancel = useRef(null);
   useEffect(() => {
@@ -20,11 +22,11 @@ export default function TargetedBatchConfirmModal({ draft, confirmation, isCreat
     <div style={styles.header}><h2 id="tb-confirm-title">Create Targeted Batch</h2></div>
     <div style={styles.body}><p>{draft.id} · {confirmation.scope.wardName}</p><h3>Included ({included.length})</h3>
       <ul>{included.map(row => <li key={row.salesId}>{row.meterNo} · {row.address} · {row.erfId}</li>)}</ul>
-      <h3>Left out ({leftOut.length})</h3><ul>{leftOut.map(row => <li key={row.salesId}>{row.meterNo} · {row.reason}</li>)}</ul>
+      <h3>Left out ({leftOut.length})</h3><ul>{leftOut.map(row => <li key={row.salesId}>{row.meterNo} · {salesDraftMessage(row.reason)}</li>)}</ul>
       <p>OK creates this single batch with exactly the included meters.</p>
       {stale && <p role="alert">Draft data changed or evidence expired. Cancel and select Create again to review the current list.</p>}
-      <button ref={cancel} type="button" disabled={isCreating} onClick={onCancel}>Cancel</button>
-      <button type="button" disabled={isCreating || stale || included.length === 0} onClick={onConfirm}>{isCreating ? "Creating…" : "OK"}</button>
+      <button ref={cancel} type="button" style={draftButtonStyle(isCreating)} disabled={isCreating} onClick={onCancel}>Cancel</button>
+      <button type="button" style={draftButtonStyle(isCreating || stale || included.length === 0, true)} disabled={isCreating || stale || included.length === 0} onClick={onConfirm}>{isCreating ? "Creating…" : "OK"}</button>
     </div></div></div>;
 }
 const styles = {

@@ -3,14 +3,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { useAuth } from "../../auth/useAuth";
+import { useGetLmBoundaryByIdQuery } from "../../redux/mapLmsApi";
 import { useSalesReadScope } from "../../redux/salesApi";
 import { clearTargetedBatchDraft, selectTargetedBatchDraft, updateSalesDraftResolution, saveSalesDraftFence, removeSalesDraftMeter, setSalesDraftConfirmation, setSalesDraftUncertainRequest } from "../../redux/targetedBatchDraftSlice";
 import { useGetSalesBatchDraftSnapshotQuery, useResolveSalesTargetedBatchMutation, useSaveSalesTargetedBatchGeofenceMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
 import { useGeofencePolygonDraft } from "../../features/maps/use-geofence-polygon-draft";
-import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure } from "./targeted-batches/draft/sales-batch-draft-model";
+import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure, salesDraftReturnPath } from "./targeted-batches/draft/sales-batch-draft-model";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
 import TargetedBatchConfirmModal from "./targeted-batches/TargetedBatchConfirmModal";
-import { draftReviewStyles as styles } from "./targeted-batches/draft/targetedBatchDraftReviewStyles";
+import { draftReviewStyles as styles, draftButtonStyle } from "./targeted-batches/draft/targetedBatchDraftReviewStyles";
 
 export default function TargetedBatchDraftPage() {
   const draft = useSelector(selectTargetedBatchDraft), dispatch = useDispatch();
@@ -29,6 +30,7 @@ export default function TargetedBatchDraftPage() {
 
 function SalesDraftSession({ draft }) {
   const dispatch = useDispatch(), navigate = useNavigate(), drawing = useGeofencePolygonDraft();
+  const { currentData: lmBoundary } = useGetLmBoundaryByIdQuery(draft.scope.lmPcode);
   const [resolve, resolveState] = useResolveSalesTargetedBatchMutation(), [save, saveState] = useSaveSalesTargetedBatchGeofenceMutation();
   const [assess, assessState] = useAssessSalesTargetedBatchMutation(), [create, createState] = useCreateSalesTargetedBatchMutation();
   const [feedback, setFeedback] = useState(""), [recheck, setRecheck] = useState(0), [resolvedSignature, setResolvedSignature] = useState("");
@@ -114,10 +116,12 @@ function SalesDraftSession({ draft }) {
     }
   }
   return <>
-    <TargetedBatchDraftReview draft={draft} model={model} live={live} drawing={drawing} geometry={geometry} busy={busy || uncertain} feedback={resolveState.isLoading ? "" : currentResolutionFailure?.reason || feedback}
+    <TargetedBatchDraftReview draft={draft} model={model} live={live} lmBoundary={lmBoundary} drawing={drawing} geometry={geometry} busy={busy || uncertain} feedback={resolveState.isLoading ? "" : currentResolutionFailure?.reason || feedback}
       onRemove={salesId => dispatch(removeSalesDraftMeter({ tbId: draft.id, salesId }))} onSave={saveFence} onCreate={openConfirmation}
-      onResolve={() => { handled.current = ""; setResolutionFailure(null); setFeedback(""); setRecheck(value => value + 1); }} onClear={() => { if (window.confirm("Clear this retained draft? Saved fences remain recorded.")) dispatch(clearTargetedBatchDraft()); }}/>
-    {uncertain && !createState.isLoading && <button type="button" onClick={() => commitConfirmed(draft.uncertainRequest)}>Retry the same confirmed creation</button>}
+      onResolve={() => { handled.current = ""; setResolutionFailure(null); setFeedback(""); setRecheck(value => value + 1); }} onClear={() => { if (window.confirm("Clear this draft and go back to the meter table? A geofence you already saved stays saved.")) {
+        dispatch(clearTargetedBatchDraft()); navigate(salesDraftReturnPath(draft.source.type), { replace: true });
+      } }}/>
+    {uncertain && !createState.isLoading && <button type="button" style={draftButtonStyle()} onClick={() => commitConfirmed(draft.uncertainRequest)}>Retry the same confirmed creation</button>}
     {confirmation && !uncertain && <TargetedBatchConfirmModal draft={draft} confirmation={confirmation} isCreating={createState.isLoading} stale={stale}
       onCancel={() => dispatch(setSalesDraftConfirmation({ tbId: draft.id, confirmation: null }))} onConfirm={() => { if (!stale) commitConfirmed(confirmation.input); }}/>}</>;
 }

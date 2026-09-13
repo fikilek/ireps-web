@@ -206,7 +206,7 @@ function fitMapToBatch(map, { erfs, premises, meters }) {
   return true;
 }
 
-function BatchViewportLayer({ erfs, premises, meters, fitRequest }) {
+function BatchViewportLayer({ erfs, premises, meters, fitRequest, viewport = null }) {
   const map = useMap();
   const previousSignatureRef = useRef("");
   const previousFitRequestRef = useRef(0);
@@ -214,11 +214,12 @@ function BatchViewportLayer({ erfs, premises, meters, fitRequest }) {
   const signature = useMemo(
     () =>
       [
+        JSON.stringify(viewport),
         erfs.map((erf) => erf?.id).join("|"),
         premises.map((premise) => premise?.id).join("|"),
         meters.map((meter) => meter?.id).join("|"),
       ].join("::"),
-    [erfs, premises, meters],
+    [erfs, premises, meters, viewport],
   );
 
   useEffect(() => {
@@ -229,12 +230,14 @@ function BatchViewportLayer({ erfs, premises, meters, fitRequest }) {
     const isManualFit = fitRequest > previousFitRequestRef.current;
 
     if (isFirstPopulation || isManualFit) {
-      fitMapToBatch(map, { erfs, premises, meters });
+      if (viewport?.bounds) map.fitBounds(viewport.bounds, 35);
+      else if (viewport?.center) { map.setCenter(viewport.center); map.setZoom(viewport.zoom); }
+      else fitMapToBatch(map, { erfs, premises, meters });
     }
 
     previousSignatureRef.current = signature;
     previousFitRequestRef.current = fitRequest;
-  }, [erfs, fitRequest, map, meters, premises, signature]);
+  }, [erfs, fitRequest, map, meters, premises, signature, viewport]);
 
   return null;
 }
@@ -618,6 +621,8 @@ export default function SalesTargetedBatchMap({
   meterStateColors = EMPTY_METER_STATE_COLORS,
   children = null,
   hasDraftBoundary = false,
+  viewport = null,
+  fitButtonStyle = null,
 }) {
   const [fitRequest, setFitRequest] = useState(0);
 
@@ -675,19 +680,15 @@ export default function SalesTargetedBatchMap({
           <span style={styles.legendItem}>
             <span style={styles.waterLegend}>●</span> Water meter
           </span>
-          <span style={styles.legendNote}>
-            Meter state colours remain neutral until the canonical state palette
-            is approved.
-          </span>
         </div>
 
         <button
           type="button"
           style={{
-            ...styles.fitButton,
-            ...(spatialFeatureCount === 0 ? styles.disabledButton : null),
+            ...(fitButtonStyle || styles.fitButton),
+            ...((spatialFeatureCount === 0 && !viewport) ? styles.disabledButton : null),
           }}
-          disabled={spatialFeatureCount === 0}
+          disabled={spatialFeatureCount === 0 && !viewport}
           onClick={() => setFitRequest((current) => current + 1)}
         >
           Fit Batch
@@ -702,31 +703,24 @@ export default function SalesTargetedBatchMap({
             Vite.
           </span>
         </div>
-      ) : spatialFeatureCount === 0 ? (
-        <div style={styles.emptyState}>
-          <strong>No usable spatial features are available for this batch.</strong>
-          <span>
-            The spatial diagnostics above show whether ERF geometry, premise
-            GPS or Field Meter GPS is missing.
-          </span>
-        </div>
       ) : (
         <div style={{ ...styles.mapWrap, height }}>
           <APIProvider apiKey={googleMapsApiKey}>
             <Map
-              defaultCenter={DEFAULT_CENTER}
-              defaultZoom={DEFAULT_ZOOM}
+              defaultCenter={viewport?.center || DEFAULT_CENTER}
+              defaultZoom={viewport?.zoom || DEFAULT_ZOOM}
               mapTypeId="roadmap"
               gestureHandling="greedy"
               disableDefaultUI={false}
               style={{ width: "100%", height: "100%" }}
             >
               {children}
-              {!hasDraftBoundary && <BatchViewportLayer
+              {(!hasDraftBoundary || viewport) && <BatchViewportLayer
                 erfs={safeErfs}
                 premises={safePremises}
                 meters={safeMeters}
                 fitRequest={fitRequest}
+                viewport={viewport}
               />}
               <ErfPolygonLayer erfs={safeErfs} focusedErfId={focusedErfId} />
               <ErfLabelsLayer
@@ -748,6 +742,7 @@ export default function SalesTargetedBatchMap({
               />
             </Map>
           </APIProvider>
+          {spatialFeatureCount === 0 && <p role="status" style={styles.mapNotice}>No usable spatial features are available for this batch.</p>}
         </div>
       )}
     </section>
@@ -789,12 +784,6 @@ const styles = {
     alignItems: "center",
     gap: 5,
     whiteSpace: "nowrap",
-  },
-
-  legendNote: {
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 700,
   },
 
   erfLegend: {
@@ -862,9 +851,16 @@ const styles = {
   },
 
   mapWrap: {
+    position: "relative",
     width: "100%",
     minHeight: 420,
     background: "#e2e8f0",
+  },
+
+  mapNotice: {
+    position: "absolute", bottom: 16, left: 12, right: 12, margin: 0, padding: "0.5rem 0.65rem",
+    border: "1px solid #cbd5e1", borderRadius: "0.6rem", background: "rgba(255,255,255,0.95)",
+    color: "#475569", fontSize: "0.75rem", pointerEvents: "none",
   },
 
   emptyState: {

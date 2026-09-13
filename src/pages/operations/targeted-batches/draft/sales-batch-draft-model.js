@@ -24,15 +24,33 @@ export function salesDraftIntent(draft) {
 // Callable transport errors do not establish a completed per-meter lookup.
 // A lost response also cannot prove whether the server ran, so promise only
 // that the retained draft is unchanged; never invent an erfLookup outcome.
-export function salesDraftResolutionFailure(error, source) {
+export function salesDraftResolutionFailure(error) {
   const code = String(error?.code || "").replace(/^functions\//, "");
   const message = error?.error || error?.message;
   const unavailable = error?.uncertain || ["internal", "unavailable", "not-found", "deadline-exceeded", "cancelled", "unknown"].includes(code)
     || !message || /^(internal|failed to fetch|network error|network request failed)[.!]?$/i.test(message);
-  const service = source === "PREPAID_SALES_NON_GPS" ? "Geocoding" : "Resolution";
   return unavailable
-    ? { code: "RESOLUTION_SERVICE_UNAVAILABLE", reason: `${service} service unavailable. Your draft is unchanged. Try Recheck resolution.` }
-    : { code: code || "RESOLUTION_REQUEST_FAILED", reason: message };
+    ? { code: "RESOLUTION_SERVICE_UNAVAILABLE", reason: "Couldn't locate meters right now. Your draft is unchanged. Press Locate meters again." }
+    : { code: code || "RESOLUTION_REQUEST_FAILED", reason: salesDraftMessage(message) };
+}
+
+// Translate display text only; server codes, proofs and stored evidence stay intact.
+export function salesDraftMessage(value) {
+  return String(value || "")
+    .replace(/\bRecheck resolution\b/gi, "Locate meters again")
+    .replace(/\bgeocoded position\b/gi, "Position from address")
+    .replace(/\bgeocoding\b/gi, "meter location service")
+    .replace(/\bgeocoded\b/gi, "located from address")
+    .replace(/\bgeocode\b/gi, "locate")
+    .replace(/\bresolutions?\b/gi, "location check")
+    .replace(/\bunresolved\b/gi, "not confirmed")
+    .replace(/\bresolving\b/gi, "locating")
+    .replace(/\bresolved\b/gi, "located")
+    .replace(/\bresolve\b/gi, "locate");
+}
+
+export function salesDraftReturnPath(source) {
+  return source === "PREPAID_SALES_NON_GPS" ? "/sales/non-gps-batch-planning" : "/sales/table";
 }
 
 // Missing or ineligible rows remain visible until the operator explicitly removes them.
@@ -46,11 +64,11 @@ export function projectSalesDraft(draft, live, { geometry = null, resolutionsCur
     if (!sales) return { ...row, reason: "Sales meter is no longer available" };
     const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: draft.scope.lmPcode, source: draft.source.type });
     if (!policy.batchable) return { ...row, reason: policy.reason };
-    if (resolving) return { ...row, code: "RESOLUTION_PENDING", reason: "Checking coordinates and ERF…" };
+    if (resolving) return { ...row, code: "RESOLUTION_PENDING", reason: "Locating meters…" };
     if (resolutionFailure) return { ...row, ...resolutionFailure };
-    if (!resolutionsCurrent) return { ...row, code: "RESOLUTION_REQUIRED", reason: "Resolution has not been checked. Try Recheck resolution." };
-    if (!resolved?.ready || !row.point || !row.erfId) return { ...row, reason: resolved?.reason || "Resolving coordinates and ERF" };
-    if (!Number.isFinite(resolved.expiresAt) || now >= resolved.expiresAt) return { ...row, reason: "Resolution expired. Recheck resolution before continuing" };
+    if (!resolutionsCurrent) return { ...row, code: "RESOLUTION_REQUIRED", reason: "Not located yet. Press Locate meters again." };
+    if (!resolved?.ready || !row.point || !row.erfId) return { ...row, reason: resolved?.reason || "Locating meters…" };
+    if (!Number.isFinite(resolved.expiresAt) || now >= resolved.expiresAt) return { ...row, reason: "Location check expired. Press Locate meters again." };
     const erf = live.erfs[row.erfId], ward = live.wards[row.scope?.wardPcode];
     if (!erf || !ward) return { ...row, reason: "ERF or Ward data is unavailable" };
     if (draft.savedFence && !draft.savedFence.savedSalesIds.includes(salesId)) return { ...row, reason: "Outside the saved population; start a new draft to include this meter" };
@@ -62,11 +80,12 @@ export function projectSalesDraft(draft, live, { geometry = null, resolutionsCur
     }
     return { ...row, ready: true, reason: "Ready" };
   });
+  for (const row of rows) row.reason = salesDraftMessage(row.reason);
   const wards = [...new Set(rows.map(row => row.scope?.wardPcode).filter(Boolean))];
   const readyIds = rows.filter(row => row.ready).map(row => row.salesId);
   return { rows, wards, readyIds, canSave: live?.ready && wards.length === 1 && readyIds.length > 0 && Boolean(geometry),
     canCreate: live?.ready && wards.length === 1 && readyIds.length > 0 && Boolean(draft.savedFence) && live.fence?.id === draft.savedFence.id && live.fence?.linkState === "UNLINKED" && !live.parent,
-    gate: wards.length > 1 ? "Retained meters span multiple Wards. Remove the named meters outside the intended Ward." : wards.length === 0 ? "Resolve at least one meter to establish the Ward." : "" };
+    gate: wards.length > 1 ? "Retained meters span multiple Wards. Remove the named meters outside the intended Ward." : wards.length === 0 ? "Locate at least one meter to find the Ward." : "" };
 }
 export function draftGeometry(points, savedFence) {
   try { return savedFence ? normalizeBatchGeometry(savedFence.geometry) : polygonFromPoints(points); } catch { return null; }

@@ -1,3 +1,4 @@
+const actionButton = { minHeight: "2.5rem", fontFamily: "inherit", fontSize: "0.875rem", lineHeight: 1.25 };
 export const draftReviewStyles = {
   twoPane: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 440px), 1fr))", gap: "1rem", alignItems: "start", padding: "1rem" },
   pane: { minWidth: 0 },
@@ -296,6 +297,7 @@ export const draftReviewStyles = {
     lineHeight: 1.5,
   },
   primaryButton: {
+    ...actionButton,
     border: "1px solid #1d4ed8",
     borderRadius: "0.7rem",
     padding: "0.55rem 0.8rem",
@@ -309,6 +311,7 @@ export const draftReviewStyles = {
     cursor: "not-allowed",
   },
   secondaryButton: {
+    ...actionButton,
     border: "1px solid #cbd5e1",
     borderRadius: "0.7rem",
     padding: "0.55rem 0.8rem",
@@ -464,3 +467,8 @@ export const draftReviewStyles = {
   },
 
 };
+
+export function draftButtonStyle(disabled = false, primary = false) {
+  return { ...(primary ? draftReviewStyles.primaryButton : draftReviewStyles.secondaryButton),
+    ...(disabled ? draftReviewStyles.disabledButton : {}) };
+}
