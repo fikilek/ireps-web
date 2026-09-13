@@ -54,7 +54,7 @@ test("canonical Targeted Batch row statuses are exact", () => {
     null,
     "",
     "created",
-    "IN_PROGRESS",
+    "UNKNOWN",
     "WAITING",
     "ALLOCATION_FAILED",
   ]) {
@@ -96,7 +96,7 @@ test("all ACCEPTED rows derive ACCEPTED", () => {
   assert.equal(result.status, TARGETED_BATCH_DERIVED_STATES.accepted);
 });
 
-test("ACCEPTED plus COMPLETED derives ACCEPTED", () => {
+test("ACCEPTED plus COMPLETED derives IN_PROGRESS", () => {
   const result = deriveTargetedBatchState(
     fixture([
       TARGETED_BATCH_ROW_STATUSES.completed,
@@ -105,7 +105,7 @@ test("ACCEPTED plus COMPLETED derives ACCEPTED", () => {
     ]),
   );
 
-  assert.equal(result.status, TARGETED_BATCH_DERIVED_STATES.accepted);
+  assert.equal(result.status, TARGETED_BATCH_DERIVED_STATES.inProgress);
 });
 
 test("all REJECTED rows derive REJECTED", () => {
@@ -140,16 +140,14 @@ test("every unsupported two-state canonical combination fails closed", () => {
       rightIndex += 1
     ) {
       const pair = [statuses[leftIndex], statuses[rightIndex]];
-      const isAcceptedCompleted =
-        pair.includes(TARGETED_BATCH_ROW_STATUSES.accepted) &&
-        pair.includes(TARGETED_BATCH_ROW_STATUSES.completed);
+      const hasExecution = pair.includes("IN_PROGRESS") || pair.includes("COMPLETED");
 
       const result = deriveTargetedBatchState(fixture(pair));
 
       assert.equal(
         result.status,
-        isAcceptedCompleted
-          ? TARGETED_BATCH_DERIVED_STATES.accepted
+        hasExecution
+          ? TARGETED_BATCH_DERIVED_STATES.inProgress
           : TARGETED_BATCH_DERIVED_STATES.inconsistent,
         `Unexpected derived state for ${pair.join(" + ")}`,
       );
@@ -183,7 +181,7 @@ test("missing canonical status fails closed", () => {
 
 test("unknown canonical status fails closed", () => {
   const input = fixture([TARGETED_BATCH_ROW_STATUSES.created]);
-  input.rows[0].status = "IN_PROGRESS";
+  input.rows[0].status = "UNKNOWN";
 
   const result = deriveTargetedBatchState(input);
 

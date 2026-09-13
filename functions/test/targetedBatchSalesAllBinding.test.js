@@ -84,6 +84,7 @@ function buildRowWithVisibility({ serverVisibility, clientVisibility }) {
     salesSource: {
       meterNo: SALES_ID,
       meterNoNormalized: SALES_ID,
+      monthlySalesC: {},
       master: { visibility: serverVisibility },
     },
     erfReference: { erfNo: "386/9" },
@@ -101,7 +102,7 @@ test("Targeted Batch canonical Sales source is sales-all-meters", () => {
 
 test("authoritative VISIBLE overrides conflicting client INVISIBLE", () => {
   const result = buildRowWithVisibility({
-    serverVisibility: " visible ",
+    serverVisibility: "VISIBLE",
     clientVisibility: "INVISIBLE",
   });
 
@@ -110,20 +111,20 @@ test("authoritative VISIBLE overrides conflicting client INVISIBLE", () => {
 
 test("authoritative INVISIBLE overrides conflicting client VISIBLE", () => {
   const result = buildRowWithVisibility({
-    serverVisibility: " invisible ",
+    serverVisibility: "INVISIBLE",
     clientVisibility: "VISIBLE",
   });
 
   assert.equal(result.meter.masterVisibility, "INVISIBLE");
 });
 
-test("client visibility remains the fallback when server visibility is falsy", () => {
+test("missing server visibility cannot be fabricated from the client draft", () => {
   const result = buildRowWithVisibility({
     serverVisibility: "",
     clientVisibility: " visible ",
   });
 
-  assert.equal(result.meter.masterVisibility, "VISIBLE");
+  assert.equal(result.meter.masterVisibility, null);
 });
 
 test("canonical Sales All missing lmPcode is rejected", () => {

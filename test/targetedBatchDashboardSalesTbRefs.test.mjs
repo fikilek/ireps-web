@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { buildTargetedBatchDashboardReadModel } from "../src/pages/sales/models/salesTargetedBatchReadModel.js";
 
+const AT = { seconds: 1787565600, nanoseconds: 0 };
+const visit = () => ({ date: "2026-08-24", time: "10:00:00", user: "Field worker" });
 const TB_ID = "TGB_20260824_120000_AB12";
 
 function makeBatch(overrides = {}) {
@@ -25,7 +27,7 @@ function makeRow(index, salesAllMeterId, overrides = {}) {
 function makeInitialRef(overrides = {}) {
   return {
     id: TB_ID,
-    date: "2026-08-24",
+    date: AT,
     ...overrides,
   };
 }
@@ -34,14 +36,15 @@ function makeCompletedFieldWork(overrides = {}) {
   return {
     status: "COMPLETED",
     outcomeCode: "METER_DISCOVERED",
+    outcomeLabel: "Meter discovered",
     targetedMeterNo: "07100000001",
     discoveredMeterNo: "07100000001",
     meterMatch: true,
     premiseId: "PRM_001",
     meterId: "AST_001",
     trnId: "TRN_001",
-    submittedAt: "2026-08-24T10:00:00.000Z",
-    updatedAt: "2026-08-24T10:00:00.000Z",
+    submittedAt: AT,
+    updatedAt: AT,
     noAccess: [],
     ...overrides,
   };
@@ -161,8 +164,9 @@ test("No Access sums attempts and separately counts affected meters", () => {
             rowId: rows[0].id,
             fieldWork: {
               status: "IN_PROGRESS",
+              updatedAt: AT,
               outcomeCode: null,
-              noAccess: [{ date: "2026-08-24" }, { date: "2026-08-24" }],
+              noAccess: [visit(), visit()],
             },
           }),
         ],
@@ -173,8 +177,9 @@ test("No Access sums attempts and separately counts affected meters", () => {
             rowId: rows[1].id,
             fieldWork: {
               status: "IN_PROGRESS",
+              updatedAt: AT,
               outcomeCode: null,
-              noAccess: [{ date: "2026-08-24" }],
+              noAccess: [visit()],
             },
           }),
         ],
@@ -196,7 +201,7 @@ test("No Access history survives later successful discovery", () => {
           makeInitialRef({
             rowId: row.id,
             fieldWork: makeCompletedFieldWork({
-              noAccess: [{ date: "2026-08-24" }, { date: "2026-08-24" }],
+              noAccess: [visit(), visit()],
             }),
           }),
         ],
@@ -216,9 +221,9 @@ test("current tbId ignores historical references for other batches", () => {
     salesById: {
       "07100000001": {
         tbRefs: [
-          { id: "TGB_OLD", date: "2026-08-01" },
+          { id: "TGB_20260801_120000_AB12", date: AT },
           makeInitialRef(),
-          { id: "TGB_OTHER", date: "2026-08-02" },
+          { id: "TGB_20260802_120000_AB12", date: AT },
         ],
       },
     },
@@ -228,7 +233,7 @@ test("current tbId ignores historical references for other batches", () => {
   assert.equal(integrity(result).issueCount, 0);
 });
 
-test("normalized duplicate tbRef IDs fail closed", () => {
+test("duplicate canonical tbRef IDs fail closed", () => {
   const row = makeRow(1, "07100000001");
   const result = resolve({
     rows: [row],
@@ -236,7 +241,7 @@ test("normalized duplicate tbRef IDs fail closed", () => {
       "07100000001": {
         tbRefs: [
           makeInitialRef(),
-          makeInitialRef({ id: ` ${TB_ID.toLowerCase()} ` }),
+          makeInitialRef({ id: TB_ID }),
         ],
       },
     },
@@ -267,7 +272,7 @@ test("rowId mismatch keeps Original but excludes derived outcomes", () => {
         tbRefs: [
           makeInitialRef({
             rowId: "ROW_OTHER",
-            fieldWork: makeCompletedFieldWork({ noAccess: [{ date: "2026-08-24" }] }),
+            fieldWork: makeCompletedFieldWork({ noAccess: [visit()] }),
           }),
         ],
       },
@@ -300,7 +305,7 @@ test("completed discovery missing discoveredMeterNo does not count Found", () =>
   assert.equal(integrity(result).metricCompleteness.metersFound, false);
 });
 
-test("Found can remain countable while Different and Premises are incomplete", () => {
+test("malformed completed TB8 cannot contribute any derived outcomes", () => {
   const row = makeRow(1, "07100000001");
   const result = resolve({
     rows: [row],
@@ -319,7 +324,7 @@ test("Found can remain countable while Different and Premises are incomplete", (
     },
   });
 
-  assert.equal(metrics(result).metersFound, 1);
+  assert.equal(metrics(result).metersFound, 0);
   assert.equal(metrics(result).metersDifferent, 0);
   assert.equal(metrics(result).premises, 0);
   assert.equal(integrity(result).metricCompleteness.metersDifferent, false);
@@ -358,7 +363,8 @@ test("No Access attempts may exceed Original without changing affected-meter cou
             rowId: row.id,
             fieldWork: {
               status: "IN_PROGRESS",
-              noAccess: Array.from({ length: 4 }, () => ({ date: "2026-08-24" })),
+              updatedAt: AT,
+              noAccess: Array.from({ length: 4 }, () => (visit())),
             },
           }),
         ],
@@ -400,6 +406,7 @@ test("IN_PROGRESS with stale discovered meter fields does not count Found", () =
             rowId: row.id,
             fieldWork: makeCompletedFieldWork({
               status: "IN_PROGRESS",
+              updatedAt: AT,
               outcomeCode: null,
             }),
           }),
@@ -439,7 +446,8 @@ test("malformed No Access array is diagnosed without inventing attempts", () => 
         tbRefs: [
           makeInitialRef({
             rowId: row.id,
-            fieldWork: { status: "IN_PROGRESS", noAccess: { count: 2 } },
+            fieldWork: { status: "IN_PROGRESS",
+              updatedAt: AT, noAccess: { count: 2 } },
           }),
         ],
       },

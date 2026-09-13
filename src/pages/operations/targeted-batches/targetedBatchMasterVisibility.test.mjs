@@ -12,7 +12,7 @@ const draftModelUrl = new URL(
 ).href;
 const targetedBatchUtils = await import(
   `data:text/javascript;base64,${Buffer.from(
-    targetedBatchUtilsSource.replace(
+    targetedBatchUtilsSource.replaceAll("../../../../functions/salesAllMeters/sales-batch-policy.js", new URL("../../../../functions/salesAllMeters/sales-batch-policy.js", import.meta.url).href).replace(
       '"../../../redux/targetedBatchDraftModel"',
       JSON.stringify(draftModelUrl),
     ),
@@ -50,51 +50,16 @@ test("flat Sales masterVisibility propagates without changing draft row shape", 
   );
 });
 
-test("masterVisibility changes no Targeted Batch eligibility or row identity", () => {
-  const withoutVisibility = buildSalesTargetedBatchDraftPlan({
-    rows: [baseRow],
-    lmPcode: "ZA5241",
-    lmName: "Endumeni",
-  });
-  const withVisibility = buildSalesTargetedBatchDraftPlan({
-    rows: [{ ...baseRow, masterVisibility: "VISIBLE" }],
-    lmPcode: "ZA5241",
-    lmName: "Endumeni",
-  });
-
-  assert.equal(withVisibility.ok, withoutVisibility.ok);
-  assert.deepEqual(withVisibility.failures, withoutVisibility.failures);
-  assert.deepEqual(withVisibility.salesAllMeterIds, withoutVisibility.salesAllMeterIds);
-  assert.deepEqual(
-    withVisibility.proposedBatches.map((batch) => ({
-      scope: batch.scope,
-      rowCount: batch.rowCount,
-      salesAllMeterIds: batch.salesAllMeterIds,
-      validation: batch.validation,
-    })),
-    withoutVisibility.proposedBatches.map((batch) => ({
-      scope: batch.scope,
-      rowCount: batch.rowCount,
-      salesAllMeterIds: batch.salesAllMeterIds,
-      validation: batch.validation,
-    })),
-  );
-  assert.equal(
-    getSalesAllMeterId({ ...baseRow, masterVisibility: "VISIBLE" }),
-    getSalesAllMeterId(baseRow),
-  );
+test("visible Sales cannot enter a draft; identity is independent of visibility", () => {
+  const row = { ...baseRow, erfId: null, master: { id: baseRow.id, visibility: "INVISIBLE" }, hasUsableGps: true,
+    erfCandidates: [{ ErfId: "ERF_1", Latitude: -28.5, Longitude: 30.5 }] };
+  const open = buildSalesTargetedBatchDraftPlan({ rows: [row], lmPcode: "ZA5241", lmName: "Endumeni" });
+  const completed = buildSalesTargetedBatchDraftPlan({ rows: [{ ...row, master: { ...row.master, visibility: "VISIBLE" } }], lmPcode: "ZA5241", lmName: "Endumeni" });
+  assert.equal(open.ok, true); assert.equal(completed.ok, false);
+  assert.equal(getSalesAllMeterId(row), getSalesAllMeterId({ ...row, masterVisibility: "VISIBLE" }));
 });
-
-test("server Sales visibility remains authoritative over the client draft", async () => {
-  const documentFactory = await readFile(
-    new URL(
-      "../../../../functions/targetedBatches/documentFactory.js",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  assert.match(
-    documentFactory,
-    /salesSource\?\.master\?\.visibility \|\|\s*draftRow\?\.masterVisibility/,
-  );
+test("server Sales visibility remains authoritative with no draft fallback", async () => {
+  const source = await readFile(new URL("../../../../functions/targetedBatches/documentFactory.js", import.meta.url), "utf8");
+  assert.match(source, /masterVisibility = salesSource\.master\?\.visibility/);
+  assert.doesNotMatch(source, /draftRow\?\.masterVisibility/);
 });
