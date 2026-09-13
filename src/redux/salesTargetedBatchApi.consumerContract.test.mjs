@@ -90,13 +90,13 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   assert.ok(listeners.every(listener => listener.stopped));
 });
 
-async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }) {
+async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callable = null) {
   const listeners = [];
   const cleanups = new Set();
   let current = true;
   const context = createContext({ Date, console: { error() {}, warn() {} } });
   const mocks = {
-    "firebase/functions": { httpsCallable: () => { throw Error("Read-only details must never call a mutation"); } },
+    "firebase/functions": { httpsCallable: callable || (() => { throw Error("Read-only details must never call a mutation"); }) },
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
       fakeBaseQuery: () => () => {},
@@ -146,7 +146,7 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }) {
   const parent = (extra = {}) => ({ id: "TB", scope: { lmPcode: "ZA5241" },
     metadata: { createdAt: { seconds: 1700000000 }, createdByUid: "U", createdByUser: "Creator" }, ...extra });
   return {
-    listeners, state, emit, parent,
+    listeners, state, emit, parent, definitions: module.namespace.salesTargetedBatchApi.definitions,
     async close() { endCache(); await lifetime; },
     async logout() { current = false; for (const cleanup of cleanups) cleanup(); await lifetime; },
   };
@@ -241,4 +241,28 @@ test("details reject path-invalid IDs and suppress callbacks after session dispo
   assert.equal(JSON.stringify(f.state), before);
   assert.equal(f.listeners.length, 2);
   assert.ok(f.listeners.every(l => l.stopped));
+});
+
+test("a resolver rejected before server entry returns only a request error, never failed-lookup rows or writes", async () => {
+  let rejection = { code: "functions/internal", message: "internal" }, calls = 0;
+  const f = await detailsFixture(undefined, (_functions, name) => async () => {
+    assert.equal(name, "resolveSalesTargetedBatchCallable"); calls++;
+    if (rejection) throw rejection;
+    return { data: { success: true, rows: [{ salesId: "00123", ready: true, code: "RESOLVED" }] } };
+  });
+  try {
+    const input = { tbId: "TB", lmPcode: "ZA5241", source: "PREPAID_SALES_NON_GPS", salesIds: ["00123"] };
+    const before = structuredClone(input), streamBefore = JSON.stringify(f.state);
+    for (const code of ["internal", "not-found", "unavailable", "deadline-exceeded"]) {
+      rejection = { code: `functions/${code}`, message: code };
+      const result = await f.definitions.resolveSalesTargetedBatch.queryFn(input);
+      assert.equal(result.error.code, rejection.code); assert.equal(result.error.uncertain, true);
+      assert.equal(Object.hasOwn(result, "data"), false);
+      assert.doesNotMatch(JSON.stringify(result), /erfLookup|NO_EXACT_POSITION|NO_ERF|MULTIPLE_ERFS/);
+      assert.deepEqual(input, before); assert.equal(JSON.stringify(f.state), streamBefore);
+    }
+    rejection = null;
+    const recovered = await f.definitions.resolveSalesTargetedBatch.queryFn(input);
+    assert.equal(recovered.data.rows[0].code, "RESOLVED"); assert.equal(calls, 5);
+  } finally { await f.close(); }
 });

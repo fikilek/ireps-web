@@ -7,7 +7,7 @@ import { useSalesReadScope } from "../../redux/salesApi";
 import { clearTargetedBatchDraft, selectTargetedBatchDraft, updateSalesDraftResolution, saveSalesDraftFence, removeSalesDraftMeter, setSalesDraftConfirmation, setSalesDraftUncertainRequest } from "../../redux/targetedBatchDraftSlice";
 import { useGetSalesBatchDraftSnapshotQuery, useResolveSalesTargetedBatchMutation, useSaveSalesTargetedBatchGeofenceMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
 import { useGeofencePolygonDraft } from "../../features/maps/use-geofence-polygon-draft";
-import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity } from "./targeted-batches/draft/sales-batch-draft-model";
+import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure } from "./targeted-batches/draft/sales-batch-draft-model";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
 import TargetedBatchConfirmModal from "./targeted-batches/TargetedBatchConfirmModal";
 import { draftReviewStyles as styles } from "./targeted-batches/draft/targetedBatchDraftReviewStyles";
@@ -32,6 +32,7 @@ function SalesDraftSession({ draft }) {
   const [resolve, resolveState] = useResolveSalesTargetedBatchMutation(), [save, saveState] = useSaveSalesTargetedBatchGeofenceMutation();
   const [assess, assessState] = useAssessSalesTargetedBatchMutation(), [create, createState] = useCreateSalesTargetedBatchMutation();
   const [feedback, setFeedback] = useState(""), [recheck, setRecheck] = useState(0), [resolvedSignature, setResolvedSignature] = useState("");
+  const [resolutionFailure, setResolutionFailure] = useState(null);
   const [tick, setTick] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setTick(Date.now()), 5000); return () => clearInterval(timer); }, []);
   const ids = JSON.stringify(draft.retainedIds), resolved = Object.values(draft.resolutions);
@@ -56,18 +57,27 @@ function SalesDraftSession({ draft }) {
       pending = false;
       if (!active) return;
       dispatch(updateSalesDraftResolution({ tbId: input.tbId, rows: result.rows }));
-      setResolvedSignature(signature); setFeedback("");
-    }).catch(error => { pending = false; if (active) { handled.current = ""; setFeedback(error.error || "Resolution is unavailable. Recheck when the service is available."); } });
+      setResolvedSignature(signature); setResolutionFailure(null); setFeedback("");
+    }).catch(error => {
+      pending = false;
+      if (active) {
+        handled.current = "";
+        setResolutionFailure({ key, ...salesDraftResolutionFailure(error, input.source) });
+      }
+    });
     return () => { active = false; if (pending && handled.current === key) handled.current = ""; };
   }, [signature, ids, recheck, uncertain, resolve, dispatch]);
   useEffect(() => {
     if (live?.fence && JSON.stringify(live.fence) !== JSON.stringify(draft.savedFence)) dispatch(saveSalesDraftFence({ tbId: draft.id, fence: live.fence }));
   }, [live?.fence, draft.savedFence, draft.id, dispatch]);
   const geometry = useMemo(() => draftGeometry(drawing.points, draft.savedFence), [drawing.points, draft.savedFence]);
-  const model = useMemo(() => projectSalesDraft(draft, live, { geometry, resolutionsCurrent: signature === resolvedSignature, now: tick }), [draft, live, geometry, signature, resolvedSignature, tick]);
+  const currentResolutionFailure = resolutionFailure?.key === JSON.stringify([signature, ids, recheck]) ? resolutionFailure : null;
+  const model = useMemo(() => projectSalesDraft(draft, live, { geometry, resolutionsCurrent: signature === resolvedSignature,
+    resolving: resolveState.isLoading, resolutionFailure: currentResolutionFailure, now: tick }),
+  [draft, live, geometry, signature, resolvedSignature, resolveState.isLoading, currentResolutionFailure, tick]);
   const identity = confirmationIdentity(draft, live);
   const confirmation = draft.confirmation;
-  const stale = !live?.ready || confirmation?.identity !== identity || tick > (confirmation?.expiresAt || 0);
+  const stale = !live?.ready || resolveState.isLoading || Boolean(currentResolutionFailure) || confirmation?.identity !== identity || tick > (confirmation?.expiresAt || 0);
   const busy = resolveState.isLoading || saveState.isLoading || assessState.isLoading || createState.isLoading;
 
   async function saveFence() {
@@ -104,9 +114,9 @@ function SalesDraftSession({ draft }) {
     }
   }
   return <>
-    <TargetedBatchDraftReview draft={draft} model={model} live={live} drawing={drawing} geometry={geometry} busy={busy || uncertain} feedback={feedback}
+    <TargetedBatchDraftReview draft={draft} model={model} live={live} drawing={drawing} geometry={geometry} busy={busy || uncertain} feedback={resolveState.isLoading ? "" : currentResolutionFailure?.reason || feedback}
       onRemove={salesId => dispatch(removeSalesDraftMeter({ tbId: draft.id, salesId }))} onSave={saveFence} onCreate={openConfirmation}
-      onResolve={() => { handled.current = ""; setRecheck(value => value + 1); }} onClear={() => { if (window.confirm("Clear this retained draft? Saved fences remain recorded.")) dispatch(clearTargetedBatchDraft()); }}/>
+      onResolve={() => { handled.current = ""; setResolutionFailure(null); setFeedback(""); setRecheck(value => value + 1); }} onClear={() => { if (window.confirm("Clear this retained draft? Saved fences remain recorded.")) dispatch(clearTargetedBatchDraft()); }}/>
     {uncertain && !createState.isLoading && <button type="button" onClick={() => commitConfirmed(draft.uncertainRequest)}>Retry the same confirmed creation</button>}
     {confirmation && !uncertain && <TargetedBatchConfirmModal draft={draft} confirmation={confirmation} isCreating={createState.isLoading} stale={stale}
       onCancel={() => dispatch(setSalesDraftConfirmation({ tbId: draft.id, confirmation: null }))} onConfirm={() => { if (!stale) commitConfirmed(confirmation.input); }}/>}</>;

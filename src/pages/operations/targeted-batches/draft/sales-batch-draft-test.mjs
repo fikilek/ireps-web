@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {buildRetainedSalesDraft,projectSalesDraft,confirmationIdentity,salesDraftIntent} from "./sales-batch-draft-model.js";
+import {buildRetainedSalesDraft,projectSalesDraft,confirmationIdentity,salesDraftIntent,salesDraftResolutionFailure} from "./sales-batch-draft-model.js";
 const f=JSON.parse(fs.readFileSync(new URL("../../../../../functions/test/fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 function fixture(n=1){
  const ids=Array.from({length:n},(_,i)=>`00${123+i}`),rows=ids.map(id=>({...f.sales,id,meterNo:id,meterNoNormalized:id,master:{...f.sales.master,id}}));
@@ -34,4 +34,52 @@ test("confirmation identity observes retained rows and all live authorities; int
  assert.deepEqual(intent.salesIds,draft.retainedIds);assert.equal(Object.hasOwn(intent,"rows"),false);
  for(const key of ["sales","erfs","wards","fence","parent"]){const changed=structuredClone(live);changed[key]={changed:true};assert.notEqual(confirmationIdentity(draft,changed),initial);}
  assert.notEqual(confirmationIdentity({...draft,selection:{reason:"Changed"}},live),initial);
+});
+
+test("undeployed, offline and blocked resolver calls have plain matching row states without changing Sales or the draft", () => {
+ const {draft,live}=fixture(2); draft.resolutions={};
+ const before=structuredClone({draft,live});
+ for(const error of [
+  {code:"functions/internal",error:"internal",uncertain:true},
+  {code:"functions/not-found",error:"NOT FOUND",uncertain:true},
+  {code:"functions/unavailable",error:"offline",uncertain:true},
+  {code:"functions/deadline-exceeded",error:"timeout",uncertain:true},
+  {code:"functions/internal",error:"internal"}, new TypeError("Failed to fetch"), {},
+ ]) {
+  const failure=salesDraftResolutionFailure(error,draft.source.type);
+  assert.equal(failure.reason,"Geocoding service unavailable. Your draft is unchanged. Try Recheck resolution.");
+  const result=projectSalesDraft(draft,live,{now:1000,resolutionsCurrent:false,resolutionFailure:failure,geometry:f.ward.geometry});
+  assert.equal(result.rows.length,2); assert.deepEqual(result.readyIds,[]);
+  assert.equal(Boolean(result.canSave),false); assert.equal(Boolean(result.canCreate),false);
+  for(const row of result.rows) {
+   assert.equal(row.ready,false); assert.equal(row.code,"RESOLUTION_SERVICE_UNAVAILABLE"); assert.equal(row.reason,failure.reason);
+   assert.doesNotMatch(row.reason,/Sales data changed|Needs manual ERFing/);
+   assert.equal(Object.hasOwn(row,"erfLookup"),false);
+  }
+  assert.deepEqual({draft,live},before);
+ }
+});
+test("waiting, pending, unavailable and successful recheck remain distinct even after a prior success", () => {
+ const {draft,live}=fixture();
+ const failure=salesDraftResolutionFailure({code:"functions/internal"},draft.source.type);
+ assert.match(projectSalesDraft(draft,live,{now:1000,resolutionsCurrent:false}).rows[0].reason,/has not been checked/);
+ const pending=projectSalesDraft(draft,live,{now:1000,resolving:true,resolutionFailure:failure});
+ assert.equal(pending.rows[0].code,"RESOLUTION_PENDING"); assert.equal(pending.rows[0].reason,"Checking coordinates and ERF…");
+ assert.deepEqual(pending.readyIds,[]);
+ const failed=projectSalesDraft(draft,live,{now:1000,resolutionFailure:failure});
+ assert.equal(failed.rows[0].code,"RESOLUTION_SERVICE_UNAVAILABLE"); assert.deepEqual(failed.readyIds,[]);
+ const recovered=projectSalesDraft(draft,live,{now:1000});
+ assert.deepEqual(recovered.readyIds,draft.retainedIds); assert.equal(recovered.rows[0].reason,"Ready");
+});
+test("service errors retain genuine policy reasons and completed lookup outcomes", () => {
+ const {draft,live,ids}=fixture(2);
+ live.sales[ids[0]].targetedBatchId="TGB_20260913_120001_AB12";
+ const policyReason=projectSalesDraft(draft,live,{now:1000}).rows[0].reason;
+ const failure=salesDraftResolutionFailure({code:"functions/internal"},draft.source.type);
+ assert.equal(projectSalesDraft(draft,live,{now:1000,resolutionFailure:failure}).rows[0].reason,policyReason);
+ draft.resolutions[ids[1]]={ready:false,code:"NO_EXACT_POSITION",reason:"Needs manual ERFing — NO_EXACT_POSITION"};
+ assert.equal(projectSalesDraft(draft,live,{now:1000}).rows[1].reason,"Needs manual ERFing — NO_EXACT_POSITION");
+ const denied=salesDraftResolutionFailure({code:"ACTOR_SCOPE_INVALID",error:"Select the authorized LM."},draft.source.type);
+ assert.deepEqual(denied,{code:"ACTOR_SCOPE_INVALID",reason:"Select the authorized LM."});
+ assert.match(salesDraftResolutionFailure({code:"functions/internal"},"PREPAID_SALES").reason,/^Resolution service unavailable/);
 });

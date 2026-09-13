@@ -21,8 +21,22 @@ export function salesDraftIntent(draft) {
     salesPeriodTo: draft.selection.salesPeriodTo || null, resolutionProofs: Object.fromEntries(Object.entries(draft.resolutions).filter(([,row]) => row.proof).map(([id,row]) => [id,row.proof])) };
 }
 
+// Callable transport errors do not establish a completed per-meter lookup.
+// A lost response also cannot prove whether the server ran, so promise only
+// that the retained draft is unchanged; never invent an erfLookup outcome.
+export function salesDraftResolutionFailure(error, source) {
+  const code = String(error?.code || "").replace(/^functions\//, "");
+  const message = error?.error || error?.message;
+  const unavailable = error?.uncertain || ["internal", "unavailable", "not-found", "deadline-exceeded", "cancelled", "unknown"].includes(code)
+    || !message || /^(internal|failed to fetch|network error|network request failed)[.!]?$/i.test(message);
+  const service = source === "PREPAID_SALES_NON_GPS" ? "Geocoding" : "Resolution";
+  return unavailable
+    ? { code: "RESOLUTION_SERVICE_UNAVAILABLE", reason: `${service} service unavailable. Your draft is unchanged. Try Recheck resolution.` }
+    : { code: code || "RESOLUTION_REQUEST_FAILED", reason: message };
+}
+
 // Missing or ineligible rows remain visible until the operator explicitly removes them.
-export function projectSalesDraft(draft, live, { geometry = null, resolutionsCurrent = true, now = Date.now() } = {}) {
+export function projectSalesDraft(draft, live, { geometry = null, resolutionsCurrent = true, resolving = false, resolutionFailure = null, now = Date.now() } = {}) {
   const rows = draft.retainedIds.map(salesId => {
     const sales = live?.sales?.[salesId], resolved = draft.resolutions[salesId];
     const fallback = draft.displayRows.find(row => (row.salesAllMeterId || row.id) === salesId);
@@ -32,7 +46,9 @@ export function projectSalesDraft(draft, live, { geometry = null, resolutionsCur
     if (!sales) return { ...row, reason: "Sales meter is no longer available" };
     const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: draft.scope.lmPcode, source: draft.source.type });
     if (!policy.batchable) return { ...row, reason: policy.reason };
-    if (!resolutionsCurrent) return { ...row, reason: "Sales data changed; checking resolution" };
+    if (resolving) return { ...row, code: "RESOLUTION_PENDING", reason: "Checking coordinates and ERF…" };
+    if (resolutionFailure) return { ...row, ...resolutionFailure };
+    if (!resolutionsCurrent) return { ...row, code: "RESOLUTION_REQUIRED", reason: "Resolution has not been checked. Try Recheck resolution." };
     if (!resolved?.ready || !row.point || !row.erfId) return { ...row, reason: resolved?.reason || "Resolving coordinates and ERF" };
     if (!Number.isFinite(resolved.expiresAt) || now >= resolved.expiresAt) return { ...row, reason: "Resolution expired. Recheck resolution before continuing" };
     const erf = live.erfs[row.erfId], ward = live.wards[row.scope?.wardPcode];
