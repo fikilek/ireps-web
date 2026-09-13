@@ -1,4 +1,4 @@
-import { addSalesSelection, evaluateSalesBatchability } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { addSalesSelection, evaluateSalesBatchability, hasUsableSalesGps as hasPolicySalesGps } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -10,6 +10,7 @@ import SalesGpsMapSection from "./SalesGpsMapSection";
 import SalesRangeFilterModal from "./SalesRangeFilterModal";
 import MultiSelectFilter from "./MultiSelectFilter";
 import { hasUsableSalesGps } from "../models/salesGpsModel";
+import { salesTableMeterNote } from "../models/sales-table-meter-note.js";
 import {
   TARGET_FILTERS,
   compareNatural,
@@ -558,11 +559,17 @@ export default function SalesMetersTable({
 
   const classifiedRows = useMemo(
     () =>
-      rows.map((row) => ({
-        ...row,
-        salesStatus: row?.salesWorkStatus,
-        batchability: evaluateSalesBatchability(row, { source: "PREPAID_SALES" }),
-      })),
+      rows.map((row) => {
+        const batchability = evaluateSalesBatchability(row, { source: "PREPAID_SALES" });
+        const isNonGpsSales = !hasPolicySalesGps(row);
+        return {
+          ...row,
+          salesStatus: row?.salesWorkStatus,
+          batchability,
+          isNonGpsSales,
+          meterNote: salesTableMeterNote({ isNonGpsSales, batchability }),
+        };
+      }),
     [rows],
   );
 
@@ -1166,7 +1173,7 @@ export default function SalesMetersTable({
           </button>
 
           <DownloadButtons
-            registryName="Sales Table"
+            registryName="GPS Sales Table"
             rowsLabel="meters"
             visibleRows={sortedRows}
             columns={quickDownloadColumns}
@@ -1677,13 +1684,13 @@ export default function SalesMetersTable({
                   <td style={{ ...styles.bodyCell, ...styles.meterCell, ...getStickyStyle("meterNo", stickyLayout) }}>
                     <button
                       type="button"
-                      style={styles.meterLink}
+                      style={row.isNonGpsSales ? { ...styles.meterLink, ...styles.meterLinkNonGps } : styles.meterLink}
                       onClick={() => setMapRow(row)}
                       title={`Open meter ${row.meterNo} on map`}
                     >
                       {row.meterNo || "NAv"}
                     </button>
-                    {!row.batchability.batchable ? <span style={styles.noGpsHelper}>{row.batchability.reason}</span> : null}
+                    {row.meterNote ? <span style={styles.noGpsHelper}>{row.meterNote}</span> : null}
                   </td>
 
                   {columnVisibility.wardNo ? (
@@ -2195,12 +2202,15 @@ const styles = {
     textUnderlineOffset: "2px",
     cursor: "pointer",
   },
+  meterLinkNonGps: {
+    color: "#94a3b8",
+  },
   noGpsHelper: {
     display: "block",
     marginTop: "0.22rem",
     color: "#b45309",
-    fontSize: "0.68rem",
-    fontWeight: 800,
+    fontSize: "0.62rem",
+    fontWeight: 500,
     lineHeight: 1.2,
     whiteSpace: "normal",
   },

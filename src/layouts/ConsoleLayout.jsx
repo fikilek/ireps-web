@@ -91,12 +91,12 @@ const navSections = [
         label: "Sales",
         items: [
           {
-            label: "Sales Table",
+            label: "GPS Sales Table",
             path: "/sales/table",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "Non GPS Batch Planning",
+            label: "Non-GPS Sales Table",
             path: "/sales/non-gps-batch-planning",
             allowedRoles: MANAGEMENT_ROLES,
           },

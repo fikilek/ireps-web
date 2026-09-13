@@ -323,7 +323,7 @@ export default function NonGpsBatchPlanningPage() {
       <section style={styles.hero}>
         <div>
           <p style={styles.heroEyebrow}>Sales Planning</p>
-          <h1 style={styles.heroTitle}>Non GPS Batch Planning</h1>
+          <h1 style={styles.heroTitle}>Non-GPS Sales Table</h1>
           <p style={styles.heroSubtitle}>
             {activeLmPcode || "NAv"} · {activeWorkbaseName} · Plan Sales meters
             without usable GPS by Town / Area and street.

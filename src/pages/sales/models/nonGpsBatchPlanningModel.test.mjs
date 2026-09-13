@@ -895,7 +895,8 @@ test("NGP route and Sales navigation entry are management-side only", () => {
 
   assert.match(routes, /path="\/sales\/non-gps-batch-planning"/);
   assert.match(routes, /<NonGpsBatchPlanningPage \/>/);
-  assert.match(layout, /label: "Non GPS Batch Planning"/);
+  assert.match(layout, /label: "Non-GPS Sales Table"/);
+  assert.match(layout, /label: "GPS Sales Table"/);
   assert.match(layout, /path: "\/sales\/non-gps-batch-planning"/);
 });
 

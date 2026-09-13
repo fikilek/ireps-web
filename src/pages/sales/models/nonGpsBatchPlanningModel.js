@@ -489,7 +489,7 @@ export function buildNgpTargetedBatchDraftPlan({
   tbId,
   lmPcode,
   lmName,
-  selectionReason = "Selected from Non GPS Batch Planning",
+  selectionReason = "Selected from Non-GPS Sales Table",
 }) {
   const selectedTargets = [...(Array.isArray(targets) ? targets : [])].sort(
     compareNgpTargets,

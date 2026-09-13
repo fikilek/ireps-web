@@ -16,7 +16,7 @@ function getDownloadButtonsBlock(source) {
   return source.match(/<DownloadButtons[\s\S]*?\/>/)?.[0] || "";
 }
 
-test("Sales Table uses the standard iREPS QD/FD component", () => {
+test("GPS Sales Table uses the standard iREPS QD/FD component", () => {
   assert.match(
     table,
     /import DownloadButtons from "\.\.\/\.\.\/\.\.\/components\/DownloadButtons";/,
@@ -25,7 +25,7 @@ test("Sales Table uses the standard iREPS QD/FD component", () => {
   const block = getDownloadButtonsBlock(table);
 
   assert.ok(block, "DownloadButtons block must exist");
-  assert.match(block, /registryName="Sales Table"/);
+  assert.match(block, /registryName="GPS Sales Table"/);
   assert.match(block, /rowsLabel="meters"/);
   assert.match(block, /fileBaseName="sales_table"/);
   assert.match(block, /scope=\{downloadScope\}/);

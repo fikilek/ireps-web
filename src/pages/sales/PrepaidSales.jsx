@@ -350,7 +350,7 @@ export default function PrepaidSales() {
       return;
     }
 
-    const selectionReason = "Selected from Prepaid Sales filters";
+    const selectionReason = "Selected from GPS Sales Table";
 
     const draftPlan = buildSalesTargetedBatchDraftPlan({
       rows: selectedRows,
@@ -387,7 +387,7 @@ export default function PrepaidSales() {
         proposedBatches: draftPlan.proposedBatches,
         source: {
           type: "PREPAID_SALES",
-          label: "Prepaid Sales",
+          label: "GPS Sales",
           sourceId: null,
           fileName: null,
         },
@@ -441,7 +441,7 @@ export default function PrepaidSales() {
       <section style={styles.hero}>
         <div>
           <div style={styles.heroEyebrowRow}>
-            <p style={styles.heroEyebrow}>Sales Table</p>
+            <p style={styles.heroEyebrow}>GPS Sales Table</p>
             <label>Category month <input type="month" value={categoryMonth || ""} onChange={event => setMonthSelection({ scope: salesScopeKey, month: event.target.value })} /></label>
             <span>{salesRows.filter(row => row.categoryAvailable).length} of {salesRows.length} records have this month's category; unavailable values show NAv.</span>
           </div>
@@ -462,7 +462,7 @@ export default function PrepaidSales() {
             style={styles.ngpButton}
             onClick={() => navigate("/sales/non-gps-batch-planning")}
           >
-            Non GPS Batch Planning
+            Non-GPS Sales Table
           </button>
           <div style={styles.roleBadge}>{role || "NAv"}</div>
           <button
