@@ -1,6 +1,8 @@
+/* eslint-disable no-unused-vars -- Component tags are consumed by JSX; the repository uses the core ESLint rule. */
 // src/pages/operations/GeoFencesPage.jsx
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useGeofencePolygonDraft } from "../../features/maps/use-geofence-polygon-draft.js";
 import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -558,7 +560,7 @@ function WardBoundaryLayer({
     }, 120);
 
     return () => clearTimeout(timer);
-  }, [map, shouldFit, wardPcode, ward?.bbox, ward?.geometry]);
+  }, [map, shouldFit, ward]);
 
   useEffect(() => {
     if (!map || !manualWardFlightKey || !manualWardFlightWard) return;
@@ -571,9 +573,7 @@ function WardBoundaryLayer({
   }, [
     map,
     manualWardFlightKey,
-    manualWardPcode,
-    manualWardFlightWard?.bbox,
-    manualWardFlightWard?.geometry,
+    manualWardFlightWard,
   ]);
 
   useEffect(() => {
@@ -1512,7 +1512,7 @@ export default function GeoFencesPage() {
 
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
-  const [draftPoints, setDraftPoints] = useState([]);
+  const { points: draftPoints, setPoints: setDraftPoints } = useGeofencePolygonDraft();
   const [planningLayerVisibility, setPlanningLayerVisibility] = useState({
     erfs: false,
     sales: false,
@@ -1542,6 +1542,8 @@ export default function GeoFencesPage() {
     if (!nextGeoFence) return;
     if (selectedGeoFence?.id === nextGeoFence.id) return;
 
+    // Preserve route-to-geofence synchronization when the external stream arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedGeoFence(nextGeoFence);
   }, [
     focusGeofenceId,
