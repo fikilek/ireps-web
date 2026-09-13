@@ -1,18 +1,10 @@
-/* eslint-disable no-unused-vars, react-hooks/set-state-in-effect -- subscription effects reset route-scoped loading state. */
+import { useGetPermanentSalesBatchesQuery, useAllocateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
+/* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { Link, useParams } from "react-router-dom";
-import { httpsCallable } from "firebase/functions";
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
 
-import { db, functions } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import {
   useGetTargetedBatchAllocationDirectoryQuery,
@@ -64,30 +56,6 @@ function timestampToIso(value) {
   return null;
 }
 
-function mapPermanentTbRow(rowDoc) {
-  const data = rowDoc.data() || {};
-  const meterId = data?.refs?.meterId || null;
-
-  return {
-    ...data,
-    id: rowDoc.id,
-    tbRowId: rowDoc.id,
-    rowNo: data.rowNo,
-    salesAllMeterId: data.salesAllMeterId,
-    meterNo: data?.meter?.numberRaw || data?.meter?.numberNormalized || "",
-    accountNumber: data?.customer?.accountNumber || "",
-    customerName: data?.customer?.customerName || "",
-    addressLine1: data?.location?.addressLine1 || "",
-    town: data?.location?.town || "",
-    wardNumberLabel: data?.location?.wardNumberLabel || "",
-    wardNumbers: Array.isArray(data?.location?.wardNumbers)
-      ? data.location.wardNumbers
-      : [],
-    astId: meterId,
-    astMatchStatus: meterId ? "MATCHED" : "NOT_MATCHED",
-    proposedTrnType: meterId ? "METER_INSPECTION" : "METER_DISCOVERY",
-  };
-}
 
 function getTargetMembers(target = {}) {
   return asArray(target.members);
@@ -426,11 +394,6 @@ export default function TargetedBatchAllocationPage() {
   const authContext = useAuth();
   const actorMncServiceProviderId = getActorMncServiceProviderId(authContext);
 
-  const [batch, setBatch] = useState(null);
-  const [permanentRows, setPermanentRows] = useState([]);
-  const [isBatchLoading, setIsBatchLoading] = useState(true);
-  const [batchLoadError, setBatchLoadError] = useState("");
-
   const [targetType, setTargetType] = useState("TEAM");
   const [targetId, setTargetId] = useState("");
   const [dragTarget, setDragTarget] = useState(null);
@@ -441,64 +404,12 @@ export default function TargetedBatchAllocationPage() {
 
   const decodedTbId = decodeURIComponent(tbId || "");
 
-  useEffect(() => {
-    {
-      setIsBatchLoading(true);
-      setBatchLoadError("");
-      setBatch(null);
-      setPermanentRows([]);
-      setTargetId("");
-      setStatusMessage("");
-      setAllocationError("");
-
-      if (!decodedTbId) {
-        setBatchLoadError("The Targeted Batch ID is missing from the route.");
-        setIsBatchLoading(false);
-        return undefined;
-      }
-      let parentReady = false;
-      let rowsReady = false;
-      const markReady = () => parentReady && rowsReady && setIsBatchLoading(false);
-      const handleError = (error) => {
-        setBatchLoadError(error?.message || "The permanent Targeted Batch could not be loaded from Firestore.");
-        setIsBatchLoading(false);
-      };
-      const unsubscribeParent = onSnapshot(doc(db, "tb_uploads", decodedTbId), (parentSnapshot) => {
-        if (!parentSnapshot.exists()) {
-          setBatchLoadError(
-            `Permanent Targeted Batch ${decodedTbId} was not found.`,
-          );
-          setBatch(null);
-          parentReady = true;
-          markReady();
-          return;
-        }
-
-        const permanentBatch = {
-          ...parentSnapshot.data(),
-          id: parentSnapshot.id,
-        };
-
-        setBatch(permanentBatch);
-        parentReady = true;
-        markReady();
-      }, handleError);
-      const unsubscribeRows = onSnapshot(query(collection(db, "tb_rows"), where("tbId", "==", decodedTbId)), (rowsSnapshot) => {
-        const loadedRows = rowsSnapshot.docs
-          .map(mapPermanentTbRow)
-          .sort((left, right) => Number(left.rowNo) - Number(right.rowNo));
-
-        setPermanentRows(loadedRows);
-        rowsReady = true;
-        markReady();
-      }, handleError);
-
-    return () => {
-      unsubscribeParent();
-      unsubscribeRows();
-    };
-    }
-  }, [decodedTbId]);
+  const activeWorkbase = authContext.activeWorkbase;
+  const lmPcode = activeWorkbase?.lmPcode || activeWorkbase?.pcode || activeWorkbase?.id || activeWorkbase?.localMunicipalityId;
+  const { data: permanent } = useGetPermanentSalesBatchesQuery({ lmPcode, tbId: decodedTbId }, { skip: !lmPcode || !decodedTbId });
+  const batch = permanent?.batch || null, permanentRows = permanent?.rows || [];
+  const isBatchLoading = !permanent?.ready && !permanent?.error, batchLoadError = permanent?.error || "";
+  const [allocateTargetedBatch] = useAllocateSalesTargetedBatchMutation();
 
   const sourceType = batch?.source?.type || "";
   const isSalesSource = ["PREPAID_SALES", "PREPAID_SALES_NON_GPS"].includes(
@@ -796,16 +707,7 @@ export default function TargetedBatchAllocationPage() {
     );
 
     try {
-      const allocateTargetedBatch = httpsCallable(
-        functions,
-        "onAllocateTargetedBatchCallable",
-      );
-      const response = await allocateTargetedBatch({
-        tbId: batch.id,
-        targetType: target.type,
-        targetId: target.id,
-      });
-      const result = response?.data || {};
+      const result = await allocateTargetedBatch({ tbId: batch.id, targetType: target.type, targetId: target.id }).unwrap();
 
       if (result?.success !== true) {
         const error = new Error(
@@ -817,44 +719,7 @@ export default function TargetedBatchAllocationPage() {
       }
 
       const backendTarget = result?.target || target;
-      const completedAt = result?.completedAt || new Date().toISOString();
-      const allocatedRows = Number(
-        result?.allocatedRows || permanentRows.length,
-      );
-
-      setBatch((current) => ({
-        ...current,
-        status: result?.batchStatus || "ALLOCATED",
-        allocation: {
-          ...(current?.allocation || {}),
-          status: result?.allocationStatus || "ALLOCATED",
-          targetType: backendTarget.type,
-          targetId: backendTarget.id,
-          targetName: backendTarget.name,
-          memberCount: Number(backendTarget.memberCount || 0),
-          completedAt,
-        },
-        counts: {
-          ...(current?.counts || {}),
-          allocatedRows,
-          unallocatedRows: Number(result?.unallocatedRows || 0),
-        },
-      }));
-
-      setPermanentRows((currentRows) =>
-        currentRows.map((row) => ({
-          ...row,
-          allocation: {
-            ...(row?.allocation || {}),
-            status: "ALLOCATED",
-            targetType: backendTarget.type,
-            targetId: backendTarget.id,
-            targetName: backendTarget.name,
-            allocatedAt: completedAt,
-          },
-        })),
-      );
-
+      const allocatedRows = result.allocatedRows;
       setStatusMessage(
         `${batch.id} and ${formatNumber(allocatedRows)} TB Row(s) were permanently allocated to ${getTargetLabel(backendTarget)}.`,
       );
@@ -865,7 +730,7 @@ export default function TargetedBatchAllocationPage() {
         .replace(/^functions\//, "")
         .toUpperCase();
       const message =
-        error?.message ||
+        error?.error || error?.message ||
         error?.details?.message ||
         "Targeted Batch allocation failed.";
 

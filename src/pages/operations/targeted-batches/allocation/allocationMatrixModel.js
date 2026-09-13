@@ -10,6 +10,8 @@ export const CANONICAL_TARGETED_BATCH_STATES = Object.freeze({
   accepted: "ACCEPTED",
   rejected: "REJECTED",
   completed: "COMPLETED",
+  inProgress: "IN_PROGRESS",
+  unavailable: "UNAVAILABLE",
 });
 
 function cleanText(value) {
@@ -94,6 +96,8 @@ export function getCanonicalBatchState(batch = {}) {
   const allocationStatus = upper(batch?.allocation?.status);
   const acceptanceStatus = upper(batch?.acceptance?.status);
   const executionStatus = upper(batch?.execution?.status);
+  if (batch.schemaVersion === "0.3.0" && (!batch.creation?.state || !batch.allocation?.status || !batch.acceptance?.status || !["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(executionStatus))) return "UNAVAILABLE";
+  if (executionStatus === "IN_PROGRESS") return "IN_PROGRESS";
 
   if (executionStatus === "COMPLETED" || parentStatus === "COMPLETED") {
     return CANONICAL_TARGETED_BATCH_STATES.completed;
@@ -185,6 +189,7 @@ export function getBatchAllocationIntegrity(batch = {}) {
 
   const successfulAllocationStates = new Set([
     CANONICAL_TARGETED_BATCH_STATES.allocated,
+    CANONICAL_TARGETED_BATCH_STATES.inProgress,
     CANONICAL_TARGETED_BATCH_STATES.accepted,
     CANONICAL_TARGETED_BATCH_STATES.rejected,
     CANONICAL_TARGETED_BATCH_STATES.completed,
@@ -490,7 +495,7 @@ export function buildOrganisationAllocationMatrixResult({
       metric.awaitingAcceptanceBatches += 1;
       metric.remainingMeters += unfinishedRows;
     }
-    if (state === CANONICAL_TARGETED_BATCH_STATES.accepted) {
+    if ([CANONICAL_TARGETED_BATCH_STATES.accepted, CANONICAL_TARGETED_BATCH_STATES.inProgress].includes(state)) {
       metric.acceptedBatches += 1;
       metric.remainingMeters += unfinishedRows;
     }

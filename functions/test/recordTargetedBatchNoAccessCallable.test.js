@@ -5,7 +5,7 @@ import {Timestamp} from "firebase-admin/firestore";
 import {recordTargetedBatchNoAccess} from
   "../targetedBatches/recordTargetedBatchNoAccessCallable.js";
 
-const TB = "TB_1";
+const TB = "TGB_20260913_120000_AAAA";
 const ROW = "ROW_1";
 const SALES = "SALE_1";
 const ERF = "ERF_1";
@@ -99,9 +99,9 @@ function fixture({targetType = "TEAM", premiseId = null, rowStatus = "NOT_STARTE
       scope: {lmPcode: "ZA1", wardPcode: "ZA1001"}, metadata: {},
     },
     [`sales-all-meters/${SALES}`]: {
-      untouched: {yes: true}, geofenceRefs: [{id: "GF1"}],
-      tbRefs: [{id: "OTHER", rowId: "OTHER_ROW", fieldWork: {status: "NOT_STARTED"}}, {
-        id: TB, rowId: ROW, date: "LOCKED", fieldWork: {status: "NOT_STARTED",
+      targetedBatchId: TB, untouched: {yes: true}, geofenceRefs: [{id: "GF1"}],
+      tbRefs: [{id: "TGB_20260913_120000_BBBB", date: NOW}, {
+        id: TB, rowId: ROW, date: NOW, fieldWork: {status: "IN_PROGRESS", updatedAt: NOW,
           noAccess: [{date: "2026-08-01", time: "01:02:03", user: "Earlier"}],
           discoveredMeterNo: "KEEP", meterId: null, trnId: null,
           meterMatch: null, outcomeCode: null, outcomeLabel: null, submittedAt: null},
@@ -231,7 +231,7 @@ test("exact correlation and Sales shape failures produce zero writes", async () 
     const docs = fixture();
     docs[`sales-all-meters/${SALES}`].tbRefs[1].fieldWork = value;
     const db = new FakeDb(docs);
-    await assert.rejects(record(db), {code: "FIELDWORK_INVALID"});
+    await assert.rejects(record(db), {code: "TARGETED_BATCH_MEMBERSHIP_CONFLICT"});
     assert.equal(db.writes.length, 0);
   }
 });
@@ -244,7 +244,7 @@ test("Sales append preserves all existing fields, references, date, and entry or
   assert.deepEqual(after.geofenceRefs, before.geofenceRefs);
   assert.deepEqual(after.untouched, before.untouched);
   assert.deepEqual(after.tbRefs[0], before.tbRefs[0]);
-  assert.equal(after.tbRefs[1].date, "LOCKED");
+  assert.deepEqual(after.tbRefs[1].date, before.tbRefs[1].date);
   assert.deepEqual(after.tbRefs[1].fieldWork.noAccess[0], before.tbRefs[1].fieldWork.noAccess[0]);
   assert.deepEqual(after.tbRefs[1].fieldWork.noAccess[1],
     {date: "2026-08-04", time: "10:11:12", user: "Field Worker"});
@@ -324,4 +324,8 @@ test("reason, photo, timestamp, location, and source validation reject early", a
     await assert.rejects(record(db, request(change)), {code});
     assert.equal(db.writes.length, 0);
   }
+});
+
+test("No Access rejects null, blank, boolean and nonnumeric field GPS with no writes",async()=>{
+ for(const lat of [null,"",false,"-28.5",NaN]){const db=new FakeDb(fixture());await assert.rejects(record(db,request({location:{gps:{lat,lng:30.5}}})));assert.equal(db.writes.length,0);}
 });

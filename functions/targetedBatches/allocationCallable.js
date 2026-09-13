@@ -1,3 +1,4 @@
+import { readBatchActor, snapshotReader } from "./sales-batch-resolution.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -402,6 +403,10 @@ export function isNonGpsTargetedBatch(parent = {}) {
   );
 }
 
+export function requiresAtomicSalesAllocation(parent) {
+  return (parent.schemaVersion === "0.3.0" && ["PREPAID_SALES", "PREPAID_SALES_NON_GPS"].includes(parent.source?.type)) || isNonGpsTargetedBatch(parent);
+}
+
 function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
   const candidates = [
     {
@@ -428,7 +433,7 @@ function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
     value: Number(raw),
   }));
   const invalid = parsed.find(
-    ({ value }) => !Number.isInteger(value) || value < 1 || value > 20,
+    ({ value }) => !Number.isInteger(value) || value < 1 || value > 30,
   );
 
   if (invalid) {
@@ -457,6 +462,7 @@ function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
 
 export async function allocateNonGpsBatchAtomically({
   db,
+  request,
   parentRef,
   tbId,
   targetType,
@@ -492,19 +498,25 @@ export async function allocateNonGpsBatchAtomically({
     });
 
     const liveParent = liveParentSnapshot.data() || {};
+    if (liveParent.schemaVersion === "0.3.0") {
+      const currentActor = await readBatchActor({ db, request, lmPcode: liveParent.scope?.lmPcode, read: snapshotReader(transaction) });
+      const currentMnc = getActorMncServiceProviderId({ request: { auth: { token: {} } }, profile: currentActor.profile });
+      if (!currentMnc || currentMnc !== actorMncId) throw controlledError("ALLOCATION_AUTHORITY_CHANGED", "The allocating user's MNC changed");
+      actorName = currentActor.user;
+    }
     assertParentReadyForAllocation({ parent: liveParent, tbId });
 
-    if (!isNonGpsTargetedBatch(liveParent)) {
+    if (!requiresAtomicSalesAllocation(liveParent)) {
       throw controlledError(
         "NGP_ALLOCATION_SOURCE_CHANGED",
-        `${tbId} is no longer recognised as a Non-GPS Targeted Batch.`,
+        `${tbId} is no longer recognised as a Sales Targeted Batch.`,
       );
     }
 
-    if (liveRowSnapshots.length < 1 || liveRowSnapshots.length > 20) {
+    if (liveRowSnapshots.length < 1 || liveRowSnapshots.length > 30) {
       throw controlledError(
         "NGP_ALLOCATION_ROW_COUNT_INVALID",
-        `${tbId} must contain between 1 and 20 rows for atomic Non-GPS allocation.`,
+        `${tbId} must contain between 1 and 30 rows for atomic Sales allocation.`,
         { rowCount: liveRowSnapshots.length },
       );
     }
@@ -535,6 +547,16 @@ export async function allocateNonGpsBatchAtomically({
         `${tbId} contains TB Rows linked to another parent.`,
         { rowIds: foreignRows },
       );
+    }
+
+    if (liveParent.schemaVersion === "0.3.0") {
+      const slots = new Set(), meters = new Set();
+      if (liveParent.execution?.status !== "NOT_STARTED" || !["NOT_STARTED", "ALLOCATED"].includes(liveParent.allocation?.status) || liveParent.creation?.createdRows !== expectedRows) throw controlledError("CANONICAL_ALLOCATION_STATE_INVALID", "Canonical parent lifecycle and counts are incomplete");
+      for (const snapshot of liveRowSnapshots) {
+        const row = snapshot.data();
+        if (row.schemaVersion !== "0.3.0" || row.id !== snapshot.id || row.tbId !== tbId || !Number.isInteger(row.rowNo) || row.rowNo < 1 || slots.has(row.rowNo) || !row.salesAllMeterId || meters.has(row.salesAllMeterId) || row.decision?.status !== "ACCEPT" || row.allocation?.allocatable !== true || !["UNALLOCATED", "ALLOCATED"].includes(row.allocation?.status) || row.execution?.status !== "NOT_STARTED") throw controlledError("CANONICAL_ALLOCATION_STATE_INVALID", "Canonical row identity, decision, allocation or execution is incomplete");
+        slots.add(row.rowNo); meters.add(row.salesAllMeterId);
+      }
     }
 
     assertRowsSafeForAllocation({
@@ -835,9 +857,10 @@ export const onAllocateTargetedBatchCallable = onCall(
       const parent = parentSnapshot.data() || {};
       assertParentReadyForAllocation({ parent, tbId });
 
-      if (isNonGpsTargetedBatch(parent)) {
+      if (requiresAtomicSalesAllocation(parent)) {
         return await allocateNonGpsBatchAtomically({
           db,
+          request,
           parentRef,
           tbId,
           targetType,

@@ -1,3 +1,4 @@
+import { assertSalesBatchExecutionMembership, exactSalesTbRef } from "../salesAllMeters/sales-batch-policy.js";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
@@ -109,8 +110,8 @@ function validateMedia(media) {
 
 function validateLocation(location) {
   const gps = location?.gps || location;
-  const lat = Number(gps?.lat);
-  const lng = Number(gps?.lng);
+  const lat = typeof gps?.lat === "number" ? gps.lat : NaN;
+  const lng = typeof gps?.lng === "number" ? gps.lng : NaN;
   if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
       lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     throw controlledError("LOCATION_INVALID", "location.gps must contain valid lat and lng values.");
@@ -152,19 +153,19 @@ function assertParentExecutable(parent, tbId) {
   if (normalizeUpper(parent?.acceptance?.status) !== "ACCEPTED") {
     throw controlledError("TARGETED_BATCH_NOT_ACCEPTED", `${tbId} is not accepted.`);
   }
-  const status = normalizeUpper(parent?.execution?.status || "NOT_STARTED");
+  const status = normalizeUpper(parent?.execution?.status || (parent?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"));
   if (!["NOT_STARTED", "IN_PROGRESS"].includes(status)) {
     throw controlledError("TARGETED_BATCH_EXECUTION_STATE_INVALID", `${tbId} is not executable.`);
   }
 }
 
 function assertRowExecutable(row, rowId) {
-  if (normalizeUpper(row?.decision?.status || "ACCEPT") !== "ACCEPT" ||
+  if (normalizeUpper(row?.decision?.status || (row?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "ACCEPT")) !== "ACCEPT" ||
       row?.allocation?.allocatable === false ||
       normalizeUpper(row?.allocation?.status) !== "ALLOCATED") {
     throw controlledError("TARGETED_BATCH_ROW_NOT_EXECUTABLE", `${rowId} is not executable.`);
   }
-  const status = normalizeUpper(row?.execution?.status || "NOT_STARTED");
+  const status = normalizeUpper(row?.execution?.status || (row?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"));
   if (!["NOT_STARTED", "IN_PROGRESS"].includes(status)) {
     throw controlledError("TARGETED_BATCH_ROW_EXECUTION_STATE_INVALID", `${rowId} is not executable.`);
   }
@@ -199,24 +200,9 @@ function assertIdentity(existing, input) {
 }
 
 export function resolveSalesTbRef({tbRefs, input}) {
-  if (!Array.isArray(tbRefs)) {
-    throw controlledError("SALES_TB_REFS_INVALID", "The Sales tbRefs field is invalid.");
-  }
-
-  const matches = [];
-  tbRefs.forEach((ref, index) => {
-    if (sameId(ref?.id, input.tbId)) matches.push(index);
-  });
-
-  if (matches.length !== 1) {
-    throw controlledError(
-      matches.length ? "SALES_TB_REF_DUPLICATE" : "SALES_TB_REF_NOT_FOUND",
-      "The Sales Targeted Batch reference was not found uniquely.",
-    );
-  }
-
-  const index = matches[0];
-  const ref = tbRefs[index] || {};
+  const exact = exactSalesTbRef({ tbRefs }, input.tbId);
+  if (!exact.ok) throw controlledError(exact.code, "The Sales Targeted Batch reference is malformed or ambiguous.");
+  const { index, reference: ref } = exact;
   const existingRowId = normalizeText(ref?.rowId);
 
   if (existingRowId && !sameId(existingRowId, input.rowId)) {
@@ -336,6 +322,7 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
     const parent = requireDocument(parentSnap, "TARGETED_BATCH_NOT_FOUND", "Targeted Batch not found.");
     const row = requireDocument(rowSnap, "TARGETED_BATCH_ROW_NOT_FOUND", "Targeted Batch row not found.");
     const sales = requireDocument(salesSnap, "SALES_DOCUMENT_NOT_FOUND", "Sales document not found.");
+    assertSalesBatchExecutionMembership(sales, input.tbId);
     const allocation = parent?.allocation || {};
     const target = allocation?.target || {};
     const targetType = normalizeUpper(allocation?.targetType || target?.type);
@@ -398,7 +385,7 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
       });
     }
     transaction.update(rowRef, rowPatch);
-    const parentStatus = normalizeUpper(parent?.execution?.status || "NOT_STARTED");
+    const parentStatus = normalizeUpper(parent?.execution?.status || (parent?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"));
     const parentPatch = {
       "metadata.updatedAt": now,
       "metadata.updatedByUid": actor.uid,

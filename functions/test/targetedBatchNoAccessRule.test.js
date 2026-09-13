@@ -61,10 +61,12 @@ test("row enrichment returns NA length and fieldWork meterId", () => {
       tbRefs: [
         {
           id: TB_ID,
+          date: NOW,
           rowId: ROW_ID,
           fieldWork: {
+            status: "IN_PROGRESS", updatedAt: NOW,
             meterId: "AST_001",
-            noAccess: [{}, {}, {}],
+            noAccess: Array.from({ length: 3 }, () => ({ date: "2026-08-05", time: "00:05:06", user: "Operator" })),
           },
         },
       ],
@@ -107,8 +109,10 @@ test("NA is rejected only when fieldWork meterId has a value", () => {
         tbRefs: [
           {
             id: TB_ID,
+            date: NOW,
             rowId: ROW_ID,
             fieldWork: {
+              status: "IN_PROGRESS", updatedAt: NOW,
               meterId: "AST_001",
               noAccess: [],
             },
@@ -130,7 +134,7 @@ test("a Sales tbRef already assigned to another row is rejected", () => {
   assert.throws(
     () =>
       resolveSalesTbRef({
-        tbRefs: [{ id: TB_ID, rowId: "TBR_OTHER" }],
+        tbRefs: [{ id: TB_ID, date: NOW, rowId: "TBR_OTHER", fieldWork: { status: "IN_PROGRESS", updatedAt: NOW } }],
         input: input(),
       }),
     (error) => {

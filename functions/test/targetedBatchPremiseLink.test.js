@@ -147,12 +147,8 @@ test("rejects an incomplete Targeted Batch premise context", () => {
 
 test("enriches only the matching Sales TB reference", () => {
   const originalOtherReference = {
-    id: "TGB_OTHER",
-    date: "OTHER_DATE",
-    fieldWork: {
-      status: "COMPLETED",
-      premiseId: "PRM_OTHER",
-    },
+    id: "TGB_20260913_120000_BBBB",
+    date: UPDATED_AT,
   };
   const originalDate = { seconds: 123, nanoseconds: 456 };
   const tbRefs = [
@@ -206,9 +202,10 @@ test("same TB Row and premise is idempotent", () => {
       {
         id: TB_ID,
         rowId: ROW_ID,
-        date: "DATE",
+        date: UPDATED_AT,
         fieldWork: {
           status: "IN_PROGRESS",
+          updatedAt: UPDATED_AT,
           premiseId: PREMISE_ID,
           targetedMeterNo: "04298074388",
         },
@@ -233,9 +230,11 @@ test("another premise cannot replace the existing Sales link", () => {
         tbRefs: [
           {
             id: TB_ID,
+            date: UPDATED_AT,
             rowId: ROW_ID,
             fieldWork: {
               status: "IN_PROGRESS",
+              updatedAt: UPDATED_AT,
               premiseId: "PRM_EXISTING",
             },
           },
@@ -264,7 +263,7 @@ test("missing and duplicate Sales TB references are blocked", () => {
         targetedMeterNo: "04298074388",
         updatedAt: UPDATED_AT,
       }),
-    (error) => error.irepsCode === "SALES_TB_REF_NOT_FOUND",
+    (error) => error.irepsCode === "TB_REFERENCE_INVALID",
   );
 
   assert.throws(
@@ -277,7 +276,7 @@ test("missing and duplicate Sales TB references are blocked", () => {
         targetedMeterNo: "04298074388",
         updatedAt: UPDATED_AT,
       }),
-    (error) => error.irepsCode === "SALES_TB_REF_DUPLICATE",
+    (error) => error.irepsCode === "TB_REFERENCE_AMBIGUOUS",
   );
 });
 
@@ -494,7 +493,7 @@ function buildLinkedFixture() {
         tbRefs: [
           {
             id: TB_ID,
-            date: "CREATION_DATE",
+            date: UPDATED_AT,
           },
         ],
       },
@@ -790,7 +789,7 @@ test("linked helper failure creates no premise or partial linkage", async () => 
       actorUid: "USER_1",
       actorName: "Field Worker",
     }),
-    (error) => error?.irepsCode === "SALES_TB_REF_NOT_FOUND",
+    (error) => error?.irepsCode === "TARGETED_BATCH_MEMBERSHIP_CONFLICT",
   );
 
   assert.equal(db.read(`premises/${fixture.premiseId}`), undefined);

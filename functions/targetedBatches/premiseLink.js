@@ -1,3 +1,4 @@
+import { assertSalesBatchExecutionMembership, readTbRefBatchId, exactSalesTbRef } from "../salesAllMeters/sales-batch-policy.js";
 import { Timestamp } from "firebase-admin/firestore";
 
 import {
@@ -238,7 +239,7 @@ function assertParentReady(parent = {}, tbId) {
   const allocationStatus = normalizeUpper(parent?.allocation?.status);
   const acceptanceStatus = normalizeUpper(parent?.acceptance?.status);
   const executionStatus = normalizeUpper(
-    parent?.execution?.status || "NOT_STARTED",
+    parent?.execution?.status || (parent?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"),
   );
 
   if (creationState !== "READY") {
@@ -282,10 +283,10 @@ function assertParentReady(parent = {}, tbId) {
 }
 
 function assertRowReady(row = {}, rowId) {
-  const decisionStatus = normalizeUpper(row?.decision?.status || "ACCEPT");
+  const decisionStatus = normalizeUpper(row?.decision?.status || (row?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "ACCEPT"));
   const allocationStatus = normalizeUpper(row?.allocation?.status);
   const executionStatus = normalizeUpper(
-    row?.execution?.status || "NOT_STARTED",
+    row?.execution?.status || (row?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"),
   );
 
   if (decisionStatus !== "ACCEPT") {
@@ -492,6 +493,8 @@ export function buildSalesTbRefsForPremiseStart({
   targetedMeterNo,
   updatedAt,
 }) {
+  const exact = exactSalesTbRef({ tbRefs }, tbId);
+  if (!exact.ok) throw controlledError(exact.code, "Sales reference is malformed or ambiguous");
   if (!Array.isArray(tbRefs)) {
     throw controlledError(
       "SALES_TB_REFS_INVALID",
@@ -502,7 +505,7 @@ export function buildSalesTbRefsForPremiseStart({
   const matchingIndexes = [];
 
   tbRefs.forEach((reference, index) => {
-    if (normalizeUpper(reference?.id) === normalizeUpper(tbId)) {
+    if (readTbRefBatchId(reference) === tbId) {
       matchingIndexes.push(index);
     }
   });
@@ -647,6 +650,7 @@ export async function createOrLinkTargetedBatchPremise({
       "SALES_DOCUMENT_NOT_FOUND",
       `Sales document ${context.salesDocId} was not found.`,
     );
+  assertSalesBatchExecutionMembership(sales, context.tbId);
     const erf = requireDocument(
       erfSnapshot,
       "TARGETED_BATCH_ERF_NOT_FOUND",
@@ -771,7 +775,7 @@ export async function createOrLinkTargetedBatchPremise({
       rowExecutionStatus === "IN_PROGRESS" &&
       existingRowPremiseId === premiseRef.id;
     const parentExecutionStatus = normalizeUpper(
-      parent?.execution?.status || "NOT_STARTED",
+      parent?.execution?.status || (parent?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"),
     );
     const parentAlreadyStarted = parentExecutionStatus === "IN_PROGRESS";
     const fullNoOp =
@@ -991,6 +995,8 @@ function findSalesTargetedBatchReference({
   tbId,
   rowId,
 }) {
+  const exact = exactSalesTbRef({ tbRefs }, tbId);
+  if (!exact.ok) throw controlledError(exact.code, "Sales reference is malformed or ambiguous");
   if (!Array.isArray(tbRefs)) {
     throw controlledError(
       "SALES_TB_REFS_INVALID",
@@ -1001,7 +1007,7 @@ function findSalesTargetedBatchReference({
   const matches = [];
 
   tbRefs.forEach((reference, index) => {
-    if (sameId(reference?.id, tbId)) {
+    if (readTbRefBatchId(reference) === tbId) {
       matches.push({ index, reference: reference || {} });
     }
   });
@@ -1225,6 +1231,7 @@ export async function validateTargetedBatchMeterDiscoverySubmission({
     "SALES_DOCUMENT_NOT_FOUND",
     `Sales document ${context.salesDocId} was not found.`,
   );
+  assertSalesBatchExecutionMembership(sales, context.tbId);
   const erf = requireDocument(
     erfSnapshot,
     "TARGETED_BATCH_ERF_NOT_FOUND",
@@ -1318,6 +1325,8 @@ export function buildSalesTbRefsForMeterDiscoveryCompletion({
   discoveredMeterNo,
   updatedAt,
 }) {
+  const exact = exactSalesTbRef({ tbRefs }, tbId);
+  if (!exact.ok) throw controlledError(exact.code, "Sales reference is malformed or ambiguous");
   const match = findSalesTargetedBatchReference({
     tbRefs,
     tbId,
@@ -1533,6 +1542,7 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     "SALES_DOCUMENT_NOT_FOUND",
     `Sales document ${context.salesDocId} was not found.`,
   );
+  assertSalesBatchExecutionMembership(sales, context.tbId);
   const premise = requireDocument(
     premiseSnapshot,
     "TARGETED_BATCH_PREMISE_NOT_FOUND",
@@ -1552,7 +1562,7 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
   });
 
   const rowStatus = normalizeUpper(
-    row?.execution?.status || "NOT_STARTED",
+    row?.execution?.status || (row?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"),
   );
   const existingRowMeterId = normalizeText(row?.refs?.meterId);
   const existingRowTrnId = normalizeText(row?.refs?.trnId);
