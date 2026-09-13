@@ -20,7 +20,9 @@ export default function SalesBatchMapLayers({ rows, highlightedId, onHighlight }
     const listeners = [], currentMarkers = markers.current;
     for (const row of rows) {
       const position = mapPoint(row.point); if (!position) continue;
-      const icon = { path: row.salesWorkStatus === "IN_PROGRESS" ? "M 0,-1 L 1,1 L -1,1 Z" : row.salesWorkStatus === "COMPLETED" ? "M -1,-1 L 1,-1 L 1,1 L -1,1 Z" : window.google.maps.SymbolPath.CIRCLE,
+      // The draft's own meters are always lettered circles (G/S); the triangle, star
+      // and square belong to nearby Sales status icons (rules 18.7).
+      const icon = { path: window.google.maps.SymbolPath.CIRCLE,
         fillColor: row.salesWorkStatus === "IN_PROGRESS" ? "#b45309" : row.salesWorkStatus === "COMPLETED" ? "#0f766e" : "#2563eb", fillOpacity: 1, strokeColor: row.ready ? "white" : "#7c2d12", strokeWeight: row.ready ? 2 : 4, scale: 13 };
       const marker = new window.google.maps.Marker({ map, position, title: `${row.meterNo} · ${row.pointSource === "GEOCODED" ? "Position from address" : "Sales GPS"} · ${row.reason}`, label: { text: row.pointSource === "GEOCODED" ? "G" : "S", color: "white" }, icon, zIndex: 200 });
       listeners.push(marker.addListener("mouseover", () => onHighlight(row.salesId)), marker.addListener("mouseout", () => onHighlight(null)));

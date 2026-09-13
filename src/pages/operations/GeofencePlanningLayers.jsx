@@ -6,13 +6,19 @@ import {
   SALES_STATUSES,
   getSalesStatusLabel,
 } from "../sales/models/salesStatusModel.js";
+import {
+  ERF_LABEL_BELOW_ICON_OFFSET,
+  SALES_ICON_SCALE,
+  SALES_STATUS_GLYPHS,
+  erfIdsUnderMeterIcons,
+} from "./geofence-map-icons.js";
 
 const ERF_LABEL_MIN_ZOOM = 17;
 
 const SALES_STATUS_META = Object.freeze({
   [SALES_STATUSES.NOT_STARTED]: {
     label: getSalesStatusLabel(SALES_STATUSES.NOT_STARTED),
-    color: "#64748b",
+    color: "#475569",
   },
   [SALES_STATUSES.IN_PROGRESS]: {
     label: getSalesStatusLabel(SALES_STATUSES.IN_PROGRESS),
@@ -78,6 +84,7 @@ export function GeofencePlanningLayers({
   visibility,
   salesStatusVisibility,
   isCreateMode,
+  meterPoints = [],
 }) {
   const map = useMap();
   const zoom = useCurrentZoom(14);
@@ -178,7 +185,12 @@ export function GeofencePlanningLayers({
 
     // Rules 18.7: the ERF number only, placed on the centroid (no separate centroid
     // symbol), small and light on an off-white label (.ireps-erf-label in index.css)
-    // so it stays readable on every map type, including satellite.
+    // so it stays readable on every map type, including satellite. Where a meter
+    // icon sits on the centroid, the label moves just below the icon.
+    const covered = erfIdsUnderMeterIcons(model?.erfs, [
+      ...salesMarkers.map((item) => item.point),
+      ...(meterPoints || []),
+    ]);
     const labels = (model?.erfs || [])
       .filter((erf) => Boolean(erf.point))
       .map((erf) =>
@@ -198,6 +210,9 @@ export function GeofencePlanningLayers({
             scale: 1,
             fillOpacity: 0,
             strokeOpacity: 0,
+            ...(covered.has(erf.id)
+              ? { labelOrigin: new window.google.maps.Point(0, ERF_LABEL_BELOW_ICON_OFFSET) }
+              : {}),
           },
           clickable: false,
           zIndex: 42,
@@ -206,7 +221,7 @@ export function GeofencePlanningLayers({
 
     erfLabelsRef.current = labels;
     return () => clearMapObjects(erfLabelsRef);
-  }, [map, model?.erfs, visibility.erfs, zoom]);
+  }, [map, model?.erfs, visibility.erfs, zoom, salesMarkers, meterPoints]);
 
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;
@@ -215,18 +230,28 @@ export function GeofencePlanningLayers({
 
     const markers = salesMarkers.map((item) => {
       const meta = SALES_STATUS_META[item.status] || SALES_STATUS_META.INTEGRITY_EXCEPTION;
+      const glyph = SALES_STATUS_GLYPHS[item.status];
       const marker = new window.google.maps.Marker({
         position: item.point,
         map,
         title: `${item.meterNo} • ${meta.label}`,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: item.status === SALES_STATUSES.INTEGRITY_EXCEPTION ? 5 : 4,
-          fillColor: meta.color,
-          fillOpacity: 0.92,
-          strokeColor: "#ffffff",
-          strokeWeight: 1,
-        },
+        icon: glyph
+          ? {
+              path: glyph.path,
+              scale: SALES_ICON_SCALE,
+              fillColor: glyph.color,
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            }
+          : {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 7,
+              fillColor: meta.color,
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            },
         clickable: !isCreateMode,
         zIndex:
           item.status === SALES_STATUSES.INTEGRITY_EXCEPTION ? 132 : 112,
@@ -357,11 +382,22 @@ export function GeofencePlanningLayers({
   return null;
 }
 
-function ToggleRow({ checked, label, count, onChange, dotColor = null, disabled = false }) {
+export function SalesStatusGlyph({ status, size = 14 }) {
+  const glyph = SALES_STATUS_GLYPHS[status];
+  if (!glyph) return null;
+  return (
+    <svg width={size} height={size} viewBox="-1.25 -1.25 2.5 2.5" aria-hidden="true" style={{ flex: "0 0 auto" }}>
+      <path d={glyph.path} fill={glyph.color} stroke="rgba(15,23,42,0.35)" strokeWidth="0.12" />
+    </svg>
+  );
+}
+
+function ToggleRow({ checked, label, count, onChange, dotColor = null, glyphStatus = null, disabled = false }) {
   return (
     <label style={toggleRowStyle}>
       <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
-      {dotColor ? (
+      {glyphStatus ? <SalesStatusGlyph status={glyphStatus} /> : null}
+      {!glyphStatus && dotColor ? (
         <span style={{ ...legendDotStyle, background: dotColor }} aria-hidden="true" />
       ) : null}
       <span style={{ flex: 1 }}>{label}</span>
@@ -387,6 +423,23 @@ export function GeofencePlanningLayerControls({
     completed: 0,
     integrityExceptions: 0,
   };
+  const [open, setOpen] = useState(true);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Show map layers"
+        title="Map layers"
+        style={{ ...layersOpenButtonStyle, top: isCreateMode ? 92 : 60 }}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3 2 8l10 5 10-5-10-5Zm-7.5 8.2L2 12.5l10 5 10-5-2.5-1.3L12 15l-7.5-3.8Zm0 4.5L2 17l10 5 10-5-2.5-1.3L12 19.5l-7.5-3.8Z" fill="#475569" />
+        </svg>
+      </button>
+    );
+  }
 
   return (
     <div
@@ -395,7 +448,10 @@ export function GeofencePlanningLayerControls({
         top: isCreateMode ? 92 : 14,
       }}
     >
-      <strong style={controlTitleStyle}>Map Layers</strong>
+      <div style={controlHeaderStyle}>
+        <strong style={controlTitleStyle}>Map Layers</strong>
+        <button type="button" onClick={() => setOpen(false)} aria-label="Close map layers" title="Close" style={layersCloseButtonStyle}>×</button>
+      </div>
       {layerStates !== undefined && <div role="status">{["erfs", "sales", "premises", "assets"].map(layer => <div key={layer}>{layer}: {requestedLayers.includes(layer) ? layerStates?.[layer] || "Loading nearby records…" : "Off · not loaded"}</div>)}</div>}
 
       <ToggleRow disabled={disabled}
@@ -418,21 +474,21 @@ export function GeofencePlanningLayerControls({
             checked={salesStatusVisibility.notStarted}
             label={SALES_STATUS_META[SALES_STATUSES.NOT_STARTED].label}
             count={summary.notStarted}
-            dotColor={SALES_STATUS_META[SALES_STATUSES.NOT_STARTED].color}
+            glyphStatus={SALES_STATUSES.NOT_STARTED}
             onChange={() => onToggleSalesStatus("notStarted")}
           />
           <ToggleRow disabled={disabled}
             checked={salesStatusVisibility.inProgress}
             label={SALES_STATUS_META[SALES_STATUSES.IN_PROGRESS].label}
             count={summary.inProgress}
-            dotColor={SALES_STATUS_META[SALES_STATUSES.IN_PROGRESS].color}
+            glyphStatus={SALES_STATUSES.IN_PROGRESS}
             onChange={() => onToggleSalesStatus("inProgress")}
           />
           <ToggleRow disabled={disabled}
             checked={salesStatusVisibility.completed}
             label={SALES_STATUS_META[SALES_STATUSES.COMPLETED].label}
             count={summary.completed}
-            dotColor={SALES_STATUS_META[SALES_STATUSES.COMPLETED].color}
+            glyphStatus={SALES_STATUSES.COMPLETED}
             onChange={() => onToggleSalesStatus("completed")}
           />
           {summary.integrityExceptions > 0 ? (
@@ -490,6 +546,43 @@ const controlTitleStyle = {
   fontSize: 12,
   textTransform: "uppercase",
   letterSpacing: "0.05em",
+};
+
+const controlHeaderStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+};
+
+const layersCloseButtonStyle = {
+  width: 22,
+  height: 22,
+  border: 0,
+  borderRadius: 4,
+  background: "transparent",
+  color: "#475569",
+  fontSize: 18,
+  lineHeight: "22px",
+  padding: 0,
+  cursor: "pointer",
+};
+
+// Sized and styled like Google's own map buttons, below the full-screen button.
+const layersOpenButtonStyle = {
+  position: "absolute",
+  right: 10,
+  zIndex: 55,
+  width: 40,
+  height: 40,
+  display: "grid",
+  placeItems: "center",
+  border: 0,
+  borderRadius: 2,
+  background: "#ffffff",
+  boxShadow: "rgba(0, 0, 0, 0.3) 0 1px 4px -1px",
+  cursor: "pointer",
+  padding: 0,
 };
 
 const toggleRowStyle = {

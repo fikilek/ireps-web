@@ -5,7 +5,8 @@ import { useGetGeoFencesByWardQuery } from "../../../../redux/geofencesApi";
 import { useGetSalesBatchNearbyQuery } from "../../../../redux/salesTargetedBatchApi";
 import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "../../geofence-shared-ui";
 import { DraftGeoFenceLayer, ExistingGeoFenceLayer } from "../../geofence-map-layers";
-import { GeofencePlanningLayerControls, GeofencePlanningLayers } from "../../GeofencePlanningLayers";
+import { GeofencePlanningLayerControls, GeofencePlanningLayers, SalesStatusGlyph } from "../../GeofencePlanningLayers";
+import { SALES_STATUSES } from "../../../sales/models/salesStatusModel.js";
 import { buildGeofencePlanningDraftStats } from "../../geofencePlanningModel";
 import { mapShellStyle, wardSelectWrapStyle } from "../../geofence-ui-styles";
 import { NEARBY_LAYERS, emptyNearbyModel, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
@@ -27,6 +28,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const draftPoints = drawing.points, draftPolygonReady = draftPoints.length >= 3, canSaveDraft = Boolean(draftName.trim() && model.canSave && !busy);
   const createState = { isLoading: saving };
   const bounds = useMemo(() => locatedMeterBounds(model.rows), [model.rows]);
+  const meterPoints = useMemo(() => model.rows.map(row => mapPoint(row.point)).filter(Boolean), [model.rows]);
   const layers = NEARBY_LAYERS.filter(layer => visibility[layer] || isCreateMode);
   const { data: nearby } = useGetSalesBatchNearbyQuery({ lmPcode, wardPcode, bounds, wardGeometry: ward?.geometry, layers }, { skip: !scopeReady || !bounds || !layers.length });
   const planningModel = nearby?.model || emptyNearbyModel();
@@ -64,7 +66,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
     <div style={{ ...mapShellStyle, height: 560 }}>
       {!key ? <p>Google Maps key missing</p> : !bounds ? <p role="status">{locating || !live?.ready || !Object.keys(draft.resolutions).length ? "Locating meters…" : "No draft meters could be located. Press Locate meters again."}</p> : <APIProvider apiKey={key}>
         <GoogleMap defaultCenter={{ lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }} defaultZoom={18} mapTypeId={mapTypeId} gestureHandling="greedy" disableDefaultUI={false} onClick={handleMapClick} style={{ width: "100%", height: "100%" }}>
-          <GeofencePlanningLayers model={planningModel} {...{ visibility, salesStatusVisibility, isCreateMode }}/>
+          <GeofencePlanningLayers model={planningModel} {...{ visibility, salesStatusVisibility, isCreateMode, meterPoints }}/>
           <ExistingGeoFenceLayer geofences={mapFences} selectedGeoFenceId={selectedGeoFence?.id || ""} onSelectGeoFence={setSelectedGeoFence} interactive={!isCreateMode} fitSelected={false}/>
           {isCreateMode && <DraftGeoFenceLayer draftPoints={draftPoints}/>}
           <SalesBatchMapLayers rows={model.rows} highlightedId={highlightedId} onHighlight={onHighlight}/>
@@ -74,7 +76,11 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
         onToggleLayer={layer => setVisibility(current => ({ ...current, [layer]: !current[layer] }))} onToggleSalesStatus={status => setSalesStatusVisibility(current => ({ ...current, [status]: !current[status] }))}
         salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady}/>}
     </div>
-    <p>G = Position from address · S = Sales GPS. Circle / blue = Not Started; triangle / amber = In Progress; square / green = Completed. A thick outline marks a meter left out of the batch. Hover a meter or row to highlight both.</p>
+    <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
+      Nearby GPS Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed.
+      Hover a meter or row to highlight both.</p>
     <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} visibleGeofences={geofences} lockedWard/>
   </div>;
 }
+
+const legendStyle = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, margin: "8px 0 0", color: "#334155", fontSize: 13, lineHeight: 1.5 };
