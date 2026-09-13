@@ -68,6 +68,7 @@ export function getBatchWorkflowStatus(batch = {}) {
 }
 
 export function getBatchAllocationStatus(batch = {}) {
+  if (batch.schemaVersion === "0.3.0") return ["NOT_STARTED", "ALLOCATING", "ALLOCATED", "ALLOCATION_FAILED"].includes(batch.allocation?.status) ? batch.allocation.status : "UNAVAILABLE";
   const status = normalizeUpper(
     batch?.allocation?.status ||
       (batch?.status === "ALLOCATED" ? "ALLOCATED" : ""),
@@ -77,10 +78,12 @@ export function getBatchAllocationStatus(batch = {}) {
 }
 
 export function getBatchExecutionStatus(batch = {}) {
+  if (batch.schemaVersion === "0.3.0") return ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(batch.execution?.status) ? batch.execution.status : "UNAVAILABLE";
   return normalizeUpper(batch?.execution?.status) || "NOT_STARTED";
 }
 
 export function getBatchTarget(batch = {}) {
+  if (batch.schemaVersion === "0.3.0" && batch.allocation?.targetId && (!batch.allocation.targetType || !batch.allocation.targetName)) return { id: batch.allocation.targetId, type: "UNAVAILABLE", name: "Allocation target data unavailable", memberCount: null };
   const allocation = batch?.allocation || {};
   const target = allocation?.target || {};
   const id = allocation?.targetId || target?.id || null;

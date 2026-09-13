@@ -1,3 +1,4 @@
+import { classifySalesWorkStatus } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
@@ -8,7 +9,8 @@ import {
   where,
 } from "firebase/firestore";
 
-import { db } from "../firebase";
+import { db, functions } from "../firebase";
+import { httpsCallable } from "firebase/functions";
 import { projectSalesCategoryMonth } from "../pages/sales/models/salesCategoryModel";
 import { useMemo } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -16,7 +18,7 @@ import { useSalesReadScope, isSalesReadScopeCurrent, registerSalesSessionCleanup
 import { getDefaultSalesMonth } from "../pages/sales/models/salesMonthModel.js";
 
 export function projectSalesMapForMonth(rows, month) {
-  return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, projectSalesCategoryMonth(row, month)]));
+  return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, { ...projectSalesCategoryMonth(row, month), salesWorkStatus: classifySalesWorkStatus(row) }]));
 }
 
 // RTK owns cache lifetime; account changes also end these read-only listeners.
@@ -56,6 +58,8 @@ import {
   getTargetedBatchMapMembership,
   getTargetedBatchPremiseIds,
   getTargetedBatchSalesIds,
+  normalizePermanentSalesBatch,
+  normalizePermanentSalesBatchRow,
 } from "../pages/sales/models/salesTargetedBatchReadModel";
 
 const TARGETED_BATCH_UPLOADS_COLLECTION = "tb_uploads";
@@ -442,6 +446,91 @@ export const salesTargetedBatchApi = createApi({
   endpoints: (rtkBuilder) => {
     const builder = { query: config => rtkBuilder.query(scopedSalesQuery(config)) };
     return ({
+    getPermanentSalesBatches: builder.query({
+      keepUnusedDataFor: 0,
+      queryFn: () => ({ data: { batches: [], batch: null, rows: [], ready: false, error: null } }),
+      async onCacheEntryAdded({ lmPcode, tbId = null }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
+        let active = true, parents = [], rows = [], parentReady = false, rowsReady = !tbId, failure = null;
+        const stops = [];
+        const publish = () => {
+          if (!active || !isCurrent()) return;
+          const batch = parents.find(item => item.id === tbId) || null;
+          updateCachedData(() => ({ batches: parents, batch, rows: batch ? rows.map(row => normalizePermanentSalesBatchRow(row, row._snapshotId, batch)) : [], ready: parentReady && rowsReady && !failure, error: failure || (parentReady && tbId && !batch ? "Permanent Targeted Batch is unavailable in this LM." : null) }));
+        };
+        const onError = error => { failure = error.message; publish(); };
+        try {
+          await cacheDataLoaded;
+          const parentQuery = tbId ? doc(db, "tb_uploads", tbId) : query(collection(db, "tb_uploads"), where("scope.lmPcode", "==", lmPcode));
+          stops.push(onSnapshot(parentQuery, { includeMetadataChanges: true }, snapshot => {
+            const snapshots = tbId ? snapshot.exists() ? [snapshot] : [] : snapshot.docs;
+            parents = snapshots.filter(item => item.data().scope?.lmPcode === lmPcode).map(item => normalizePermanentSalesBatch(item.data(), item.id)).sort((a,b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+            parentReady = !snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites; publish();
+          }, onError));
+          if (tbId) stops.push(onSnapshot(query(collection(db, "tb_rows"), where("tbId", "==", tbId)), { includeMetadataChanges: true }, snapshot => {
+            rows = snapshot.docs.map(item => ({ ...item.data(), _snapshotId: item.id })).sort((a,b) => a.rowNo - b.rowNo);
+            rowsReady = !snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites; publish();
+          }, onError));
+          await cacheEntryRemoved;
+        } catch (error) { onError(error); }
+        finally { active = false; stops.forEach(stop => stop()); }
+      },
+    }),
+    resolveSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("resolveSalesTargetedBatchCallable")),
+    saveSalesTargetedBatchGeofence: rtkBuilder.mutation(callSalesBatch("saveSalesTargetedBatchGeofenceCallable")),
+    assessSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("assessSalesTargetedBatchCallable")),
+    createSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onCreateTargetedBatchCallable")),
+    deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
+    allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
+    getSalesBatchDraftSnapshot: builder.query({
+      keepUnusedDataFor: 0,
+      queryFn: () => ({ data: { ready: false, sales: {}, erfs: {}, wards: {}, fence: null, parent: null, error: null } }),
+      async onCacheEntryAdded({ salesIds, erfIds = [], wardIds = [], tbId, lmPcode }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
+        const stops = [], values = { sales: {}, erfs: {}, wards: {}, fence: null, parent: null, wardErfs: [], premises: [], meters: [] }, waiting = new Set(), errors = new Map();
+        let active = true;
+        const paths = [
+          ...salesIds.map(id => ["sales", "sales-all-meters", id]),
+          ...erfIds.map(id => ["erfs", "ireps_erfs", id]),
+          ...wardIds.map(id => ["wards", "wards", id]),
+          ["fence", "geo_fences", `SALES_${tbId}`], ["parent", "tb_uploads", tbId],
+        ];
+        const publish = () => { if (active && isCurrent()) updateCachedData(() => ({ ...JSON.parse(JSON.stringify(values)), ready: waiting.size === 0 && errors.size === 0, error: [...errors.values()].join("; ") || null })); };
+        try {
+          await cacheDataLoaded;
+          if (salesIds.length > 30 || paths.some(([, , id]) => typeof id !== "string" || !id || id.includes("/"))) throw new Error("Invalid retained draft identities");
+          for (const [kind, , id] of paths) waiting.add(`${kind}/${id}`);
+          const layers = wardIds.length === 1 ? [
+            ["wardErfs", "ireps_erfs", "admin.ward.pcode"],
+            ["premises", "premises", "parents.wardPcode"],
+            ["meters", "asts", "accessData.parents.wardPcode"],
+          ] : [];
+          for (const [kind] of layers) waiting.add(kind);
+          for (const [kind, collectionName, field] of layers) {
+            stops.push(onSnapshot(query(collection(db, collectionName), where(field, "==", wardIds[0])), { includeMetadataChanges: true }, snapshot => {
+              const all = snapshot.docs.map(item => ({ ...item.data(), id: item.id }));
+              const sameLm = item => (kind === "wardErfs" ? item.admin?.localMunicipality?.pcode : kind === "premises" ? item.parents?.lmPcode : item.accessData?.parents?.lmPcode) === lmPcode;
+              values[kind] = all.filter(sameLm);
+              if (!snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) waiting.delete(kind); else waiting.add(kind);
+              if (values[kind].length !== all.length) errors.set(kind, `${kind} contains missing or conflicting LM authority`); else errors.delete(kind);
+              publish();
+            }, error => { errors.set(kind, error.message); publish(); }));
+          }
+          for (const [kind, collectionName, id] of paths) {
+            const key = `${kind}/${id}`;
+            stops.push(onSnapshot(doc(db, collectionName, id), { includeMetadataChanges: true }, snapshot => {
+              const value = snapshot.exists() ? snapshot.data() : null;
+              const actualLm = kind === "sales" ? value?.lmPcode : kind === "erfs" ? value?.admin?.localMunicipality?.pcode : kind === "wards" ? value?.parents?.localMunicipalityId : kind === "fence" ? value?.parents?.lmPcode : value?.scope?.lmPcode;
+              if (value && actualLm !== lmPcode) errors.set(key, `${kind} is outside this draft's LM`); else errors.delete(key);
+              if (kind === "fence" || kind === "parent") values[kind] = value;
+              else values[kind][id] = value;
+              if (!snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) waiting.delete(key); else waiting.add(key);
+              publish();
+            }, error => { errors.set(key, error.message); publish(); }));
+          }
+          await cacheEntryRemoved;
+        } catch (error) { errors.set("stream", error.message); publish(); }
+        finally { active = false; stops.forEach(stop => stop()); }
+      },
+    }),
     getTargetedBatchDetailsById: builder.query({
       queryFn: () => ({
         data: {
@@ -2492,6 +2581,18 @@ function useScopedTargetedBatchRead(endpoint, query, options) {
   const result = salesTargetedBatchApi[endpoint](enabled ? { ...readScope, query: normalizedQuery, month } : skipToken, options);
   return { ...result, data: enabled ? result.currentData : undefined, currentData: enabled ? result.currentData : undefined };
 }
+function callSalesBatch(name) {
+  return { async queryFn(payload) {
+    try {
+      const result = (await httpsCallable(functions, name, { timeout: 540000 })(payload)).data;
+      if (result?.success !== true) return { error: { status: "CUSTOM_ERROR", code: result?.code, error: result?.message || "Targeted Batch request failed" } };
+      return { data: result };
+    } catch (error) { return { error: { status: "CUSTOM_ERROR", code: error.code, error: error.message, uncertain: true } }; }
+  } };
+}
+export function useGetSalesBatchDraftSnapshotQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchDraftSnapshotQuery", arg, options); }
+export function useGetPermanentSalesBatchesQuery(arg, options) { return useScopedTargetedBatchRead("useGetPermanentSalesBatchesQuery", arg, options); }
+export const { useResolveSalesTargetedBatchMutation, useSaveSalesTargetedBatchGeofenceMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation } = salesTargetedBatchApi;
 export function useGetSalesOperationalStatsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesOperationalStatsByLmQuery", arg, options); }
 export function useGetTargetedBatchAllocationContextByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationContextByIdQuery", arg, options); }
 export function useGetTargetedBatchAllocationDirectoryQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationDirectoryQuery", arg, options); }

@@ -1,3 +1,4 @@
+import * as policy from "../../functions/salesAllMeters/sales-batch-policy.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -41,7 +42,8 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   const cleanups = new Set();
   const context = createContext({ console: { error() {}, warn() {} }, Date });
   const mocks = {
-    "@reduxjs/toolkit/query/react": { fakeBaseQuery: () => () => {}, createApi: config => ({ definitions: config.endpoints({ query: value => value }) }) },
+    "../../functions/salesAllMeters/sales-batch-policy.js": policy,
+    "@reduxjs/toolkit/query/react": { fakeBaseQuery: () => () => {}, createApi: config => ({ definitions: config.endpoints({ query: value => value, mutation: value => value }) }) },
     "firebase/firestore": { collection: (_db, name) => name, doc: (_db, name, id) => [name, id], documentId: () => "documentId", where: (...parts) => parts, query: (...parts) => parts,
       onSnapshot: (query, next, error) => { const listener = { query, next, error, stopped: false }; listeners.push(listener); return () => { listener.stopped = true; }; } },
     "../firebase": { db: {}, functions: {} },
@@ -94,9 +96,11 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }) {
   let current = true;
   const context = createContext({ Date, console: { error() {}, warn() {} } });
   const mocks = {
+    "firebase/functions": { httpsCallable: () => { throw Error("Read-only details must never call a mutation"); } },
+    "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
       fakeBaseQuery: () => () => {},
-      createApi: config => ({ definitions: config.endpoints({ query: value => value }) }),
+      createApi: config => ({ definitions: config.endpoints({ query: value => value, mutation: value => value }) }),
     },
     "firebase/firestore": {
       collection: (_db, name) => name, doc: (_db, name, id) => [name, id],
@@ -107,7 +111,7 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }) {
         return () => { listener.stopped = true; };
       },
     },
-    "../firebase": { db: {} },
+    "../firebase": { db: {}, functions: {} },
     react: { useMemo: fn => fn() },
     "@reduxjs/toolkit/query": { skipToken: Symbol() },
     "./salesApi": {

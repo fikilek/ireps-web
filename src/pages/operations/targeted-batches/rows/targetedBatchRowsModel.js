@@ -2,6 +2,7 @@ import {
   TARGETED_BATCH_ROW_DECISIONS,
   TARGETED_BATCH_SOURCE_TYPES,
 } from "../../../../redux/targetedBatchDraftModel";
+import { normalizePermanentSalesBatchRow } from "../../../sales/models/salesTargetedBatchReadModel.js";
 
 export const TB_ROW_NOT_APPLICABLE = "NOT_APPLICABLE";
 export const TB_ROW_NOT_STARTED = "NOT_STARTED";
@@ -52,6 +53,7 @@ function firstText(...values) {
 }
 
 function normalizeOutcome(row, sourceType) {
+  if (row.schemaVersion === "0.3.0") return ["ACCEPT", "REJECT"].includes(row.decision?.status) ? row.decision.status : "UNAVAILABLE";
   const explicitOutcome = asUpper(
     row?.rowDecision ?? row?.assessmentDecision ?? row?.decision,
   );
@@ -120,6 +122,7 @@ function normalizeLifecycleStatus({ explicit, hasReference, fallback }) {
 }
 
 export function normalizeTargetedBatchRow({ row = {}, index, batch }) {
+  if (row.schemaVersion === "0.3.0") row = normalizePermanentSalesBatchRow(row, row.id, batch);
   const sourceType = batch?.source?.type || batch?.sourceType || "";
   const outcome = normalizeOutcome(row, sourceType);
   const rejected = outcome === TARGETED_BATCH_ROW_DECISIONS.REJECT;

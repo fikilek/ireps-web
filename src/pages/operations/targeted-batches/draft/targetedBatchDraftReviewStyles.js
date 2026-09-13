@@ -1,4 +1,8 @@
 export const draftReviewStyles = {
+  twoPane: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 440px), 1fr))", gap: "1rem", alignItems: "start", padding: "1rem" },
+  pane: { minWidth: 0 },
+  draftTable: { width: "100%", minWidth: 650, borderCollapse: "separate", borderSpacing: 0, fontSize: "0.8rem" },
+  inlineReason: { display: "block", marginTop: 6, color: "#92400e" },
   panel: {
     background: "#ffffff",
     border: "1px solid rgba(148, 163, 184, 0.28)",

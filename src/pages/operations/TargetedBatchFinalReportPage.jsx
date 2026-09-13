@@ -1,100 +1,24 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
+/* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { Link, useParams } from "react-router-dom";
-import { useSelector } from "react-redux";
-
-import {
-  formatCurrencyFromCents,
-  formatDateTime,
-  formatNumber,
-} from "./targeted-batches/targetedBatchUtils";
-
+import { useAuth } from "../../auth/useAuth";
+import { useGetPermanentSalesBatchesQuery } from "../../redux/salesTargetedBatchApi";
 export default function TargetedBatchFinalReportPage() {
-  const { tbId } = useParams();
-  const draft = useSelector((state) => state.targetedBatchDraft?.draft || null);
-
-  const decodedTbId = decodeURIComponent(tbId || "");
-  const draftMatchesRoute = draft?.id === decodedTbId;
-  const rows =
-    draftMatchesRoute && Array.isArray(draft?.rows) ? draft.rows : [];
-  const totalSalesC = rows.reduce(
-    (total, row) => total + Number(row?.totalSalesC || 0),
-    0,
-  );
-
-  if (!draftMatchesRoute) {
-    return (
-      <section style={styles.page}>
-        <Link to="/operations/targeted-batches" style={styles.backLink}>
-          ← Back to TB Uploads
-        </Link>
-
-        <div style={styles.errorNotice}>
-          <strong>TB upload not available</strong>
-          <p style={styles.noticeText}>
-            The requested TB ID is not present in the current Redux draft.
-          </p>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section style={styles.page}>
-      <div style={styles.topActionRow}>
-        <Link
-          to={`/operations/targeted-batches/${encodeURIComponent(draft.id)}`}
-          style={styles.backLink}
-        >
-          ← Back to TB Rows
-        </Link>
-      </div>
-
-      <div style={styles.header}>
-        <div>
-          <p style={styles.eyebrow}>Operations / TB Final Report</p>
-          <h2 style={styles.title}>TB Final Report</h2>
-          <p style={styles.subtitle}>{draft.id}</p>
-        </div>
-
-        <span style={styles.draftBadge}>DRAFT</span>
-      </div>
-
-      <div style={styles.noticePanel}>
-        <strong>Frontend draft report</strong>
-        <p style={styles.noticeText}>
-          This report currently summarizes the frontend TB draft. The final
-          authoritative report will be produced from the permanent backend
-          Targeted Batch and its assessed rows.
-        </p>
-      </div>
-
-      <div style={styles.infoGrid}>
-        <InfoCard label="TB ID" value={draft.id} />
-        <InfoCard label="Source" value={draft.sourceLabel || draft.sourceType} />
-        <InfoCard
-          label="LM"
-          value={`${draft.lmPcode || "NAv"} · ${draft.lmName || "NAv"}`}
-        />
-        <InfoCard label="Created" value={formatDateTime(draft.createdAt)} />
-        <InfoCard label="Total Rows" value={formatNumber(rows.length)} />
-        <InfoCard
-          label="Selected Sales Value"
-          value={formatCurrencyFromCents(totalSalesC)}
-        />
-      </div>
-    </section>
-  );
+  const { tbId } = useParams(), { activeWorkbase } = useAuth();
+  const lmPcode = activeWorkbase?.lmPcode || activeWorkbase?.pcode || activeWorkbase?.id || activeWorkbase?.localMunicipalityId;
+  const { data } = useGetPermanentSalesBatchesQuery({ lmPcode, tbId }, { skip: !lmPcode || !tbId });
+  const batch = data?.batch;
+  return <section style={styles.page}>
+    <Link to="/operations/targeted-batches" style={styles.backLink}>Back to TB Register</Link>
+    <h1>TB Final Report</h1><p>{tbId}</p>
+    {!data?.ready ? <p role="status">{data?.error || "Loading permanent Targeted Batch…"}</p>
+      : !batch ? <p>Permanent Targeted Batch unavailable.</p>
+      : <div style={styles.noticePanel}><strong>{batch.finalReport?.status || "Unavailable"}</strong>
+        <p>{batch.finalReport?.status === "DRAFT" ? "The final report has not been produced. This page reads the permanent batch and its TB Rows." : "Report status is supplied by the permanent Targeted Batch."}</p>
+        <p>{data.rows.length} permanent rows · {batch.source?.type} · {batch.scope?.lmName}</p>
+        <Link to={`/operations/targeted-batches/${encodeURIComponent(tbId)}`}>Open TB Rows</Link>
+      </div>}
+  </section>;
 }
-
-function InfoCard({ label, value }) {
-  return (
-    <article style={styles.infoCard}>
-      <span style={styles.infoLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value || "NAv"}</strong>
-    </article>
-  );
-}
-
 const styles = {
   page: {
     padding: 24,

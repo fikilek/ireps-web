@@ -1,158 +1,32 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useEffect } from "react";
-
-export default function TargetedBatchConfirmModal({
-  draft,
-  isCreating = false,
-  onCancel,
-  onConfirm,
-}) {
+import { useEffect, useRef } from "react";
+export default function TargetedBatchConfirmModal({ draft, confirmation, isCreating, stale, onCancel, onConfirm }) {
+  const dialog = useRef(null), cancel = useRef(null);
   useEffect(() => {
-    function handleKeyDown(event) {
-      if (event.key === "Escape" && !isCreating) onCancel();
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isCreating, onCancel]);
-
-  const proposedBatches = Array.isArray(draft?.proposedBatches)
-    ? draft.proposedBatches
-    : [];
-  const batchCount = proposedBatches.length || 1;
-  const rowCount = Array.isArray(draft?.displayRows)
-    ? draft.displayRows.length
-    : 0;
-  const plural = batchCount !== 1;
-
-  return (
-    <div
-      style={styles.overlay}
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !isCreating) onCancel();
-      }}
-    >
-      <div
-        style={styles.card}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tb-confirm-title"
-        aria-describedby="tb-confirm-description"
-      >
-        <div style={styles.header}>
-          <div>
-            <p style={styles.eyebrow}>TB Draft</p>
-            <h2 id="tb-confirm-title" style={styles.title}>
-              Confirm permanent Targeted Batch{plural ? "es" : ""}
-            </h2>
-          </div>
-
-          <button
-            type="button"
-            style={{
-              ...styles.closeButton,
-              ...(isCreating ? styles.disabledButton : null),
-            }}
-            onClick={onCancel}
-            disabled={isCreating}
-            aria-label="Close confirmation"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div style={styles.body}>
-          <div style={styles.batchCard}>
-            <span style={styles.label}>Creation Group</span>
-            <strong style={styles.batchId}>
-              {draft?.creationGroup?.id || draft?.id || "NAv"}
-            </strong>
-            <span style={styles.batchSummary}>
-              {batchCount} proposed batch{plural ? "es" : ""} · {rowCount}{" "}
-              row{rowCount === 1 ? "" : "s"}
-            </span>
-          </div>
-
-          {proposedBatches.length > 0 ? (
-            <div style={styles.batchList}>
-              {proposedBatches.map((batch, index) => (
-                <div
-                  key={batch?.draftBatchKey || batch?.tbId || index}
-                  style={styles.batchListItem}
-                >
-                  <div>
-                    <strong>
-                      Batch {index + 1} ·{" "}
-                      {batch?.scope?.wardName ||
-                        (batch?.scope?.wardNumber
-                          ? `Ward ${batch.scope.wardNumber}`
-                          : "Ward NAv")}
-                    </strong>
-                    <span style={styles.batchListMeta}>
-                      {batch?.scope?.wardPcode || "NAv"} · {batch?.rowCount || 0}{" "}
-                      row{Number(batch?.rowCount) === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <code style={styles.batchListId}>{batch?.tbId || "NAv"}</code>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <p id="tb-confirm-description" style={styles.description}>
-            The backend will re-read every Sales document and its authoritative
-            ERF, confirm that each proposed batch contains exactly one ward, and
-            reject the complete request before creation when the frontend plan
-            does not match the authoritative data.
-          </p>
-
-          <div style={styles.notice}>
-            <strong>Permanent creation gate</strong>
-            <span>
-              Do not close or refresh the page while creation and verification
-              are running.
-            </span>
-          </div>
-        </div>
-
-        <div style={styles.footer}>
-          <button
-            type="button"
-            style={{
-              ...styles.secondaryButton,
-              ...(isCreating ? styles.disabledButton : null),
-            }}
-            onClick={onCancel}
-            disabled={isCreating}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            style={{
-              ...styles.primaryButton,
-              ...(isCreating ? styles.disabledButton : null),
-            }}
-            onClick={onConfirm}
-            disabled={isCreating}
-          >
-            {isCreating
-              ? `Creating ${batchCount} Targeted Batch${plural ? "es" : ""}...`
-              : `Create ${batchCount} Targeted Batch${plural ? "es" : ""}`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+    const previous = document.activeElement, overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden"; cancel.current?.focus();
+    return () => { document.body.style.overflow = overflow; previous?.focus?.(); };
+  }, []);
+  const handleKeys = event => {
+    if (event.key === "Escape" && !isCreating) onCancel();
+    if (event.key !== "Tab") return;
+    const nodes = [...dialog.current.querySelectorAll('button:not([disabled]), [tabindex="0"]')];
+    const first = nodes[0], last = nodes.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  };
+  const included = confirmation.rows.filter(row => confirmation.includedIds.includes(row.salesId));
+  const leftOut = confirmation.rows.filter(row => !confirmation.includedIds.includes(row.salesId));
+  return <div style={styles.overlay}><div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="tb-confirm-title" onKeyDown={handleKeys} style={styles.card}>
+    <div style={styles.header}><h2 id="tb-confirm-title">Create Targeted Batch</h2></div>
+    <div style={styles.body}><p>{draft.id} · {confirmation.scope.wardName}</p><h3>Included ({included.length})</h3>
+      <ul>{included.map(row => <li key={row.salesId}>{row.meterNo} · {row.address} · {row.erfId}</li>)}</ul>
+      <h3>Left out ({leftOut.length})</h3><ul>{leftOut.map(row => <li key={row.salesId}>{row.meterNo} · {row.reason}</li>)}</ul>
+      <p>OK creates this single batch with exactly the included meters.</p>
+      {stale && <p role="alert">Draft data changed or evidence expired. Cancel and select Create again to review the current list.</p>}
+      <button ref={cancel} type="button" disabled={isCreating} onClick={onCancel}>Cancel</button>
+      <button type="button" disabled={isCreating || stale || included.length === 0} onClick={onConfirm}>{isCreating ? "Creating…" : "OK"}</button>
+    </div></div></div>;
 }
-
 const styles = {
   overlay: {
     position: "fixed",

@@ -1,3 +1,4 @@
+import { exactSalesTbRef, resolveSalesTargetedBatchMembership } from "../salesAllMeters/sales-batch-policy.js";
 import { getFirestore, FieldPath } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 
@@ -202,12 +203,10 @@ export function enrichTargetedBatchRow(row, salesSnapshot) {
   else if (!salesSnapshot?.exists) status = "SALES_DOCUMENT_MISSING";
   else {
     const sales = salesSnapshot.data() || {};
-    const reference = Array.isArray(sales.tbRefs)
-      ? sales.tbRefs.find((item) =>
-        normalizeText(item?.id) === normalizeText(row.tbId))
-      : undefined;
-
-    if (!reference) status = "TB_REFERENCE_MISSING";
+    const exact = exactSalesTbRef(sales, row.tbId);
+    const reference = exact.reference;
+    if (!exact.ok) status = exact.code;
+    else if (reference.rowId && reference.rowId !== row.id) status = "TB_REFERENCE_ROW_CONFLICT";
     else if (reference.fieldWork !== undefined &&
       (reference.fieldWork === null || typeof reference.fieldWork !== "object" ||
        Array.isArray(reference.fieldWork))) status = "FIELDWORK_INVALID";
@@ -227,6 +226,7 @@ export function enrichTargetedBatchRow(row, salesSnapshot) {
   return {
     ...row,
     salesDocId: salesDocId || null,
+    currentMembership: salesSnapshot?.exists ? resolveSalesTargetedBatchMembership(salesSnapshot.data()) : null,
     noAccessCount: count,
     fieldWorkMeterId,
     noAccessSourceStatus: status,

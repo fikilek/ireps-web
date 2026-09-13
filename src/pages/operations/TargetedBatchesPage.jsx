@@ -1,12 +1,10 @@
-/* eslint-disable no-unused-vars, react-hooks/set-state-in-effect -- subscription effects reset route-scoped loading state. */
+import { useGetPermanentSalesBatchesQuery, useDeleteSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
+/* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 
 import { useAuth } from "../../auth/useAuth";
-import { db, functions } from "../../firebase";
 import {
   clearTargetedBatchDraft,
   prepareTargetedBatchDraft,
@@ -75,20 +73,6 @@ function timestampToIso(value) {
   return null;
 }
 
-function mapPermanentTargetedBatch(snapshot) {
-  const data = snapshot.data() || {};
-
-  return {
-    ...data,
-    id: snapshot.id,
-    createdAt: timestampToIso(data?.metadata?.createdAt),
-    updatedAt: timestampToIso(data?.metadata?.updatedAt),
-    totalRows: Number(data?.counts?.totalRows || 0),
-    acceptedRows: Number(data?.counts?.acceptedRows || 0),
-    rejectedRows: Number(data?.counts?.rejectedRows || 0),
-  };
-}
-
 function getSourceReference(upload) {
   if (
     [
@@ -105,6 +89,7 @@ function getSourceReference(upload) {
 }
 
 function getUploadTotal(upload) {
+  if (upload?.schemaVersion === "0.3.0") return Number.isInteger(upload?.counts?.totalRows) && upload.counts.totalRows >= 0 ? upload.counts.totalRows : null;
   return Number(
     upload?.totalRows ??
       upload?.counts?.totalRows ??
@@ -472,11 +457,8 @@ export default function TargetedBatchesPage() {
   const [wardFilter, setWardFilter] = useState("");
   const [createdByFilter, setCreatedByFilter] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "", direction: "asc" });
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(5);
   const [currentPage, setCurrentPage] = useState(1);
-  const [permanentUploads, setPermanentUploads] = useState([]);
-  const [isRegisterLoading, setIsRegisterLoading] = useState(true);
-  const [registerLoadError, setRegisterLoadError] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
   const [deleteBatchError, setDeleteBatchError] = useState("");
@@ -486,45 +468,11 @@ export default function TargetedBatchesPage() {
   const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
   const creationResult = location.state?.targetedBatchCreation;
 
-  useEffect(() => {
-    setIsRegisterLoading(true);
-    setRegisterLoadError("");
-
-    if (!activeLmPcode) {
-      setPermanentUploads([]);
-      setIsRegisterLoading(false);
-      return undefined;
-    }
-
-    const uploadsQuery = query(
-      collection(db, "tb_uploads"),
-      where("scope.lmPcode", "==", activeLmPcode),
-    );
-    const unsubscribe = onSnapshot(
-      uploadsQuery,
-      (snapshot) => {
-        const loadedUploads = snapshot.docs
-          .map(mapPermanentTargetedBatch)
-          .sort((left, right) =>
-            String(right?.createdAt || "").localeCompare(
-              String(left?.createdAt || ""),
-            ),
-          );
-
-        setPermanentUploads(loadedUploads);
-        setIsRegisterLoading(false);
-      },
-      (error) => {
-        setPermanentUploads([]);
-        setRegisterLoadError(
-          error?.message || "Permanent Targeted Batches could not be loaded.",
-        );
-        setIsRegisterLoading(false);
-      },
-    );
-
-    return unsubscribe;
-  }, [activeLmPcode]);
+  const { data: permanent } = useGetPermanentSalesBatchesQuery({ lmPcode: activeLmPcode }, { skip: !activeLmPcode });
+  const permanentUploads = permanent?.batches || [];
+  const isRegisterLoading = !permanent?.ready && !permanent?.error;
+  const registerLoadError = permanent?.error || "";
+  const [deleteCallable] = useDeleteSalesTargetedBatchMutation();
 
   const uploads = permanentUploads;
 
@@ -705,12 +653,7 @@ export default function TargetedBatchesPage() {
     setRegisterStatusMessage("");
 
     try {
-      const deleteCallable = httpsCallable(
-        functions,
-        "onDeleteTargetedBatchCallable",
-      );
-      const response = await deleteCallable({ tbId: deleteCandidate.id });
-      const result = response?.data || {};
+      const result = await deleteCallable({ tbId: deleteCandidate.id }).unwrap();
 
       if (result?.success !== true) {
         const error = new Error(
@@ -720,9 +663,6 @@ export default function TargetedBatchesPage() {
         throw error;
       }
 
-      setPermanentUploads((current) =>
-        current.filter((upload) => upload.id !== deleteCandidate.id),
-      );
       setRegisterStatusMessage(
         `${deleteCandidate.id} and ${formatNumber(
           result?.deletedRows || 0,
@@ -736,7 +676,7 @@ export default function TargetedBatchesPage() {
         .replace(/^functions\//, "")
         .toUpperCase();
       const message =
-        error?.message ||
+        error?.error || error?.message ||
         error?.details?.message ||
         "Targeted Batch deletion failed.";
 
@@ -1213,7 +1153,7 @@ export default function TargetedBatchesPage() {
 
                     <Td>
                       <strong style={styles.totalCell}>
-                        {formatNumber(getUploadTotal(upload))}
+                        {getUploadTotal(upload) === null ? "Unavailable" : formatNumber(getUploadTotal(upload))}
                       </strong>
                     </Td>
 

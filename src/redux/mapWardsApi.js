@@ -39,6 +39,18 @@ export const mapWardsApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getWardBoundaryByPcode: builder.query({
+      async onCacheEntryAdded(arg, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        const wardPcode = String(typeof arg === "string" ? arg : arg?.wardPcode || "").trim();
+        if (!wardPcode) return;
+        let stop = () => {};
+        try {
+          await cacheDataLoaded;
+          stop = onSnapshot(doc(db, WARDS_COLLECTION, wardPcode), snapshot => {
+            updateCachedData(() => snapshot.exists() ? normalizeWardBoundaryRow(snapshot.id, snapshot.data()) : null);
+          }, error => updateCachedData(() => ({ id: wardPcode, geometry: null, streamError: error.message })));
+          await cacheEntryRemoved;
+        } finally { stop(); }
+      },
       async queryFn(arg) {
         const wardPcode = String(
           typeof arg === "string" ? arg : arg?.wardPcode || "",

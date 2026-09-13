@@ -22,7 +22,7 @@ function makeNgpDraft(rowCount = 2) {
     proposedTbId: tbId,
     draftBatchKey: `NGP::${tbId}`,
     planning: {
-      mode: TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET,
+      mode: TARGETED_BATCH_PLANNING_MODES.ERF_GEOFENCE,
       townKey: "dundee",
       streetKey: `dundee::street ${index + 1}`,
       streetNameKey: `street ${index + 1}`,
@@ -39,7 +39,7 @@ function makeNgpDraft(rowCount = 2) {
       proposedBatchCount: 1,
     },
     source: {
-      type: "PREPAID_SALES",
+      type: "PREPAID_SALES_NON_GPS",
       label: "Prepaid Sales",
     },
     scope: {
@@ -48,7 +48,7 @@ function makeNgpDraft(rowCount = 2) {
     },
     selection: {
       reason: "Selected from Non GPS Batch Planning",
-      planningMode: TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET,
+      planningMode: TARGETED_BATCH_PLANNING_MODES.ERF_GEOFENCE,
     },
     authoritativeIds: {
       salesAllMeterIds,
@@ -80,7 +80,7 @@ function makeNgpDraft(rowCount = 2) {
       status: "PASSED",
       errors: [],
       warnings: [],
-      planningMode: TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET,
+      planningMode: TARGETED_BATCH_PLANNING_MODES.ERF_GEOFENCE,
     },
   };
 }
@@ -90,36 +90,21 @@ test("NGP draft remains one batch and does not require ward scope", () => {
   const integrity = getTargetedBatchDraftIntegrity(draft);
 
   assert.equal(draft.proposedBatches.length, 1);
-  assert.equal(draft.proposedBatches[0].scope.wardPcode, "");
-  assert.equal(draft.proposedBatches[0].scope.wardNumber, "");
+  assert.equal(draft.proposedBatches[0].scope.wardPcode, undefined);
+  assert.equal(draft.proposedBatches[0].scope.wardNumber, undefined);
   assert.equal(
     draft.selection.planningMode,
-    TARGETED_BATCH_PLANNING_MODES.NON_GPS_STREET,
+    TARGETED_BATCH_PLANNING_MODES.ERF_GEOFENCE,
   );
-  assert.equal(integrity.canConfirm, true);
-});
-
-test("NGP draft blocks more than 20 rows", () => {
-  const integrity = getTargetedBatchDraftIntegrity(makeNgpDraft(21));
-
   assert.equal(integrity.canConfirm, false);
-  assert.ok(integrity.blockers.some((message) => message.includes("20 rows")));
 });
 
+test("NGP draft admits 30 retained IDs and refuses 31 before any save", () => {
+  assert.equal(buildTargetedBatchDraft(makeNgpDraft(30)).retainedIds.length, 30);
+  assert.throws(() => buildTargetedBatchDraft(makeNgpDraft(31)), /1–30/);
+});
 test("NGP draft blocks more than one proposed batch", () => {
   const input = makeNgpDraft(2);
-  input.proposedBatches.push({
-    ...input.proposedBatches[0],
-    tbId: "TGB_20260816_044221_CD34",
-    draftBatchKey: "NGP::TGB_20260816_044221_CD34",
-  });
-
-  const integrity = getTargetedBatchDraftIntegrity(input);
-
-  assert.equal(integrity.canConfirm, false);
-  assert.ok(
-    integrity.blockers.some((message) =>
-      message.includes("exactly one proposed Targeted Batch"),
-    ),
-  );
+  input.proposedBatches.push({ ...input.proposedBatches[0], tbId: "TGB_20260816_044221_CD34" });
+  assert.throws(() => buildTargetedBatchDraft(input), /one retained proposal/);
 });

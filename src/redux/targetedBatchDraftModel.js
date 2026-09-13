@@ -1,3 +1,4 @@
+import { buildRetainedSalesDraft } from "../pages/operations/targeted-batches/draft/sales-batch-draft-model.js";
 const TARGETED_BATCH_ID_TIME_ZONE = "Africa/Johannesburg";
 const TARGETED_BATCH_ID_RANDOM_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -12,10 +13,12 @@ export const TARGETED_BATCH_COLLECTIONS = Object.freeze({
 
 export const TARGETED_BATCH_SOURCE_TYPES = Object.freeze({
   PREPAID_SALES: "PREPAID_SALES",
+  PREPAID_SALES_NON_GPS: "PREPAID_SALES_NON_GPS",
   CSV_UPLOAD: "CSV_UPLOAD",
 });
 
 export const TARGETED_BATCH_PLANNING_MODES = Object.freeze({
+  ERF_GEOFENCE: "ERF_GEOFENCE",
   WARD_ERF: "WARD_ERF",
   NON_GPS_STREET: "NON_GPS_STREET",
 });
@@ -514,6 +517,9 @@ function normalizeProposedBatches({
 }
 
 export function buildTargetedBatchDraft(payload = {}) {
+  if (["PREPAID_SALES", "PREPAID_SALES_NON_GPS"].includes(payload.source?.type || payload.sourceType)) {
+    return buildRetainedSalesDraft(payload, payload.id || buildTargetedBatchDraftId());
+  }
   const sourceType = normalizeTargetedBatchSourceType(
     payload?.source?.type ?? payload?.sourceType,
   );
@@ -767,6 +773,7 @@ export function getTargetedBatchDraftRows(draft) {
 }
 
 export function getTargetedBatchDraftIntegrity(draft) {
+  if (draft?.retainedIds) return { valid: draft.retainedIds.length > 0 && draft.retainedIds.length <= 30, canConfirm: Boolean(draft.savedFence && draft.confirmation), issues: [], errors: [] };
   const currentDraft = getTargetedBatchDraftView(draft);
 
   if (!currentDraft) {

@@ -69,6 +69,30 @@ export const targetedBatchDraftSlice = createSlice({
   name: "targetedBatchDraft",
   initialState,
   reducers: {
+    updateSalesDraftResolution(state, { payload }) {
+      if (state.draft?.id !== payload.tbId || state.draft.uncertainRequest) return;
+      for (const row of payload.rows) if (state.draft.retainedIds.includes(row.salesId)) state.draft.resolutions[row.salesId] = row;
+      state.draft.confirmation = null;
+    },
+    saveSalesDraftFence(state, { payload }) {
+      if (state.draft?.id !== payload.tbId) return;
+      state.draft.savedFence = payload.fence;
+      state.draft.confirmation = null;
+    },
+    removeSalesDraftMeter(state, { payload }) {
+      const draft = state.draft;
+      if (draft?.id !== payload.tbId || draft.uncertainRequest) return;
+      draft.retainedIds = draft.retainedIds.filter(id => id !== payload.salesId);
+      draft.authoritativeIds.salesAllMeterIds = [...draft.retainedIds];
+      delete draft.resolutions[payload.salesId];
+      draft.confirmation = null;
+    },
+    setSalesDraftConfirmation(state, { payload }) {
+      if (state.draft?.id === payload.tbId) state.draft.confirmation = payload.confirmation;
+    },
+    setSalesDraftUncertainRequest(state, { payload }) {
+      if (state.draft?.id === payload.tbId) state.draft.uncertainRequest = payload.request;
+    },
     prepareTargetedBatchDraft: {
       reducer(state, action) {
         state.draft = action.payload;
@@ -237,6 +261,7 @@ export const targetedBatchDraftSlice = createSlice({
 });
 
 export const {
+  updateSalesDraftResolution, saveSalesDraftFence, removeSalesDraftMeter, setSalesDraftConfirmation, setSalesDraftUncertainRequest,
   prepareTargetedBatchDraft,
   recordTargetedBatchUploadAudit,
   applyTargetedBatchDraftAllocations,

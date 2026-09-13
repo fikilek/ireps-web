@@ -1,15 +1,9 @@
-/* eslint-disable no-unused-vars, react-hooks/set-state-in-effect -- subscription effects reset route-scoped loading state. */
+import { useAuth } from "../../auth/useAuth";
+import { useGetPermanentSalesBatchesQuery } from "../../redux/salesTargetedBatchApi";
+/* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
 
-import { db } from "../../firebase";
 import {
   downloadTargetedBatchRows,
   formatDateTime,
@@ -27,7 +21,7 @@ import {
 } from "./targeted-batches/rows/targetedBatchRowsModel";
 import { tbRowsStyles as styles } from "./targeted-batches/rows/targetedBatchRowsStyles";
 
-const DEFAULT_PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 5;
 
 function timestampToIso(value) {
   if (!value) return null;
@@ -37,60 +31,6 @@ function timestampToIso(value) {
     return new Date(value.seconds * 1000).toISOString();
   }
   return null;
-}
-
-function mapPermanentTbRow(rowSnapshot) {
-  const data = rowSnapshot.data() || {};
-  const meterId = data?.refs?.meterId || null;
-  const decisionStatus = data?.decision?.status || "ACCEPT";
-  const decisionReasons = Array.isArray(data?.decision?.reasons)
-    ? data.decision.reasons
-    : data?.decision?.reasons
-      ? [String(data.decision.reasons)]
-      : [];
-
-  return {
-    ...data,
-    id: rowSnapshot.id,
-    tbRowId: rowSnapshot.id,
-    uploadRowId: rowSnapshot.id,
-    rowNo: data.rowNo,
-    salesAllMeterId: data.salesAllMeterId,
-    sourceSalesAllMeterId: data.salesAllMeterId,
-    sourceLine: data?.source?.sourceLine ?? null,
-    rowDecision: decisionStatus,
-    assessmentDecision: decisionStatus,
-    rowDecisionReasons: decisionReasons,
-    rowDecisionReason: decisionReasons.join(" ") || null,
-    meterNo: data?.meter?.numberRaw || data?.meter?.numberNormalized || "",
-    meterNoNormalized: data?.meter?.numberNormalized || "",
-    accountNumber: data?.customer?.accountNumber || "",
-    customerName: data?.customer?.customerName || "",
-    addressLine1: data?.location?.addressLine1 || "",
-    town: data?.location?.town || "",
-    standNumber: data?.location?.sgCode || "",
-    wardNumberLabel: data?.location?.wardNumberLabel || "",
-    wardNumbers: Array.isArray(data?.location?.wardNumbers)
-      ? data.location.wardNumbers
-      : [],
-    actionReason: data?.selection?.actionReason || "",
-    totalSalesC:
-      data?.salesSnapshot?.totalSalesC === null ||
-      data?.salesSnapshot?.totalSalesC === undefined
-        ? null
-        : Number(data.salesSnapshot.totalSalesC),
-    astId: meterId,
-    astMatchStatus: meterId ? "MATCHED" : "NOT_MATCHED",
-    proposedTrnType: meterId ? "METER_INSPECTION" : "METER_DISCOVERY",
-    premiseId: data?.refs?.premiseId || null,
-    meterDiscoveryTrnId: data?.refs?.trnId || null,
-    allocationStatus: data?.allocation?.status || "UNALLOCATED",
-    allocationTargetType: data?.allocation?.targetType || null,
-    allocationTargetId: data?.allocation?.targetId || null,
-    allocationTargetName: data?.allocation?.targetName || null,
-    completionStatus: data?.execution?.status || "NOT_STARTED",
-    confirmedAt: timestampToIso(data?.metadata?.createdAt),
-  };
 }
 
 function InfoItem({ label, value }) {
@@ -129,81 +69,21 @@ export default function TargetedBatchDetailsPage() {
   const { tbId } = useParams();
   const decodedTbId = decodeURIComponent(tbId || "");
 
-  const [batch, setBatch] = useState(null);
-  const [permanentRows, setPermanentRows] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const { activeWorkbase } = useAuth();
+  const lmPcode = activeWorkbase?.lmPcode || activeWorkbase?.pcode || activeWorkbase?.id || activeWorkbase?.localMunicipalityId;
+  const { data: permanent } = useGetPermanentSalesBatchesQuery({ lmPcode, tbId: decodedTbId }, { skip: !lmPcode || !decodedTbId });
+  const batch = permanent?.batch || null, permanentRows = permanent?.rows;
+  const isLoading = !permanent?.ready && !permanent?.error, loadError = permanent?.error || "";
   const [filters, setFilters] = useState({ ...TB_ROW_FILTER_DEFAULTS });
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setLoadError("");
-    setBatch(null);
-    setPermanentRows([]);
-    if (!decodedTbId) {
-      setLoadError("The Targeted Batch ID is missing from the route.");
-      setIsLoading(false);
-      return undefined;
-    }
-    let parentReady = false;
-    let rowsReady = false;
-    const markReady = () => parentReady && rowsReady && setIsLoading(false);
-    const handleError = (error) => {
-      setLoadError(error?.message || "The permanent Targeted Batch and TB Rows could not be loaded.");
-      setIsLoading(false);
-    };
-    const unsubscribeParent = onSnapshot(
-      doc(db, "tb_uploads", decodedTbId),
-      (parentSnapshot) => {
-        if (!parentSnapshot.exists()) {
-          setLoadError(`Permanent Targeted Batch ${decodedTbId} was not found.`);
-          setBatch(null);
-          parentReady = true;
-          markReady();
-          return;
-        }
-
-        const parentData = parentSnapshot.data() || {};
-        const loadedBatch = {
-          ...parentData,
-          id: parentSnapshot.id,
-          createdAt: timestampToIso(parentData?.metadata?.createdAt),
-          updatedAt: timestampToIso(parentData?.metadata?.updatedAt),
-          validation: {
-            ...(parentData?.validation || {}),
-            passed: parentData?.validation?.status === "PASSED",
-          },
-        };
-        setBatch(loadedBatch);
-        parentReady = true;
-        markReady();
-      }, handleError);
-    const unsubscribeRows = onSnapshot(
-      query(collection(db, "tb_rows"), where("tbId", "==", decodedTbId)),
-      (rowsSnapshot) => {
-        const loadedRows = rowsSnapshot.docs
-          .map(mapPermanentTbRow)
-          .sort((left, right) => Number(left.rowNo) - Number(right.rowNo));
-
-        setPermanentRows(loadedRows);
-        rowsReady = true;
-        markReady();
-      }, handleError);
-
-    return () => {
-      unsubscribeParent();
-      unsubscribeRows();
-    };
-  }, [decodedTbId]);
 
   const rows = useMemo(
     () =>
       batch
         ? buildTargetedBatchRows({
             ...batch,
-            rows: permanentRows,
+            rows: permanentRows || [],
           })
         : [],
     [batch, permanentRows],

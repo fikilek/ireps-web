@@ -1,3 +1,4 @@
+import { evaluateSalesBatchability, SALES_BATCH_MAX as SALES_BATCH_LIMIT } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import {
   buildTargetedBatchDraftId,
   getTargetedBatchDraftView,
@@ -773,170 +774,19 @@ export function normalizeSalesTargetRows(rows = [], selectionReason = "NAv") {
   });
 }
 
-export function buildSalesTargetedBatchDraftPlan({
-  rows = [],
-  selectionReason = "NAv",
-  lmPcode = "",
-  lmName = "NAv",
-} = {}) {
-  const normalizedLmPcode = normalizeScopeText(lmPcode);
-  const failures = [];
-  const resolvedRows = [];
-  const seenSalesIds = new Set();
-
-  rows.forEach((row, index) => {
-    const salesAllMeterId = getSalesAllMeterId(row);
-
-    if (!salesAllMeterId) {
-      failures.push({
-        row: index + 1,
-        meterNo: String(row?.meterNo || "NAv"),
-        code: "SALES_ID_MISSING",
-        message: `Selected row ${index + 1} has no Sales All Meters identity.`,
-      });
-      return;
-    }
-
-    if (seenSalesIds.has(salesAllMeterId)) {
-      failures.push({
-        row: index + 1,
-        salesAllMeterId,
-        meterNo: String(row?.meterNo || salesAllMeterId),
-        code: "DUPLICATE_SALES_ID",
-        message: `Sales meter ${salesAllMeterId} is selected more than once.`,
-      });
-      return;
-    }
-
-    seenSalesIds.add(salesAllMeterId);
-    const scopeResolution = resolveLocalSalesTargetScope(
-      row,
-      normalizedLmPcode,
-    );
-
-    if (!scopeResolution.ok) {
-      failures.push({
-        row: index + 1,
-        salesAllMeterId,
-        meterNo: String(row?.meterNo || salesAllMeterId),
-        code: scopeResolution.code,
-        message: scopeResolution.message,
-      });
-      return;
-    }
-
-    resolvedRows.push({
-      sourceRow: row,
-      sourceIndex: index,
-      salesAllMeterId,
-      scope: scopeResolution,
-    });
+export function buildSalesTargetedBatchDraftPlan({ rows = [], selectionReason = "Selected GPS Sales meters", lmPcode = "", lmName = "" } = {}) {
+  const failures = rows.flatMap((row, index) => {
+    const result = evaluateSalesBatchability(row, { salesId: getSalesAllMeterId(row), lmPcode, source: "PREPAID_SALES" });
+    return result.batchable ? [] : [{ row: index + 1, message: `${row.meterNo}: ${result.reason}`, code: result.code }];
   });
-
-  if (failures.length > 0) {
-    return {
-      ok: false,
-      code: "TARGETED_BATCH_DRAFT_RULES_FAILED",
-      message: `${failures.length} selected meter${
-        failures.length === 1 ? "" : "s"
-      } cannot be placed into a ward-compliant Targeted Batch Draft.`,
-      failures,
-    };
-  }
-
-  const groupsByWard = new Map();
-
-  resolvedRows.forEach((record) => {
-    const key = record.scope.wardPcode;
-    if (!groupsByWard.has(key)) groupsByWard.set(key, []);
-    groupsByWard.get(key).push(record);
-  });
-
-  const sortedGroups = Array.from(groupsByWard.entries()).sort(
-    ([leftPcode, leftRows], [rightPcode, rightRows]) => {
-      const leftWard = leftRows[0]?.scope?.wardNumber || leftPcode;
-      const rightWard = rightRows[0]?.scope?.wardNumber || rightPcode;
-      return String(leftWard).localeCompare(String(rightWard), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-    },
-  );
-
-  const firstTbId = buildTargetedBatchDraftId();
-  const creationGroupId = firstTbId.replace(/^TGB_/, "TBCG_");
-  let globalRowNo = 0;
-
-  const proposedBatches = sortedGroups.map(
-    ([wardPcode, groupRows], groupIndex) => {
-      const tbId = groupIndex === 0 ? firstTbId : buildTargetedBatchDraftId();
-      const scope = groupRows[0].scope;
-      const draftBatchKey = `${wardPcode}::${tbId}`;
-      const normalizedRows = groupRows.map((record, rowIndex) => {
-        globalRowNo += 1;
-
-        return normalizeSalesTargetRow({
-          row: record.sourceRow,
-          index: record.sourceIndex,
-          selectionReason,
-          resolvedScope: record.scope,
-          batch: {
-            draftBatchKey,
-            tbId,
-            sequence: groupIndex + 1,
-            rowNo: rowIndex + 1,
-            draftRowNo: globalRowNo,
-          },
-        });
-      });
-
-      return {
-        draftBatchKey,
-        sequence: groupIndex + 1,
-        tbId,
-        scope: {
-          lmPcode: normalizedLmPcode,
-          lmName: String(lmName || "NAv").trim() || "NAv",
-          wardPcode,
-          wardNumber: scope.wardNumber,
-          wardName: scope.wardName,
-        },
-        rowCount: normalizedRows.length,
-        salesAllMeterIds: normalizedRows.map(
-          (row) => row.salesAllMeterId,
-        ),
-        rows: normalizedRows,
-        validation: {
-          status: "PASSED",
-          oneWardOnly: true,
-        },
-      };
-    },
-  );
-
-  const displayRows = proposedBatches.flatMap((batch) => batch.rows);
-
-  return {
-    ok: true,
-    creationGroup: {
-      id: creationGroupId,
-      proposedBatchCount: proposedBatches.length,
-    },
-    proposedBatches,
-    displayRows,
-    salesAllMeterIds: displayRows.map((row) => row.salesAllMeterId),
-    validation: {
-      status: "PASSED",
-      passed: true,
-      totalRows: displayRows.length,
-      acceptedRows: displayRows.length,
-      rejectedRows: 0,
-      proposedBatchCount: proposedBatches.length,
-      wardGroupingApplied: true,
-      errors: [],
-      warnings: [],
-    },
-  };
+  const ids = rows.map(getSalesAllMeterId);
+  if (rows.length < 1 || rows.length > SALES_BATCH_LIMIT || new Set(ids).size !== rows.length) failures.push({ message: "Select 1–30 distinct GPS Sales meters." });
+  if (failures.length) return { ok: false, message: "The selection is not batchable.", failures };
+  const tbId = buildTargetedBatchDraftId();
+  const displayRows = rows.map(row => ({ ...row, salesAllMeterId: getSalesAllMeterId(row), actionReason: selectionReason }));
+  return { ok: true, proposedBatches: [{ tbId, salesAllMeterIds: ids, rows: displayRows, scope: { lmPcode, lmName } }],
+    creationGroup: { id: tbId.replace(/^TGB_/, "TBCG_"), proposedBatchCount: 1 }, displayRows, salesAllMeterIds: ids,
+    validation: { status: "PASSED", passed: true, wardGroupingApplied: false, proposedBatchCount: 1, errors: [], warnings: [] } };
 }
 
 export function downloadTargetedBatchRows({ batch, rows = [] }) {

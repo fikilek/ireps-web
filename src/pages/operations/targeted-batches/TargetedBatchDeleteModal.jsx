@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useEffect } from "react";
 
 import { formatNumber } from "./targetedBatchUtils";
@@ -89,10 +88,11 @@ export default function TargetedBatchDeleteModal({
           </section>
 
           <p style={styles.explanation}>
-            Confirming will delete the <strong>tb_uploads</strong> parent, all
-            matching <strong>tb_rows</strong>, and this TB ID from each linked
-            Sales document&apos;s <strong>tbRefs</strong> array. Sales documents
-            themselves are not deleted.
+            Confirming removes this unexecuted batch and its rows, clears only
+            matching current Sales membership, and removes its exact historical
+            link. Sales records, saved ERF decisions and batch history remain.
+            The dedicated geofence remains recorded and cannot be reused for a
+            new batch. Any evidence of execution blocks removal.
           </p>
 
           {error ? (

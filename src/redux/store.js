@@ -31,7 +31,7 @@ import { registryMreadApi } from "./registryMreadApi";
 import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
 import { mreadStagingApi } from "./mreadStagingApi";
 import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
-import targetedBatchDraftReducer from "./targetedBatchDraftSlice";
+import targetedBatchDraftReducer, { clearTargetedBatchDraft } from "./targetedBatchDraftSlice";
 import { salesApi, setSalesReadSession } from "./salesApi";
 import { salesTargetedBatchApi } from "./salesTargetedBatchApi";
 
@@ -109,6 +109,7 @@ setupListeners(store.dispatch);
 // AuthProvider retain their existing ownership.
 const stopSalesAuthObserver = onAuthStateChanged(auth, user => {
   if (setSalesReadSession(user?.uid ?? null)) {
+    store.dispatch(clearTargetedBatchDraft());
     store.dispatch(salesApi.util.resetApiState());
     store.dispatch(salesTargetedBatchApi.util.resetApiState());
   }

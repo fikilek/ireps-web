@@ -4,6 +4,7 @@ export const TARGETED_BATCH_ROW_STATUSES = Object.freeze({
   accepted: "ACCEPTED",
   rejected: "REJECTED",
   completed: "COMPLETED",
+  inProgress: "IN_PROGRESS",
 });
 
 export const TARGETED_BATCH_DERIVED_STATES = Object.freeze({
@@ -41,13 +42,28 @@ function normalizeExpectedIdentity(identity = {}) {
   };
 }
 
-function normalizeActualIdentity(row = {}) {
+export function canonicalTargetedBatchRowState(row, parent = null) {
+  if (row?.schemaVersion !== "0.3.0") return row?.status;
+  if (!["ACCEPT", "REJECT"].includes(row.decision?.status) || !["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(row.execution?.status) || !["UNALLOCATED", "ALLOCATED"].includes(row.allocation?.status)) return null;
+  if (row.execution.status === "COMPLETED") return "COMPLETED";
+  if (row.execution.status === "IN_PROGRESS") return "IN_PROGRESS";
+  if (row.decision.status === "REJECT") return "REJECTED";
+  if (row.allocation.status === "ALLOCATED") {
+    if (parent?.acceptance?.status === "ACCEPTED") return "ACCEPTED";
+    if (parent?.acceptance?.status === "REJECTED") return "REJECTED";
+    if (parent && !["WAITING", "NOT_READY"].includes(parent.acceptance?.status)) return null;
+    return "ALLOCATED";
+  }
+  return "CREATED";
+}
+
+function normalizeActualIdentity(row = {}, parent = null) {
   return {
     id: cleanText(row?.id),
     tbId: cleanText(row?.tbId),
     rowNo: asPositiveInteger(row?.rowNo),
     salesAllMeterId: cleanText(row?.salesAllMeterId),
-    status: row?.status,
+    status: canonicalTargetedBatchRowState(row, parent),
   };
 }
 
@@ -60,6 +76,7 @@ export function validateCompleteTargetedBatchRowSet({
   expectedRowCount,
   expectedRows,
   rows,
+  parent = null,
 } = {}) {
   const diagnostics = [];
   const normalizedTbId = cleanText(tbId);
@@ -68,7 +85,7 @@ export function validateCompleteTargetedBatchRowSet({
   const expectedIdentities = Array.isArray(expectedRows)
     ? expectedRows.map(normalizeExpectedIdentity)
     : [];
-  const actualIdentities = actualRows.map(normalizeActualIdentity);
+  const actualIdentities = actualRows.map(row => normalizeActualIdentity(row, parent));
 
   if (!normalizedTbId) {
     pushDiagnostic(diagnostics, "TB_ID_REQUIRED");
@@ -138,26 +155,7 @@ export function validateCompleteTargetedBatchRowSet({
     pushDiagnostic(diagnostics, "DUPLICATE_EXPECTED_SALES_ID");
   }
 
-  if (
-    normalizedExpectedRowCount !== null &&
-    expectedRowNos.length === normalizedExpectedRowCount &&
-    expectedRowNos.every((value) => value !== null)
-  ) {
-    const sortedExpectedRowNos = [...expectedRowNos].sort((a, b) => a - b);
-    const expectedSequence = Array.from(
-      { length: normalizedExpectedRowCount },
-      (_, index) => index + 1,
-    );
-
-    if (
-      sortedExpectedRowNos.some(
-        (value, index) => value !== expectedSequence[index],
-      )
-    ) {
-      pushDiagnostic(diagnostics, "EXPECTED_ROW_NO_SEQUENCE_INVALID");
-    }
-  }
-
+  // Stable saved-population slots may have gaps after explicit removal.
   const actualIds = actualIdentities.map((identity) => identity.id);
   const actualRowNos = actualIdentities.map((identity) => identity.rowNo);
   const actualSalesIds = actualIdentities.map(
@@ -272,9 +270,10 @@ export function validateCompleteTargetedBatchRowSet({
   };
 }
 
-function deriveStateFromValidatedRows(rows) {
-  const statuses = rows.map((row) => row.status);
+function deriveStateFromValidatedRows(rows, parent) {
+  const statuses = rows.map(row => canonicalTargetedBatchRowState(row, parent));
   const uniqueStatuses = new Set(statuses);
+  if (uniqueStatuses.has("IN_PROGRESS") || (uniqueStatuses.has("COMPLETED") && uniqueStatuses.size > 1)) return "IN_PROGRESS";
 
   if (
     uniqueStatuses.size === 1 &&
@@ -336,7 +335,7 @@ export function deriveTargetedBatchState(input = {}) {
   }
 
   return {
-    status: deriveStateFromValidatedRows(input.rows),
+    status: deriveStateFromValidatedRows(input.rows, input.parent),
     completeRowSet: true,
     diagnostics: [],
     expectedRowCount: validation.expectedRowCount,
