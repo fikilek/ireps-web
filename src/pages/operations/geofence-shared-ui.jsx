@@ -1,6 +1,7 @@
 import { getGeoFencePointCount } from "./geofence-map-helpers";
 import { headerActionsStyle, countPillStyle, buttonStyle, primaryButtonStyle, drawingPanelStyle, drawingStatsStyle, countDetailStyle, integrityDetailStyle, modalBackdropStyle, modalCardStyle, modalHeaderStyle, modalCloseButtonStyle, modalCountsRowStyle, confirmIntroStyle, countCardGridStyle, countCardStyle, countLabelStyle, countValueStyle, confirmDetailsStyle, confirmFieldLabelStyle, modalActionsStyle, successBoxStyle, inputStyle, textareaStyle } from "./geofence-ui-styles";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
+import BusySpinner from "../../components/busy-spinner.jsx";
 function Modal({ title, children, onClose, width = 720 }) {
   return (
     <div style={modalBackdropStyle}>
@@ -325,7 +326,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
                 cursor: createState.isLoading ? "not-allowed" : "pointer",
               }}
             >
-              {createState.isLoading ? "Creating..." : "Confirm Create"}
+              {createState.isLoading ? <BusySpinner label="Creating…" size={14} inverse asStatus={false} /> : "Confirm Create"}
             </button>
           </div>
         </Modal>

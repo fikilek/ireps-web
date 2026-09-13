@@ -1,6 +1,8 @@
+/* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useEffect, useRef } from "react";
 import { salesDraftMessage } from "./draft/sales-batch-draft-model";
 import { draftButtonStyle } from "./draft/targetedBatchDraftReviewStyles";
+import BusySpinner from "../../../components/busy-spinner.jsx";
 export default function TargetedBatchConfirmModal({ draft, confirmation, isCreating, stale, onCancel, onConfirm }) {
   const dialog = useRef(null), cancel = useRef(null);
   useEffect(() => {
@@ -26,7 +28,7 @@ export default function TargetedBatchConfirmModal({ draft, confirmation, isCreat
       <p>OK creates this single batch with exactly the included meters.</p>
       {stale && <p role="alert">Draft data changed or evidence expired. Cancel and select Create again to review the current list.</p>}
       <button ref={cancel} type="button" style={draftButtonStyle(isCreating)} disabled={isCreating} onClick={onCancel}>Cancel</button>
-      <button type="button" style={draftButtonStyle(isCreating || stale || included.length === 0, true)} disabled={isCreating || stale || included.length === 0} onClick={onConfirm}>{isCreating ? "Creating…" : "OK"}</button>
+      <button type="button" style={draftButtonStyle(isCreating || stale || included.length === 0, true)} disabled={isCreating || stale || included.length === 0} onClick={onConfirm}>{isCreating ? <BusySpinner label="Creating…" size={14} inverse asStatus={false}/> : "OK"}</button>
     </div></div></div>;
 }
 const styles = {

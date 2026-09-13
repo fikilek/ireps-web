@@ -12,6 +12,7 @@ import {
   SALES_STATUS_GLYPHS,
   erfIdsUnderMeterIcons,
 } from "./geofence-map-icons.js";
+import BusySpinner from "../../components/busy-spinner.jsx";
 
 const ERF_LABEL_MIN_ZOOM = 17;
 
@@ -392,7 +393,7 @@ export function SalesStatusGlyph({ status, size = 14 }) {
   );
 }
 
-function ToggleRow({ checked, label, count, onChange, dotColor = null, glyphStatus = null, disabled = false }) {
+function ToggleRow({ checked, label, count, onChange, dotColor = null, glyphStatus = null, disabled = false, loading = false }) {
   return (
     <label style={toggleRowStyle}>
       <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
@@ -401,9 +402,17 @@ function ToggleRow({ checked, label, count, onChange, dotColor = null, glyphStat
         <span style={{ ...legendDotStyle, background: dotColor }} aria-hidden="true" />
       ) : null}
       <span style={{ flex: 1 }}>{label}</span>
+      {loading ? <BusySpinner size={11} asStatus={false} /> : null}
       <strong>{count}</strong>
     </label>
   );
+}
+
+// A requested nearby layer is still loading until its first complete server read.
+function layerIsLoading(layer, layerStates, requestedLayers) {
+  if (layerStates === undefined || !requestedLayers.includes(layer)) return false;
+  const state = layerStates?.[layer];
+  return !state || /^Loading|waiting for the server/i.test(state);
 }
 
 export function GeofencePlanningLayerControls({
@@ -415,7 +424,7 @@ export function GeofencePlanningLayerControls({
   isCreateMode,
   salesLabel = "Sales (excluding Normal)",
   layerStates, requestedLayers = [], disabled = false,
-  geofencesCount = null,
+  geofencesCount = null, geofencesLoading = false,
 }) {
   const summary = model?.salesSummary || {
     total: 0,
@@ -458,6 +467,7 @@ export function GeofencePlanningLayerControls({
       <ToggleRow disabled={disabled}
         checked={visibility.erfs}
         label="ERFs"
+        loading={layerIsLoading("erfs", layerStates, requestedLayers)}
         count={model?.erfs?.length || 0}
         onChange={() => onToggleLayer("erfs")}
       />
@@ -465,6 +475,7 @@ export function GeofencePlanningLayerControls({
       <ToggleRow disabled={disabled}
         checked={visibility.sales}
         label={salesLabel}
+        loading={layerIsLoading("sales", layerStates, requestedLayers)}
         count={summary.total + summary.integrityExceptions}
         onChange={() => onToggleLayer("sales")}
       />
@@ -511,6 +522,7 @@ export function GeofencePlanningLayerControls({
       <ToggleRow disabled={disabled}
         checked={visibility.premises}
         label="Premises"
+        loading={layerIsLoading("premises", layerStates, requestedLayers)}
         count={model?.premises?.length || 0}
         onChange={() => onToggleLayer("premises")}
       />
@@ -518,6 +530,7 @@ export function GeofencePlanningLayerControls({
       <ToggleRow disabled={disabled}
         checked={visibility.assets}
         label="Assets"
+        loading={layerIsLoading("assets", layerStates, requestedLayers)}
         count={model?.assets?.length || 0}
         onChange={() => onToggleLayer("assets")}
       />
@@ -527,6 +540,7 @@ export function GeofencePlanningLayerControls({
         <ToggleRow disabled={disabled}
           checked={Boolean(visibility.geofences)}
           label="Geofences (whole Ward)"
+          loading={Boolean(visibility.geofences && geofencesLoading)}
           count={geofencesCount}
           onChange={() => onToggleLayer("geofences")}
         />

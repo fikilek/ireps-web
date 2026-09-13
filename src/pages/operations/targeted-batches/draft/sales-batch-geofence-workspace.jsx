@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
-import { useMemo, useState } from "react";
-import { APIProvider, Map as GoogleMap } from "@vis.gl/react-google-maps";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
+import BusySpinner from "../../../../components/busy-spinner.jsx";
 import { useGetGeoFencesByWardQuery } from "../../../../redux/geofencesApi";
 import { useGetSalesBatchNearbyQuery } from "../../../../redux/salesTargetedBatchApi";
 import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "../../geofence-shared-ui";
@@ -28,12 +29,19 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const isCreateMode = drawing.drawing && !saved && !pendingFence;
   const draftPoints = drawing.points, draftPolygonReady = draftPoints.length >= 3, canSaveDraft = Boolean(draftName.trim() && model.canSave && !busy);
   const createState = { isLoading: saving };
-  const bounds = useMemo(() => locatedMeterBounds(model.rows), [model.rows]);
-  const meterPoints = useMemo(() => model.rows.map(row => mapPoint(row.point)).filter(Boolean), [model.rows]);
+  // The draft model is rebuilt every few seconds (evidence expiry). Key the map inputs on
+  // what the map actually shows, so markers and labels are not redrawn needlessly.
+  const meterKey = JSON.stringify(model.rows.map(row => mapPoint(row.point)).filter(Boolean));
+  const meterPoints = useMemo(() => JSON.parse(meterKey), [meterKey]);
+  const bounds = useMemo(() => locatedMeterBounds(meterPoints.map(point => ({ point }))), [meterPoints]);
   const layers = NEARBY_LAYERS.filter(layer => visibility[layer] || isCreateMode);
   const { data: nearby } = useGetSalesBatchNearbyQuery({ lmPcode, wardPcode, bounds, wardGeometry: ward?.geometry, layers }, { skip: !scopeReady || !bounds || !layers.length });
-  const planningModel = nearby?.model || emptyNearbyModel();
-  const { data: geofences = [], isLoading: geofencesLoading } = useGetGeoFencesByWardQuery({ lmPcode, wardPcode }, { skip: !scopeReady });
+  const emptyModel = useMemo(() => emptyNearbyModel(), []);
+  const planningModel = nearby?.model || emptyModel;
+  const { data: geofenceData, isLoading: geofencesLoading } = useGetGeoFencesByWardQuery({ lmPcode, wardPcode }, { skip: !scopeReady });
+  const geofences = useMemo(() => geofenceData || [], [geofenceData]);
+  const layersLoading = (layers.length > 0 && scopeReady && layers.some(layer => { const state = nearby?.states?.[layer]; return !state || /^Loading|waiting for the server/i.test(state); }))
+    || Boolean(visibility.geofences && geofencesLoading);
   const draftPreviewStats = useMemo(() => buildGeofencePlanningDraftStats({ draftPoints, ...planningModel }), [draftPoints, planningModel]);
   const draftInside = <span>Draft meters inside: <strong>{model.readyIds.length} of {model.rows.length}</strong></span>;
   const completeness = <div role="status">{layers.map(layer => <span key={layer} style={{ display: "block" }}>{layer}: {nearby?.states?.[layer] || "Loading nearby records…"}</span>)}</div>;
@@ -69,17 +77,21 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
       handleUndoPoint={() => { if (!busy) drawing.undo(); }} handleRestartDraft={() => { if (!busy) drawing.setPoints([]); }}/>
     <p>Layers show the area near the batch (50 m margin), within its Ward. Draft meters are always shown.</p>
     <div style={{ ...mapShellStyle, height: 560 }}>
-      {!key ? <p>Google Maps key missing</p> : !bounds ? <p role="status">{locating || !live?.ready || !Object.keys(draft.resolutions).length ? "Locating meters…" : "No draft meters could be located. Press Locate meters again."}</p> : <APIProvider apiKey={key}>
+      {!key ? <p>Google Maps key missing</p> : !bounds ? (locating || !live?.ready || !Object.keys(draft.resolutions).length
+        ? <div style={mapBusyStyle}><BusySpinner label="Locating meters…" size={20}/></div>
+        : <p role="status">No draft meters could be located. Press Locate meters again.</p>) : <APIProvider apiKey={key}>
         <GoogleMap defaultCenter={{ lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }} defaultZoom={18} mapTypeId={mapTypeId} gestureHandling="greedy" disableDefaultUI={false} onClick={handleMapClick} style={{ width: "100%", height: "100%" }}>
           <GeofencePlanningLayers model={planningModel} {...{ visibility, salesStatusVisibility, isCreateMode, meterPoints }}/>
           <ExistingGeoFenceLayer geofences={mapFences} selectedGeoFenceId={selectedGeoFence?.id || ""} onSelectGeoFence={setSelectedGeoFence} interactive={!isCreateMode} fitSelected={false}/>
           {isCreateMode && <DraftGeoFenceLayer draftPoints={draftPoints}/>}
           <SalesBatchMapLayers rows={model.rows} highlightedId={highlightedId} onHighlight={onHighlight}/>
+          <GeofencesLayerCamera active={Boolean(visibility.geofences)} geofences={geofences} meterPoints={meterPoints}/>
         </GoogleMap>
       </APIProvider>}
+      {bounds && layersLoading && <div style={layersLoadingStripStyle}><BusySpinner label="Loading map layers…" size={14}/></div>}
       {bounds && <GeofencePlanningLayerControls model={planningModel} {...{ visibility, salesStatusVisibility }}
         onToggleLayer={layer => setVisibility(current => ({ ...current, [layer]: !current[layer] }))} onToggleSalesStatus={status => setSalesStatusVisibility(current => ({ ...current, [status]: !current[status] }))}
-        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady} geofencesCount={geofences.length}/>}
+        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady} geofencesCount={geofences.length} geofencesLoading={geofencesLoading}/>}
     </div>
     <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
       Nearby GPS Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed.
@@ -89,3 +101,31 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
 }
 
 const legendStyle = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, margin: "8px 0 0", color: "#334155", fontSize: 13, lineHeight: 1.5 };
+const mapBusyStyle = { display: "grid", placeItems: "center", height: "100%", color: "#334155", fontSize: 15 };
+const layersLoadingStripStyle = { position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 60, padding: "6px 12px", borderRadius: 999, background: "rgba(255,255,255,0.95)", boxShadow: "0 4px 12px rgba(15,23,42,0.18)", color: "#334155", fontSize: 13, pointerEvents: "none" };
+
+// Rules 18.7 (1.3.4): switching the Geofences layer on fits the view to every Ward
+// geofence plus the draft's meters; switching it off returns to the draft's meters.
+// Only reacts to a change of the switch (and to the geofence list arriving after it
+// was switched on), so panning and zooming are never overridden while you work.
+function GeofencesLayerCamera({ active, geofences, meterPoints }) {
+  const map = useMap();
+  const previous = useRef({ active, fittedCount: -1 });
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+    const state = previous.current;
+    const switched = state.active !== active;
+    const listArrived = active && !switched && state.fittedCount !== geofences.length;
+    if (!switched && !listArrived) return undefined;
+    state.active = active;
+    state.fittedCount = active ? geofences.length : -1;
+    const points = active ? [...geofences.flatMap(fence => getGeoFencePath(fence)), ...meterPoints] : meterPoints;
+    if (!points.length) return undefined;
+    const bounds = new window.google.maps.LatLngBounds();
+    points.forEach(point => bounds.extend(point));
+    map.fitBounds(bounds, 48);
+    const listener = map.addListener("idle", () => { if (map.getZoom() > 19) map.setZoom(19); listener.remove(); });
+    return () => listener.remove();
+  }, [map, active, geofences, meterPoints]);
+  return null;
+}
