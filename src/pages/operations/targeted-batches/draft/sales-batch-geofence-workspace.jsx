@@ -11,6 +11,7 @@ import { SALES_STATUSES } from "../../../sales/models/salesStatusModel.js";
 import { buildGeofencePlanningDraftStats } from "../../geofencePlanningModel";
 import { mapShellStyle, wardSelectWrapStyle } from "../../geofence-ui-styles";
 import { geofenceKind, getGeoFencePath, pathsOverlap } from "../../geofence-map-helpers";
+import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../../../functions/geofences/geofence-name.js";
 import { NEARBY_LAYERS, emptyNearbyModel, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
 import { salesDraftWardLabel, salesDraftMessage } from "./sales-batch-draft-model";
 import SalesBatchMapLayers from "./sales-batch-map-layers";
@@ -27,7 +28,10 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const [visibility, setVisibility] = useState({ erfs: false, sales: false, premises: false, assets: false, geofences: false });
   const [salesStatusVisibility, setSalesStatusVisibility] = useState({ notStarted: true, inProgress: true, completed: true });
   const isCreateMode = drawing.drawing && !saved && !pendingFence;
-  const draftPoints = drawing.points, draftPolygonReady = draftPoints.length >= 3, canSaveDraft = Boolean(draftName.trim() && model.canSave && !busy);
+  // Geofences rules GF-R001: "Gf W<Ward number> <name>"; the start comes from the draft's Ward.
+  const draftWardNumber = wardNumberFromPcode(wardPcode);
+  const standardDraftName = composeGeofenceName(draftWardNumber, geofenceNamePart(draftName));
+  const draftPoints = drawing.points, draftPolygonReady = draftPoints.length >= 3, canSaveDraft = Boolean(standardDraftName && model.canSave && !busy);
   const createState = { isLoading: saving };
   // The draft model is rebuilt every few seconds (evidence expiry). Key the map inputs on
   // what the map actually shows, so markers and labels are not redrawn needlessly.
@@ -48,15 +52,15 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const handleCancelDraft = () => { drawing.clear(); setConfirmCreateModalOpen(false); setDraftName(""); setDraftDescription(""); setError(""); };
   const handleStartDrawing = () => {
     if (!scopeReady || saved || pendingFence || busy) return;
-    if (!draftName.trim()) { setError("Geofence name is required."); return; }
+    if (!geofenceNamePart(draftName).trim()) { setError(`Type a name after "Gf W${draftWardNumber}".`); return; }
     drawing.clear(); drawing.setDrawing(true); setSelectedGeoFence(null); setCreateModalOpen(false); setError("");
   };
   const handleConfirmCreate = async () => {
     if (!canSaveDraft) return;
     try {
-      await onSave({ name: draftName.trim(), description: draftDescription.trim() || "NAv", parents: { lmPcode, wardPcode,
+      await onSave({ name: standardDraftName, description: draftDescription.trim() || "NAv", parents: { lmPcode, wardPcode,
         countryPcode: "ZA", provincePcode: lmPcode.slice(0, 3), dmPcode: lmPcode.slice(0, -1) }, points: draftPoints.map((point, order) => ({ latitude: point.lat, longitude: point.lng, order })) });
-      setCreateSuccess({ name: draftName.trim(), wardLabel, stats: draftPreviewStats, isTcContext: false });
+      setCreateSuccess({ name: standardDraftName, wardLabel, stats: draftPreviewStats, isTcContext: false });
       handleCancelDraft();
     } catch (failure) { setError(salesDraftMessage(failure.message || failure.error || "Couldn't create the geofence. Try the same request again.")); }
   };
@@ -96,7 +100,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
     <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
       Nearby GPS Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed.
       Hover a meter or row to highlight both.</p>
-    <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} overlaps={overlapsNote} visibleGeofences={geofences} lockedWard/>
+    <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} overlaps={overlapsNote} visibleGeofences={geofences} lockedWard wardNumber={draftWardNumber}/>
   </div>;
 }
 

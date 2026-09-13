@@ -5,6 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore } from "firebase-admin/firestore";
 import { createSalesBatchGeofence } from "../targetedBatches/sales-batch-geofence.js";
 import { createProofCodec, salesBatchProofKey, callableFailure } from "../targetedBatches/sales-batch-resolution.js";
+import { checkGeofenceName } from "./geofence-name.js";
 
 import {
   validateCreateGeoFencePayload,
@@ -29,6 +30,13 @@ export async function createGeoFenceRequest({ db, request, codec }) {
 
   const { name, description, parents, rawPoints } =
     validateCreateGeoFencePayload(request.data || {});
+
+  // Geofences rules GF-R001: every new geofence, area or batch, is named
+  // "Gf W<Ward number> <name>" for its own Ward.
+  const nameCheck = checkGeofenceName(name, parents?.wardPcode);
+  if (!nameCheck.ok) {
+    throw new HttpsError("invalid-argument", nameCheck.reason);
+  }
 
   if (request.data?.targetedBatch !== undefined) {
     return createSalesBatchGeofence({ db, request, codec, name, description, parents, rawPoints });

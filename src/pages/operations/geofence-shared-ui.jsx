@@ -2,6 +2,9 @@ import { getGeoFencePointCount } from "./geofence-map-helpers";
 import { headerActionsStyle, countPillStyle, buttonStyle, primaryButtonStyle, drawingPanelStyle, drawingStatsStyle, countDetailStyle, integrityDetailStyle, modalBackdropStyle, modalCardStyle, modalHeaderStyle, modalCloseButtonStyle, modalCountsRowStyle, confirmIntroStyle, countCardGridStyle, countCardStyle, countLabelStyle, countValueStyle, confirmDetailsStyle, confirmFieldLabelStyle, modalActionsStyle, successBoxStyle, inputStyle, textareaStyle } from "./geofence-ui-styles";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import BusySpinner from "../../components/busy-spinner.jsx";
+import { composeGeofenceName, geofenceNamePart, geofenceNamePrefix } from "../../../functions/geofences/geofence-name.js";
+
+const namePrefixStyle = { padding: "10px 12px", border: "1px solid #CBD5E1", borderRadius: 10, background: "#F1F5F9", color: "#0F172A", fontWeight: 700, whiteSpace: "nowrap" };
 function Modal({ title, children, onClose, width = 720 }) {
   return (
     <div style={modalBackdropStyle}>
@@ -139,7 +142,7 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
           </div>
         ) : null}
 </>); }
-export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false}) { return (<>
+export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null}) { return (<>
       {listModalOpen ? (
         <Modal
           title={`Existing Geofences in ${wardLabel}`}
@@ -210,15 +213,29 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
           width={620}
         >
           {lockedWard && <p>Ward: <strong>{wardLabel}</strong></p>}
+          {/* Geofences rules GF-R001: "Gf W<Ward number> <name>". The start comes from
+              the Ward and cannot be changed; the user types only the name. */}
           <label>
             Name
-            <input
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              placeholder="e.g. Ward 6 Block A"
-              style={inputStyle}
-            />
+            {wardNumber ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, marginBottom: 6 }}>
+                <span style={namePrefixStyle} title="Fixed start of every geofence name (rule GF-R001)">{geofenceNamePrefix(wardNumber).trim()}</span>
+                <input
+                  value={geofenceNamePart(draftName)}
+                  onChange={(event) => setDraftName(`${geofenceNamePrefix(wardNumber)}${event.target.value}`)}
+                  placeholder="e.g. Albert Street"
+                  style={{ ...inputStyle, marginTop: 0, marginBottom: 0, flex: 1 }}
+                />
+              </span>
+            ) : (
+              <input value="" disabled placeholder="Select a Ward first" style={inputStyle} />
+            )}
           </label>
+          {wardNumber ? (
+            <p style={{ margin: "0 0 12px", color: "#475569", fontSize: 13 }}>
+              Full name: <strong>{composeGeofenceName(wardNumber, geofenceNamePart(draftName)) || `${geofenceNamePrefix(wardNumber)}…`}</strong>
+            </p>
+          ) : null}
 
           <label>
             Description

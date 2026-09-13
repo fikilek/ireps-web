@@ -3,6 +3,7 @@ import { pageStyle, headerStyle, eyebrowStyle, wardSelectWrapStyle, wardSelectLa
 import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "./geofence-shared-ui";
 import { ExistingGeoFenceLayer, DraftGeoFenceLayer } from "./geofence-map-layers";
 import { isUsableMapPoint, toUsableLatLng, normalizeBbox, fitMapToBbox } from "./geofence-map-helpers";
+import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../functions/geofences/geofence-name.js";
 // src/pages/operations/GeoFencesPage.jsx
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1299,8 +1300,11 @@ export default function GeoFencesPage() {
   const [createGeoFence, createState] = useCreateGeoFenceMutation();
 
   const draftPolygonReady = draftPoints.length >= 3;
+  // Geofences rules GF-R001: "Gf W<Ward number> <name>"; the start comes from the Ward.
+  const draftWardNumber = wardNumberFromPcode(wardPcode);
+  const standardDraftName = composeGeofenceName(draftWardNumber, geofenceNamePart(draftName));
   const canSaveDraft =
-    draftName.trim().length > 0 && draftPolygonReady && !createState.isLoading;
+    standardDraftName.length > 0 && draftPolygonReady && !createState.isLoading;
 
   const selectedStats = useMemo(() => {
     return {
@@ -1425,8 +1429,8 @@ export default function GeoFencesPage() {
       return;
     }
 
-    if (!draftName.trim()) {
-      alert("Geofence name is required.");
+    if (!geofenceNamePart(draftName).trim()) {
+      alert(`Type a name after "Gf W${draftWardNumber}".`);
       return;
     }
 
@@ -1483,7 +1487,7 @@ export default function GeoFencesPage() {
     if (!canSaveDraft) return;
 
     const successPayload = {
-      name: draftName.trim(),
+      name: standardDraftName,
       description: draftDescription.trim() || "NAv",
       wardLabel,
       stats: draftPreviewStats,
@@ -1491,7 +1495,7 @@ export default function GeoFencesPage() {
     };
 
     const payload = {
-      name: draftName.trim(),
+      name: standardDraftName,
       description: draftDescription.trim() || "NAv",
       parents: getParentsFromScope({
         lmPcode,
@@ -1710,7 +1714,7 @@ export default function GeoFencesPage() {
         </APIProvider>
       </div>
 
-      <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess }}/>
+      <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess }} wardNumber={draftWardNumber}/>
 
     </section>
   );
