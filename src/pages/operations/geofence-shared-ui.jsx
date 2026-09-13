@@ -138,7 +138,7 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
           </div>
         ) : null}
 </>); }
-export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, lockedWard = false}) { return (<>
+export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false}) { return (<>
       {listModalOpen ? (
         <Modal
           title={`Existing Geofences in ${wardLabel}`}
@@ -293,6 +293,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
           </div>
 
           {draftInside}
+          {overlaps}
           {completeness}
           <div style={confirmDetailsStyle}>
             <div>

@@ -415,6 +415,7 @@ export function GeofencePlanningLayerControls({
   isCreateMode,
   salesLabel = "Sales (excluding Normal)",
   layerStates, requestedLayers = [], disabled = false,
+  geofencesCount = null,
 }) {
   const summary = model?.salesSummary || {
     total: 0,
@@ -520,6 +521,16 @@ export function GeofencePlanningLayerControls({
         count={model?.assets?.length || 0}
         onChange={() => onToggleLayer("assets")}
       />
+
+      {geofencesCount !== null ? (
+        // Rules 18.7 (1.3.3): every geofence in the Ward, not only the nearby area.
+        <ToggleRow disabled={disabled}
+          checked={Boolean(visibility.geofences)}
+          label="Geofences (whole Ward)"
+          count={geofencesCount}
+          onChange={() => onToggleLayer("geofences")}
+        />
+      ) : null}
     </div>
   );
 }

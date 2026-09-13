@@ -96,6 +96,73 @@ export function getGeoFencePointCount(geoFence) {
   return getGeoFencePath(geoFence).length;
 }
 
+// Targeted Batch rules 18.7 (1.3.3): area geofences are green, batch geofences
+// (those linked to a Targeted Batch) purple; a selected geofence stays red.
+export const GEOFENCE_KIND_COLORS = Object.freeze({ area: "#10b981", batch: "#7c3aed" });
+
+export function geofenceKind(geoFence) {
+  return geoFence?.targetedBatch ? "batch" : "area";
+}
+
+// Where a geofence's name label sits: its stored centroid, else the average of its points.
+export function geofenceLabelPoint(geoFence) {
+  const centroid = toUsableLatLng(geoFence?.geometry?.centroid);
+  if (centroid) return centroid;
+  const path = getGeoFencePath(geoFence);
+  if (!path.length) return null;
+  return {
+    lat: path.reduce((sum, point) => sum + point.lat, 0) / path.length,
+    lng: path.reduce((sum, point) => sum + point.lng, 0) / path.length,
+  };
+}
+
+function onSegment(point, a, b) {
+  const epsilon = 1e-12;
+  const cross = (b.lng - a.lng) * (point.lat - a.lat) - (b.lat - a.lat) * (point.lng - a.lng);
+  if (Math.abs(cross) > epsilon) return false;
+  return Math.min(a.lng, b.lng) - epsilon <= point.lng && point.lng <= Math.max(a.lng, b.lng) + epsilon
+    && Math.min(a.lat, b.lat) - epsilon <= point.lat && point.lat <= Math.max(a.lat, b.lat) + epsilon;
+}
+
+// Strictly inside: a point on an edge counts as outside (as elsewhere in the rules).
+function pointInPath(point, path) {
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    if (onSegment(point, path[j], path[i])) return false;
+  }
+  let inside = false;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    const a = path[i], b = path[j];
+    if ((a.lat > point.lat) !== (b.lat > point.lat)
+      && point.lng < ((b.lng - a.lng) * (point.lat - a.lat)) / (b.lat - a.lat) + a.lng) inside = !inside;
+  }
+  return inside;
+}
+
+function segmentsCross(a, b, c, d) {
+  const turn = (p, q, r) => Math.sign((q.lng - p.lng) * (r.lat - p.lat) - (q.lat - p.lat) * (r.lng - p.lng));
+  const t1 = turn(a, b, c), t2 = turn(a, b, d), t3 = turn(c, d, a), t4 = turn(c, d, b);
+  return t1 !== 0 && t2 !== 0 && t3 !== 0 && t4 !== 0 && t1 !== t2 && t3 !== t4;
+}
+
+// True when two drawn areas share ground (one inside the other, or edges crossing).
+// Touching only along an edge does not count. Paths are [{ lat, lng }].
+export function pathsOverlap(first = [], second = []) {
+  if (first.length < 3 || second.length < 3) return false;
+  const centre = (path) => ({
+    lat: path.reduce((sum, point) => sum + point.lat, 0) / path.length,
+    lng: path.reduce((sum, point) => sum + point.lng, 0) / path.length,
+  });
+  if (first.some((point) => pointInPath(point, second)) || second.some((point) => pointInPath(point, first))) return true;
+  // Identical or edge-aligned shapes have no corner strictly inside the other.
+  if (pointInPath(centre(first), second) || pointInPath(centre(second), first)) return true;
+  for (let i = 0; i < first.length; i++) {
+    for (let j = 0; j < second.length; j++) {
+      if (segmentsCross(first[i], first[(i + 1) % first.length], second[j], second[(j + 1) % second.length])) return true;
+    }
+  }
+  return false;
+}
+
 export function fitMapToGeoFence(map, geoFence, padding = 88) {
   if (!map || !geoFence || !window.google?.maps) return;
 

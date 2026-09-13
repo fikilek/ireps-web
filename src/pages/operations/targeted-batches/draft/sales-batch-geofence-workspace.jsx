@@ -9,6 +9,7 @@ import { GeofencePlanningLayerControls, GeofencePlanningLayers, SalesStatusGlyph
 import { SALES_STATUSES } from "../../../sales/models/salesStatusModel.js";
 import { buildGeofencePlanningDraftStats } from "../../geofencePlanningModel";
 import { mapShellStyle, wardSelectWrapStyle } from "../../geofence-ui-styles";
+import { geofenceKind, getGeoFencePath, pathsOverlap } from "../../geofence-map-helpers";
 import { NEARBY_LAYERS, emptyNearbyModel, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
 import { salesDraftWardLabel, salesDraftMessage } from "./sales-batch-draft-model";
 import SalesBatchMapLayers from "./sales-batch-map-layers";
@@ -22,7 +23,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const [mapTypeId, setMapTypeId] = useState("roadmap"), [selectedGeoFence, setSelectedGeoFence] = useState(null);
   const [listModalOpen, setListModalOpen] = useState(false), [createModalOpen, setCreateModalOpen] = useState(false), [confirmCreateModalOpen, setConfirmCreateModalOpen] = useState(false), [createSuccess, setCreateSuccess] = useState(null);
   const [draftName, setDraftName] = useState(""), [draftDescription, setDraftDescription] = useState(""), [error, setError] = useState("");
-  const [visibility, setVisibility] = useState({ erfs: false, sales: false, premises: false, assets: false });
+  const [visibility, setVisibility] = useState({ erfs: false, sales: false, premises: false, assets: false, geofences: false });
   const [salesStatusVisibility, setSalesStatusVisibility] = useState({ notStarted: true, inProgress: true, completed: true });
   const isCreateMode = drawing.drawing && !saved && !pendingFence;
   const draftPoints = drawing.points, draftPolygonReady = draftPoints.length >= 3, canSaveDraft = Boolean(draftName.trim() && model.canSave && !busy);
@@ -54,7 +55,11 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const handleOpenCreateModal = () => { if (scopeReady && !saved && !pendingFence && !busy) { setCreateModalOpen(true); setError(""); } };
   const handleOpenCreateConfirm = () => { if (canSaveDraft) setConfirmCreateModalOpen(true); };
   const handleMapClick = event => { if (!isCreateMode || busy) return; const point = mapPoint(event.detail?.latLng); if (point) drawing.addPoint(point); };
-  const mapFences = useMemo(() => [...new Map([...(saved ? [draft.savedFence] : []), ...(selectedGeoFence ? [selectedGeoFence] : [])].map(fence => [fence.id, fence])).values()], [saved, draft.savedFence, selectedGeoFence]);
+  // Rules 18.7 (1.3.3): the Geofences layer shows every geofence in the Ward.
+  const mapFences = useMemo(() => [...new Map([...(visibility.geofences ? geofences : []), ...(saved ? [draft.savedFence] : []), ...(selectedGeoFence ? [selectedGeoFence] : [])].map(fence => [fence.id, fence])).values()], [visibility.geofences, geofences, saved, draft.savedFence, selectedGeoFence]);
+  // Rules 18.5 (1.3.3): Confirm Geofence lists overlapped geofences; information only.
+  const overlapping = useMemo(() => draftPoints.length >= 3 ? geofences.filter(fence => fence.id !== draft.savedFence?.id && pathsOverlap(draftPoints, getGeoFencePath(fence))) : [], [draftPoints, geofences, draft.savedFence?.id]);
+  const overlapsNote = <span>Overlaps: <strong>{overlapping.length ? overlapping.map(fence => `${fence.name || fence.id} (${geofenceKind(fence)})`).join(", ") : "none"}</strong></span>;
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   return <div style={{ minWidth: 0 }}>
     <GeofenceToolbar wardControl={<div style={wardSelectWrapStyle}>Ward: <strong>{wardLabel}</strong></div>}
@@ -74,12 +79,12 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
       </APIProvider>}
       {bounds && <GeofencePlanningLayerControls model={planningModel} {...{ visibility, salesStatusVisibility }}
         onToggleLayer={layer => setVisibility(current => ({ ...current, [layer]: !current[layer] }))} onToggleSalesStatus={status => setSalesStatusVisibility(current => ({ ...current, [status]: !current[status] }))}
-        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady}/>}
+        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady} geofencesCount={geofences.length}/>}
     </div>
     <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
       Nearby GPS Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed.
       Hover a meter or row to highlight both.</p>
-    <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} visibleGeofences={geofences} lockedWard/>
+    <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} overlaps={overlapsNote} visibleGeofences={geofences} lockedWard/>
   </div>;
 }
 

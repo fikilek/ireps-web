@@ -1,4 +1,8 @@
-import { getGeoFencePath, fitMapToGeoFence } from "./geofence-map-helpers";
+import { getGeoFencePath, fitMapToGeoFence, GEOFENCE_KIND_COLORS, geofenceKind, geofenceLabelPoint } from "./geofence-map-helpers";
+
+const escapeHtml = (value) => String(value ?? "")
+  .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 import { useEffect, useMemo, useRef } from "react";
 import { useMap } from "@vis.gl/react-google-maps";
 export function ExistingGeoFenceLayer({
@@ -25,6 +29,7 @@ export function ExistingGeoFenceLayer({
     polygonsRef.current.forEach((polygon) => polygon.setMap(null));
     polygonsRef.current = [];
     const infoWindows = [];
+    const labels = [];
 
     const polygons = (geofences || [])
       .map((geoFence) => {
@@ -33,28 +38,54 @@ export function ExistingGeoFenceLayer({
         if (path.length < 3) return null;
 
         const selected = selectedGeoFenceId === geoFence.id;
+        // Rules 18.7 (1.3.3): area geofences green, batch geofences purple, selected red.
+        const kind = geofenceKind(geoFence);
+        const kindColor = GEOFENCE_KIND_COLORS[kind];
 
         const polygon = new window.google.maps.Polygon({
           paths: path,
-          strokeColor: selected ? "#dc2626" : "#10b981",
+          strokeColor: selected ? "#dc2626" : kindColor,
           strokeOpacity: 1,
           strokeWeight: selected ? 4 : 2,
-          fillColor: selected ? "#dc2626" : "#10b981",
-          fillOpacity: selected ? 0.18 : 0.15,
+          fillColor: selected ? "#dc2626" : kindColor,
+          fillOpacity: selected ? 0.18 : 0.12,
           clickable: interactive,
           zIndex: selected ? 80 : 60,
         });
 
+        const labelPoint = geofenceLabelPoint(geoFence);
+        if (labelPoint) {
+          labels.push(new window.google.maps.Marker({
+            position: labelPoint,
+            map,
+            title: geoFence.name || geoFence.id,
+            label: {
+              text: String(geoFence.name || geoFence.id),
+              className: "ireps-geofence-label",
+              color: selected ? "#b91c1c" : kindColor,
+              fontWeight: "600",
+              fontSize: "11px",
+            },
+            icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 1, fillOpacity: 0, strokeOpacity: 0 },
+            clickable: false,
+            zIndex: 90,
+          }));
+        }
+
         if (interactive) {
+          const kindLine = kind === "batch"
+            ? `Batch geofence · ${escapeHtml(geoFence.targetedBatch?.tbId || "NAv")}`
+            : "Area geofence";
           const infoWindow = new window.google.maps.InfoWindow({
             content: `
               <div style="font-family: Arial, sans-serif; min-width: 200px;">
-                <strong>${geoFence.name || geoFence.id}</strong>
-                <div style="margin-top: 4px;">${geoFence.description || "NAv"}</div>
+                <strong>${escapeHtml(geoFence.name || geoFence.id)}</strong>
+                <div style="margin-top: 4px; color: ${kindColor};">${kindLine}</div>
+                <div style="margin-top: 4px;">${escapeHtml(geoFence.description || "NAv")}</div>
                 <hr />
-                <div>ERFs: ${geoFence?.counts?.erfs || 0}</div>
-                <div>Premises: ${geoFence?.counts?.premises || 0}</div>
-                <div>Meters: ${geoFence?.counts?.meters || 0}</div>
+                <div>ERFs: ${Number(geoFence?.counts?.erfs) || 0}</div>
+                <div>Premises: ${Number(geoFence?.counts?.premises) || 0}</div>
+                <div>Meters: ${Number(geoFence?.counts?.meters) || 0}</div>
               </div>
             `,
           });
@@ -82,6 +113,7 @@ export function ExistingGeoFenceLayer({
 
     return () => {
       infoWindows.forEach((infoWindow) => infoWindow.close());
+      labels.forEach((label) => label.setMap(null));
       polygonsRef.current.forEach((polygon) => polygon.setMap(null));
       polygonsRef.current = [];
     };
