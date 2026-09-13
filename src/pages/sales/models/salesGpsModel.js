@@ -4,9 +4,8 @@ export const SALES_GPS_FILTERS = Object.freeze({
   WITHOUT_GPS: "WITHOUT_GPS",
 });
 
-export function hasUsableSalesGps(row = {}) {
-  return row?.hasUsableGps === true;
-}
+import { hasUsableSalesGps } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+export { hasUsableSalesGps };
 
 export function isSalesWithoutUsableGps(row = {}) {
   return !hasUsableSalesGps(row);

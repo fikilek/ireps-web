@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+/* eslint-disable no-unused-vars -- Component tags are consumed by JSX; the repository uses the core ESLint rule. */
 import { skipToken } from "@reduxjs/toolkit/query";
 import { Link, useParams } from "react-router-dom";
 
@@ -70,18 +70,9 @@ export default function SalesBatchMapPage() {
   const batch = mapStream?.batch || null;
   const membership = mapStream?.membership || {};
   const diagnostics = mapStream?.diagnostics || {};
-  const erfs = useMemo(
-    () => (Array.isArray(mapStream?.erfs) ? mapStream.erfs : []),
-    [mapStream?.erfs],
-  );
-  const premises = useMemo(
-    () => (Array.isArray(mapStream?.premises) ? mapStream.premises : []),
-    [mapStream?.premises],
-  );
-  const meters = useMemo(
-    () => (Array.isArray(mapStream?.meters) ? mapStream.meters : []),
-    [mapStream?.meters],
-  );
+  const erfs = Array.isArray(mapStream?.erfs) ? mapStream.erfs : [];
+  const premises = Array.isArray(mapStream?.premises) ? mapStream.premises : [];
+  const meters = Array.isArray(mapStream?.meters) ? mapStream.meters : [];
 
   const streamStatus = cleanText(mapStream?.sync?.status);
   const streamReady =
@@ -115,7 +106,7 @@ export default function SalesBatchMapPage() {
           <h1 style={styles.title}>Targeted Batch Map</h1>
           <p style={styles.subtitle}>
             A live spatial overview containing only ERFs, premises and Field
-            Meters referenced by this Targeted Batch.
+            Meters referenced by permanent TB Rows. These historical associations do not establish a Sales meter’s current targetedBatchId membership.
           </p>
         </div>
 

@@ -1,4 +1,40 @@
 import { resolveSalesCategoryForMonth } from "./salesCategoryModel.js";
+import { exactSalesTbRef, readTbRefBatchId, inspectSalesTbRefsIntegrity, resolveSalesTargetedBatchMembership } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { canonicalTargetedBatchRowState } from "../../../../functions/targetedBatches/lifecycle.js";
+
+const canonicalState = (value, allowed) => allowed.includes(value) ? value : "UNAVAILABLE";
+const canonicalCount = value => Number.isInteger(value) && value >= 0 ? value : null;
+
+export function normalizePermanentSalesBatch(data, id) {
+  return { ...data, id, createdAt: toMillis(data.metadata?.createdAt) ? new Date(toMillis(data.metadata.createdAt)).toISOString() : null,
+    updatedAt: toMillis(data.metadata?.updatedAt) ? new Date(toMillis(data.metadata.updatedAt)).toISOString() : null,
+    totalRows: canonicalCount(data.counts?.totalRows), acceptedRows: canonicalCount(data.counts?.acceptedRows), rejectedRows: canonicalCount(data.counts?.rejectedRows),
+    validation: { ...data.validation, passed: data.validation?.status === "PASSED" } };
+}
+export function normalizePermanentSalesBatchRow(data, id = data.id, parent = null) {
+  const modern = data.schemaVersion === "0.3.0";
+  const state = canonicalTargetedBatchRowState(data, parent);
+  const integrityIssues = modern ? [
+    ...(!state ? ["Canonical decision, allocation or execution status is missing or invalid"] : []),
+    ...(!data.refs || !Object.hasOwn(data.refs, "erfId") ? ["Canonical ERF reference is missing"] : []),
+    ...(!data.id || data.id !== id || !Number.isInteger(data.rowNo) || data.rowNo < 1 ? ["Canonical row identity is invalid"] : []),
+  ] : [];
+  const decision = modern ? canonicalState(data.decision?.status, ["ACCEPT", "REJECT"]) : data.decision?.status || data.rowDecision || data.assessmentDecision || "UNASSESSED";
+  return { ...data, id, tbRowId: id, uploadRowId: id, integrityIssues, status: state || "INCONSISTENT", sourceSalesAllMeterId: data.salesAllMeterId,
+    rowDecision: decision, assessmentDecision: decision, rowDecisionReasons: Array.isArray(data.decision?.reasons) ? data.decision.reasons : [],
+    meterNo: data.meter?.numberRaw ?? data.meterNo ?? "", meterNoNormalized: data.meter?.numberNormalized ?? data.meterNoNormalized ?? "",
+    accountNumber: data.customer?.accountNumber ?? data.accountNumber ?? "", customerName: data.customer?.customerName ?? data.customerName ?? "",
+    addressLine1: data.location?.addressLine1 ?? data.addressLine1 ?? "", town: data.location?.town ?? data.town ?? "",
+    wardNumberLabel: data.location?.wardNumberLabel ?? data.wardNumberLabel ?? "", wardNumbers: data.location?.wardNumbers ?? data.wardNumbers ?? [],
+    standNumber: data.location?.sgCode ?? data.standNumber ?? "", actionReason: data.selection?.actionReason ?? data.actionReason ?? "",
+    totalSalesC: data.salesSnapshot?.totalSalesC ?? data.totalSalesC ?? null,
+    premiseId: data.refs?.premiseId ?? data.premiseId ?? null, astId: data.refs?.meterId ?? data.astId ?? null,
+    meterDiscoveryTrnId: data.refs?.trnId ?? data.meterDiscoveryTrnId ?? null,
+    allocationStatus: modern ? canonicalState(data.allocation?.status, ["UNALLOCATED", "ALLOCATED"]) : data.allocation?.status ?? data.allocationStatus,
+    completionStatus: integrityIssues.length ? "INTEGRITY_ERROR" : data.execution?.status ?? (modern ? "UNAVAILABLE" : data.completionStatus),
+    fieldAcceptanceStatus: modern ? canonicalState(parent?.acceptance?.status, ["NOT_READY", "WAITING", "ACCEPTED", "REJECTED"]) : parent?.acceptance?.status ?? data.fieldAcceptanceStatus,
+    proposedTrnType: data.refs?.meterId ? "METER_INSPECTION" : "METER_DISCOVERY", astMatchStatus: data.refs?.meterId ? "MATCHED" : "NOT_MATCHED" };
+}
 
 export function cleanText(value) {
   return String(value ?? "").trim();
@@ -100,6 +136,7 @@ function getBatchLastActivityAtMs(batch = {}) {
 }
 
 export function normalizeTargetedBatchHeader(id, batch = {}) {
+  const modern = batch.schemaVersion === "0.3.0";
   const scope = batch?.scope || {};
   const selection = batch?.selection || {};
   const allocation = batch?.allocation || {};
@@ -123,7 +160,8 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
 
   return {
     id: cleanText(id || batch?.id),
-    schemaVersion: "0.2.0",
+    schemaVersion: batch.schemaVersion || null,
+    integrityIssues: modern && (!["CREATING", "READY", "FAILED"].includes(batch.creation?.state) || !["NOT_STARTED", "PARTIAL", "ALLOCATING", "ALLOCATED", "ALLOCATION_FAILED"].includes(batch.allocation?.status) || !["NOT_READY", "WAITING", "ACCEPTED", "REJECTED"].includes(batch.acceptance?.status) || !["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(batch.execution?.status) || [batch.counts?.totalRows, batch.counts?.executionStartedRows, batch.counts?.completedRows].some(value => canonicalCount(value) === null)) ? ["Canonical batch lifecycle or counts are missing or invalid"] : [],
 
     scope: {
       lmPcode: cleanText(scope?.lmPcode),
@@ -145,7 +183,7 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
     },
 
     allocation: {
-      status: normalizeUpper(allocation?.status) || "UNALLOCATED",
+      status: modern ? canonicalState(allocation?.status, ["NOT_STARTED", "PARTIAL", "ALLOCATING", "ALLOCATED", "ALLOCATION_FAILED"]) : normalizeUpper(allocation?.status) || "UNALLOCATED",
       targetType,
       targetId: targetId || null,
       targetName: targetName || null,
@@ -154,18 +192,18 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
     },
 
     acceptance: {
-      status: normalizeUpper(acceptance?.status) || "NOT_READY",
+      status: modern ? canonicalState(acceptance?.status, ["NOT_READY", "WAITING", "ACCEPTED", "REJECTED"]) : normalizeUpper(acceptance?.status) || "NOT_READY",
       acceptedAtMs: toMillis(acceptance?.acceptedAt) || null,
       rejectedAtMs: toMillis(acceptance?.rejectedAt) || null,
     },
 
     execution: {
-      status: normalizeUpper(execution?.status) || "NOT_STARTED",
+      status: modern ? canonicalState(execution?.status, ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"]) : normalizeUpper(execution?.status) || "NOT_STARTED",
       startedAtMs: toMillis(execution?.startedAt) || null,
       completedAtMs: toMillis(execution?.completedAt) || null,
     },
 
-    progress: getProgress(batch?.counts),
+    progress: modern && [batch.counts?.totalRows, batch.counts?.executionStartedRows, batch.counts?.completedRows].some(value => canonicalCount(value) === null) ? { total: null, notStarted: null, inProgress: null, completed: null } : getProgress(batch?.counts),
 
     createdAtMs: toMillis(batch?.metadata?.createdAt),
     updatedAtMs: toMillis(batch?.metadata?.updatedAt),
@@ -232,22 +270,8 @@ function normalizeBooleanMatch(value) {
 }
 
 function getBatchReference(sales = {}, tbId, rowId) {
-  const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
-  const normalizedTbId = cleanText(tbId);
-  const normalizedRowId = cleanText(rowId);
-
-  return (
-    refs.find(
-      (reference) =>
-        cleanText(reference?.id || reference?.tbId) === normalizedTbId &&
-        cleanText(reference?.rowId || reference?.tbRowId) === normalizedRowId,
-    ) ||
-    refs.find(
-      (reference) =>
-        cleanText(reference?.id || reference?.tbId) === normalizedTbId,
-    ) ||
-    null
-  );
+  const exact = exactSalesTbRef(sales, tbId);
+  return exact.ok && (!exact.reference.rowId || exact.reference.rowId === rowId) ? exact.reference : null;
 }
 
 function getFieldWork(reference = {}) {
@@ -470,6 +494,7 @@ function getAddressMatch({ originalAddressParts, fieldAddressParts }) {
 }
 
 function getExecutionStatus(row = {}, fieldWork = {}) {
+  if (row.schemaVersion === "0.3.0") return ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(row.execution?.status) ? row.execution.status : "UNAVAILABLE";
   return (
     normalizeUpper(firstText(fieldWork?.status, row?.execution?.status)) ||
     "NOT_STARTED"
@@ -678,12 +703,12 @@ function getTargetedBatchDashboardReference(sales = {}, tbId = "") {
   const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
   const normalizedTbId = normalizeUpper(tbId);
   const matches = refs.filter(
-    (reference) => normalizeUpper(reference?.id) === normalizedTbId,
+    (reference) => readTbRefBatchId(reference) === normalizedTbId,
   );
 
   return {
     matches,
-    reference: matches.length === 1 ? matches[0] : null,
+    reference: exactSalesTbRef(sales, tbId).reference,
   };
 }
 
@@ -854,6 +879,11 @@ function buildTargetedBatchDashboardMetricsForBatch({
       return;
     }
 
+    if (!reference) {
+      pushTargetedBatchDashboardIssue({ issues, completeness, code: "TB_REF_INVALID", tbId, rowId, salesAllMeterId,
+        metricKeys: ["originalMeters", ...TARGETED_BATCH_DASHBOARD_DERIVED_METRICS], detail: inspectSalesTbRefsIntegrity(sales.tbRefs).issues.join(", ") });
+      return;
+    }
     if (!hasDashboardValue(reference?.date)) {
       pushTargetedBatchDashboardIssue({
         issues,
@@ -1140,6 +1170,8 @@ export function normalizeTargetedBatchReportRow({
   return {
     id: cleanText(row?.id),
     tbId: cleanText(tbId || row?.tbId),
+    currentMembership: resolveSalesTargetedBatchMembership(sales),
+    referenceIntegrity: { ...inspectSalesTbRefsIntegrity(sales.tbRefs), exactRowReference: Boolean(reference) },
     rowNo: Number(row?.rowNo || 0),
 
     scope: {

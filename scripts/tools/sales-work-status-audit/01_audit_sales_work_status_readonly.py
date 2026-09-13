@@ -14,9 +14,11 @@ from sales_work_status_classifier import (
     get_path, inspect_preflight, normalize_meter_identity, normalize_new_sales_row,
     normalize_old_sales_row, normalize_registry_row,
     normalize_sales_work_status_ast_row, transition_reasons,
+    classify_non_gps_sales_row,
 )
 
-PROJECT="ireps-5c3e9"; ENV="LIVE"; LM="ZA5241"; LM_NAME="Endumeni"
+PROJECT=None; ENV=None; LM=None; LM_NAME=None
+GOVERNANCE={"rules":"30f9cdd", "schemas":"21012fc", "salesSchema":"1.6.0", "classifier":"sales-targeted-batch-v4.2-tb9"}
 SALES="sales-all-meters"; ASTS="asts"; REG="registry_meters"
 EXPECTED_SALES=10216; STEP=500; HEARTBEAT=5
 PUBLIC_STATUSES={"COMPLETED","IN_PROGRESS","NOT_STARTED"}
@@ -53,7 +55,7 @@ class Beat:
     def end(self): self.stop.set(); self.thread.join(timeout=1)
 
 def parse_args():
-    parser=argparse.ArgumentParser(description="READ-ONLY LIVE Endumeni Sales work-status transition audit")
+    parser=argparse.ArgumentParser(description="READ-ONLY explicitly scoped Sales work-status transition audit")
     parser.add_argument("--project-id",required=True); parser.add_argument("--confirm-project",required=True)
     parser.add_argument("--environment",required=True); parser.add_argument("--lm-pcode",required=True)
     parser.add_argument("--lm-name",required=True); parser.add_argument("--service-account",required=True,type=Path)
@@ -65,7 +67,7 @@ def gate(args,service_account):
     errors=[]
     if args.project_id!=PROJECT: errors.append(f"project must be {PROJECT}")
     if args.confirm_project!=args.project_id: errors.append("--confirm-project must match --project-id")
-    if args.environment.upper()!=ENV: errors.append("environment must be LIVE")
+    if args.environment.upper()!=ENV: errors.append("environment mismatch")
     if args.lm_pcode!=LM: errors.append(f"lm-pcode must be {LM}")
     if args.lm_name.lower()!=LM_NAME.lower(): errors.append(f"lm-name must be {LM_NAME}")
     if not service_account.is_file(): errors.append(f"service account not found: {service_account}")
@@ -74,7 +76,7 @@ def gate(args,service_account):
         try: metadata=json.loads(service_account.read_text(encoding="utf-8"))
         except Exception as error: errors.append(f"invalid service-account JSON: {error}")
     if metadata.get("project_id")!=PROJECT: errors.append(f"service account must belong to {PROJECT}")
-    if errors: raise SystemExit("LIVE SAFETY GATE BLOCKED:\n- "+"\n- ".join(errors))
+    if errors: raise SystemExit("READ-ONLY SCOPE GATE BLOCKED:\n- "+"\n- ".join(errors))
 
 def db(service_account):
     try:
@@ -161,10 +163,13 @@ def old_integrity_codes(snapshot_id,data,asts,registry):
     return list(dict.fromkeys(codes))
 
 def main():
-    args=parse_args(); t0=time.time(); repo=Path.cwd().resolve(); service_account=args.service_account.expanduser().resolve(); gate(args,service_account)
+    global PROJECT, ENV, LM, LM_NAME
+    args=parse_args(); PROJECT=args.project_id; ENV=args.environment.upper(); LM=args.lm_pcode; LM_NAME=args.lm_name
+    if {"DEV":"ireps2","TEST":"ireps-test","LIVE":"ireps-5c3e9"}.get(ENV) != PROJECT or not LM.startswith("ZA"): raise SystemExit("Explicit project/environment/LM mismatch")
+    t0=time.time(); repo=Path.cwd().resolve(); service_account=args.service_account.expanduser().resolve(); gate(args,service_account)
     output=args.report_dir.expanduser().resolve()/runid()/ENV; output.mkdir(parents=True,exist_ok=False)
     tee=Tee(output/"07_console_log.txt"); original=sys.stdout; sys.stdout=tee
-    manifest={"mode":"READ_ONLY","projectId":PROJECT,"environment":ENV,"lmPcode":LM,"startedAt":utc(),
+    manifest={"mode":"READ_ONLY","governance":GOVERNANCE,"projectId":PROJECT,"environment":ENV,"lmPcode":LM,"startedAt":utc(),
       "scriptSha256":sha(Path(__file__).resolve()),"classifierSha256":sha(Path(__file__).resolve().with_name("sales_work_status_classifier.py")),
       "gitBranch":git(repo,"branch","--show-current"),"gitHead":git(repo,"rev-parse","HEAD"),"firestoreWritesPerformed":False}
     write_json(output/"00_run_manifest.json",manifest)
@@ -184,6 +189,7 @@ def main():
         status=Counter(); old_audit_counts=Counter(); old_front_counts=Counter(); vis_counts=Counter()
         audit_matrix=Counter(); front_matrix=Counter(); pre_counts=Counter(); pre_rows=Counter()
         diagnostics=Counter(); reasons_count=Counter(); source_shapes=Counter()
+        ngp_status=Counter(); ngp_total_meters=0; ngp_selectable_meters=0; ngp_rows=[]
         rows=[]; exceptions=[]; progress=[]; duplicate_suppressed=0; correlation_suppressed=0
         recovered_count=0; unexplained=0; unclassified=0
         for index,snapshot in enumerate(sales,1):
@@ -198,6 +204,22 @@ def main():
             audit_matrix[(old_audit,new_status)]+=1; front_matrix[(old_front,new_status)]+=1
             raw_vis=get_path(data,"master","visibility"); vis_counts[raw_vis if isinstance(raw_vis,str) else "<NON_STRING>"]+=1
             if new_status not in PUBLIC_STATUSES: unclassified+=1
+
+            ngp_info = classify_non_gps_sales_row(data, new_row, new_status)
+            if ngp_info["isNoGps"]:
+                ngp_total_meters += 1
+                ngp_status[ngp_info["classification"]] += 1
+                if ngp_info["selectable"]:
+                    ngp_selectable_meters += 1
+                ngp_rows.append({
+                    "meterNoNormalized": meter,
+                    "salesDocId": sid,
+                    "salesWorkStatus": new_status,
+                    "rawVisibility": raw_vis,
+                    "ngpClassification": ngp_info["classification"],
+                    "selectable": ngp_info["selectable"],
+                    "exceptionReasons": join(ngp_info["exceptionReasons"]),
+                })
 
             if "tbRefs" not in data: source_shapes["canonicalAbsent"]+=1
             elif data.get("tbRefs") is None: source_shapes["canonicalNull"]+=1
@@ -261,6 +283,20 @@ def main():
         stopped=any(bool(v) for k,v in stop_findings.items() if k!="firestoreWritesPerformed")
         summary={"status":"STOP" if stopped else "PASS","projectId":PROJECT,"environment":ENV,"lmPcode":LM,
           "sourceCounts":{"sales":len(sales),"asts":len(asts),"registryMeters":len(registry)},
+          "salesMeterPopulation":{
+              "totalSalesMeters":len(sales),
+              "completedMeters":status["COMPLETED"],
+              "inProgressMeters":status["IN_PROGRESS"],
+              "notStartedMeters":status["NOT_STARTED"],
+          },
+          "noGpsPlanningMeterPopulation":{
+              "totalNoGpsMeters":ngp_total_meters,
+              "discoveredMeters":ngp_status["DISCOVERED"],
+              "alreadyBatchedMeters":ngp_status["ALREADY_BATCHED"],
+              "outstandingMeters":ngp_status["OUTSTANDING"],
+              "exceptionMeters":ngp_status["EXCEPTION"],
+              "selectableMeters":ngp_selectable_meters,
+          },
           "expectedSalesCount":args.expected_sales_count,"salesCountMatchesExpected":count_ok,
           "sourceShapeCounts":dict(sorted(source_shapes.items())),"rawVisibilityCounts":dict(sorted(vis_counts.items())),
           "oldAuditClassification":dict(sorted(old_audit_counts.items())),"oldFrontendClassification":dict(sorted(old_front_counts.items())),
@@ -286,9 +322,13 @@ def main():
         write_csv(output/"10_old_audit_to_new_matrix.csv",["fromStatus","toStatus","count"],matrix_rows(audit_matrix))
         write_csv(output/"11_old_frontend_to_new_matrix.csv",["fromStatus","toStatus","count"],matrix_rows(front_matrix))
         write_csv(output/"12_transition_reason_counts.csv",["reason","count"],[{"reason":r,"count":n} for r,n in sorted(reasons_count.items())])
+        write_csv(output/"13_no_gps_planning_meters.csv",["meterNoNormalized","salesDocId","salesWorkStatus","rawVisibility","ngpClassification","selectable","exceptionReasons"],ngp_rows)
         manifest.update({"completedAt":utc(),"resultStatus":summary["status"],"elapsedSeconds":summary["elapsedSeconds"],"firestoreWritesPerformed":False}); write_json(output/"00_run_manifest.json",manifest)
-        print("\n"+"="*78); print("AUDIT SUMMARY")
-        print(f"STATUS={summary['status']} Sales={len(sales):,} COMPLETED={status['COMPLETED']:,} IN_PROGRESS={status['IN_PROGRESS']:,} NOT_STARTED={status['NOT_STARTED']:,}")
+        print("\n"+"="*78); print("AUDIT SUMMARY (METER POPULATIONS - STRICTLY METERS)")
+        print(f"STATUS={summary['status']}")
+        print(f"Sales Meter Population: Total={len(sales):,} | COMPLETED={status['COMPLETED']:,} | IN_PROGRESS={status['IN_PROGRESS']:,} | NOT_STARTED={status['NOT_STARTED']:,}")
+        print(f"No-GPS Planning Meter Population: Total={ngp_total_meters:,} | DISCOVERED={ngp_status['DISCOVERED']:,} | ALREADY_BATCHED={ngp_status['ALREADY_BATCHED']:,} | OUTSTANDING={ngp_status['OUTSTANDING']:,} | EXCEPTION={ngp_status['EXCEPTION']:,} | Selectable={ngp_selectable_meters:,}")
+        print("Note: All counts above are METERS. Non-meter counts (AST docs, Registry docs, TB refs) are tracked separately.")
         print(f"PerReferenceRecovered={recovered_count:,} DuplicateSuppressed={duplicate_suppressed:,} UnexplainedTransitions={unexplained:,}")
         print(f"Stop findings={stop_findings}"); print(f"Output={output}"); print("Firestore writes performed: NO"); print("="*78)
         if stopped: raise SystemExit("APPROVED LIVE PRE-FLIGHT STOP CONDITION TRIGGERED. Evidence saved; production implementation must not continue.")

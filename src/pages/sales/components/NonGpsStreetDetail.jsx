@@ -452,6 +452,7 @@ export default function NonGpsStreetDetail({
                     </td>
                     <td style={styles.bodyCell}>
                       {target.canonicalAddress || "NAv"}
+                      {!target.batchable ? <div>{target.batchabilityReason}</div> : null}
                     </td>
                     <td style={styles.bodyCell}>{target.meterNo || "NAv"}</td>
                     <td style={styles.bodyCell}>

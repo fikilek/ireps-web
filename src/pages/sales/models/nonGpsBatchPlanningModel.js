@@ -1,3 +1,4 @@
+import { SALES_BATCH_MAX, evaluateSalesBatchability } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import {
   hasUsableSalesGps,
   isSalesWithoutUsableGps,
@@ -13,10 +14,8 @@ export const NGP_CLASSIFICATIONS = Object.freeze({
   OUTSTANDING: "OUTSTANDING",
 });
 
-export const NGP_SELECTION_MAX = 20;
-export const NGP_TARGETED_BATCH_PLANNING_MODE = "NON_GPS_STREET";
-
-const INVALID_TEXT_VALUES = new Set(["", "NAV", "N/A", "NA", "NULL"]);
+export const NGP_SELECTION_MAX = SALES_BATCH_MAX;
+export const NGP_TARGETED_BATCH_PLANNING_MODE = "ERF_GEOFENCE";
 
 export function normalizePlanningKey(value) {
   return String(value ?? "")
@@ -27,10 +26,6 @@ export function normalizePlanningKey(value) {
 
 function displayText(value) {
   return String(value ?? "").trim();
-}
-
-function isMeaningfulPlanningText(value) {
-  return !INVALID_TEXT_VALUES.has(displayText(value).toUpperCase());
 }
 
 export function formatAuthoritativeAddress(row = {}) {
@@ -71,190 +66,26 @@ export function compareStreetNumbers(left, right) {
   return compareNaturalValues(left?.meterNo, right?.meterNo);
 }
 
-function getAddressExceptionReasons(row = {}) {
-  const reasons = [];
-
-  if (!isMeaningfulPlanningText(row?.town)) {
-    reasons.push("Town / Area is missing");
-  }
-
-  if (!isMeaningfulPlanningText(row?.adr?.strNo)) {
-    reasons.push("Street number is missing");
-  }
-
-  if (!isMeaningfulPlanningText(row?.adr?.strName)) {
-    reasons.push("Street name is missing");
-  }
-
-  return reasons;
-}
-
-function getTbReferenceIntegrityReasons(row = {}) {
-  const integrity = row?.tbRefsIntegrity;
-
-  if (integrity?.valid !== false) return [];
-
-  const issues = Array.isArray(integrity?.issues) ? integrity.issues : [];
-
-  if (issues.length === 0) {
-    return ["Targeted Batch reference data is invalid"];
-  }
-
-  return issues.map(
-    (issue) => `Targeted Batch reference integrity issue: ${String(issue)}`,
-  );
-}
-
-function getNormalizedTbRefs(row = {}) {
-  return Array.isArray(row?.tbRefs) ? row.tbRefs : [];
-}
-
 export function hasCompletedMeterDiscovery(row = {}) {
-  if (row?.tbRefsIntegrity?.valid === false) return false;
-
-  return getNormalizedTbRefs(row).some((reference) => {
-    const status = String(reference?.fieldWork?.status || "")
-      .trim()
-      .toUpperCase();
-    const outcomeCode = String(reference?.fieldWork?.outcomeCode || "")
-      .trim()
-      .toUpperCase();
-
-    return status === "COMPLETED" && outcomeCode === "METER_DISCOVERED";
-  });
+  return classifySalesTableWorkStatus(row) === SALES_STATUSES.COMPLETED;
 }
 
-export function evaluateNgpBatchability(row = {}, membership = resolveSalesTargetedBatchMembership(row)) {
-  const salesId = String(row?.id || "").trim();
-  const salesWorkStatus = classifySalesTableWorkStatus(row);
-
-  if (!salesId) {
-    return {
-      batchable: false,
-      code: "SALES_ID_MISSING",
-      reason: "Sales meter identity is missing",
-    };
-  }
-
-  if (salesWorkStatus === SALES_STATUSES.COMPLETED) {
-    return {
-      batchable: false,
-      code: "SALES_STATUS_COMPLETED",
-      reason: "COMPLETED — not batchable",
-    };
-  }
-
-  if (salesWorkStatus === SALES_STATUSES.IN_PROGRESS) {
-    return {
-      batchable: false,
-      code: "SALES_STATUS_IN_PROGRESS",
-      reason: "IN_PROGRESS — not batchable",
-    };
-  }
-
-  if (membership.state === "UNRESOLVED") {
-    return {
-      batchable: false,
-      code: "TARGETED_BATCH_MEMBERSHIP_UNRESOLVED",
-      reason: membership.reason,
-    };
-  }
-  if (membership.state === "MEMBER") {
-    return {
-      batchable: false,
-      code: membership.source === "SCALAR"
-        ? "CURRENT_TARGETED_BATCH" : "EXISTING_TARGETED_BATCH_REFERENCE",
-      reason: membership.reason,
-    };
-  }
-
-  // Malformed tbRefs block batching independently of current membership (18.2).
-  if (row?.tbRefsIntegrity?.valid === false) {
-    return {
-      batchable: false,
-      code: "TB_REFERENCE_INTEGRITY_INVALID",
-      reason: getTbReferenceIntegrityReasons(row).join("; "),
-    };
-  }
-
-  if (hasUsableSalesGps(row)) {
-    return {
-      batchable: false,
-      code: "GPS_AVAILABLE",
-      reason: "GPS is available — use Sales Table",
-    };
-  }
-
-  const addressExceptionReasons = getAddressExceptionReasons(row);
-  if (addressExceptionReasons.length > 0) {
-    return {
-      batchable: false,
-      code: "PLANNING_ADDRESS_INVALID",
-      reason: addressExceptionReasons.join("; "),
-    };
-  }
-
-  return {
-    batchable: true,
-    code: "BATCHABLE",
-    reason: "Batchable Sales meter",
-  };
+export function evaluateNgpBatchability(row = {}) {
+  return evaluateSalesBatchability(row, { source: "PREPAID_SALES_NON_GPS" });
 }
 
 export function classifyNonGpsSalesRow(row = {}) {
-  if (hasUsableSalesGps(row)) {
-    return {
-      classification: null,
-      exceptionReasons: [],
-      selectable: false,
-    };
-  }
-
-  if (hasCompletedMeterDiscovery(row)) {
-    return {
-      classification: NGP_CLASSIFICATIONS.DISCOVERED,
-      exceptionReasons: [],
-      selectable: false,
-    };
-  }
-
-  const exceptionReasons = [
-    ...getAddressExceptionReasons(row),
-    ...getTbReferenceIntegrityReasons(row),
-  ];
-
-  if (exceptionReasons.length > 0) {
-    return {
-      classification: NGP_CLASSIFICATIONS.EXCEPTION,
-      exceptionReasons,
-      selectable: false,
-    };
-  }
-
+  if (hasUsableSalesGps(row)) return { classification: null, exceptionReasons: [], selectable: false };
+  const status = classifySalesTableWorkStatus(row);
+  if (status === SALES_STATUSES.COMPLETED) return { classification: NGP_CLASSIFICATIONS.DISCOVERED, exceptionReasons: [], selectable: false };
+  if (status === SALES_STATUSES.IN_PROGRESS) return { classification: NGP_CLASSIFICATIONS.ALREADY_BATCHED, exceptionReasons: [], selectable: false };
   const membership = resolveSalesTargetedBatchMembership(row);
-
-  if (membership.state === "UNRESOLVED" && membership.source === "SCALAR") {
-    return {
-      classification: NGP_CLASSIFICATIONS.EXCEPTION,
-      exceptionReasons: [membership.reason],
-      selectable: false,
-    };
-  }
-
-  // TB-R037: current membership decides, not the mere presence of old tbRefs.
-  if (membership.state !== "NONE") {
-    return {
-      classification: NGP_CLASSIFICATIONS.ALREADY_BATCHED,
-      exceptionReasons: [],
-      selectable: false,
-    };
-  }
-
-  return {
-    classification: NGP_CLASSIFICATIONS.OUTSTANDING,
-    exceptionReasons: [],
-    selectable: true,
-  };
+  const result = evaluateNgpBatchability(row);
+  // Keep valid historical ambiguity visible in its street, with the separate
+  // membership value still UNRESOLVED and Batchability still false.
+  const visibleLegacyAmbiguity = membership.state === "UNRESOLVED" && membership.source === "LEGACY_TBREFS" && evaluateNgpBatchability({ ...row, targetedBatchId: null }).batchable;
+  if (membership.state === "MEMBER" || visibleLegacyAmbiguity) return { classification: NGP_CLASSIFICATIONS.ALREADY_BATCHED, exceptionReasons: [], selectable: false };
+  return { classification: result.batchable || result.code === "NEEDS_MANUAL_ERFING" ? NGP_CLASSIFICATIONS.OUTSTANDING : NGP_CLASSIFICATIONS.EXCEPTION, exceptionReasons: result.batchable ? [] : [result.reason], selectable: result.batchable };
 }
 
 function buildTarget(row) {
@@ -779,8 +610,8 @@ export function buildNgpTargetedBatchDraftPlan({
         proposedBatchCount: 1,
       },
       source: {
-        type: "PREPAID_SALES",
-        label: "Prepaid Sales",
+        type: "PREPAID_SALES_NON_GPS",
+        label: "Non-GPS Sales",
         sourceId: null,
         fileName: null,
       },

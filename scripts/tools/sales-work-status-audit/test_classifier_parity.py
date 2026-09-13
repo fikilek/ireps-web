@@ -20,6 +20,7 @@ from sales_work_status_classifier import (
     normalize_registry_row,
     normalize_sales_work_status_ast_row,
     select_raw_tbrefs,
+    resolve_current_membership,
 )
 
 
@@ -31,6 +32,16 @@ FIXTURES = json.loads(
 
 
 class ClassifierParityTests(unittest.TestCase):
+    def test_shared_canonical_corpus(self):
+        for case in FIXTURES["canonicalCases"]:
+            with self.subTest(case=case["name"]):
+                before = copy.deepcopy(case["data"])
+                self.assertEqual(derive_new_sales_status(case["data"]), case["status"])
+                self.assertEqual(resolve_current_membership(case["data"]), case["membership"])
+                if "valid" in case:
+                    self.assertEqual(inspect_tbrefs(case["data"].get("tbRefs", []))["valid"], case["valid"])
+                self.assertEqual(case["data"], before)
+
     def test_javascript_meter_identity_vocabulary(self):
         for case in FIXTURES["meterIdentity"]:
             with self.subTest(raw=case["raw"]):
@@ -111,7 +122,7 @@ class ClassifierParityTests(unittest.TestCase):
     def test_duplicate_logical_ids_are_suppressed_in_both_orders(self):
         valid = copy.deepcopy(FIXTURES["validInProgressReference"])
         duplicate = copy.deepcopy(valid)
-        duplicate["id"] = " tb-1 "
+        duplicate["id"] = valid["id"]
         duplicate["rowId"] = "ROW-2"
         for references in ([valid, duplicate], [duplicate, valid]):
             with self.subTest(order=[entry["rowId"] for entry in references]):
@@ -182,7 +193,7 @@ class ClassifierParityTests(unittest.TestCase):
 
     def test_aggregate_integrity_contract_is_frozen(self):
         value = [
-            {"id": "TB-1", "date": {"seconds": 1, "nanoseconds": 0}},
+            {"id": "TGB_20260913_120000_AB12", "date": {"seconds": 1, "nanoseconds": 0}},
             {"id": " tb-1 ", "date": {"seconds": 2, "nanoseconds": 0}},
         ]
         integrity = inspect_tbrefs(value)

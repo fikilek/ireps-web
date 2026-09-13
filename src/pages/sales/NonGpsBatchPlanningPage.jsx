@@ -136,7 +136,7 @@ export default function NonGpsBatchPlanningPage() {
   );
 
   useEffect(() => {
-    if (isLoading || error || selectedIds.size === 0) return;
+    if (isLoading || isFetching || error || selectedIds.size === 0) return;
 
     const nextSelectedIds = new Set(selectedIds);
     const removed = [];
@@ -172,7 +172,7 @@ export default function NonGpsBatchPlanningPage() {
           .join("; ")}.`,
       );
     }
-  }, [batchabilityBySalesId, error, isLoading, scopeKey, selectedIds]);
+  }, [batchabilityBySalesId, error, isFetching, isLoading, scopeKey, selectedIds]);
 
   const selectedDownloadColumns = useMemo(
     () => [
@@ -314,7 +314,7 @@ export default function NonGpsBatchPlanningPage() {
       return;
     }
 
-    dispatch(prepareTargetedBatchDraft(draftPlan.draft));
+    dispatch(prepareTargetedBatchDraft({ ...draftPlan.draft, scopeKey: JSON.stringify(readScope) }));
     navigate("/operations/targeted-batches/draft");
   }
 

@@ -233,13 +233,13 @@ test("Contour rich monthly target passes with null recency despite positive sale
 test("Contour operational roots are accepted but never included in bridge patch", () => {
   const timestamp = { seconds: 1786200000, nanoseconds: 0 };
   const existing = contour({
-    tbRefs: [{ id: "TGB_1", date: timestamp }],
+    tbRefs: [{ id: "TGB_20260913_120000_AAAA", date: timestamp }],
     geofenceRefs: [{ id: "GF_1", name: "Zone 1" }],
   });
   const result = classify(existing, { desiredVisibility: "VISIBLE" });
   assert.equal(result.outcome, OUTCOMES.UPDATED);
   assert.deepEqual(result.patch, { "master.visibility": "VISIBLE" });
-  assert.equal(existing.tbRefs[0].id, "TGB_1");
+  assert.equal(existing.tbRefs[0].id, "TGB_20260913_120000_AAAA");
   assert.equal(existing.geofenceRefs[0].id, "GF_1");
 });
 
@@ -423,14 +423,14 @@ test("tbRefs absent and empty are valid", () => {
 });
 
 test("initial tbRef with id/date is valid", () => {
-  const result = classify(contour({ tbRefs: [{ id: "TGB_ABC", date: ts() }] }));
+  const result = classify(contour({ tbRefs: [{ id: "TGB_20260913_120000_AAAA", date: ts() }] }));
   assert.equal(result.outcome, OUTCOMES.UNCHANGED);
 });
 
 test("IN_PROGRESS tbRef lifecycle is valid including no-access and null premise", () => {
   const result = classify(contour({
     tbRefs: [{
-      id: "TGB_ABC",
+      id: "TGB_20260913_120000_AAAA",
       date: ts(),
       rowId: "TBR_ABC_000001",
       fieldWork: {
@@ -451,7 +451,7 @@ test("IN_PROGRESS tbRef lifecycle is valid including no-access and null premise"
 test("COMPLETED tbRef lifecycle is valid", () => {
   const result = classify(contour({
     tbRefs: [{
-      id: "TGB_ABC",
+      id: "TGB_20260913_120000_AAAA",
       date: ts(),
       rowId: "TBR_ABC_000001",
       fieldWork: {
@@ -474,12 +474,12 @@ test("COMPLETED tbRef lifecycle is valid", () => {
 
 for (const [name, tbRefs, expectedPath] of [
   ["tbRefs non-array", {}, "tbRefs"],
-  ["tbRefs malformed item", ["TGB_1"], "tbRefs.0"],
+  ["tbRefs malformed item", ["TGB_20260913_120000_AAAA"], "tbRefs.0"],
   ["tbRefs blank id", [{ id: " ", date: ts() }], "tbRefs.0.id"],
-  ["tbRefs invalid timestamp", [{ id: "TGB_1", date: "2026-08-08" }], "tbRefs.0.date"],
-  ["tbRefs duplicate logical id", [{ id: "TGB_1", date: ts() }, { id: " tgb_1 ", date: ts(1786200001) }], "tbRefs.1.id"],
-  ["tbRefs malformed known fieldWork member", [{ id: "TGB_1", date: ts(), fieldWork: { status: 5 } }], "tbRefs.0.fieldWork.status"],
-  ["tbRefs malformed noAccess", [{ id: "TGB_1", date: ts(), rowId: "ROW_1", fieldWork: { status: "IN_PROGRESS", updatedAt: ts(), noAccess: [{ date: "08/08/2026", time: "20:00", user: "" }] } }], "tbRefs.0.fieldWork.noAccess.0.date"],
+  ["tbRefs invalid timestamp", [{ id: "TGB_20260913_120000_AAAA", date: "2026-08-08" }], "tbRefs.0.date"],
+  ["tbRefs duplicate logical id", [{ id: "TGB_20260913_120000_AAAA", date: ts() }, { id: " tgb_1 ", date: ts(1786200001) }], "tbRefs.1.id"],
+  ["tbRefs malformed known fieldWork member", [{ id: "TGB_20260913_120000_AAAA", date: ts(), fieldWork: { status: 5 } }], "tbRefs.0.fieldWork.status"],
+  ["tbRefs malformed noAccess", [{ id: "TGB_20260913_120000_AAAA", date: ts(), rowId: "ROW_1", fieldWork: { status: "IN_PROGRESS", updatedAt: ts(), noAccess: [{ date: "08/08/2026", time: "20:00", user: "" }] } }], "tbRefs.0.fieldWork.noAccess.0"],
 ]) {
   test(name, () => {
     const result = classify(contour({ tbRefs }));
@@ -488,21 +488,21 @@ for (const [name, tbRefs, expectedPath] of [
   });
 }
 
-test("explicit NOT_STARTED fieldWork may omit lifecycle correlation ids", () => {
+test("explicit NOT_STARTED fieldWork is not a canonical entry", () => {
   const result = classify(contour({
     tbRefs: [{
-      id: "TGB_NOT_STARTED",
+      id: "TGB_20260913_120000_AAAA",
       date: ts(),
       fieldWork: { status: "NOT_STARTED" },
     }],
   }));
-  assert.equal(result.outcome, OUTCOMES.UNCHANGED);
+  assert.equal(result.outcome, OUTCOMES.CONFLICT);
 });
 
 test("COMPLETED fieldWork requires completion correlation fields", () => {
   const result = classify(contour({
     tbRefs: [{
-      id: "TGB_INCOMPLETE",
+      id: "TGB_20260913_120000_AAAA",
       date: ts(),
       rowId: "ROW_1",
       fieldWork: {
@@ -519,10 +519,10 @@ test("COMPLETED fieldWork requires completion correlation fields", () => {
   assert.ok(result.conflictingPaths.includes("tbRefs.0.fieldWork.premiseId"));
 });
 
-test("unknown nested tbRef/fieldWork members remain allowed while known invalid members fail", () => {
+test("unknown and malformed nested tbRef/fieldWork members fail closed", () => {
   const good = classify(contour({
     tbRefs: [{
-      id: "TGB_1",
+      id: "TGB_20260913_120000_AAAA",
       date: ts(),
       futureRefMember: { source: "future" },
       rowId: "ROW_1",
@@ -533,10 +533,10 @@ test("unknown nested tbRef/fieldWork members remain allowed while known invalid 
       },
     }],
   }));
-  assert.equal(good.outcome, OUTCOMES.UNCHANGED);
+  assert.equal(good.outcome, OUTCOMES.CONFLICT);
 
   const bad = classify(contour({
-    tbRefs: [{ id: "TGB_1", date: ts(), fieldWork: { meterMatch: "yes" } }],
+    tbRefs: [{ id: "TGB_20260913_120000_AAAA", date: ts(), fieldWork: { meterMatch: "yes" } }],
   }));
   assert.equal(bad.outcome, OUTCOMES.CONFLICT);
   assert.ok(bad.conflictingPaths.includes("tbRefs.0.fieldWork.meterMatch"));

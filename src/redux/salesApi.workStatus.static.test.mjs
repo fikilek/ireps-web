@@ -14,7 +14,7 @@ test("Sales normalization selects one raw tbRefs source by canonical presence", 
     )?.length,
     1,
   );
-  assert.match(normalizeSalesRow, /tbRefs: normalizeTbRefs\(rawTbRefs\)/);
+  assert.match(normalizeSalesRow, /tbRefs: toSerializableValue\(rawTbRefs === undefined \? \[\] : rawTbRefs\)/);
   assert.match(
     normalizeSalesRow,
     /tbRefsIntegrity: inspectSalesTbRefsIntegrity\(rawTbRefs\)/,
@@ -22,11 +22,13 @@ test("Sales normalization selects one raw tbRefs source by canonical presence", 
   assert.doesNotMatch(normalizeSalesRow, /data\.tbRefs \|\| data\.TbRefs/);
 });
 
-test("Sales normalization projects strict flat masterVisibility only", () => {
+test("Sales normalization preserves raw master authority alongside strict flat visibility", () => {
   assert.match(
     normalizeSalesRow,
     /masterVisibility:\s*typeof data\?\.master\?\.visibility === "string"\s*\? data\.master\.visibility\s*: null/,
   );
-  assert.doesNotMatch(normalizeSalesRow, /^\s+master:/m);
-  assert.doesNotMatch(normalizeSalesRow, /\.\.\.data/);
+  assert.match(normalizeSalesRow, /^\s+master: data\.master \? \{ \.\.\.data\.master \} : null/m);
+  assert.match(source, /sales-batch-policy/);
+  assert.match(normalizeSalesRow, /classifySalesWorkStatus/);
+  assert.doesNotMatch(normalizeSalesRow, /^\s*\.\.\.data\s*[,}]/m);
 });

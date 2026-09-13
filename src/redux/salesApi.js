@@ -1,3 +1,4 @@
+import { classifySalesWorkStatus, hasUsableSalesGps, coordinateNumber } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
@@ -136,8 +137,8 @@ function getLastPositiveSalesMonth(monthlySalesC, monthKeys) {
 function normalizeErfCandidate(candidate = {}) {
   const rawLatitude = candidate.Latitude ?? candidate.latitude;
   const rawLongitude = candidate.Longitude ?? candidate.longitude;
-  const latitude = Number(rawLatitude);
-  const longitude = Number(rawLongitude);
+  const latitude = coordinateNumber(rawLatitude, 90);
+  const longitude = coordinateNumber(rawLongitude, 180);
 
   return {
     erfId: String(candidate.ErfId || candidate.erfId || ""),
@@ -212,12 +213,12 @@ function toSerializableValue(value) {
     return Number.isFinite(milliseconds) ? value.toISOString() : null;
   }
 
-  if (
-    typeof value?.toMillis === "function" ||
-    typeof value?.toDate === "function" ||
-    Number.isFinite(Number(value?.seconds))
-  ) {
-    return toSerializableTimestamp(value);
+  // Governed TB8/TB9/provenance timestamps retain their exact serializable type.
+  // Display-only metadata fields use toSerializableTimestamp separately.
+  const seconds = value?.seconds ?? value?._seconds;
+  const nanoseconds = value?.nanoseconds ?? value?._nanoseconds;
+  if (Number.isInteger(seconds) && Number.isInteger(nanoseconds) && nanoseconds >= 0 && nanoseconds <= 999999999) {
+    return { seconds, nanoseconds };
   }
 
   if (
@@ -257,17 +258,7 @@ function toSerializableTimestamp(value) {
   return milliseconds > 0 ? new Date(milliseconds).toISOString() : null;
 }
 
-function normalizeFieldWork(value) {
-  if (!value || typeof value !== "object") return null;
 
-  const serializableValue = toSerializableValue(value);
-
-  return {
-    ...serializableValue,
-    submittedAt: toSerializableTimestamp(value.submittedAt),
-    updatedAt: toSerializableTimestamp(value.updatedAt),
-  };
-}
 
 function normalizeAuthoritativeAddress(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -285,47 +276,7 @@ function normalizeAuthoritativeAddress(value) {
   };
 }
 
-function normalizeTbRefs(value = []) {
-  const seen = new Set();
 
-  return (Array.isArray(value) ? value : [])
-    .map((item) => {
-      const id = String(item?.id || item?.tbId || "").trim();
-      const rowId = String(item?.rowId || item?.tbRowId || "").trim();
-
-      if (!id) return null;
-
-      return {
-        ...toSerializableValue(item),
-        id,
-        rowId: rowId || null,
-        date: toSerializableTimestamp(
-          item?.date ?? item?.addedAt ?? item?.createdAt ?? null,
-        ),
-        fieldWork: normalizeFieldWork(item?.fieldWork),
-      };
-    })
-    .filter((item) => {
-      if (!item) return false;
-      const key = `${item.id}::${item.rowId || ""}`;
-
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((left, right) => {
-      const leftDate = String(left?.date || "");
-      const rightDate = String(right?.date || "");
-      const dateComparison = rightDate.localeCompare(leftDate);
-
-      if (dateComparison !== 0) return dateComparison;
-
-      return String(left.id).localeCompare(String(right.id), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-    });
-}
 
 function getTimestampMs(value) {
   if (!value) return 0;
@@ -414,7 +365,7 @@ export function normalizeSalesRow(id, data = {}) {
     addressLine2: String(
       data.addressLine2 || data.AddressLine2 || data.PostalAddress2 || "",
     ),
-    town: String(data.town || data.Town || data.PostalAddressTown || "NAv"),
+    town: typeof data.town === "string" ? data.town : "",
     adr: normalizeAuthoritativeAddress(data.adr),
     standNumber: String(
       data.standNumber || data.StandNumber || erfNumbers[0] || "",
@@ -448,6 +399,12 @@ export function normalizeSalesRow(id, data = {}) {
     createdAtMs: getTimestampMs(data.metadata?.createdAt),
     updatedAtMs: getTimestampMs(data.metadata?.updatedAt),
     demoData: data.demoData ?? null,
+    master: data.master ? { ...data.master } : null,
+    meterType: data.meterType ?? data.MeterType ?? data.meterMode ?? data.MeterMode ?? data.tariffType ?? "PREPAID",
+    salesWorkStatus: classifySalesWorkStatus(data),
+    ...(Object.hasOwn(data, "erfId") ? { erfId: data.erfId } : {}),
+    ...(Object.hasOwn(data, "erfResolution") ? { erfResolution: toSerializableValue(data.erfResolution) } : {}),
+    ...(Object.hasOwn(data, "erfLookup") ? { erfLookup: toSerializableValue(data.erfLookup) } : {}),
     masterVisibility:
       typeof data?.master?.visibility === "string"
         ? data.master.visibility
@@ -507,10 +464,7 @@ export function normalizeSalesRow(id, data = {}) {
     // Match the geofence creation trigger's lowercase Firestore eligibility gate.
     geofenceGpsEligible: data.hasUsableGps === true,
     gpsAvailable: typeof data.hasUsableGps === "boolean" || typeof data.HasUsableGps === "boolean" || erfCandidates.some(candidate => candidate.hasValidGps),
-    hasUsableGps:
-      data.HasUsableGps === true ||
-      data.hasUsableGps === true ||
-      erfCandidates.some((candidate) => candidate.hasValidGps),
+    hasUsableGps: hasUsableSalesGps(data),
     geofenceRefs: normalizeGeofenceRefs(
       data.geofenceRefs || data.GeoFenceRefs || [],
     ),
@@ -521,7 +475,7 @@ export function normalizeSalesRow(id, data = {}) {
         ? { targetedBatchId: data.targetedBatchId }
         : { targetedBatchIdInvalid: true }
       : {}),
-    tbRefs: normalizeTbRefs(rawTbRefs),
+    tbRefs: toSerializableValue(rawTbRefs === undefined ? [] : rawTbRefs),
     tbRefsIntegrity: inspectSalesTbRefsIntegrity(rawTbRefs),
     trnBatchIds: uniqueNonBlank(
       Array.isArray(data.trnBatchIds) ? data.trnBatchIds : [],

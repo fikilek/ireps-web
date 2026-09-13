@@ -129,116 +129,63 @@ def _validate_no_access(value, path):
     return issues
 
 
-def _validate_reference(reference, index, seen_ids):
+BATCH_ID_RE = re.compile(r"^TGB_[0-9]{8}_[0-9]{6}_[A-Z0-9]{4}$")
+CLASSIFIER_VERSION = "sales-targeted-batch-v4.2-tb9"
+
+def read_tb_ref_id(ref):
+    if not isinstance(ref, dict): return None
+    value = ref.get("id") if "id" in ref else ref.get("tbId")
+    if "id" in ref and "tbId" in ref and ref["id"] != ref["tbId"]: return None
+    return value if isinstance(value, str) and BATCH_ID_RE.fullmatch(value) else None
+
+def valid_document_id(value):
+    return is_nonblank_string(value) and value == value.strip() and "/" not in value and value not in (".", "..") and all(ord(c) >= 32 and ord(c) != 127 for c in value)
+
+def _validate_reference(ref, index, seen_ids):
+    del seen_ids
     path = f"tbRefs.{index}"
+    if not isinstance(ref, dict): return [path]
     issues = []
-    if not is_plain_object(reference):
-        return [path]
-
-    if not is_nonblank_string(reference.get("id")):
-        issues.append(f"{path}.id")
-    else:
-        logical_id = reference["id"].strip().upper()
-        if logical_id in seen_ids:
-            issues.append(f"{path}.id")
-        seen_ids.add(logical_id)
-
-    if not is_timestamp_like(reference.get("date")):
-        issues.append(f"{path}.date")
-
-    if "rowId" in reference and not is_nonblank_string(reference.get("rowId")):
-        issues.append(f"{path}.rowId")
-
-    if "fieldWork" not in reference:
-        return issues
-    field_work = reference.get("fieldWork")
-    if not is_plain_object(field_work):
-        issues.append(f"{path}.fieldWork")
-        return issues
-
-    field_path = f"{path}.fieldWork"
-    status = (
-        clean_text(js_or(field_work.get("status"), "")).upper()
-        if "status" in field_work
-        else ""
-    )
-    if "status" in field_work and (
-        not isinstance(field_work.get("status"), str)
-        or field_work.get("status") != status
-        or status not in VALID_FIELD_WORK_STATUSES
-    ):
-        issues.append(f"{field_path}.status")
-
-    for field in (
-        "outcomeCode", "outcomeLabel", "targetedMeterNo",
-        "discoveredMeterNo", "premiseId", "meterId", "trnId",
-    ):
-        if field in field_work and not is_nullable_nonblank_string(field_work.get(field)):
-            issues.append(f"{field_path}.{field}")
-
-    if (
-        "meterMatch" in field_work
-        and field_work.get("meterMatch") is not None
-        and type(field_work.get("meterMatch")) is not bool
-    ):
-        issues.append(f"{field_path}.meterMatch")
-
-    for field in ("submittedAt", "updatedAt"):
-        if (
-            field in field_work
-            and field_work.get(field) is not None
-            and not is_timestamp_like(field_work.get(field))
-        ):
-            issues.append(f"{field_path}.{field}")
-
-    if "noAccess" in field_work:
-        issues.extend(_validate_no_access(field_work.get("noAccess"), f"{field_path}.noAccess"))
-
-    outcome = clean_text(js_or(field_work.get("outcomeCode"), "")).upper()
-    if status == "COMPLETED" and outcome != "METER_DISCOVERED":
-        issues.append(f"{field_path}.outcomeCode")
-    if outcome == "METER_DISCOVERED" and status != "COMPLETED":
-        issues.append(f"{field_path}.status")
-
-    if status == "IN_PROGRESS":
-        if not is_nonblank_string(reference.get("rowId")):
-            issues.append(f"{path}.rowId")
-        if not is_timestamp_like(field_work.get("updatedAt")):
-            issues.append(f"{field_path}.updatedAt")
-
-    if status == "COMPLETED":
-        if not is_nonblank_string(reference.get("rowId")):
-            issues.append(f"{path}.rowId")
-        for field in ("outcomeCode", "outcomeLabel", "premiseId", "meterId", "trnId"):
-            if not is_nonblank_string(field_work.get(field)):
-                issues.append(f"{field_path}.{field}")
-        if type(field_work.get("meterMatch")) is not bool:
-            issues.append(f"{field_path}.meterMatch")
-        if not is_timestamp_like(field_work.get("submittedAt")):
-            issues.append(f"{field_path}.submittedAt")
-        if not is_timestamp_like(field_work.get("updatedAt")):
-            issues.append(f"{field_path}.updatedAt")
+    def bad(key): issues.append(f"{path}.{key}")
+    if not read_tb_ref_id(ref): bad("id")
+    if not is_timestamp_like(ref.get("date")): bad("date")
+    for key in ref.keys() - {"id", "tbId", "date", "rowId", "fieldWork"}: bad(key)
+    if "rowId" in ref and (not valid_document_id(ref["rowId"]) or "fieldWork" not in ref): bad("rowId")
+    if "fieldWork" not in ref: return issues
+    fw = ref["fieldWork"]
+    if not isinstance(fw, dict): bad("fieldWork"); return issues
+    allowed = {"status", "outcomeCode", "outcomeLabel", "targetedMeterNo", "discoveredMeterNo", "meterMatch", "premiseId", "meterId", "trnId", "submittedAt", "updatedAt", "noAccess"}
+    for key in fw.keys() - allowed: bad(f"fieldWork.{key}")
+    if fw.get("status") not in ("IN_PROGRESS", "COMPLETED"): bad("fieldWork.status")
+    if not valid_document_id(ref.get("rowId")): bad("rowId")
+    if not is_timestamp_like(fw.get("updatedAt")): bad("fieldWork.updatedAt")
+    for key in ("outcomeCode", "outcomeLabel", "targetedMeterNo", "discoveredMeterNo", "premiseId", "meterId", "trnId"):
+        if key in fw and fw[key] is not None and not is_nonblank_string(fw[key]): bad(f"fieldWork.{key}")
+    if "meterMatch" in fw and fw["meterMatch"] is not None and type(fw["meterMatch"]) is not bool: bad("fieldWork.meterMatch")
+    if "submittedAt" in fw and fw["submittedAt"] is not None and not is_timestamp_like(fw["submittedAt"]): bad("fieldWork.submittedAt")
+    if "noAccess" in fw:
+        if not isinstance(fw["noAccess"], list): bad("fieldWork.noAccess")
+        else:
+            for n, visit in enumerate(fw["noAccess"]):
+                if not isinstance(visit, dict) or set(visit) != {"date", "time", "user"} or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", str(visit.get("date", ""))) or not re.fullmatch(r"[0-9]{2}:[0-9]{2}:[0-9]{2}", str(visit.get("time", ""))) or not is_nonblank_string(visit.get("user")): bad(f"fieldWork.noAccess.{n}")
+    if fw.get("status") == "COMPLETED":
+        for key in ("outcomeCode", "outcomeLabel", "premiseId", "meterId", "trnId"):
+            if not is_nonblank_string(fw.get(key)): bad(f"fieldWork.{key}")
+        if fw.get("outcomeCode") != "METER_DISCOVERED": bad("fieldWork.outcomeCode")
+        if type(fw.get("meterMatch")) is not bool: bad("fieldWork.meterMatch")
+        if not is_timestamp_like(fw.get("submittedAt")): bad("fieldWork.submittedAt")
+    elif fw.get("outcomeCode") == "METER_DISCOVERED": bad("fieldWork.status")
     return issues
 
-
 def build_correlation_key(reference):
-    if not isinstance(reference, dict):
-        return ""
-    reference_id = clean_text(js_or(reference.get("id"), reference.get("tbId"), ""))
-    row_id = clean_text(js_or(reference.get("rowId"), reference.get("tbRowId"), ""))
-    return f"{reference_id}::{row_id}" if reference_id else ""
-
+    value = read_tb_ref_id(reference)
+    row_id = reference.get("rowId") if isinstance(reference, dict) else ""
+    return f"{value}::{row_id if isinstance(row_id, str) else ''}" if value else ""
 
 def build_duplicate_key(reference):
-    if not isinstance(reference, dict):
-        return ""
-    value = reference.get("id") if "id" in reference else ""
-    return clean_text(value).upper()
-
+    return read_tb_ref_id(reference) or ""
 
 def inspect_tbrefs(value):
-    if value is None:
-        return {"valid": True, "issues": [], "entries": [], "entriesByKey": {}}
     if not isinstance(value, list):
         return {"valid": False, "issues": ["tbRefs"], "entries": [], "entriesByKey": {}}
 
@@ -287,6 +234,7 @@ def inspect_tbrefs(value):
         }
 
     issues = [issue for entry in entries for issue in entry["issues"]]
+    issues += [f"tbRefs.{entry['index']}.id" for entry in entries if entry["duplicateLogicalIdentity"]]
     return {"valid": not issues, "issues": issues, "entries": entries, "entriesByKey": by_key}
 
 
@@ -430,29 +378,27 @@ def derive_old_frontend_status(sales, registry_matches, ast_matches, expected_lm
 
 
 def normalize_new_sales_row(snapshot_id, data):
-    raw = select_raw_tbrefs(data)
-    return {
-        "id": snapshot_id,
-        "masterVisibility": get_path(data, "master", "visibility") if isinstance(get_path(data, "master", "visibility"), str) else None,
-        "tbRefs": _normalize_tbrefs(raw),
-        "tbRefsIntegrity": inspect_tbrefs(raw),
-    }
-
+    raw = data.get("tbRefs", [])
+    return {**data, "id": snapshot_id, "masterVisibility": get_path(data, "master", "visibility"), "tbRefs": raw, "tbRefsIntegrity": inspect_tbrefs(raw)}
 
 def derive_new_sales_status(row):
-    if row.get("masterVisibility") == "VISIBLE":
-        return "COMPLETED"
-    entries_by_key = get_path(row, "tbRefsIntegrity", "entriesByKey")
-    if not isinstance(entries_by_key, dict) or not isinstance(row.get("tbRefs"), list):
-        return "NOT_STARTED"
-    for reference in row["tbRefs"]:
-        if get_path(reference, "fieldWork", "status") != "IN_PROGRESS":
-            continue
-        key = build_correlation_key(reference)
-        if key in entries_by_key and entries_by_key[key].get("classifiable") is True:
-            return "IN_PROGRESS"
+    visibility = get_path(row, "master", "visibility")
+    if "master" not in row: visibility = row.get("masterVisibility")
+    if visibility == "VISIBLE": return "COMPLETED"
+    raw = row.get("tbRefs", [])
+    integrity = inspect_tbrefs(raw)
+    if any(entry["classifiable"] and get_path(raw[entry["index"]], "fieldWork", "status") == "IN_PROGRESS" for entry in integrity["entries"]): return "IN_PROGRESS"
     return "NOT_STARTED"
 
+def resolve_current_membership(data):
+    if data.get("targetedBatchIdInvalid") is True: return "UNRESOLVED"
+    if "targetedBatchId" in data:
+        value = data["targetedBatchId"]
+        if value is None: return "NONE"
+        return "MEMBER" if isinstance(value, str) and BATCH_ID_RE.fullmatch(value) else "UNRESOLVED"
+    refs = data.get("tbRefs", [])
+    if not inspect_tbrefs(refs)["valid"] or get_path(data, "tbRefsIntegrity", "valid") is False: return "UNRESOLVED"
+    return "NONE" if not refs else "MEMBER" if len(refs) == 1 else "UNRESOLVED"
 
 def build_grouped_old_inputs(registry_rows, ast_rows):
     registry_by_meter = defaultdict(list)
@@ -562,3 +508,37 @@ def transition_reasons(old_audit, old_frontend, new_status, data, new_row):
     if not reasons:
         reasons.append("STRICT_STATUS_CHANGE")
     return list(dict.fromkeys(reasons))
+
+
+def has_usable_sales_gps(data):
+    if data.get("HasUsableGps") is True or data.get("hasUsableGps") is True: return True
+    def valid(value, bound):
+        if value is None or isinstance(value, bool) or (isinstance(value, str) and not value.strip()): return False
+        try: return abs(float(value)) <= bound
+        except (TypeError, ValueError): return False
+    candidates = data.get("erfCandidates", [])
+    return isinstance(candidates, list) and any(isinstance(c, dict) and valid(c.get("Latitude", c.get("latitude")),90) and valid(c.get("Longitude", c.get("longitude")),180) for c in candidates)
+
+def classify_non_gps_sales_row(data, new_row, sales_work_status):
+    result = {"isNoGps": not has_usable_sales_gps(data), "classification": None, "exceptionReasons": [], "selectable": False}
+    if not result["isNoGps"]: return result
+    if sales_work_status == "COMPLETED": result["classification"] = "DISCOVERED"; return result
+    membership = resolve_current_membership(data)
+    if sales_work_status == "IN_PROGRESS" or membership == "MEMBER": result["classification"] = "ALREADY_BATCHED"; return result
+    def meaningful(value): return is_nonblank_string(value) and value.strip().upper() not in {"NAV", "N/A", "NA", "NULL"}
+    reasons = []
+    for label, value in [("Town",data.get("town")),("Street number",get_path(data,"adr","strNo")),("Street name",get_path(data,"adr","strName"))]:
+        if not meaningful(value): reasons.append(f"{label} is missing")
+    if not inspect_tbrefs(data.get("tbRefs", []))["valid"]: reasons.append("Targeted Batch reference data is invalid")
+    if membership == "UNRESOLVED": reasons.append("Current membership is unresolved")
+    if get_path(data,"master","id") != new_row.get("id") or data.get("meterNoNormalized") != new_row.get("id"): reasons.append("Sales identity is invalid")
+    if get_path(data,"master","visibility") not in ("VISIBLE","INVISIBLE"): reasons.append("Sales visibility is invalid")
+    if not re.fullmatch(r"ZA[0-9]+",str(data.get("lmPcode",""))): reasons.append("Sales LM is invalid")
+    result["classification"] = "EXCEPTION" if reasons else "OUTSTANDING"
+    result["exceptionReasons"] = reasons
+    result["selectable"] = not reasons
+    lookup = data.get("erfLookup")
+    address = ", ".join(filter(None,[" ".join(str(get_path(data,"adr",key) or "").strip() for key in ("strNo","strName","strType")).strip(),str(data.get("town") or "").strip(),str(data.get("lmPcode") or "").strip(),"South Africa"]))
+    if isinstance(lookup,dict) and lookup.get("address") == address:
+        result["selectable"] = False; result["exceptionReasons"].append(f"Needs manual ERFing — {lookup.get('outcome')}")
+    return result

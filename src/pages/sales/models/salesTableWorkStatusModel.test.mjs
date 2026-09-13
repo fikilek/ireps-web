@@ -12,7 +12,7 @@ const timestamp = (seconds) => ({ seconds, nanoseconds: 0 });
 
 function inProgress(overrides = {}) {
   return {
-    id: "TGB_1",
+    id: "TGB_20260913_120000_AAAA",
     rowId: "ROW_1",
     date: timestamp(1),
     fieldWork: { status: "IN_PROGRESS", updatedAt: timestamp(2) },
@@ -22,7 +22,7 @@ function inProgress(overrides = {}) {
 
 function completed(overrides = {}) {
   return {
-    id: "TGB_DONE",
+    id: "TGB_20260913_120000_DONE",
     rowId: "ROW_DONE",
     date: timestamp(1),
     fieldWork: {
@@ -54,7 +54,7 @@ for (const [name, row, expected] of [
   ["VISIBLE with IN_PROGRESS", salesRow({ masterVisibility: "VISIBLE", tbRefs: [inProgress()] }), SALES_STATUSES.COMPLETED],
   ["VISIBLE with malformed tbRefs", { masterVisibility: "VISIBLE", tbRefs: "bad", tbRefsIntegrity: inspectSalesTbRefsIntegrity("bad") }, SALES_STATUSES.COMPLETED],
   ["INVISIBLE with canonical IN_PROGRESS", salesRow({ tbRefs: [inProgress()] }), SALES_STATUSES.IN_PROGRESS],
-  ["allocation only", salesRow({ tbRefs: [{ id: "TGB_1", date: timestamp(1) }] }), SALES_STATUSES.NOT_STARTED],
+  ["allocation only", salesRow({ tbRefs: [{ id: "TGB_20260913_120000_AAAA", date: timestamp(1) }] }), SALES_STATUSES.NOT_STARTED],
   ["different-meter completed", salesRow({ tbRefs: [completed()] }), SALES_STATUSES.NOT_STARTED],
   ["same-meter completed", salesRow({ tbRefs: [completed({ fieldWork: { ...completed().fieldWork, meterMatch: true } })] }), SALES_STATUSES.NOT_STARTED],
   ["completed history plus IN_PROGRESS", salesRow({ tbRefs: [completed(), inProgress()] }), SALES_STATUSES.IN_PROGRESS],

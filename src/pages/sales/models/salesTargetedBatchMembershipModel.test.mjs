@@ -11,17 +11,17 @@ const TB_A = "TGB_20260912_100000_AAAA";
 const TB_B = "TGB_20260912_100000_BBBB";
 
 for (const [name, input, state, id, source] of [
-  ["empty", row(), "NONE", null, null],
-  ["singleton", row([ref("TGB_2")]), "MEMBER", "TGB_2", "LEGACY_TBREF"],
-  ["multiple", row([ref("TGB_2"), ref("TGB_1")]), "UNRESOLVED", null, "LEGACY_TBREF"],
-  ["duplicate", row([ref("TGB_2"), ref("TGB_2")]), "UNRESOLVED", null, null],
-  ["invalid entry", row([{ id: "TB" }]), "UNRESOLVED", null, null],
-  ["invalid sibling", row([ref("TGB_2"), { id: "BROKEN" }]), "UNRESOLVED", null, null],
-  ["missing integrity", { tbRefs: [] }, "UNRESOLVED", null, null],
-  ["filtered invalid input", { tbRefs: [], tbRefsIntegrity: { valid: false } }, "UNRESOLVED", null, null],
-  ["normalized duplicate guard", row([ref("TB"), ref("tb")], { tbRefsIntegrity: { valid: true } }), "UNRESOLVED", null, null],
-  ["path invalid", row([ref("bad/id")]), "UNRESOLVED", null, null],
-  ["dot path invalid", row([ref("..")]), "UNRESOLVED", null, null],
+  ["empty", row(), "NONE", null, "LEGACY_TBREFS"],
+  ["singleton", row([ref("TGB_20260913_120000_BBBB")]), "MEMBER", "TGB_20260913_120000_BBBB", "LEGACY_TBREFS"],
+  ["multiple", row([ref("TGB_20260913_120000_BBBB"), ref("TGB_20260913_120000_AAAA")]), "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["duplicate", row([ref("TGB_20260913_120000_BBBB"), ref("TGB_20260913_120000_BBBB")]), "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["invalid entry", row([{ id: "TB" }]), "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["invalid sibling", row([ref("TGB_20260913_120000_BBBB"), { id: "BROKEN" }]), "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["missing cached integrity is recomputed", { tbRefs: [] }, "NONE", null, "LEGACY_TBREFS"],
+  ["filtered invalid input", { tbRefs: [], tbRefsIntegrity: { valid: false } }, "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["normalized duplicate guard", row([ref("TB"), ref("tb")], { tbRefsIntegrity: { valid: true } }), "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["path invalid", row([ref("bad/id")]), "UNRESOLVED", null, "LEGACY_TBREFS"],
+  ["dot path invalid", row([ref("..")]), "UNRESOLVED", null, "LEGACY_TBREFS"],
   ["scalar", row([], { targetedBatchId: TB_A }), "MEMBER", TB_A, "SCALAR"],
   ["scalar and matching ref", row([ref(TB_A)], { targetedBatchId: TB_A }), "MEMBER", TB_A, "SCALAR"],
   ["scalar decides over an old ref", row([ref(TB_B)], { targetedBatchId: TB_A }), "MEMBER", TB_A, "SCALAR"],
@@ -34,7 +34,7 @@ for (const [name, input, state, id, source] of [
   ["non-TGB scalar", row([], { targetedBatchId: "TB_A" }), "UNRESOLVED", null, "SCALAR"],
   ["padded scalar is not repaired", row([], { targetedBatchId: ` ${TB_A}` }), "UNRESOLVED", null, "SCALAR"],
   ["flagged scalar", row([], { targetedBatchIdInvalid: true }), "UNRESOLVED", null, "SCALAR"],
-  ["old field is ignored", row([], { activeTargetedBatchId: TB_A }), "NONE", null, null],
+  ["old field is ignored", row([], { activeTargetedBatchId: TB_A }), "NONE", null, "LEGACY_TBREFS"],
 ]) {
   test("membership: " + name, () => {
     const result = resolve(input);
@@ -47,12 +47,12 @@ for (const [name, input, state, id, source] of [
 }
 
 test("completion retains a valid singleton and never mutates legacy evidence", () => {
-  const r = { ...ref("TGB_DONE"), rowId: "ROW", fieldWork: { status: "COMPLETED",
+  const r = { ...ref("TGB_20260913_120000_DONE"), rowId: "ROW", fieldWork: { status: "COMPLETED",
     outcomeCode: "METER_DISCOVERED", outcomeLabel: "Meter discovered", premiseId: "P",
     meterId: "M", trnId: "T", meterMatch: true,
     submittedAt: ref("x").date, updatedAt: ref("x").date } };
   const input = row([r]);
   const before = JSON.stringify(input);
-  assert.equal(resolve(input).tbId, "TGB_DONE");
+  assert.equal(resolve(input).tbId, "TGB_20260913_120000_DONE");
   assert.equal(JSON.stringify(input), before);
 });

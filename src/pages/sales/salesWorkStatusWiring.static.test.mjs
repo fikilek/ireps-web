@@ -58,7 +58,8 @@ test("Prepaid Sales uses current-LM Sales data as its only Work Status stream", 
   assert.match(readiness, /Boolean\(activeLmPcode\)/);
   assert.match(readiness, /Array\.isArray\(currentSalesRows\)/);
   assert.doesNotMatch(readiness, /isLoading|isFetching/);
-  assert.match(prepaid, /buildSalesTableWorkStatusRows\(\{ salesRows \}\)/);
+  assert.doesNotMatch(prepaid, /buildSalesTableWorkStatusRows/);
+  assert.match(prepaid, /salesWorkStatusReady\s*\? salesRows/);
   assert.match(prepaid, /registryName: "Selected Prepaid Sales Meters"/);
 });
 

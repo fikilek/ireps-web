@@ -1,3 +1,4 @@
+import { addSalesSelection, evaluateSalesBatchability } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -520,6 +521,7 @@ export default function SalesMetersTable({
   onSelectedIdsChange,
 }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [selectionMessage, setSelectionMessage] = useState("");
   const [columnVisibility, setColumnVisibility] = useState(
     DEFAULT_COLUMN_VISIBILITY,
   );
@@ -559,6 +561,7 @@ export default function SalesMetersTable({
       rows.map((row) => ({
         ...row,
         salesStatus: row?.salesWorkStatus,
+        batchability: evaluateSalesBatchability(row, { source: "PREPAID_SALES" }),
       })),
     [rows],
   );
@@ -667,6 +670,8 @@ export default function SalesMetersTable({
     : "";
 
   useEffect(() => {
+    // External navigation to another target filter starts its first page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentPage(1);
   }, [targetFilter]);
 
@@ -871,11 +876,6 @@ export default function SalesMetersTable({
   );
 
   const selectedIdSet = selectedIds || new Set();
-  const pageIds = paginatedRows
-    .filter((row) => hasUsableSalesGps(row))
-    .map((row) => row.id)
-    .filter(Boolean);
-
   const hasActiveColumnFilters =
     Boolean(String(filters.meterNo || "").trim()) ||
     filters.wardNos.length > 0 ||
@@ -896,12 +896,7 @@ export default function SalesMetersTable({
   const hasActiveFilter =
     targetFilter !== TARGET_FILTERS.ALL || hasActiveColumnFilters;
 
-  const headerSelectionIds = hasActiveFilter
-    ? sortedRows
-        .filter((row) => hasUsableSalesGps(row))
-        .map((row) => row.id)
-        .filter(Boolean)
-    : pageIds;
+  const headerSelectionIds = sortedRows.filter(row => row.batchability.batchable).map(row => row.id);
 
   const selectedHeaderScopeCount = headerSelectionIds.reduce(
     (count, id) => count + (selectedIdSet.has(id) ? 1 : 0),
@@ -915,9 +910,7 @@ export default function SalesMetersTable({
   const someHeaderScopeRowsSelected =
     selectedHeaderScopeCount > 0 && !allHeaderScopeRowsSelected;
 
-  const headerSelectionLabel = hasActiveFilter
-    ? `Select all ${formatNumber(headerSelectionIds.length)} filtered meters`
-    : `Select all ${formatNumber(headerSelectionIds.length)} meters on this page`;
+  const headerSelectionLabel = `Select all ${formatNumber(headerSelectionIds.length)} Batchable meters in the full filtered result`;
 
   function clearMapRowInteraction() {
     setHoveredMapMeterId("");
@@ -1055,29 +1048,24 @@ export default function SalesMetersTable({
   }
 
   function toggleRow(row) {
-    if (!hasUsableSalesGps(row)) return;
-
-    const rowId = row?.id;
-    if (!rowId) return;
-
-    const nextSelected = new Set(selectedIdSet);
-
-    if (nextSelected.has(rowId)) nextSelected.delete(rowId);
-    else nextSelected.add(rowId);
-
-    onSelectedIdsChange(nextSelected);
+    if (!row.batchability.batchable) return;
+    if (selectedIdSet.has(row.id)) {
+      const next = new Set(selectedIdSet); next.delete(row.id);
+      onSelectedIdsChange(next); setSelectionMessage(""); return;
+    }
+    const result = addSalesSelection([...selectedIdSet], [row.id]);
+    setSelectionMessage(result.message);
+    if (result.changed) onSelectedIdsChange(new Set(result.selectedIds));
   }
 
   function toggleHeaderSelection() {
-    const nextSelected = new Set(selectedIdSet);
-
     if (allHeaderScopeRowsSelected) {
-      headerSelectionIds.forEach((id) => nextSelected.delete(id));
-    } else {
-      headerSelectionIds.forEach((id) => nextSelected.add(id));
+      const next = new Set(selectedIdSet); headerSelectionIds.forEach(id => next.delete(id));
+      onSelectedIdsChange(next); setSelectionMessage(""); return;
     }
-
-    onSelectedIdsChange(nextSelected);
+    const result = addSalesSelection([...selectedIdSet], headerSelectionIds);
+    setSelectionMessage(result.message);
+    if (result.changed) onSelectedIdsChange(new Set(result.selectedIds));
   }
 
   function toggleColumn(columnKey) {
@@ -1149,6 +1137,7 @@ export default function SalesMetersTable({
 
   return (
     <section style={styles.panel}>
+      {selectionMessage ? <p role="alert" style={styles.sectionSubtitle}>{selectionMessage}</p> : null}
       <div style={styles.sectionHeader}>
         <div>
           <p style={styles.eyebrow}>Sales Meters</p>
@@ -1672,15 +1661,15 @@ export default function SalesMetersTable({
                     <input
                       type="checkbox"
                       checked={
-                        hasUsableSalesGps(row) && selectedIdSet.has(row.id)
+                        selectedIdSet.has(row.id)
                       }
-                      disabled={!hasUsableSalesGps(row)}
+                      disabled={!row.batchability.batchable}
                       onChange={() => toggleRow(row)}
                       aria-label={`Select meter ${row.meterNo}`}
                       title={
-                        hasUsableSalesGps(row)
+                        row.batchability.batchable
                           ? `Select meter ${row.meterNo}`
-                          : "No GPS — use Non GPS Batch Planning"
+                          : row.batchability.reason
                       }
                     />
                   </td>
@@ -1694,11 +1683,7 @@ export default function SalesMetersTable({
                     >
                       {row.meterNo || "NAv"}
                     </button>
-                    {!hasUsableSalesGps(row) ? (
-                      <span style={styles.noGpsHelper}>
-                        No GPS — use Non GPS Batch Planning
-                      </span>
-                    ) : null}
+                    {!row.batchability.batchable ? <span style={styles.noGpsHelper}>{row.batchability.reason}</span> : null}
                   </td>
 
                   {columnVisibility.wardNo ? (

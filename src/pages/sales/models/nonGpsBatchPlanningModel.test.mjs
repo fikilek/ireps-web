@@ -36,12 +36,14 @@ function makeRow({
   meterNo,
   accountNumber,
   lmPcode = "ZA5241",
-  masterVisibility = "",
+  masterVisibility = "INVISIBLE",
   targetedBatchId,
 } = {}) {
   return {
-    id: id || `SALES_${Math.random()}`,
-    meterNo: meterNo || id || "07100000000",
+    id: (id || "07100000000").replaceAll("_", ""),
+    master: { id: (id || "07100000000").replaceAll("_", ""), visibility: masterVisibility },
+    meterNoNormalized: (id || "07100000000").replaceAll("_", ""),
+    meterNo: meterNo || (id || "07100000000").replaceAll("_", ""),
     accountNumber: accountNumber || `ACC_${id || "1"}`,
     lmPcode,
     masterVisibility,
@@ -58,7 +60,7 @@ function makeDiscoveredRef({ targeted = "111", discovered = "222" } = {}) {
   const timestamp = { seconds: 1_700_000_000, nanoseconds: 0 };
 
   return {
-    id: "TB_001",
+    id: "TGB_20260913_120000_0000",
     date: timestamp,
     rowId: "TBR_001_000001",
     fieldWork: {
@@ -79,7 +81,7 @@ function makeDiscoveredRef({ targeted = "111", discovered = "222" } = {}) {
 
 function makeUnresolvedRef(overrides = {}) {
   return {
-    id: "TB_123",
+    id: "TGB_20260913_120000_0001",
     date: { seconds: 1_700_000_000, nanoseconds: 0 },
     ...overrides,
   };
@@ -89,7 +91,7 @@ function makeInProgressRef(overrides = {}) {
   const timestamp = { seconds: 1_700_000_000, nanoseconds: 0 };
 
   return {
-    id: "TB_IP",
+    id: "TGB_20260913_120000_0002",
     date: timestamp,
     rowId: "TBR_IP_000001",
     fieldWork: {
@@ -182,9 +184,9 @@ test("street numbers sort naturally", () => {
   );
 });
 
-test("classification precedence puts valid completed Meter Discovery before address exceptions", () => {
+test("visible-master completion takes precedence over address exceptions", () => {
   const row = makeRow({
-    id: "DISCOVERED",
+    id: "DISCOVERED", masterVisibility: "VISIBLE",
     strNo: "",
     strName: "",
     tbRefs: [makeDiscoveredRef({ targeted: "111", discovered: "222" })],
@@ -197,9 +199,9 @@ test("classification precedence puts valid completed Meter Discovery before addr
   assert.equal(result.selectable, false);
 });
 
-test("Meter Discovery closes the original target when physical meter differs", () => {
+test("a visible master remains completed when a different physical meter was discovered", () => {
   const row = makeRow({
-    id: "MISMATCH",
+    id: "MISMATCH", masterVisibility: "VISIBLE",
     meterNo: "111",
     tbRefs: [makeDiscoveredRef({ targeted: "111", discovered: "999" })],
   });
@@ -217,14 +219,14 @@ test("missing planning address becomes a non-selectable exception", () => {
 
   assert.equal(result.classification, NGP_CLASSIFICATIONS.EXCEPTION);
   assert.equal(result.selectable, false);
-  assert.ok(result.exceptionReasons.includes("Street number is missing"));
-  assert.ok(result.exceptionReasons.includes("Street name is missing"));
+  assert.ok(result.exceptionReasons.some(reason => reason.includes("street number")));
+  assert.ok(result.exceptionReasons.some(reason => reason.includes("street name")));
 });
 
 test("malformed Targeted Batch references fail closed as exceptions", () => {
   const result = classifyNonGpsSalesRow(
     makeRow({
-      id: "BAD_TB",
+      id: "BADTB",
       tbRefs: [],
       tbRefsIntegrity: {
         valid: false,
@@ -256,7 +258,7 @@ test("frontend TB integrity rejects malformed reference dates and duplicate IDs"
     makeUnresolvedRef({ date: "2026-08-14" }),
   ]);
   const duplicateIds = inspectSalesTbRefsIntegrity([
-    makeUnresolvedRef({ id: "TB_1" }),
+    makeUnresolvedRef({ id: "TGB_20260913_120000_0003" }),
     makeUnresolvedRef({ id: " tb_1 " }),
   ]);
 
@@ -300,7 +302,7 @@ test("frontend TB integrity rejects incomplete COMPLETED evidence", () => {
   ]);
   const result = classifyNonGpsSalesRow(
     makeRow({
-      id: "INCOMPLETE_COMPLETED",
+      id: "INCOMPLETECOMPLETED",
       tbRefs: [
         makeUnresolvedRef({
           rowId: "TBR_1",
@@ -326,7 +328,7 @@ test("valid COMPLETED discovery and valid unresolved reference preserve classifi
   assert.equal(
     classifyNonGpsSalesRow(
       makeRow({
-        id: "VALID_DISC",
+        id: "VALIDDISC", masterVisibility: "VISIBLE",
         tbRefs: [discoveredRef],
         tbRefsIntegrity: inspectSalesTbRefsIntegrity([discoveredRef]),
       }),
@@ -337,7 +339,7 @@ test("valid COMPLETED discovery and valid unresolved reference preserve classifi
   assert.equal(
     classifyNonGpsSalesRow(
       makeRow({
-        id: "VALID_UNRESOLVED",
+        id: "VALIDUNRESOLVED",
         tbRefs: [unresolvedRef],
         tbRefsIntegrity: inspectSalesTbRefsIntegrity([unresolvedRef]),
       }),
@@ -384,8 +386,8 @@ test("clean No-GPS street target with no TB reference is OUTSTANDING", () => {
 test("street detail retains complete population and calculates counters", () => {
   const model = buildNonGpsBatchPlanningModel([
     makeRow({ id: "OUT" }),
-    makeRow({ id: "BATCHED", tbRefs: [makeUnresolvedRef({ id: "TB_1" })] }),
-    makeRow({ id: "DISC", tbRefs: [makeDiscoveredRef()] }),
+    makeRow({ id: "BATCHED", tbRefs: [makeUnresolvedRef({ id: "TGB_20260913_120000_0003" })] }),
+    makeRow({ id: "DISC", masterVisibility: "VISIBLE", tbRefs: [makeDiscoveredRef()] }),
   ]);
   const street = model.towns[0].streets[0];
 
@@ -397,9 +399,9 @@ test("street detail retains complete population and calculates counters", () => 
     outstanding: 1,
     alreadyBatched: 1,
     discovered: 1,
-    notStarted: 3,
+    notStarted: 2,
     inProgress: 0,
-    completed: 0,
+    completed: 1,
   });
 });
 
@@ -411,13 +413,13 @@ test("Town and Street counters use the canonical three-state Sales Meter Status"
 
   const model = buildNonGpsBatchPlanningModel([
     makeRow({
-      id: "NS_1",
+      id: "NS1",
       town: "Dundee",
       strNo: "1",
       strName: "Ann",
     }),
     makeRow({
-      id: "IP_1",
+      id: "IP1",
       town: "Dundee",
       strNo: "2",
       strName: "Ann",
@@ -425,14 +427,14 @@ test("Town and Street counters use the canonical three-state Sales Meter Status"
       tbRefsIntegrity: inProgressIntegrity,
     }),
     makeRow({
-      id: "DONE_1",
+      id: "DONE1",
       town: "Dundee",
       strNo: "3",
       strName: "Beaconsfield",
       masterVisibility: "VISIBLE",
     }),
     makeRow({
-      id: "DONE_2",
+      id: "DONE2",
       town: "Glencoe",
       strNo: "4",
       strName: "Smith",
@@ -497,7 +499,7 @@ test("every No-GPS row is visible in exactly one planning or exception view", ()
     makeRow({ id: "STREET" }),
     makeRow({ id: "EXCEPTION", strName: "" }),
     makeRow({
-      id: "UNPLACED_DISCOVERED",
+      id: "UNPLACEDDISCOVERED", masterVisibility: "VISIBLE",
       town: "",
       strNo: "",
       strName: "",
@@ -580,7 +582,7 @@ test("Batchable requires NOT_STARTED plus the current NGP planning gates", () =>
 
   const brokenRefs = evaluateNgpBatchability(
     makeRow({
-      id: "BROKEN_REFS",
+      id: "BROKENREFS",
       targetedBatchId: null,
       tbRefsIntegrity: { valid: false, issues: ["malformed entry"] },
     }),
@@ -592,10 +594,10 @@ test("Batchable requires NOT_STARTED plus the current NGP planning gates", () =>
     makeRow({ id: "LEGACY", tbRefs: [makeUnresolvedRef()] }),
   );
   assert.equal(legacyBatch.batchable, false);
-  assert.equal(legacyBatch.code, "EXISTING_TARGETED_BATCH_REFERENCE");
+  assert.equal(legacyBatch.code, "CURRENT_TARGETED_BATCH");
 
   const invalidAddress = evaluateNgpBatchability(
-    makeRow({ id: "BAD_ADDRESS", strNo: "" }),
+    makeRow({ id: "BADADDRESS", strNo: "" }),
   );
   assert.equal(invalidAddress.batchable, false);
   assert.equal(invalidAddress.code, "PLANNING_ADDRESS_INVALID");
@@ -604,15 +606,15 @@ test("Batchable requires NOT_STARTED plus the current NGP planning gates", () =>
     makeRow({ id: "GPS", gps: true }),
   );
   assert.equal(gpsAvailable.batchable, false);
-  assert.equal(gpsAvailable.code, "GPS_AVAILABLE");
+  assert.equal(gpsAvailable.code, "SALES_ORIGIN_CHANGED");
 });
 
-test("selection requires 1-20 unique Batchable Sales meters and may combine streets", () => {
+test("selection requires 1-30 unique Batchable Sales meters and may combine streets", () => {
   const model = buildNonGpsBatchPlanningModel([
     makeRow({ id: "A", strNo: "1" }),
     makeRow({ id: "B", strNo: "2" }),
     makeRow({ id: "C", town: "Glencoe", strNo: "1" }),
-    makeRow({ id: "D", tbRefs: [makeUnresolvedRef({ id: "TB_1" })] }),
+    makeRow({ id: "D", tbRefs: [makeUnresolvedRef({ id: "TGB_20260913_120000_0003" })] }),
   ]);
   const dundeeStreet = model.towns.find((town) => town.town === "Dundee").streets[0];
   const glencoeStreet = model.towns.find((town) => town.town === "Glencoe").streets[0];
@@ -645,7 +647,7 @@ test("selection requires 1-20 unique Batchable Sales meters and may combine stre
 
 test("street selection tops up partial selection and never silently truncates to capacity", () => {
   const model = buildNonGpsBatchPlanningModel(
-    Array.from({ length: 25 }, (_, index) =>
+    Array.from({ length: 31 }, (_, index) =>
       makeRow({
         id: `STREET_${index + 1}`,
         strNo: String(index + 1),
@@ -661,8 +663,8 @@ test("street selection tops up partial selection and never silently truncates to
   });
   assert.equal(tooLarge.selectedIds.size, 0);
   assert.equal(tooLarge.blockedByCapacity, true);
-  assert.equal(tooLarge.requestedCount, 25);
-  assert.equal(tooLarge.remainingCapacity, 20);
+  assert.equal(tooLarge.requestedCount, 31);
+  assert.equal(tooLarge.remainingCapacity, 30);
 
   const narrowedStreet = street.targets.slice(0, 3);
   const oneSelected = new Set([narrowedStreet[0].id]);
@@ -683,16 +685,16 @@ test("street selection tops up partial selection and never silently truncates to
   assert.equal(toggledOff.removedCount, 3);
 
   const capacityBlocked = updateNgpStreetSelection({
-    selectedIds: new Set(Array.from({ length: 18 }, (_, index) => `OTHER_${index}`)),
+    selectedIds: new Set(Array.from({ length: 28 }, (_, index) => `OTHER_${index}`)),
     streetTargets: narrowedStreet,
   });
-  assert.equal(capacityBlocked.selectedIds.size, 18);
+  assert.equal(capacityBlocked.selectedIds.size, 28);
   assert.equal(capacityBlocked.blockedByCapacity, true);
   assert.equal(capacityBlocked.requestedCount, 3);
   assert.equal(capacityBlocked.remainingCapacity, 2);
 });
 
-test("NGP draft plan creates exactly one 1-20 PREPAID_SALES batch without ward scope", () => {
+test("NGP draft plan creates exactly one 1-30 PREPAID_SALES batch without ward scope", () => {
   const model = buildNonGpsBatchPlanningModel([
     makeRow({ id: "A100", town: "Dundee", strNo: "1", strName: "Acacia" }),
     makeRow({ id: "B200", town: "Dundee", strNo: "2", strName: "Albert" }),
@@ -879,18 +881,12 @@ test("NGP checkbox and selection bar follow the shared Targeted Batch rules", ()
   assert.doesNotMatch(model, /\.slice\(0, capacity\)/);
 });
 
-test("Sales page and table share the GPS model and block No-GPS selection", () => {
-  const salesPage = readSource("../PrepaidSales.jsx");
+test("Sales table checkbox uses business Batchability independently of capacity", () => {
   const table = readSource("../components/SalesMetersTable.jsx");
-
-  assert.match(salesPage, /from "\.\/models\/salesGpsModel"/);
-  assert.match(table, /from "\.\.\/models\/salesGpsModel"/);
-  assert.match(table, /disabled=\{!hasUsableSalesGps\(row\)\}/);
-  assert.match(table, /No GPS — use Non GPS Batch Planning/);
-  assert.match(
-    table,
-    /\.filter\(\(row\) => hasUsableSalesGps\(row\)\)[\s\S]*\.map\(\(row\) => row\.id\)/,
-  );
+  assert.match(table, /evaluateSalesBatchability/);
+  assert.match(table, /disabled=\{!row\.batchability\.batchable\}/);
+  assert.doesNotMatch(table, /disabled=\{[^}]*capacity/i);
+  assert.match(table, /addSalesSelection/);
 });
 
 test("NGP route and Sales navigation entry are management-side only", () => {
@@ -933,15 +929,15 @@ test("NGP implementation contains no Allocation or Mobile runtime dependency", (
 });
 
 test("membership, status, counters and Batch ID share one target result", () => {
-  const refs = [makeUnresolvedRef({ id: "TB_A" })];
+  const refs = [makeUnresolvedRef({ id: "TGB_20260913_120000_0004" })];
   const ip = makeInProgressRef();
   const rows = [
     makeRow({ id: "NONE" }),
     makeRow({ id: "MEMBER", tbRefs: refs }),
     makeRow({ id: "IP", tbRefs: [ip], tbRefsIntegrity: inspectSalesTbRefsIntegrity([ip]) }),
-    makeRow({ id: "DONE_MEMBER", masterVisibility: "VISIBLE", tbRefs: refs }),
-    makeRow({ id: "DONE_NONE", masterVisibility: "VISIBLE" }),
-    makeRow({ id: "UNRESOLVED", tbRefs: [makeUnresolvedRef({ id: "TB_A" }), makeUnresolvedRef({ id: "TB_B" })] }),
+    makeRow({ id: "DONEMEMBER", masterVisibility: "VISIBLE", tbRefs: refs }),
+    makeRow({ id: "DONENONE", masterVisibility: "VISIBLE" }),
+    makeRow({ id: "UNRESOLVED", tbRefs: [makeUnresolvedRef({ id: "TGB_20260913_120000_0004" }), makeUnresolvedRef({ id: "TGB_20260913_120000_0005" })] }),
   ];
   const model = buildNonGpsBatchPlanningModel(rows);
   const targets = model.streetPlanningTargets;
@@ -957,15 +953,15 @@ test("membership, status, counters and Batch ID share one target result", () => 
 });
 
 test("batching counts cover all towns and do not depend on selection capacity", () => {
-  const rows = Array.from({ length: 24 }, (_, i) => makeRow({ id: "M" + i, town: i < 22 ? "Dundee" : "Glencoe" }));
+  const rows = Array.from({ length: 34 }, (_, i) => makeRow({ id: "M" + i, town: i < 32 ? "Dundee" : "Glencoe" }));
   const model = buildNonGpsBatchPlanningModel(rows);
   const before = JSON.stringify(model.towns.map(t => t.counters));
-  const update = updateNgpStreetSelection({ selectedIds: new Set(Array.from({ length: 20 }, (_, i) => "M" + i)),
+  const update = updateNgpStreetSelection({ selectedIds: new Set(Array.from({ length: 30 }, (_, i) => "M" + i)),
     streetTargets: model.towns[0].streets[0].targets });
   assert.equal(update.blockedByCapacity, true);
-  assert.equal(update.selectedIds.size, 20);
+  assert.equal(update.selectedIds.size, 30);
   assert.equal(JSON.stringify(model.towns.map(t => t.counters)), before);
-  assert.equal(model.towns.reduce((n, t) => n + t.counters.batchable, 0), 24);
+  assert.equal(model.towns.reduce((n, t) => n + t.counters.batchable, 0), 34);
 });
 
 test("visibility columns, KPI context, dropdown and modal wiring stay narrow", () => {

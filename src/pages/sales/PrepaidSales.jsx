@@ -14,7 +14,7 @@ import {
   hasUsableSalesGps,
   matchesSalesGpsFilter,
 } from "./models/salesGpsModel";
-import { buildSalesTableWorkStatusRows } from "./models/salesTableWorkStatusModel.js";
+import { evaluateSalesBatchability } from "../../../functions/salesAllMeters/sales-batch-policy.js";
 import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
   buildMonthKeys,
@@ -113,15 +113,13 @@ function TargetBatchModal({
           ) : null}
 
           <p style={styles.modalText}>
-            iREPS will apply the Targeted Batch rules locally, resolve the ward
-            carried by each selected Sales row, and prepare one proposed batch
-            per ward. The selection is preserved across all filtered pages.
+            Review up to 30 selected GPS Sales meters in one TB Draft. Selection
+            is preserved across filters and pages.
           </p>
 
           <p style={styles.modalText}>
-            TB Draft opens only when every selected meter can be placed into a
-            ward-compliant proposed batch. The backend confirms and enforces the
-            same plan when permanent batches are created.
+            TB Draft resolves the authoritative ERFs and Ward, then lets you draw
+            and save the batch geofence. Permanent creation follows confirmation.
           </p>
         </div>
 
@@ -203,17 +201,36 @@ export default function PrepaidSales() {
   const salesWorkStatusRows = useMemo(
     () =>
       salesWorkStatusReady
-        ? buildSalesTableWorkStatusRows({ salesRows })
+        ? salesRows
         : [],
     [salesRows, salesWorkStatusReady],
   );
 
   useEffect(() => {
+    // A new account/LM scope discards presentation state tied to the previous scope.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGpsFilter(GPS_FILTERS.ALL);
     setSelectedIds(new Set());
     setIsTargetBatchModalOpen(false);
     setTargetBatchScopeError("");
   }, [salesScopeKey]);
+
+  useEffect(() => {
+    if (!salesWorkStatusReady || isLoading || isFetching || selectedIds.size === 0) return;
+    const byId = new Map(salesWorkStatusRows.map(row => [row.id, row]));
+    const removed = [];
+    const remaining = new Set(selectedIds);
+    for (const id of selectedIds) {
+      const row = byId.get(id);
+      const result = row ? evaluateSalesBatchability(row, { source: "PREPAID_SALES", lmPcode: activeLmPcode }) : { batchable: false, reason: "Sales meter is no longer available in this scope" };
+      if (!result.batchable) { remaining.delete(id); removed.push(`${row?.meterNo || id} (${result.reason})`); }
+    }
+    if (!removed.length) return;
+    // This affects Sales selection only; an opened TB Draft owns its own IDs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedIds(remaining);
+    setTargetBatchScopeError(`Removed from selection: ${removed.join("; ")}.`);
+  }, [activeLmPcode, isFetching, isLoading, salesWorkStatusReady, salesWorkStatusRows, selectedIds]);
 
   const monthKeys = useMemo(() => buildMonthKeys(salesRows), [salesRows]);
   const latestMonthKey = monthKeys[0] || "2026-02";
@@ -257,8 +274,8 @@ export default function PrepaidSales() {
 
   const selectedRows = useMemo(() => {
     if (selectedIds.size === 0) return [];
-    return gpsFilteredRows.filter((row) => selectedIds.has(row.id));
-  }, [gpsFilteredRows, selectedIds]);
+    return salesWorkStatusRows.filter((row) => selectedIds.has(row.id));
+  }, [salesWorkStatusRows, selectedIds]);
 
   const selectedDownloadColumns = useMemo(() => {
     return [
@@ -282,7 +299,6 @@ export default function PrepaidSales() {
     if (nextGpsFilter === gpsFilter) return;
 
     setGpsFilter(nextGpsFilter);
-    setSelectedIds(new Set());
     setIsTargetBatchModalOpen(false);
     setTargetBatchScopeError("");
   }
@@ -366,6 +382,7 @@ export default function PrepaidSales() {
     dispatch(
       prepareTargetedBatchDraft({
         id: draftPlan.proposedBatches[0]?.tbId,
+        scopeKey: JSON.stringify(salesReadScope),
         creationGroup: draftPlan.creationGroup,
         proposedBatches: draftPlan.proposedBatches,
         source: {
@@ -458,6 +475,8 @@ export default function PrepaidSales() {
           </button>
         </div>
       </section>
+
+      {targetBatchScopeError && !isTargetBatchModalOpen ? <section role="alert" style={styles.statePanel}>{targetBatchScopeError}</section> : null}
 
       {!activeLmPcode ? (
         <section style={styles.statePanel}>

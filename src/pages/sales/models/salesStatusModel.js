@@ -1,3 +1,5 @@
+import { classifySalesWorkStatus, inspectSalesTbRefsIntegrity } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+
 export const SALES_STATUSES = Object.freeze({
   NOT_STARTED: "NOT_STARTED",
   IN_PROGRESS: "IN_PROGRESS",
@@ -44,73 +46,9 @@ export const SALES_STATUS_SORT_RANKS = Object.freeze({
   [SALES_STATUSES.INTEGRITY_EXCEPTION]: 3,
 });
 
-const OPERATIONAL_STATUS_SET = new Set(SALES_OPERATIONAL_STATUSES);
-
-function normalizeStatus(value) {
-  return String(value || "").trim().toUpperCase();
-}
-
-function integrityException(issues = []) {
-  return {
-    status: SALES_STATUSES.INTEGRITY_EXCEPTION,
-    issues: Array.isArray(issues) && issues.length > 0
-      ? [...issues]
-      : ["tbRefsIntegrity"],
-  };
-}
-
 export function classifySalesStatus(row = {}) {
-  const integrity = row?.tbRefsIntegrity;
-
-  if (!integrity || integrity.valid !== true) {
-    return integrityException(integrity?.issues);
-  }
-
-  if (!Array.isArray(row?.tbRefs)) {
-    return integrityException(["tbRefs"]);
-  }
-
-  let hasInProgress = false;
-
-  for (const [index, reference] of row.tbRefs.entries()) {
-    const referencePath = `tbRefs.${index}`;
-
-    if (!reference || typeof reference !== "object" || Array.isArray(reference)) {
-      return integrityException([referencePath]);
-    }
-
-    const fieldWork = reference?.fieldWork;
-
-    if (fieldWork === undefined || fieldWork === null) continue;
-    if (typeof fieldWork !== "object" || Array.isArray(fieldWork)) {
-      return integrityException([`${referencePath}.fieldWork`]);
-    }
-
-    if (!Object.hasOwn(fieldWork, "status")) continue;
-
-    const rawStatus = fieldWork.status;
-    if (typeof rawStatus !== "string") {
-      return integrityException([`${referencePath}.fieldWork.status`]);
-    }
-
-    const status = normalizeStatus(rawStatus);
-    if (rawStatus !== status || !OPERATIONAL_STATUS_SET.has(status)) {
-      return integrityException([`${referencePath}.fieldWork.status`]);
-    }
-
-    if (status === SALES_STATUSES.COMPLETED) {
-      return { status: SALES_STATUSES.COMPLETED, issues: [] };
-    }
-
-    if (status === SALES_STATUSES.IN_PROGRESS) hasInProgress = true;
-  }
-
-  return {
-    status: hasInProgress
-      ? SALES_STATUSES.IN_PROGRESS
-      : SALES_STATUSES.NOT_STARTED,
-    issues: [],
-  };
+  const integrity = inspectSalesTbRefsIntegrity(row.tbRefs);
+  return { status: classifySalesWorkStatus(row), issues: integrity.issues };
 }
 
 export function getSalesStatusLabel(status) {

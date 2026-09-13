@@ -67,20 +67,6 @@ export function parseStorageReference(raw, expectedBucket = "ireps2.appspot.com"
   } catch { return null; }
 }
 
-export function removeExactReferences(value, removedIds) {
-  if (Array.isArray(value)) return value.filter((item) => !(typeof item === "string" && removedIds.has(item))).map((item) => removeExactReferences(item, removedIds));
-  if (!object(value)) return value;
-  const next = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (["premiseId", "meterId", "astId", "trnId"].includes(key) && typeof item === "string" && removedIds.has(item)) continue;
-    next[key] = removeExactReferences(item, removedIds);
-  }
-  return next;
-}
+export function removeExactReferences() { throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: use governed batch removal; direct mutation is prohibited"); }
 
-export function cleanSales(data, removedIds) {
-  const next = removeExactReferences(data, removedIds);
-  delete next.tbRefs;
-  if (next.master && object(next.master)) next.master = {...next.master, visibility: "INVISIBLE"};
-  return next;
-}
+export function cleanSales() { throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: use governed batch removal; direct mutation is prohibited"); }

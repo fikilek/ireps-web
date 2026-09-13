@@ -124,16 +124,7 @@ export function proveCanonicalCorrelation({trnId, trn = {}, rowId, row = {}, tbI
   return {valid: blockers.length === 0, blockers: [...new Set(blockers)], matchingSalesTbRef: match};
 }
 
-export function cleanPremiseIds(current, targets) {
-  if (!Array.isArray(current) || current.some((id) => typeof id !== "string" || !id.trim())) {
-    return {safe: false, reason: "MALFORMED_NO_ACCESS_TRN_IDS"};
-  }
-  const targetSet = new Set(targets);
-  const duplicateTargetIds = [...targetSet].filter((id) => current.filter((item) => item === id).length > 1);
-  if (duplicateTargetIds.length) return {safe: false, reason: "DUPLICATE_TARGET_IDS", duplicateTargetIds};
-  const remaining = current.filter((id) => !targetSet.has(id));
-  return {safe: true, remaining, removed: current.filter((id) => targetSet.has(id)), missing: [...targetSet].filter((id) => !current.includes(id))};
-}
+export function cleanPremiseIds() { throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: use governed batch removal; direct mutation is prohibited"); }
 
 export function parseStorageObject(media, {expectedBucket = "ireps2.appspot.com", prefix = EVIDENCE_PREFIX} = {}) {
   const raw = text(media?.storagePath) || text(media?.url) || text(media?.uri);
@@ -285,10 +276,7 @@ export const stableStringify = (value) => JSON.stringify(serializeFirestoreValue
 export const sha256Text = (value) => crypto.createHash("sha256").update(value).digest("hex");
 export const sortByKeys = (rows, keys) => [...rows].sort((a, b) => keys.map((key) => String(a[key] ?? "").localeCompare(String(b[key] ?? ""))).find((result) => result) || 0);
 
-export function expectedErfCounts(trns, deletedIds) {
-  const removed = new Set(deletedIds);
-  return trns.filter((trn) => !removed.has(trn.id)).reduce((counts, trn) => { const outcome = trn.accessData?.access?.hasAccess; if (outcome === "no") counts.trnsNa += 1; if (outcome === "yes") counts.trnsAccess += 1; counts.trnsTotal = counts.trnsNa + counts.trnsAccess; return counts; }, {trnsNa: 0, trnsAccess: 0, trnsTotal: 0});
-}
+export function expectedErfCounts() { throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: use governed batch removal; direct mutation is prohibited"); }
 
 export function inventoryPathWithinRoot(candidate, approvedRoot, resolved = {}) {
   if (typeof candidate !== "string" || !path.win32.isAbsolute(candidate)) return {valid: false, reason: "INVENTORY_PATH_NOT_ABSOLUTE"};
@@ -311,20 +299,6 @@ export function assertExpectedUpdateTime({collection, id, expected, actual, exis
 }
 
 export const uniqueSorted = (values) => [...new Set(values.filter(Boolean))].sort();
-export function cleanDemoSales(data = {}) { const next = {...data}; delete next.tbRefs; return next; }
+export function cleanDemoSales() { throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: use governed batch removal; direct mutation is prohibited"); }
 
-export function validatePreflight(input) {
-  const errors = [];
-  if (input.projectId !== EXPECTED_PROJECT_ID) errors.push("WRONG_PROJECT");
-  if (input.serviceAccountProject !== EXPECTED_PROJECT_ID) errors.push("WRONG_SERVICE_ACCOUNT_PROJECT");
-  if (input.confirmToken !== CONFIRM_TOKEN) errors.push("WRONG_CONFIRMATION_TOKEN");
-  if (input.inventory?.schemaVersion !== RESET_SCHEMA_VERSION) errors.push("OLD_SCHEMA_VERSION");
-  if (input.inventory?.status !== "PASSED") errors.push("INVENTORY_NOT_PASSED");
-  if (stableStringify(input.inventory?.resetPolicy) !== stableStringify(RESET_POLICY)) errors.push("RESET_POLICY_MISMATCH");
-  if (input.hashesMatch === false) errors.push("HASH_MISMATCH");
-  if (input.updateTimesMatch === false) errors.push("UPDATE_TIME_MISMATCH");
-  if (input.countsMatch === false) errors.push("COUNT_MISMATCH");
-  if (input.ambiguousTrns) errors.push("AMBIGUOUS_TRN");
-  if (input.ambiguousStorage) errors.push("AMBIGUOUS_STORAGE");
-  return {passed: errors.length === 0, errors};
-}
+export function validatePreflight() { throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: use governed batch removal; direct mutation is prohibited"); }

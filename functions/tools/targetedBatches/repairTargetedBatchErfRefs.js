@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { Timestamp, getFirestore } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 
 import {
   resolveAuthoritativeSalesErfReference,
@@ -152,10 +152,13 @@ function buildAssessment({ row, sourceSnapshot }) {
 }
 
 async function main() {
+  if (process.argv.some(arg => /^--apply(?:=|$)/.test(arg))) throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED");
+  if (!process.argv.includes("--historical-dev-inventory")) throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED: explicit --historical-dev-inventory required; assessment is non-authoritative");
   const args = parseArgs(process.argv.slice(2));
   const projectId = cleanText(args["project-id"] || "ireps2");
   const tbId = normalizeUpper(args["tb-id"]);
-  const apply = args.apply === true;
+  const apply = false;
+  if (projectId !== "ireps2") throw new Error("Historical assessment is DEV only");
   const serviceAccountPath = path.resolve(cleanText(args["service-account"]));
   const outputPath = path.resolve(
     cleanText(args.output) ||
@@ -200,6 +203,7 @@ async function main() {
   }
 
   const parent = parentSnapshot.data() || {};
+  if (parent.schemaVersion === "0.3.0") throw new Error("Canonical Sales batches cannot use legacy demo repair assessment");
   console.log(
     `[PASS] status=${parent?.status || "NAv"}, acceptance=${parent?.acceptance?.status || "NAv"}`,
   );
@@ -279,29 +283,12 @@ async function main() {
     );
   } else if (!apply) {
     console.log(
-      `[DRY RUN] ${repairableRows.length} row(s) are ready for repair. No writes performed.`,
+      `[DRY RUN] ${repairableRows.length} row(s) are historical suggestions only; never apply. No writes performed.`,
     );
   } else if (repairableRows.length === 0) {
     console.log("[PASS] All ERF references are already correct.");
   } else {
-    const now = Timestamp.now();
-    const batch = db.batch();
-
-    repairableRows.forEach((assessment) => {
-      const row = rows.find((item) => item.id === assessment.tbRowId);
-
-      batch.update(row.ref, {
-        "refs.erfId": assessment.resolvedErfId,
-        "property.erfNo": assessment.resolvedErfNo,
-        "metadata.updatedAt": now,
-        "metadata.updatedByUid": "SYSTEM_TARGETED_BATCH_ERF_REPAIR",
-        "metadata.updatedByUser": "SYSTEM_TARGETED_BATCH_ERF_REPAIR",
-      });
-    });
-
-    await batch.commit();
-    writesPerformed = repairableRows.length;
-    console.log(`[PASS] Updated ${writesPerformed} TB row(s).`);
+    throw new Error("TARGETED_BATCH_MAINTENANCE_RETIRED");
   }
 
   const report = {

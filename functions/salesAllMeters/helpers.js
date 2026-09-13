@@ -1,3 +1,4 @@
+import { inspectSalesTbRefsIntegrity, inspectSavedErfDecision, inspectErfLookup, SALES_BATCH_ID } from "./sales-batch-policy.js";
 export const SALES_ALL_METERS_OUTCOMES = Object.freeze({
   TARGET_MISSING: "TARGET_MISSING", UNCHANGED: "UNCHANGED",
   UPDATED: "UPDATED", CONFLICT: "CONFLICT",
@@ -136,9 +137,7 @@ function isNonblankString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function isNullableNonblankString(value) {
-  return value === null || isNonblankString(value);
-}
+
 
 function isFirestoreTimestampLike(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -246,124 +245,11 @@ export function buildSalesAllMetersOperationalMetadataPatch({
   };
 }
 
-function validateNoAccessEntries(value, path, unsafe) {
-  if (!Array.isArray(value)) {
-    unsafe.push(path);
-    return;
-  }
 
-  value.forEach((entry, index) => {
-    const entryPath = `${path}.${index}`;
-    if (!isPlainObject(entry)) {
-      unsafe.push(entryPath);
-      return;
-    }
-
-    if (typeof entry.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) {
-      unsafe.push(`${entryPath}.date`);
-    }
-    if (typeof entry.time !== "string" || !/^\d{2}:\d{2}:\d{2}$/.test(entry.time)) {
-      unsafe.push(`${entryPath}.time`);
-    }
-    if (!isNonblankString(entry.user)) unsafe.push(`${entryPath}.user`);
-  });
-}
 
 function validateTbRefs(value, unsafe) {
-  if (!Array.isArray(value)) {
-    unsafe.push("tbRefs");
-    return;
-  }
-
-  const seenIds = new Set();
-  const validStatuses = new Set(["NOT_STARTED", "IN_PROGRESS", "COMPLETED"]);
-
-  value.forEach((reference, index) => {
-    const path = `tbRefs.${index}`;
-    if (!isPlainObject(reference)) {
-      unsafe.push(path);
-      return;
-    }
-
-    if (!isNonblankString(reference.id)) {
-      unsafe.push(`${path}.id`);
-    } else {
-      const logicalId = reference.id.trim().toUpperCase();
-      if (seenIds.has(logicalId)) unsafe.push(`${path}.id`);
-      seenIds.add(logicalId);
-    }
-
-    if (!isFirestoreTimestampLike(reference.date)) unsafe.push(`${path}.date`);
-
-    if (Object.hasOwn(reference, "rowId") && !isNonblankString(reference.rowId)) {
-      unsafe.push(`${path}.rowId`);
-    }
-
-    if (!Object.hasOwn(reference, "fieldWork")) return;
-    if (!isPlainObject(reference.fieldWork)) {
-      unsafe.push(`${path}.fieldWork`);
-      return;
-    }
-
-    const fieldWork = reference.fieldWork;
-    const fieldWorkPath = `${path}.fieldWork`;
-    const status = Object.hasOwn(fieldWork, "status")
-      ? String(fieldWork.status || "").trim().toUpperCase()
-      : "";
-
-    if (Object.hasOwn(fieldWork, "status") &&
-        (typeof fieldWork.status !== "string" ||
-         fieldWork.status !== status ||
-         !validStatuses.has(status))) {
-      unsafe.push(`${fieldWorkPath}.status`);
-    }
-
-    for (const field of [
-      "outcomeCode", "outcomeLabel", "targetedMeterNo", "discoveredMeterNo",
-      "premiseId", "meterId", "trnId",
-    ]) {
-      if (Object.hasOwn(fieldWork, field) && !isNullableNonblankString(fieldWork[field])) {
-        unsafe.push(`${fieldWorkPath}.${field}`);
-      }
-    }
-
-    if (Object.hasOwn(fieldWork, "meterMatch") &&
-        fieldWork.meterMatch !== null && typeof fieldWork.meterMatch !== "boolean") {
-      unsafe.push(`${fieldWorkPath}.meterMatch`);
-    }
-
-    for (const field of ["submittedAt", "updatedAt"]) {
-      if (Object.hasOwn(fieldWork, field) && fieldWork[field] !== null &&
-          !isFirestoreTimestampLike(fieldWork[field])) {
-        unsafe.push(`${fieldWorkPath}.${field}`);
-      }
-    }
-
-    if (Object.hasOwn(fieldWork, "noAccess")) {
-      validateNoAccessEntries(fieldWork.noAccess, `${fieldWorkPath}.noAccess`, unsafe);
-    }
-
-    if (status === "IN_PROGRESS") {
-      if (!isNonblankString(reference.rowId)) unsafe.push(`${path}.rowId`);
-      if (!isFirestoreTimestampLike(fieldWork.updatedAt)) {
-        unsafe.push(`${fieldWorkPath}.updatedAt`);
-      }
-    }
-
-    if (status === "COMPLETED") {
-      if (!isNonblankString(reference.rowId)) unsafe.push(`${path}.rowId`);
-      for (const field of ["outcomeCode", "outcomeLabel", "premiseId", "meterId", "trnId"]) {
-        if (!isNonblankString(fieldWork[field])) unsafe.push(`${fieldWorkPath}.${field}`);
-      }
-      if (typeof fieldWork.meterMatch !== "boolean") unsafe.push(`${fieldWorkPath}.meterMatch`);
-      if (!isFirestoreTimestampLike(fieldWork.submittedAt)) {
-        unsafe.push(`${fieldWorkPath}.submittedAt`);
-      }
-      if (!isFirestoreTimestampLike(fieldWork.updatedAt)) {
-        unsafe.push(`${fieldWorkPath}.updatedAt`);
-      }
-    }
-  });
+  const result = inspectSalesTbRefsIntegrity(value);
+  if (!result.valid) unsafe.push(...result.issues);
 }
 
 function validateGeofenceRefs(value, unsafe) {
@@ -555,6 +441,10 @@ export function validateExistingSalesAllMetersTarget({
     if (Object.hasOwn(existing, field) && !Array.isArray(existing[field])) unsafe.push(field);
   }
   if (Object.hasOwn(existing, "tbRefs")) validateTbRefs(existing.tbRefs, unsafe);
+  if (Object.hasOwn(existing, "targetedBatchId") && existing.targetedBatchId !== null && (typeof existing.targetedBatchId !== "string" || !SALES_BATCH_ID.test(existing.targetedBatchId))) unsafe.push("targetedBatchId");
+  if (!inspectSavedErfDecision(existing).valid) unsafe.push("erfResolution");
+  if (!inspectErfLookup(existing).valid) unsafe.push("erfLookup");
+
   if (Object.hasOwn(existing, "geofenceRefs")) {
     validateGeofenceRefs(existing.geofenceRefs, unsafe);
   }

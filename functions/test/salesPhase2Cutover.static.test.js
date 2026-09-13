@@ -13,10 +13,10 @@ test("Targeted Batch central Sales binding is Sales All and lmPcode is strict", 
   assert.match(source, /if \(sourceLmPcode !== expectedLmPcode\)/);
 });
 
-test("Targeted Batch creation owns only tbRefs on Sales", async () => {
-  const source = await read("../targetedBatches/callables.js");
+test("Targeted Batch creation uses the governed atomic Sales patch", async () => {
+  const source = await read("../targetedBatches/sales-batch-creation.js");
   assert.doesNotMatch(source, /batchFail/);
-  assert.match(source, /tbRefs:\s*FieldValue\.arrayUnion\(salesTbRef\)/);
+  assert.match(source, /targetedBatchId: intent\.tbId, tbRefs:/);
   assert.doesNotMatch(source, /geofenceRefs\s*:/);
   assert.doesNotMatch(source, /master\s*:/);
 });

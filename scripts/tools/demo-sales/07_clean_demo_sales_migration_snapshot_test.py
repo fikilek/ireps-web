@@ -218,6 +218,9 @@ def clean_record(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, 
     if not isinstance(data, dict):
         return None, None, errors + ["data: expected object"]
 
+    if document_path.startswith("sales-all-meters/") or any(key in data for key in ("master", "targetedBatchId", "erfResolution", "erfLookup", "batchHistory")):
+        return None, None, errors + ["CANONICAL_SALES_PROHIBITED: immutable historical demo analysis only; output is non-authoritative and non-executable"]
+
     meter = text(data.get("MeterNumber"))
     if not meter:
         errors.append("MeterNumber: blank")
@@ -584,6 +587,8 @@ def main() -> int:
         },
         "outputs": {
             "cleanPipelineInput": clean_path.name,
+            "purpose": "HISTORICAL_DEMO_ANALYSIS_ONLY",
+            "operationalExportAuthorized": False,
             "rejectedRecords": rejected_path.name,
             "operationalPreservation": operational_path.name,
             "cleanPipelineInputSha256": sha256_file(clean_path),

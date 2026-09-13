@@ -9,7 +9,7 @@ import {
   validateEvidenceReferences, evidenceObjectState, detectDuplicates,
   markSharedStorage, serializeFirestoreValue, stableStringify, sha256Text,
   sortByKeys, expectedErfCounts, inventoryPathWithinRoot,
-  assertExpectedUpdateTime, uniqueSorted, cleanDemoSales, validatePreflight,
+  assertExpectedUpdateTime, cleanDemoSales, validatePreflight,
   exactUpdateTime, parseExactUpdateTime, exactUpdateTimesEqual, makeLastUpdateTime,
   writeImmutableJson, replaceLatestPointer, proveCanonicalCorrelation,
   assessStorageLiveState, assessSalesCollection,
@@ -46,13 +46,7 @@ test("correlation does not require an absent premise", () => {
   assert.ok(correlationState({tb: true, row: true, sales: true, premiseRequired: true, premise: false, registryErf: true}).includes("MISSING_REFERENCED_PREMISE"));
 });
 
-test("premise cleanup is exact, order preserving and idempotent", () => {
-  const first = cleanPremiseIds(["ordinary", "target", "new-unrelated", "bgo"], ["target"]);
-  assert.equal(first.safe, true); assert.deepEqual(first.remaining, ["ordinary", "new-unrelated", "bgo"]);
-  assert.deepEqual(cleanPremiseIds(first.remaining, ["target"]).remaining, first.remaining);
-  assert.equal(cleanPremiseIds(["target", "target"], ["target"]).safe, false);
-  assert.equal(cleanPremiseIds(["ok", null], ["target"]).safe, false);
-});
+test("retired premise cleanup cannot generate a mutation", () => assert.throws(() => cleanPremiseIds({}, []), /MAINTENANCE_RETIRED/));
 
 test("exact valid No Access evidence is accepted", () => {
   const result = validateEvidenceReferences([{tag: "noAccessPhoto", url: evidenceUrl()}], canonical.id);
@@ -130,26 +124,18 @@ test("duplicate detection and sorting are deterministic", () => {
   assert.deepEqual(detectDuplicates([{id: "b"}, {id: "a"}, {id: "b"}], (item) => item.id), ["b"]);
   assert.deepEqual(sortByKeys([{id: "b"}, {id: "a"}], ["id"]).map((item) => item.id), ["a", "b"]);
 });
-test("demo Sales cleanup removes only root tbRefs", () => {
-  const source = {tbRefs: [{id: "TB"}], geofenceRefs: [{id: "G"}], nested: {tbRefs: true}, other: 1}; const result = cleanDemoSales(source);
-  assert.equal(Object.hasOwn(result, "tbRefs"), false); assert.deepEqual(result.geofenceRefs, source.geofenceRefs); assert.deepEqual(result.nested, source.nested); assert.equal(result.other, 1);
-});
-test("registry ERF counts exclude only exact target TRNs", () => {
-  const trns = [{id: "target", accessData: {access: {hasAccess: "no"}}}, {id: "ordinary", accessData: {access: {hasAccess: "no"}}}, {id: "yes", accessData: {access: {hasAccess: "yes"}}}];
-  assert.deepEqual(expectedErfCounts(trns, ["target"]), {trnsNa: 1, trnsAccess: 1, trnsTotal: 2}); assert.deepEqual(uniqueSorted(["b", "a", "b"]), ["a", "b"]);
-});
+test("retired demo Sales cleanup cannot remove canonical linkage", () => assert.throws(() => cleanDemoSales({ tbRefs: [] }), /MAINTENANCE_RETIRED/));
+test("retired reset count projection cannot generate an apply plan", () => assert.throws(() => expectedErfCounts([], []), /MAINTENANCE_RETIRED/));
 
 const validPreflight = {projectId: "ireps2", serviceAccountProject: "ireps2", confirmToken: CONFIRM_TOKEN, inventory: {schemaVersion: RESET_SCHEMA_VERSION, status: "PASSED", resetPolicy: RESET_POLICY}, hashesMatch: true, countsMatch: true, updateTimesMatch: true, ambiguousTrns: 0, ambiguousStorage: 0};
-test("preflight accepts only the exact approved state and confirmation", () => assert.equal(validatePreflight(validPreflight).passed, true));
-for (const [name, patch, error] of [["wrong project", {projectId: "prod"}, "WRONG_PROJECT"], ["wrong credential", {serviceAccountProject: "prod"}, "WRONG_SERVICE_ACCOUNT_PROJECT"], ["old schema", {inventory: {...validPreflight.inventory, schemaVersion: "1.1.0"}}, "OLD_SCHEMA_VERSION"], ["blocked inventory", {inventory: {...validPreflight.inventory, status: "BLOCKED_AMBIGUOUS_SCOPE"}}, "INVENTORY_NOT_PASSED"], ["hash mismatch", {hashesMatch: false}, "HASH_MISMATCH"], ["update mismatch", {updateTimesMatch: false}, "UPDATE_TIME_MISMATCH"], ["count mismatch", {countsMatch: false}, "COUNT_MISMATCH"], ["ambiguous TRN", {ambiguousTrns: 1}, "AMBIGUOUS_TRN"], ["ambiguous Storage", {ambiguousStorage: 1}, "AMBIGUOUS_STORAGE"], ["old confirmation", {confirmToken: "RESET_TARGETED_BATCH_SCOPE_DEV"}, "WRONG_CONFIRMATION_TOKEN"]]) test(`preflight blocks ${name}`, () => assert.ok(validatePreflight({...validPreflight, ...patch}).errors.includes(error)));
+test("old valid preflight no longer authorizes apply", () => assert.throws(() => validatePreflight(validPreflight), /MAINTENANCE_RETIRED/));
+for (const [name, patch] of [["wrong project", {projectId: "prod"}, "WRONG_PROJECT"], ["wrong credential", {serviceAccountProject: "prod"}, "WRONG_SERVICE_ACCOUNT_PROJECT"], ["old schema", {inventory: {...validPreflight.inventory, schemaVersion: "1.1.0"}}, "OLD_SCHEMA_VERSION"], ["blocked inventory", {inventory: {...validPreflight.inventory, status: "BLOCKED_AMBIGUOUS_SCOPE"}}, "INVENTORY_NOT_PASSED"], ["hash mismatch", {hashesMatch: false}, "HASH_MISMATCH"], ["update mismatch", {updateTimesMatch: false}, "UPDATE_TIME_MISMATCH"], ["count mismatch", {countsMatch: false}, "COUNT_MISMATCH"], ["ambiguous TRN", {ambiguousTrns: 1}, "AMBIGUOUS_TRN"], ["ambiguous Storage", {ambiguousStorage: 1}, "AMBIGUOUS_STORAGE"], ["old confirmation", {confirmToken: "RESET_TARGETED_BATCH_SCOPE_DEV"}, "WRONG_CONFIRMATION_TOKEN"]]) test(`preflight blocks ${name}`, () => assert.throws(() => validatePreflight({...validPreflight, ...patch}), /MAINTENANCE_RETIRED/));
 
-test("apply uses exact manifests, write preconditions, and no active ireps_erfs operation", () => {
-  const source = fs.readFileSync(new URL("../scripts/tools/targeted-batches/02_delete_batches_and_clean_demo_sales_dev.js", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /collection\(["']ireps_erfs["']\)/); assert.doesNotMatch(source, /deleteFiles|deleteFilesByPrefix|batchDeleteCollection/);
-  assert.match(source, /makeLastUpdateTime/); assert.doesNotMatch(source, /Timestamp\.fromDate|updateTime.*toDate/); assert.match(source, /inventory\.exports\.tb_rows\.path/); assert.match(source, /inventory\.exports\.tb_uploads\.path/); assert.match(source, /readJsonl\(inventory\.manifests\.salesTbNaTrns\.path\)/);
-  const demoSalesStart = source.indexOf('console.log("[DEMO_SALES] START")'); const demoSalesEnd = source.indexOf('phases.push({phase: "DEMO_SALES"', demoSalesStart); const demoSalesBlock = source.slice(demoSalesStart, demoSalesEnd);
-  assert.ok(demoSalesStart >= 0 && demoSalesEnd > demoSalesStart); assert.doesNotMatch(demoSalesBlock, /guardedWrite|expectedUpdateTime|lastUpdateTime/); assert.match(demoSalesBlock, /snap\.ref\.update\(\{tbRefs: admin\.firestore\.FieldValue\.delete\(\)\}\)/);
-});
+test("retired apply entry has no credential initialization or database write path", () => {
+   const source=fs.readFileSync(new URL("../scripts/tools/targeted-batches/02_delete_batches_and_clean_demo_sales_dev.js",import.meta.url),"utf8");
+   assert.match(source,/throw new Error/); assert.match(source,/MAINTENANCE_RETIRED/);
+   assert.doesNotMatch(source,/initializeApp|credential|runTransaction|\.update\(|\.delete\(/);
+  });
 test("Step 1 contains no active ireps_erfs operation", () => {
   const source = fs.readFileSync(new URL("../scripts/tools/targeted-batches/01_read_targeted_batch_reset_scope_dev.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /collection\(["']ireps_erfs["']\)/); assert.doesNotMatch(source, /COUNT_COLLECTIONS[^\n]*ireps_erfs/);
@@ -215,8 +201,8 @@ test("full Sales preflight ignores unrelated changes but detects ID and tbRefs s
   const changed = salesRows(); changed[0].data.tbRefs = [{id: "OTHER"}]; assert.equal(assessSalesCollection(salesRows(), changed).valid, false);
   const gained = salesRows(); gained[1].data.tbRefs = []; assert.equal(assessSalesCollection(salesRows(), gained).valid, false);
 });
-test("final full Sales scan requires exact IDs/count and zero root tbRefs", () => {
-  const clean = salesRows().map((row) => ({...row, data: cleanDemoSales(row.data)}));
-  const result = assessSalesCollection(salesRows(), clean, {final: true}); assert.equal(result.valid, true); assert.equal(result.tbRefsRemaining, 0); assert.deepEqual(clean[0].data.geofenceRefs, [1]);
-  clean[1].data.tbRefs = []; assert.equal(assessSalesCollection(salesRows(), clean, {final: true}).valid, false);
-});
+test("historical final-scan evidence is read-only and is not an executable approval", () => {
+    const clean=salesRows().map(row=>{const data={...row.data};delete data.tbRefs;return {...row,data};});
+    const result=assessSalesCollection(salesRows(),clean,{final:true});assert.equal(result.valid,true);
+    assert.throws(()=>validatePreflight(validPreflight),/MAINTENANCE_RETIRED/);
+  });

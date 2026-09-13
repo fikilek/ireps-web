@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars -- Component tags are consumed by JSX; the repository uses the core ESLint rule. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
@@ -117,6 +118,8 @@ function getMeterStateColor(state, meterStateColors) {
 function buildMeterMarkerSvg({
   type,
   state,
+  salesWorkStatus,
+  showSalesWorkStatus = false,
   focused = false,
   subdued = false,
   meterStateColors,
@@ -142,6 +145,7 @@ function buildMeterMarkerSvg({
       <rect x="6.5" y="3.5" width="21" height="30" rx="5.5" fill="#ffffff" stroke="${stateColor}" stroke-width="3"/>
       <rect x="10" y="7" width="14" height="22" rx="3.5" fill="#f8fafc"/>
       ${glyph}
+      ${showSalesWorkStatus ? `<text x="27" y="12" font-size="10" font-weight="bold" fill="#111827">${salesWorkStatus === "NOT_STARTED" ? "N" : salesWorkStatus === "IN_PROGRESS" ? "I" : salesWorkStatus === "COMPLETED" ? "C" : "?"}</text>` : ""}
     </svg>
   `;
 
@@ -513,6 +517,8 @@ function MeterMarkersLayer({
           icon: buildMeterMarkerSvg({
             type: meter.type,
             state: meter.state,
+            salesWorkStatus: meter.salesWorkStatus,
+            showSalesWorkStatus: meter.showSalesWorkStatus,
             focused: isFocused,
             subdued: hasFocus && !isFocused,
             meterStateColors,
@@ -527,6 +533,7 @@ function MeterMarkersLayer({
               <strong>Field Meter ${escapeHtml(meter.number || "NAv")}</strong>
               <div style="margin-top: 6px;">Type: ${escapeHtml(meter.type || "NAv")}</div>
               <div>State: ${escapeHtml(meter.state || "NAv")}</div>
+              ${meter.showSalesWorkStatus ? `<div>Linked Sales status: ${escapeHtml(meter.salesWorkStatus || "unavailable")}</div>` : ""}
               <div>Premise: ${escapeHtml(meter.linkedPremiseId || "NAv")}</div>
               <div>ERF: ${escapeHtml(meter.linkedErfId || "NAv")}</div>
             </div>
@@ -609,6 +616,8 @@ export default function SalesTargetedBatchMap({
   focusedMeterId = "",
   height = 620,
   meterStateColors = EMPTY_METER_STATE_COLORS,
+  children = null,
+  hasDraftBoundary = false,
 }) {
   const [fitRequest, setFitRequest] = useState(0);
 
@@ -644,7 +653,7 @@ export default function SalesTargetedBatchMap({
     [focusedPremiseId, safePremises],
   );
   const focusedErfId = cleanText(focusedMeter?.linkedErfId);
-  const spatialFeatureCount =
+  const spatialFeatureCount = Number(hasDraftBoundary) +
     safeErfs.filter((erf) => erf?.geometry || isValidPoint(erf?.centroid))
       .length +
     safePremises.filter((premise) => isValidPoint(premise?.point)).length +
@@ -712,12 +721,13 @@ export default function SalesTargetedBatchMap({
               disableDefaultUI={false}
               style={{ width: "100%", height: "100%" }}
             >
-              <BatchViewportLayer
+              {children}
+              {!hasDraftBoundary && <BatchViewportLayer
                 erfs={safeErfs}
                 premises={safePremises}
                 meters={safeMeters}
                 fitRequest={fitRequest}
-              />
+              />}
               <ErfPolygonLayer erfs={safeErfs} focusedErfId={focusedErfId} />
               <ErfLabelsLayer
                 erfs={safeErfs}

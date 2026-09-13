@@ -60,3 +60,6 @@ python .\scripts\tools\sales-work-status-audit\01_audit_sales_work_status_readon
   --service-account "<PATH_TO_LIVE_SERVICE_ACCOUNT_JSON>" `
   --report-dir ".\docs\reports\sales-work-status-audit"
 ```
+
+
+Canonical v4.2 audit: Rules 1.2.0 (`30f9cdd`), Sales schema 1.6.0 (`21012fc`). Canonical status derives from raw visibility and strict TB8 only. Historical AST/Registry comparisons are diagnostics. Explicit project, environment, LM and report directory are required. This implementation task runs only offline fixtures; no live audit is authorized. Shared semantic corpus: `fixtures/classifier_parity.json`, version 2.

@@ -14,11 +14,6 @@ test("storage parser accepts only exact expected bucket objects", () => {
   assert.equal(parseStorageReference("gs://ireps2.appspot.com/media/*").eligible, false);
 });
 
-test("reference cleanup removes exact operational IDs only", () => {
-  const result = removeExactReferences({premiseId: "P1", note: "P1", ids: ["P1", "P2"], nested: {meterId: "M1"}}, new Set(["P1", "M1"]));
-  assert.deepEqual(result, {note: "P1", ids: ["P2"], nested: {}});
-});
+test("retired reference cleanup cannot remove operational evidence", () => assert.throws(() => removeExactReferences({}, new Set()), /MAINTENANCE_RETIRED/));
 
-test("sales cleanup preserves the document and removes operational links", () => {
-  assert.deepEqual(cleanSales({amount: 10, tbRefs: [{id: "TB1"}], premiseId: "P1", master: {visibility: "VISIBLE"}}, new Set(["P1"])), {amount: 10, master: {visibility: "INVISIBLE"}});
-});
+test("retired Sales cleanup cannot reset visibility or remove batch history", () => assert.throws(() => cleanSales({}, new Set()), /MAINTENANCE_RETIRED/));

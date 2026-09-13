@@ -1,19 +1,286 @@
 {
   "meterIdentity": [
-    { "raw": " 071 234 5678 ", "expected": "0712345678" },
-    { "raw": "ab12", "expected": "AB12" },
-    { "raw": "A-B", "expected": "" },
-    { "raw": "café", "expected": "" },
-    { "raw": "\u00a0A\ufeff1\u2028", "expected": "A1" },
-    { "raw": "", "expected": "" }
+    {
+      "raw": " 071 234 5678 ",
+      "expected": "0712345678"
+    },
+    {
+      "raw": "ab12",
+      "expected": "AB12"
+    },
+    {
+      "raw": "A-B",
+      "expected": ""
+    },
+    {
+      "raw": "caf\u00e9",
+      "expected": ""
+    },
+    {
+      "raw": "\u00a0A\ufeff1\u2028",
+      "expected": "A1"
+    },
+    {
+      "raw": "",
+      "expected": ""
+    }
   ],
   "validInProgressReference": {
-    "id": "TB-1",
+    "id": "TGB_20260913_120000_AB12",
     "rowId": "ROW-1",
-    "date": { "seconds": 1, "nanoseconds": 0 },
+    "date": {
+      "seconds": 1,
+      "nanoseconds": 0
+    },
     "fieldWork": {
       "status": "IN_PROGRESS",
-      "updatedAt": { "seconds": 2, "nanoseconds": 0 }
+      "updatedAt": {
+        "seconds": 2,
+        "nanoseconds": 0
+      }
     }
-  }
+  },
+  "version": 2,
+  "canonicalCases": [
+    {
+      "name": "invisible-unstarted",
+      "data": {
+        "master": {
+          "visibility": "INVISIBLE"
+        }
+      },
+      "status": "NOT_STARTED",
+      "membership": "NONE"
+    },
+    {
+      "name": "visible-first",
+      "data": {
+        "master": {
+          "visibility": "VISIBLE"
+        },
+        "tbRefs": [
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "rowId": "ROW-1",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "fieldWork": {
+              "status": "IN_PROGRESS",
+              "updatedAt": {
+                "seconds": 2,
+                "nanoseconds": 0
+              }
+            }
+          }
+        ]
+      },
+      "status": "COMPLETED",
+      "membership": "MEMBER"
+    },
+    {
+      "name": "in-progress",
+      "data": {
+        "master": {
+          "visibility": "INVISIBLE"
+        },
+        "tbRefs": [
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "rowId": "ROW-1",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "fieldWork": {
+              "status": "IN_PROGRESS",
+              "updatedAt": {
+                "seconds": 2,
+                "nanoseconds": 0
+              }
+            }
+          }
+        ]
+      },
+      "status": "IN_PROGRESS",
+      "membership": "MEMBER"
+    },
+    {
+      "name": "malformed-sibling",
+      "data": {
+        "tbRefs": [
+          null,
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "rowId": "ROW-1",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "fieldWork": {
+              "status": "IN_PROGRESS",
+              "updatedAt": {
+                "seconds": 2,
+                "nanoseconds": 0
+              }
+            }
+          }
+        ]
+      },
+      "status": "IN_PROGRESS",
+      "membership": "UNRESOLVED"
+    },
+    {
+      "name": "duplicate",
+      "data": {
+        "tbRefs": [
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "rowId": "ROW-1",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "fieldWork": {
+              "status": "IN_PROGRESS",
+              "updatedAt": {
+                "seconds": 2,
+                "nanoseconds": 0
+              }
+            }
+          },
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "rowId": "ROW-1",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "fieldWork": {
+              "status": "IN_PROGRESS",
+              "updatedAt": {
+                "seconds": 2,
+                "nanoseconds": 0
+              }
+            }
+          }
+        ]
+      },
+      "status": "NOT_STARTED",
+      "membership": "UNRESOLVED"
+    },
+    {
+      "name": "explicit-null",
+      "data": {
+        "targetedBatchId": null,
+        "tbRefs": [
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "rowId": "ROW-1",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "fieldWork": {
+              "status": "IN_PROGRESS",
+              "updatedAt": {
+                "seconds": 2,
+                "nanoseconds": 0
+              }
+            }
+          }
+        ]
+      },
+      "status": "IN_PROGRESS",
+      "membership": "NONE"
+    },
+    {
+      "name": "invalid-scalar",
+      "data": {
+        "targetedBatchId": "bad"
+      },
+      "status": "NOT_STARTED",
+      "membership": "UNRESOLVED"
+    },
+    {
+      "name": "legacy-alias",
+      "data": {
+        "tbRefs": [
+          {
+            "tbId": "TGB_20260913_120000_AB12",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            }
+          }
+        ]
+      },
+      "status": "NOT_STARTED",
+      "membership": "MEMBER"
+    },
+    {
+      "name": "malformed-null-refs",
+      "data": {
+        "tbRefs": null
+      },
+      "status": "NOT_STARTED",
+      "membership": "UNRESOLVED"
+    },
+    {
+      "name": "raw-null-master-overrides-flat-visible",
+      "data": {
+        "master": null,
+        "masterVisibility": "VISIBLE"
+      },
+      "status": "NOT_STARTED",
+      "membership": "NONE",
+      "valid": true
+    },
+    {
+      "name": "canonical-row-id-without-fieldwork-is-invalid",
+      "data": {
+        "tbRefs": [
+          {
+            "id": "TGB_20260913_120000_AB12",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            },
+            "rowId": "ROW1"
+          }
+        ]
+      },
+      "status": "NOT_STARTED",
+      "membership": "UNRESOLVED",
+      "valid": false
+    },
+    {
+      "name": "explicit-null-over-malformed-reference",
+      "data": {
+        "targetedBatchId": null,
+        "tbRefs": null
+      },
+      "status": "NOT_STARTED",
+      "membership": "NONE",
+      "valid": false
+    },
+    {
+      "name": "pre-execution-legacy-tbid",
+      "data": {
+        "tbRefs": [
+          {
+            "tbId": "TGB_20260913_120000_AB12",
+            "date": {
+              "seconds": 1,
+              "nanoseconds": 0
+            }
+          }
+        ]
+      },
+      "status": "NOT_STARTED",
+      "membership": "MEMBER",
+      "valid": true
+    }
+  ]
 }

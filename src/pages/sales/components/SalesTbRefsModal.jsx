@@ -1,5 +1,5 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useEffect, useMemo } from "react";
+import { inspectSalesTbRefsIntegrity, readTbRefBatchId, resolveSalesTargetedBatchMembership } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 function asText(value, fallback = "NAv") {
@@ -56,10 +56,10 @@ function getFieldWorkRows(fieldWork = {}) {
 }
 
 export default function SalesTbRefsModal({ row, onClose }) {
-  const tbRefs = useMemo(
-    () => (Array.isArray(row?.tbRefs) ? row.tbRefs.filter((ref) => ref?.id) : []),
-    [row?.tbRefs],
-  );
+  const tbRefs = Array.isArray(row?.tbRefs) ? row.tbRefs.map(ref => ref && typeof ref === "object" ? ref : {}) : [];
+
+  const membership = resolveSalesTargetedBatchMembership(row);
+  const integrity = inspectSalesTbRefsIntegrity(row?.tbRefs);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -119,9 +119,11 @@ export default function SalesTbRefsModal({ row, onClose }) {
         </div>
 
         <div style={styles.body}>
+          <p>Current membership: {membership.state === "MEMBER" ? membership.tbId : membership.state === "NONE" ? "None" : "Unresolved"}</p>
+          {!integrity.valid && <p role="alert">Historical linkage integrity: {integrity.issues.join(", ")}</p>}
           {tbRefs.length === 0 ? (
             <div style={styles.emptyState}>
-              This Sales meter is not currently linked to a Targeted Batch.
+              No historical Targeted Batch references are recorded.
             </div>
           ) : (
             <div style={styles.list}>
@@ -136,7 +138,7 @@ export default function SalesTbRefsModal({ row, onClose }) {
 
                 return (
                   <article
-                    key={`${ref.id}-${ref.rowId || index}`}
+                    key={`${readTbRefBatchId(ref)}-${index}`}
                     style={styles.referenceCard}
                   >
                     <div style={styles.referenceHeader}>
@@ -144,7 +146,7 @@ export default function SalesTbRefsModal({ row, onClose }) {
                       <div>
                         <p style={styles.referenceLabel}>TB ID</p>
                         <strong style={styles.referenceId}>
-                          {asText(ref.id)}
+                          {readTbRefBatchId(ref) || "Invalid historical reference"}
                         </strong>
                       </div>
                     </div>

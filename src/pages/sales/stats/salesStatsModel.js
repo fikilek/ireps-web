@@ -1,3 +1,4 @@
+import { exactSalesTbRef } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import { getOperationalSalesCategory } from "../models/salesTargetedBatchReadModel.js";
 
 export const ALL_FILTER = "ALL";
@@ -144,22 +145,8 @@ export function getGeofenceRefs(sales = {}, geofenceNameById = {}) {
 }
 
 export function getBatchReference(sales = {}, tbId, rowId) {
-  const refs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];
-  const normalizedTbId = cleanText(tbId);
-  const normalizedRowId = cleanText(rowId);
-
-  return (
-    refs.find(
-      (reference) =>
-        cleanText(reference?.id || reference?.tbId) === normalizedTbId &&
-        cleanText(reference?.rowId || reference?.tbRowId) === normalizedRowId,
-    ) ||
-    refs.find(
-      (reference) =>
-        cleanText(reference?.id || reference?.tbId) === normalizedTbId,
-    ) ||
-    null
-  );
+  const exact = exactSalesTbRef(sales, tbId);
+  return exact.ok && (!exact.reference.rowId || exact.reference.rowId === rowId) ? exact.reference : null;
 }
 
 export function getFieldWork(sales = {}, tbId, rowId) {

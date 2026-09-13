@@ -1,3 +1,4 @@
+import * as policy from "../../functions/salesAllMeters/sales-batch-policy.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -10,9 +11,10 @@ async function fixture() {
   const state = { uid: "A", governanceCalls: 0, listeners: [], raw: {}, args: [] };
   const context = createContext({ console: { info() {}, error() {} }, setTimeout, clearTimeout, Date, AbortController });
   const mocks = {
+    "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
       fakeBaseQuery: () => () => {},
-      createApi: config => ({ definitions: config.endpoints({ query: value => value }),
+      createApi: config => ({ definitions: config.endpoints({ query: value => value, mutation: value => value }),
         useGetSalesByLmPcodeQuery: arg => { state.args.push(arg); return state.raw; },
         useGetSalesGovernanceQuery: () => { state.governanceCalls++; return { error: "governance rejected" }; },
       }),
@@ -141,7 +143,7 @@ test("current membership projection preserves absence, null and invalid scalar e
   const legacyField = api.normalizeSalesRow("1", { activeTargetedBatchId: "TGB_20260912_100000_AAAA" });
   assert.equal(Object.hasOwn(legacyField, "activeTargetedBatchId"), false);
   const invalid = api.normalizeSalesRow("1", { tbRefs: [{ id: "" }] });
-  assert.equal(invalid.tbRefs.length, 0);
+  assert.equal(invalid.tbRefs.length, 1); // Preserve malformed raw entries for diagnosis.
   assert.equal(invalid.tbRefsIntegrity.valid, false);
   api.setSalesReadSession(null);
 });
