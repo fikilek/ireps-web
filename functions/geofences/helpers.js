@@ -1,6 +1,5 @@
 // /functions/geofences/helpers.js
 
-/* eslint-disable no-undef */
 
 import { HttpsError } from "firebase-functions/v2/https";
 
@@ -449,3 +448,13 @@ export const doesEntityBelongToGeoFence = ({ point, bbox, polygonPoints }) => {
 
   return isPointInsidePolygon(point, polygonPoints);
 };
+
+// Both creation paths persist the same ordinary geofence document.
+export function buildGeoFenceDocument({ id, name, description, parents, points, actorUid, actorName, now }) {
+  return {
+    id, name, description, status: "ACTIVE",
+    geometry: { type: "Polygon", points, centroid: buildGeoFenceCentroid(points), bbox: buildGeoFenceBoundingBox(points) },
+    parents, counts: { erfs: 0, premises: 0, meters: 0, salesMeters: 0 },
+    metadata: { createdAt: now, createdByUid: actorUid, createdByUser: actorName, updatedAt: now, updatedByUid: actorUid, updatedByUser: actorName },
+  };
+}

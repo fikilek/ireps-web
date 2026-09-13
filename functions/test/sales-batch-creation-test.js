@@ -6,7 +6,7 @@ import {buildTargetedBatchParentDoc,buildTargetedBatchRowDoc} from "../targetedB
 const f=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 test("factory snapshots fresh Sales and preserves identities without client authority",()=>{
  for(const source of ["PREPAID_SALES","PREPAID_SALES_NON_GPS"]){
-  const payload=creationPayload({tbId:f.tbId,source,reason:"Reviewed selection"},f.scope,1,`SALES_${f.tbId}`);
+  const payload=creationPayload({tbId:f.tbId,source,reason:"Reviewed selection"},f.scope,1,"ordinaryAutoFenceId1");
   const common={payload,creationDate:f.stamp,actorUid:f.actor.uid,actorName:f.actor.user};
   const parent=buildTargetedBatchParentDoc({...common,fingerprint:"A".repeat(64)});
   const before=JSON.stringify(f.sales),row=buildTargetedBatchRowDoc({...common,salesSource:f.sales,salesAllMeterId:"00123",rowNo:3,erfReference:{erfId:"ERF1",erfNo:"123"},draftRow:{meterNo:"FORGED",customerName:"FORGED",totalSalesC:999999,latitude:0}});

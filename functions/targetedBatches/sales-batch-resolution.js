@@ -223,7 +223,7 @@ export async function readDraftAssessment({ db, intent, codec, actor, read = sna
         }
         if (!point || !nonblank(salesStreetAddress(sales)) || !nonblank(sales.town)) throw batchError("ROW_INCOMPLETE", "Meter number, address, coordinates and ERF are required");
         if (fence) {
-          if (!fence.savedSalesIds.includes(salesId)) throw batchError("OUTSIDE_SAVED_POPULATION", "Not in the saved geofence population; start a new proposal to add this meter");
+          if (!fence.targetedBatch.salesIds.includes(salesId)) throw batchError("OUTSIDE_SAVED_POPULATION", "Not in the saved geofence population; start a new proposal to add this meter");
           if (context.scope.wardPcode !== fence.parents?.wardPcode || !strictlyWithinWard(fence.geometry, context.wardGeometry)) throw batchError("FENCE_WARD_INVALID", "The saved geofence is not strictly inside the authoritative Ward");
           if (!strictlyInside(context.centroid, fence.geometry)) throw batchError("CENTROID_OUTSIDE_GEOFENCE", "ERF centroid is outside or on the geofence boundary");
         }

@@ -68,9 +68,9 @@ export async function deleteSalesBatch({ db, request, now = () => Timestamp.now(
       if (modern && (rows.docs.length !== parent.counts?.totalRows || rows.docs.length !== parent.creation?.createdRows)) throw batchError("BATCH_COUNT_MISMATCH", "Permanent row and parent counts do not reconcile");
       assertUnexecuted(parent, rows.docs.map(row => row.data()));
       if (modern) {
-        if (!validDocumentId(parent.geofenceId)) throw batchError("FENCE_LINKAGE_INVALID", "The canonical dedicated fence identity is missing");
+        if (!validDocumentId(parent.geofenceId)) throw batchError("FENCE_LINKAGE_INVALID", "The canonical geofence identity is missing");
         const fenceSnapshot = await read(db.doc(`geo_fences/${parent.geofenceId}`)), fence = fenceSnapshot.exists ? fenceSnapshot.data() : null;
-        if (!fence || fence.proposedTbId !== tbId || fence.linkState !== "LINKED" || fence.status !== "BATCH_ONLY") throw batchError("FENCE_LINKAGE_INVALID", "The dedicated batch fence is missing or inconsistent");
+        if (!fence || fence.targetedBatch?.tbId !== tbId || fence.targetedBatch?.linkState !== "LINKED" || fence.status !== "ACTIVE") throw batchError("FENCE_LINKAGE_INVALID", "The batch geofence is missing or inconsistent");
       }
       const chunk = modern ? rows.docs : rows.docs.slice(0, 30), at = now();
       const plans = await prepareUnlinks({ db, read, parent, snapshots: chunk, actor, at, reason });

@@ -4,7 +4,8 @@ import fs from "node:fs";
 import { initializeApp, deleteApp } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { createProofCodec, resolveSalesBatch } from "../targetedBatches/sales-batch-resolution.js";
-import { saveSalesBatchGeofence, assessSalesBatch } from "../targetedBatches/sales-batch-geofence.js";
+import { assessSalesBatch } from "../targetedBatches/sales-batch-geofence.js";
+import { createGeoFenceRequest } from "../geofences/callables.js";
 import { createSalesBatch } from "../targetedBatches/sales-batch-creation.js";
 import { allocateNonGpsBatchAtomically, onAllocateTargetedBatchCallable } from "../targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "../targetedBatches/acceptanceCallable.js";
@@ -38,12 +39,17 @@ async function seed(n=1,{source="PREPAID_SALES_NON_GPS"}={}){
   batch.set(db.doc(`sales-all-meters/${id}`),row);
  }await batch.commit();return ids;
 }
+async function saveFence({db,request: req,codec}) {
+ const {points,saveSalesIds: _ignored,...intent}=req.data;
+ return createGeoFenceRequest({db,codec,request:{...req,data:{name:"Test named fence",description:"Owner description",parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:points.map(p=>Array.isArray(p)?{latitude:p[1],longitude:p[0]}:p),targetedBatch:intent}}});
+}
+async function fenceFor(tbId=f.tbId) {return (await db.collection("geo_fences").where("targetedBatch.tbId","==",tbId).get()).docs[0];}
 async function prepare(ids,{source="PREPAID_SALES_NON_GPS",tbId=f.tbId}={}){
  const intent={tbId,lmPcode:"ZA5241",source,salesIds:ids,reason:"Fixture selection",salesPeriodFrom:"2026-07",salesPeriodTo:"2026-08"};
  const resolved=await resolveSalesBatch({db,request:request(intent),codec,geocode});
  assert.equal(resolved.rows.every(row=>row.ready),true,JSON.stringify(resolved));
  intent.resolutionProofs=Object.fromEntries(resolved.rows.map(row=>[row.salesId,row.proof]));
- await saveSalesBatchGeofence({db,request:request({...intent,points:f.fencePoints,saveSalesIds:ids}),codec});
+ intent.geofenceId=(await saveFence({db,request:request({...intent,points:f.fencePoints,saveSalesIds:ids}),codec})).geofenceId;
  const assessment=await assessSalesBatch({db,request:request(intent),codec});
  return {...intent,confirmationProof:assessment.confirmationProof,fingerprint:assessment.fingerprint,includedIds:assessment.includedIds};
 }
@@ -70,7 +76,7 @@ test("30 confirmed with one newly occupied meter creates zero",async()=>{
  await db.doc(`sales-all-meters/${ids[10]}`).update({targetedBatchId:"TGB_20260913_120001_AB12"});
  await assert.rejects(createSalesBatch({db,request:request(intent),codec}));
  assert.equal((await db.collection("tb_uploads").get()).size,0);assert.equal((await db.collection("tb_rows").get()).size,0);
- assert.equal((await db.doc(`geo_fences/SALES_${f.tbId}`).get()).data().linkState,"UNLINKED");
+ assert.equal((await fenceFor()).data().targetedBatch.linkState,"UNLINKED");
  for(const id of ids)assert.equal((await db.doc(`sales-all-meters/${id}/batchHistory/${f.tbId}__BATCHED`).get()).exists,false);
 });
 test("failed overlapping lookup records only TB9, never coordinates or ERF",async()=>{
@@ -86,7 +92,7 @@ test("guarded unexecuted removal retains history and final ERF, consumes fence a
  await deleteSalesBatch({db,request:request({tbId:f.tbId,reason:"Owner fixture removal"})});
  const after=(await db.doc(`sales-all-meters/${ids[0]}`).get()).data();assert.equal(after.targetedBatchId,null);assert.deepEqual(after.tbRefs,[]);assert.deepEqual(after.erfResolution,before.erfResolution);
  assert.equal((await db.doc(`sales-all-meters/${ids[0]}/batchHistory/${f.tbId}__REMOVED_FROM_BATCH`).get()).exists,true);
- assert.equal((await db.doc(`geo_fences/SALES_${f.tbId}`).get()).data().linkState,"LINKED");
+ assert.equal((await fenceFor()).data().targetedBatch.linkState,"LINKED");
  await assert.rejects(createSalesBatch({db,request:request(intent),codec}));
  const next=await prepare(ids,{tbId:"TGB_20260913_120001_AB12"});assert.equal((await createSalesBatch({db,request:request(next),codec})).success,true);
 });
@@ -106,20 +112,20 @@ async function resolveIntent(ids,{source="PREPAID_SALES_NON_GPS",tbId=f.tbId}={}
 }
 test("Save is immutable, repeatable across winding, Sales-read-only, and population can only shrink",async()=>{
  const ids=await seed(3),intent=await resolveIntent(ids),before=await Promise.all(ids.map(id=>db.doc(`sales-all-meters/${id}`).get()));
- const saved=await saveSalesBatchGeofence({db,request:request({...intent,saveSalesIds:ids,points:f.fencePoints}),codec});assert.equal(saved.reused,false);
- assert.equal((await saveSalesBatchGeofence({db,request:request({...intent,saveSalesIds:ids,points:[...f.fencePoints].reverse()}),codec})).reused,true);
- await assert.rejects(saveSalesBatchGeofence({db,request:request({...intent,saveSalesIds:ids.slice(1),points:f.fencePoints}),codec}),/different saved/);
+ const saved=await saveFence({db,request:request({...intent,saveSalesIds:ids,points:f.fencePoints}),codec});assert.equal(saved.reused,false);
+ assert.equal((await saveFence({db,request:request({...intent,saveSalesIds:ids,points:[...f.fencePoints].reverse()}),codec})).reused,true);
+ await assert.rejects(saveFence({db,request:request({...intent,salesIds:ids.slice(1),points:f.fencePoints}),codec}),/different saved/);
  for(let i=0;i<ids.length;i++)assert.deepEqual((await db.doc(`sales-all-meters/${ids[i]}`).get()).data(),before[i].data());
- const smaller={...intent,salesIds:[ids[0],ids[2]]},assessed=await assessSalesBatch({db,request:request(smaller),codec});
+ const smaller={...intent,geofenceId:saved.geofenceId,salesIds:[ids[0],ids[2]]},assessed=await assessSalesBatch({db,request:request(smaller),codec});
  await createSalesBatch({db,request:request({...smaller,...assessed}),codec});
  const rows=await db.collection("tb_rows").where("tbId","==",f.tbId).get();assert.deepEqual(rows.docs.map(row=>row.data().rowNo).sort(),[1,3]);
  assert.equal((await db.doc(`sales-all-meters/${ids[1]}`).get()).data().targetedBatchId,undefined);
 });
 test("unresolved at Save cannot join after resolving later; every retained row is accounted for",async()=>{
  const source="PREPAID_SALES",ids=await seed(2,{source});await db.doc(`sales-all-meters/${ids[1]}`).update({erfCandidates:[]});
- let intent=await resolveIntent(ids,{source});await saveSalesBatchGeofence({db,request:request({...intent,saveSalesIds:[ids[0]],points:f.fencePoints}),codec});
+ let intent=await resolveIntent(ids,{source});await saveFence({db,request:request({...intent,saveSalesIds:[ids[0]],points:f.fencePoints}),codec});
  await db.doc(`sales-all-meters/${ids[1]}`).update({erfCandidates:[{ErfId:"ERF1",Latitude:-28.5,Longitude:30.5}]});
- intent=await resolveIntent(ids,{source});const assessed=await assessSalesBatch({db,request:request(intent),codec});
+ intent={...await resolveIntent(ids,{source}),geofenceId:(await fenceFor()).id};const assessed=await assessSalesBatch({db,request:request(intent),codec});
  assert.deepEqual(assessed.includedIds,[ids[0]]);assert.equal(assessed.leftOut[0].salesId,ids[1]);assert.equal(assessed.leftOut[0].code,"OUTSIDE_SAVED_POPULATION");assert.equal(assessed.rows.length,2);
 });
 test("a retained ineligible GPS meter in another Ward prevents Save even if excluded from save IDs",async()=>{
@@ -127,7 +133,7 @@ test("a retained ineligible GPS meter in another Ward prevents Save even if excl
  await db.doc("wards/ZA5241002").set({...f.ward,pcode:"ZA5241002",code:"2",name:"Ward 2",geometry:JSON.stringify({type:"Polygon",coordinates:[[[31,-29],[32,-29],[32,-28],[31,-28],[31,-29]]]})});
  await db.doc("ireps_erfs/ERF2").set({...f.erf,erfId:"ERF2",admin:{...f.erf.admin,ward:{pcode:"ZA5241002",name:"Ward 2"}},centroid:{lat:-28.5,lng:31.5},bbox:{minLat:-28.6,maxLat:-28.4,minLng:31.4,maxLng:31.6},geometry:JSON.stringify({type:"Polygon",coordinates:[[[31.4,-28.6],[31.6,-28.6],[31.6,-28.4],[31.4,-28.4],[31.4,-28.6]]]})});
  await db.doc(`sales-all-meters/${ids[1]}`).update({erfCandidates:[{ErfId:"ERF2",Latitude:-28.5,Longitude:31.5}],targetedBatchId:"TGB_20260913_120001_AB12"});
- const intent=await resolveIntent(ids,{source});await assert.rejects(saveSalesBatchGeofence({db,request:request({...intent,saveSalesIds:[ids[0]],points:f.fencePoints}),codec}),/one Ward/);
+ const intent=await resolveIntent(ids,{source});await assert.rejects(saveFence({db,request:request({...intent,saveSalesIds:[ids[0]],points:f.fencePoints}),codec}),/one Ward/);
  assert.equal((await db.collection("geo_fences").get()).size,0);
 });
 for(const [name,path,patch]of [
@@ -136,10 +142,10 @@ for(const [name,path,patch]of [
  ["actor role","users/SUPERVISOR1",{"employment.role":"FWR"}],
  ["Ward geometry","wards/ZA5241001",{geometry:"invalid"}],
  ["ERF geometry","ireps_erfs/ERF1",{geometry:"invalid"}],
- ["fence population",`geo_fences/SALES_${f.tbId}`,{savedSalesIds:["WRONG"]}],
- ["fence consumed",`geo_fences/SALES_${f.tbId}`,{linkState:"LINKED"}],
+ ["fence population","FENCE",{"targetedBatch.salesIds":["WRONG"]}],
+ ["fence consumed","FENCE",{"targetedBatch.linkState":"LINKED"}],
 ])test(`fresh transaction rejects changed ${name} with no creation writes`,async()=>{
- const ids=await seed(),intent=await prepare(ids);await db.doc(path).update(patch);
+ const ids=await seed(),intent=await prepare(ids);await db.doc(path==="FENCE"?`geo_fences/${intent.geofenceId}`:path).update(patch);
  await assert.rejects(createSalesBatch({db,request:request(intent),codec}));
  assert.equal((await db.collection("tb_uploads").get()).size,0);assert.equal((await db.collection("tb_rows").get()).size,0);assert.equal((await db.doc(`sales-all-meters/${ids[0]}/batchHistory/${f.tbId}__BATCHED`).get()).exists,false);
 });
@@ -189,11 +195,13 @@ test("No Access races removal: one complete outcome, never orphan execution or r
  const parent=await db.doc(`tb_uploads/${f.tbId}`).get(),sales=(await db.doc(`sales-all-meters/${ids[0]}`).get()).data(),trn=await db.doc("trns/TRN_MDIS_EMULATOR_1").get();
  if(parent.exists){assert.equal(sales.targetedBatchId,f.tbId);assert.equal(trn.exists,true);assert.equal(sales.tbRefs[0].fieldWork.status,"IN_PROGRESS");}else{assert.equal(sales.targetedBatchId,null);assert.equal(trn.exists,false);assert.deepEqual(sales.tbRefs,[]);}
 });
-test("BATCH_ONLY CREATE trigger returns before any generic membership write",async()=>{
- const ids=await seed(),intent=await prepare(ids),fence=await db.doc(`geo_fences/SALES_${f.tbId}`).get(),before=(await db.doc(`sales-all-meters/${ids[0]}`).get()).data();
+test("ordinary batch fence uses normal ERF and GPS Sales membership without batch membership",async()=>{
+ const ids=await seed(1,{source:"PREPAID_SALES"}),intent=await prepare(ids,{source:"PREPAID_SALES"}),fence=await fenceFor();
  await onGeoFenceCreated.run({data:fence,params:{geoFenceId:fence.id}});
- assert.deepEqual((await db.doc(`sales-all-meters/${ids[0]}`).get()).data(),before);assert.deepEqual((await fence.ref.get()).data(),fence.data());
- assert.equal((await db.collection("premises").get()).size,0);assert.equal((await db.collection("asts").get()).size,0);assert.equal((await db.collection("tb_uploads").get()).size,0);assert.ok(intent.confirmationProof);
+ assert.ok((await db.doc("ireps_erfs/ERF1").get()).data().geofenceRefs.some(ref=>ref.id===fence.id));
+ const sales=(await db.doc(`sales-all-meters/${ids[0]}`).get()).data();
+ assert.equal(sales.targetedBatchId,undefined);assert.deepEqual(sales.tbRefs,[]);
+ assert.equal((await fence.ref.get()).data().status,"ACTIVE");assert.ok(intent.confirmationProof);
 });
 
 test("saved Non-GPS final pair resolves after removal without another Google request or any Sales write",async()=>{
@@ -221,4 +229,55 @@ test("unknown geocoding province reports configuration failure and leaves persis
  assert.equal(result.rows[0].code,"GEOCODING_CONFIGURATION_ERROR");assert.equal(result.rows[0].ready,false);
  const after=await ref.get();assert.deepEqual(after.data(),before.data());assert.equal(after.updateTime.isEqual(before.updateTime),true);
  assert.equal((await db.collection("tb_uploads").get()).size,0);assert.equal((await db.collection("geo_fences").get()).size,0);
+});
+
+test("concurrent identical fence requests produce exactly one ordinary auto ID",async()=>{
+ const ids=await seed(),intent=await resolveIntent(ids);
+ const results=await Promise.all(Array.from({length:4},()=>saveFence({db,request:request({...intent,points:f.fencePoints}),codec})));
+ assert.equal(new Set(results.map(r=>r.geofenceId)).size,1);
+ const docs=await db.collection("geo_fences").get();assert.equal(docs.size,1);
+ const fence=docs.docs[0].data();assert.match(fence.id,/^[A-Za-z0-9]{20}$/);assert.equal(fence.name,"Test named fence");assert.equal(fence.description,"Owner description");assert.equal(fence.status,"ACTIVE");
+ assert.deepEqual(Object.keys(fence.targetedBatch).sort(),["fingerprint","geometryHash","linkState","salesIds","tbId"]);
+ assert.equal(fence.purpose,undefined);assert.equal(fence.proposedTbId,undefined);
+ clock+=10000000;assert.equal((await saveFence({db,request:request({...intent,points:f.fencePoints}),codec})).reused,true);
+});
+test("different simultaneous fence intents cannot reserve two geofences for one tbId",async()=>{
+ const ids=await seed(2),intent=await resolveIntent(ids);
+ const results=await Promise.allSettled([intent,{...intent,salesIds:[ids[0]]}].map(value=>saveFence({db,request:request({...value,points:f.fencePoints}),codec})));
+ assert.equal(results.filter(r=>r.status==="fulfilled").length,1);assert.equal((await db.collection("geo_fences").get()).size,1);
+});
+test("batch fence rejects invalid points, edges and bowties with zero writes",async()=>{
+ const ids=await seed(),intent=await resolveIntent(ids);
+ for(const points of [[...f.fencePoints,{latitude:"bad",longitude:30}],[[30,-29],[31,-29],[31,-28]],[[30.3,-28.7],[30.7,-28.3],[30.7,-28.7],[30.3,-28.3]],[[30.3,-28.7],[30.7,-28.7],[30.7,-28.7],[30.3,-28.3]],[[181,-28],[30,-28],[31,-27]]]){
+  await assert.rejects(saveFence({db,request:request({...intent,points}),codec}));
+ }
+ assert.equal((await db.collection("geo_fences").get()).size,0);
+});
+test("normal area permission cannot widen batch planning permission",async()=>{
+ const ids=await seed(),intent=await resolveIntent(ids);
+ await db.doc(`users/${f.actor.uid}`).update({"employment.role":"ADM"});
+ await assert.rejects(saveFence({db,request:request({...intent,points:f.fencePoints}),codec}),/Only MNG/);
+ const result=await createGeoFenceRequest({db,request:request({name:"Area",parents:{lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({longitude,latitude}))})});
+ const area=(await db.doc(`geo_fences/${result.geofenceId}`).get()).data();assert.equal(area.status,"ACTIVE");assert.equal(area.targetedBatch,undefined);
+});
+test("batch supervisor also needs normal MNC geofence permission",async()=>{
+ const ids=await seed(),intent=await resolveIntent(ids);
+ await db.doc(`users/${f.actor.uid}`).update({"employment.role":"SPV","employment.serviceProvider.id":"SP1"});
+ await db.doc("serviceProviders/SP1").set({clients:[]});
+ await assert.rejects(saveFence({db,request:request({...intent,points:f.fencePoints}),codec}),/Only MNC/);
+ await db.doc("serviceProviders/SP1").update({clients:[{id:"ZA5241",clientType:"LM",relationshipType:"MNC"}]});
+ assert.equal((await saveFence({db,request:request({...intent,points:f.fencePoints}),codec})).success,true);
+});
+test("ordinary membership counts changing does not invalidate batch confirmation",async()=>{
+ const ids=await seed(),intent=await prepare(ids);
+ await (await fenceFor()).ref.update({"counts.erfs":100,"metadata.updatedAt":new Date().toISOString()});
+ assert.equal((await createSalesBatch({db,request:request(intent),codec})).success,true);
+ const fence=(await fenceFor()).data();assert.equal(fence.targetedBatch.linkState,"LINKED");
+ await deleteSalesBatch({db,request:request({tbId:f.tbId})});assert.deepEqual((await fenceFor()).data(),fence);
+});
+test("old batch-only fence remains untouched and cannot be used for new creation",async()=>{
+ const ids=await seed(),intent=await resolveIntent(ids),old={id:`SALES_${f.tbId}`,status:"BATCH_ONLY",proposedTbId:f.tbId,linkState:"UNLINKED"};
+ await db.doc(`geo_fences/${old.id}`).set(old);
+ await assert.rejects(assessSalesBatch({db,request:request({...intent,geofenceId:old.id}),codec}),/Create a new geofence/);
+ assert.deepEqual((await db.doc(`geo_fences/${old.id}`).get()).data(),old);
 });

@@ -3,7 +3,7 @@ import { inspectSavedErfDecision, resolveSalesTargetedBatchMembership } from "..
 import { buildTargetedBatchParentDoc, buildTargetedBatchRowDoc } from "./documentFactory.js";
 import { buildTbRowId } from "./helpers.js";
 import { batchError, canonicalJson, materialHash, requireBatchIntent, readBatchActor, snapshotReader, proofScope, readDraftAssessment, salesMetadataUpdate } from "./sales-batch-resolution.js";
-import { salesBatchFenceId, assertDedicatedFence, confirmationMaterial } from "./sales-batch-geofence.js";
+import { requireSalesBatchFenceId, assertDedicatedFence, confirmationMaterial } from "./sales-batch-geofence.js";
 import { buildSalesBatchHistory } from "./sales-batch-history.js";
 
 export const MAX_DOCUMENT_BYTES = 900_000;
@@ -24,11 +24,11 @@ export async function createSalesBatch({ db, request, codec, now = () => Timesta
   const intent = requireBatchIntent(request.data);
   const expected = { kind: "CONFIRMATION", project: db.projectId, actorUid: request.auth?.uid, tbId: intent.tbId, lmPcode: intent.lmPcode, source: intent.source };
   const confirmed = codec.verify(intent.confirmationProof, expected, { allowExpired: true });
-  if (materialHash(confirmed.material) !== confirmed.fingerprint || intent.fingerprint !== confirmed.fingerprint || canonicalJson(intent.includedIds) !== canonicalJson(confirmed.material.includedIds) || canonicalJson(intent.salesIds) !== canonicalJson(confirmed.material.retainedIds) || intent.reason !== confirmed.material.reason || (intent.salesPeriodFrom ?? null) !== confirmed.material.salesPeriodFrom || (intent.salesPeriodTo ?? null) !== confirmed.material.salesPeriodTo) throw batchError("CONFIRMATION_INTENT_CHANGED", "The request differs from the exact confirmed meter list or intent");
+  if (materialHash(confirmed.material) !== confirmed.fingerprint || intent.geofenceId !== confirmed.material.geofenceId || intent.fingerprint !== confirmed.fingerprint || canonicalJson(intent.includedIds) !== canonicalJson(confirmed.material.includedIds) || canonicalJson(intent.salesIds) !== canonicalJson(confirmed.material.retainedIds) || intent.reason !== confirmed.material.reason || (intent.salesPeriodFrom ?? null) !== confirmed.material.salesPeriodFrom || (intent.salesPeriodTo ?? null) !== confirmed.material.salesPeriodTo) throw batchError("CONFIRMATION_INTENT_CHANGED", "The request differs from the exact confirmed meter list or intent");
   return db.runTransaction(async tx => {
     const read = snapshotReader(tx), actor = await readBatchActor({ db, request, lmPcode: intent.lmPcode, read });
     const parentRef = db.doc(`tb_uploads/${intent.tbId}`), parentSnapshot = await read(parentRef);
-    const fenceRef = db.doc(`geo_fences/${salesBatchFenceId(intent.tbId)}`), fenceSnapshot = await read(fenceRef);
+    const fenceRef = db.doc(`geo_fences/${requireSalesBatchFenceId(intent)}`), fenceSnapshot = await read(fenceRef);
     const fence = fenceSnapshot.exists ? fenceSnapshot.data() : null;
     if (parentSnapshot.exists) {
       const parent = parentSnapshot.data();
@@ -43,7 +43,7 @@ export async function createSalesBatch({ db, request, codec, now = () => Timesta
     const included = assessment.rows.filter(row => row.ready);
     const identities = [];
     for (const row of included) {
-      const rowNo = fence.savedSalesIds.indexOf(row.salesId) + 1, rowId = buildTbRowId(intent.tbId, rowNo);
+      const rowNo = fence.targetedBatch.salesIds.indexOf(row.salesId) + 1, rowId = buildTbRowId(intent.tbId, rowNo);
       const rowRef = db.doc(`tb_rows/${rowId}`), historyRef = db.doc(`sales-all-meters/${row.salesId}/batchHistory/${intent.tbId}__BATCHED`);
       const rowSnapshot = await read(rowRef), historySnapshot = await read(historyRef);
       if (rowSnapshot.exists || historySnapshot.exists) throw batchError("BATCH_ARTIFACT_CONFLICT", "A row or immutable history event already occupies this identity");
@@ -74,7 +74,7 @@ export async function createSalesBatch({ db, request, codec, now = () => Timesta
     // All authoritative reads and checks complete before the first write. 3N+2 writes.
     tx.create(parentRef, parent);
     for (const write of writes) { tx.create(write.rowRef, write.rowDoc); tx.create(write.historyRef, write.history); tx.update(write.salesRef, write.patch); }
-    tx.update(fenceRef, { linkState: "LINKED", "metadata.updatedAt": at, "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.user });
+    tx.update(fenceRef, { "targetedBatch.linkState": "LINKED", "metadata.updatedAt": at, "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.user });
     return { success: true, code: "TARGETED_BATCH_CREATED", creationState: "READY", tbId: intent.tbId, rowCount: included.length, reused: false };
   });
 }

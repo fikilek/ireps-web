@@ -1,15 +1,15 @@
 // /functions/geofences/callables.js
 
-/* eslint-disable no-undef */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore } from "firebase-admin/firestore";
+import { createSalesBatchGeofence } from "../targetedBatches/sales-batch-geofence.js";
+import { createProofCodec, salesBatchProofKey, callableFailure } from "../targetedBatches/sales-batch-resolution.js";
 
 import {
   validateCreateGeoFencePayload,
   normalizeGeoFencePoints,
-  buildGeoFenceBoundingBox,
-  buildGeoFenceCentroid,
+  buildGeoFenceDocument,
   getActorUserDoc,
   getAllServiceProviders,
   getUserDisplayName,
@@ -20,8 +20,7 @@ import {
    CREATE GEOFENCE
    ===================================================== */
 
-export const createGeoFence = onCall(async (request) => {
-  const db = getFirestore();
+export async function createGeoFenceRequest({ db, request, codec }) {
 
   const actorUid = request.auth?.uid || null;
   if (!actorUid) {
@@ -30,6 +29,10 @@ export const createGeoFence = onCall(async (request) => {
 
   const { name, description, parents, rawPoints } =
     validateCreateGeoFencePayload(request.data || {});
+
+  if (request.data?.targetedBatch !== undefined) {
+    return createSalesBatchGeofence({ db, request, codec, name, description, parents, rawPoints });
+  }
 
   const actorUserDoc = await getActorUserDoc(db, actorUid);
   const allServiceProviders = await getAllServiceProviders(db);
@@ -50,43 +53,10 @@ export const createGeoFence = onCall(async (request) => {
     );
   }
 
-  const bbox = buildGeoFenceBoundingBox(points);
-  const centroid = buildGeoFenceCentroid(points);
-
   const geoFenceRef = db.collection("geo_fences").doc();
-  const now = new Date().toISOString();
-
-  await geoFenceRef.set({
-    id: geoFenceRef.id,
-    name,
-    description,
-    status: "ACTIVE",
-
-    geometry: {
-      type: "Polygon",
-      points,
-      centroid,
-      bbox,
-    },
-
-    parents,
-
-    counts: {
-      erfs: 0,
-      premises: 0,
-      meters: 0,
-      salesMeters: 0,
-    },
-
-    metadata: {
-      createdAt: now,
-      createdByUid: actorUid,
-      createdByUser: actorName,
-      updatedAt: now,
-      updatedByUid: actorUid,
-      updatedByUser: actorName,
-    },
-  });
+  await geoFenceRef.set(buildGeoFenceDocument({
+    id: geoFenceRef.id, name, description, parents, points, actorUid, actorName, now: new Date().toISOString(),
+  }));
 
   return {
     success: true,
@@ -98,4 +68,14 @@ export const createGeoFence = onCall(async (request) => {
       salesMeters: 0,
     },
   };
+}
+
+export const createGeoFence = onCall({ secrets: [salesBatchProofKey], timeoutSeconds: 180, memory: "1GiB" }, async request => {
+  try {
+    return await createGeoFenceRequest({ db: getFirestore(), request,
+      codec: request.data?.targetedBatch !== undefined ? createProofCodec(salesBatchProofKey.value()) : null });
+  } catch (error) {
+    if (request.data?.targetedBatch !== undefined) return callableFailure(error);
+    throw error;
+  }
 });

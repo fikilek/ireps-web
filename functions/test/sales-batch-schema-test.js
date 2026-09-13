@@ -11,19 +11,19 @@ import { creationPayload } from "../targetedBatches/sales-batch-creation.js";
 const fixture=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 const schemaRoot=process.env.IREPS_SCHEMAS_ROOT || "C:/dev/ireps-schemas";
 const head=execFileSync("git",["--no-optional-locks","-c",`safe.directory=${schemaRoot}`,"-C",schemaRoot,"rev-parse","HEAD"],{encoding:"utf8"}).trim();
-assert.equal(head,"21012fcb0243b6c5fc61c9f99eb0b0efdadc014a","Mount the approved immutable schema checkout");
+assert.equal(head,"5d9c2ebe813922104607f40347d943490bfc1c28","Mount the approved immutable schema checkout");
 const ajv=new Ajv2020({allErrors:true,allowUnionTypes:true,strictTypes:false,strictRequired:false,coerceTypes:false,useDefaults:false,removeAdditional:false});
 for(const keyword of ["x-ireps","x-firestore-type"])ajv.addKeyword({keyword,valid:true});
 addFormats(ajv);
 const validators={};
-for(const [name,hash] of [["tb-uploads","CEA794BF26824BFD5C0411AD5B1147FF6075E93114EBA9DE1827329A0A682B44"],["tb-rows","76F9276B16711298ABFA5A1CA27E4606E6D82D3005F24B3F5F75B94663BAA3B2"]]){
+for(const [name,hash] of [["tb-uploads","DEC4A0C0495E6DC66214C7F4F8843B9B35763BD2AF8EA6173566E15818E256B7"],["tb-rows","76F9276B16711298ABFA5A1CA27E4606E6D82D3005F24B3F5F75B94663BAA3B2"]]){
  const bytes=fs.readFileSync(`${schemaRoot}/${name}/${name}-schema.json`);
  assert.equal(crypto.createHash("sha256").update(bytes).digest("hex").toUpperCase(),hash,"Canonical schema content changed");
  const schema=JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/,""));ajv.addSchema(schema);
  validators[name]={root:ajv.getSchema(schema.$id),fresh:ajv.compile({$ref:`${schema.$id}#/$defs/freshSalesCreation`})};
 }
 for(const source of ["PREPAID_SALES","PREPAID_SALES_NON_GPS"])for(const n of [1,30])test(`actual ${source} factory N=${n} matches root and fresh schema`,()=>{
- const payload=creationPayload({tbId:fixture.tbId,source,reason:"Test selection",salesPeriodFrom:"2026-07",salesPeriodTo:"2026-08"},fixture.scope,n,`SALES_${fixture.tbId}`);
+ const payload=creationPayload({tbId:fixture.tbId,source,reason:"Test selection",salesPeriodFrom:"2026-07",salesPeriodTo:"2026-08"},fixture.scope,n,"ordinaryAutoFenceId1");
  const common={payload,creationDate:fixture.stamp,actorUid:fixture.actor.uid,actorName:fixture.actor.user};
  const parent=buildTargetedBatchParentDoc({...common,fingerprint:"A".repeat(64)});
  for(const validator of Object.values(validators["tb-uploads"]))assert.equal(validator(parent),true,JSON.stringify(validator.errors));
@@ -40,7 +40,7 @@ for(const source of ["PREPAID_SALES","PREPAID_SALES_NON_GPS"])for(const n of [1,
 });
 
 test("each required root/fresh group is enforced without coercion or default insertion",()=>{
- const payload=creationPayload({tbId:fixture.tbId,source:"PREPAID_SALES_NON_GPS",reason:"Test"},fixture.scope,1,`SALES_${fixture.tbId}`);
+ const payload=creationPayload({tbId:fixture.tbId,source:"PREPAID_SALES_NON_GPS",reason:"Test"},fixture.scope,1,"ordinaryAutoFenceId1");
  const common={payload,creationDate:fixture.stamp,actorUid:fixture.actor.uid,actorName:fixture.actor.user};
  const parent=buildTargetedBatchParentDoc({...common,fingerprint:"A".repeat(64)}),row=buildTargetedBatchRowDoc({...common,salesSource:fixture.sales,salesAllMeterId:"00123",rowNo:1,erfReference:{erfId:"ERF1",erfNo:"123"}});
  for(const [name,doc,keys]of [["tb-uploads",parent,["id","scope","source","selection","creation","allocation","acceptance","execution","counts","metadata"]],["tb-rows",row,["id","tbId","rowNo","scope","source","meter","customer","location","decision","allocation","execution","refs","metadata"]]])for(const key of keys){const bad=structuredClone(doc);delete bad[key];const before=JSON.stringify(bad);assert.equal(validators[name].fresh(bad),false,`${name}.${key}`);assert.equal(JSON.stringify(bad),before);}
@@ -48,7 +48,7 @@ test("each required root/fresh group is enforced without coercion or default ins
 });
 
 for (const version of ["0.1.0", "0.2.0"]) test(`historical ${version} documents remain valid only under the compatibility root`, () => {
- const payload=creationPayload({tbId:fixture.tbId,source:"PREPAID_SALES",reason:"Historical fixture"},fixture.scope,1,`SALES_${fixture.tbId}`);
+ const payload=creationPayload({tbId:fixture.tbId,source:"PREPAID_SALES",reason:"Historical fixture"},fixture.scope,1,"ordinaryAutoFenceId1");
  const common={payload,creationDate:fixture.stamp,actorUid:fixture.actor.uid,actorName:fixture.actor.user};
  const parent={...buildTargetedBatchParentDoc({...common,fingerprint:"A".repeat(64)}),schemaVersion:version};
  const row={...buildTargetedBatchRowDoc({...common,salesSource:fixture.sales,salesAllMeterId:"00123",rowNo:1,erfReference:{erfId:"ERF1",erfNo:"123"}}),schemaVersion:version};
