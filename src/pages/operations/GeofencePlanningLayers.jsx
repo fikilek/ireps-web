@@ -78,7 +78,6 @@ export function GeofencePlanningLayers({
   visibility,
   salesStatusVisibility,
   isCreateMode,
-  showCentroids = false,
 }) {
   const map = useMap();
   const zoom = useCurrentZoom(14);
@@ -175,8 +174,11 @@ export function GeofencePlanningLayers({
     if (!map || !window.google?.maps) return undefined;
 
     clearMapObjects(erfLabelsRef);
-    if (!visibility.erfs || (!showCentroids && zoom < ERF_LABEL_MIN_ZOOM)) return undefined;
+    if (!visibility.erfs || zoom < ERF_LABEL_MIN_ZOOM) return undefined;
 
+    // Rules 18.7: the ERF number only, placed on the centroid (no separate centroid
+    // symbol), small and light on an off-white label (.ireps-erf-label in index.css)
+    // so it stays readable on every map type, including satellite.
     const labels = (model?.erfs || [])
       .filter((erf) => Boolean(erf.point))
       .map((erf) =>
@@ -185,18 +187,17 @@ export function GeofencePlanningLayers({
           map,
           title: `ERF ${erf.erfNo}`,
           label: {
-            text: zoom >= ERF_LABEL_MIN_ZOOM ? String(erf.erfNo || "E") : "",
-            color: "#0f172a",
-            fontWeight: "800",
-            fontSize: "11px",
+            text: String(erf.erfNo || "E"),
+            className: "ireps-erf-label",
+            color: "#334155",
+            fontWeight: "400",
+            fontSize: "10px",
           },
           icon: {
-            path: showCentroids ? "M -1,0 L 1,0 M 0,-1 L 0,1" : window.google.maps.SymbolPath.CIRCLE,
-            scale: showCentroids ? 6 : 1,
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 1,
             fillOpacity: 0,
-            strokeOpacity: showCentroids ? 1 : 0,
-            strokeColor: "#0f172a",
-            strokeWeight: 2,
+            strokeOpacity: 0,
           },
           clickable: false,
           zIndex: 42,
@@ -205,7 +206,7 @@ export function GeofencePlanningLayers({
 
     erfLabelsRef.current = labels;
     return () => clearMapObjects(erfLabelsRef);
-  }, [map, model?.erfs, visibility.erfs, zoom, showCentroids]);
+  }, [map, model?.erfs, visibility.erfs, zoom]);
 
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;

@@ -64,7 +64,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
     <div style={{ ...mapShellStyle, height: 560 }}>
       {!key ? <p>Google Maps key missing</p> : !bounds ? <p role="status">{locating || !live?.ready || !Object.keys(draft.resolutions).length ? "Locating meters…" : "No draft meters could be located. Press Locate meters again."}</p> : <APIProvider apiKey={key}>
         <GoogleMap defaultCenter={{ lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }} defaultZoom={18} mapTypeId={mapTypeId} gestureHandling="greedy" disableDefaultUI={false} onClick={handleMapClick} style={{ width: "100%", height: "100%" }}>
-          <GeofencePlanningLayers model={planningModel} {...{ visibility, salesStatusVisibility, isCreateMode }} showCentroids/>
+          <GeofencePlanningLayers model={planningModel} {...{ visibility, salesStatusVisibility, isCreateMode }}/>
           <ExistingGeoFenceLayer geofences={mapFences} selectedGeoFenceId={selectedGeoFence?.id || ""} onSelectGeoFence={setSelectedGeoFence} interactive={!isCreateMode} fitSelected={false}/>
           {isCreateMode && <DraftGeoFenceLayer draftPoints={draftPoints}/>}
           <SalesBatchMapLayers rows={model.rows} highlightedId={highlightedId} onHighlight={onHighlight}/>

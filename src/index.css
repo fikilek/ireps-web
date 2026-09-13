@@ -41,3 +41,13 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+/* ERF number labels on maps (Targeted Batch rules 18.7): small and light on an
+   off-white background, readable on every map type including satellite. */
+.ireps-erf-label {
+  background: #fbfbf9;
+  border: 1px solid rgba(51, 65, 85, 0.25);
+  border-radius: 3px;
+  padding: 0 3px;
+  line-height: 1.35;
+}
