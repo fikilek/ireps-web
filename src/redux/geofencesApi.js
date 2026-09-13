@@ -567,7 +567,7 @@ export const geofencesApi = createApi({
       async queryFn(payload) {
         try {
           const functions = getFunctions();
-          const callable = httpsCallable(functions, "createGeoFence");
+          const callable = httpsCallable(functions, "createGeoFence", { timeout: 180000 });
           const result = await callable(payload);
 
           return {

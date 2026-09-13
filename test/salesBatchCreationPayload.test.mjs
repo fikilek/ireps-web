@@ -24,7 +24,7 @@ test("callable intent carries retained identities and signed evidence, without c
   const value = draft(); value.selection.reason = "Fixture selection";
   value.resolutions = { "07100000001": { proof: "MOCK_SIGNED_PROOF", erfId: "UNTRUSTED", ready: true } };
   const input = salesDraftIntent(value);
-  assert.deepEqual(Object.keys(input).sort(), ["tbId", "lmPcode", "source", "salesIds", "reason", "salesPeriodFrom", "salesPeriodTo", "resolutionProofs"].sort());
+  assert.deepEqual(Object.keys(input).sort(), ["tbId", "lmPcode", "source", "geofenceId", "salesIds", "reason", "salesPeriodFrom", "salesPeriodTo", "resolutionProofs"].sort());
   assert.deepEqual(input.salesIds, value.retainedIds);
   assert.equal(input.resolutionProofs["07100000001"], "MOCK_SIGNED_PROOF");
   assert.equal(Object.hasOwn(input, "draft"), false);

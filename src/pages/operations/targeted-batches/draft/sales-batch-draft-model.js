@@ -16,7 +16,7 @@ export function buildRetainedSalesDraft(payload, id) {
 }
 
 export function salesDraftIntent(draft) {
-  return { tbId: draft.id, lmPcode: draft.scope.lmPcode, source: draft.source.type, salesIds: [...draft.retainedIds],
+  return { tbId: draft.id, lmPcode: draft.scope.lmPcode, source: draft.source.type, geofenceId: draft.savedFence?.id || null, salesIds: [...draft.retainedIds],
     reason: draft.selection.reason || "Selected Sales meters", salesPeriodFrom: draft.selection.salesPeriodFrom || null,
     salesPeriodTo: draft.selection.salesPeriodTo || null, resolutionProofs: Object.fromEntries(Object.entries(draft.resolutions).filter(([,row]) => row.proof).map(([id,row]) => [id,row.proof])) };
 }
@@ -55,11 +55,13 @@ export function salesDraftReturnPath(source) {
 
 // Missing or ineligible rows remain visible until the operator explicitly removes them.
 export function projectSalesDraft(draft, live, { geometry = null, resolutionsCurrent = true, resolving = false, resolutionFailure = null, now = Date.now() } = {}) {
+  const validFence = draft.savedFence?.status === "ACTIVE" && draft.savedFence?.targetedBatch?.tbId === draft.id;
+  const oldFence = draft.savedFence?.status === "BATCH_ONLY";
   const rows = draft.retainedIds.map(salesId => {
     const sales = live?.sales?.[salesId], resolved = draft.resolutions[salesId];
     const fallback = draft.displayRows.find(row => (row.salesAllMeterId || row.id) === salesId);
     let row = { ...resolved, salesId, salesWorkStatus: sales ? classifySalesWorkStatus(sales) : null, meterNo: sales?.meterNo || fallback?.meterNo || salesId,
-      address: sales ? composeSalesGeocodingAddress(sales) : fallback?.addressLine1 || "", ready: false };
+      address: sales ? composeSalesGeocodingAddress(sales) : fallback?.addressLine1 || "", erfNo: live?.erfs?.[resolved?.erfId]?.sg?.erfNo || "", ready: false };
     if (!live?.ready) return { ...row, reason: live?.error || "Waiting for current draft data" };
     if (!sales) return { ...row, reason: "Sales meter is no longer available" };
     const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: draft.scope.lmPcode, source: draft.source.type });
@@ -71,7 +73,7 @@ export function projectSalesDraft(draft, live, { geometry = null, resolutionsCur
     if (!Number.isFinite(resolved.expiresAt) || now >= resolved.expiresAt) return { ...row, reason: "Location check expired. Press Locate meters again." };
     const erf = live.erfs[row.erfId], ward = live.wards[row.scope?.wardPcode];
     if (!erf || !ward) return { ...row, reason: "ERF or Ward data is unavailable" };
-    if (draft.savedFence && !draft.savedFence.savedSalesIds.includes(salesId)) return { ...row, reason: "Outside the saved population; start a new draft to include this meter" };
+    if (validFence && !draft.savedFence.targetedBatch.salesIds.includes(salesId)) return { ...row, reason: "Outside the saved population; start a new draft to include this meter" };
     if (geometry) {
       try {
         if (!strictlyWithinWard(geometry, ward.geometry)) return { ...row, reason: "Geofence must be strictly inside the Ward" };
@@ -84,13 +86,27 @@ export function projectSalesDraft(draft, live, { geometry = null, resolutionsCur
   const wards = [...new Set(rows.map(row => row.scope?.wardPcode).filter(Boolean))];
   const readyIds = rows.filter(row => row.ready).map(row => row.salesId);
   return { rows, wards, readyIds, canSave: live?.ready && wards.length === 1 && readyIds.length > 0 && Boolean(geometry),
-    canCreate: live?.ready && wards.length === 1 && readyIds.length > 0 && Boolean(draft.savedFence) && live.fence?.id === draft.savedFence.id && live.fence?.linkState === "UNLINKED" && !live.parent,
-    gate: wards.length > 1 ? "Retained meters span multiple Wards. Remove the named meters outside the intended Ward." : wards.length === 0 ? "Locate at least one meter to find the Ward." : "" };
+    canCreate: live?.ready && wards.length === 1 && readyIds.length > 0 && validFence && live.fence?.id === draft.savedFence.id && live.fence?.targetedBatch?.linkState === "UNLINKED" && !live.parent,
+    gate: oldFence ? "Create a new geofence for this draft; the earlier fence model cannot be used." : wards.length > 1 ? "Retained meters span multiple Wards. Remove the named meters outside the intended Ward." : wards.length === 0 ? "Locate at least one meter to find the Ward." : "" };
 }
 export function draftGeometry(points, savedFence) {
-  try { return savedFence ? normalizeBatchGeometry(savedFence.geometry) : polygonFromPoints(points); } catch { return null; }
+  try { return savedFence?.status === "ACTIVE" && savedFence.targetedBatch ? normalizeBatchGeometry(savedFence.geometry) : polygonFromPoints(points); } catch { return null; }
 }
 
 export function confirmationIdentity(draft, live) {
   return JSON.stringify([draft.id, draft.retainedIds, draft.selection, draft.resolutions, draft.savedFence, live]);
+}
+
+export function salesDraftWardLabel(pcode, ward) {
+  const number = ward?.code || ward?.wardNumber || (pcode?.match(/(\d{3})$/)?.[1] ? Number(pcode.slice(-3)) : null);
+  return number ? `Ward ${Number(number)}` : ward?.name || "Ward not found";
+}
+export function salesDraftWardGroups(rows) {
+  const groups = new Map();
+  for (const row of rows) if (row.scope?.wardPcode) {
+    const key = row.scope.wardPcode;
+    if (!groups.has(key)) groups.set(key, { pcode: key, label: salesDraftWardLabel(key, { wardNumber: row.scope.wardNumber }), salesIds: [] });
+    groups.get(key).salesIds.push(row.salesId);
+  }
+  return [...groups.values()];
 }

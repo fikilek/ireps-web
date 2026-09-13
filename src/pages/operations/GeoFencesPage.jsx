@@ -1,4 +1,8 @@
 /* eslint-disable no-unused-vars -- Component tags are consumed by JSX; the repository uses the core ESLint rule. */
+import { pageStyle, headerStyle, eyebrowStyle, wardSelectWrapStyle, wardSelectLabelStyle, wardSelectStyle, mapShellStyle } from "./geofence-ui-styles";
+import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "./geofence-shared-ui";
+import { ExistingGeoFenceLayer, DraftGeoFenceLayer } from "./geofence-map-layers";
+import { isUsableMapPoint, toUsableLatLng, normalizeBbox, fitMapToBbox } from "./geofence-map-helpers";
 // src/pages/operations/GeoFencesPage.jsx
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -39,35 +43,6 @@ const FALLBACK_CENTER = {
   lat: -26.461472069502317,
   lng: 28.50667220650696,
 };
-
-function isZeroZeroPoint(point) {
-  const lat = Number(point?.lat ?? point?.latitude);
-  const lng = Number(point?.lng ?? point?.longitude);
-
-  return Number.isFinite(lat) && Number.isFinite(lng) && lat === 0 && lng === 0;
-}
-
-function isUsableMapPoint(point) {
-  const lat = Number(point?.lat ?? point?.latitude);
-  const lng = Number(point?.lng ?? point?.longitude);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-
-  // iREPS operational geography is never at 0,0. Treat this as missing/bad GPS
-  // so a single bad point cannot pull the map away from the selected geofence.
-  if (lat === 0 && lng === 0) return false;
-
-  return true;
-}
-
-function toUsableLatLng(point) {
-  if (!isUsableMapPoint(point)) return null;
-
-  return {
-    lat: Number(point?.lat ?? point?.latitude),
-    lng: Number(point?.lng ?? point?.longitude),
-  };
-}
 
 function getActiveLmPcode(activeWorkbase, selectedLm) {
   return (
@@ -211,60 +186,6 @@ function geoJsonPolygonToGooglePaths(geoJsonGeometry) {
   return [];
 }
 
-function normalizeBbox(bbox) {
-  if (!bbox) return null;
-
-  const minLat = Number(bbox.minLat ?? bbox.minLatitude);
-  const maxLat = Number(bbox.maxLat ?? bbox.maxLatitude);
-  const minLng = Number(bbox.minLng ?? bbox.minLongitude);
-  const maxLng = Number(bbox.maxLng ?? bbox.maxLongitude);
-
-  if (
-    !Number.isFinite(minLat) ||
-    !Number.isFinite(maxLat) ||
-    !Number.isFinite(minLng) ||
-    !Number.isFinite(maxLng)
-  ) {
-    return null;
-  }
-
-  if (minLat === 0 && maxLat === 0 && minLng === 0 && maxLng === 0) {
-    return null;
-  }
-
-  if (minLat > maxLat || minLng > maxLng) {
-    return null;
-  }
-
-  return {
-    minLat,
-    maxLat,
-    minLng,
-    maxLng,
-  };
-}
-
-function fitMapToBbox(map, bbox, padding = 56) {
-  if (!map || !bbox || !window.google?.maps) return;
-
-  const cleanBbox = normalizeBbox(bbox);
-  if (!cleanBbox) return;
-
-  const bounds = new window.google.maps.LatLngBounds();
-
-  bounds.extend({
-    lat: cleanBbox.minLat,
-    lng: cleanBbox.minLng,
-  });
-
-  bounds.extend({
-    lat: cleanBbox.maxLat,
-    lng: cleanBbox.maxLng,
-  });
-
-  map.fitBounds(bounds, padding);
-}
-
 function getWardCenter(ward) {
   const lat = Number(ward?.centroid?.lat ?? ward?.centroid?.latitude);
   const lng = Number(ward?.centroid?.lng ?? ward?.centroid?.longitude);
@@ -275,50 +196,6 @@ function getWardCenter(ward) {
     lat,
     lng,
   };
-}
-
-function getGeoFencePath(geoFence) {
-  const points = geoFence?.geometry?.points || geoFence?.points || [];
-
-  if (!Array.isArray(points)) return [];
-
-  return [...points]
-    .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
-    .map(toUsableLatLng)
-    .filter(Boolean);
-}
-
-function getGeoFencePointCount(geoFence) {
-  return getGeoFencePath(geoFence).length;
-}
-
-function fitMapToGeoFence(map, geoFence, padding = 88) {
-  if (!map || !geoFence || !window.google?.maps) return;
-
-  const bbox = normalizeBbox(geoFence?.bbox || geoFence?.geometry?.bbox);
-
-  if (bbox) {
-    fitMapToBbox(map, bbox, padding);
-    return;
-  }
-
-  const bounds = new window.google.maps.LatLngBounds();
-  let hasAnyPoint = false;
-
-  const geoFencePath = getGeoFencePath(geoFence);
-
-  geoFencePath.forEach((point) => {
-    const usablePoint = toUsableLatLng(point);
-
-    if (!usablePoint) return;
-
-    bounds.extend(usablePoint);
-    hasAnyPoint = true;
-  });
-
-  if (!hasAnyPoint) return;
-
-  map.fitBounds(bounds, padding);
 }
 
 function fitMapToWard(map, ward, padding = 56) {
@@ -607,176 +484,6 @@ function WardBoundaryLayer({
       }
     };
   }, [map, paths]);
-
-  return null;
-}
-
-function ExistingGeoFenceLayer({
-  geofences,
-  selectedGeoFenceId,
-  onSelectGeoFence,
-  interactive = true,
-}) {
-  const map = useMap();
-  const polygonsRef = useRef([]);
-
-  const selectedGeoFence = useMemo(() => {
-    return (
-      (geofences || []).find(
-        (geoFence) => geoFence.id === selectedGeoFenceId,
-      ) || null
-    );
-  }, [geofences, selectedGeoFenceId]);
-
-  useEffect(() => {
-    if (!map || !window.google?.maps) return;
-
-    polygonsRef.current.forEach((polygon) => polygon.setMap(null));
-    polygonsRef.current = [];
-    const infoWindows = [];
-
-    const polygons = (geofences || [])
-      .map((geoFence) => {
-        const path = getGeoFencePath(geoFence);
-
-        if (path.length < 3) return null;
-
-        const selected = selectedGeoFenceId === geoFence.id;
-
-        const polygon = new window.google.maps.Polygon({
-          paths: path,
-          strokeColor: selected ? "#dc2626" : "#10b981",
-          strokeOpacity: 1,
-          strokeWeight: selected ? 4 : 2,
-          fillColor: selected ? "#dc2626" : "#10b981",
-          fillOpacity: selected ? 0.18 : 0.15,
-          clickable: interactive,
-          zIndex: selected ? 80 : 60,
-        });
-
-        if (interactive) {
-          const infoWindow = new window.google.maps.InfoWindow({
-            content: `
-              <div style="font-family: Arial, sans-serif; min-width: 200px;">
-                <strong>${geoFence.name || geoFence.id}</strong>
-                <div style="margin-top: 4px;">${geoFence.description || "NAv"}</div>
-                <hr />
-                <div>ERFs: ${geoFence?.counts?.erfs || 0}</div>
-                <div>Premises: ${geoFence?.counts?.premises || 0}</div>
-                <div>Meters: ${geoFence?.counts?.meters || 0}</div>
-              </div>
-            `,
-          });
-
-          infoWindows.push(infoWindow);
-
-          polygon.addListener("click", (event) => {
-            onSelectGeoFence?.(geoFence);
-
-            infoWindow.setPosition(event.latLng);
-            infoWindow.open({
-              map,
-              shouldFocus: false,
-            });
-          });
-        }
-
-        polygon.setMap(map);
-
-        return polygon;
-      })
-      .filter(Boolean);
-
-    polygonsRef.current = polygons;
-
-    return () => {
-      infoWindows.forEach((infoWindow) => infoWindow.close());
-      polygonsRef.current.forEach((polygon) => polygon.setMap(null));
-      polygonsRef.current = [];
-    };
-  }, [map, geofences, selectedGeoFenceId, onSelectGeoFence, interactive]);
-
-  useEffect(() => {
-    if (!map || !selectedGeoFence) return;
-
-    const timer = setTimeout(() => {
-      fitMapToGeoFence(map, selectedGeoFence, 88);
-    }, 120);
-
-    return () => clearTimeout(timer);
-  }, [map, selectedGeoFence]);
-
-  return null;
-}
-
-function DraftGeoFenceLayer({ draftPoints }) {
-  const map = useMap();
-  const polygonRef = useRef(null);
-  const markersRef = useRef([]);
-
-  useEffect(() => {
-    if (!map || !window.google?.maps) return;
-
-    if (polygonRef.current) {
-      polygonRef.current.setMap(null);
-      polygonRef.current = null;
-    }
-
-    markersRef.current.forEach((marker) => marker.setMap(null));
-    markersRef.current = [];
-
-    const markers = draftPoints.map((point, index) => {
-      const marker = new window.google.maps.Marker({
-        position: point,
-        map,
-        label: {
-          text: String(index + 1),
-          color: "#ffffff",
-          fontWeight: "900",
-        },
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: "#2563eb",
-          fillOpacity: 1,
-          strokeColor: "#ffffff",
-          strokeWeight: 2,
-        },
-        zIndex: 170,
-        clickable: false,
-      });
-
-      return marker;
-    });
-
-    markersRef.current = markers;
-
-    if (draftPoints.length >= 3) {
-      const polygon = new window.google.maps.Polygon({
-        paths: draftPoints,
-        strokeColor: "#2563eb",
-        strokeOpacity: 1,
-        strokeWeight: 3,
-        fillColor: "#2563eb",
-        fillOpacity: 0.22,
-        clickable: false,
-        zIndex: 160,
-      });
-
-      polygon.setMap(map);
-      polygonRef.current = polygon;
-    }
-
-    return () => {
-      if (polygonRef.current) {
-        polygonRef.current.setMap(null);
-        polygonRef.current = null;
-      }
-
-      markersRef.current.forEach((marker) => marker.setMap(null));
-      markersRef.current = [];
-    };
-  }, [map, draftPoints]);
 
   return null;
 }
@@ -1393,24 +1100,6 @@ function UrlFocusPointLayer({
    MODAL
    ===================================================== */
 
-function Modal({ title, children, onClose, width = 720 }) {
-  return (
-    <div style={modalBackdropStyle}>
-      <div style={{ ...modalCardStyle, maxWidth: width }}>
-        <div style={modalHeaderStyle}>
-          <h2 style={{ margin: 0 }}>{title}</h2>
-
-          <button onClick={onClose} style={modalCloseButtonStyle}>
-            ×
-          </button>
-        </div>
-
-        {children}
-      </div>
-    </div>
-  );
-}
-
 /* =====================================================
    PAGE
    ===================================================== */
@@ -1495,6 +1184,7 @@ export default function GeoFencesPage() {
   const wardLabel = getWardLabel(selectedWardDoc, wardPcode);
   const mapCenter = getWardCenter(selectedWardDoc);
 
+  const [geofenceKind, setGeofenceKind] = useState("ALL");
   const [mapTypeId, setMapTypeId] = useState("roadmap");
   const [selectedGeoFence, setSelectedGeoFence] = useState(null);
   const [manualWardFlight, setManualWardFlight] = useState({
@@ -1530,6 +1220,8 @@ export default function GeoFencesPage() {
       { lmPcode, wardPcode },
       { skip: !lmPcode || !wardPcode },
     );
+
+  const visibleGeofences = geofences.filter(fence => geofenceKind === "ALL" || (geofenceKind === "BATCH") === Boolean(fence.targetedBatch));
 
   useEffect(() => {
     if (!focusGeofenceId || geofences.length === 0) return;
@@ -1886,8 +1578,7 @@ export default function GeoFencesPage() {
           ) : null}
         </div>
 
-        <div style={headerActionsStyle}>
-          <label style={wardSelectWrapStyle}>
+        <GeofenceToolbar wardControl={<label style={wardSelectWrapStyle}>
             <span style={wardSelectLabelStyle}>Select Ward</span>
             <select
               value={wardPcode}
@@ -1913,120 +1604,15 @@ export default function GeoFencesPage() {
                 })
               )}
             </select>
-          </label>
+          </label>}
+          filterControl={<label>Type <select aria-label="Geofence type" value={geofenceKind} onChange={event => setGeofenceKind(event.target.value)}><option value="ALL">Area / Batch</option><option value="AREA">Area</option><option value="BATCH">Batch</option></select></label>}
+          {...{ geofencesLoading, geofences, setListModalOpen, handleOpenCreateModal, scopeReady, setMapTypeId, mapTypeId, selectedGeoFence, setSelectedGeoFence, isTcContext, navigate, tcId }}/>
 
-          <div style={countPillStyle}>
-            <span>Geofences</span>
-            <strong>{geofencesLoading ? "..." : geofences.length}</strong>
-          </div>
-
-          <button onClick={() => setListModalOpen(true)} style={buttonStyle}>
-            Existing Geofences
-          </button>
-
-          <button
-            onClick={handleOpenCreateModal}
-            disabled={!scopeReady}
-            title={scopeReady ? "Create Geofence" : "Select a ward first"}
-            style={{
-              ...primaryButtonStyle,
-              opacity: scopeReady ? 1 : 0.45,
-              cursor: scopeReady ? "pointer" : "not-allowed",
-            }}
-          >
-            Create Geofence
-          </button>
-
-          <button
-            onClick={() =>
-              setMapTypeId((current) =>
-                current === "roadmap" ? "satellite" : "roadmap",
-              )
-            }
-            style={buttonStyle}
-          >
-            {mapTypeId === "roadmap" ? "Satellite" : "Map"}
-          </button>
-
-          {selectedGeoFence ? (
-            <button
-              onClick={() => setSelectedGeoFence(null)}
-              style={buttonStyle}
-            >
-              Clear Selection
-            </button>
-          ) : null}
-
-          {isTcContext ? (
-            <button
-              onClick={() => navigate(`/operations/tc-uploads/${tcId}`)}
-              style={buttonStyle}
-            >
-              Back to TC
-            </button>
-          ) : null}
-        </div>
       </header>
 
       <div style={mapShellStyle}>
-        {isCreateMode ? (
-          <div style={drawingPanelStyle}>
-            <strong>Creating: {draftName}</strong>
+        <GeofenceDrawingBar {...{ isCreateMode, draftName, draftPoints, draftPolygonReady, draftPreviewStats, handleUndoPoint, handleRestartDraft, handleOpenCreateConfirm, canSaveDraft, createState, handleCancelDraft }}/>
 
-            <span>
-              Points: {draftPoints.length}{" "}
-              {draftPolygonReady ? "• Ready to save" : "• Minimum 3 required"}
-            </span>
-
-            <span style={drawingStatsStyle}>
-              ERFs: <strong>{draftPreviewStats.erfs}</strong> • Sales:{" "}
-              <strong>{draftPreviewStats.sales.total}</strong>{" "}
-              (Not Started {draftPreviewStats.sales.notStarted}, In Progress{" "}
-              {draftPreviewStats.sales.inProgress}, Completed{" "}
-              {draftPreviewStats.sales.completed}) • Premises:{" "}
-              <strong>{draftPreviewStats.premises}</strong> • Assets:{" "}
-              <strong>{draftPreviewStats.assets}</strong>
-              {draftPreviewStats.sales.integrityExceptions > 0 ? (
-                <>
-                  {" "}
-                  • Sales integrity:{" "}
-                  <strong>{draftPreviewStats.sales.integrityExceptions}</strong>
-                </>
-              ) : null}
-            </span>
-
-            <button
-              onClick={handleUndoPoint}
-              disabled={draftPoints.length === 0}
-              style={buttonStyle}
-            >
-              Undo
-            </button>
-
-            <button
-              onClick={handleRestartDraft}
-              disabled={draftPoints.length === 0}
-              style={buttonStyle}
-            >
-              Restart
-            </button>
-
-            <button
-              onClick={handleOpenCreateConfirm}
-              disabled={!canSaveDraft}
-              style={{
-                ...primaryButtonStyle,
-                opacity: canSaveDraft ? 1 : 0.45,
-              }}
-            >
-              {createState.isLoading ? "Saving..." : "Save"}
-            </button>
-
-            <button onClick={handleCancelDraft} style={buttonStyle}>
-              Cancel
-            </button>
-          </div>
-        ) : null}
 
         <div role="status">
           <label>Sales category month <input type="month" value={salesCategoryMonth || ""} onChange={event => setSalesMonthSelection({ scope: salesScopeKey, month: event.target.value })} /></label>
@@ -2059,7 +1645,7 @@ export default function GeoFencesPage() {
             />
 
             <ExistingGeoFenceLayer
-              geofences={geofences}
+              geofences={visibleGeofences}
               selectedGeoFenceId={selectedGeoFenceId}
               onSelectGeoFence={setSelectedGeoFence}
               interactive={!isCreateMode}
@@ -2124,250 +1710,8 @@ export default function GeoFencesPage() {
         </APIProvider>
       </div>
 
-      {listModalOpen ? (
-        <Modal
-          title={`Existing Geofences in ${wardLabel}`}
-          onClose={() => setListModalOpen(false)}
-          width={860}
-        >
-          {geofences.length === 0 ? (
-            <p>No active geofences found in this ward.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {geofences.map((geoFence) => (
-                <div
-                  key={geoFence.id}
-                  style={{
-                    border: "1px solid #E5E7EB",
-                    borderRadius: 12,
-                    padding: 12,
-                    background:
-                      selectedGeoFence?.id === geoFence.id
-                        ? "#FEF3C7"
-                        : "white",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <div>
-                      <strong>{geoFence.name || geoFence.id}</strong>
+      <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess }}/>
 
-                      <p style={{ margin: "4px 0 0", color: "#64748B" }}>
-                        {geoFence.description || "NAv"}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setSelectedGeoFence(geoFence);
-                        setListModalOpen(false);
-                      }}
-                      style={buttonStyle}
-                    >
-                      Show on map
-                    </button>
-                  </div>
-
-                  <div style={modalCountsRowStyle}>
-                    <span>ERFs: {geoFence?.counts?.erfs || 0}</span>
-                    <span>Premises: {geoFence?.counts?.premises || 0}</span>
-                    <span>Meters: {geoFence?.counts?.meters || 0}</span>
-                    <span>Points: {getGeoFencePointCount(geoFence)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Modal>
-      ) : null}
-
-      {createModalOpen ? (
-        <Modal
-          title="Create New Geofence"
-          onClose={() => setCreateModalOpen(false)}
-          width={620}
-        >
-          <label>
-            Name
-            <input
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              placeholder="e.g. Ward 6 Block A"
-              style={inputStyle}
-            />
-          </label>
-
-          <label>
-            Description
-            <textarea
-              value={draftDescription}
-              onChange={(event) => setDraftDescription(event.target.value)}
-              placeholder="Optional description"
-              style={textareaStyle}
-            />
-          </label>
-
-          <p style={{ color: "#64748B", fontSize: 13 }}>
-            After clicking Start Drawing, click points directly on the map.
-            Minimum 3 points are required.
-          </p>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button
-              onClick={() => setCreateModalOpen(false)}
-              style={buttonStyle}
-            >
-              Cancel
-            </button>
-
-            <button onClick={handleStartDrawing} style={primaryButtonStyle}>
-              Start Drawing
-            </button>
-          </div>
-        </Modal>
-      ) : null}
-
-      {confirmCreateModalOpen ? (
-        <Modal
-          title="Confirm Geofence"
-          onClose={() => setConfirmCreateModalOpen(false)}
-          width={760}
-        >
-          <p style={confirmIntroStyle}>
-            You are about to create this geofence. Please confirm the selected
-            coverage.
-          </p>
-
-          <div style={countCardGridStyle}>
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>ERFs</span>
-              <strong style={countValueStyle}>{draftPreviewStats.erfs}</strong>
-            </div>
-
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>Sales</span>
-              <strong style={countValueStyle}>{draftPreviewStats.sales.total}</strong>
-              <span style={countDetailStyle}>
-                Not Started {draftPreviewStats.sales.notStarted} • In Progress{" "}
-                {draftPreviewStats.sales.inProgress} • Completed{" "}
-                {draftPreviewStats.sales.completed}
-              </span>
-              {draftPreviewStats.sales.integrityExceptions > 0 ? (
-                <span style={integrityDetailStyle}>
-                  Integrity: {draftPreviewStats.sales.integrityExceptions}
-                </span>
-              ) : null}
-            </div>
-
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>Premises</span>
-              <strong style={countValueStyle}>{draftPreviewStats.premises}</strong>
-            </div>
-
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>Assets</span>
-              <strong style={countValueStyle}>{draftPreviewStats.assets}</strong>
-            </div>
-          </div>
-
-          <div style={confirmDetailsStyle}>
-            <div>
-              <span style={confirmFieldLabelStyle}>Geofence Name</span>
-              <strong>{draftName.trim()}</strong>
-            </div>
-
-            <div>
-              <span style={confirmFieldLabelStyle}>Ward</span>
-              <strong>{wardLabel}</strong>
-            </div>
-          </div>
-
-          <div style={modalActionsStyle}>
-            <button
-              onClick={() => setConfirmCreateModalOpen(false)}
-              disabled={createState.isLoading}
-              style={buttonStyle}
-            >
-              Cancel
-            </button>
-
-            <button
-              onClick={handleConfirmCreate}
-              disabled={createState.isLoading}
-              style={{
-                ...primaryButtonStyle,
-                opacity: createState.isLoading ? 0.55 : 1,
-                cursor: createState.isLoading ? "not-allowed" : "pointer",
-              }}
-            >
-              {createState.isLoading ? "Creating..." : "Confirm Create"}
-            </button>
-          </div>
-        </Modal>
-      ) : null}
-
-      {createSuccess ? (
-        <Modal
-          title="Geofence Created"
-          onClose={() => setCreateSuccess(null)}
-          width={760}
-        >
-          <div style={successBoxStyle}>
-            <strong>{createSuccess.name}</strong> was created successfully in{" "}
-            <strong>{createSuccess.wardLabel}</strong>.
-          </div>
-
-          <div style={countCardGridStyle}>
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>ERFs planned</span>
-              <strong style={countValueStyle}>{createSuccess.stats.erfs}</strong>
-            </div>
-
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>Sales planned</span>
-              <strong style={countValueStyle}>{createSuccess.stats.sales.total}</strong>
-              <span style={countDetailStyle}>
-                Not Started {createSuccess.stats.sales.notStarted} • In Progress{" "}
-                {createSuccess.stats.sales.inProgress} • Completed{" "}
-                {createSuccess.stats.sales.completed}
-              </span>
-            </div>
-
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>Premises planned</span>
-              <strong style={countValueStyle}>{createSuccess.stats.premises}</strong>
-            </div>
-
-            <div style={countCardStyle}>
-              <span style={countLabelStyle}>Assets planned</span>
-              <strong style={countValueStyle}>{createSuccess.stats.assets}</strong>
-            </div>
-          </div>
-
-          <p style={{ color: "#475569", marginTop: 16 }}>
-            iREPS has submitted the geofence creation request. These are the
-            planning-preview counts; authoritative ERF, premise, asset and Sales
-            membership will update through the normal geofence membership process.
-            {createSuccess.isTcContext
-              ? " TC readiness will also update automatically."
-              : ""}
-          </p>
-
-          <div style={modalActionsStyle}>
-            <button
-              onClick={() => setCreateSuccess(null)}
-              style={primaryButtonStyle}
-            >
-              OK
-            </button>
-          </div>
-        </Modal>
-      ) : null}
     </section>
   );
 }
@@ -2375,284 +1719,3 @@ export default function GeoFencesPage() {
 /* =====================================================
    STYLES
    ===================================================== */
-
-const pageStyle = {
-  height: "calc(100vh - 96px)",
-  display: "flex",
-  flexDirection: "column",
-  gap: 14,
-};
-
-const headerStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 16,
-  padding: "0 0 4px",
-};
-
-const eyebrowStyle = {
-  margin: 0,
-  color: "#64748B",
-  fontSize: 12,
-  fontWeight: 800,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-};
-
-const headerActionsStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  flexWrap: "wrap",
-  justifyContent: "flex-end",
-};
-
-const wardSelectWrapStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  border: "1px solid #CBD5E1",
-  background: "white",
-  borderRadius: 10,
-  padding: "6px 8px",
-};
-
-const wardSelectLabelStyle = {
-  color: "#475569",
-  fontSize: 12,
-  fontWeight: 900,
-  whiteSpace: "nowrap",
-};
-
-const wardSelectStyle = {
-  border: "none",
-  outline: "none",
-  background: "transparent",
-  color: "#0F172A",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const countPillStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  border: "1px solid #E5E7EB",
-  background: "white",
-  borderRadius: 999,
-  padding: "8px 12px",
-  color: "#334155",
-};
-
-const buttonStyle = {
-  border: "1px solid #CBD5E1",
-  background: "white",
-  color: "#0F172A",
-  borderRadius: 10,
-  padding: "9px 12px",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const primaryButtonStyle = {
-  border: "1px solid #0F172A",
-  background: "#0F172A",
-  color: "white",
-  borderRadius: 10,
-  padding: "9px 12px",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const mapShellStyle = {
-  position: "relative",
-  flex: 1,
-  minHeight: 520,
-  border: "1px solid #E5E7EB",
-  borderRadius: 16,
-  overflow: "hidden",
-  background: "#E2E8F0",
-};
-
-const drawingPanelStyle = {
-  position: "absolute",
-  top: 14,
-  left: 14,
-  right: 14,
-  zIndex: 50,
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  flexWrap: "wrap",
-  background: "rgba(255,255,255,0.95)",
-  border: "1px solid #E5E7EB",
-  borderRadius: 14,
-  padding: 12,
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
-};
-
-const drawingStatsStyle = {
-  color: "#334155",
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const countDetailStyle = {
-  display: "block",
-  marginTop: 4,
-  color: "#475569",
-  fontSize: 11,
-  fontWeight: 800,
-};
-
-const integrityDetailStyle = {
-  display: "block",
-  marginTop: 4,
-  color: "#b91c1c",
-  fontSize: 11,
-  fontWeight: 900,
-};
-
-const modalBackdropStyle = {
-  position: "fixed",
-  inset: 0,
-  zIndex: 200,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: "rgba(15, 23, 42, 0.45)",
-  padding: 24,
-};
-
-const modalCardStyle = {
-  width: "100%",
-  maxHeight: "86vh",
-  overflow: "auto",
-  background: "white",
-  borderRadius: 18,
-  padding: 18,
-  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.28)",
-};
-
-const modalHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  marginBottom: 16,
-};
-
-const modalCloseButtonStyle = {
-  border: "none",
-  background: "#F1F5F9",
-  color: "#0F172A",
-  width: 34,
-  height: 34,
-  borderRadius: 17,
-  fontSize: 24,
-  lineHeight: "30px",
-  cursor: "pointer",
-};
-
-const modalCountsRowStyle = {
-  display: "flex",
-  gap: 12,
-  flexWrap: "wrap",
-  marginTop: 10,
-  color: "#334155",
-  fontSize: 13,
-  fontWeight: 800,
-};
-
-const confirmIntroStyle = {
-  color: "#475569",
-  marginTop: 0,
-  marginBottom: 16,
-};
-
-const countCardGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-  gap: 12,
-  marginBottom: 18,
-};
-
-const countCardStyle = {
-  border: "1px solid #E5E7EB",
-  background: "#F8FAFC",
-  borderRadius: 14,
-  padding: "16px 14px",
-  textAlign: "center",
-};
-
-const countLabelStyle = {
-  display: "block",
-  color: "#64748B",
-  fontSize: 12,
-  fontWeight: 900,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-};
-
-const countValueStyle = {
-  display: "block",
-  color: "#0F172A",
-  fontSize: 30,
-  lineHeight: "38px",
-  marginTop: 4,
-};
-
-const confirmDetailsStyle = {
-  display: "grid",
-  gap: 12,
-  borderTop: "1px solid #E5E7EB",
-  paddingTop: 14,
-};
-
-const confirmFieldLabelStyle = {
-  display: "block",
-  color: "#64748B",
-  fontSize: 12,
-  fontWeight: 900,
-  marginBottom: 4,
-};
-
-const modalActionsStyle = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 10,
-  marginTop: 20,
-};
-
-const successBoxStyle = {
-  border: "1px solid #BBF7D0",
-  background: "#F0FDF4",
-  color: "#14532D",
-  borderRadius: 14,
-  padding: 14,
-  marginBottom: 16,
-};
-
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  marginTop: 6,
-  marginBottom: 12,
-  padding: "10px 12px",
-  border: "1px solid #CBD5E1",
-  borderRadius: 10,
-};
-
-const textareaStyle = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  marginTop: 6,
-  marginBottom: 12,
-  padding: "10px 12px",
-  border: "1px solid #CBD5E1",
-  borderRadius: 10,
-  minHeight: 84,
-};

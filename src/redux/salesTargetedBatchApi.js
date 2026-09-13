@@ -1,9 +1,13 @@
+import { NEARBY_LIMIT, NEARBY_LAYERS, nearbyQuerySpec, nearbySalesQueryPlan, nearbyLayerRecords, emptyNearbyModel } from "../features/maps/sales-batch-nearby.js";
+import { summarizeSalesPlanningRecords } from "../pages/operations/geofencePlanningModel.js";
 import { classifySalesWorkStatus } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
   doc,
   documentId,
+  getDocs,
+  limit,
   onSnapshot,
   query,
   where,
@@ -476,44 +480,86 @@ export const salesTargetedBatchApi = createApi({
       },
     }),
     resolveSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("resolveSalesTargetedBatchCallable")),
-    saveSalesTargetedBatchGeofence: rtkBuilder.mutation(callSalesBatch("saveSalesTargetedBatchGeofenceCallable")),
     assessSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("assessSalesTargetedBatchCallable")),
     createSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onCreateTargetedBatchCallable")),
     deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
     allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
+    getSalesBatchNearby: builder.query({
+      keepUnusedDataFor: 0,
+      queryFn: () => ({ data: { model: emptyNearbyModel(), states: {} } }),
+      async onCacheEntryAdded(args, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
+        const stops = [], states = {}, model = emptyNearbyModel(); let active = true;
+        const requested = NEARBY_LAYERS.filter(layer => args.layers.includes(layer));
+        const publish = () => { if (active && isCurrent()) updateCachedData(() => ({ model: { ...model, generalAssets: model.assets, salesSummary: summarizeSalesPlanningRecords(model.salesRecords) }, states: { ...states } })); };
+        try {
+          await cacheDataLoaded;
+          if (!isCurrent() || !args.bounds || !args.wardPcode) return;
+          for (const layer of requested) states[layer] = "Loading nearby records…";
+          publish();
+          for (const layer of requested) {
+            if (layer === "sales") {
+              // Sales on the nearby ERFs only (see nearbySalesQueryPlan); never an LM-wide read.
+              const erfSpec = nearbyQuerySpec("erfs", args);
+              const erfSnapshot = await getDocs(query(collection(db, erfSpec.collection), ...erfSpec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1)));
+              if (!active || !isCurrent()) return;
+              const { records: nearbyErfs } = nearbyLayerRecords("erfs", erfSnapshot.docs.slice(0, NEARBY_LIMIT).map(doc => ({ ...doc.data(), id: doc.id })), args);
+              const plan = nearbySalesQueryPlan({ lmPcode: args.lmPcode, erfNumbers: nearbyErfs.map(erf => erf.erfNo), erfCapped: erfSnapshot.size > NEARBY_LIMIT });
+              if (!plan.specs.length) { model.salesRecords = []; states.sales = plan.truncated ? "Incomplete: nearby read limit reached" : "Complete"; publish(); continue; }
+              const chunks = new Map();
+              const publishSales = () => {
+                const merged = new Map(); let capped = false, pending = chunks.size < plan.specs.length;
+                for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; for (const row of chunk.rows) merged.set(row.id, row); }
+                try {
+                  const { records, invalid } = nearbyLayerRecords("sales", [...merged.values()], args);
+                  model.salesRecords = records;
+                  states.sales = pending ? "Incomplete: waiting for the server" : capped || plan.truncated ? "Incomplete: nearby read limit reached" : invalid ? `Incomplete: ${invalid} records have invalid scope or geometry` : "Complete";
+                } catch { model.salesRecords = []; states.sales = "Incomplete: Ward or layer geometry is invalid"; }
+                publish();
+              };
+              plan.specs.forEach((spec, index) => {
+                stops.push(onSnapshot(query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1)), { includeMetadataChanges: true }, snapshot => {
+                  if (!active || !isCurrent()) return;
+                  chunks.set(index, { rows: snapshot.docs.slice(0, NEARBY_LIMIT).map(doc => ({ ...doc.data(), id: doc.id })), capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
+                  publishSales();
+                }, () => { model.salesRecords = []; states.sales = "Error: nearby records could not be loaded"; publish(); }));
+              });
+              continue;
+            }
+            const spec = nearbyQuerySpec(layer, args);
+            stops.push(onSnapshot(query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1)), { includeMetadataChanges: true }, snapshot => {
+              if (!active || !isCurrent()) return;
+              const key = layer === "sales" ? "salesRecords" : layer;
+              try {
+                const capped = snapshot.size > NEARBY_LIMIT;
+                const { records, invalid } = nearbyLayerRecords(layer, snapshot.docs.slice(0, NEARBY_LIMIT).map(doc => ({ ...doc.data(), id: doc.id })), args);
+                model[key] = records;
+                states[layer] = snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : invalid ? `Incomplete: ${invalid} records have invalid scope or geometry` : "Complete";
+              } catch { model[key] = []; states[layer] = "Incomplete: Ward or layer geometry is invalid"; }
+              publish();
+            }, () => { model[layer === "sales" ? "salesRecords" : layer] = []; states[layer] = "Error: nearby records could not be loaded"; publish(); }));
+          }
+          await cacheEntryRemoved;
+        } catch { for (const layer of requested) states[layer] = "Error: nearby records could not be loaded"; publish(); }
+        finally { active = false; stops.forEach(stop => stop()); }
+      },
+    }),
     getSalesBatchDraftSnapshot: builder.query({
       keepUnusedDataFor: 0,
       queryFn: () => ({ data: { ready: false, sales: {}, erfs: {}, wards: {}, fence: null, parent: null, error: null } }),
-      async onCacheEntryAdded({ salesIds, erfIds = [], wardIds = [], tbId, lmPcode }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
+      async onCacheEntryAdded({ salesIds, erfIds = [], wardIds = [], tbId, geofenceId, lmPcode }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
         const stops = [], values = { sales: {}, erfs: {}, wards: {}, fence: null, parent: null, wardErfs: [], premises: [], meters: [] }, waiting = new Set(), errors = new Map();
         let active = true;
         const paths = [
           ...salesIds.map(id => ["sales", "sales-all-meters", id]),
           ...erfIds.map(id => ["erfs", "ireps_erfs", id]),
           ...wardIds.map(id => ["wards", "wards", id]),
-          ["fence", "geo_fences", `SALES_${tbId}`], ["parent", "tb_uploads", tbId],
+          ...(geofenceId ? [["fence", "geo_fences", geofenceId]] : []), ["parent", "tb_uploads", tbId],
         ];
         const publish = () => { if (active && isCurrent()) updateCachedData(() => ({ ...JSON.parse(JSON.stringify(values)), ready: waiting.size === 0 && errors.size === 0, error: [...errors.values()].join("; ") || null })); };
         try {
           await cacheDataLoaded;
           if (salesIds.length > 30 || paths.some(([, , id]) => typeof id !== "string" || !id || id.includes("/"))) throw new Error("Invalid retained draft identities");
           for (const [kind, , id] of paths) waiting.add(`${kind}/${id}`);
-          const layers = wardIds.length === 1 ? [
-            ["wardErfs", "ireps_erfs", "admin.ward.pcode"],
-            ["premises", "premises", "parents.wardPcode"],
-            ["meters", "asts", "accessData.parents.wardPcode"],
-          ] : [];
-          for (const [kind] of layers) waiting.add(kind);
-          for (const [kind, collectionName, field] of layers) {
-            stops.push(onSnapshot(query(collection(db, collectionName), where(field, "==", wardIds[0])), { includeMetadataChanges: true }, snapshot => {
-              const all = snapshot.docs.map(item => ({ ...item.data(), id: item.id }));
-              const sameLm = item => (kind === "wardErfs" ? item.admin?.localMunicipality?.pcode : kind === "premises" ? item.parents?.lmPcode : item.accessData?.parents?.lmPcode) === lmPcode;
-              values[kind] = all.filter(sameLm);
-              if (!snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) waiting.delete(kind); else waiting.add(kind);
-              if (values[kind].length !== all.length) errors.set(kind, `${kind} contains missing or conflicting LM authority`); else errors.delete(kind);
-              publish();
-            }, error => { errors.set(kind, error.message); publish(); }));
-          }
           for (const [kind, collectionName, id] of paths) {
             const key = `${kind}/${id}`;
             stops.push(onSnapshot(doc(db, collectionName, id), { includeMetadataChanges: true }, snapshot => {
@@ -2592,7 +2638,7 @@ function callSalesBatch(name) {
 }
 export function useGetSalesBatchDraftSnapshotQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchDraftSnapshotQuery", arg, options); }
 export function useGetPermanentSalesBatchesQuery(arg, options) { return useScopedTargetedBatchRead("useGetPermanentSalesBatchesQuery", arg, options); }
-export const { useResolveSalesTargetedBatchMutation, useSaveSalesTargetedBatchGeofenceMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation } = salesTargetedBatchApi;
+export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation } = salesTargetedBatchApi;
 export function useGetSalesOperationalStatsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesOperationalStatsByLmQuery", arg, options); }
 export function useGetTargetedBatchAllocationContextByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationContextByIdQuery", arg, options); }
 export function useGetTargetedBatchAllocationDirectoryQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationDirectoryQuery", arg, options); }
@@ -2606,3 +2652,5 @@ export function useGetTargetedBatchReportByIdQuery(arg, options) { return useSco
 export function useGetTargetedBatchDetailsByIdQuery(arg, options) {
   return useScopedTargetedBatchRead("useGetTargetedBatchDetailsByIdQuery", arg, options);
 }
+
+export function useGetSalesBatchNearbyQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchNearbyQuery", arg, options); }

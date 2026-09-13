@@ -22,11 +22,11 @@ test("mixed retained Wards block Save/Create even when one meter is ineligible",
  const result=projectSalesDraft(draft,live,{now:1000,geometry:f.ward.geometry});assert.equal(result.wards.length,2);assert.equal(Boolean(result.canSave),false);assert.equal(Boolean(result.canCreate),false);assert.match(result.gate,/multiple Wards/);
 });
 test("saved allowlist cannot grow; expiration/live failure/consumed fence block action",()=>{
- const {draft,live,ids}=fixture(2);draft.savedFence={id:`SALES_${draft.id}`,savedSalesIds:[ids[0]]};live.fence={id:draft.savedFence.id,linkState:"UNLINKED"};
+ const {draft,live,ids}=fixture(2);draft.savedFence={id:"ordinaryAutoFenceId1",status:"ACTIVE",targetedBatch:{tbId:draft.id,salesIds:[ids[0]],linkState:"UNLINKED"}};live.fence=draft.savedFence;
  let result=projectSalesDraft(draft,live,{now:1000});assert.deepEqual(result.readyIds,[ids[0]]);assert.equal(Boolean(result.canCreate),true);assert.match(result.rows[1].reason,/saved population/);
  assert.equal(projectSalesDraft(draft,live,{now:2000}).readyIds.length,0);
  assert.equal(Boolean(projectSalesDraft(draft,{...live,ready:false},{now:1000}).canCreate),false);
- assert.equal(Boolean(projectSalesDraft(draft,{...live,fence:{...live.fence,linkState:"LINKED"}},{now:1000}).canCreate),false);
+ assert.equal(Boolean(projectSalesDraft(draft,{...live,fence:{...live.fence,targetedBatch:{...live.fence.targetedBatch,linkState:"LINKED"}}},{now:1000}).canCreate),false);
  assert.equal(Boolean(projectSalesDraft(draft,{...live,parent:{id:draft.id}},{now:1000}).canCreate),false);
 });
 test("confirmation identity observes retained rows and all live authorities; intent excludes commercial data",()=>{

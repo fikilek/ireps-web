@@ -1,3 +1,5 @@
+import * as nearbyModel from "../features/maps/sales-batch-nearby.js";
+import * as planningModel from "../pages/operations/geofencePlanningModel.js";
 import * as policy from "../../functions/salesAllMeters/sales-batch-policy.js";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,9 +44,12 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   const cleanups = new Set();
   const context = createContext({ console: { error() {}, warn() {} }, Date });
   const mocks = {
+    "../features/maps/sales-batch-nearby.js": nearbyModel,
+    "../pages/operations/geofencePlanningModel.js": planningModel,
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": { fakeBaseQuery: () => () => {}, createApi: config => ({ definitions: config.endpoints({ query: value => value, mutation: value => value }) }) },
-    "firebase/firestore": { collection: (_db, name) => name, doc: (_db, name, id) => [name, id], documentId: () => "documentId", where: (...parts) => parts, query: (...parts) => parts,
+    "firebase/firestore": { collection: (_db, name) => name, doc: (_db, name, id) => [name, id], documentId: () => "documentId", limit: n => ["limit",n], where: (...parts) => parts, query: (...parts) => parts,
+      getDocs: async () => ({ size: 0, docs: [] }),
       onSnapshot: (query, next, error) => { const listener = { query, next, error, stopped: false }; listeners.push(listener); return () => { listener.stopped = true; }; } },
     "../firebase": { db: {}, functions: {} },
     "firebase/functions": { httpsCallable: () => async () => { governanceCalls++; throw Error("governance rejected"); } },
@@ -90,12 +95,15 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   assert.ok(listeners.every(listener => listener.stopped));
 });
 
-async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callable = null) {
+async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callable = null, endpointName = "getTargetedBatchDetailsById", erfDocs = []) {
   const listeners = [];
+  const oneTimeReads = [];
   const cleanups = new Set();
   let current = true;
   const context = createContext({ Date, console: { error() {}, warn() {} } });
   const mocks = {
+    "../features/maps/sales-batch-nearby.js": nearbyModel,
+    "../pages/operations/geofencePlanningModel.js": planningModel,
     "firebase/functions": { httpsCallable: callable || (() => { throw Error("Read-only details must never call a mutation"); }) },
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
@@ -104,8 +112,11 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callabl
     },
     "firebase/firestore": {
       collection: (_db, name) => name, doc: (_db, name, id) => [name, id],
-      documentId: () => "documentId", where: (...parts) => parts, query: (...parts) => parts,
-      onSnapshot: (path, next, error) => {
+      documentId: () => "documentId", limit: n => ["limit",n], where: (...parts) => parts, query: (...parts) => parts,
+      getDocs: async path => { oneTimeReads.push(path); return { size: erfDocs.length, docs: erfDocs.map((data, index) => ({ id: `E${index}`, data: () => data })) }; },
+      onSnapshot: (path, optionsOrNext, nextOrError, failure) => {
+        const next = typeof optionsOrNext === "function" ? optionsOrNext : nextOrError;
+        const error = typeof optionsOrNext === "function" ? nextOrError : failure;
         const listener = { path, next, error, stopped: false };
         listeners.push(listener);
         return () => { listener.stopped = true; };
@@ -131,14 +142,14 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callabl
     }, { context });
   });
   await module.evaluate();
-  const endpoint = module.namespace.salesTargetedBatchApi.definitions.getTargetedBatchDetailsById;
+  const endpoint = module.namespace.salesTargetedBatchApi.definitions[endpointName];
   const scope = { uid: "A", session: 1, query };
   const state = endpoint.queryFn(scope).data;
   let endCache;
   const lifetime = endpoint.onCacheEntryAdded(scope, {
     cacheDataLoaded: Promise.resolve(),
     cacheEntryRemoved: new Promise(resolve => { endCache = resolve; }),
-    updateCachedData: update => update(state),
+    updateCachedData: update => { const replacement = update(state); if (replacement) Object.assign(state, replacement); },
   });
   await new Promise(resolve => setImmediate(resolve));
   const emit = (listener, data, id = listener.path[1]) =>
@@ -146,7 +157,7 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callabl
   const parent = (extra = {}) => ({ id: "TB", scope: { lmPcode: "ZA5241" },
     metadata: { createdAt: { seconds: 1700000000 }, createdByUid: "U", createdByUser: "Creator" }, ...extra });
   return {
-    listeners, state, emit, parent, definitions: module.namespace.salesTargetedBatchApi.definitions,
+    listeners, oneTimeReads, state, emit, parent, definitions: module.namespace.salesTargetedBatchApi.definitions,
     async close() { endCache(); await lifetime; },
     async logout() { current = false; for (const cleanup of cleanups) cleanup(); await lifetime; },
   };
@@ -265,4 +276,45 @@ test("a resolver rejected before server entry returns only a request error, neve
     const recovered = await f.definitions.resolveSalesTargetedBatch.queryFn(input);
     assert.equal(recovered.data.rows[0].code, "RESOLVED"); assert.equal(calls, 5);
   } finally { await f.close(); }
+});
+
+test("draft snapshot reads only retained authorities and the ordinary fence document ID, never whole-Ward layers",async()=>{
+ const args={tbId:"TGB_20260913_120000_AB12",lmPcode:"ZA5241",salesIds:["00123"],erfIds:["ERF1"],wardIds:["ZA5241001"]};
+ const initial=await detailsFixture(args,null,"getSalesBatchDraftSnapshot");
+ assert.deepEqual(initial.listeners.map(l=>l.path),[["sales-all-meters","00123"],["ireps_erfs","ERF1"],["wards","ZA5241001"],["tb_uploads",args.tbId]]);
+ await initial.close();assert.ok(initial.listeners.every(l=>l.stopped));
+ const saved=await detailsFixture({...args,geofenceId:"ordinaryAutoId"},null,"getSalesBatchDraftSnapshot");
+ assert.ok(saved.listeners.some(l=>l.path[0]==="geo_fences"&&l.path[1]==="ordinaryAutoId"));
+ assert.ok(saved.listeners.every(l=>l.path.length===2));await saved.logout();assert.ok(saved.listeners.every(l=>l.stopped));
+});
+test("nearby streams are opt-in, capped, explicit about completeness and errors, and end with the account",async()=>{
+ const args={lmPcode:"ZA5241",wardPcode:"ZA5241001",bounds:{minLat:-28.5005,maxLat:-28.4995,minLng:30.4995,maxLng:30.5005},wardGeometry:{type:"Polygon",coordinates:[[[30,-29],[31,-29],[31,-28],[30,-28],[30,-29]]]},layers:[]};
+ const off=await detailsFixture(args,null,"getSalesBatchNearby");assert.equal(off.listeners.length,0);await off.close();
+ const f=await detailsFixture({...args,layers:["premises","assets"]},null,"getSalesBatchNearby");
+ assert.equal(f.listeners.length,2);assert.ok(f.listeners.every(l=>l.path.some(part=>JSON.stringify(part)==='["limit",501]')));
+ const premise=f.listeners.find(l=>l.path[0]==="premises"),asset=f.listeners.find(l=>l.path[0]==="asts");
+ const data={parents:{lmPcode:"ZA5241"},geometry:{centroid:{lat:-28.5,lng:30.5}}};
+ const snapshot=n=>({size:n,docs:Array.from({length:n},(_,i)=>({id:`P${i}`,data:()=>data})),metadata:{fromCache:false,hasPendingWrites:false}});
+ premise.next(snapshot(1));assert.equal(f.state.model.premises.length,1);assert.equal(f.state.states.premises,"Complete");
+ premise.next(snapshot(501));assert.equal(f.state.model.premises.length,500);assert.match(f.state.states.premises,/Incomplete.*500/);
+ const cached=snapshot(1);cached.metadata.fromCache=true;premise.next(cached);assert.match(f.state.states.premises,/waiting for the server/);
+ asset.error({code:"permission-denied"});assert.match(f.state.states.assets,/Error:/);assert.equal(f.state.model.assets.length,0);
+ await f.logout();const before=JSON.stringify(f.state);premise.next(snapshot(2));assert.equal(JSON.stringify(f.state),before);assert.ok(f.listeners.every(l=>l.stopped));
+});
+test("nearby Sales read only the Sales on the nearby ERFs, never the whole LM",async()=>{
+ const args={lmPcode:"ZA5241",wardPcode:"ZA5241001",bounds:{minLat:-28.5005,maxLat:-28.4995,minLng:30.4995,maxLng:30.5005},wardGeometry:{type:"Polygon",coordinates:[[[30,-29],[31,-29],[31,-28],[30,-28],[30,-29]]]},layers:["sales"]};
+ const erf=erfNo=>({admin:{localMunicipality:{pcode:"ZA5241"},ward:{pcode:"ZA5241001"}},centroid:{lat:-28.5,lng:30.5},sg:{erfNo},geometry:JSON.stringify({type:"Polygon",coordinates:[[[30.4999,-28.5001],[30.5001,-28.5001],[30.5001,-28.4999],[30.4999,-28.4999],[30.4999,-28.5001]]]})});
+ const f=await detailsFixture(args,null,"getSalesBatchNearby",[erf("4230"),erf("4241"),erf("4230")]);
+ assert.equal(f.oneTimeReads.length,1);assert.equal(f.oneTimeReads[0][0],"ireps_erfs");
+ assert.ok(f.oneTimeReads[0].some(part=>JSON.stringify(part)===JSON.stringify(["admin.ward.pcode","==","ZA5241001"])));
+ assert.equal(f.listeners.length,1);const sales=f.listeners[0];assert.equal(sales.path[0],"sales-all-meters");
+ assert.ok(sales.path.some(part=>JSON.stringify(part)===JSON.stringify(["lmPcode","==","ZA5241"])));
+ assert.ok(sales.path.some(part=>JSON.stringify(part)===JSON.stringify(["erfNumbers","array-contains-any",["4230","4241"]])));
+ assert.ok(sales.path.some(part=>JSON.stringify(part)==='["limit",501]'));
+ const row=(id,lat)=>({id,data:()=>({lmPcode:"ZA5241",meterNo:id,hasUsableGps:true,erfCandidates:[{Latitude:lat,Longitude:30.5}]})});
+ sales.next({size:2,docs:[row("NEAR",-28.5),row("FAR",-28.6)],metadata:{fromCache:false,hasPendingWrites:false}});
+ assert.deepEqual(f.state.model.salesRecords.map(record=>record.id),["NEAR"]);assert.equal(f.state.states.sales,"Complete");
+ await f.close();
+ const none=await detailsFixture(args,null,"getSalesBatchNearby",[]);
+ assert.equal(none.listeners.length,0);assert.equal(none.state.states.sales,"Complete");assert.equal(none.state.model.salesRecords.length,0);await none.close();
 });

@@ -47,6 +47,7 @@ function salesRow({
   hasUsableGps = true,
   erfCandidates = [candidate()],
   tbRefs = [],
+  master = { visibility: "INVISIBLE" },
   tbRefsIntegrity = { valid: true, issues: [] },
 } = {}) {
   return projectSalesCategoryMonth({
@@ -58,6 +59,7 @@ function salesRow({
     hasUsableGps,
     erfCandidates,
     tbRefs,
+    master,
     tbRefsIntegrity,
   }, "2026-08");
 }
@@ -73,10 +75,10 @@ test("missing, invalid and scalar-only categories never become geofence targets"
 });
 
 function tbRef(status) {
-  return {
-    id: `TB_${status}`,
-    fieldWork: status ? { status } : null,
-  };
+  const ids = { NOT_STARTED: "AA01", IN_PROGRESS: "AA02", COMPLETED: "AA03", BOGUS: "AA04" };
+  const stamp = { seconds: 1, nanoseconds: 0 };
+  return { id: `TGB_20260913_120000_${ids[status]}`, date: stamp,
+    ...(status === "NOT_STARTED" ? {} : { rowId: "ROW1", fieldWork: { status, updatedAt: stamp } }) };
 }
 
 function square() {
@@ -245,13 +247,13 @@ test("Sales Status precedence is COMPLETED over IN_PROGRESS over NOT_STARTED", (
 
   assert.equal(
     classifySalesStatus(
-      salesRow({ tbRefs: [tbRef("IN_PROGRESS"), tbRef("COMPLETED")] }),
+      salesRow({ master: { visibility: "VISIBLE" }, tbRefs: [tbRef("IN_PROGRESS"), tbRef("COMPLETED")] }),
     ).status,
     SALES_STATUSES.COMPLETED,
   );
 });
 
-test("invalid tbRefs integrity and unknown fieldwork fail closed", () => {
+test("cached integrity does not invent a fourth operational status; malformed progress is unstarted", () => {
   const invalidIntegrity = classifySalesStatus(
     salesRow({
       tbRefsIntegrity: { valid: false, issues: ["tbRefs.0.id"] },
@@ -259,7 +261,7 @@ test("invalid tbRefs integrity and unknown fieldwork fail closed", () => {
   );
   assert.equal(
     invalidIntegrity.status,
-    SALES_STATUSES.INTEGRITY_EXCEPTION,
+    SALES_STATUSES.NOT_STARTED,
   );
 
   const unknownStatus = classifySalesStatus(
@@ -267,7 +269,7 @@ test("invalid tbRefs integrity and unknown fieldwork fail closed", () => {
   );
   assert.equal(
     unknownStatus.status,
-    SALES_STATUSES.INTEGRITY_EXCEPTION,
+    SALES_STATUSES.NOT_STARTED,
   );
 });
 
@@ -278,7 +280,7 @@ test("Sales valid total equals three operational buckets and excludes integrity"
     salesRows: [
       salesRow({ id: "N" }),
       salesRow({ id: "I", tbRefs: [tbRef("IN_PROGRESS")] }),
-      salesRow({ id: "C", tbRefs: [tbRef("COMPLETED")] }),
+      salesRow({ id: "C", master: { visibility: "VISIBLE" } }),
       salesRow({
         id: "X",
         tbRefsIntegrity: { valid: false, issues: ["tbRefs"] },
@@ -288,10 +290,10 @@ test("Sales valid total equals three operational buckets and excludes integrity"
 
   const summary = summarizeSalesPlanningRecords(records);
 
-  assert.equal(summary.notStarted, 1);
+  assert.equal(summary.notStarted, 2);
   assert.equal(summary.inProgress, 1);
   assert.equal(summary.completed, 1);
-  assert.equal(summary.integrityExceptions, 1);
+  assert.equal(summary.integrityExceptions, 0);
   assert.equal(
     summary.total,
     summary.notStarted + summary.inProgress + summary.completed,
@@ -401,7 +403,7 @@ test("draft stats include all Sales statuses regardless of rendering filters", (
     salesRows: [
       salesRow({ id: "N" }),
       salesRow({ id: "I", tbRefs: [tbRef("IN_PROGRESS")] }),
-      salesRow({ id: "C", tbRefs: [tbRef("COMPLETED")] }),
+      salesRow({ id: "C", master: { visibility: "VISIBLE" } }),
       salesRow({
         id: "X",
         tbRefsIntegrity: { valid: false, issues: ["tbRefs"] },
@@ -410,10 +412,10 @@ test("draft stats include all Sales statuses regardless of rendering filters", (
   });
 
   assert.deepEqual(model.draftStats.sales, {
-    total: 3,
-    notStarted: 1,
+    total: 4,
+    notStarted: 2,
     inProgress: 1,
     completed: 1,
-    integrityExceptions: 1,
+    integrityExceptions: 0,
   });
 });

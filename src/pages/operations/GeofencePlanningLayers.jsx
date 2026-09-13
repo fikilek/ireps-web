@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMap } from "@vis.gl/react-google-maps";
 
@@ -77,6 +78,7 @@ export function GeofencePlanningLayers({
   visibility,
   salesStatusVisibility,
   isCreateMode,
+  showCentroids = false,
 }) {
   const map = useMap();
   const zoom = useCurrentZoom(14);
@@ -173,7 +175,7 @@ export function GeofencePlanningLayers({
     if (!map || !window.google?.maps) return undefined;
 
     clearMapObjects(erfLabelsRef);
-    if (!visibility.erfs || zoom < ERF_LABEL_MIN_ZOOM) return undefined;
+    if (!visibility.erfs || (!showCentroids && zoom < ERF_LABEL_MIN_ZOOM)) return undefined;
 
     const labels = (model?.erfs || [])
       .filter((erf) => Boolean(erf.point))
@@ -183,16 +185,18 @@ export function GeofencePlanningLayers({
           map,
           title: `ERF ${erf.erfNo}`,
           label: {
-            text: String(erf.erfNo || "E"),
+            text: zoom >= ERF_LABEL_MIN_ZOOM ? String(erf.erfNo || "E") : "",
             color: "#0f172a",
             fontWeight: "800",
             fontSize: "11px",
           },
           icon: {
-            path: window.google.maps.SymbolPath.CIRCLE,
-            scale: 1,
+            path: showCentroids ? "M -1,0 L 1,0 M 0,-1 L 0,1" : window.google.maps.SymbolPath.CIRCLE,
+            scale: showCentroids ? 6 : 1,
             fillOpacity: 0,
-            strokeOpacity: 0,
+            strokeOpacity: showCentroids ? 1 : 0,
+            strokeColor: "#0f172a",
+            strokeWeight: 2,
           },
           clickable: false,
           zIndex: 42,
@@ -201,7 +205,7 @@ export function GeofencePlanningLayers({
 
     erfLabelsRef.current = labels;
     return () => clearMapObjects(erfLabelsRef);
-  }, [map, model?.erfs, visibility.erfs, zoom]);
+  }, [map, model?.erfs, visibility.erfs, zoom, showCentroids]);
 
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;
@@ -352,10 +356,10 @@ export function GeofencePlanningLayers({
   return null;
 }
 
-function ToggleRow({ checked, label, count, onChange, dotColor = null }) {
+function ToggleRow({ checked, label, count, onChange, dotColor = null, disabled = false }) {
   return (
     <label style={toggleRowStyle}>
-      <input type="checkbox" checked={checked} onChange={onChange} />
+      <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
       {dotColor ? (
         <span style={{ ...legendDotStyle, background: dotColor }} aria-hidden="true" />
       ) : null}
@@ -372,6 +376,8 @@ export function GeofencePlanningLayerControls({
   onToggleLayer,
   onToggleSalesStatus,
   isCreateMode,
+  salesLabel = "Sales (excluding Normal)",
+  layerStates, requestedLayers = [], disabled = false,
 }) {
   const summary = model?.salesSummary || {
     total: 0,
@@ -389,38 +395,39 @@ export function GeofencePlanningLayerControls({
       }}
     >
       <strong style={controlTitleStyle}>Map Layers</strong>
+      {layerStates !== undefined && <div role="status">{["erfs", "sales", "premises", "assets"].map(layer => <div key={layer}>{layer}: {requestedLayers.includes(layer) ? layerStates?.[layer] || "Loading nearby records…" : "Off · not loaded"}</div>)}</div>}
 
-      <ToggleRow
+      <ToggleRow disabled={disabled}
         checked={visibility.erfs}
         label="ERFs"
         count={model?.erfs?.length || 0}
         onChange={() => onToggleLayer("erfs")}
       />
 
-      <ToggleRow
+      <ToggleRow disabled={disabled}
         checked={visibility.sales}
-        label="Sales (excluding Normal)"
+        label={salesLabel}
         count={summary.total + summary.integrityExceptions}
         onChange={() => onToggleLayer("sales")}
       />
 
       {visibility.sales ? (
         <div style={salesSubgroupStyle}>
-          <ToggleRow
+          <ToggleRow disabled={disabled}
             checked={salesStatusVisibility.notStarted}
             label={SALES_STATUS_META[SALES_STATUSES.NOT_STARTED].label}
             count={summary.notStarted}
             dotColor={SALES_STATUS_META[SALES_STATUSES.NOT_STARTED].color}
             onChange={() => onToggleSalesStatus("notStarted")}
           />
-          <ToggleRow
+          <ToggleRow disabled={disabled}
             checked={salesStatusVisibility.inProgress}
             label={SALES_STATUS_META[SALES_STATUSES.IN_PROGRESS].label}
             count={summary.inProgress}
             dotColor={SALES_STATUS_META[SALES_STATUSES.IN_PROGRESS].color}
             onChange={() => onToggleSalesStatus("inProgress")}
           />
-          <ToggleRow
+          <ToggleRow disabled={disabled}
             checked={salesStatusVisibility.completed}
             label={SALES_STATUS_META[SALES_STATUSES.COMPLETED].label}
             count={summary.completed}
@@ -443,14 +450,14 @@ export function GeofencePlanningLayerControls({
         </div>
       ) : null}
 
-      <ToggleRow
+      <ToggleRow disabled={disabled}
         checked={visibility.premises}
         label="Premises"
         count={model?.premises?.length || 0}
         onChange={() => onToggleLayer("premises")}
       />
 
-      <ToggleRow
+      <ToggleRow disabled={disabled}
         checked={visibility.assets}
         label="Assets"
         count={model?.assets?.length || 0}

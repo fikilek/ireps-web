@@ -1,4 +1,4 @@
-﻿{
+{
   "indexes": [
     {
       "collectionGroup": "ireps_erfs",
@@ -27,6 +27,20 @@
       ]
     },
     {
+      "collectionGroup": "sales-all-meters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "erfNumbers",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    },
+    {
       "collectionGroup": "tb_rows",
       "queryScope": "COLLECTION",
       "fields": [
@@ -45,7 +59,6 @@
       ],
       "density": "SPARSE_ALL"
     },
-
     {
       "collectionGroup": "asts",
       "queryScope": "COLLECTION",
@@ -2340,6 +2353,24 @@
         }
       ],
       "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "premises",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "parents.wardPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "geometry.centroid.lat",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "geometry.centroid.lng",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

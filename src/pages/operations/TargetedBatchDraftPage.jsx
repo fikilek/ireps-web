@@ -3,10 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { useAuth } from "../../auth/useAuth";
-import { useGetLmBoundaryByIdQuery } from "../../redux/mapLmsApi";
+import { useCreateGeoFenceMutation } from "../../redux/geofencesApi";
 import { useSalesReadScope } from "../../redux/salesApi";
 import { clearTargetedBatchDraft, selectTargetedBatchDraft, updateSalesDraftResolution, saveSalesDraftFence, removeSalesDraftMeter, setSalesDraftConfirmation, setSalesDraftUncertainRequest } from "../../redux/targetedBatchDraftSlice";
-import { useGetSalesBatchDraftSnapshotQuery, useResolveSalesTargetedBatchMutation, useSaveSalesTargetedBatchGeofenceMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
+import { useGetSalesBatchDraftSnapshotQuery, useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
 import { useGeofencePolygonDraft } from "../../features/maps/use-geofence-polygon-draft";
 import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure, salesDraftReturnPath } from "./targeted-batches/draft/sales-batch-draft-model";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
@@ -30,8 +30,7 @@ export default function TargetedBatchDraftPage() {
 
 function SalesDraftSession({ draft }) {
   const dispatch = useDispatch(), navigate = useNavigate(), drawing = useGeofencePolygonDraft();
-  const { currentData: lmBoundary } = useGetLmBoundaryByIdQuery(draft.scope.lmPcode);
-  const [resolve, resolveState] = useResolveSalesTargetedBatchMutation(), [save, saveState] = useSaveSalesTargetedBatchGeofenceMutation();
+  const [resolve, resolveState] = useResolveSalesTargetedBatchMutation(), [save, saveState] = useCreateGeoFenceMutation();
   const [assess, assessState] = useAssessSalesTargetedBatchMutation(), [create, createState] = useCreateSalesTargetedBatchMutation();
   const [feedback, setFeedback] = useState(""), [recheck, setRecheck] = useState(0), [resolvedSignature, setResolvedSignature] = useState("");
   const [resolutionFailure, setResolutionFailure] = useState(null);
@@ -40,7 +39,7 @@ function SalesDraftSession({ draft }) {
   const ids = JSON.stringify(draft.retainedIds), resolved = Object.values(draft.resolutions);
   const erfIds = [...new Set(resolved.map(row => row.erfId).filter(Boolean))].sort();
   const wardIds = [...new Set(resolved.map(row => row.scope?.wardPcode).filter(Boolean))].sort();
-  const { data: live } = useGetSalesBatchDraftSnapshotQuery({ lmPcode: draft.scope.lmPcode, salesIds: draft.retainedIds, erfIds, wardIds, tbId: draft.id });
+  const { data: live } = useGetSalesBatchDraftSnapshotQuery({ lmPcode: draft.scope.lmPcode, salesIds: draft.retainedIds, erfIds, wardIds, tbId: draft.id, geofenceId: draft.savedFence?.id });
   const signature = live?.ready ? JSON.stringify([live.sales, live.erfs, live.wards]) : "";
   const latest = useRef(null);
   useEffect(() => { latest.current = { draft, live }; }, [draft, live]);
@@ -82,13 +81,12 @@ function SalesDraftSession({ draft }) {
   const stale = !live?.ready || resolveState.isLoading || Boolean(currentResolutionFailure) || confirmation?.identity !== identity || tick > (confirmation?.expiresAt || 0);
   const busy = resolveState.isLoading || saveState.isLoading || assessState.isLoading || createState.isLoading;
 
-  async function saveFence() {
-    if (!model.canSave || !drawing.complete || busy) return;
-    try {
-      await save({ ...salesDraftIntent(draft), points: drawing.points, saveSalesIds: model.readyIds }).unwrap();
-      if (!mounted.current) return;
-      setFeedback("Geofence saved. Its included population is fixed for this draft.");
-    } catch (error) { if (!mounted.current) return; setFeedback(error.error || "Geofence save failed. The retained draft is unchanged."); }
+  async function saveFence(payload) {
+    if (!model.canSave || busy) throw new Error("The draft is not ready for this geofence");
+    const result = await save({ ...payload, targetedBatch: salesDraftIntent(draft) }).unwrap();
+    if (result.success !== true) throw new Error(result.message || "Geofence creation failed");
+    if (mounted.current) dispatch(saveSalesDraftFence({ tbId: draft.id, fence: { id: result.geofenceId } }));
+    return result;
   }
   async function openConfirmation() {
     if (!model.canCreate || busy || uncertain) return;
@@ -116,7 +114,7 @@ function SalesDraftSession({ draft }) {
     }
   }
   return <>
-    <TargetedBatchDraftReview draft={draft} model={model} live={live} lmBoundary={lmBoundary} drawing={drawing} geometry={geometry} busy={busy || uncertain} feedback={resolveState.isLoading ? "" : currentResolutionFailure?.reason || feedback}
+    <TargetedBatchDraftReview draft={draft} model={model} live={live} drawing={drawing} geometry={geometry} busy={busy || uncertain} locating={resolveState.isLoading} saving={saveState.isLoading} feedback={resolveState.isLoading ? "" : currentResolutionFailure?.reason || feedback}
       onRemove={salesId => dispatch(removeSalesDraftMeter({ tbId: draft.id, salesId }))} onSave={saveFence} onCreate={openConfirmation}
       onResolve={() => { handled.current = ""; setResolutionFailure(null); setFeedback(""); setRecheck(value => value + 1); }} onClear={() => { if (window.confirm("Clear this draft and go back to the meter table? A geofence you already saved stays saved.")) {
         dispatch(clearTargetedBatchDraft()); navigate(salesDraftReturnPath(draft.source.type), { replace: true });
