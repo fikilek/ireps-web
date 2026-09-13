@@ -10,6 +10,7 @@ import {
   getSalesTargetedBatchMembershipFilterKey,
 } from "../models/salesTargetedBatchMembershipModel";
 import { SALES_STATUSES } from "../models/salesStatusModel";
+import { NGP_SELECTION_MAX } from "../models/nonGpsBatchPlanningModel";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -292,7 +293,7 @@ export default function NonGpsStreetDetail({
           </h2>
           <p style={styles.subtitle}>
             The complete street population remains visible. Only batchable Sales
-            meters can be selected for the current 1–20 meter batch.
+            meters can be selected for the current 1–{NGP_SELECTION_MAX} meter batch.
           </p>
         </div>
 
@@ -452,7 +453,10 @@ export default function NonGpsStreetDetail({
                     </td>
                     <td style={styles.bodyCell}>
                       {target.canonicalAddress || "NAv"}
-                      {!target.batchable ? <div>{target.batchabilityReason}</div> : null}
+                      {/* Current batch membership gets no note: the Batch ID column already
+                          shows it. Other reasons a meter cannot be ticked stay visible. */}
+                      {!target.batchable && target.batchabilityCode !== "CURRENT_TARGETED_BATCH"
+                        ? <div>{target.batchabilityReason}</div> : null}
                     </td>
                     <td style={styles.bodyCell}>{target.meterNo || "NAv"}</td>
                     <td style={styles.bodyCell}>
