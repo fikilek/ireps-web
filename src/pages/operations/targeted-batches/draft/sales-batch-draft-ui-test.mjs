@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import * as jsx from "react/jsx-runtime";
 import * as model from "./sales-batch-draft-model.js";
 import * as styles from "./targetedBatchDraftReviewStyles.js";
+import * as geofenceHelpers from "../../geofence-map-helpers.js";
 const hooks={useEffect:()=>{},useMemo:fn=>fn(),useRef:value=>({current:value}),useState:value=>[typeof value==="function"?value():value,()=>{}]};
 const component=()=>null;
 async function load(relative,mocks={},globals={},apiKey="offline-mock") {
@@ -53,8 +54,14 @@ test("Clear draft cancellation preserves the draft; confirmation returns each Sa
  }
 });
 test("shared map stays mounted without assets and shows a banner; missing key still blocks the SDK", async () => {
- const mocks={"@googlemaps/markerclusterer":{MarkerClusterer:class{}},"@vis.gl/react-google-maps":{APIProvider:({children})=>children,Map:({children,defaultCenter})=>jsx.jsxs("div",{"data-map":"present","data-center":JSON.stringify(defaultCenter),children}),useMap:()=>null}};
+ const mocks={"@googlemaps/markerclusterer":{MarkerClusterer:class{}},"@vis.gl/react-google-maps":{APIProvider:({children})=>children,Map:({children,defaultCenter})=>jsx.jsxs("div",{"data-map":"present","data-center":JSON.stringify(defaultCenter),children}),useMap:()=>null},
+  "../../operations/geofence-map-helpers":geofenceHelpers,"../../operations/geofence-map-layers":{ExistingGeoFenceLayer:component}};
  const map=await load("../../../sales/components/SalesTargetedBatchMap.jsx",mocks);
+ // TB-R043: a batch geofence alone is something to show, and it appears in the legend.
+ const fence={id:"PvBEHYrp6cLFw9vbdcA0",name:"Gf W6 Acacia",targetedBatch:{tbId:"TGB_20260914_012600_YHXQ"},geometry:{points:[{latitude:-28.1,longitude:30.1,order:0},{latitude:-28.1,longitude:30.2,order:1},{latitude:-28.2,longitude:30.2,order:2}]}};
+ const withFence=renderToStaticMarkup(jsx.jsx(map.default,{geofence:fence}));
+ assert.match(withFence,/> Geofence</);assert.doesNotMatch(withFence,/No usable spatial features/);
+ assert.doesNotMatch(renderToStaticMarkup(jsx.jsx(map.default,{})),/> Geofence</);
  const viewport={center:{lat:-28.4,lng:30.5},zoom:10,scope:"LM"};
  const markup=renderToStaticMarkup(jsx.jsx(map.default,{viewport}));
  assert.match(markup,/data-map="present"/);assert.match(markup,/-28.4/);assert.match(markup,/role="status"/);assert.match(markup,/No usable spatial features/);

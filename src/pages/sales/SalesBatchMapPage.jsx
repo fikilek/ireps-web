@@ -5,6 +5,8 @@ import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/useAuth";
 import { useGetTargetedBatchMapByIdQuery } from "../../redux/salesTargetedBatchApi";
 import SalesTargetedBatchMap from "./components/SalesTargetedBatchMap";
+import { useBatchGeofence } from "./components/use-batch-geofence.js";
+import { NO_GEOFENCE_LABEL } from "../operations/targeted-batches/batch-geofence-label.js";
 
 function cleanText(value) {
   return String(value ?? "").trim();
@@ -68,6 +70,9 @@ export default function SalesBatchMapPage() {
   );
 
   const batch = mapStream?.batch || null;
+  // TB-R043: the batch's geofence, drawn around the batch and named at the top.
+  const geofence = useBatchGeofence(activeLmPcode, batch?.geofenceId);
+  const geofenceLabel = !batch?.geofenceId ? NO_GEOFENCE_LABEL : geofence?.name || batch.geofenceId;
   const membership = mapStream?.membership || {};
   const diagnostics = mapStream?.diagnostics || {};
   const erfs = Array.isArray(mapStream?.erfs) ? mapStream.erfs : [];
@@ -90,13 +95,13 @@ export default function SalesBatchMapPage() {
         }
       : null);
 
+  // TB-R043: warn only for genuine gaps — something the rows point to that cannot be found,
+  // or a row without an ERF. Rows without a premise or meter yet are normal before field work.
   const missingReferenceCount =
     Number(diagnostics?.missingErfCount || 0) +
     Number(diagnostics?.missingPremiseCount || 0) +
     Number(diagnostics?.missingMeterCount || 0) +
-    Number(diagnostics?.rowsMissingErfRef || 0) +
-    Number(diagnostics?.rowsMissingPremiseRef || 0) +
-    Number(diagnostics?.rowsMissingMeterRef || 0);
+    Number(diagnostics?.rowsMissingErfRef || 0);
 
   return (
     <section style={styles.page}>
@@ -148,6 +153,12 @@ export default function SalesBatchMapPage() {
             <span style={styles.identityLabel}>Ward</span>
             <strong style={styles.identityValue}>
               {batch?.scope?.wardLabel || "NAv"}
+            </strong>
+          </div>
+          <div>
+            <span style={styles.identityLabel}>Geofence</span>
+            <strong style={styles.identityValue} title={batch?.geofenceId || ""}>
+              {batch ? geofenceLabel : "NAv"}
             </strong>
           </div>
           <div>
@@ -231,6 +242,7 @@ export default function SalesBatchMapPage() {
           premises={premises}
           meters={meters}
           focusedMeterId=""
+          geofence={geofence}
         />
       ) : null}
 

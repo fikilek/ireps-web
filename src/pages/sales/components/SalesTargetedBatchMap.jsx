@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
+import { ExistingGeoFenceLayer } from "../../operations/geofence-map-layers";
+import { GEOFENCE_KIND_COLORS, getGeoFencePath } from "../../operations/geofence-map-helpers";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -156,11 +158,17 @@ function buildMeterMarkerSvg({
   };
 }
 
-function fitMapToBatch(map, { erfs, premises, meters }) {
+function fitMapToBatch(map, { erfs, premises, meters, boundary = [] }) {
   if (!map || !window.google?.maps) return false;
 
   const bounds = new window.google.maps.LatLngBounds();
   let hasSpatialFeature = false;
+
+  // TB-R043: the batch's geofence is fitted whole, not only the ERFs inside it.
+  boundary.forEach((point) => {
+    bounds.extend(point);
+    hasSpatialFeature = true;
+  });
 
   erfs.forEach((erf) => {
     visitGeometryCoordinates(erf?.geometry?.coordinates, (point) => {
@@ -206,11 +214,12 @@ function fitMapToBatch(map, { erfs, premises, meters }) {
   return true;
 }
 
-function BatchViewportLayer({ erfs, premises, meters, fitRequest, viewport = null }) {
+function BatchViewportLayer({ erfs, premises, meters, fitRequest, viewport = null, boundary = [] }) {
   const map = useMap();
   const previousSignatureRef = useRef("");
   const previousFitRequestRef = useRef(0);
 
+  // The geofence is part of the population, so its arrival refits once like any other data.
   const signature = useMemo(
     () =>
       [
@@ -218,8 +227,9 @@ function BatchViewportLayer({ erfs, premises, meters, fitRequest, viewport = nul
         erfs.map((erf) => erf?.id).join("|"),
         premises.map((premise) => premise?.id).join("|"),
         meters.map((meter) => meter?.id).join("|"),
+        JSON.stringify(boundary),
       ].join("::"),
-    [erfs, premises, meters, viewport],
+    [erfs, premises, meters, viewport, boundary],
   );
 
   useEffect(() => {
@@ -232,12 +242,12 @@ function BatchViewportLayer({ erfs, premises, meters, fitRequest, viewport = nul
     if (isFirstPopulation || isManualFit) {
       if (viewport?.bounds) map.fitBounds(viewport.bounds, 35);
       else if (viewport?.center) { map.setCenter(viewport.center); map.setZoom(viewport.zoom); }
-      else fitMapToBatch(map, { erfs, premises, meters });
+      else fitMapToBatch(map, { erfs, premises, meters, boundary });
     }
 
     previousSignatureRef.current = signature;
     previousFitRequestRef.current = fitRequest;
-  }, [erfs, fitRequest, map, meters, premises, signature, viewport]);
+  }, [boundary, erfs, fitRequest, map, meters, premises, signature, viewport]);
 
   return null;
 }
@@ -623,8 +633,16 @@ export default function SalesTargetedBatchMap({
   hasDraftBoundary = false,
   viewport = null,
   fitButtonStyle = null,
+  geofence = null,
 }) {
   const [fitRequest, setFitRequest] = useState(0);
+
+  // TB-R043: the batch's geofence, drawn like every batch geofence (purple, named).
+  const geofenceBoundary = useMemo(() => getGeoFencePath(geofence), [geofence]);
+  const geofenceList = useMemo(
+    () => (geofence && geofenceBoundary.length >= 3 ? [geofence] : []),
+    [geofence, geofenceBoundary],
+  );
 
   const safeErfs = useMemo(
     () => (Array.isArray(erfs) ? erfs : []),
@@ -658,7 +676,7 @@ export default function SalesTargetedBatchMap({
     [focusedPremiseId, safePremises],
   );
   const focusedErfId = cleanText(focusedMeter?.linkedErfId);
-  const spatialFeatureCount = Number(hasDraftBoundary) +
+  const spatialFeatureCount = Number(hasDraftBoundary) + geofenceList.length +
     safeErfs.filter((erf) => erf?.geometry || isValidPoint(erf?.centroid))
       .length +
     safePremises.filter((premise) => isValidPoint(premise?.point)).length +
@@ -680,6 +698,11 @@ export default function SalesTargetedBatchMap({
           <span style={styles.legendItem}>
             <span style={styles.waterLegend}>●</span> Water meter
           </span>
+          {geofenceList.length ? (
+            <span style={styles.legendItem}>
+              <span style={styles.geofenceLegend} /> Geofence
+            </span>
+          ) : null}
         </div>
 
         <button
@@ -721,7 +744,9 @@ export default function SalesTargetedBatchMap({
                 meters={safeMeters}
                 fitRequest={fitRequest}
                 viewport={viewport}
+                boundary={geofenceBoundary}
               />}
+              <ExistingGeoFenceLayer geofences={geofenceList} selectedGeoFenceId="" interactive={false} fitSelected={false} />
               <ErfPolygonLayer erfs={safeErfs} focusedErfId={focusedErfId} />
               <ErfLabelsLayer
                 erfs={safeErfs}
@@ -791,6 +816,13 @@ const styles = {
     height: 12,
     border: "2px solid #2563eb",
     background: "rgba(96, 165, 250, 0.18)",
+  },
+
+  geofenceLegend: {
+    width: 20,
+    height: 12,
+    border: `2px solid ${GEOFENCE_KIND_COLORS.batch}`,
+    background: "rgba(124, 58, 237, 0.12)",
   },
 
   premiseLegend: {

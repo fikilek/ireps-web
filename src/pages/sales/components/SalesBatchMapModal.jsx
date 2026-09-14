@@ -3,6 +3,7 @@ import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useGetTargetedBatchMapByIdQuery } from "../../../redux/salesTargetedBatchApi";
 import SalesTargetedBatchMap from "./SalesTargetedBatchMap";
+import { useBatchGeofence } from "./use-batch-geofence.js";
 
 function cleanText(value) {
   return String(value ?? "").trim();
@@ -58,6 +59,9 @@ export default function SalesBatchMapModal({
         }
       : skipToken,
   );
+
+  // TB-R043: the batch's geofence is drawn around the batch here too.
+  const geofence = useBatchGeofence(normalizedLmPcode, mapStream?.batch?.geofenceId);
 
   const erfs = useMemo(
     () => (Array.isArray(mapStream?.erfs) ? mapStream.erfs : []),
@@ -302,6 +306,7 @@ export default function SalesBatchMapModal({
               meters={meters}
               focusedMeterId={normalizedFocusedMeterId}
               height={560}
+              geofence={geofence}
             />
           </>
         ) : null}

@@ -23,6 +23,8 @@ function normalizeGeoFenceRow(id, data) {
 
     lmPcode: data?.parents?.lmPcode || "NAv",
     wardPcode: data?.parents?.wardPcode || "NAv",
+    // A batch geofence's link to its Targeted Batch (rules 18.5); maps colour it as a batch geofence.
+    targetedBatch: data?.targetedBatch || null,
 
     geometry,
     bbox: geometry?.bbox || null,

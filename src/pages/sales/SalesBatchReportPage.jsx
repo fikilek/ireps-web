@@ -4,6 +4,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { useGetTargetedBatchReportByIdQuery } from "../../redux/salesTargetedBatchApi";
 import SalesBatchMapModal from "./components/SalesBatchMapModal";
+import { useBatchGeofence } from "./components/use-batch-geofence.js";
+import { NO_GEOFENCE_LABEL } from "../operations/targeted-batches/batch-geofence-label.js";
 
 const ALL_FILTER = "ALL";
 const TERMINAL_STREAM_STATES = new Set(["ready", "error"]);
@@ -344,6 +346,9 @@ export default function SalesBatchReportPage() {
   );
 
   const batch = data?.batch || null;
+  // TB-R043: the batch's geofence, named next to the Ward.
+  const geofence = useBatchGeofence(batch?.scope?.lmPcode, batch?.geofenceId);
+  const geofenceLabel = !batch?.geofenceId ? NO_GEOFENCE_LABEL : geofence?.name || batch.geofenceId;
   const rows = data?.rows || [];
   const summary = data?.summary || EMPTY_REPORT.summary;
   const sync = data?.sync || EMPTY_REPORT.sync;
@@ -526,6 +531,7 @@ export default function SalesBatchReportPage() {
             value={batch.selection.reason}
           />
           <InfoItem label="Ward" value={batch.scope.wardLabel} />
+          <InfoItem label="Geofence" value={geofenceLabel} />
           <InfoItem
             label="Allocated To"
             value={batch.allocation.targetLabel}
