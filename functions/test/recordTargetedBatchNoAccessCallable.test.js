@@ -160,6 +160,7 @@ test("no-premise attempt creates canonical TRN and atomically starts row and par
   assert.equal(db.read(`tb_rows/${ROW}`).execution.status, "IN_PROGRESS");
   const row = db.read(`tb_rows/${ROW}`);
   const parent = db.read(`tb_uploads/${TB}`);
+  assert.equal(parent.status, "IN_PROGRESS", "rules section 14: the batch is In Progress once field work starts");
   assertTimestampEqual(row.execution.startedAt, NOW);
   assertTimestampEqual(row.metadata.updatedAt, NOW);
   assert.equal(row.metadata.updatedByUid, "U1");

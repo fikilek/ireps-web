@@ -81,6 +81,16 @@ a {
 }
 
 /* Geofence name labels (rules 18.7, 1.3.3): white label, text in the kind colour. */
+/* Ward name on the TB Draft Wards layer (Targeted Batch rules 18.7, 1.3.7). */
+.ireps-ward-label {
+  background: #ffffff;
+  border: 1px solid #f59e0b;
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
 .ireps-geofence-label {
   background: #ffffff;
   border: 1px solid rgba(51, 65, 85, 0.3);

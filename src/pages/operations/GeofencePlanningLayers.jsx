@@ -425,6 +425,7 @@ export function GeofencePlanningLayerControls({
   salesLabel = "Sales (excluding Normal)",
   layerStates, requestedLayers = [], disabled = false,
   geofencesCount = null, geofencesLoading = false,
+  wardsCount = null,
 }) {
   const summary = model?.salesSummary || {
     total: 0,
@@ -543,6 +544,17 @@ export function GeofencePlanningLayerControls({
           loading={Boolean(visibility.geofences && geofencesLoading)}
           count={geofencesCount}
           onChange={() => onToggleLayer("geofences")}
+        />
+      ) : null}
+
+      {wardsCount !== null ? (
+        // Rules 18.7 (1.3.7): the boundary of every Ward the draft's meters are in.
+        // Usable even when the draft spans Wards, which is when it helps most.
+        <ToggleRow disabled={!wardsCount}
+          checked={Boolean(visibility.wards)}
+          label="Wards"
+          count={wardsCount}
+          onChange={() => onToggleLayer("wards")}
         />
       ) : null}
     </div>

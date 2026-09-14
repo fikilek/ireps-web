@@ -96,6 +96,61 @@ export function getGeoFencePointCount(geoFence) {
   return getGeoFencePath(geoFence).length;
 }
 
+// Ward boundaries are stored as GeoJSON, often as JSON text.
+export function parseGeometry(geometry) {
+  if (!geometry) return null;
+
+  if (typeof geometry === "string") {
+    try {
+      return JSON.parse(geometry);
+    } catch (error) {
+      console.error("Could not parse geometry:", error);
+      return null;
+    }
+  }
+
+  return geometry;
+}
+
+export function geoJsonPolygonToGooglePaths(geoJsonGeometry) {
+  if (!geoJsonGeometry) return [];
+
+  if (geoJsonGeometry.type === "Polygon") {
+    return geoJsonGeometry.coordinates.map((ring) =>
+      ring.map(([lng, lat]) => ({ lat, lng })),
+    );
+  }
+
+  if (geoJsonGeometry.type === "MultiPolygon") {
+    return geoJsonGeometry.coordinates.flatMap((polygon) =>
+      polygon.map((ring) => ring.map(([lng, lat]) => ({ lat, lng }))),
+    );
+  }
+
+  return [];
+}
+
+// One Ward boundary look for the Geo-Fences page and the TB Draft Wards layer
+// (Targeted Batch rules 18.7, 1.3.7): amber line with a faint fill.
+export const WARD_BOUNDARY_STYLE = Object.freeze({
+  strokeColor: "#f59e0b",
+  strokeOpacity: 1,
+  strokeWeight: 3,
+  fillColor: "#f59e0b",
+  fillOpacity: 0.08,
+});
+export const WARD_LABEL_COLOR = "#b45309";
+
+// The average of some { lat, lng } points, or null when there are none.
+export function pointsCentre(points = []) {
+  const usable = points.map(toUsableLatLng).filter(Boolean);
+  if (!usable.length) return null;
+  return {
+    lat: usable.reduce((sum, point) => sum + point.lat, 0) / usable.length,
+    lng: usable.reduce((sum, point) => sum + point.lng, 0) / usable.length,
+  };
+}
+
 // Targeted Batch rules 18.7 (1.3.3): area geofences are green, batch geofences
 // (those linked to a Targeted Batch) purple; a selected geofence stays red.
 export const GEOFENCE_KIND_COLORS = Object.freeze({ area: "#10b981", batch: "#7c3aed" });

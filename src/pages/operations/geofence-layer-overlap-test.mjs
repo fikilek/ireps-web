@@ -37,7 +37,7 @@ test("layer, labels, row and Overlaps line are wired on the shared components an
   assert.match(await read("./GeofencePlanningLayers.jsx"), /label="Geofences \(whole Ward\)"/);
   assert.match(await read("./geofence-shared-ui.jsx"), /\{draftInside\}\s*\{overlaps\}/);
   const workspace = await read("./targeted-batches/draft/sales-batch-geofence-workspace.jsx");
-  assert.match(workspace, /geofences: false \}\);/);
+  assert.match(workspace, /geofences: false[, ]/);
   assert.match(workspace, /geofencesCount=\{geofences\.length\}/);
   assert.match(workspace, /overlaps=\{overlapsNote\}/);
   assert.match(workspace, /visibility\.geofences \? geofences : \[\]/);

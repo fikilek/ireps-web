@@ -1,4 +1,4 @@
-import { getGeoFencePath, fitMapToGeoFence, GEOFENCE_KIND_COLORS, geofenceKind, geofenceLabelPoint } from "./geofence-map-helpers";
+import { getGeoFencePath, fitMapToGeoFence, GEOFENCE_KIND_COLORS, geofenceKind, geofenceLabelPoint, parseGeometry, geoJsonPolygonToGooglePaths, WARD_BOUNDARY_STYLE, WARD_LABEL_COLOR } from "./geofence-map-helpers";
 
 const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -128,6 +128,42 @@ export function ExistingGeoFenceLayer({
 
     return () => clearTimeout(timer);
   }, [map, selectedGeoFence, fitSelected]);
+
+  return null;
+}
+
+// Ward boundaries, shared by the Geo-Fences page and the TB Draft Wards layer
+// (Targeted Batch rules 18.7, 1.3.7). Each ward is { id, geometry } with an optional
+// { label, labelPoint }; the label sits just above labelPoint so it clears the meters there.
+export function WardBoundaryPolygons({ wards = [] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+    const objects = [];
+
+    for (const ward of wards) {
+      const paths = geoJsonPolygonToGooglePaths(parseGeometry(ward?.geometry));
+      if (paths.length) {
+        const polygon = new window.google.maps.Polygon({ paths, ...WARD_BOUNDARY_STYLE, clickable: false, zIndex: 20 });
+        polygon.setMap(map);
+        objects.push(polygon);
+      }
+      if (ward?.label && ward?.labelPoint) {
+        objects.push(new window.google.maps.Marker({
+          position: ward.labelPoint,
+          map,
+          title: ward.label,
+          label: { text: ward.label, className: "ireps-ward-label", color: WARD_LABEL_COLOR, fontWeight: "700", fontSize: "12px" },
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 1, fillOpacity: 0, strokeOpacity: 0, labelOrigin: new window.google.maps.Point(0, -30) },
+          clickable: false,
+          zIndex: 95,
+        }));
+      }
+    }
+
+    return () => objects.forEach((object) => object.setMap(null));
+  }, [map, wards]);
 
   return null;
 }

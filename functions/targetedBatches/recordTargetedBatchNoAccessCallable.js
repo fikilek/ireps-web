@@ -392,7 +392,9 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
       "metadata.updatedByUser": actor.name,
     };
     if (parentStatus === "NOT_STARTED" || rowStatus === "NOT_STARTED") {
+      // Rules section 14: the batch is In Progress once field work starts on any row.
       Object.assign(parentPatch, {
+        status: "IN_PROGRESS",
         "execution.status": "IN_PROGRESS", "execution.startedAt": parent?.execution?.startedAt || now,
         "execution.completedAt": null,
       });

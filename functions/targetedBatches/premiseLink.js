@@ -825,7 +825,9 @@ export async function createOrLinkTargetedBatchPremise({
     }
 
     if (!parentAlreadyStarted || rowExecutionStatus === "NOT_STARTED") {
+      // Rules section 14: the batch is In Progress once field work starts on any row.
       const parentPatch = {
+        status: "IN_PROGRESS",
         "execution.status": "IN_PROGRESS",
         "execution.startedAt": parent?.execution?.startedAt || now,
         "execution.completedAt": null,
@@ -1666,8 +1668,10 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     ...salesMetadataPatch,
   });
 
+  // Rules section 14: In Progress until every row is complete, then Completed.
   const parentPatch = {
     "counts.completedRows": nextCompletedRows,
+    status: batchCompleted ? "COMPLETED" : "IN_PROGRESS",
     "execution.status": batchCompleted ? "COMPLETED" : "IN_PROGRESS",
     "execution.startedAt": parent?.execution?.startedAt || now,
     "execution.completedAt": batchCompleted ? now : null,

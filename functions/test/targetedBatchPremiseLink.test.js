@@ -6,6 +6,7 @@ import {
   assertCompleteTargetedBatchPremiseContext,
   buildSalesTbRefsForPremiseStart,
   classifyTargetedBatchPremiseRoute,
+  completeTargetedBatchMeterDiscoveryInTransaction,
   createOrLinkTargetedBatchPremise,
   isSalesTargetedBatchContext,
   normalizeTargetedBatchPremiseContext,
@@ -707,6 +708,7 @@ test("linked premise transaction starts TB execution and preserves Sales data", 
   const premise = db.read(`premises/${fixture.premiseId}`);
 
   assert.equal(parent.execution.status, "IN_PROGRESS");
+  assert.equal(parent.status, "IN_PROGRESS", "rules section 14: the batch is In Progress once field work starts");
   assert.equal(parent.counts.executionStartedRows, 1);
   assert.equal(row.execution.status, "IN_PROGRESS");
   assert.equal(row.refs.premiseId, fixture.premiseId);
@@ -798,4 +800,38 @@ test("linked helper failure creates no premise or partial linkage", async () => 
     db.read(`tb_uploads/${TB_ID}`).counts.executionStartedRows,
     0,
   );
+});
+
+// Rules section 14: the batch stays In Progress until every row is complete, then Completed.
+async function linkThenDiscover(totalRows) {
+  const fixture = buildLinkedFixture();
+  fixture.documents[`tb_uploads/${TB_ID}`].counts.totalRows = totalRows;
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+  await createOrLinkTargetedBatchPremise({ db, premiseRef, premisePayload: buildPremisePayload(fixture), actorUid: "USER_1", actorName: "Field Worker" });
+  assert.equal(db.read(`tb_uploads/${TB_ID}`).status, "IN_PROGRESS");
+  const premise = db.read(`premises/${fixture.premiseId}`);
+  const trnData = {
+    id: "TRN_MDIS_TEST_1",
+    targetedBatchContext: { ...premise.targetedBatchContext, premiseId: fixture.premiseId },
+    accessData: { premise: { id: fixture.premiseId } },
+    ast: { astData: { astNo: fixture.salesDocId } },
+    metadata: { createdByUid: "USER_1", createdByUser: "Field Worker" },
+  };
+  const result = await db.runTransaction((transaction) => completeTargetedBatchMeterDiscoveryInTransaction({
+    transaction, db, trnData, astId: "TRN_MDIS_TEST_1", normalizedMeterNo: fixture.salesDocId,
+  }));
+  return { db, result };
+}
+
+test("meter discovery completes the batch only when every row is complete", async () => {
+  const single = await linkThenDiscover(1);
+  assert.equal(single.result.batchCompleted, true);
+  assert.equal(single.db.read(`tb_uploads/${TB_ID}`).status, "COMPLETED");
+  assert.equal(single.db.read(`tb_uploads/${TB_ID}`).execution.status, "COMPLETED");
+
+  const oneOfTwo = await linkThenDiscover(2);
+  assert.equal(oneOfTwo.result.batchCompleted, false);
+  assert.equal(oneOfTwo.db.read(`tb_uploads/${TB_ID}`).status, "IN_PROGRESS");
+  assert.equal(oneOfTwo.db.read(`tb_uploads/${TB_ID}`).execution.status, "IN_PROGRESS");
 });

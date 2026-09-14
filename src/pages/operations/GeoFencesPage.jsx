@@ -1,8 +1,8 @@
 /* eslint-disable no-unused-vars -- Component tags are consumed by JSX; the repository uses the core ESLint rule. */
 import { pageStyle, headerStyle, eyebrowStyle, wardSelectWrapStyle, wardSelectLabelStyle, wardSelectStyle, mapShellStyle } from "./geofence-ui-styles";
 import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "./geofence-shared-ui";
-import { ExistingGeoFenceLayer, DraftGeoFenceLayer } from "./geofence-map-layers";
-import { isUsableMapPoint, toUsableLatLng, normalizeBbox, fitMapToBbox } from "./geofence-map-helpers";
+import { ExistingGeoFenceLayer, DraftGeoFenceLayer, WardBoundaryPolygons } from "./geofence-map-layers";
+import { isUsableMapPoint, toUsableLatLng, normalizeBbox, fitMapToBbox, parseGeometry, geoJsonPolygonToGooglePaths } from "./geofence-map-helpers";
 import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../functions/geofences/geofence-name.js";
 // src/pages/operations/GeoFencesPage.jsx
 
@@ -152,39 +152,6 @@ function getWardLabel(ward, wardPcode) {
     wardPcode ||
     "NAv"
   );
-}
-
-function parseGeometry(geometry) {
-  if (!geometry) return null;
-
-  if (typeof geometry === "string") {
-    try {
-      return JSON.parse(geometry);
-    } catch (error) {
-      console.error("Could not parse geometry:", error);
-      return null;
-    }
-  }
-
-  return geometry;
-}
-
-function geoJsonPolygonToGooglePaths(geoJsonGeometry) {
-  if (!geoJsonGeometry) return [];
-
-  if (geoJsonGeometry.type === "Polygon") {
-    return geoJsonGeometry.coordinates.map((ring) =>
-      ring.map(([lng, lat]) => ({ lat, lng })),
-    );
-  }
-
-  if (geoJsonGeometry.type === "MultiPolygon") {
-    return geoJsonGeometry.coordinates.flatMap((polygon) =>
-      polygon.map((ring) => ring.map(([lng, lat]) => ({ lat, lng }))),
-    );
-  }
-
-  return [];
 }
 
 function getWardCenter(ward) {
@@ -422,13 +389,14 @@ function WardBoundaryLayer({
   manualWardFlightWard = null,
 }) {
   const map = useMap();
-  const polygonRef = useRef(null);
   const wardPcode = getWardPcode(ward);
   const manualWardPcode = getWardPcode(manualWardFlightWard);
 
-  const paths = useMemo(() => {
-    return geoJsonPolygonToGooglePaths(parseGeometry(ward?.geometry));
-  }, [ward?.geometry]);
+  // Drawn by the shared Ward boundary component, also used by the TB Draft Wards layer.
+  const wardGeometry = ward?.geometry;
+  const boundary = useMemo(() => {
+    return wardGeometry ? [{ id: wardPcode, geometry: wardGeometry }] : [];
+  }, [wardPcode, wardGeometry]);
 
   useEffect(() => {
     if (!map || !shouldFit) return;
@@ -454,39 +422,7 @@ function WardBoundaryLayer({
     manualWardFlightWard,
   ]);
 
-  useEffect(() => {
-    if (!map || !window.google?.maps) return;
-
-    if (polygonRef.current) {
-      polygonRef.current.setMap(null);
-      polygonRef.current = null;
-    }
-
-    if (!paths.length) return;
-
-    const polygon = new window.google.maps.Polygon({
-      paths,
-      strokeColor: "#f59e0b",
-      strokeOpacity: 1,
-      strokeWeight: 3,
-      fillColor: "#f59e0b",
-      fillOpacity: 0.08,
-      clickable: false,
-      zIndex: 20,
-    });
-
-    polygon.setMap(map);
-    polygonRef.current = polygon;
-
-    return () => {
-      if (polygonRef.current) {
-        polygonRef.current.setMap(null);
-        polygonRef.current = null;
-      }
-    };
-  }, [map, paths]);
-
-  return null;
+  return <WardBoundaryPolygons wards={boundary} />;
 }
 
 function NoGeofenceMetersLayer({ meters, interactive = true }) {

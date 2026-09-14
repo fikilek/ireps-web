@@ -1113,6 +1113,7 @@ export default function TargetedBatchesPage() {
                     </Td>
 
                     <Td>
+                      {/* TB-R017: the action reads Allocate while unallocated and Allocated once done. */}
                       {allocationState.isAllocated ? (
                         <span
                           style={{
@@ -1126,7 +1127,7 @@ export default function TargetedBatchesPage() {
                           }
                         >
                           <span style={styles.allocationStatusLabel}>
-                            {allocationState.label}
+                            Allocated
                           </span>
                           {allocationState.targetLabel ? (
                             <span style={styles.allocationTargetText}>
@@ -1139,14 +1140,10 @@ export default function TargetedBatchesPage() {
                           to={`/operations/targeted-batches/${encodeURIComponent(
                             upload.id,
                           )}/allocation`}
-                          style={{
-                            ...styles.allocationStatusBadge,
-                            ...styles.allocationStatusNotAllocated,
-                            ...styles.allocationStatusLink,
-                          }}
-                          title="Open the Targeted Batch Allocation page."
+                          style={styles.rowLinkButton}
+                          title="Open TB Allocation to allocate this batch to a team or service provider."
                         >
-                          {allocationState.label}
+                          Allocate
                         </Link>
                       )}
                     </Td>
@@ -1622,19 +1619,10 @@ const styles = {
     fontWeight: 700,
     opacity: 0.82,
   },
-  allocationStatusLink: {
-    textDecoration: "none",
-    cursor: "pointer",
-  },
   allocationStatusAllocated: {
     border: "1px solid #86efac",
     background: "#dcfce7",
     color: "#166534",
-  },
-  allocationStatusNotAllocated: {
-    border: "1px solid #fde68a",
-    background: "#fef3c7",
-    color: "#92400e",
   },
   deleteBatchButton: {
     display: "inline-flex",
