@@ -67,6 +67,7 @@ export async function createSalesBatch({ db, request, codec, now = () => Timesta
         patch.erfResolution = { version: 1, revision, method: "GEOCODED", evidenceRefs: [`ireps_erfs/${row.erfId}`], geocode: { latitude: row.evidence.point.latitude, longitude: row.evidence.point.longitude, matchLevel: "EXACT_STREET_NUMBER", geocodedAddress: row.evidence.address, provider: row.evidence.provider, geocodedAt: Timestamp.fromMillis(row.evidence.geocodedAt) }, confirmedByUid: actor.uid, confirmedByUser: actor.user, confirmedAt: at, tbId: intent.tbId };
       }
       if (intent.source === "PREPAID_SALES_NON_GPS" && Object.hasOwn(sales, "erfLookup")) patch.erfLookup = FieldValue.delete();
+      if (intent.source === "PREPAID_SALES_NON_GPS" && Object.hasOwn(sales, "erfLocated")) patch.erfLocated = FieldValue.delete();
       const history = buildSalesBatchHistory({ type: "BATCHED", tbId: intent.tbId, rowId, salesId: row.salesId, geofenceId: fence.id, erfId: row.erfId, membershipSource: membership.source || "LEGACY_TBREFS", actor, at, revision });
       writes.push({ rowRef, rowDoc, historyRef, history, salesRef: db.doc(`sales-all-meters/${row.salesId}`), patch });
     }

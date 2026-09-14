@@ -8,7 +8,7 @@ import { useSalesReadScope } from "../../redux/salesApi";
 import { clearTargetedBatchDraft, selectTargetedBatchDraft, updateSalesDraftResolution, saveSalesDraftFence, removeSalesDraftMeter, setSalesDraftConfirmation, setSalesDraftUncertainRequest } from "../../redux/targetedBatchDraftSlice";
 import { useGetSalesBatchDraftSnapshotQuery, useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
 import { useGeofencePolygonDraft } from "../../features/maps/use-geofence-polygon-draft";
-import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure, salesDraftReturnPath } from "./targeted-batches/draft/sales-batch-draft-model";
+import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure, salesDraftReturnPath, salesDraftSignature } from "./targeted-batches/draft/sales-batch-draft-model";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
 import TargetedBatchConfirmModal from "./targeted-batches/TargetedBatchConfirmModal";
 import { draftReviewStyles as styles, draftButtonStyle } from "./targeted-batches/draft/targetedBatchDraftReviewStyles";
@@ -38,7 +38,7 @@ function SalesDraftSession({ draft }) {
   const erfIds = [...new Set(resolved.map(row => row.erfId).filter(Boolean))].sort();
   const wardIds = [...new Set(resolved.map(row => row.scope?.wardPcode).filter(Boolean))].sort();
   const { data: live } = useGetSalesBatchDraftSnapshotQuery({ lmPcode: draft.scope.lmPcode, salesIds: draft.retainedIds, erfIds, wardIds, tbId: draft.id, geofenceId: draft.savedFence?.id });
-  const signature = live?.ready ? JSON.stringify([live.sales, live.erfs, live.wards]) : "";
+  const signature = salesDraftSignature(live);
   const latest = useRef(null);
   useEffect(() => { latest.current = { draft, live }; }, [draft, live]);
   const mounted = useRef(true);

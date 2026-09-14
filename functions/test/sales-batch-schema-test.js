@@ -11,7 +11,7 @@ import { creationPayload } from "../targetedBatches/sales-batch-creation.js";
 const fixture=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 const schemaRoot=process.env.IREPS_SCHEMAS_ROOT || "C:/dev/ireps-schemas";
 const head=execFileSync("git",["--no-optional-locks","-c",`safe.directory=${schemaRoot}`,"-C",schemaRoot,"rev-parse","HEAD"],{encoding:"utf8"}).trim();
-assert.equal(head,"5d9c2ebe813922104607f40347d943490bfc1c28","Mount the approved immutable schema checkout");
+assert.equal(head,"f2876320d0a28dc1ab90bc197b974b6fea39c2f1","Mount the approved immutable schema checkout");
 const ajv=new Ajv2020({allErrors:true,allowUnionTypes:true,strictTypes:false,strictRequired:false,coerceTypes:false,useDefaults:false,removeAdditional:false});
 for(const keyword of ["x-ireps","x-firestore-type"])ajv.addKeyword({keyword,valid:true});
 addFormats(ajv);

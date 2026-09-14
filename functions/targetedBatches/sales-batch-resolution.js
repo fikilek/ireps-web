@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { defineSecret } from "firebase-functions/params";
 import { onCall } from "firebase-functions/v2/https";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
-import { SALES_BATCH_ID, SALES_ID, SALES_BATCH_MAX, GEOCODING_PROVIDER, LOOKUP_OUTCOMES, composeSalesGeocodingAddress, evaluateSalesBatchability, inspectSavedErfDecision, singlePipelineErf, salesStreetAddress, nonblank, validDocumentId, exactKeys, isTimestamp } from "../salesAllMeters/sales-batch-policy.js";
+import * as logger from "firebase-functions/logger";
+import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
+import { SALES_BATCH_ID, SALES_ID, SALES_BATCH_MAX, GEOCODING_PROVIDER, LOOKUP_OUTCOMES, composeSalesGeocodingAddress, evaluateSalesBatchability, inspectSavedErfDecision, inspectErfLocated, salesMaterial, singlePipelineErf, salesStreetAddress, nonblank, validDocumentId, exactKeys, isTimestamp } from "../salesAllMeters/sales-batch-policy.js";
 import { normalizeBatchGeometry, pointCoordinates, strictlyInside, strictlyWithinWard, MAX_GEOMETRY_BYTES } from "../geofences/sales-batch-geometry.js";
 import { geocodeSalesAddress, googleGeocodingApiKey } from "./sales-batch-geocoding.js";
 import { isSubcontractorServiceProvider } from "./helpers.js";
@@ -20,6 +21,9 @@ export function canonicalJson(value) {
   return JSON.stringify(normalize(value));
 }
 export const materialHash = value => crypto.createHash("sha256").update(canonicalJson(value)).digest("hex").toUpperCase();
+// The Sales material TB Draft evidence binds (schema TB10): the lookup records and metadata
+// are left out, so recording a lookup never makes a located meter need locating again.
+export const salesMaterialHash = sales => materialHash(salesMaterial(sales));
 // Evidence has no time limit (rules 18.4, 1.3.6). It is refused only when what it binds
 // really changed: the actor and draft scope here, and the Sales record, ERF and Ward
 // hashes where it is used.
@@ -132,7 +136,28 @@ export async function recordFailedLookup({ db, request, intent, salesId, address
     if (!policy.batchable && policy.code !== "NEEDS_MANUAL_ERFING") throw batchError(policy.code, policy.reason);
     if (inspectSavedErfDecision(sales).established) throw batchError("ERF_ALREADY_ESTABLISHED", "The ERF decision was established during lookup");
     const at = now();
-    tx.update(ref, { erfLookup: { version: 1, outcome, address, provider: GEOCODING_PROVIDER, attemptedAt: at, attemptedByUid: actor.uid, attemptedByUser: actor.user }, ...salesMetadataUpdate(sales, actor, at) });
+    tx.update(ref, { erfLookup: { version: 1, outcome, address, provider: GEOCODING_PROVIDER, attemptedAt: at, attemptedByUid: actor.uid, attemptedByUser: actor.user },
+      ...(Object.hasOwn(sales, "erfLocated") ? { erfLocated: FieldValue.delete() } : {}), ...salesMetadataUpdate(sales, actor, at) });
+  });
+}
+export function sameErfLocated(sales, { erfId, wardPcode, address }) {
+  const record = sales?.erfLocated;
+  return inspectErfLocated(sales).located && record.erfId === erfId && record.wardPcode === wardPcode && record.address === address && record.provider === GEOCODING_PROVIDER;
+}
+// Schema TB10: record a successful Non-GPS location, only when new or changed. It is not the
+// ERF decision and never sets erfId; it replaces an earlier failed-lookup flag.
+export async function recordLocatedLookup({ db, actor, intent, salesId, address, erfId, wardPcode, now = () => Timestamp.now() }) {
+  return db.runTransaction(async tx => {
+    const ref = db.doc(`sales-all-meters/${salesId}`), snapshot = await tx.get(ref);
+    if (!snapshot.exists) return false;
+    const sales = snapshot.data();
+    if (composeSalesGeocodingAddress(sales) !== address || inspectSavedErfDecision(sales).established || sameErfLocated(sales, { erfId, wardPcode, address })) return false;
+    const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
+    if (!policy.batchable && policy.code !== "NEEDS_MANUAL_ERFING") return false;
+    const at = now();
+    tx.update(ref, { erfLocated: { version: 1, erfId, wardPcode, address, provider: GEOCODING_PROVIDER, locatedAt: at, locatedByUid: actor.uid, locatedByUser: actor.user },
+      ...(Object.hasOwn(sales, "erfLookup") ? { erfLookup: FieldValue.delete() } : {}), ...salesMetadataUpdate(sales, actor, at) });
+    return true;
   });
 }
 export async function resolveSalesBatch({ db, request, codec, geocode, now = () => Timestamp.now() }) {
@@ -175,7 +200,15 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
       }
       const context = await readErfContext({ db, erfId, lmPcode: intent.lmPcode });
       if (!nonblank(salesStreetAddress(sales)) || !nonblank(sales.town)) throw batchError("ROW_ADDRESS_INCOMPLETE", "The draft address is incomplete");
-      const proof = codec.sign({ kind: "RESOLUTION", ...proofScope({ db, actor, intent }), salesId, salesHash: materialHash(sales), erfId, geometryHash: context.geometryHash, wardHash: context.wardHash, point, evidence });
+      const proof = codec.sign({ kind: "RESOLUTION", ...proofScope({ db, actor, intent }), salesId, salesHash: salesMaterialHash(sales), erfId, geometryHash: context.geometryHash, wardHash: context.wardHash, point, evidence });
+      if (evidence) {
+        const located = { erfId, wardPcode: context.scope.wardPcode, address: evidence.address };
+        // The location stands even if recording it fails; the next Locate meters records it.
+        if (!sameErfLocated(sales, located)) {
+          try { await recordLocatedLookup({ db, actor, intent, salesId, ...located, now }); }
+          catch (error) { logger.warn("resolveSalesTargetedBatch -- successful location not recorded", { salesId, code: error?.code || null }); }
+        }
+      }
       rows.push({ salesId, meterNo: sales.meterNo, address: composeSalesGeocodingAddress(sales), ready: true, code: "RESOLVED", reason: "Coordinates and ERF resolved", erfId, point, pointSource: saved.established || evidence ? "GEOCODED" : "PIPELINE", scope: context.scope, centroid: context.centroid, proof });
     } catch (error) {
       rows.push({ salesId, meterNo: sales?.meterNo || salesId, address: sales ? composeSalesGeocodingAddress(sales) : "", ready: false, code: error.code || "RESOLUTION_INCOMPLETE", reason: error.code ? error.message : "Resolution is incomplete", point: null, erfId: null, ...known, proof: null });
@@ -188,7 +221,7 @@ export async function readDraftAssessment({ db, intent, codec, actor, read = sna
   for (const salesId of intent.salesIds) {
     const snapshot = await read(db.doc(`sales-all-meters/${salesId}`));
     const sales = snapshot.exists ? snapshot.data() : null;
-    salesById.set(salesId, sales); material.push([salesId, sales ? materialHash(sales) : null]);
+    salesById.set(salesId, sales); material.push([salesId, sales ? salesMaterialHash(sales) : null]);
     let row = { salesId, meterNo: sales?.meterNo || salesId, address: sales ? composeSalesGeocodingAddress(sales) : "", ready: false, code: "SALES_MISSING", reason: "Sales meter is unavailable", erfId: null, point: null };
     if (sales) {
       const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
@@ -205,7 +238,7 @@ export async function readDraftAssessment({ db, intent, codec, actor, read = sna
         if (token) {
           try {
             proof = codec.verify(token, { kind: "RESOLUTION", ...proofScope({ db, actor, intent }), salesId });
-            if (proof.salesHash !== materialHash(sales)) throw batchError("SALES_CHANGED", "Sales data changed; resolution must be reassessed");
+            if (proof.salesHash !== salesMaterialHash(sales)) throw batchError("SALES_CHANGED", "Sales data changed; resolution must be reassessed");
             if (erfId && proof.erfId !== erfId) throw batchError("ERF_CHANGED", "The confirmed ERF changed");
             erfId = proof.erfId; point = proof.point; evidence = proof.evidence;
           } catch (error) { proofError = error; }

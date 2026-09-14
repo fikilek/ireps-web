@@ -1,4 +1,4 @@
-import { evaluateSalesBatchability, classifySalesWorkStatus, SALES_BATCH_MAX as SALES_BATCH_LIMIT, composeSalesGeocodingAddress, LOOKUP_OUTCOMES } from "../../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { evaluateSalesBatchability, classifySalesWorkStatus, SALES_BATCH_MAX as SALES_BATCH_LIMIT, composeSalesGeocodingAddress, LOOKUP_OUTCOMES, salesMaterial } from "../../../../../functions/salesAllMeters/sales-batch-policy.js";
 import { normalizeBatchGeometry, polygonFromPoints, strictlyInside, strictlyWithinWard } from "../../../../../functions/geofences/sales-batch-geometry.js";
 
 export function buildRetainedSalesDraft(payload, id) {
@@ -94,8 +94,18 @@ export function draftGeometry(points, savedFence) {
   try { return savedFence?.status === "ACTIVE" && savedFence.targetedBatch ? normalizeBatchGeometry(savedFence.geometry) : polygonFromPoints(points); } catch { return null; }
 }
 
+// Schema TB10: the lookup records and metadata are not Sales material. Recording a lookup
+// must not make TB Draft locate the meters again or make a confirmation stale.
+export function salesDraftMaterial(live) {
+  if (!live?.sales) return live;
+  return { ...live, sales: Object.fromEntries(Object.entries(live.sales).map(([id, row]) => [id, salesMaterial(row)])) };
+}
+export function salesDraftSignature(live) {
+  return live?.ready ? JSON.stringify([salesDraftMaterial(live).sales, live.erfs, live.wards]) : "";
+}
+
 export function confirmationIdentity(draft, live) {
-  return JSON.stringify([draft.id, draft.retainedIds, draft.selection, draft.resolutions, draft.savedFence, live]);
+  return JSON.stringify([draft.id, draft.retainedIds, draft.selection, draft.resolutions, draft.savedFence, salesDraftMaterial(live)]);
 }
 
 export function salesDraftWardLabel(pcode, ward) {

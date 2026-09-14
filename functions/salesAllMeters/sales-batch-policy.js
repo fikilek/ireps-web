@@ -191,6 +191,24 @@ export function inspectErfLookup(row = {}) {
   const valid = exactKeys(flag, ["version", "outcome", "address", "provider", "attemptedAt", "attemptedByUid", "attemptedByUser"]) && flag.version === 1 && LOOKUP_OUTCOMES.includes(flag.outcome) && [flag.address, flag.provider, flag.attemptedByUid, flag.attemptedByUser].every(nonblank) && isTimestamp(flag.attemptedAt);
   return { valid, flagged: valid && flag.address === composeSalesGeocodingAddress(row), outcome: valid ? flag.outcome : null };
 }
+// Roots TB Draft evidence does not bind (schema TB10): recording a lookup is not a Sales change.
+export const NON_MATERIAL_SALES_ROOTS = Object.freeze(["erfLocated", "erfLookup", "metadata"]);
+export function salesMaterial(row) {
+  if (!row || typeof row !== "object") return row;
+  const material = { ...row };
+  for (const key of NON_MATERIAL_SALES_ROOTS) delete material[key];
+  return material;
+}
+// Schema TB10: a successful TB Draft location. A record of the lookup, not the ERF decision;
+// it applies only while its address is the meter's current composed address.
+export const ERF_LOCATED_KEYS = Object.freeze(["version", "erfId", "wardPcode", "address", "provider", "locatedAt", "locatedByUid", "locatedByUser"]);
+export function inspectErfLocated(row = {}) {
+  if (!Object.hasOwn(row, "erfLocated")) return { valid: true, located: false, erfId: null, wardPcode: null };
+  const record = row.erfLocated;
+  const valid = exactKeys(record, ERF_LOCATED_KEYS) && record.version === 1 && validDocumentId(record.erfId) && /^ZA[0-9]+$/.test(record.wardPcode || "") && [record.address, record.provider, record.locatedByUid, record.locatedByUser].every(nonblank) && isTimestamp(record.locatedAt);
+  const located = Boolean(valid) && record.address === composeSalesGeocodingAddress(row);
+  return { valid: Boolean(valid), located, erfId: located ? record.erfId : null, wardPcode: located ? record.wardPcode : null };
+}
 export function inspectSavedErfDecision(row = {}) {
   const hasErf = row.erfId !== undefined && row.erfId !== null;
   const hasResolution = Object.hasOwn(row, "erfResolution");

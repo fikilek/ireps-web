@@ -58,7 +58,7 @@ for(const source of ["PREPAID_SALES","PREPAID_SALES_NON_GPS"])for(const n of [1,
  const parent=(await db.doc(`tb_uploads/${f.tbId}`).get()).data();assert.equal(parent.schemaVersion,"0.3.0");assert.equal(parent.creation.createdRows,n);
  const rows=await db.collection("tb_rows").where("tbId","==",f.tbId).get();assert.equal(rows.size,n);
  for(const id of ids){const sales=(await db.doc(`sales-all-meters/${id}`).get()).data();assert.equal(sales.targetedBatchId,f.tbId);assert.equal(sales.tbRefs.length,1);assert.equal(sales.tbRefs[0].date.toMillis(),parent.metadata.createdAt.toMillis());assert.equal(sales.metadata.createdAt.toMillis(),1000000);assert.deepEqual(sales.monthlyCategories,f.sales.monthlyCategories);assert.equal(sales.salesStatus,"NOT_STARTED");
-  assert.equal(Boolean(sales.erfResolution),source==="PREPAID_SALES_NON_GPS");
+  assert.equal(Boolean(sales.erfResolution),source==="PREPAID_SALES_NON_GPS");assert.equal(sales.erfLocated,undefined);
   assert.equal((await db.doc(`sales-all-meters/${id}/batchHistory/${f.tbId}__BATCHED`).get()).exists,true);
  }
  const again=await createSalesBatch({db,request:request(intent),codec});assert.equal(again.reused,true);
@@ -109,6 +109,37 @@ async function resolveIntent(ids,{source="PREPAID_SALES_NON_GPS",tbId=f.tbId}={}
  const resolution=await resolveSalesBatch({db,request:request(intent),codec,geocode});
  return {...intent,resolutionProofs:Object.fromEntries(resolution.rows.filter(row=>row.proof).map(row=>[row.salesId,row.proof]))};
 }
+// Targeted Batch rules 1.3.15 and Sales schema TB10: successful locations are recorded.
+test("successful Non-GPS locate records TB10 once, keeps its evidence valid, and creation removes it",async()=>{
+ const ids=await seed(),ref=db.doc(`sales-all-meters/${ids[0]}`);
+ await ref.update({erfLookup:{version:1,outcome:"NO_EXACT_POSITION",address:"1 Old Spelling, DUNDEE, KwaZulu-Natal, South Africa",provider:"Google Geocoding API",attemptedAt:Timestamp.fromMillis(2000000),attemptedByUid:"ORIGINAL",attemptedByUser:"Original"}});
+ const intent=await resolveIntent(ids),first=await ref.get(),sales=first.data();
+ assert.deepEqual(Object.keys(sales.erfLocated).sort(),["address","erfId","locatedAt","locatedByUid","locatedByUser","provider","version","wardPcode"]);
+ assert.equal(sales.erfLocated.erfId,"ERF1");assert.equal(sales.erfLocated.wardPcode,"ZA5241001");assert.equal(sales.erfLocated.locatedByUid,f.actor.uid);assert.equal(sales.erfLocated.locatedAt instanceof Timestamp,true);
+ assert.equal(sales.erfLookup,undefined);assert.equal(sales.erfId,undefined);assert.equal(sales.erfResolution,undefined);assert.equal(sales.metadata.createdAt.toMillis(),1000000);assert.equal(sales.metadata.updatedByUid,f.actor.uid);
+ await resolveIntent(ids);assert.equal((await ref.get()).updateTime.isEqual(first.updateTime),true,"locating again writes nothing");
+ intent.geofenceId=(await saveFence({db,request:request({...intent,points:f.fencePoints,saveSalesIds:ids}),codec})).geofenceId;
+ const assessed=await assessSalesBatch({db,request:request(intent),codec});assert.deepEqual(assessed.includedIds,ids,"evidence from before the record is still valid");
+ assert.equal((await createSalesBatch({db,request:request({...intent,...assessed}),codec})).success,true);
+ const batched=(await ref.get()).data();assert.equal(batched.erfLocated,undefined);assert.equal(batched.erfId,"ERF1");assert.equal(batched.erfResolution.geocode.geocodedAddress,sales.erfLocated.address);
+});
+test("a later failed lookup replaces the successful location with the flag",async()=>{
+ const ids=await seed(),ref=db.doc(`sales-all-meters/${ids[0]}`);await resolveIntent(ids);assert.equal((await ref.get()).data().erfLocated.erfId,"ERF1");
+ await db.doc("ireps_erfs/ERF2").set({...f.erf,erfId:"ERF2"});
+ const result=await resolveSalesBatch({db,request:request({tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES_NON_GPS",salesIds:ids}),codec,geocode});
+ assert.equal(result.rows[0].code,"MULTIPLE_ERFS");const sales=(await ref.get()).data();assert.equal(sales.erfLocated,undefined);assert.equal(sales.erfLookup.outcome,"MULTIPLE_ERFS");
+});
+test("a failure to record the location never fails the locate",async()=>{
+ const ids=await seed(),ref=db.doc(`sales-all-meters/${ids[0]}`),before=await ref.get();
+ const wrapped=new Proxy(db,{get(target,key){if(key==="runTransaction")return async()=>{throw new Error("Injected record failure");};const value=target[key];return typeof value==="function"?value.bind(target):value;}});
+ const result=await resolveSalesBatch({db:wrapped,request:request({tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES_NON_GPS",salesIds:ids}),codec,geocode});
+ assert.equal(result.rows[0].ready,true,JSON.stringify(result));assert.ok(result.rows[0].proof);
+ assert.equal((await ref.get()).updateTime.isEqual(before.updateTime),true);
+});
+test("GPS Sales are never geocoded and get no location record",async()=>{
+ const ids=await seed(1,{source:"PREPAID_SALES"}),ref=db.doc(`sales-all-meters/${ids[0]}`),before=await ref.get();
+ await resolveIntent(ids,{source:"PREPAID_SALES"});assert.equal((await ref.get()).updateTime.isEqual(before.updateTime),true);
+});
 test("Save is immutable, repeatable across winding, Sales-read-only, and population can only shrink",async()=>{
  const ids=await seed(3),intent=await resolveIntent(ids),before=await Promise.all(ids.map(id=>db.doc(`sales-all-meters/${id}`).get()));
  const saved=await saveFence({db,request:request({...intent,saveSalesIds:ids,points:f.fencePoints}),codec});assert.equal(saved.reused,false);
