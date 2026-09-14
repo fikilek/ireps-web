@@ -2,6 +2,7 @@ import { useGetPermanentSalesBatchesQuery, useDeleteSalesTargetedBatchMutation }
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "./targeted-batches/batch-geofence-label.js";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
+import BatchMapLink from "../../components/batch-map-link.jsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
@@ -153,6 +154,7 @@ function compareTableValues(left, right) {
 function getSortValue(upload, sortKey) {
   if (sortKey === "batchType") return getBatchType(upload);
   if (sortKey === "allocation") return getAllocationState(upload).label;
+  if (sortKey === "allocatedTo") return getAllocationState(upload).targetName;
   if (sortKey === "total") return getUploadTotal(upload);
   if (sortKey === "ward") return getWardFilterValue(upload);
   if (sortKey === "geofence") return upload?.geofenceLabel || "";
@@ -199,6 +201,9 @@ function getAllocationState(upload = {}) {
     isAllocated,
     label: isAllocated ? "ALLOCATED" : "NOT ALLOCATED",
     targetLabel,
+    // TB-R043: who it is allocated to, shown and filtered in its own column.
+    targetName,
+    targetKind: targetType === "TEAM" ? "Team" : targetType ? "Service provider" : "",
   };
 }
 
@@ -456,6 +461,7 @@ export default function TargetedBatchesPage() {
   const [tbIdFilter, setTbIdFilter] = useState("");
   const [batchTypeFilter, setBatchTypeFilter] = useState("");
   const [allocationFilter, setAllocationFilter] = useState("");
+  const [allocatedToFilter, setAllocatedToFilter] = useState("");
   const [totalFilter, setTotalFilter] = useState("");
   const [wardFilter, setWardFilter] = useState("");
   const [geofenceFilter, setGeofenceFilter] = useState("");
@@ -524,6 +530,14 @@ export default function TargetedBatchesPage() {
     [uploads],
   );
 
+  const allocatedToOptions = useMemo(
+    () =>
+      Array.from(new Set(uploads.map((upload) => getAllocationState(upload).targetName)))
+        .filter(Boolean)
+        .sort(compareTableValues),
+    [uploads],
+  );
+
   const filteredUploads = useMemo(() => {
     const normalizedTbIdFilter = tbIdFilter.trim().toLowerCase();
     const normalizedTotalFilter = totalFilter.trim().toLowerCase();
@@ -547,6 +561,9 @@ export default function TargetedBatchesPage() {
         return false;
       }
       if (allocationFilter && allocationState.label !== allocationFilter) {
+        return false;
+      }
+      if (allocatedToFilter && allocationState.targetName !== allocatedToFilter) {
         return false;
       }
       if (
@@ -574,6 +591,7 @@ export default function TargetedBatchesPage() {
       return true;
     });
   }, [
+    allocatedToFilter,
     allocationFilter,
     batchTypeFilter,
     createdByFilter,
@@ -947,6 +965,7 @@ export default function TargetedBatchesPage() {
           <table style={styles.table}>
             <thead>
               <tr>
+                <Th>Map</Th>
                 <SortableTh
                   label="TB ID"
                   sortKey="id"
@@ -963,6 +982,12 @@ export default function TargetedBatchesPage() {
                 <SortableTh
                   label="Allocation"
                   sortKey="allocation"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTh
+                  label="Allocated To"
+                  sortKey="allocatedTo"
                   sortConfig={sortConfig}
                   onSort={handleSort}
                 />
@@ -993,6 +1018,7 @@ export default function TargetedBatchesPage() {
                 <Th>Delete TB</Th>
               </tr>
               <tr>
+                <th style={styles.filterHeaderCell} />
                 <th style={styles.filterHeaderCell}>
                   <input
                     type="text"
@@ -1035,6 +1061,24 @@ export default function TargetedBatchesPage() {
                     <option value="">All</option>
                     <option value="NOT ALLOCATED">Not Allocated</option>
                     <option value="ALLOCATED">Allocated</option>
+                  </select>
+                </th>
+                <th style={styles.filterHeaderCell}>
+                  <select
+                    value={allocatedToFilter}
+                    onChange={(event) => {
+                      setAllocatedToFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Allocated To"
+                  >
+                    <option value="">All</option>
+                    {allocatedToOptions.map((target) => (
+                      <option key={target} value={target}>
+                        {target}
+                      </option>
+                    ))}
                   </select>
                 </th>
                 <th style={styles.filterHeaderCell}>
@@ -1102,7 +1146,7 @@ export default function TargetedBatchesPage() {
             <tbody>
               {sortedUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={9}>
+                  <Td colSpan={11}>
                     {uploads.length === 0
                       ? "No permanent Targeted Batches were found for this Local Municipality."
                       : "No permanent Targeted Batches match the selected filters."}
@@ -1117,6 +1161,11 @@ export default function TargetedBatchesPage() {
 
                 return (
                   <tr key={upload.id}>
+                    <Td>
+                      {/* TB-R043: opens the Batch Map; its back button returns here. */}
+                      {upload.id ? <BatchMapLink tbId={upload.id} from={{ path: "/operations/targeted-batches", label: "TB Register" }} /> : null}
+                    </Td>
+
                     <Td>
                       <div style={styles.strongCell}>{upload.id || "NAv"}</div>
                     </Td>
@@ -1167,11 +1216,6 @@ export default function TargetedBatchesPage() {
                           <span style={styles.allocationStatusLabel}>
                             Allocated
                           </span>
-                          {allocationState.targetLabel ? (
-                            <span style={styles.allocationTargetText}>
-                              {allocationState.targetLabel}
-                            </span>
-                          ) : null}
                         </span>
                       ) : (
                         <Link
@@ -1184,6 +1228,15 @@ export default function TargetedBatchesPage() {
                           Allocate
                         </Link>
                       )}
+                    </Td>
+
+                    <Td>
+                      {/* TB-R043: who it is allocated to; hovering shows team or service provider. */}
+                      {allocationState.targetName ? (
+                        <div style={styles.strongCell} title={allocationState.targetKind || undefined}>
+                          {allocationState.targetName}
+                        </div>
+                      ) : null}
                     </Td>
 
                     <Td>
@@ -1657,15 +1710,6 @@ const styles = {
   },
   allocationStatusLabel: {
     display: "block",
-  },
-  allocationTargetText: {
-    display: "block",
-    maxWidth: 150,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    fontSize: 9,
-    fontWeight: 700,
-    opacity: 0.82,
   },
   allocationStatusAllocated: {
     border: "1px solid #86efac",

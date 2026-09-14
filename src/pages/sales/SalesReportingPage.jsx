@@ -11,6 +11,7 @@ import {
 import { useGetTargetedBatchHeadersByLmQuery } from "../../redux/salesTargetedBatchApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "../operations/targeted-batches/batch-geofence-label.js";
+import BatchMapLink from "../../components/batch-map-link.jsx";
 
 const ALL_FILTER = "ALL";
 // Targeted Batch rules TB-R043: allocation shows as two filterable columns.
@@ -431,26 +432,6 @@ function PaginationControls({
   );
 }
 
-function MapIcon() {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z" />
-      <path d="M9 3v15" />
-      <path d="M15 6v15" />
-    </svg>
-  );
-}
 
 export default function SalesReportingPage() {
   const { activeWorkbase } = useAuth();
@@ -951,14 +932,7 @@ export default function SalesReportingPage() {
                     <tr key={batch.id}>
                       <td>
                         <div style={styles.batchIdCell}>
-                          <Link
-                            to={`/sales/reporting/${encodeURIComponent(batch.id)}/map`}
-                            style={styles.batchMapIconButton}
-                            aria-label={`View Batch Map for ${batch.id}`}
-                            title="View Batch Map"
-                          >
-                            <MapIcon />
-                          </Link>
+                          <BatchMapLink tbId={batch.id} from={{ path: "/sales/reporting", label: "Reporting" }} />
                           <strong style={styles.batchId}>{batch.id}</strong>
                         </div>
                       </td>
@@ -1355,20 +1329,6 @@ const styles = {
     alignItems: "center",
     gap: 8,
     whiteSpace: "nowrap",
-  },
-
-  batchMapIconButton: {
-    width: 30,
-    height: 30,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "0 0 auto",
-    borderRadius: 9,
-    border: "1px solid #93c5fd",
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    textDecoration: "none",
   },
 
   loadingState: {

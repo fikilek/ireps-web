@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars -- Component tags are consumed by JSX; the repository uses the core ESLint rule. */
 import { skipToken } from "@reduxjs/toolkit/query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { batchMapReturn } from "../../components/batch-map-path.js";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetTargetedBatchMapByIdQuery } from "../../redux/salesTargetedBatchApi";
@@ -52,6 +53,8 @@ function CoverageRow({ label, found, referenced, spatial, spatialLabel }) {
 export default function SalesBatchMapPage() {
   const { tbId: routeTbId = "" } = useParams();
   const { activeWorkbase } = useAuth();
+  // TB-R043: back to the list the map was opened from (TB Register or Sales Reporting).
+  const back = batchMapReturn(useLocation().state);
 
   const tbId = cleanText(routeTbId);
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
@@ -116,8 +119,8 @@ export default function SalesBatchMapPage() {
         </div>
 
         <div style={styles.headerActions}>
-          <Link to="/sales/reporting" style={styles.secondaryButton}>
-            Back to Reporting
+          <Link to={back.path} style={styles.secondaryButton}>
+            Back to {back.label}
           </Link>
           {tbId ? (
             <Link

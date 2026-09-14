@@ -34,7 +34,33 @@ test("TB Register: Geofence column after Ward, with a text filter and sorting", 
   assert.match(page, /label="Geofence"\s+sortKey="geofence"/);
   assert.match(page, /aria-label="Filter Geofence"/);
   assert.match(page, /if \(sortKey === "geofence"\) return upload\?\.geofenceLabel \|\| "";/);
-  assert.match(page, /<Td colSpan=\{9\}>/);
+  assert.match(page, /<Td colSpan=\{11\}>/);
+});
+
+test("TB Register: Map button first; Allocation (Allocate / Allocated) then Allocated To, each filterable (1.3.11)", async () => {
+  const page = await read("../TargetedBatchesPage.jsx");
+  inOrder(page, ["<Th>Map</Th>", 'label="TB ID"', 'label="Allocation"', 'label="Allocated To"', 'label="Total"']);
+  inOrder(page, ['aria-label="Filter Allocation"', 'aria-label="Filter Allocated To"', 'aria-label="Filter Total"']);
+  assert.match(page, /<BatchMapLink tbId=\{upload\.id\} from=\{\{ path: "\/operations\/targeted-batches", label: "TB Register" \}\} \/>/);
+  assert.match(page, /if \(allocatedToFilter && allocationState\.targetName !== allocatedToFilter\)/);
+  assert.match(page, /title=\{allocationState\.targetKind \|\| undefined\}>\s*\{allocationState\.targetName\}/);
+  assert.doesNotMatch(page, /allocationTargetText/, "the Allocated chip no longer carries the name");
+});
+
+test("the Batch Map button is shared, and the Batch Map returns to the list it came from", async () => {
+  const { batchMapPath, batchMapReturn } = await import("../../../components/batch-map-path.js");
+  assert.equal(batchMapPath("TGB_20260914_012600_YHXQ"), "/sales/reporting/TGB_20260914_012600_YHXQ/map");
+  assert.deepEqual(batchMapReturn({ from: { path: "/operations/targeted-batches", label: "TB Register" } }), { path: "/operations/targeted-batches", label: "TB Register" });
+  for (const state of [null, undefined, {}, { from: { path: "https://evil.example" } }, { from: { path: "//evil.example" } }, { from: { path: 42 } }]) {
+    assert.deepEqual(batchMapReturn(state), { path: "/sales/reporting", label: "Reporting" }, JSON.stringify(state));
+  }
+  const link = await read("../../../components/batch-map-link.jsx");
+  assert.match(link, /to=\{batchMapPath\(tbId\)\}\s+state=\{from \? \{ from \} : undefined\}/);
+  const reporting = await read("../../sales/SalesReportingPage.jsx");
+  assert.match(reporting, /<BatchMapLink tbId=\{batch\.id\} from=\{\{ path: "\/sales\/reporting", label: "Reporting" \}\} \/>/);
+  const mapPage = await read("../../sales/SalesBatchMapPage.jsx");
+  assert.match(mapPage, /const back = batchMapReturn\(useLocation\(\)\.state\);/);
+  assert.match(mapPage, /<Link to=\{back\.path\} style=\{styles\.secondaryButton\}>\s*Back to \{back\.label\}/);
 });
 
 test("Sales Reporting: Geofence after Ward; Allocation (Allocated / Unallocated) then Allocated To (team), each filterable", async () => {
