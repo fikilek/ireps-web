@@ -151,6 +151,63 @@ export function pointsCentre(points = []) {
   };
 }
 
+// Even-odd test over every ring, so holes and multi-part Wards are handled.
+export function pointInPaths(point, paths = []) {
+  let inside = false;
+  for (const ring of paths) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i], b = ring[j];
+      if ((a.lat > point.lat) !== (b.lat > point.lat)
+        && point.lng < ((b.lng - a.lng) * (point.lat - a.lat)) / (b.lat - a.lat) + a.lng) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+const METRES_PER_DEGREE = 111320;
+
+// The point on any ring edge nearest `point`, with its distance in metres (a local
+// flat approximation, accurate to a few metres across a municipality).
+export function nearestPointOnPaths(point, paths = []) {
+  const kx = Math.cos((point.lat * Math.PI) / 180) * METRES_PER_DEGREE, ky = METRES_PER_DEGREE;
+  let best = null;
+  for (const ring of paths) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      const ax = (a.lng - point.lng) * kx, ay = (a.lat - point.lat) * ky;
+      const dx = (b.lng - a.lng) * kx, dy = (b.lat - a.lat) * ky;
+      const lengthSq = dx * dx + dy * dy;
+      const t = lengthSq ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSq)) : 0;
+      const x = ax + t * dx, y = ay + t * dy, distance = Math.hypot(x, y);
+      if (!best || distance < best.distance) best = { point: { lat: point.lat + y / ky, lng: point.lng + x / kx }, distance };
+    }
+  }
+  return best;
+}
+
+// Where a Ward's name goes on the TB Draft Wards layer (Targeted Batch rules 18.7, 1.3.8):
+// inside the Ward at the spot nearest `towards` (the draft's meters) — `towards` itself
+// when it lies in the Ward, else just across the Ward's nearest edge: straight on first,
+// then around that edge point, a little further each time where the edge is jagged or a
+// narrow spike — or else the Ward's stored centroid.
+export function wardNameLabelPoint(paths, towards, { steps = [40, 80, 160, 320], centroid = null } = {}) {
+  if (towards && pointInPaths(towards, paths)) return towards;
+  const nearest = towards ? nearestPointOnPaths(towards, paths) : null;
+  if (nearest && nearest.distance > 0) {
+    const edge = nearest.point;
+    const kx = Math.cos((edge.lat * Math.PI) / 180) * METRES_PER_DEGREE, ky = METRES_PER_DEGREE;
+    const straight = Math.atan2((edge.lat - towards.lat) * ky, (edge.lng - towards.lng) * kx);
+    const turns = [0, 1, -1, 2, -2, 3, -3, 4].map((turn) => straight + (turn * Math.PI) / 4);
+    for (const step of steps) {
+      for (const angle of turns) {
+        const candidate = { lat: edge.lat + (Math.sin(angle) * step) / ky, lng: edge.lng + (Math.cos(angle) * step) / kx };
+        if (pointInPaths(candidate, paths)) return candidate;
+      }
+    }
+  }
+  return toUsableLatLng(centroid) || pointsCentre(paths[0] || []);
+}
+
 // Targeted Batch rules 18.7 (1.3.3): area geofences are green, batch geofences
 // (those linked to a Targeted Batch) purple; a selected geofence stays red.
 export const GEOFENCE_KIND_COLORS = Object.freeze({ area: "#10b981", batch: "#7c3aed" });

@@ -10,7 +10,8 @@ import { GeofencePlanningLayerControls, GeofencePlanningLayers, SalesStatusGlyph
 import { SALES_STATUSES } from "../../../sales/models/salesStatusModel.js";
 import { buildGeofencePlanningDraftStats } from "../../geofencePlanningModel";
 import { mapShellStyle, wardSelectWrapStyle } from "../../geofence-ui-styles";
-import { geofenceKind, getGeoFencePath, pathsOverlap, pointsCentre } from "../../geofence-map-helpers";
+import { geofenceKind, getGeoFencePath, pathsOverlap, pointsCentre, parseGeometry, geoJsonPolygonToGooglePaths, wardNameLabelPoint } from "../../geofence-map-helpers";
+import { useGetWardBoundariesByLmQuery } from "../../../../redux/mapWardsApi";
 import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../../../functions/geofences/geofence-name.js";
 import { NEARBY_LAYERS, emptyNearbyModel, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
 import { salesDraftWardLabel, salesDraftMessage } from "./sales-batch-draft-model";
@@ -38,19 +39,24 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const meterKey = JSON.stringify(model.rows.map(row => mapPoint(row.point)).filter(Boolean));
   const meterPoints = useMemo(() => JSON.parse(meterKey), [meterKey]);
   const bounds = useMemo(() => locatedMeterBounds(meterPoints.map(point => ({ point }))), [meterPoints]);
-  // Rules 18.7 (1.3.7): the Wards layer shows every Ward the draft's located meters are in,
-  // each labelled just above the centre of its own meters. The boundaries are already
-  // loaded for the one-Ward check, so this needs no extra reads.
+  // Rules 18.7 (1.3.8): the Wards layer shows every Ward in the LM. A Ward with draft
+  // meters is named just above them; any other Ward inside itself, nearest the meters.
+  // The same LM Ward query feeds the app's Ward lists, so it is usually already in memory.
+  const { data: lmWards } = useGetWardBoundariesByLmQuery(lmPcode, { skip: !visibility.wards || !lmPcode });
+  const wardsLoading = Boolean(visibility.wards && !lmWards?.length);
   const wardMeterKey = JSON.stringify(model.rows.flatMap(row => { const point = mapPoint(row.point); return point && row.scope?.wardPcode ? [[row.scope.wardPcode, point.lat, point.lng]] : []; }));
-  const liveWards = live?.wards;
   const wardLayer = useMemo(() => {
     const pointsByWard = new Map();
     for (const [pcode, lat, lng] of JSON.parse(wardMeterKey)) pointsByWard.set(pcode, [...(pointsByWard.get(pcode) || []), { lat, lng }]);
-    return [...pointsByWard].flatMap(([pcode, points]) => {
-      const wardDoc = liveWards?.[pcode];
-      return wardDoc?.geometry ? [{ id: pcode, geometry: wardDoc.geometry, label: salesDraftWardLabel(pcode, wardDoc), labelPoint: pointsCentre(points) }] : [];
+    const batchCentre = pointsCentre([...pointsByWard.values()].flat());
+    return (lmWards || []).flatMap(ward => {
+      const pcode = ward.wardPcode || ward.id, paths = geoJsonPolygonToGooglePaths(parseGeometry(ward.geometry));
+      if (!paths.length) return [];
+      const own = pointsByWard.get(pcode), number = wardNumberFromPcode(pcode);
+      return [{ id: pcode, paths, label: number ? `Ward ${number}` : ward.name, labelAbove: Boolean(own),
+        labelPoint: own ? pointsCentre(own) : wardNameLabelPoint(paths, batchCentre, { centroid: ward.centroid }) }];
     });
-  }, [wardMeterKey, liveWards]);
+  }, [lmWards, wardMeterKey]);
   const layers = NEARBY_LAYERS.filter(layer => visibility[layer] || isCreateMode);
   const { data: nearby } = useGetSalesBatchNearbyQuery({ lmPcode, wardPcode, bounds, wardGeometry: ward?.geometry, layers }, { skip: !scopeReady || !bounds || !layers.length });
   const emptyModel = useMemo(() => emptyNearbyModel(), []);
@@ -58,7 +64,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const { data: geofenceData, isLoading: geofencesLoading } = useGetGeoFencesByWardQuery({ lmPcode, wardPcode }, { skip: !scopeReady });
   const geofences = useMemo(() => geofenceData || [], [geofenceData]);
   const layersLoading = (layers.length > 0 && scopeReady && layers.some(layer => { const state = nearby?.states?.[layer]; return !state || /^Loading|waiting for the server/i.test(state); }))
-    || Boolean(visibility.geofences && geofencesLoading);
+    || Boolean(visibility.geofences && geofencesLoading) || wardsLoading;
   const draftPreviewStats = useMemo(() => buildGeofencePlanningDraftStats({ draftPoints, ...planningModel }), [draftPoints, planningModel]);
   const draftInside = <span>Draft meters inside: <strong>{model.readyIds.length} of {model.rows.length}</strong></span>;
   const completeness = <div role="status">{layers.map(layer => <span key={layer} style={{ display: "block" }}>{layer}: {nearby?.states?.[layer] || "Loading nearby records…"}</span>)}</div>;
@@ -109,7 +115,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
       {bounds && layersLoading && <div style={layersLoadingStripStyle}><BusySpinner label="Loading map layers…" size={14}/></div>}
       {bounds && <GeofencePlanningLayerControls model={planningModel} {...{ visibility, salesStatusVisibility }}
         onToggleLayer={layer => setVisibility(current => ({ ...current, [layer]: !current[layer] }))} onToggleSalesStatus={status => setSalesStatusVisibility(current => ({ ...current, [status]: !current[status] }))}
-        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady} geofencesCount={geofences.length} geofencesLoading={geofencesLoading} wardsCount={wardLayer.length}/>}
+        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady} geofencesCount={geofences.length} geofencesLoading={geofencesLoading} showWards wardsCount={visibility.wards ? wardLayer.length : null} wardsLoading={wardsLoading}/>}
     </div>
     <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
       Nearby GPS Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed.
