@@ -1,14 +1,16 @@
 import { defineSecret } from "firebase-functions/params";
-import { composeSalesGeocodingAddress, coordinateNumber, GEOCODING_PROVIDER, salesStreetType } from "../salesAllMeters/sales-batch-policy.js";
+import { composeSalesGeocodingAddress, coordinateNumber, correctedStreetName, GEOCODING_PROVIDER, salesStreetType } from "../salesAllMeters/sales-batch-policy.js";
 
 export const googleGeocodingApiKey = defineSecret("GOOGLE_GEOCODING_API_KEY");
 const normalize = value => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
 const routeText = value => normalize(value).replace(/\b(ST|STR)\b/g, "STREET").replace(/\bRD\b/g, "ROAD").replace(/\bDR\b/g, "DRIVE").replace(/\bAVE\b/g, "AVENUE").replace(/\b(CR|CRES)\b/g, "CRESCENT");
 const trailingStreetType = /\s+(STREET|ST|STR|ROAD|RD|DRIVE|DR|AVENUE|AVE|AV|LANE|LN|CRESCENT|CRES|CR|PLACE|PL|CLOSE|CL|WAY|WY)\.?$/;
 function matchesSalesRoute(route, sales) {
-  const type = salesStreetType(sales), name = routeText(sales.adr?.strName);
+  // TB-R041 (1.3.12): the owner-approved spelling, else the Sales spelling; still exact.
+  const street = correctedStreetName(sales);
+  const type = salesStreetType(sales), name = routeText(street);
   const actual = routeText(route);
-  if (type) return actual === routeText(`${sales.adr?.strName} ${type}`);
+  if (type) return actual === routeText(`${street} ${type}`);
   // Only an unspecified type permits dropping one trailing type word. The
   // complete street name must still match; never use prefix or fuzzy matching.
   return actual === name || actual.replace(trailingStreetType, "") === name;

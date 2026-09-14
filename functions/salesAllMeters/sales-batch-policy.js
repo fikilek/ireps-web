@@ -1,4 +1,6 @@
 // Shared pure business policy. UI projections are never backend authority.
+import { correctedStreetName } from "./sales-street-corrections.js";
+export { correctedStreetName };
 export const SALES_BATCH_MIN = 1;
 export const SALES_BATCH_MAX = 30;
 export const SALES_BATCH_ID = /^TGB_[0-9]{8}_[0-9]{6}_[A-Z0-9]{4}$/;
@@ -164,6 +166,10 @@ export function salesStreetAddress(row = {}) {
 export function salesStreetType(row = {}) {
   return meaningful(row.adr?.strType) ? row.adr.strType.trim() : "";
 }
+// TB-R041 (1.3.12): the street part sent for geocoding uses the owner-approved spelling.
+export function salesGeocodingStreetAddress(row = {}) {
+  return [row.adr?.strNo, correctedStreetName(row), row.adr?.strType].filter(meaningful).map(value => value.trim()).join(" ");
+}
 // South African province pcodes are the ZA prefix and first numeric digit.
 // Keep this pure: the same address is used by Web, Google and the TB9 predicate.
 const provinceNames = Object.freeze({
@@ -177,7 +183,7 @@ export function composeSalesGeocodingAddress(row = {}) {
   // An unknown province cannot form a provider/flag address. Callers report a
   // configuration error; returning an empty string also keeps UI reads safe.
   if (!province) return "";
-  return [salesStreetAddress(row), typeof row.town === "string" ? row.town.trim() : "", province, "South Africa"].filter(Boolean).join(", ");
+  return [salesGeocodingStreetAddress(row), typeof row.town === "string" ? row.town.trim() : "", province, "South Africa"].filter(Boolean).join(", ");
 }
 export function inspectErfLookup(row = {}) {
   if (!Object.hasOwn(row, "erfLookup")) return { valid: true, flagged: false, outcome: null };
