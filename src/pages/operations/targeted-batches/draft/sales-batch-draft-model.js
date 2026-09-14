@@ -1,4 +1,4 @@
-import { evaluateSalesBatchability, classifySalesWorkStatus, SALES_BATCH_MAX as SALES_BATCH_LIMIT, composeSalesGeocodingAddress } from "../../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { evaluateSalesBatchability, classifySalesWorkStatus, SALES_BATCH_MAX as SALES_BATCH_LIMIT, composeSalesGeocodingAddress, LOOKUP_OUTCOMES } from "../../../../../functions/salesAllMeters/sales-batch-policy.js";
 import { normalizeBatchGeometry, polygonFromPoints, strictlyInside, strictlyWithinWard } from "../../../../../functions/geofences/sales-batch-geometry.js";
 
 export function buildRetainedSalesDraft(payload, id) {
@@ -110,4 +110,23 @@ export function salesDraftWardGroups(rows) {
     groups.get(key).salesIds.push(row.salesId);
   }
   return [...groups.values()];
+}
+
+const MANUAL_ERFING_CODES = new Set([...LOOKUP_OUTCOMES, "NEEDS_MANUAL_ERFING"]);
+export function needsManualErfing(row = {}) {
+  return MANUAL_ERFING_CODES.has(row.code) || /^Needs manual ERFing/.test(row.reason || "");
+}
+
+// Rules TB-R038 (1.3.14): the chips above the TB Draft list — one per Ward (W6: 17), one for
+// meters needing manual ERFing, and one for meters not located yet. Each can be removed in
+// bulk, except the only group left (Clear draft empties a draft).
+export function salesDraftChipGroups(rows = []) {
+  const wards = salesDraftWardGroups(rows).map(group => ({ key: group.pcode, kind: "ward", label: `W${Number(group.pcode.slice(-3))}`, title: group.label, salesIds: group.salesIds }));
+  const unplaced = rows.filter(row => !row.scope?.wardPcode);
+  const erfing = unplaced.filter(needsManualErfing).map(row => row.salesId);
+  const unlocated = unplaced.filter(row => !needsManualErfing(row)).map(row => row.salesId);
+  const groups = [...wards,
+    ...(erfing.length ? [{ key: "manual-erfing", kind: "erfing", label: "Needs manual ERFing", title: "Needs manual ERFing", salesIds: erfing }] : []),
+    ...(unlocated.length ? [{ key: "not-located", kind: "unlocated", label: "Not located", title: "Not located yet", salesIds: unlocated }] : [])];
+  return groups.map(group => ({ ...group, removable: groups.length > 1 }));
 }
