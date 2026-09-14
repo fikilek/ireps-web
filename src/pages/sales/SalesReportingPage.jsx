@@ -9,8 +9,12 @@ import {
   EMPTY_DATETIME_FILTER,
 } from "../../components/DatetimeFilter";
 import { useGetTargetedBatchHeadersByLmQuery } from "../../redux/salesTargetedBatchApi";
+import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
+import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "../operations/targeted-batches/batch-geofence-label.js";
 
 const ALL_FILTER = "ALL";
+// Targeted Batch rules TB-R043: allocation shows as two filterable columns.
+const ALLOCATION_STATES = ["Allocated", "Unallocated"];
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
@@ -18,7 +22,9 @@ const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
 const EMPTY_FILTERS = {
   batchId: "",
   ward: ALL_FILTER,
+  geofence: "",
   allocation: ALL_FILTER,
+  allocatedTo: ALL_FILTER,
   acceptance: ALL_FILTER,
   totalRows: "",
   notStarted: "",
@@ -94,8 +100,15 @@ function unique(values) {
   return Array.from(new Set(values.filter(Boolean))).sort(compareNatural);
 }
 
-function getAllocationLabel(batch = {}) {
-  return cleanText(batch?.allocation?.targetName) || "Unallocated";
+function getAllocatedToLabel(batch = {}) {
+  return cleanText(batch?.allocation?.targetName);
+}
+
+function getAllocationState(batch = {}) {
+  const allocation = batch?.allocation || {};
+  const allocated = Boolean(cleanText(allocation.targetId) || cleanText(allocation.targetName))
+    || normalizeUpper(allocation.status) === "ALLOCATED";
+  return allocated ? "Allocated" : "Unallocated";
 }
 
 function getLastActivityDate(value) {
@@ -221,7 +234,9 @@ function getSortValue(batch, key) {
 
   if (key === "batchId") return cleanText(batch?.id);
   if (key === "ward") return cleanText(batch?.scope?.wardLabel) || "NAv";
-  if (key === "allocation") return getAllocationLabel(batch);
+  if (key === "geofence") return cleanText(batch?.geofenceLabel);
+  if (key === "allocation") return getAllocationState(batch);
+  if (key === "allocatedTo") return getAllocatedToLabel(batch);
   if (key === "acceptance") {
     return cleanText(batch?.acceptance?.status) || "NOT_READY";
   }
@@ -271,26 +286,17 @@ function StatusBadge({ value }) {
   );
 }
 
-function AllocationCell({ allocation = {} }) {
+// TB-R043: who the batch is allocated to, in its own column; the kind shows on hover.
+function AllocatedToCell({ allocation = {} }) {
   const targetName = cleanText(allocation?.targetName);
-
-  if (!targetName) return "Unallocated";
+  if (!targetName) return null;
 
   const targetType = normalizeUpper(allocation?.targetType);
-  let targetTypeLabel = cleanText(allocation?.targetType).replaceAll("_", " ");
+  const kind = targetType === "TEAM" ? "Team"
+    : targetType === "SP" || targetType === "SERVICE_PROVIDER" ? "Service provider"
+      : cleanText(allocation?.targetType).replaceAll("_", " ");
 
-  if (targetType === "TEAM") targetTypeLabel = "Team";
-  if (targetType === "SP" || targetType === "SERVICE_PROVIDER") {
-    targetTypeLabel = "SP";
-  }
-  if (!targetTypeLabel) targetTypeLabel = "Target";
-
-  return (
-    <div style={styles.allocationCell}>
-      <span style={styles.allocationType}>{targetTypeLabel}</span>
-      <span style={styles.allocationName}>{targetName}</span>
-    </div>
-  );
+  return <span title={kind || undefined}>{targetName}</span>;
 }
 
 function SummaryCard({ label, value, helper }) {
@@ -457,12 +463,14 @@ export default function SalesReportingPage() {
     error: targetedBatchQueryError,
   } = useGetTargetedBatchHeadersByLmQuery(activeLmPcode || skipToken);
 
+  // TB-R043: each batch shows its geofence name, from the LM's active geofences.
+  const { data: lmGeofences } = useGetGeoFencesByLmQuery(activeLmPcode || skipToken);
+  const geofenceNames = useMemo(() => geofenceNamesById(lmGeofences), [lmGeofences]);
   const batches = useMemo(
     () =>
-      Array.isArray(targetedBatchStream?.items)
-        ? targetedBatchStream.items
-        : [],
-    [targetedBatchStream],
+      (Array.isArray(targetedBatchStream?.items) ? targetedBatchStream.items : [])
+        .map((batch) => ({ ...batch, geofenceLabel: batchGeofenceLabel(batch?.geofenceId, geofenceNames) })),
+    [targetedBatchStream, geofenceNames],
   );
 
   const streamStatus = cleanText(targetedBatchStream?.sync?.status);
@@ -497,7 +505,7 @@ export default function SalesReportingPage() {
       wards: unique(
         batches.map((batch) => cleanText(batch?.scope?.wardLabel) || "NAv"),
       ),
-      allocations: unique(batches.map((batch) => getAllocationLabel(batch))),
+      allocatedTo: unique(batches.map((batch) => getAllocatedToLabel(batch))),
       acceptanceStatuses: unique(
         batches.map(
           (batch) => cleanText(batch?.acceptance?.status) || "NOT_READY",
@@ -511,15 +519,18 @@ export default function SalesReportingPage() {
     return batches.filter((batch) => {
       const progress = batch?.progress || {};
       const ward = cleanText(batch?.scope?.wardLabel) || "NAv";
-      const allocation = getAllocationLabel(batch);
+      const allocation = getAllocationState(batch);
       const acceptanceStatus =
         cleanText(batch?.acceptance?.status) || "NOT_READY";
 
       return (
         includesText(batch?.id, filters.batchId) &&
         (filters.ward === ALL_FILTER || ward === filters.ward) &&
+        includesText(batch?.geofenceLabel, filters.geofence) &&
         (filters.allocation === ALL_FILTER ||
           allocation === filters.allocation) &&
+        (filters.allocatedTo === ALL_FILTER ||
+          getAllocatedToLabel(batch) === filters.allocatedTo) &&
         (filters.acceptance === ALL_FILTER ||
           acceptanceStatus === filters.acceptance) &&
         matchesNumberFilter(progress?.total, filters.totalRows) &&
@@ -747,7 +758,20 @@ export default function SalesReportingPage() {
                 </th>
                 <th>
                   <SortButton
-                    label="Allocated To"
+                    label="Geofence"
+                    sortKey="geofence"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    value={filters.geofence}
+                    onChange={(value) => updateFilter("geofence", value)}
+                    placeholder="Geofence"
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Allocation"
                     sortKey="allocation"
                     sortConfig={sortConfig}
                     onSort={handleSort}
@@ -757,9 +781,28 @@ export default function SalesReportingPage() {
                     onChange={(value) => updateFilter("allocation", value)}
                   >
                     <option value={ALL_FILTER}>All</option>
-                    {filterOptions.allocations.map((allocation) => (
-                      <option key={allocation} value={allocation}>
-                        {allocation}
+                    {ALLOCATION_STATES.map((state) => (
+                      <option key={state} value={state}>
+                        {state}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </th>
+                <th>
+                  <SortButton
+                    label="Allocated To"
+                    sortKey="allocatedTo"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterSelect
+                    value={filters.allocatedTo}
+                    onChange={(value) => updateFilter("allocatedTo", value)}
+                  >
+                    <option value={ALL_FILTER}>All</option>
+                    {filterOptions.allocatedTo.map((target) => (
+                      <option key={target} value={target}>
+                        {target}
                       </option>
                     ))}
                   </FilterSelect>
@@ -865,7 +908,7 @@ export default function SalesReportingPage() {
             <tbody>
               {!streamReady ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={12}>
                     <div style={styles.loadingState}>
                       <span style={styles.spinner} />
                       Loading live Targeted Batch reports...
@@ -876,7 +919,7 @@ export default function SalesReportingPage() {
 
               {streamReady && streamError ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={12}>
                     <div style={styles.errorState}>
                       <strong>Targeted Batch report stream failed.</strong>
                       <span>
@@ -890,7 +933,7 @@ export default function SalesReportingPage() {
 
               {streamReady && !streamError && sortedBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="muted">
+                  <td colSpan={12} className="muted">
                     {batches.length === 0
                       ? "No permanent Targeted Batches exist in this workbase yet."
                       : "No Targeted Batches match the selected column filters."}
@@ -923,7 +966,15 @@ export default function SalesReportingPage() {
                         <strong>{ward}</strong>
                       </td>
                       <td>
-                        <AllocationCell allocation={batch?.allocation} />
+                        {batch.geofenceLabel === NO_GEOFENCE_LABEL ? (
+                          <span className="muted" title="Created before every batch had its own geofence.">{NO_GEOFENCE_LABEL}</span>
+                        ) : (
+                          <strong title={batch?.geofenceId || ""}>{batch.geofenceLabel}</strong>
+                        )}
+                      </td>
+                      <td>{getAllocationState(batch)}</td>
+                      <td>
+                        <AllocatedToCell allocation={batch?.allocation} />
                       </td>
                       <td>
                         <StatusBadge value={batch?.acceptance?.status} />
@@ -1255,25 +1306,6 @@ const styles = {
 
   batchId: {
     color: "#0f172a",
-    whiteSpace: "nowrap",
-  },
-
-  allocationCell: {
-    display: "grid",
-    gap: 2,
-    lineHeight: 1.25,
-  },
-
-  allocationType: {
-    color: "#475569",
-    fontSize: 10,
-    fontWeight: 900,
-  },
-
-  allocationName: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: 700,
     whiteSpace: "nowrap",
   },
 

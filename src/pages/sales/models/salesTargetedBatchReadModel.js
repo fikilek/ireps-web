@@ -161,6 +161,8 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
   return {
     id: cleanText(id || batch?.id),
     schemaVersion: batch.schemaVersion || null,
+    // TB-R043: the batch's geofence (absent on batches from before TB-R039).
+    geofenceId: cleanText(batch?.geofenceId) || null,
     integrityIssues: modern && (!["CREATING", "READY", "FAILED"].includes(batch.creation?.state) || !["NOT_STARTED", "PARTIAL", "ALLOCATING", "ALLOCATED", "ALLOCATION_FAILED"].includes(batch.allocation?.status) || !["NOT_READY", "WAITING", "ACCEPTED", "REJECTED"].includes(batch.acceptance?.status) || !["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(batch.execution?.status) || [batch.counts?.totalRows, batch.counts?.executionStartedRows, batch.counts?.completedRows].some(value => canonicalCount(value) === null)) ? ["Canonical batch lifecycle or counts are missing or invalid"] : [],
 
     scope: {

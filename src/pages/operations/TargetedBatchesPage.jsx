@@ -1,4 +1,6 @@
 import { useGetPermanentSalesBatchesQuery, useDeleteSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
+import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
+import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "./targeted-batches/batch-geofence-label.js";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -153,6 +155,7 @@ function getSortValue(upload, sortKey) {
   if (sortKey === "allocation") return getAllocationState(upload).label;
   if (sortKey === "total") return getUploadTotal(upload);
   if (sortKey === "ward") return getWardFilterValue(upload);
+  if (sortKey === "geofence") return upload?.geofenceLabel || "";
   if (sortKey === "createdBy") return getCreatedBy(upload);
   return upload?.id || "";
 }
@@ -455,6 +458,7 @@ export default function TargetedBatchesPage() {
   const [allocationFilter, setAllocationFilter] = useState("");
   const [totalFilter, setTotalFilter] = useState("");
   const [wardFilter, setWardFilter] = useState("");
+  const [geofenceFilter, setGeofenceFilter] = useState("");
   const [createdByFilter, setCreatedByFilter] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "", direction: "asc" });
   const [pageSize, setPageSize] = useState(5);
@@ -469,7 +473,14 @@ export default function TargetedBatchesPage() {
   const creationResult = location.state?.targetedBatchCreation;
 
   const { data: permanent } = useGetPermanentSalesBatchesQuery({ lmPcode: activeLmPcode }, { skip: !activeLmPcode });
-  const permanentUploads = permanent?.batches || [];
+  const permanentBatches = permanent?.batches;
+  // TB-R043: each batch shows its geofence name, from the LM's active geofences.
+  const { data: lmGeofences } = useGetGeoFencesByLmQuery(activeLmPcode, { skip: !activeLmPcode });
+  const geofenceNames = useMemo(() => geofenceNamesById(lmGeofences), [lmGeofences]);
+  const permanentUploads = useMemo(
+    () => (permanentBatches || []).map((upload) => ({ ...upload, geofenceLabel: batchGeofenceLabel(upload?.geofenceId, geofenceNames) })),
+    [permanentBatches, geofenceNames],
+  );
   const isRegisterLoading = !permanent?.ready && !permanent?.error;
   const registerLoadError = permanent?.error || "";
   const [deleteCallable] = useDeleteSalesTargetedBatchMutation();
@@ -517,6 +528,7 @@ export default function TargetedBatchesPage() {
     const normalizedTbIdFilter = tbIdFilter.trim().toLowerCase();
     const normalizedTotalFilter = totalFilter.trim().toLowerCase();
     const normalizedCreatedByFilter = createdByFilter.trim().toLowerCase();
+    const normalizedGeofenceFilter = geofenceFilter.trim().toLowerCase();
 
     return uploads.filter((upload) => {
       const allocationState = getAllocationState(upload);
@@ -547,6 +559,12 @@ export default function TargetedBatchesPage() {
         return false;
       }
       if (
+        normalizedGeofenceFilter &&
+        !String(upload?.geofenceLabel || "").toLowerCase().includes(normalizedGeofenceFilter)
+      ) {
+        return false;
+      }
+      if (
         normalizedCreatedByFilter &&
         !getCreatedBy(upload).toLowerCase().includes(normalizedCreatedByFilter)
       ) {
@@ -559,6 +577,7 @@ export default function TargetedBatchesPage() {
     allocationFilter,
     batchTypeFilter,
     createdByFilter,
+    geofenceFilter,
     sourceFilter,
     statusFilter,
     tbIdFilter,
@@ -960,6 +979,12 @@ export default function TargetedBatchesPage() {
                   onSort={handleSort}
                 />
                 <SortableTh
+                  label="Geofence"
+                  sortKey="geofence"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTh
                   label="Created By"
                   sortKey="createdBy"
                   sortConfig={sortConfig}
@@ -1047,6 +1072,19 @@ export default function TargetedBatchesPage() {
                 <th style={styles.filterHeaderCell}>
                   <input
                     type="text"
+                    value={geofenceFilter}
+                    onChange={(event) => {
+                      setGeofenceFilter(event.target.value);
+                      resetToFirstPage();
+                    }}
+                    placeholder="Filter Geofence"
+                    style={styles.columnFilterInput}
+                    aria-label="Filter Geofence"
+                  />
+                </th>
+                <th style={styles.filterHeaderCell}>
+                  <input
+                    type="text"
                     value={createdByFilter}
                     onChange={(event) => {
                       setCreatedByFilter(event.target.value);
@@ -1064,7 +1102,7 @@ export default function TargetedBatchesPage() {
             <tbody>
               {sortedUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={8}>
+                  <Td colSpan={9}>
                     {uploads.length === 0
                       ? "No permanent Targeted Batches were found for this Local Municipality."
                       : "No permanent Targeted Batches match the selected filters."}
@@ -1159,6 +1197,16 @@ export default function TargetedBatchesPage() {
                       <div style={styles.mutedCell}>
                         {upload?.scope?.wardPcode || "NAv"}
                       </div>
+                    </Td>
+
+                    <Td>
+                      {upload.geofenceLabel === NO_GEOFENCE_LABEL ? (
+                        <div style={styles.mutedCell} title="Created before every batch had its own geofence.">
+                          {NO_GEOFENCE_LABEL}
+                        </div>
+                      ) : (
+                        <div style={styles.strongCell} title={upload?.geofenceId || ""}>{upload.geofenceLabel}</div>
+                      )}
                     </Td>
 
                     <Td>
