@@ -11,9 +11,10 @@ const sales = (strName, town = "DUNDEE", strType = "-") => ({ master: { id: "042
 const google = (route, town = "Dundee", number = "12") => ({ status: "OK", results: [{ geometry: { location_type: "ROOFTOP", location: { lat: -28.16, lng: 30.24 } },
   address_components: [{ types: ["street_number"], long_name: number }, { types: ["route"], long_name: route, short_name: route }, { types: ["locality"], long_name: town }, { types: ["country"], short_name: "ZA" }] }] });
 
-test("the first approved Dundee corrections, each with its approval", () => {
+test("the approved corrections, each with its approval", () => {
   assert.deepEqual(STREET_NAME_CORRECTIONS.map(c => `${c.town}: ${c.from} -> ${c.to}`), [
-    "DUNDEE: Ann -> Anne", "DUNDEE: Argyle -> Argyll", "DUNDEE: Oldacre -> Old Acre", "DUNDEE: Mc Kenzie -> Mckenzie", "DUNDEE: Karellandman -> Karel Landman"]);
+    "DUNDEE: Ann -> Anne", "DUNDEE: Argyle -> Argyll", "DUNDEE: Oldacre -> Old Acre", "DUNDEE: Mc Kenzie -> Mckenzie", "DUNDEE: Karellandman -> Karel Landman",
+    "DUNDEE: Willson -> Wilson", "GLENCOE: Karellandman -> Karel Landman"]);
   assert.ok(STREET_NAME_CORRECTIONS.every(c => c.lmPcode === "ZA5241" && c.approved === "2026-09-14"));
 });
 
@@ -37,8 +38,10 @@ test("Google's corrected street is accepted exactly; uncorrected misspellings ar
   assert.equal(acceptGoogleGeocode(google("Anne Street"), sales("Ann")).ok, true);
   assert.equal(acceptGoogleGeocode(google("Old Acre Street"), sales("Oldacre")).ok, true);
   assert.equal(acceptGoogleGeocode(google("Karel Landman Street"), sales("Karellandman")).ok, true);
-  assert.equal(acceptGoogleGeocode(google("Anne Street", "Glencoe"), sales("Ann", "GLENCOE")).ok, false, "no correction for Glencoe: still exact");
-  assert.equal(acceptGoogleGeocode(google("Wilson Street"), sales("Willson")).ok, false, "not approved: still refused");
+  assert.equal(acceptGoogleGeocode(google("Anne Street", "Glencoe"), sales("Ann", "GLENCOE")).ok, false, "no Ann correction for Glencoe: still exact");
+  assert.equal(acceptGoogleGeocode(google("Wilson Street"), sales("Willson")).ok, true);
+  assert.equal(acceptGoogleGeocode(google("Karel Landman Street", "Glencoe"), sales("Karellandman", "GLENCOE")).ok, true);
+  assert.equal(acceptGoogleGeocode(google("Friis Street"), sales("Iris")).ok, false, "not approved: still refused");
   assert.equal(acceptGoogleGeocode(google("Annex Street"), sales("Ann")).ok, false, "no fuzzy matching around a correction");
 });
 

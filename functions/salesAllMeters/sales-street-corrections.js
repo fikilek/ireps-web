@@ -8,6 +8,8 @@ export const STREET_NAME_CORRECTIONS = Object.freeze([
   { lmPcode: "ZA5241", town: "DUNDEE", from: "Oldacre", to: "Old Acre", approved: "2026-09-14" },
   { lmPcode: "ZA5241", town: "DUNDEE", from: "Mc Kenzie", to: "Mckenzie", approved: "2026-09-14" },
   { lmPcode: "ZA5241", town: "DUNDEE", from: "Karellandman", to: "Karel Landman", approved: "2026-09-14" },
+  { lmPcode: "ZA5241", town: "DUNDEE", from: "Willson", to: "Wilson", approved: "2026-09-14" },
+  { lmPcode: "ZA5241", town: "GLENCOE", from: "Karellandman", to: "Karel Landman", approved: "2026-09-14" },
 ]);
 
 const correctionKey = (lmPcode, town, name) => [lmPcode, town, name]
