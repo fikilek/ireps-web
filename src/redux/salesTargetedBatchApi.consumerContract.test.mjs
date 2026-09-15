@@ -49,7 +49,7 @@ test("all three operational Sales join endpoints run synchronously with zero gov
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": { fakeBaseQuery: () => () => {}, createApi: config => ({ definitions: config.endpoints({ query: value => value, mutation: value => value }) }) },
     "firebase/firestore": { collection: (_db, name) => name, doc: (_db, name, id) => [name, id], documentId: () => "documentId", limit: n => ["limit",n], where: (...parts) => parts, query: (...parts) => parts,
-      getDocs: async () => ({ size: 0, docs: [] }),
+      getDocs: async () => ({ size: 0, docs: [] }), getDoc: async () => ({ exists: () => false, data: () => null }),
       onSnapshot: (query, next, error) => { const listener = { query, next, error, stopped: false }; listeners.push(listener); return () => { listener.stopped = true; }; } },
     "../firebase": { db: {}, functions: {} },
     "firebase/functions": { httpsCallable: () => async () => { governanceCalls++; throw Error("governance rejected"); } },
@@ -95,7 +95,8 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   assert.ok(listeners.every(listener => listener.stopped));
 });
 
-async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callable = null, endpointName = "getTargetedBatchDetailsById", erfDocs = []) {
+const FIXTURE_WARD = { parents: { localMunicipalityId: "ZA5241" }, geometry: { type: "Polygon", coordinates: [[[30, -29], [31, -29], [31, -28], [30, -28], [30, -29]]] } };
+async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callable = null, endpointName = "getTargetedBatchDetailsById", erfDocs = [], wardDoc = FIXTURE_WARD) {
   const listeners = [];
   const oneTimeReads = [];
   const cleanups = new Set();
@@ -114,6 +115,7 @@ async function detailsFixture(query = { tbId: "TB", lmPcode: "ZA5241" }, callabl
       collection: (_db, name) => name, doc: (_db, name, id) => [name, id],
       documentId: () => "documentId", limit: n => ["limit",n], where: (...parts) => parts, query: (...parts) => parts,
       getDocs: async path => { oneTimeReads.push(path); return { size: erfDocs.length, docs: erfDocs.map((data, index) => ({ id: `E${index}`, data: () => data })) }; },
+      getDoc: async path => { oneTimeReads.push(path); return { exists: () => wardDoc !== null, data: () => wardDoc }; },
       onSnapshot: (path, optionsOrNext, nextOrError, failure) => {
         const next = typeof optionsOrNext === "function" ? optionsOrNext : nextOrError;
         const error = typeof optionsOrNext === "function" ? nextOrError : failure;
@@ -287,34 +289,52 @@ test("draft snapshot reads only retained authorities and the ordinary fence docu
  assert.ok(saved.listeners.some(l=>l.path[0]==="geo_fences"&&l.path[1]==="ordinaryAutoId"));
  assert.ok(saved.listeners.every(l=>l.path.length===2));await saved.logout();assert.ok(saved.listeners.every(l=>l.stopped));
 });
-test("nearby streams are opt-in, capped, explicit about completeness and errors, and end with the account",async()=>{
- const args={lmPcode:"ZA5241",wardPcode:"ZA5241001",bounds:{minLat:-28.5005,maxLat:-28.4995,minLng:30.4995,maxLng:30.5005},wardGeometry:{type:"Polygon",coordinates:[[[30,-29],[31,-29],[31,-28],[30,-28],[30,-29]]]},layers:[]};
- const off=await detailsFixture(args,null,"getSalesBatchNearby");assert.equal(off.listeners.length,0);await off.close();
- const f=await detailsFixture({...args,layers:["premises","assets"]},null,"getSalesBatchNearby");
- assert.equal(f.listeners.length,2);assert.ok(f.listeners.every(l=>l.path.some(part=>JSON.stringify(part)==='["limit",501]')));
- const premise=f.listeners.find(l=>l.path[0]==="premises"),asset=f.listeners.find(l=>l.path[0]==="asts");
+// Rules 18.7 (1.3.17): one read per layer; Sales and Assets through the nearby ERFs.
+const nearbyArgs=layer=>({lmPcode:"ZA5241",wardPcode:"ZA5241001",bounds:{minLat:-28.5005,maxLat:-28.4995,minLng:30.4995,maxLng:30.5005},layer});
+const nearbyErf=erfNo=>({admin:{localMunicipality:{pcode:"ZA5241"},ward:{pcode:"ZA5241001"}},centroid:{lat:-28.5,lng:30.5},sg:{erfNo},geometry:JSON.stringify({type:"Polygon",coordinates:[[[30.4999,-28.5001],[30.5001,-28.5001],[30.5001,-28.4999],[30.4999,-28.4999],[30.4999,-28.5001]]]})});
+const hasPart=(path,part)=>path.some(item=>JSON.stringify(item)===JSON.stringify(part));
+test("each nearby layer is its own read: opt-in, capped, explicit about completeness and errors, and ends with the account",async()=>{
+ for(const bad of [{...nearbyArgs("premises"),bounds:null},nearbyArgs("unknown")]){const off=await detailsFixture(bad,null,"getSalesBatchNearbyLayer");assert.equal(off.listeners.length,0);assert.equal(off.oneTimeReads.length,0);await off.close();}
+ const f=await detailsFixture(nearbyArgs("premises"),null,"getSalesBatchNearbyLayer");
+ assert.deepEqual(f.oneTimeReads,[["wards","ZA5241001"]],"the layer reads its Ward itself, never waiting on the draft snapshot");
+ assert.equal(f.listeners.length,1);const premise=f.listeners[0];assert.equal(premise.path[0],"premises");assert.ok(hasPart(premise.path,["limit",501]));
  const data={parents:{lmPcode:"ZA5241"},geometry:{centroid:{lat:-28.5,lng:30.5}}};
  const snapshot=n=>({size:n,docs:Array.from({length:n},(_,i)=>({id:`P${i}`,data:()=>data})),metadata:{fromCache:false,hasPendingWrites:false}});
- premise.next(snapshot(1));assert.equal(f.state.model.premises.length,1);assert.equal(f.state.states.premises,"Complete");
- premise.next(snapshot(501));assert.equal(f.state.model.premises.length,500);assert.match(f.state.states.premises,/Incomplete.*500/);
- const cached=snapshot(1);cached.metadata.fromCache=true;premise.next(cached);assert.match(f.state.states.premises,/waiting for the server/);
- asset.error({code:"permission-denied"});assert.match(f.state.states.assets,/Error:/);assert.equal(f.state.model.assets.length,0);
+ premise.next(snapshot(1));assert.equal(f.state.records.length,1);assert.equal(f.state.state,"Complete");
+ premise.next(snapshot(501));assert.equal(f.state.records.length,500);assert.match(f.state.state,/Incomplete.*500/);
+ const cached=snapshot(1);cached.metadata.fromCache=true;premise.next(cached);assert.match(f.state.state,/waiting for the server/);
+ premise.error({code:"permission-denied"});assert.match(f.state.state,/Error:/);assert.equal(f.state.records.length,0);
  await f.logout();const before=JSON.stringify(f.state);premise.next(snapshot(2));assert.equal(JSON.stringify(f.state),before);assert.ok(f.listeners.every(l=>l.stopped));
+ const erfs=await detailsFixture(nearbyArgs("erfs"),null,"getSalesBatchNearbyLayer");assert.equal(erfs.listeners.length,1);assert.equal(erfs.listeners[0].path[0],"ireps_erfs");await erfs.close();
+ const foreign=await detailsFixture(nearbyArgs("erfs"),null,"getSalesBatchNearbyLayer",[],{...FIXTURE_WARD,parents:{localMunicipalityId:"ZA9999"}});
+ assert.equal(foreign.listeners.length,0);assert.match(foreign.state.state,/Error: the Ward boundary/);await foreign.close();
 });
-test("nearby Sales read only the Sales on the nearby ERFs, never the whole LM",async()=>{
- const args={lmPcode:"ZA5241",wardPcode:"ZA5241001",bounds:{minLat:-28.5005,maxLat:-28.4995,minLng:30.4995,maxLng:30.5005},wardGeometry:{type:"Polygon",coordinates:[[[30,-29],[31,-29],[31,-28],[30,-28],[30,-29]]]},layers:["sales"]};
- const erf=erfNo=>({admin:{localMunicipality:{pcode:"ZA5241"},ward:{pcode:"ZA5241001"}},centroid:{lat:-28.5,lng:30.5},sg:{erfNo},geometry:JSON.stringify({type:"Polygon",coordinates:[[[30.4999,-28.5001],[30.5001,-28.5001],[30.5001,-28.4999],[30.4999,-28.4999],[30.4999,-28.5001]]]})});
- const f=await detailsFixture(args,null,"getSalesBatchNearby",[erf("4230"),erf("4241"),erf("4230")]);
- assert.equal(f.oneTimeReads.length,1);assert.equal(f.oneTimeReads[0][0],"ireps_erfs");
- assert.ok(f.oneTimeReads[0].some(part=>JSON.stringify(part)===JSON.stringify(["admin.ward.pcode","==","ZA5241001"])));
- assert.equal(f.listeners.length,1);const sales=f.listeners[0];assert.equal(sales.path[0],"sales-all-meters");
- assert.ok(sales.path.some(part=>JSON.stringify(part)===JSON.stringify(["lmPcode","==","ZA5241"])));
- assert.ok(sales.path.some(part=>JSON.stringify(part)===JSON.stringify(["erfNumbers","array-contains-any",["4230","4241"]])));
- assert.ok(sales.path.some(part=>JSON.stringify(part)==='["limit",501]'));
+test("nearby Sales: GPS Sales by nearby ERF numbers and batched Non-GPS Sales by nearby ERF IDs, never the whole LM",async()=>{
+ const f=await detailsFixture(nearbyArgs("sales"),null,"getSalesBatchNearbyLayer",[nearbyErf("4230"),nearbyErf("4241"),nearbyErf("4230")]);
+ assert.equal(f.oneTimeReads.length,2);assert.equal(f.oneTimeReads[1][0],"ireps_erfs");assert.ok(hasPart(f.oneTimeReads[1],["admin.ward.pcode","==","ZA5241001"]));
+ assert.equal(f.listeners.length,2);const [gps,batched]=f.listeners;
+ assert.equal(gps.path[0],"sales-all-meters");assert.ok(hasPart(gps.path,["lmPcode","==","ZA5241"]));assert.ok(hasPart(gps.path,["erfNumbers","array-contains-any",["4230","4241"]]));
+ assert.equal(batched.path[0],"sales-all-meters");assert.ok(hasPart(batched.path,["erfId","in",["E0","E1","E2"]]));
+ for(const listener of f.listeners)assert.ok(hasPart(listener.path,["limit",501]));
+ const stamp={seconds:1789257600,nanoseconds:0},ok={fromCache:false,hasPendingWrites:false};
  const row=(id,lat)=>({id,data:()=>({lmPcode:"ZA5241",meterNo:id,hasUsableGps:true,erfCandidates:[{Latitude:lat,Longitude:30.5}]})});
- sales.next({size:2,docs:[row("NEAR",-28.5),row("FAR",-28.6)],metadata:{fromCache:false,hasPendingWrites:false}});
- assert.deepEqual(f.state.model.salesRecords.map(record=>record.id),["NEAR"]);assert.equal(f.state.states.sales,"Complete");
+ gps.next({size:2,docs:[row("NEAR",-28.5),row("FAR",-28.6)],metadata:ok});
+ assert.deepEqual(f.state.records.map(record=>record.id),["NEAR"]);assert.match(f.state.state,/waiting for the server/,"not complete until every read has answered");
+ const nonGps={lmPcode:"ZA5241",meterNo:"NONGPS",erfId:"E0",erfResolution:{version:1,revision:1,method:"GEOCODED",evidenceRefs:["ireps_erfs/E0"],confirmedByUid:"U1",confirmedByUser:"Planner",confirmedAt:stamp,tbId:"TGB_20260914_085124_F2MH",
+  geocode:{latitude:-28.5,longitude:30.5,matchLevel:"EXACT_STREET_NUMBER",geocodedAddress:"1 Test, DUNDEE, KwaZulu-Natal, South Africa",provider:"Google Geocoding API",geocodedAt:stamp}}};
+ batched.next({size:2,docs:[{id:"NONGPS",data:()=>nonGps},{id:"UNSAVED",data:()=>({...nonGps,meterNo:"UNSAVED",erfResolution:{geocode:{latitude:-28.5,longitude:30.5}}})}],metadata:ok});
+ assert.deepEqual(f.state.records.map(record=>record.id).sort(),["NEAR","NONGPS"],"a partial saved position is not shown");assert.equal(f.state.state,"Complete");
+ assert.match(f.state.records.find(record=>record.id==="NONGPS").candidates[0].positionNote,/saved with its batch/);
  await f.close();
- const none=await detailsFixture(args,null,"getSalesBatchNearby",[]);
- assert.equal(none.listeners.length,0);assert.equal(none.state.states.sales,"Complete");assert.equal(none.state.model.salesRecords.length,0);await none.close();
+ const none=await detailsFixture(nearbyArgs("sales"),null,"getSalesBatchNearbyLayer",[]);
+ assert.equal(none.listeners.length,0);assert.equal(none.state.state,"Complete");assert.equal(none.state.records.length,0);await none.close();
+});
+test("nearby Assets are read through the nearby ERFs by ERF ID, never the whole Ward",async()=>{
+ const f=await detailsFixture(nearbyArgs("assets"),null,"getSalesBatchNearbyLayer",[nearbyErf("4230"),nearbyErf("4241")]);
+ assert.equal(f.listeners.length,1);const assets=f.listeners[0];
+ assert.equal(assets.path[0],"asts");assert.ok(hasPart(assets.path,["accessData.erfId","in",["E0","E1"]]));
+ assert.equal(assets.path.some(part=>JSON.stringify(part).includes("accessData.parents.wardPcode")),false);
+ const asset=(id,lat)=>({id,data:()=>({accessData:{parents:{lmPcode:"ZA5241"},erfId:"E0"},ast:{astData:{astNo:id},location:{gps:{lat,lng:30.5}}}})});
+ assets.next({size:2,docs:[asset("A1",-28.5),asset("A2",-28.6)],metadata:{fromCache:false,hasPendingWrites:false}});
+ assert.deepEqual(f.state.records.map(record=>record.id),["A1"]);assert.equal(f.state.state,"Complete");await f.close();
 });

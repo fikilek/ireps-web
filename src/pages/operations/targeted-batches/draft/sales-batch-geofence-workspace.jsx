@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
 import BusySpinner from "../../../../components/busy-spinner.jsx";
 import { useGetGeoFencesByWardQuery } from "../../../../redux/geofencesApi";
-import { useGetSalesBatchNearbyQuery } from "../../../../redux/salesTargetedBatchApi";
+import { useGetSalesBatchNearbyLayerQuery } from "../../../../redux/salesTargetedBatchApi";
 import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "../../geofence-shared-ui";
 import { DraftGeoFenceLayer, ExistingGeoFenceLayer, WardBoundaryPolygons } from "../../geofence-map-layers";
 import { GeofencePlanningLayerControls, GeofencePlanningLayers, SalesStatusGlyph } from "../../GeofencePlanningLayers";
@@ -13,7 +13,7 @@ import { mapShellStyle, wardSelectWrapStyle } from "../../geofence-ui-styles";
 import { geofenceKind, getGeoFencePath, pathsOverlap, pointsCentre, parseGeometry, geoJsonPolygonToGooglePaths, wardNameLabelPoint } from "../../geofence-map-helpers";
 import { useGetWardBoundariesByLmQuery } from "../../../../redux/mapWardsApi";
 import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../../../functions/geofences/geofence-name.js";
-import { NEARBY_LAYERS, emptyNearbyModel, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
+import { NEARBY_LAYERS, combineNearbyLayers, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
 import { salesDraftWardLabel, salesDraftMessage } from "./sales-batch-draft-model";
 import { draftButtonStyle } from "./targetedBatchDraftReviewStyles";
 import SalesBatchMapLayers from "./sales-batch-map-layers";
@@ -58,17 +58,24 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
         labelPoint: own ? pointsCentre(own) : wardNameLabelPoint(paths, batchCentre, { centroid: ward.centroid }) }];
     });
   }, [lmWards, wardMeterKey]);
+  // Rules 18.7 (1.3.17): each layer is its own read, keyed only on the Ward, the area and the
+  // layer. Switching another layer on, or the draft data briefly waiting, never reloads it.
+  const layersReady = Boolean(wardPcode && bounds);
   const layers = NEARBY_LAYERS.filter(layer => visibility[layer] || isCreateMode);
-  const { data: nearby } = useGetSalesBatchNearbyQuery({ lmPcode, wardPcode, bounds, wardGeometry: ward?.geometry, layers }, { skip: !scopeReady || !bounds || !layers.length });
-  const emptyModel = useMemo(() => emptyNearbyModel(), []);
-  const planningModel = nearby?.model || emptyModel;
-  const { data: geofenceData, isLoading: geofencesLoading } = useGetGeoFencesByWardQuery({ lmPcode, wardPcode }, { skip: !scopeReady });
+  const layerRead = layer => [{ lmPcode, wardPcode, bounds, layer }, { skip: !layersReady || !layers.includes(layer) }];
+  const { data: erfsLayer } = useGetSalesBatchNearbyLayerQuery(...layerRead("erfs"));
+  const { data: salesLayer } = useGetSalesBatchNearbyLayerQuery(...layerRead("sales"));
+  const { data: premisesLayer } = useGetSalesBatchNearbyLayerQuery(...layerRead("premises"));
+  const { data: assetsLayer } = useGetSalesBatchNearbyLayerQuery(...layerRead("assets"));
+  const planningModel = useMemo(() => combineNearbyLayers({ erfs: erfsLayer, sales: salesLayer, premises: premisesLayer, assets: assetsLayer }), [erfsLayer, salesLayer, premisesLayer, assetsLayer]);
+  const layerStates = { erfs: erfsLayer?.state, sales: salesLayer?.state, premises: premisesLayer?.state, assets: assetsLayer?.state };
+  const { data: geofenceData, isLoading: geofencesLoading } = useGetGeoFencesByWardQuery({ lmPcode, wardPcode }, { skip: !lmPcode || !wardPcode });
   const geofences = useMemo(() => geofenceData || [], [geofenceData]);
-  const layersLoading = (layers.length > 0 && scopeReady && layers.some(layer => { const state = nearby?.states?.[layer]; return !state || /^Loading|waiting for the server/i.test(state); }))
+  const layersLoading = (layersReady && layers.some(layer => { const state = layerStates[layer]; return !state || /^Loading|waiting for the server/i.test(state); }))
     || Boolean(visibility.geofences && geofencesLoading) || wardsLoading;
   const draftPreviewStats = useMemo(() => buildGeofencePlanningDraftStats({ draftPoints, ...planningModel }), [draftPoints, planningModel]);
   const draftInside = <span>Draft meters inside: <strong>{model.readyIds.length} of {model.rows.length}</strong></span>;
-  const completeness = <div role="status">{layers.map(layer => <span key={layer} style={{ display: "block" }}>{layer}: {nearby?.states?.[layer] || "Loading nearby records…"}</span>)}</div>;
+  const completeness = <div role="status">{layers.map(layer => <span key={layer} style={{ display: "block" }}>{layer}: {layerStates[layer] || "Loading nearby records…"}</span>)}</div>;
   const handleCancelDraft = () => { drawing.clear(); setConfirmCreateModalOpen(false); setDraftName(""); setDraftDescription(""); setError(""); };
   const handleStartDrawing = () => {
     if (!scopeReady || saved || pendingFence || busy) return;
@@ -121,10 +128,10 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
       {bounds && layersLoading && <div style={layersLoadingStripStyle}><BusySpinner label="Loading map layers…" size={14}/></div>}
       {bounds && <GeofencePlanningLayerControls model={planningModel} {...{ visibility, salesStatusVisibility }}
         onToggleLayer={layer => setVisibility(current => ({ ...current, [layer]: !current[layer] }))} onToggleSalesStatus={status => setSalesStatusVisibility(current => ({ ...current, [status]: !current[status] }))}
-        salesLabel="Sales" layerStates={nearby?.states || {}} requestedLayers={layers} disabled={!scopeReady} geofencesCount={geofences.length} geofencesLoading={geofencesLoading} showWards wardsCount={visibility.wards ? wardLayer.length : null} wardsLoading={wardsLoading}/>}
+        salesLabel="Sales" layerStates={layerStates} requestedLayers={layers} disabled={!layersReady} countsNote="Counts are for the area near the draft" geofencesCount={geofences.length} geofencesLoading={geofencesLoading} showWards wardsCount={visibility.wards ? wardLayer.length : null} wardsLoading={wardsLoading}/>}
     </div>
     <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
-      Nearby GPS Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed.
+      Nearby Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed (GPS Sales at their Sales GPS point; Non-GPS Sales in a batch at the position saved with their batch).
       Hover a meter or row to highlight both.</p>
     <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} overlaps={overlapsNote} visibleGeofences={geofences} lockedWard wardNumber={draftWardNumber} successAction={successAction}/>
   </div>;

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { locatedMeterBounds, nearbyQuerySpec, nearbySalesQueryPlan, nearbyLayerRecords, NEARBY_LIMIT, SALES_ERF_CHUNK, MAX_SALES_ERF_CHUNKS } from "./sales-batch-nearby.js";
+import { locatedMeterBounds, nearbyQuerySpec, nearbySalesQueryPlan, nearbyLayerRecords, nearbyErfLinkedPlan, combineNearbyLayers, NEARBY_LIMIT, SALES_ERF_CHUNK, MAX_SALES_ERF_CHUNKS, ERF_ID_CHUNK, MAX_ERF_ID_CHUNKS, BATCH_POSITION_NOTE } from "./sales-batch-nearby.js";
 import { salesDraftWardGroups, projectSalesDraft, buildRetainedSalesDraft, salesDraftIntent } from "../../pages/operations/targeted-batches/draft/sales-batch-draft-model.js";
 const f=JSON.parse(fs.readFileSync(new URL("../../../functions/test/fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 const args={lmPcode:"ZA5241",wardPcode:"ZA5241001",bounds:locatedMeterBounds([{point:{latitude:-28.5,longitude:30.5}}]),wardGeometry:f.ward.geometry};
@@ -21,10 +21,39 @@ test("ERF labels use sg.erfNo verbatim; invalid geometry explicitly contributes 
  for(const number of ["4230","3/826","RE/799"]){const result=nearbyLayerRecords("erfs",[{...f.erf,id:"SG-CODE",sg:{erfNo:number,parcelNo:"WRONG"}}],args);assert.equal(result.records[0].erfNo,number);}
  assert.equal(nearbyLayerRecords("erfs",[{...f.erf,id:"BAD",geometry:"bad"}],args).invalid,1);
 });
-test("Sales coordinates come only from observed pipeline candidates, not saved address positions",()=>{
+test("Sales use their Sales GPS point; a Non-GPS meter with a saved ERF decision uses its saved position (18.7, 1.3.17)",()=>{
  const sales={...f.sales,id:"S1",erfResolution:{geocode:{latitude:-28.5,longitude:30.5}}};
- assert.equal(nearbyLayerRecords("sales",[sales],args).records.length,0);
- sales.erfCandidates=[{Latitude:-28.5,Longitude:30.5}];assert.equal(nearbyLayerRecords("sales",[sales],args).records.length,1);
+ assert.equal(nearbyLayerRecords("sales",[sales],args).records.length,0,"a partial saved position is not a saved decision");
+ const stamp={seconds:1789257600,nanoseconds:0};
+ const saved={...f.sales,id:"S2",erfId:"ERF1",erfResolution:{version:1,revision:1,method:"GEOCODED",evidenceRefs:["ireps_erfs/ERF1"],confirmedByUid:"U1",confirmedByUser:"Planner",confirmedAt:stamp,tbId:f.tbId,
+  geocode:{latitude:-28.5,longitude:30.5,matchLevel:"EXACT_STREET_NUMBER",geocodedAddress:"1 Test, DUNDEE, KwaZulu-Natal, South Africa",provider:"Google Geocoding API",geocodedAt:stamp}}};
+ const [batched]=nearbyLayerRecords("sales",[saved],args).records;
+ assert.equal(batched.id,"S2");assert.equal(batched.candidates[0].positionNote,BATCH_POSITION_NOTE);
+ assert.equal(nearbyLayerRecords("sales",[{...saved,erfResolution:{...saved.erfResolution,geocode:{...saved.erfResolution.geocode,latitude:-28.6}}}],args).records.length,0,"outside the area");
+ sales.erfCandidates=[{Latitude:-28.5,Longitude:30.5}];const [gps]=nearbyLayerRecords("sales",[sales],args).records;
+ assert.equal(gps.candidates.length,1);assert.equal(gps.candidates[0].positionNote,undefined,"a Sales GPS point is not labelled as a batch position");
+ const both=nearbyLayerRecords("sales",[{...saved,erfCandidates:[{Latitude:-28.5001,Longitude:30.5}]}],args).records[0];
+ assert.equal(both.candidates[0].point.lat,-28.5001);assert.equal(both.candidates[0].positionNote,undefined,"the Sales GPS point wins");
+});
+test("Assets and batched Non-GPS Sales are read through the nearby ERF IDs, enough queries for every nearby ERF",()=>{
+ const erfs=Array.from({length:65},(_,index)=>({id:`E${String(index).padStart(3,"0")}`,erfNo:String(index+1)}));
+ const assets=nearbyErfLinkedPlan("assets",{lmPcode:"ZA5241",erfs:[...erfs,erfs[0],{id:""}]});
+ assert.equal(ERF_ID_CHUNK,30);assert.equal(assets.truncated,false);assert.equal(assets.specs.length,3);
+ for(const spec of assets.specs){assert.equal(spec.collection,"asts");assert.equal(spec.conditions.length,1);assert.equal(spec.conditions[0][0],"accessData.erfId");assert.equal(spec.conditions[0][1],"in");assert.ok(spec.conditions[0][2].length<=30);}
+ assert.equal(assets.specs.flatMap(spec=>spec.conditions[0][2]).length,65);
+ const sales=nearbyErfLinkedPlan("sales",{lmPcode:"ZA5241",erfs});
+ assert.equal(sales.specs.filter(spec=>spec.conditions[0][0]==="lmPcode").length,3,"GPS Sales by ERF number");
+ assert.deepEqual(sales.specs.filter(spec=>spec.conditions[0][0]==="erfId").map(spec=>spec.conditions[0][2].length),[30,30,5],"batched Non-GPS by ERF ID");
+ assert.equal(MAX_ERF_ID_CHUNKS*ERF_ID_CHUNK>=NEARBY_LIMIT,true,"every nearby ERF can be covered");
+ assert.equal(nearbyErfLinkedPlan("assets",{erfs,erfCapped:true}).truncated,true);
+ assert.deepEqual(nearbyErfLinkedPlan("assets",{erfs:[]}),{specs:[],truncated:false});
+ assert.throws(()=>nearbyErfLinkedPlan("premises",{erfs}),/Only Sales and Assets/);
+});
+test("the layers are combined for the map and panel, each empty until it has loaded",()=>{
+ const model=combineNearbyLayers({erfs:{records:[{id:"E1"}]},sales:{records:[{id:"S1",status:"IN_PROGRESS",candidates:[]}]},assets:{records:[{id:"A1"}]}});
+ assert.deepEqual([model.erfs.length,model.premises.length,model.assets.length,model.generalAssets.length,model.salesRecords.length],[1,0,1,1,1]);
+ assert.equal(model.salesSummary.inProgress,1);
+ assert.deepEqual(combineNearbyLayers().erfs,[]);
 });
 test("every spatial composite used by draft layers or ERF lookup has equality first and alphabetic ranges",()=>{
  const indexes=JSON.parse(fs.readFileSync(new URL("../../../firestore.indexes.json",import.meta.url))).indexes;
@@ -37,8 +66,7 @@ test("every spatial composite used by draft layers or ERF lookup has equality fi
   const expected=[...equal,...ranges];assert.ok(expected.length>1);
   assert.ok(indexes.some(index=>index.collectionGroup===spec.collection&&JSON.stringify(index.fields.filter(field=>field.fieldPath!=="__name__").map(field=>field.fieldPath))===JSON.stringify(expected)&&index.fields.every(field=>field.order==="ASCENDING")),`Missing or incorrectly ordered ${spec.collection} index: ${expected}`);
  }
- assert.deepEqual(nearbyQuerySpec("assets",args).conditions,[["accessData.parents.wardPcode","==",args.wardPcode]]);
- assert.throws(()=>nearbyQuerySpec("sales",args),/nearbySalesQueryPlan/);
+ for(const layer of ["sales","assets"])assert.throws(()=>nearbyQuerySpec(layer,args),/nearbyErfLinkedPlan/,`${layer} are never a Ward-wide read`);
  assert.ok(indexes.some(index=>index.collectionGroup==="sales-all-meters"&&JSON.stringify(index.fields.map(field=>[field.fieldPath,field.order||field.arrayConfig]))===JSON.stringify([["lmPcode","ASCENDING"],["erfNumbers","CONTAINS"]])),"Missing sales-all-meters lmPcode + erfNumbers CONTAINS index");
 });
 test("nearby Sales ask only for the nearby ERF numbers, 30 per query, never the whole LM",()=>{

@@ -235,7 +235,7 @@ export function GeofencePlanningLayers({
       const marker = new window.google.maps.Marker({
         position: item.point,
         map,
-        title: `${item.meterNo} • ${meta.label}`,
+        title: `${item.meterNo} • ${meta.label}${item.positionNote ? ` • ${item.positionNote}` : ""}`,
         icon: glyph
           ? {
               path: glyph.path,
@@ -274,7 +274,7 @@ export function GeofencePlanningLayers({
               <strong>${escapeHtml(item.meterNo)}</strong>
               <div>Sales: ${escapeHtml(item.salesId)}</div>
               <div>Sales Status: ${escapeHtml(meta.label)}</div>
-              <div>Candidate ERF: ${escapeHtml(item.erfNumber || item.erfId || "NAv")}</div>
+              ${item.positionNote ? `<div>${escapeHtml(item.positionNote)}</div>` : `<div>Candidate ERF: ${escapeHtml(item.erfNumber || item.erfId || "NAv")}</div>`}
               ${integrity}
             </div>
           `);
@@ -426,6 +426,7 @@ export function GeofencePlanningLayerControls({
   layerStates, requestedLayers = [], disabled = false,
   geofencesCount = null, geofencesLoading = false,
   showWards = false, wardsCount = null, wardsLoading = false,
+  countsNote = "",
 }) {
   const summary = model?.salesSummary || {
     total: 0,
@@ -463,6 +464,7 @@ export function GeofencePlanningLayerControls({
         <strong style={controlTitleStyle}>Map Layers</strong>
         <button type="button" onClick={() => setOpen(false)} aria-label="Close map layers" title="Close" style={layersCloseButtonStyle}>×</button>
       </div>
+      {countsNote ? <div style={countsNoteStyle}>{countsNote}</div> : null}
       {layerStates !== undefined && <div role="status">{["erfs", "sales", "premises", "assets"].map(layer => <div key={layer}>{layer}: {requestedLayers.includes(layer) ? layerStates?.[layer] || "Loading nearby records…" : "Off · not loaded"}</div>)}</div>}
 
       <ToggleRow disabled={disabled}
@@ -591,6 +593,12 @@ const controlHeaderStyle = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: 8,
+};
+
+const countsNoteStyle = {
+  fontSize: 11,
+  color: "#64748b",
+  marginTop: 2,
 };
 
 const layersCloseButtonStyle = {

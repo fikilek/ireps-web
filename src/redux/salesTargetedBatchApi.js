@@ -1,11 +1,11 @@
-import { NEARBY_LIMIT, NEARBY_LAYERS, nearbyQuerySpec, nearbySalesQueryPlan, nearbyLayerRecords, emptyNearbyModel } from "../features/maps/sales-batch-nearby.js";
-import { summarizeSalesPlanningRecords } from "../pages/operations/geofencePlanningModel.js";
+import { NEARBY_LIMIT, NEARBY_LAYERS, nearbyQuerySpec, nearbyErfLinkedPlan, nearbyLayerRecords } from "../features/maps/sales-batch-nearby.js";
 import { classifySalesWorkStatus } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
   doc,
   documentId,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -484,62 +484,53 @@ export const salesTargetedBatchApi = createApi({
     createSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onCreateTargetedBatchCallable")),
     deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
     allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
-    getSalesBatchNearby: builder.query({
+    // Rules 18.7 (1.3.17): one cache entry per layer. Switching a layer on loads only that layer;
+    // a loaded layer is not read again while its Ward and area stay the same. The entry reads the
+    // Ward itself, so it never restarts because the draft snapshot is briefly waiting.
+    getSalesBatchNearbyLayer: builder.query({
       keepUnusedDataFor: 0,
-      queryFn: () => ({ data: { model: emptyNearbyModel(), states: {} } }),
+      queryFn: () => ({ data: { records: [], state: "Loading nearby records…" } }),
       async onCacheEntryAdded(args, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
-        const stops = [], states = {}, model = emptyNearbyModel(); let active = true;
-        const requested = NEARBY_LAYERS.filter(layer => args.layers.includes(layer));
-        const publish = () => { if (active && isCurrent()) updateCachedData(() => ({ model: { ...model, generalAssets: model.assets, salesSummary: summarizeSalesPlanningRecords(model.salesRecords) }, states: { ...states } })); };
+        const stops = []; let active = true;
+        const publish = (records, state) => { if (active && isCurrent()) updateCachedData(() => ({ records, state })); };
+        const read = spec => query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1));
+        const rowsOf = snapshot => snapshot.docs.slice(0, NEARBY_LIMIT).map(item => ({ ...item.data(), id: item.id }));
         try {
           await cacheDataLoaded;
-          if (!isCurrent() || !args.bounds || !args.wardPcode) return;
-          for (const layer of requested) states[layer] = "Loading nearby records…";
-          publish();
-          for (const layer of requested) {
-            if (layer === "sales") {
-              // Sales on the nearby ERFs only (see nearbySalesQueryPlan); never an LM-wide read.
-              const erfSpec = nearbyQuerySpec("erfs", args);
-              const erfSnapshot = await getDocs(query(collection(db, erfSpec.collection), ...erfSpec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1)));
-              if (!active || !isCurrent()) return;
-              const { records: nearbyErfs } = nearbyLayerRecords("erfs", erfSnapshot.docs.slice(0, NEARBY_LIMIT).map(doc => ({ ...doc.data(), id: doc.id })), args);
-              const plan = nearbySalesQueryPlan({ lmPcode: args.lmPcode, erfNumbers: nearbyErfs.map(erf => erf.erfNo), erfCapped: erfSnapshot.size > NEARBY_LIMIT });
-              if (!plan.specs.length) { model.salesRecords = []; states.sales = plan.truncated ? "Incomplete: nearby read limit reached" : "Complete"; publish(); continue; }
-              const chunks = new Map();
-              const publishSales = () => {
-                const merged = new Map(); let capped = false, pending = chunks.size < plan.specs.length;
-                for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; for (const row of chunk.rows) merged.set(row.id, row); }
-                try {
-                  const { records, invalid } = nearbyLayerRecords("sales", [...merged.values()], args);
-                  model.salesRecords = records;
-                  states.sales = pending ? "Incomplete: waiting for the server" : capped || plan.truncated ? "Incomplete: nearby read limit reached" : invalid ? `Incomplete: ${invalid} records have invalid scope or geometry` : "Complete";
-                } catch { model.salesRecords = []; states.sales = "Incomplete: Ward or layer geometry is invalid"; }
-                publish();
-              };
-              plan.specs.forEach((spec, index) => {
-                stops.push(onSnapshot(query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1)), { includeMetadataChanges: true }, snapshot => {
-                  if (!active || !isCurrent()) return;
-                  chunks.set(index, { rows: snapshot.docs.slice(0, NEARBY_LIMIT).map(doc => ({ ...doc.data(), id: doc.id })), capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
-                  publishSales();
-                }, () => { model.salesRecords = []; states.sales = "Error: nearby records could not be loaded"; publish(); }));
-              });
-              continue;
-            }
-            const spec = nearbyQuerySpec(layer, args);
-            stops.push(onSnapshot(query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1)), { includeMetadataChanges: true }, snapshot => {
-              if (!active || !isCurrent()) return;
-              const key = layer === "sales" ? "salesRecords" : layer;
-              try {
-                const capped = snapshot.size > NEARBY_LIMIT;
-                const { records, invalid } = nearbyLayerRecords(layer, snapshot.docs.slice(0, NEARBY_LIMIT).map(doc => ({ ...doc.data(), id: doc.id })), args);
-                model[key] = records;
-                states[layer] = snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : invalid ? `Incomplete: ${invalid} records have invalid scope or geometry` : "Complete";
-              } catch { model[key] = []; states[layer] = "Incomplete: Ward or layer geometry is invalid"; }
-              publish();
-            }, () => { model[layer === "sales" ? "salesRecords" : layer] = []; states[layer] = "Error: nearby records could not be loaded"; publish(); }));
+          if (!isCurrent() || !args.bounds || !args.wardPcode || !NEARBY_LAYERS.includes(args.layer)) return;
+          const wardSnapshot = await getDoc(doc(db, "wards", args.wardPcode));
+          if (!active || !isCurrent()) return;
+          const ward = wardSnapshot.exists() ? wardSnapshot.data() : null;
+          if (ward?.parents?.localMunicipalityId !== args.lmPcode || !ward?.geometry) { publish([], "Error: the Ward boundary could not be loaded"); return; }
+          const scope = { ...args, wardGeometry: ward.geometry };
+          let specs, truncated = false;
+          if (args.layer === "erfs" || args.layer === "premises") specs = [nearbyQuerySpec(args.layer, scope)];
+          else {
+            // Sales and Assets on the nearby ERFs only (nearbyErfLinkedPlan); never a Ward- or LM-wide read.
+            const erfSnapshot = await getDocs(read(nearbyQuerySpec("erfs", scope)));
+            if (!active || !isCurrent()) return;
+            const { records: erfs } = nearbyLayerRecords("erfs", rowsOf(erfSnapshot), scope);
+            ({ specs, truncated } = nearbyErfLinkedPlan(args.layer, { lmPcode: args.lmPcode, erfs, erfCapped: erfSnapshot.size > NEARBY_LIMIT }));
           }
+          if (!specs.length) publish([], truncated ? "Incomplete: nearby read limit reached" : "Complete");
+          const chunks = new Map();
+          const publishChunks = () => {
+            if ([...chunks.values()].some(chunk => chunk.error)) return publish([], "Error: nearby records could not be loaded");
+            const merged = new Map(); let pending = chunks.size < specs.length, capped = false;
+            for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; for (const row of chunk.rows) merged.set(row.id, row); }
+            try {
+              const { records, invalid } = nearbyLayerRecords(args.layer, [...merged.values()], scope);
+              publish(records, pending ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : truncated ? "Incomplete: nearby read limit reached"
+                : invalid ? `Incomplete: ${invalid} records have invalid scope or geometry` : "Complete");
+            } catch { publish([], "Incomplete: Ward or layer geometry is invalid"); }
+          };
+          specs.forEach((spec, index) => stops.push(onSnapshot(read(spec), { includeMetadataChanges: true }, snapshot => {
+            if (!active || !isCurrent()) return;
+            chunks.set(index, { rows: rowsOf(snapshot), capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
+            publishChunks();
+          }, () => { chunks.set(index, { error: true, rows: [] }); publishChunks(); })));
           await cacheEntryRemoved;
-        } catch { for (const layer of requested) states[layer] = "Error: nearby records could not be loaded"; publish(); }
+        } catch { publish([], "Error: nearby records could not be loaded"); }
         finally { active = false; stops.forEach(stop => stop()); }
       },
     }),
@@ -2653,4 +2644,4 @@ export function useGetTargetedBatchDetailsByIdQuery(arg, options) {
   return useScopedTargetedBatchRead("useGetTargetedBatchDetailsByIdQuery", arg, options);
 }
 
-export function useGetSalesBatchNearbyQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchNearbyQuery", arg, options); }
+export function useGetSalesBatchNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchNearbyLayerQuery", arg, options); }

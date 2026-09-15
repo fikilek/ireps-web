@@ -1,5 +1,5 @@
 import { pointCoordinates, normalizeBatchGeometry, strictlyInside } from "../../../functions/geofences/sales-batch-geometry.js";
-import { classifySalesWorkStatus, pipelineCandidates } from "../../../functions/salesAllMeters/sales-batch-policy.js";
+import { classifySalesWorkStatus, pipelineCandidates, inspectSavedErfDecision } from "../../../functions/salesAllMeters/sales-batch-policy.js";
 import { geoJsonGeometryToPlanningPaths, summarizeSalesPlanningRecords } from "../../pages/operations/geofencePlanningModel.js";
 
 export const NEARBY_LIMIT = 500;
@@ -17,8 +17,7 @@ export function nearbyQuerySpec(layer, { wardPcode, bounds }) {
   const overlap = [["bbox.maxLat", ">=", bounds.minLat], ["bbox.maxLng", ">=", bounds.minLng], ["bbox.minLat", "<=", bounds.maxLat], ["bbox.minLng", "<=", bounds.maxLng]];
   if (layer === "erfs") return { collection: "ireps_erfs", conditions: [["admin.ward.pcode", "==", wardPcode], ...overlap] };
   if (layer === "premises") return { collection: "premises", conditions: [["parents.wardPcode", "==", wardPcode], ["geometry.centroid.lat", ">=", bounds.minLat], ["geometry.centroid.lat", "<=", bounds.maxLat], ["geometry.centroid.lng", ">=", bounds.minLng], ["geometry.centroid.lng", "<=", bounds.maxLng]] };
-  if (layer === "assets") return { collection: "asts", conditions: [["accessData.parents.wardPcode", "==", wardPcode]] };
-  if (layer === "sales") throw new Error("Nearby Sales use nearbySalesQueryPlan (ERF numbers of the nearby ERFs)");
+  if (layer === "sales" || layer === "assets") throw new Error("Nearby Sales and Assets are read through the nearby ERFs (nearbyErfLinkedPlan)");
   throw new Error("Unknown nearby layer");
 }
 // Sales carry no Ward or searchable position, but GPS Sales list their pipeline ERF numbers in
@@ -37,6 +36,32 @@ export function nearbySalesQueryPlan({ lmPcode, erfNumbers = [], erfCapped = fal
     truncated: erfCapped || chunks.length > MAX_SALES_ERF_CHUNKS,
   };
 }
+// Rules 18.7 (1.3.17): Assets, and Non-GPS Sales with a saved ERF decision, are read through the
+// nearby ERFs by ERF ID, 30 IDs per query (Firestore "in" limit), enough queries to cover every
+// nearby ERF. The whole Ward is never read.
+export const ERF_ID_CHUNK = 30;
+export const MAX_ERF_ID_CHUNKS = Math.ceil(NEARBY_LIMIT / ERF_ID_CHUNK);
+function erfIdChunks(erfIds) {
+  const ids = [...new Set(erfIds.map(value => String(value ?? "").trim()).filter(Boolean))].sort(), chunks = [];
+  for (let index = 0; index < ids.length; index += ERF_ID_CHUNK) chunks.push(ids.slice(index, index + ERF_ID_CHUNK));
+  return chunks;
+}
+export function nearbyErfLinkedPlan(layer, { lmPcode, erfs = [], erfCapped = false }) {
+  const chunks = erfIdChunks(erfs.map(erf => erf.id)), byId = chunks.slice(0, MAX_ERF_ID_CHUNKS), idsTruncated = chunks.length > MAX_ERF_ID_CHUNKS;
+  if (layer === "assets") return { specs: byId.map(chunk => ({ collection: "asts", conditions: [["accessData.erfId", "in", chunk]] })), truncated: erfCapped || idsTruncated };
+  if (layer === "sales") {
+    const gps = nearbySalesQueryPlan({ lmPcode, erfNumbers: erfs.map(erf => erf.erfNo), erfCapped });
+    return { specs: [...gps.specs, ...byId.map(chunk => ({ collection: "sales-all-meters", conditions: [["erfId", "in", chunk]] }))], truncated: gps.truncated || idsTruncated };
+  }
+  throw new Error("Only Sales and Assets are read through the nearby ERFs");
+}
+// One entry per layer (18.7, 1.3.17); the map and panel use them together.
+export function combineNearbyLayers({ erfs, sales, premises, assets } = {}) {
+  const salesRecords = sales?.records || [], assetRecords = assets?.records || [];
+  return { ...emptyNearbyModel(), erfs: erfs?.records || [], premises: premises?.records || [], assets: assetRecords, generalAssets: assetRecords,
+    salesRecords, salesSummary: summarizeSalesPlanningRecords(salesRecords) };
+}
+export const BATCH_POSITION_NOTE = "Position from address, saved with its batch";
 export function nearbyLayerRecords(layer, documents, { lmPcode, wardPcode, bounds, wardGeometry }) {
   const result = []; let invalid = 0;
   const ward = normalizeBatchGeometry(wardGeometry);
@@ -52,10 +77,12 @@ export function nearbyLayerRecords(layer, documents, { lmPcode, wardPcode, bound
         if (strictlyInside(point, ward)) result.push({ id: row.id, erfNo: String(row.sg?.erfNo || "Unavailable"), point, paths: geoJsonGeometryToPlanningPaths(geometry), raw: row });
       } catch { invalid++; }
     } else if (layer === "sales") {
-      const candidates = (pipelineCandidates(row) || []).flatMap((candidate, index) => {
-        const point = mapPoint({ latitude: candidate.Latitude ?? candidate.latitude, longitude: candidate.Longitude ?? candidate.longitude });
-        return insideArea(point) ? [{ key: `${row.id}:${index}`, point }] : [];
-      });
+      // Sales GPS points first; a Non-GPS meter with a saved ERF decision uses the position saved
+      // with it (18.7, 1.3.17). Anything else has no position and is not shown.
+      const observed = (pipelineCandidates(row) || []).map(candidate => mapPoint({ latitude: candidate.Latitude ?? candidate.latitude, longitude: candidate.Longitude ?? candidate.longitude })).filter(Boolean);
+      const saved = observed.length ? null : inspectSavedErfDecision(row);
+      const points = observed.length ? observed : saved?.established ? [mapPoint(saved.point)].filter(Boolean) : [];
+      const candidates = points.flatMap((point, index) => insideArea(point) ? [{ key: `${row.id}:${index}`, point, ...(saved?.established ? { positionNote: BATCH_POSITION_NOTE } : {}) }] : []);
       if (candidates.length) result.push({ id: row.id, meterNo: row.meterNo || row.id, status: classifySalesWorkStatus(row), integrityIssues: [], candidates, raw: row });
     } else {
       const point = mapPoint(layer === "premises" ? row.geometry?.centroid : row.ast?.location?.gps || row.location?.gps || row.gps);

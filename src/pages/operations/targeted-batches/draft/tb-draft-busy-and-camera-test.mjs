@@ -33,6 +33,6 @@ test("the map is not redrawn on every draft rebuild", async () => {
   assert.doesNotMatch(markers, /\}, \[map, rows, onHighlight\]\);/);
   const workspace = await read("./sales-batch-geofence-workspace.jsx");
   assert.match(workspace, /const meterPoints = useMemo\(\(\) => JSON\.parse\(meterKey\), \[meterKey\]\);/);
-  assert.match(workspace, /const emptyModel = useMemo\(\(\) => emptyNearbyModel\(\), \[\]\);/);
+  assert.match(workspace, /const planningModel = useMemo\(\(\) => combineNearbyLayers\(\{ erfs: erfsLayer, sales: salesLayer, premises: premisesLayer, assets: assetsLayer \}\), \[erfsLayer, salesLayer, premisesLayer, assetsLayer\]\);/);
   assert.match(workspace, /const geofences = useMemo\(\(\) => geofenceData \|\| \[\], \[geofenceData\]\);/);
 });
