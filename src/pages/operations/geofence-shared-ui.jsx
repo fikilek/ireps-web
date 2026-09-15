@@ -145,7 +145,7 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
           </div>
         ) : null}
 </>); }
-export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null, successAction = null}) { return (<>
+export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null}) { return (<>
       {listModalOpen ? (
         <Modal
           title={`Existing Geofences in ${wardLabel}`}
@@ -400,22 +400,11 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
           </p>
 
           <div style={modalActionsStyle}>
-            {/* TB Draft: go straight on to the batch (Targeted Batch rules TB-R040). */}
-            {successAction ? (
-              <button
-                onClick={successAction.onClick}
-                disabled={successAction.disabled}
-                title={successAction.disabled ? successAction.waitingTitle : undefined}
-                style={{ ...primaryButtonStyle, opacity: successAction.disabled ? 0.45 : 1, cursor: successAction.disabled ? "not-allowed" : "pointer" }}
-              >
-                {successAction.disabled ? successAction.waitingLabel : successAction.label}
-              </button>
-            ) : null}
             <button
               onClick={() => setCreateSuccess(null)}
-              style={successAction ? buttonStyle : primaryButtonStyle}
+              style={primaryButtonStyle}
             >
-              {successAction ? "Later" : "OK"}
+              OK
             </button>
           </div>
         </Modal>

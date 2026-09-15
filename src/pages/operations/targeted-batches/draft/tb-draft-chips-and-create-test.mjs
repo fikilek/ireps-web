@@ -32,18 +32,18 @@ test("the chip row sits above the list, confirms, and replaces the Keep Ward but
   assert.doesNotMatch(review, /Keep \{group\.label\}|aria-label="Keep one Ward"/);
 });
 
-test("Create Batch is next to Satellite, not in the page header; the Geofence Created window offers Now create the batch", async () => {
+// Rules 1.3.18: the Now create the batch option in the Geofence Created window is withdrawn.
+test("Create Batch is next to Satellite, not in the page header; the Geofence Created window has only OK", async () => {
   const review = await read("../TargetedBatchDraftReview.jsx");
   assert.doesNotMatch(review, />Create<\/button>/, "no Create button in the page header");
   assert.match(review, /createDisabled=\{busy \|\| !model\.canCreate\}/);
   const workspace = await read("./sales-batch-geofence-workspace.jsx");
   assert.match(workspace, /onClick=\{onCreate\} disabled=\{createDisabled\}>Create Batch<\/button>/);
   assert.match(workspace, /extraActions=\{createBatchButton\}/);
-  assert.match(workspace, /label: "Now create the batch"/);
-  assert.match(workspace, /onClick: \(\) => \{ setCreateSuccess\(null\); onCreate\(\); \}/);
-  assert.match(workspace, /successAction=\{successAction\}/);
+  assert.doesNotMatch(workspace, /Now create the batch|successAction/);
   const shared = await read("../../geofence-shared-ui.jsx");
   const satellite = shared.indexOf('{mapTypeId === "roadmap" ? "Satellite" : "Map"}');
   assert.ok(satellite > 0 && shared.indexOf("{extraActions}") > satellite, "extra actions come right after Satellite");
-  assert.match(shared, /\{successAction \? "Later" : "OK"\}/, "the Geo-Fences page keeps its plain OK");
+  assert.doesNotMatch(shared, /successAction|"Later"/);
+  assert.match(shared, /onClick=\{\(\) => setCreateSuccess\(null\)\}\s*style=\{primaryButtonStyle\}\s*>\s*OK\s*<\/button>/);
 });
