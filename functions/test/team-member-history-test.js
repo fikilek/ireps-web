@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildMemberJoined, buildMemberLeft, memberHistoryId, openMemberPeriods, START_SOURCE, TEAM_MEMBER_HISTORY } from "../teams/member-history.js";
-import { classifyTrn, isBatchTrn, summarizeFieldWork, teamOnDate } from "../teams/field-work-summary.js";
+import { classifyTrn, isBatchTrn, summarizeFieldWork, teamOnDate, workOf } from "../teams/field-work-summary.js";
 import { getFieldWorkSummary } from "../teams/fieldWorkSummaryCallable.js";
 
 // Teams rules TM-R001 and Targeted Batch rules TB-R045 (1.3.26).
@@ -53,18 +53,43 @@ test("work is credited to the team on the date of the work; a move starts afresh
     trn("W1", "2026-09-08T10:00:00.000Z", { sourceModule: "SALES_TARGETED_BATCH", targetedBatchContext: { tbId: "TGB_1" } }),
     trn("M1", "2026-09-09T10:00:00.000Z", { accessData: { trnType: "METER_DISCONNECTION", access: { hasAccess: "yes" } } }),
   ] });
-  assert.deepEqual(summary.totals, { trns: 6, batchTrns: 1, normalTrns: 5, transactions: 4, noAccess: 1 });
+  assert.deepEqual(summary.totals, { trns: 6, batchTrns: 1, normalTrns: 5, unfinishedJobs: 0, transactions: 4, noAccess: 1 });
   const byKey = Object.fromEntries(summary.groups.map(group => [group.key, group]));
   assert.deepEqual([byKey["TEAM:T1"].transactions, byKey["TEAM:T1"].noAccess], [1, 0], "August work stays with the old team");
   assert.deepEqual([byKey["TEAM:T2"].transactions, byKey["TEAM:T2"].noAccess], [2, 1], "a discovery and a reconnection; the No Access visit is not a transaction");
   assert.deepEqual([byKey["NO_TEAM:RSTE"].name, byKey["NO_TEAM:RSTE"].transactions, byKey["NO_TEAM:RSTE"].workers], ["RSTE (no team)", 1, ["Zamo Ngubs"]]);
 });
 
+test("a job counts once completed, for the worker who completed it, on the day it was completed", () => {
+  const job = (state, completedBy = null, completedAt = null, access = "yes", sp = { id: "RSTE", name: "RSTE" }) => ({
+    accessData: { trnType: "METER_DISCONNECTION", access: { hasAccess: access } }, serviceProvider: sp,
+    metadata: { createdByUid: "M1", createdByUser: "Zamo Ngubs", createdAt: "2026-08-19T12:00:00.000Z" },
+    workflow: { state, createdMode: "OFFICE", completedByUid: completedBy, completedByUser: completedBy === "W1" ? "Peter Peter" : completedBy, completedAt } });
+  assert.equal(workOf(job("ISSUED")), null, "an issued job is no one's work yet");
+  for (const state of ["ACCEPTED", "REJECTED", "CANCELLED"]) assert.equal(workOf(job(state)), null, state);
+  assert.deepEqual(workOf(job("COMPLETED", "W1", "2026-09-05T10:00:00.000Z")), { job: true, uid: "W1", name: "Peter Peter", millis: Date.parse("2026-09-05T10:00:00.000Z") });
+  assert.deepEqual(workOf(trn("W1", "2026-09-05T10:00:00.000Z")), { job: false, uid: "W1", name: "Peter Peter", millis: Date.parse("2026-09-05T10:00:00.000Z") }, "a record without a workflow is its creator's");
+  const periods = [period("T1", "Kaiser Team", "W1", "2026-08-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z"), period("T2", "Simo Team", "W1", "2026-09-01T00:00:00.000Z")];
+  const summary = summarizeFieldWork({ periods, usersSp: { W9: { id: "THATO", name: "Thato Engineers" } }, trns: [
+    job("ISSUED"), job("ACCEPTED"),
+    job("COMPLETED", "W1", "2026-09-05T10:00:00.000Z"),
+    job("COMPLETED", "W1", "2026-08-20T10:00:00.000Z", "no"),
+    job("COMPLETED", "W9", "2026-09-06T10:00:00.000Z"),
+  ] });
+  assert.deepEqual(summary.totals, { trns: 5, batchTrns: 0, normalTrns: 5, unfinishedJobs: 2, transactions: 2, noAccess: 1 });
+  const byKey = Object.fromEntries(summary.groups.map(group => [group.key, group]));
+  assert.equal(byKey["NO_TEAM:RSTE"], undefined, "nothing is credited to the manager who issued the jobs");
+  assert.deepEqual([byKey["TEAM:T2"].transactions, byKey["TEAM:T2"].workers], [1, ["Peter Peter"]], "completed in September: Simo Team");
+  assert.deepEqual([byKey["TEAM:T1"].noAccess, byKey["TEAM:T1"].transactions], [1, 0], "completed with No Access in August: Kaiser Team");
+  assert.deepEqual([byKey["NO_TEAM:THATO"].name, byKey["NO_TEAM:THATO"].transactions], ["Thato Engineers (no team)", 1], "a worker in no team: the worker's own service provider");
+});
+
 test("the totals Function is for management users of that LM only", async () => {
   const profile = { employment: { role: "MNG" }, access: { activeWorkbase: { id: "ZA5241" }, workbases: [{ id: "ZA5241" }] } };
   const collection = docs => ({ where() { return this; }, select() { return this; }, get: async () => ({ docs: docs.map(data => ({ data: () => data })) }) });
   const db = user => ({ doc: () => ({ get: async () => ({ exists: Boolean(user), data: () => user }) }),
-    collection: name => name === "trns" ? collection([trn("W1", "2026-09-05T10:00:00.000Z")]) : collection([period("T1", "Kaiser Team", "W1", "2026-08-01T00:00:00.000Z")]) });
+    collection: name => ({ trns: collection([trn("W1", "2026-09-05T10:00:00.000Z")]), team_member_history: collection([period("T1", "Kaiser Team", "W1", "2026-08-01T00:00:00.000Z")]),
+      users: collection([{ employment: { serviceProvider: { id: "RSTE", name: "RSTE" } } }]) })[name] });
   await assert.rejects(getFieldWorkSummary({ db: db(profile), request: { data: { lmPcode: "ZA5241" } } }), { code: "unauthenticated" });
   await assert.rejects(getFieldWorkSummary({ db: db(profile), request: { auth: { uid: "U" }, data: { lmPcode: "bad" } } }), { code: "invalid-argument" });
   await assert.rejects(getFieldWorkSummary({ db: db({ ...profile, employment: { role: "FWR" } }), request: { auth: { uid: "U" }, data: { lmPcode: "ZA5241" } } }), { code: "permission-denied" });

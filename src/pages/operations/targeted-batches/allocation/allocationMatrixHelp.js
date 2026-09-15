@@ -18,7 +18,7 @@ const totalWorkOf = organisation => Number(organisation?.matrix?.completed || 0)
 export const MATRIX_COLUMN_KEYS = Object.freeze(["type", "name", "batches", "assigned", "notStarted", "inProgress", "completed", "batchesShare", "projectedAssigned", "projectedBatchesShare",
   "transactions", "noAccess", "transactionsShare", "totalWork", "totalWorkShare"]);
 
-// Rules TB-R045 (1.3.26) and Teams rules TM-R001: how work outside batches is credited.
+// Rules TB-R045 (1.3.27) and Teams rules TM-R001: how work outside batches is credited.
 const CREDIT = ["Each record counts for the team the worker belonged to on the day of the work. When a worker moves to another team, the work they did before stays with the old team, and the new team starts afresh from the day they joined.",
   "Work by a worker who was in no team that day is shown on the \"(no team)\" row of the worker's service provider. Team membership has been recorded since 15 September 2026; the members at that date count from the day their team was created."];
 
@@ -90,7 +90,8 @@ export function matrixColumnHelp(key, { organisations = [], allOrganisations = o
     case "transactions": return {
       title: "Transactions (outside batches)",
       paragraphs: ["One total of every iREPS transaction done outside a batch (the normal path) where the worker had access: meter discoveries, installations, removals, disconnections, reconnections, commissioning, readings, inspections and any other kind. They are counted together; this table does not split them by kind.",
-        "A visit where access was refused is not a transaction; it is counted in No Access. Work done in a batch is in Completed, not here, so nothing is counted twice.", ...CREDIT],
+        "A visit where access was refused is not a transaction; it is counted in No Access. Work done in a batch is in Completed, not here, so nothing is counted twice.",
+        "A job issued from the office counts only once it is completed, for the worker who completed it, on the day it was completed. A job that is issued or accepted but not done yet is not counted.", ...CREDIT],
       rows: workRows(work => plural(work.transactions, "transaction")),
       total: `Project: ${plural(totals.transactions, "transaction")} outside batches`,
     };

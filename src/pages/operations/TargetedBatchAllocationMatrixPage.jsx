@@ -18,6 +18,7 @@ import {
   buildUserExecutionMatrix,
   getCanonicalBatchState,
   getPendingAllocationProjectionMeters,
+  matrixTotals,
   projectMatrixAllocation,
   splitHundredPercent,
 } from "./targeted-batches/allocation/allocationMatrixModel";
@@ -151,10 +152,10 @@ function HelpWindow({ help, onClose }) {
   );
 }
 
-function Td({ children, strong = false, colSpan, divider = false }) {
+function Td({ children, strong = false, colSpan, divider = false, total = false }) {
   return (
     <td
-      style={{ ...styles.td, ...(strong ? styles.strongCell : null), ...(divider ? styles.divider : null) }}
+      style={{ ...styles.td, ...(strong ? styles.strongCell : null), ...(total ? styles.totalCell : null), ...(divider ? styles.divider : null) }}
       colSpan={colSpan}
     >
       {children}
@@ -362,6 +363,7 @@ export default function TargetedBatchAllocationMatrixPage() {
   const workValue = (value) => (fieldWorkSummary ? formatNumber(value) : fieldWorkFailed ? "—" : "…");
   const workPercent = (value) => (fieldWorkSummary ? <Percent value={value} /> : fieldWorkFailed ? "—" : "…");
   const columnCount = (projectionActive ? 10 : 8) + 5;
+  const totals = matrixTotals(visibleOrganisations, matrixRows);
   const integrityIssueBatches = allocationIntegrityIssues.length;
 
   const matrixLoading =
@@ -744,6 +746,32 @@ export default function TargetedBatchAllocationMatrixPage() {
                       );
                     })}
                 </tbody>
+                {/* Rules TB-R045 (1.3.27): the totals of the rows shown. */}
+                {!loading && !matrixError && visibleOrganisations.length > 0 ? (
+                  <tfoot>
+                    <tr>
+                      <Td total colSpan={2}>
+                        <div style={styles.nameCell}>
+                          <span>Total</span>
+                          <small>{formatNumber(totals.rows)} row(s) shown</small>
+                        </div>
+                      </Td>
+                      <Td total divider>{formatNumber(totals.batches)}</Td>
+                      <Td total>{formatNumber(totals.assigned)}</Td>
+                      <Td total><CountPercent count={totals.notStarted} percent={totals.notStartedPct} /></Td>
+                      <Td total><CountPercent count={totals.inProgress} percent={totals.inProgressPct} /></Td>
+                      <Td total><CountPercent count={totals.completed} percent={totals.completedPct} /></Td>
+                      <Td total><Percent value={totals.batchesSharePct} /></Td>
+                      {projectionActive ? <Td total>—</Td> : null}
+                      {projectionActive ? <Td total>—</Td> : null}
+                      <Td total divider>{workValue(totals.transactions)}</Td>
+                      <Td total>{workValue(totals.noAccess)}</Td>
+                      <Td total>{workPercent(totals.transactionsSharePct)}</Td>
+                      <Td total divider>{workValue(totals.totalWork)}</Td>
+                      <Td total>{workPercent(totals.totalWorkSharePct)}</Td>
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </div>
           </>
@@ -1075,6 +1103,7 @@ const styles = {
     verticalAlign: "top",
   },
   strongCell: { color: "#0f172a", fontWeight: 850 },
+  totalCell: { background: "#e9eef5", color: "#0f172a", fontWeight: 900, borderTop: "2px solid #64748b" },
   typeBadge: {
     borderRadius: 999,
     padding: "4px 7px",

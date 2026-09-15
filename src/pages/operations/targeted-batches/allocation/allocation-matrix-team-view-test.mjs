@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { addFieldWorkToMatrix, buildOrganisationAllocationMatrixResult, projectMatrixAllocation, splitHundredPercent } from "./allocationMatrixModel.js";
+import { addFieldWorkToMatrix, buildOrganisationAllocationMatrixResult, matrixTotals, projectMatrixAllocation, splitHundredPercent } from "./allocationMatrixModel.js";
 import { matrixColumnHelp, MATRIX_COLUMN_KEYS } from "./allocationMatrixHelp.js";
 
 // Targeted Batch rules TB-R045: the Allocation Matrix TEAM / SP view.
@@ -130,6 +130,7 @@ test("each '?' of work outside batches explains how work is credited, with each 
   assert.match(help("transactions").paragraphs[0], /meter discoveries, installations, removals, disconnections, reconnections, commissioning, readings, inspections and any other kind/);
   assert.match(help("transactions").paragraphs.join(" "), /not a transaction; it is counted in No Access.*nothing is counted twice.*the work they did before stays with the old team, and the new team starts afresh/);
   assert.match(help("noAccess").paragraphs.join(" "), /not counted in Transactions.*"\(no team\)" row of the worker's service provider/);
+  assert.match(help("transactions").paragraphs.join(" "), /A job issued from the office counts only once it is completed, for the worker who completed it, on the day it was completed/);
   assert.equal(row("noAccess", "RSTE (no team)"), "1 visit");
   assert.equal(row("transactionsShare", "Kaiser Team"), `33 of 45 = ${n(73.3)}%`);
   assert.equal(row("totalWork", "Kaiser Team"), "4 + 33 = 37"); assert.equal(help("totalWork").total, "Project: 4 + 45 = 49");
@@ -138,4 +139,30 @@ test("each '?' of work outside batches explains how work is credited, with each 
   assert.equal(row("name", "RSTE (no team)"), "2 workers in no team"); assert.equal(row("name", "Old Team"), "Not in the current TEAM list");
   assert.equal(help("assigned").rows.some(([name]) => name === "RSTE (no team)"), false, "batch columns leave out rows without batches");
   assert.equal(help("type").total, "TEAMs: 2 · SPs: 0", "only listed TEAMs and SPs are counted");
+});
+
+// Rules TB-R045 (1.3.27): the totals row.
+test("the totals row adds up the rows shown; with every row shown the shares are 100%", () => {
+  const batches = [batch({ id: "B1", totalRows: 10, completedRows: 4, startedRows: 6 }), batch({ id: "B2", targetId: "SIMO", targetName: "Simo Team", totalRows: 30, completedRows: 12, startedRows: 12 })];
+  const rows = addFieldWorkToMatrix(buildOrganisationAllocationMatrixResult({ batches, rows: batches.flatMap(rowsFor), teams }).organisations, groups);
+  const all = matrixTotals(rows, rows);
+  assert.deepEqual([all.rows, all.batches, all.assigned, all.notStarted, all.inProgress, all.completed], [4, 2, 40, 22, 2, 16]);
+  assert.equal(all.notStarted + all.inProgress + all.completed, all.assigned);
+  assert.deepEqual([all.notStartedPct, all.inProgressPct, all.completedPct], [55, 5, 40], "22, 2 and 16 of 40");
+  assert.deepEqual([all.transactions, all.noAccess, all.totalWork], [45, 5, 61], "Total Work = 16 Completed + 45 transactions");
+  assert.deepEqual([all.batchesSharePct, all.transactionsSharePct, all.totalWorkSharePct], [100, 100, 100]);
+  const teamsOnly = matrixTotals(rows.filter(row => row.type === "TEAM"), rows);
+  assert.deepEqual([teamsOnly.rows, teamsOnly.transactions, teamsOnly.transactionsSharePct, teamsOnly.totalWork, teamsOnly.totalWorkSharePct], [3, 38, 84.4, 54, 88.5], "TEAMs only: 38 of 45 transactions, 54 of 61 total work");
+  assert.deepEqual(matrixTotals([], rows), { rows: 0, batches: 0, assigned: 0, notStarted: 0, inProgress: 0, completed: 0, notStartedPct: 0, inProgressPct: 0, completedPct: 0,
+    batchesSharePct: 0, transactions: 0, noAccess: 0, transactionsSharePct: 0, totalWork: 0, totalWorkSharePct: 0 });
+});
+
+test("the page shows the totals row under the table, with no totals for the allocation preview", async () => {
+  const page = await readFile(new URL("../../TargetedBatchAllocationMatrixPage.jsx", import.meta.url), "utf8");
+  assert.match(page, /const totals = matrixTotals\(visibleOrganisations, matrixRows\);/, "the rows shown, as parts of all rows");
+  const foot = page.slice(page.indexOf("<tfoot>"), page.indexOf("</tfoot>"));
+  assert.match(foot, /<span>Total<\/span>/);
+  for (const cell of ["totals.batches", "totals.assigned", "count={totals.notStarted}", "count={totals.inProgress}", "count={totals.completed}", "totals.batchesSharePct",
+    "workValue(totals.transactions)", "workValue(totals.noAccess)", "workPercent(totals.transactionsSharePct)", "workValue(totals.totalWork)", "workPercent(totals.totalWorkSharePct)"]) assert.ok(foot.includes(cell), cell);
+  assert.equal((foot.match(/\{projectionActive \? <Td total>—<\/Td> : null\}/g) || []).length, 2, "projections cannot be added up");
 });

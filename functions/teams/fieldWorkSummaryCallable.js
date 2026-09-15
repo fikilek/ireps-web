@@ -3,12 +3,14 @@ import { getFirestore } from "firebase-admin/firestore";
 import { TEAM_MEMBER_HISTORY } from "./member-history.js";
 import { summarizeFieldWork } from "./field-work-summary.js";
 
-// Targeted Batch rules TB-R045 (1.3.26): the Allocation Matrix's normal-path totals, worked out
+// Targeted Batch rules TB-R045 (1.3.27): the Allocation Matrix's normal-path totals, worked out
 // here so the page receives only the per-team totals, never every field work record.
 const MANAGEMENT_ROLES = new Set(["SPU", "ADM", "MNG", "SPV"]);
 const TRN_FIELDS = ["sourceModule", "targetedBatchContext.tbId", "derived.targetedBatch.tbId", "accessData.tbId", "accessData.access.hasAccess",
-  "metadata.createdByUid", "metadata.createdByUser", "metadata.createdAt", "metadata.createdAtDatetime", "serviceProvider.id", "serviceProvider.name"];
+  "metadata.createdByUid", "metadata.createdByUser", "metadata.createdAt", "metadata.createdAtDatetime", "serviceProvider.id", "serviceProvider.name",
+  "workflow.state", "workflow.completedByUid", "workflow.completedByUser", "workflow.completedAt"];
 const HISTORY_FIELDS = ["teamId", "teamName", "userUid", "joinedAt", "leftAt"];
+const USER_SP_FIELDS = ["employment.serviceProvider.id", "employment.serviceProvider.name", "profile.employment.serviceProvider.id", "profile.employment.serviceProvider.name"];
 const workbaseId = value => (typeof value === "string" ? value : value?.id || value?.pcode || value?.lmPcode || "");
 
 export async function getFieldWorkSummary({ db, request }) {
@@ -22,12 +24,14 @@ export async function getFieldWorkSummary({ db, request }) {
   if (!MANAGEMENT_ROLES.has(role)) throw new HttpsError("permission-denied", "Only management users can see the Allocation Matrix.");
   const workbases = [profile?.access?.activeWorkbase, ...(Array.isArray(profile?.access?.workbases) ? profile.access.workbases : [])].map(workbaseId);
   if (!workbases.includes(lmPcode)) throw new HttpsError("permission-denied", "The LM must be one of your workbases.");
-  const [trns, history] = await Promise.all([
+  const [trns, history, users] = await Promise.all([
     db.collection("trns").where("accessData.parents.lmPcode", "==", lmPcode).select(...TRN_FIELDS).get(),
     db.collection(TEAM_MEMBER_HISTORY).select(...HISTORY_FIELDS).get(),
+    db.collection("users").select(...USER_SP_FIELDS).get(),
   ]);
+  const usersSp = Object.fromEntries(users.docs.map(doc => [doc.id, doc.data().employment?.serviceProvider || doc.data().profile?.employment?.serviceProvider || null]).filter(([, sp]) => sp?.id));
   return { success: true, lmPcode, generatedAt: new Date().toISOString(),
-    ...summarizeFieldWork({ trns: trns.docs.map(doc => doc.data()), periods: history.docs.map(doc => doc.data()) }) };
+    ...summarizeFieldWork({ trns: trns.docs.map(doc => doc.data()), periods: history.docs.map(doc => doc.data()), usersSp }) };
 }
 
 export const getFieldWorkSummaryCallable = onCall({ timeoutSeconds: 120, memory: "512MiB" }, async request => getFieldWorkSummary({ db: getFirestore(), request }));

@@ -662,6 +662,27 @@ export function addFieldWorkToMatrix(organisations = [], groups = []) {
   return result.sort(compareOrganisations);
 }
 
+// Rules TB-R045 (1.3.27): the totals row adds up the rows shown; each share is the rows shown as a
+// part of all rows, so with every row shown the shares are 100% and the totals match the cards.
+export function matrixTotals(rows = [], allRows = rows) {
+  const sum = (list, pick) => safeArray(list).reduce((total, row) => total + finiteNumber(pick(row), 0), 0);
+  const batch = (list, key) => sum(list, (row) => row?.matrix?.[key]);
+  const work = (list, key) => sum(list, (row) => row?.fieldWork?.[key]);
+  const [assigned, notStarted, inProgress, completed] = ["assigned", "notStarted", "inProgress", "completed"].map((key) => batch(rows, key));
+  const [notStartedPct, inProgressPct, completedPct] = splitHundredPercent([notStarted, inProgress, completed]);
+  const [transactions, noAccess, totalWork] = ["transactions", "noAccess", "totalWork"].map((key) => work(rows, key));
+  return {
+    rows: safeArray(rows).length,
+    batches: batch(rows, "batches"),
+    assigned, notStarted, inProgress, completed, notStartedPct, inProgressPct, completedPct,
+    batchesSharePct: percentage(assigned, batch(allRows, "assigned")),
+    transactions, noAccess,
+    transactionsSharePct: percentage(transactions, work(allRows, "transactions")),
+    totalWork,
+    totalWorkSharePct: percentage(totalWork, work(allRows, "totalWork")),
+  };
+}
+
 export function buildOrganisationAllocationMatrix(options = {}) {
   return buildOrganisationAllocationMatrixResult(options).organisations;
 }
