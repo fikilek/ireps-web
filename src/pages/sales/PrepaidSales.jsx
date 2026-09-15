@@ -14,7 +14,7 @@ import {
   hasUsableSalesGps,
   matchesSalesGpsFilter,
 } from "./models/salesGpsModel";
-import { evaluateSalesBatchability } from "../../../functions/salesAllMeters/sales-batch-policy.js";
+import { evaluateSalesBatchability, newestSalesCategoryMonth } from "../../../functions/salesAllMeters/sales-batch-policy.js";
 import { buildSalesTargetedBatchDraftPlan } from "../operations/targeted-batches/targetedBatchUtils";
 import {
   buildMonthKeys,
@@ -205,6 +205,8 @@ export default function PrepaidSales() {
         : [],
     [salesRows, salesWorkStatusReady],
   );
+  // Targeted Batch rules TB-R046: the LM's newest category month decides which meters are CAT.
+  const batchCategoryMonth = useMemo(() => newestSalesCategoryMonth(salesWorkStatusRows), [salesWorkStatusRows]);
 
   useEffect(() => {
     // A new account/LM scope discards presentation state tied to the previous scope.
@@ -222,7 +224,7 @@ export default function PrepaidSales() {
     const remaining = new Set(selectedIds);
     for (const id of selectedIds) {
       const row = byId.get(id);
-      const result = row ? evaluateSalesBatchability(row, { source: "PREPAID_SALES", lmPcode: activeLmPcode }) : { batchable: false, reason: "Sales meter is no longer available in this scope" };
+      const result = row ? evaluateSalesBatchability(row, { source: "PREPAID_SALES", lmPcode: activeLmPcode, categoryMonth: batchCategoryMonth }) : { batchable: false, reason: "Sales meter is no longer available in this scope" };
       if (!result.batchable) { remaining.delete(id); removed.push(`${row?.meterNo || id} (${result.reason})`); }
     }
     if (!removed.length) return;
@@ -230,7 +232,7 @@ export default function PrepaidSales() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedIds(remaining);
     setTargetBatchScopeError(`Removed from selection: ${removed.join("; ")}.`);
-  }, [activeLmPcode, isFetching, isLoading, salesWorkStatusReady, salesWorkStatusRows, selectedIds]);
+  }, [activeLmPcode, batchCategoryMonth, isFetching, isLoading, salesWorkStatusReady, salesWorkStatusRows, selectedIds]);
 
   const monthKeys = useMemo(() => buildMonthKeys(salesRows), [salesRows]);
   const latestMonthKey = monthKeys[0] || "2026-02";
@@ -357,6 +359,7 @@ export default function PrepaidSales() {
       selectionReason,
       lmPcode: activeLmPcode,
       lmName: activeWorkbaseName,
+      categoryMonth: batchCategoryMonth,
     });
 
     if (!draftPlan.ok) {

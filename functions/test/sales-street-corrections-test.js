@@ -7,7 +7,8 @@ import { acceptGoogleGeocode } from "../targetedBatches/sales-batch-geocoding.js
 // Targeted Batch rules TB-R041 (1.3.12): owner-approved street-name corrections, geocoding only.
 const stamp = { seconds: 1789257600, nanoseconds: 0 };
 const sales = (strName, town = "DUNDEE", strType = "-") => ({ master: { id: "04290000001", visibility: "INVISIBLE" }, meterNo: "04290000001", meterNoNormalized: "04290000001",
-  lmPcode: "ZA5241", town, adr: { strNo: "12", strName, strType }, tbRefs: [], metadata: { createdAt: stamp, createdByUid: "P", createdByUser: "P", updatedAt: stamp, updatedByUid: "P", updatedByUser: "P" } });
+  lmPcode: "ZA5241", town, adr: { strNo: "12", strName, strType }, tbRefs: [], metadata: { createdAt: stamp, createdByUid: "P", createdByUser: "P", updatedAt: stamp, updatedByUid: "P", updatedByUser: "P" },
+  monthlyCategories: { "2026-08": { leakageCategory: "CAT4 - Long Gap (4+ months)", riskTier: "High", riskScore: 9 } } });
 const google = (route, town = "Dundee", number = "12") => ({ status: "OK", results: [{ geometry: { location_type: "ROOFTOP", location: { lat: -28.16, lng: 30.24 } },
   address_components: [{ types: ["street_number"], long_name: number }, { types: ["route"], long_name: route, short_name: route }, { types: ["locality"], long_name: town }, { types: ["country"], short_name: "ZA" }] }] });
 

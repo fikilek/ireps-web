@@ -31,6 +31,12 @@ const VIEW_MODES = Object.freeze({
   EXCEPTIONS: "EXCEPTIONS",
 });
 
+// Targeted Batch rules TB-R046 (1.3.28): the CAT / Normal / No cat split under a card's number.
+// "No cat" appears only when there are any.
+function categorySplitLine(split = {}) {
+  return [`CAT ${formatNumber(split.cat || 0)}`, `Normal ${formatNumber(split.normal || 0)}`, ...(split.none ? [`No cat ${formatNumber(split.none)}`] : [])].join(" · ");
+}
+
 function SummaryCard({
   label,
   value,
@@ -84,6 +90,8 @@ export default function NonGpsBatchPlanningPage() {
     ids: typeof next === "function" ? next(previous.scope === scopeKey ? previous.ids : new Set()) : next,
   }));
   const [selectionError, setSelectionError] = useState("");
+  // Rules TB-R046: the streets list only CAT meters unless Normal is asked for.
+  const [showNormal, setShowNormal] = useState(false);
 
   const {
     data: salesRows = [],
@@ -94,8 +102,8 @@ export default function NonGpsBatchPlanningPage() {
   } = useGetSalesByLmPcodeQuery(activeLmPcode ? { lmPcode: activeLmPcode } : skipToken);
 
   const planningModel = useMemo(
-    () => buildNonGpsBatchPlanningModel(salesRows),
-    [salesRows],
+    () => buildNonGpsBatchPlanningModel(salesRows, { showNormal }),
+    [salesRows, showNormal],
   );
 
   const selectedTown = useMemo(
@@ -403,19 +411,19 @@ export default function NonGpsBatchPlanningPage() {
             <SummaryCard
               label="No GPS"
               value={planningModel.counts.noGps}
-              subtitle="Sales meters without usable GPS"
+              subtitle={categorySplitLine(planningModel.counts.byCategory.noGps)}
             />
             <SummaryCard
               label="Street Eligible"
               value={planningModel.counts.streetEligible}
-              subtitle="Available for Town / street planning"
+              subtitle={categorySplitLine(planningModel.counts.byCategory.streetEligible)}
               active={viewMode === VIEW_MODES.PLANNING}
               onClick={openPlanningView}
             />
             <SummaryCard
               label="Exceptions"
               value={planningModel.counts.exceptions}
-              subtitle="Visible but not selectable"
+              subtitle={categorySplitLine(planningModel.counts.byCategory.exceptions)}
               active={viewMode === VIEW_MODES.EXCEPTIONS}
               onClick={openExceptionsView}
             />
@@ -433,6 +441,18 @@ export default function NonGpsBatchPlanningPage() {
               Street Eligible + Exceptions does not reconcile to the complete
               No-GPS population. Treat this as a planning-data integrity issue.
             </section>
+          ) : null}
+
+          {viewMode === VIEW_MODES.PLANNING ? (
+            <label style={styles.showNormal}>
+              <input type="checkbox" checked={showNormal} onChange={(event) => setShowNormal(event.target.checked)} />
+              Show Normal
+              <span style={styles.showNormalHint}>
+                {showNormal
+                  ? "Normal and No cat meters are listed but can never be ticked: only CAT meters are field work."
+                  : `Only CAT meters are listed${planningModel.hiddenFromStreets ? `; ${formatNumber(planningModel.hiddenFromStreets)} Normal / No cat meters are hidden` : ""}.`}
+              </span>
+            </label>
           ) : null}
 
           {selectionError && viewMode === VIEW_MODES.PLANNING ? (
@@ -582,6 +602,8 @@ const styles = {
   summaryLabel: { color: "#64748b", fontSize: "0.75rem", fontWeight: 900 },
   summaryValue: { color: "#0f172a", fontSize: "1.55rem" },
   summarySubtitle: { color: "#64748b", fontSize: "0.78rem" },
+  showNormal: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", color: "#0f172a", fontSize: "0.85rem", fontWeight: 800 },
+  showNormalHint: { color: "#64748b", fontSize: "0.78rem", fontWeight: 600 },
   selectionBar: {
     position: "fixed",
     right: "1.25rem",

@@ -105,12 +105,20 @@ test("all province prefixes compose locally; unknown/malformed codes are configu
     assert.equal(result.code, "GEOCODING_CONFIGURATION_ERROR"); assert.equal(result.incomplete, true);
   }
 });
+function categoryMonthQuery(row) {
+  const filters = [];
+  const query = { where: (field, op, value) => { filters.push([String(field), op, value]); return query; }, limit: () => query,
+    get: async () => { const month = filters.map(([field]) => field.match(/\d{4}-\d{2}/)?.[0]).find(Boolean);
+      return { empty: !(filters.some(([field, , value]) => field === "lmPcode" && value === row.lmPcode) && row.monthlyCategories?.[month]) }; } };
+  return query;
+}
 function fakeDatabase(row) {
   const profile = { ...structuredClone(fixture.profile), access: { activeWorkbase: { id: row.lmPcode }, workbases: [{ id: row.lmPcode }] } };
   const writes = [];
   const snapshot = path => ({ exists: true, data: () => structuredClone(path.startsWith("users/") ? profile : row) });
   return { writes, db: { projectId: "demo-offline-geocoding", doc: path => ({ path, get: async () => snapshot(path) }),
-    collection: () => assert.fail("No ERF query expected"),
+    // Rules TB-R046: the only query allowed is the LM's category-month check.
+    collection: name => name === "sales-all-meters" ? categoryMonthQuery(row) : assert.fail("No ERF query expected"),
     runTransaction: fn => fn({ get: async ref => snapshot(ref.path), update: (ref, patch) => writes.push({ path: ref.path, patch }) }) } };
 }
 test("unknown province stays a configuration error in resolver, assessment and flag writer, with zero writes", async () => {

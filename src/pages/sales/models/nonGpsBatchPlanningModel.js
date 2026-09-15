@@ -1,4 +1,4 @@
-import { SALES_BATCH_MAX, evaluateSalesBatchability } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { SALES_BATCH_MAX, SALES_CATEGORY_CODES, evaluateSalesBatchability, newestSalesCategoryMonth, salesCategoryKind } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import {
   hasUsableSalesGps,
   isSalesWithoutUsableGps,
@@ -70,29 +70,37 @@ export function hasCompletedMeterDiscovery(row = {}) {
   return classifySalesTableWorkStatus(row) === SALES_STATUSES.COMPLETED;
 }
 
-export function evaluateNgpBatchability(row = {}) {
-  return evaluateSalesBatchability(row, { source: "PREPAID_SALES_NON_GPS" });
+// Rules TB-R046 (1.3.28): categoryMonth is the LM's newest category month (the newest month among
+// all of the LM's meters); only CAT meters are batchable.
+export function evaluateNgpBatchability(row = {}, categoryMonth) {
+  return evaluateSalesBatchability(row, { source: "PREPAID_SALES_NON_GPS", categoryMonth });
 }
 
-export function classifyNonGpsSalesRow(row = {}) {
+// A meter whose only obstacle is its category (Normal or no category) keeps its planning place: it is
+// never an exception, it is just never tickable.
+const blockedOnlyByCategory = result => SALES_CATEGORY_CODES.includes(result?.code);
+
+export function classifyNonGpsSalesRow(row = {}, categoryMonth) {
   if (hasUsableSalesGps(row)) return { classification: null, exceptionReasons: [], selectable: false };
   const status = classifySalesTableWorkStatus(row);
   if (status === SALES_STATUSES.COMPLETED) return { classification: NGP_CLASSIFICATIONS.DISCOVERED, exceptionReasons: [], selectable: false };
   if (status === SALES_STATUSES.IN_PROGRESS) return { classification: NGP_CLASSIFICATIONS.ALREADY_BATCHED, exceptionReasons: [], selectable: false };
   const membership = resolveSalesTargetedBatchMembership(row);
-  const result = evaluateNgpBatchability(row);
+  const result = evaluateNgpBatchability(row, categoryMonth);
   // Keep valid historical ambiguity visible in its street, with the separate
   // membership value still UNRESOLVED and Batchability still false.
-  const visibleLegacyAmbiguity = membership.state === "UNRESOLVED" && membership.source === "LEGACY_TBREFS" && evaluateNgpBatchability({ ...row, targetedBatchId: null }).batchable;
+  const withoutMembership = evaluateNgpBatchability({ ...row, targetedBatchId: null }, categoryMonth);
+  const visibleLegacyAmbiguity = membership.state === "UNRESOLVED" && membership.source === "LEGACY_TBREFS" && (withoutMembership.batchable || blockedOnlyByCategory(withoutMembership));
   if (membership.state === "MEMBER" || visibleLegacyAmbiguity) return { classification: NGP_CLASSIFICATIONS.ALREADY_BATCHED, exceptionReasons: [], selectable: false };
-  return { classification: result.batchable || result.code === "NEEDS_MANUAL_ERFING" ? NGP_CLASSIFICATIONS.OUTSTANDING : NGP_CLASSIFICATIONS.EXCEPTION, exceptionReasons: result.batchable ? [] : [result.reason], selectable: result.batchable };
+  const outstanding = result.batchable || result.code === "NEEDS_MANUAL_ERFING" || blockedOnlyByCategory(result);
+  return { classification: outstanding ? NGP_CLASSIFICATIONS.OUTSTANDING : NGP_CLASSIFICATIONS.EXCEPTION, exceptionReasons: result.batchable ? [] : [result.reason], selectable: result.batchable };
 }
 
-function buildTarget(row) {
-  const classification = classifyNonGpsSalesRow(row);
+function buildTarget(row, categoryMonth) {
+  const classification = classifyNonGpsSalesRow(row, categoryMonth);
   const salesWorkStatus = classifySalesTableWorkStatus(row);
   const membership = resolveSalesTargetedBatchMembership(row);
-  const batchability = evaluateNgpBatchability(row, membership);
+  const batchability = evaluateNgpBatchability(row, categoryMonth);
   const townKey = normalizePlanningKey(row?.town);
   const streetNameKey = normalizePlanningKey(row?.adr?.strName);
 
@@ -115,6 +123,8 @@ function buildTarget(row) {
     batchable: batchability.batchable,
     batchabilityCode: batchability.code,
     batchabilityReason: batchability.reason,
+    // Rules TB-R046: CAT, NORMAL or NONE (no category in the LM's newest month).
+    category: salesCategoryKind(row, categoryMonth).kind,
     // Transitional alias for older NGP consumers. Checkbox logic must use
     // batchable rather than the legacy OUTSTANDING classification.
     selectable: batchability.batchable,
@@ -157,50 +167,18 @@ function createCounters() {
   };
 }
 
-export function buildNonGpsBatchPlanningModel(rows = []) {
-  const sourceRows = Array.isArray(rows) ? rows : [];
-  const gpsSummary = sourceRows.reduce(
-    (summary, row) => {
-      summary.total += 1;
+// Rules TB-R046 (1.3.28): CAT / Normal / No cat split of a list of targets.
+function categorySplit(targets = []) {
+  return targets.reduce((split, target) => {
+    if (target.category === "CAT") split.cat += 1;
+    else if (target.category === "NORMAL") split.normal += 1;
+    else split.none += 1;
+    return split;
+  }, { cat: 0, normal: 0, none: 0 });
+}
 
-      if (hasUsableSalesGps(row)) summary.usableGps += 1;
-      else summary.noGps += 1;
-
-      return summary;
-    },
-    { total: 0, usableGps: 0, noGps: 0 },
-  );
-
-  const targets = sourceRows.filter(isSalesWithoutUsableGps).map(buildTarget);
-  const classifiedExceptions = targets.filter(
-    (target) => target.classification === NGP_CLASSIFICATIONS.EXCEPTION,
-  );
-  const streetEligibleTargets = targets.filter(
-    (target) =>
-      target.classification !== NGP_CLASSIFICATIONS.EXCEPTION &&
-      target.townKey &&
-      target.streetNameKey &&
-      target.streetKey,
-  );
-  const unplacedTargets = targets
-    .filter(
-      (target) =>
-        target.classification !== NGP_CLASSIFICATIONS.EXCEPTION &&
-        (!target.townKey || !target.streetNameKey || !target.streetKey),
-    )
-    .map((target) => ({
-      ...target,
-      visibilityReasons: [
-        "Planning location is incomplete; shown here to preserve complete No-GPS visibility",
-      ],
-    }));
-  const exceptions = [
-    ...classifiedExceptions.map((target) => ({
-      ...target,
-      visibilityReasons: target.exceptionReasons,
-    })),
-    ...unplacedTargets,
-  ];
+// Towns and their streets, with counters, for the targets given.
+function groupTownsAndStreets(streetEligibleTargets = []) {
   const townsByKey = new Map();
 
   streetEligibleTargets.forEach((target) => {
@@ -246,7 +224,7 @@ export function buildNonGpsBatchPlanningModel(rows = []) {
     );
   });
 
-  const towns = Array.from(townsByKey.values())
+  return Array.from(townsByKey.values())
     .map((town) => {
       const streets = Array.from(town.streetsByKey.values())
         .map((street) => ({
@@ -268,8 +246,59 @@ export function buildNonGpsBatchPlanningModel(rows = []) {
       };
     })
     .sort((left, right) => compareNaturalValues(left.town, right.town));
+}
 
-  const streetPlanningTargets = towns.flatMap((town) =>
+// showNormal (rules TB-R046): the streets list only CAT meters unless Normal and uncategorised meters
+// are asked for. The counts and the reconciliation always cover every No-GPS meter.
+export function buildNonGpsBatchPlanningModel(rows = [], { showNormal = false } = {}) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const categoryMonth = newestSalesCategoryMonth(sourceRows);
+  const gpsSummary = sourceRows.reduce(
+    (summary, row) => {
+      summary.total += 1;
+
+      if (hasUsableSalesGps(row)) summary.usableGps += 1;
+      else summary.noGps += 1;
+
+      return summary;
+    },
+    { total: 0, usableGps: 0, noGps: 0 },
+  );
+
+  const targets = sourceRows.filter(isSalesWithoutUsableGps).map((row) => buildTarget(row, categoryMonth));
+  const classifiedExceptions = targets.filter(
+    (target) => target.classification === NGP_CLASSIFICATIONS.EXCEPTION,
+  );
+  const streetEligibleTargets = targets.filter(
+    (target) =>
+      target.classification !== NGP_CLASSIFICATIONS.EXCEPTION &&
+      target.townKey &&
+      target.streetNameKey &&
+      target.streetKey,
+  );
+  const unplacedTargets = targets
+    .filter(
+      (target) =>
+        target.classification !== NGP_CLASSIFICATIONS.EXCEPTION &&
+        (!target.townKey || !target.streetNameKey || !target.streetKey),
+    )
+    .map((target) => ({
+      ...target,
+      visibilityReasons: [
+        "Planning location is incomplete; shown here to preserve complete No-GPS visibility",
+      ],
+    }));
+  const exceptions = [
+    ...classifiedExceptions.map((target) => ({
+      ...target,
+      visibilityReasons: target.exceptionReasons,
+    })),
+    ...unplacedTargets,
+  ];
+  const allTowns = groupTownsAndStreets(streetEligibleTargets);
+  const towns = showNormal ? allTowns : groupTownsAndStreets(streetEligibleTargets.filter((target) => target.category === "CAT"));
+
+  const streetPlanningTargets = allTowns.flatMap((town) =>
     town.streets.flatMap((street) => street.targets),
   );
   const reconciles = reconcileNgpVisibility(
@@ -291,7 +320,16 @@ export function buildNonGpsBatchPlanningModel(rows = []) {
       noGps: targets.length,
       streetEligible: streetEligibleTargets.length,
       exceptions: classifiedExceptions.length,
+      // Rules TB-R046: the CAT / Normal / No cat split shown under each card.
+      byCategory: {
+        noGps: categorySplit(targets),
+        streetEligible: categorySplit(streetEligibleTargets),
+        exceptions: categorySplit(classifiedExceptions),
+      },
     },
+    categoryMonth,
+    showNormal,
+    hiddenFromStreets: showNormal ? 0 : streetEligibleTargets.filter((target) => target.category !== "CAT").length,
     visibilityCounts: {
       streetPlanning: streetPlanningTargets.length,
       exceptions: classifiedExceptions.length,

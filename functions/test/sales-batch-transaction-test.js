@@ -12,6 +12,7 @@ import { onAcceptRejectTargetedBatchCallable } from "../targetedBatches/acceptan
 import { recordTargetedBatchNoAccess } from "../targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import { onGeoFenceCreated } from "../geofences/triggers.js";
 import { deleteSalesBatch } from "../targetedBatches/deleteCallable.js";
+import { forgetSalesCategoryMonths } from "../salesAllMeters/sales-category-month.js";
 
 const host=process.env.FIRESTORE_EMULATOR_HOST;
 if(!/^(127\.0\.0\.1|localhost):[0-9]+$/.test(host||""))throw new Error("Firestore emulator unavailable: explicitly set a localhost FIRESTORE_EMULATOR_HOST; real projects are prohibited");
@@ -22,10 +23,15 @@ const f=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json
 // Production geometry is JSON text: Firestore cannot store nested arrays.
 f.erf.geometry=JSON.stringify(f.erf.geometry);
 f.ward.geometry=JSON.stringify(f.ward.geometry);
+// Rules TB-R046: only CAT meters are batched, by the LM's newest category month. The fixture meter is a
+// CAT meter of last month, so the server's month-by-month search always finds it.
+const CATEGORY_MONTH=(()=>{const [y,m]=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Johannesburg",year:"numeric",month:"2-digit"}).format(new Date()).split("-").map(Number);return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,"0")}`;})();
+f.sales.monthlyCategories={[CATEGORY_MONTH]:{leakageCategory:"CAT4 - Long Gap (4+ months)",riskTier:"High",riskScore:9}};
 const codec=createProofCodec("test-only-proof-key-not-a-real-secret");
 const request=data=>({auth:{uid:f.actor.uid,token:{}},data});
 const geocode=async()=>({ok:true,point:{latitude:-28.5,longitude:30.5},provider:"Google Geocoding API"});
 beforeEach(async()=>{
+  forgetSalesCategoryMonths();
   const response=await fetch(`http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`,{method:"DELETE"});assert.equal(response.ok,true);
   await Promise.all([db.doc(`users/${f.actor.uid}`).set(f.profile),db.doc("ireps_erfs/ERF1").set(f.erf),db.doc("wards/ZA5241001").set(f.ward)]);
 });
@@ -69,6 +75,18 @@ test("competing creators reread the same Sales: exactly one complete batch wins"
  const results=await Promise.allSettled([createSalesBatch({db,request:request(first),codec}),createSalesBatch({db,request:request(second),codec})]);
  assert.equal(results.filter(result=>result.status==="fulfilled").length,1);
  assert.equal((await db.collection("tb_uploads").get()).size,1);assert.equal((await db.collection("tb_rows").get()).size,1);
+});
+test("a Normal meter is refused by the server when located, and a meter turning Normal before creation creates nothing",async()=>{
+ const [normal]=await seed(1);
+ await db.doc(`sales-all-meters/${normal}`).update({[`monthlyCategories.${CATEGORY_MONTH}.leakageCategory`]:"Normal - No Leakage Flag"});
+ const resolved=await resolveSalesBatch({db,request:request({tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES_NON_GPS",salesIds:[normal],reason:"Fixture selection",salesPeriodFrom:"2026-07",salesPeriodTo:"2026-08"}),codec,geocode:()=>assert.fail("A Normal meter is never located")});
+ assert.deepEqual([resolved.rows[0].ready,resolved.rows[0].code],[false,"SALES_CATEGORY_NORMAL"]);
+ await db.doc(`sales-all-meters/${normal}`).update({[`monthlyCategories.${CATEGORY_MONTH}.leakageCategory`]:"CAT4 - Long Gap (4+ months)"});
+ const intent=await prepare([normal]);
+ await db.doc(`sales-all-meters/${normal}`).update({[`monthlyCategories.${CATEGORY_MONTH}.leakageCategory`]:"Normal - No Leakage Flag"});
+ await assert.rejects(createSalesBatch({db,request:request(intent),codec}));
+ assert.equal((await db.collection("tb_uploads").get()).size,0);assert.equal((await db.collection("tb_rows").get()).size,0);
+ assert.equal((await db.doc(`sales-all-meters/${normal}`).get()).data().targetedBatchId,undefined);
 });
 test("30 confirmed with one newly occupied meter creates zero",async()=>{
  const ids=await seed(30),intent=await prepare(ids);

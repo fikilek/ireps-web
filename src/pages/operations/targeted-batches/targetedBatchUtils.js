@@ -774,9 +774,9 @@ export function normalizeSalesTargetRows(rows = [], selectionReason = "NAv") {
   });
 }
 
-export function buildSalesTargetedBatchDraftPlan({ rows = [], selectionReason = "Selected GPS Sales meters", lmPcode = "", lmName = "" } = {}) {
+export function buildSalesTargetedBatchDraftPlan({ rows = [], selectionReason = "Selected GPS Sales meters", lmPcode = "", lmName = "", categoryMonth } = {}) {
   const failures = rows.flatMap((row, index) => {
-    const result = evaluateSalesBatchability(row, { salesId: getSalesAllMeterId(row), lmPcode, source: "PREPAID_SALES" });
+    const result = evaluateSalesBatchability(row, { salesId: getSalesAllMeterId(row), lmPcode, source: "PREPAID_SALES", categoryMonth });
     return result.batchable ? [] : [{ row: index + 1, message: `${row.meterNo}: ${result.reason}`, code: result.code }];
   });
   const ids = rows.map(getSalesAllMeterId);

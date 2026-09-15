@@ -39,6 +39,7 @@ function makeRow({
   lmPcode = "ZA5241",
   masterVisibility = "INVISIBLE",
   targetedBatchId,
+  leakageCategory = "CAT4 - Long Gap (4+ months)",
 } = {}) {
   return {
     id: (id || "07100000000").replaceAll("_", ""),
@@ -54,6 +55,8 @@ function makeRow({
     adr: { strNo, strName, strType },
     tbRefs,
     tbRefsIntegrity,
+    // Rules TB-R046: only CAT meters are batchable; test meters are CAT unless a test says otherwise.
+    monthlyCategories: leakageCategory ? { "2026-08": { leakageCategory, riskTier: "High", riskScore: 9 } } : {},
   };
 }
 
@@ -891,6 +894,11 @@ test("current regression shape reconciles 10,216 → 7,583 + 2,633 and 2,633 →
     noGps: 2_633,
     streetEligible: 2_567,
     exceptions: 66,
+    byCategory: {
+      noGps: { cat: 2_633, normal: 0, none: 0 },
+      streetEligible: { cat: 2_567, normal: 0, none: 0 },
+      exceptions: { cat: 66, normal: 0, none: 0 },
+    },
   });
   assert.equal(model.reconciles, true);
 });
@@ -1112,4 +1120,70 @@ test("visibility columns, KPI context, dropdown and modal wiring stay narrow", (
   assert.match(modal, /Not recorded/);
   assert.doesNotMatch(modal, /firebase\/firestore|onSnapshot|getDocs|tbRefs|allocation|acceptance/);
   assert.doesNotMatch(detail, /target\.row\??\.tbRefs/);
+});
+
+// Rules TB-R046 (1.3.28): only CAT meters are batched; Normal meters keep their planning place.
+function categoryStreetRows() {
+  return [
+    makeRow({ id: "C1", strNo: "1", strName: "Mixed" }),
+    makeRow({ id: "N2", strNo: "2", strName: "Mixed", leakageCategory: "Normal - No Leakage Flag" }),
+    makeRow({ id: "C3", strNo: "3", strName: "Mixed", leakageCategory: "CAT8 - Energy Without Purchase" }),
+    makeRow({ id: "X4", strNo: "4", strName: "Mixed", leakageCategory: null }),
+    makeRow({ id: "N5", strNo: "5", strName: "Normal Only", leakageCategory: "Normal - No Leakage Flag" }),
+    makeRow({ id: "E6", strNo: "", strName: "", strType: "-", leakageCategory: "Normal - No Leakage Flag" }),
+  ];
+}
+
+test("Normal and uncategorised meters stay Street Eligible and outstanding, but are never tickable", () => {
+  const model = buildNonGpsBatchPlanningModel(categoryStreetRows());
+  const byId = Object.fromEntries(model.noGpsTargets.map((target) => [target.id, target]));
+  assert.equal(model.categoryMonth, "2026-08");
+  assert.deepEqual(["C1", "C3"].map((id) => [byId[id].category, byId[id].batchable]), [["CAT", true], ["CAT", true]]);
+  assert.deepEqual([byId.N2.category, byId.N2.batchable, byId.N2.classification, byId.N2.batchabilityCode], ["NORMAL", false, NGP_CLASSIFICATIONS.OUTSTANDING, "SALES_CATEGORY_NORMAL"]);
+  assert.deepEqual([byId.X4.category, byId.X4.batchable, byId.X4.classification, byId.X4.batchabilityCode], ["NONE", false, NGP_CLASSIFICATIONS.OUTSTANDING, "SALES_CATEGORY_NONE"]);
+  assert.equal(byId.E6.classification, NGP_CLASSIFICATIONS.EXCEPTION, "a data exception stays an exception, whatever its category");
+  assert.deepEqual([model.counts.noGps, model.counts.streetEligible, model.counts.exceptions], [6, 5, 1], "the counts do not change");
+  assert.deepEqual(model.counts.byCategory, { noGps: { cat: 2, normal: 3, none: 1 }, streetEligible: { cat: 2, normal: 2, none: 1 }, exceptions: { cat: 0, normal: 1, none: 0 } });
+  assert.equal(model.reconciles, true, "every No-GPS meter is still accounted for");
+});
+
+test("the streets list CAT meters only unless Show Normal is on", () => {
+  const streetsOf = (model) => model.towns.flatMap((town) => town.streets.map((street) => [street.streetLabel, street.targets.map((target) => target.id)]));
+  const hidden = buildNonGpsBatchPlanningModel(categoryStreetRows());
+  assert.deepEqual(streetsOf(hidden), [["Mixed Street", ["C1", "C3"]]], "a Normal-only street is not listed");
+  assert.equal(hidden.hiddenFromStreets, 3);
+  const shown = buildNonGpsBatchPlanningModel(categoryStreetRows(), { showNormal: true });
+  assert.deepEqual(streetsOf(shown), [["Mixed Street", ["C1", "N2", "C3", "X4"]], ["Normal Only Street", ["N5"]]]);
+  assert.equal(shown.hiddenFromStreets, 0);
+  assert.deepEqual(hidden.counts, shown.counts, "Show Normal never changes the cards");
+  const street = shown.towns[0].streets[0];
+  const quick = quickSelectNgpStreetTargets({ selectedIds: new Set(), streetTargets: street.targets, orderedTargets: street.targets, count: 4 });
+  assert.deepEqual([...quick.selectedIds], ["C1", "C3"], "Quick select skips Normal and No cat meters");
+});
+
+test("the LM's newest category month decides: a meter missing from it has no category for batching", () => {
+  const rows = [makeRow({ id: "C1", strName: "Acacia" }), { ...makeRow({ id: "J2", strNo: "2", strName: "Acacia" }), monthlyCategories: { "2026-06": { leakageCategory: "CAT4 - Long Gap (4+ months)", riskTier: "High", riskScore: 9 } } }];
+  const model = buildNonGpsBatchPlanningModel(rows, { showNormal: true });
+  const j2 = model.noGpsTargets.find((target) => target.id === "J2");
+  assert.deepEqual([j2.category, j2.batchable, j2.batchabilityReason], ["NONE", false, "No category for 2026-08 — only CAT meters are batched"]);
+});
+
+test("the Non-GPS page shows the split under the three cards, the Show Normal switch and the Normal / No cat tag", () => {
+  const page = readSource("../NonGpsBatchPlanningPage.jsx");
+  for (const card of ["noGps", "streetEligible", "exceptions"]) assert.ok(page.includes(`subtitle={categorySplitLine(planningModel.counts.byCategory.${card})}`), card);
+  assert.match(page, /`CAT \$\{formatNumber\(split\.cat \|\| 0\)\}`, `Normal \$\{formatNumber\(split\.normal \|\| 0\)\}`, \.\.\.\(split\.none \? \[`No cat \$\{formatNumber\(split\.none\)\}`\] : \[\]\)\]\.join\(" · "\)/);
+  assert.match(page, /buildNonGpsBatchPlanningModel\(salesRows, \{ showNormal \}\)/);
+  assert.match(page, /Show Normal/);
+  assert.doesNotMatch(page, /Available for Town \/ street planning|Sales meters without usable GPS|Visible but not selectable/, "the split replaces the old subtitles");
+  const detail = readSource("../components/NonGpsStreetDetail.jsx");
+  assert.match(detail, /target\.category === "NORMAL" \? "Normal" : "No cat"/);
+});
+
+test("the GPS Sales Table opens with CATs only and Reset returns to CATs only", () => {
+  const table = readSource("../components/SalesMetersTable.jsx");
+  assert.match(table, /const DEFAULT_FILTERS = \{ \.\.\.EMPTY_FILTERS, leakageCategories: \[ALL_CATS_EXCLUDING_NORMAL_FILTER\] \};/);
+  assert.match(table, /useState\(DEFAULT_FILTERS\)/);
+  assert.match(table, /setFilters\(DEFAULT_FILTERS\);/);
+  assert.doesNotMatch(table, /setFilters\(EMPTY_FILTERS\)/);
+  assert.match(table, /evaluateSalesBatchability\(row, \{ source: "PREPAID_SALES", categoryMonth \}\)/);
 });

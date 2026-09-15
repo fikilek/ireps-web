@@ -6,7 +6,7 @@ import { createProofCodec, findContainingErf, recordFailedLookup } from "../targ
 import { composeSalesGeocodingAddress } from "../salesAllMeters/sales-batch-policy.js";
 
 const stamp={seconds:1789257600,nanoseconds:0};
-const sales=()=>({master:{id:"00123",visibility:"INVISIBLE"},meterNo:"00123",meterNoNormalized:"00123",lmPcode:"ZA5241",town:"Dundee",adr:{strNo:"01A",strName:"Smith",strType:"Street"},tbRefs:[],metadata:{createdAt:stamp,createdByUid:"ORIGINAL",createdByUser:"Original",updatedAt:stamp,updatedByUid:"ORIGINAL",updatedByUser:"Original"},monthlyCategories:{"2026-08":{leakageCategory:"A"}}});
+const sales=()=>({master:{id:"00123",visibility:"INVISIBLE"},meterNo:"00123",meterNoNormalized:"00123",lmPcode:"ZA5241",town:"Dundee",adr:{strNo:"01A",strName:"Smith",strType:"Street"},tbRefs:[],metadata:{createdAt:stamp,createdByUid:"ORIGINAL",createdByUser:"Original",updatedAt:stamp,updatedByUid:"ORIGINAL",updatedByUser:"Original"},monthlyCategories:{"2026-08":{leakageCategory:"CAT4 - Long Gap (4+ months)"}}});
 const response=()=>({status:"OK",results:[{geometry:{location_type:"ROOFTOP",location:{lat:-28.1,lng:30.2}},address_components:[{types:["street_number"],long_name:"01A"},{types:["route"],long_name:"Smith Street",short_name:"Smith St"},{types:["locality"],long_name:"Dundee"},{types:["country"],short_name:"ZA"}]}]});
 test("only exact unambiguous rooftop address results are accepted",()=>{
   assert.equal(acceptGoogleGeocode(response(),sales()).ok,true);

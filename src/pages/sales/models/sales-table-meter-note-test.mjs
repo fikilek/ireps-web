@@ -22,6 +22,6 @@ test("batchable meters get no note; other blocking reasons stay visible", () => 
   assert.equal(salesTableMeterNote({ isNonGpsSales: false, batchability: { batchable: false, code: "SALES_IDENTITY_INVALID", reason: "Sales meter identity is missing or conflicting" } }), "Sales meter identity is missing or conflicting");
 });
 
-test("only the batch and work-status reasons are left out", () => {
-  assert.deepEqual([...REASONS_SHOWN_IN_COLUMNS].sort(), ["CURRENT_TARGETED_BATCH", "SALES_STATUS_COMPLETED", "SALES_STATUS_IN_PROGRESS"]);
+test("only the batch, work-status and category reasons are left out", () => {
+  assert.deepEqual([...REASONS_SHOWN_IN_COLUMNS].sort(), ["CURRENT_TARGETED_BATCH", "SALES_CATEGORY_NONE", "SALES_CATEGORY_NORMAL", "SALES_STATUS_COMPLETED", "SALES_STATUS_IN_PROGRESS"]);
 });

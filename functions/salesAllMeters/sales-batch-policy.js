@@ -218,7 +218,22 @@ export function inspectSavedErfDecision(row = {}) {
   const valid = validDocumentId(row.erfId) && exactKeys(r, ["version", "revision", "method", "evidenceRefs", "geocode", "confirmedByUid", "confirmedByUser", "confirmedAt", "tbId"]) && r.version === 1 && Number.isInteger(r.revision) && r.revision > 0 && r.method === "GEOCODED" && Array.isArray(r.evidenceRefs) && r.evidenceRefs.length === 1 && r.evidenceRefs[0] === `ireps_erfs/${row.erfId}` && nonblank(r.confirmedByUid) && nonblank(r.confirmedByUser) && isTimestamp(r.confirmedAt) && SALES_BATCH_ID.test(r.tbId) && exactKeys(g, ["latitude", "longitude", "matchLevel", "geocodedAddress", "provider", "geocodedAt"]) && typeof g.latitude === "number" && coordinateNumber(g.latitude, 90) !== null && typeof g.longitude === "number" && coordinateNumber(g.longitude, 180) !== null && g.matchLevel === "EXACT_STREET_NUMBER" && nonblank(g.geocodedAddress) && nonblank(g.provider) && isTimestamp(g.geocodedAt);
   return { valid: Boolean(valid), established: Boolean(valid), ...(valid ? { erfId: row.erfId, point: { latitude: g.latitude, longitude: g.longitude }, resolution: r } : {}) };
 }
-export function evaluateSalesBatchability(row = {}, { salesId = row.id, lmPcode = row.lmPcode, source } = {}) {
+// Targeted Batch rules TB-R046 (1.3.28): only CAT meters are batched. The category is the one Mpilo
+// supplies for a month (monthlyCategories.<YYYY-MM>.leakageCategory); iREPS never calculates it.
+const CATEGORY_MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const SALES_CATEGORY_LABELS = Object.freeze(["CAT1 - Zero Purchaser", "CAT2 - Ghost Purchaser (1-3 mo)", "CAT3 - Micro Purchaser (<R400)", "CAT4 - Long Gap (4+ months)",
+  "CAT5 - Stopped Purchasing", "CAT6 - Low kWh per Rand", "CAT8 - Energy Without Purchase", "Normal - No Leakage Flag"]);
+export const SALES_CATEGORY_CODES = Object.freeze(["SALES_CATEGORY_NORMAL", "SALES_CATEGORY_NONE"]);
+const categoryMonthsOf = row => (isRecord(row?.monthlyCategories) ? Object.keys(row.monthlyCategories).filter(month => CATEGORY_MONTH.test(month) && nonblank(row.monthlyCategories[month]?.leakageCategory)) : []);
+// The newest month in which any of these meters has a category; for all of an LM's meters, the LM's category month.
+export function newestSalesCategoryMonth(rows = []) {
+  return (Array.isArray(rows) ? rows : [rows]).flatMap(categoryMonthsOf).sort().at(-1) || null;
+}
+export function salesCategoryKind(row = {}, month = null) {
+  const label = CATEGORY_MONTH.test(month || "") ? String(row?.monthlyCategories?.[month]?.leakageCategory ?? "").trim() : "";
+  return { kind: /^CAT[1-8]\b/i.test(label) ? "CAT" : /^normal\b/i.test(label) ? "NORMAL" : "NONE", label: label || null, month: month || null };
+}
+export function evaluateSalesBatchability(row = {}, { salesId = row.id, lmPcode = row.lmPcode, source, categoryMonth } = {}) {
   const fail = (code, reason) => ({ batchable: false, code, reason });
   if (!row || !SALES_ID.test(salesId || "") || row.master?.id !== salesId || row.meterNoNormalized !== salesId || !nonblank(row.meterNo) || row.meterNo.replace(/\s/g, "").toUpperCase() !== salesId) return fail("SALES_IDENTITY_INVALID", "Sales meter identity is missing or conflicting");
   if (!/^ZA[0-9]+$/.test(row.lmPcode || "") || row.lmPcode !== lmPcode) return fail("SALES_LM_INVALID", "Sales municipality authority is missing or conflicting");
@@ -240,6 +255,11 @@ export function evaluateSalesBatchability(row = {}, { salesId = row.id, lmPcode 
     if (lookup.flagged) return fail("NEEDS_MANUAL_ERFING", `Needs manual ERFing — ${lookup.outcome}`);
     if (![row.town, row.adr?.strNo, row.adr?.strName].every(meaningful)) return fail("PLANNING_ADDRESS_INVALID", "Town, street number or street name is missing");
   } else if (!saved.established && !singlePipelineErf(row).ok) return fail("PIPELINE_ERF_INVALID", "GPS Sales needs exactly one valid pipeline ERF and coordinate pair");
+  // Rules TB-R046: after every data check, only a CAT meter can be batched. The server always passes
+  // the LM's category month; a screen holding only a few meters uses each meter's newest month.
+  const category = salesCategoryKind(row, categoryMonth === undefined ? newestSalesCategoryMonth(row) : categoryMonth);
+  if (category.kind === "NORMAL") return fail("SALES_CATEGORY_NORMAL", "Normal — only CAT meters are batched");
+  if (category.kind !== "CAT") return fail("SALES_CATEGORY_NONE", `No category${category.month ? ` for ${category.month}` : ""} — only CAT meters are batched`);
   return { batchable: true, code: "BATCHABLE", reason: "Batchable Sales meter" };
 }
 export function addSalesSelection(selectedIds, additions) {

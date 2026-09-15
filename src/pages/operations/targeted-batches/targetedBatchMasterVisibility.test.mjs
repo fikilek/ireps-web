@@ -52,7 +52,8 @@ test("flat Sales masterVisibility propagates without changing draft row shape", 
 
 test("visible Sales cannot enter a draft; identity is independent of visibility", () => {
   const row = { ...baseRow, erfId: null, master: { id: baseRow.id, visibility: "INVISIBLE" }, hasUsableGps: true,
-    erfCandidates: [{ ErfId: "ERF_1", Latitude: -28.5, Longitude: 30.5 }] };
+    erfCandidates: [{ ErfId: "ERF_1", Latitude: -28.5, Longitude: 30.5 }],
+    monthlyCategories: { "2026-08": { leakageCategory: "CAT4 - Long Gap (4+ months)", riskTier: "High", riskScore: 9 } } };
   const open = buildSalesTargetedBatchDraftPlan({ rows: [row], lmPcode: "ZA5241", lmName: "Endumeni" });
   const completed = buildSalesTargetedBatchDraftPlan({ rows: [{ ...row, master: { ...row.master, visibility: "VISIBLE" } }], lmPcode: "ZA5241", lmName: "Endumeni" });
   assert.equal(open.ok, true); assert.equal(completed.ok, false);

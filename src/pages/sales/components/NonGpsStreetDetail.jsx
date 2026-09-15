@@ -496,9 +496,15 @@ export default function NonGpsStreetDetail({
                     </td>
                     <td style={styles.bodyCell}>
                       {target.canonicalAddress || "NAv"}
+                      {/* Rules TB-R046: only CAT meters are field work. With Show Normal on, a Normal or
+                          uncategorised meter is marked here and can never be ticked. */}
+                      {target.category && target.category !== "CAT" ? (
+                        <span style={styles.categoryTag}>{target.category === "NORMAL" ? "Normal" : "No cat"}</span>
+                      ) : null}
                       {/* A reason another column already shows gets no note: Batch ID shows
                           current batch membership, Sales Meter Status shows In Progress /
-                          Completed. Other reasons a meter cannot be ticked stay visible. */}
+                          Completed, the tag above shows Normal / No cat. Other reasons a meter
+                          cannot be ticked stay visible. */}
                       {!target.batchable && !REASONS_SHOWN_IN_COLUMNS.has(target.batchabilityCode)
                         ? <div>{target.batchabilityReason}</div> : null}
                     </td>
@@ -670,6 +676,7 @@ const styles = {
     fontSize: "0.84rem",
     verticalAlign: "top",
   },
+  categoryTag: { marginLeft: 8, borderRadius: 999, padding: "2px 8px", background: "#f1f5f9", border: "1px solid #cbd5e1", color: "#475569", fontSize: "0.7rem", fontWeight: 900, whiteSpace: "nowrap" },
   statusBadge: {
     display: "inline-flex",
     borderRadius: "999px",

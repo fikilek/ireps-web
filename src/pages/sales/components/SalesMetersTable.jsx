@@ -1,4 +1,4 @@
-import { addSalesSelection, evaluateSalesBatchability, hasUsableSalesGps as hasPolicySalesGps } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { addSalesSelection, evaluateSalesBatchability, hasUsableSalesGps as hasPolicySalesGps, newestSalesCategoryMonth } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -159,6 +159,10 @@ const EMPTY_FILTERS = {
   erfNo: "",
   salesRanges: {},
 };
+
+// Targeted Batch rules TB-R046 (1.3.28): field work is for CAT meters only, so the table opens with
+// the Sales Category filter on all CATs (Normal left out); changing the filter shows Normal meters.
+const DEFAULT_FILTERS = { ...EMPTY_FILTERS, leakageCategories: [ALL_CATS_EXCLUDING_NORMAL_FILTER] };
 
 function SortButton({ label, sortKey, sortConfig, onSort }) {
   const isActive = sortConfig.key === sortKey;
@@ -521,7 +525,7 @@ export default function SalesMetersTable({
   selectedIds,
   onSelectedIdsChange,
 }) {
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [selectionMessage, setSelectionMessage] = useState("");
   const [columnVisibility, setColumnVisibility] = useState(
     DEFAULT_COLUMN_VISIBILITY,
@@ -557,10 +561,12 @@ export default function SalesMetersTable({
     );
   }, [stickyLayout]);
 
+  // Rules TB-R046: the LM's newest category month decides which meters are CAT.
+  const categoryMonth = useMemo(() => newestSalesCategoryMonth(rows), [rows]);
   const classifiedRows = useMemo(
     () =>
       rows.map((row) => {
-        const batchability = evaluateSalesBatchability(row, { source: "PREPAID_SALES" });
+        const batchability = evaluateSalesBatchability(row, { source: "PREPAID_SALES", categoryMonth });
         const isNonGpsSales = !hasPolicySalesGps(row);
         return {
           ...row,
@@ -570,7 +576,7 @@ export default function SalesMetersTable({
           meterNote: salesTableMeterNote({ isNonGpsSales, batchability }),
         };
       }),
-    [rows],
+    [rows, categoryMonth],
   );
 
   const townOptions = useMemo(() => {
@@ -889,7 +895,7 @@ export default function SalesMetersTable({
     filters.geofenceIds.length > 0 ||
     filters.tbIds.length > 0 ||
     filters.salesStatuses.length > 0 ||
-    filters.leakageCategories.length > 0 ||
+    filters.leakageCategories.join("|") !== DEFAULT_FILTERS.leakageCategories.join("|") ||
     filters.riskTier !== "ALL" ||
     Boolean(String(filters.riskScore || "").trim()) ||
     Boolean(String(filters.addressLine1 || "").trim()) ||
@@ -1120,7 +1126,7 @@ export default function SalesMetersTable({
 
   function resetColumnFilters() {
     clearMapRowInteraction();
-    setFilters(EMPTY_FILTERS);
+    setFilters(DEFAULT_FILTERS);
     setSortConfig(DEFAULT_SORT);
     setCurrentPage(1);
   }

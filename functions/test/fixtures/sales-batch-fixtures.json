@@ -27,7 +27,7 @@
     "hasUsableGps": false,
     "erfCandidates": [],
     "tbRefs": [],
-    "monthlyCategories": { "2026-08": { "leakageCategory": "Test category", "riskTier": "Low", "riskScore": 1 } }
+    "monthlyCategories": { "2026-08": { "leakageCategory": "CAT4 - Long Gap (4+ months)", "riskTier": "Low", "riskScore": 1 } }
   },
   "ward": {
     "pcode": "ZA5241001", "code": "1", "name": "Ward 1",

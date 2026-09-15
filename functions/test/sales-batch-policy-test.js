@@ -10,7 +10,8 @@ import {
 const stamp = { seconds: 1789257600, nanoseconds: 0 };
 const tbId = "TGB_20260913_120000_AB12";
 const other = "TGB_20260913_120001_AB12";
-const source = () => ({ id: "00123", master: { id: "00123", visibility: "INVISIBLE" }, meterNo: "00123", meterNoNormalized: "00123", lmPcode: "ZA5241", town: "Dundee", adr: { strNo: "01A", strName: "Smith", strType: "Street" }, tbRefs: [], hasUsableGps: false });
+const source = () => ({ id: "00123", master: { id: "00123", visibility: "INVISIBLE" }, meterNo: "00123", meterNoNormalized: "00123", lmPcode: "ZA5241", town: "Dundee", adr: { strNo: "01A", strName: "Smith", strType: "Street" }, tbRefs: [], hasUsableGps: false,
+  monthlyCategories: { "2026-08": { leakageCategory: "CAT4 - Long Gap (4+ months)", riskTier: "High", riskScore: 9 } } });
 const ref = (id = tbId) => ({ id, date: stamp });
 const started = () => ({ ...ref(), rowId: "TBR_20260913_120000_AB12_000001", fieldWork: { status: "IN_PROGRESS", updatedAt: stamp } });
 

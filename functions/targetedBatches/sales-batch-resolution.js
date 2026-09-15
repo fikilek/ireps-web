@@ -4,6 +4,7 @@ import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
 import { SALES_BATCH_ID, SALES_ID, SALES_BATCH_MAX, GEOCODING_PROVIDER, LOOKUP_OUTCOMES, composeSalesGeocodingAddress, evaluateSalesBatchability, inspectSavedErfDecision, inspectErfLocated, salesMaterial, singlePipelineErf, salesStreetAddress, nonblank, validDocumentId, exactKeys, isTimestamp } from "../salesAllMeters/sales-batch-policy.js";
+import { latestSalesCategoryMonth } from "../salesAllMeters/sales-category-month.js";
 import { normalizeBatchGeometry, pointCoordinates, strictlyInside, strictlyWithinWard, MAX_GEOMETRY_BYTES } from "../geofences/sales-batch-geometry.js";
 import { geocodeSalesAddress, googleGeocodingApiKey } from "./sales-batch-geocoding.js";
 import { isSubcontractorServiceProvider } from "./helpers.js";
@@ -122,7 +123,7 @@ export async function readErfContext({ db, erfId, lmPcode, read = snapshotReader
   if (!nonblank(erf.admin.localMunicipality.name)) throw batchError("LM_NAME_MISSING", "The authoritative LM name is unavailable");
   return { erfId, erf, ward, geometry, wardGeometry, centroid: { latitude: centroid[1], longitude: centroid[0] }, scope: { lmPcode, lmName: erf.admin.localMunicipality.name, wardPcode, wardNumber, wardName: ward.name }, geometryHash: materialHash(geometry), wardHash: materialHash(wardGeometry) };
 }
-export async function recordFailedLookup({ db, request, intent, salesId, address, outcome, now = () => Timestamp.now() }) {
+export async function recordFailedLookup({ db, request, intent, salesId, address, outcome, categoryMonth, now = () => Timestamp.now() }) {
   if (!LOOKUP_OUTCOMES.includes(outcome)) throw batchError("INVALID_LOOKUP_OUTCOME", "Only an actual completed failed lookup may be recorded");
   await db.runTransaction(async tx => {
     const read = snapshotReader(tx);
@@ -132,7 +133,7 @@ export async function recordFailedLookup({ db, request, intent, salesId, address
     const sales = snapshot.data();
     if (!composeSalesGeocodingAddress(sales)) throw batchError("GEOCODING_CONFIGURATION_ERROR", "The Sales LM has no configured province for geocoding; no failed-lookup flag was written");
     if (composeSalesGeocodingAddress(sales) !== address) throw batchError("SALES_ADDRESS_CHANGED", "Sales address changed during lookup");
-    const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
+    const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source, categoryMonth });
     if (!policy.batchable && policy.code !== "NEEDS_MANUAL_ERFING") throw batchError(policy.code, policy.reason);
     if (inspectSavedErfDecision(sales).established) throw batchError("ERF_ALREADY_ESTABLISHED", "The ERF decision was established during lookup");
     const at = now();
@@ -146,13 +147,13 @@ export function sameErfLocated(sales, { erfId, wardPcode, address }) {
 }
 // Schema TB10: record a successful Non-GPS location, only when new or changed. It is not the
 // ERF decision and never sets erfId; it replaces an earlier failed-lookup flag.
-export async function recordLocatedLookup({ db, actor, intent, salesId, address, erfId, wardPcode, now = () => Timestamp.now() }) {
+export async function recordLocatedLookup({ db, actor, intent, salesId, address, erfId, wardPcode, categoryMonth, now = () => Timestamp.now() }) {
   return db.runTransaction(async tx => {
     const ref = db.doc(`sales-all-meters/${salesId}`), snapshot = await tx.get(ref);
     if (!snapshot.exists) return false;
     const sales = snapshot.data();
     if (composeSalesGeocodingAddress(sales) !== address || inspectSavedErfDecision(sales).established || sameErfLocated(sales, { erfId, wardPcode, address })) return false;
-    const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
+    const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source, categoryMonth });
     if (!policy.batchable && policy.code !== "NEEDS_MANUAL_ERFING") return false;
     const at = now();
     tx.update(ref, { erfLocated: { version: 1, erfId, wardPcode, address, provider: GEOCODING_PROVIDER, locatedAt: at, locatedByUid: actor.uid, locatedByUser: actor.user },
@@ -163,6 +164,8 @@ export async function recordLocatedLookup({ db, actor, intent, salesId, address,
 export async function resolveSalesBatch({ db, request, codec, geocode, now = () => Timestamp.now() }) {
   const intent = requireBatchIntent(request.data);
   const actor = await readBatchActor({ db, request, lmPcode: intent.lmPcode });
+  // Rules TB-R046: only CAT meters, by the LM's newest category month.
+  const categoryMonth = await latestSalesCategoryMonth(db, intent.lmPcode);
   const rows = [];
   // Bounded sequential provider calls avoid request bursts and keep no shared result cache.
   for (const salesId of intent.salesIds) {
@@ -172,7 +175,7 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
       if (!snapshot.exists) throw batchError("SALES_MISSING", "Sales meter is unavailable");
       sales = snapshot.data();
       if (!composeSalesGeocodingAddress(sales)) throw batchError("GEOCODING_CONFIGURATION_ERROR", "The Sales LM has no configured province for geocoding; no failed-lookup flag was written");
-      const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
+      const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source, categoryMonth });
       const saved = inspectSavedErfDecision(sales);
       const existingPipeline = intent.source === "PREPAID_SALES" ? singlePipelineErf(sales) : null;
       const existingErfId = saved.established ? saved.erfId : existingPipeline?.ok ? existingPipeline.erfId : null;
@@ -192,7 +195,7 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
         let found = result;
         if (result.ok) found = await findContainingErf({ db, point: result.point, lmPcode: intent.lmPcode });
         if (!found.ok) {
-          if (LOOKUP_OUTCOMES.includes(found.code)) await recordFailedLookup({ db, request, intent, salesId, address: composeSalesGeocodingAddress(sales), outcome: found.code, now });
+          if (LOOKUP_OUTCOMES.includes(found.code)) await recordFailedLookup({ db, request, intent, salesId, address: composeSalesGeocodingAddress(sales), outcome: found.code, categoryMonth, now });
           throw batchError(found.code, LOOKUP_OUTCOMES.includes(found.code) ? `Needs manual ERFing — ${found.code}` : "Geocoding is unavailable; no failed-lookup flag was written");
         }
         erfId = found.snapshot.id; point = result.point;
@@ -205,7 +208,7 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
         const located = { erfId, wardPcode: context.scope.wardPcode, address: evidence.address };
         // The location stands even if recording it fails; the next Locate meters records it.
         if (!sameErfLocated(sales, located)) {
-          try { await recordLocatedLookup({ db, actor, intent, salesId, ...located, now }); }
+          try { await recordLocatedLookup({ db, actor, intent, salesId, ...located, categoryMonth, now }); }
           catch (error) { logger.warn("resolveSalesTargetedBatch -- successful location not recorded", { salesId, code: error?.code || null }); }
         }
       }
@@ -216,7 +219,9 @@ export async function resolveSalesBatch({ db, request, codec, geocode, now = () 
   }
   return { success: true, tbId: intent.tbId, rows };
 }
-export async function readDraftAssessment({ db, intent, codec, actor, read = snapshotReader(), fence = null }) {
+export async function readDraftAssessment({ db, intent, codec, actor, read = snapshotReader(), fence = null, categoryMonth }) {
+  // Rules TB-R046: only CAT meters, by the LM's newest category month.
+  if (categoryMonth === undefined) categoryMonth = await latestSalesCategoryMonth(db, intent.lmPcode);
   const rows = [], contexts = new Map(), salesById = new Map(), material = [];
   for (const salesId of intent.salesIds) {
     const snapshot = await read(db.doc(`sales-all-meters/${salesId}`));
@@ -224,7 +229,7 @@ export async function readDraftAssessment({ db, intent, codec, actor, read = sna
     salesById.set(salesId, sales); material.push([salesId, sales ? salesMaterialHash(sales) : null]);
     let row = { salesId, meterNo: sales?.meterNo || salesId, address: sales ? composeSalesGeocodingAddress(sales) : "", ready: false, code: "SALES_MISSING", reason: "Sales meter is unavailable", erfId: null, point: null };
     if (sales) {
-      const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source });
+      const policy = evaluateSalesBatchability(sales, { salesId, lmPcode: intent.lmPcode, source: intent.source, categoryMonth });
       row = { ...row, code: policy.code, reason: policy.reason };
       // Establish Ward even for an occupied/ineligible retained row. It cannot hide a second Ward.
       try {

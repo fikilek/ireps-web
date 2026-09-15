@@ -9,7 +9,7 @@ import { composeSalesGeocodingAddress, evaluateSalesBatchability, inspectErfLoca
 const stamp = { seconds: 1789257600, nanoseconds: 0 };
 const later = { seconds: 1789344000, nanoseconds: 0 };
 const sales = () => ({ id: "00123", master: { id: "00123", visibility: "INVISIBLE" }, meterNo: "00123", meterNoNormalized: "00123", lmPcode: "ZA5241", town: "Dundee",
-  adr: { strNo: "01A", strName: "Smith", strType: "Street" }, tbRefs: [], monthlyCategories: { "2026-08": { leakageCategory: "A" } },
+  adr: { strNo: "01A", strName: "Smith", strType: "Street" }, tbRefs: [], monthlyCategories: { "2026-08": { leakageCategory: "CAT4 - Long Gap (4+ months)" } },
   metadata: { createdAt: stamp, createdByUid: "ORIGINAL", createdByUser: "Original", updatedAt: stamp, updatedByUid: "ORIGINAL", updatedByUser: "Original" } });
 const located = row => ({ version: 1, erfId: "ERF1", wardPcode: "ZA5241001", address: composeSalesGeocodingAddress(row), provider: "Google Geocoding API", locatedAt: stamp, locatedByUid: "U1", locatedByUser: "Supervisor" });
 const failed = row => ({ version: 1, outcome: "NO_EXACT_POSITION", address: composeSalesGeocodingAddress(row), provider: "Google Geocoding API", attemptedAt: stamp, attemptedByUid: "U1", attemptedByUser: "Supervisor" });
