@@ -152,7 +152,7 @@ function BatchGeofenceTable({ rows, columns, loading, opening, onCreateBatch, sc
           </th>)}</tr>
         </thead>
         <tbody>
-          {current.rows.map(row => <tr key={row.key}>
+          {current.rows.map((row, rowIndex) => <tr key={row.key} style={rowIndex % 2 ? styles.evenRow : styles.oddRow}>
             {shown.map((column, index) => <td key={column.key} style={{ ...styles.td, ...(column.key === "status" ? { color: STATUS_COLORS[row.status], fontWeight: 800 } : null), ...divider(index) }}>
               {column === ACTION ? (row.canCreateBatch ? <button type="button" style={styles.primaryButton} disabled={Boolean(opening)} onClick={() => onCreateBatch(row)}>
                 {opening === row.key ? "Opening TB Draft…" : "Create its batch"}</button> : <span style={styles.muted}>{row.note}</span>)
@@ -226,7 +226,10 @@ const styles = {
   sortButton: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid #cbd5e1", borderRadius: 999, background: "#ffffff", padding: "6px 10px", fontSize: 12, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" },
   filterCell: { padding: "6px 8px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0" },
   filter: { width: "100%", minWidth: 90, boxSizing: "border-box", padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 8 },
-  td: { padding: "10px 12px", borderBottom: "1px solid #f1f5f9", color: "#0f172a", verticalAlign: "top" },
+  // Rules TB-R044 (1.3.21): alternating shades with a line between rows.
+  oddRow: { background: "#ffffff" },
+  evenRow: { background: "#f1f5f9" },
+  td: { padding: "10px 12px", borderBottom: "1px solid #cbd5e1", color: "#0f172a", verticalAlign: "top" },
   divider: { borderLeft: "3px solid #334155" },
   muted: { color: "#64748b", fontSize: 12 },
 };

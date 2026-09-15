@@ -141,7 +141,8 @@ test("the page groups the columns, pages above and below, downloads every filter
   assert.match(page, /index > 0 && shown\[index\]\.group !== shown\[index - 1\]\.group \? styles\.divider : null/);
   assert.equal(page.match(/\{pagination\}/g).length, 2, "pagination above and below");
   assert.match(page, /visibleRows=\{sorted\} columns=\{batchGeofenceDownloadColumns\(\)\}/, "download every filtered and sorted row, not the page");
-  assert.match(page, /\{current\.rows\.map\(row =>/, "the body renders the current page only");
+  assert.match(page, /\{current\.rows\.map\(\(row, rowIndex\) => <tr key=\{row\.key\} style=\{rowIndex % 2 \? styles\.evenRow : styles\.oddRow\}>/, "the body renders the current page only, rows in alternating shades");
+  assert.match(page, /evenRow: \{ background: "#f1f5f9" \}/); assert.match(page, /td: \{ padding: "10px 12px", borderBottom: "1px solid #cbd5e1"/);
   assert.match(page, /try \{ window\.localStorage\.setItem\(COLUMNS_STORAGE_KEY/);
   assert.match(page, /column\.filter === "select" \? <select aria-label=\{`Filter \$\{column\.label\}`\}/);
   assert.match(page, /column\.filter === "date" \? <DatetimeFilterButton filter=\{filters\[column\.key\] \|\| EMPTY_DATETIME_FILTER\}/);
