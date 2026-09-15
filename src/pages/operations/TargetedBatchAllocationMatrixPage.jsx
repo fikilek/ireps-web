@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are used by React. */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -15,8 +16,10 @@ import {
   buildUserExecutionMatrix,
   getCanonicalBatchState,
   getPendingAllocationProjectionMeters,
-  projectOrganisationAllocation,
+  projectMatrixAllocation,
+  splitHundredPercent,
 } from "./targeted-batches/allocation/allocationMatrixModel";
+import { matrixColumnHelp } from "./targeted-batches/allocation/allocationMatrixHelp";
 import {
   buildUsersById,
   enrichServiceProvidersWithMembers,
@@ -60,31 +63,90 @@ function formatNumber(value, maximumFractionDigits = 0) {
   });
 }
 
-function signedNumber(value) {
-  if (value === null || value === undefined) return "NAv";
-  const number = Number(value || 0);
-  const formatted = formatNumber(Math.abs(number), 1);
-  if (number > 0) return `+${formatted}`;
-  if (number < 0) return `-${formatted}`;
-  return "0";
-}
-
 function Percent({ value }) {
   return <>{formatNumber(value, 1)}%</>;
 }
 
-function SummaryCard({ label, value, helper }) {
+// Rules TB-R045: the number and its percentage of Meters Assigned.
+function CountPercent({ count, percent }) {
+  return (
+    <span style={styles.countPercent}>
+      <strong style={styles.countValue}>{formatNumber(count)}</strong>
+      <span style={styles.countPct}><Percent value={percent} /></span>
+    </span>
+  );
+}
+
+function SummaryCard({ label, value, helper, percent = null }) {
   return (
     <article style={styles.summaryCard}>
       <span style={styles.summaryLabel}>{label}</span>
-      <strong style={styles.summaryValue}>{formatNumber(value, 1)}</strong>
+      <strong style={styles.summaryValue}>
+        {formatNumber(value, 1)}
+        {percent === null ? null : <span style={styles.summaryPercent}> · <Percent value={percent} /></span>}
+      </strong>
       <span style={styles.summaryHelper}>{helper}</span>
     </article>
   );
 }
 
-function Th({ children }) {
-  return <th style={styles.th}>{children}</th>;
+// Rules TB-R045: every heading has a "?". Resting the pointer on it (briefly) or tapping it opens
+// the column's explanation window.
+const HELP_HOVER_DELAY_MS = 350;
+function HelpIcon({ label, onOpen }) {
+  const timer = useRef(null);
+  const cancel = () => { clearTimeout(timer.current); timer.current = null; };
+  return (
+    <button type="button" aria-label={`What ${label} means`} title={`What ${label} means`} style={styles.helpIcon}
+      onMouseEnter={() => { cancel(); timer.current = setTimeout(onOpen, HELP_HOVER_DELAY_MS); }}
+      onMouseLeave={cancel} onClick={() => { cancel(); onOpen(); }}>
+      ?
+    </button>
+  );
+}
+
+function Th({ children, help = null, onHelp = null }) {
+  return (
+    <th style={styles.th}>
+      <span style={styles.thContent}>
+        {children}
+        {help && onHelp ? <HelpIcon label={String(children)} onOpen={() => onHelp(help)} /> : null}
+      </span>
+    </th>
+  );
+}
+
+function HelpWindow({ help, onClose }) {
+  useEffect(() => {
+    const onKeyDown = (event) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+  if (!help) return null;
+  return (
+    <div style={styles.helpBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div role="dialog" aria-modal="true" aria-label={help.title} style={styles.helpCard}>
+        <div style={styles.helpHeader}>
+          <h2 style={styles.helpTitle}>{help.title}</h2>
+          <button type="button" aria-label="Close" style={styles.helpClose} onClick={onClose}>×</button>
+        </div>
+        <div style={styles.helpBody}>
+          {help.paragraphs.map((paragraph) => <p key={paragraph} style={styles.helpText}>{paragraph}</p>)}
+          {help.formula ? <p style={styles.helpFormula}>{help.formula}</p> : null}
+          {help.rows.length ? (
+            <table style={styles.helpTable}>
+              <tbody>
+                {help.rows.map(([name, value]) => (
+                  <tr key={name}><td style={styles.helpName}>{name}</td><td style={styles.helpValue}>{value}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+          {help.total ? <p style={styles.helpTotal}>{help.total}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Td({ children, strong = false, colSpan }) {
@@ -267,23 +329,15 @@ export default function TargetedBatchAllocationMatrixPage() {
     );
   }, [usersMatrix, searchText]);
 
-  const eligibleTargets = organisations.filter((item) => item.eligible).length;
-  const totalAssigned = organisations.reduce(
-    (sum, item) => sum + item.assignedMeters,
-    0,
-  );
-  const totalCompleted = organisations.reduce(
-    (sum, item) => sum + item.completedMeters,
-    0,
-  );
-  const totalRemaining = organisations.reduce(
-    (sum, item) => sum + item.remainingMeters,
-    0,
-  );
-  const totalRejectedUnresolved = organisations.reduce(
-    (sum, item) => sum + item.rejectedUnresolvedMeters,
-    0,
-  );
+  // Rules TB-R045: the cards match the table (matrix numbers; rejected batches left out).
+  const matrixTotal = (key) => organisations.reduce((sum, item) => sum + item.matrix[key], 0);
+  const totalAssigned = matrixTotal("assigned");
+  const totalNotStarted = matrixTotal("notStarted");
+  const totalInProgress = matrixTotal("inProgress");
+  const totalCompleted = matrixTotal("completed");
+  const [notStartedPct, inProgressPct, completedPct] = splitHundredPercent([totalNotStarted, totalInProgress, totalCompleted]);
+  const [helpKey, setHelpKey] = useState("");
+  const help = helpKey ? matrixColumnHelp(helpKey, { organisations: visibleOrganisations, allOrganisations: organisations, incomingMeters }) : null;
   const integrityIssueBatches = allocationIntegrityIssues.length;
 
   const matrixLoading =
@@ -333,10 +387,10 @@ export default function TargetedBatchAllocationMatrixPage() {
           <p style={styles.eyebrow}>Sales / Targeted Batches</p>
           <h1 style={styles.title}>Allocation Matrix</h1>
           <p style={styles.subtitle}>
-            Compare cumulative project allocation, current active workload and
-            field progress. Historical work remains visible so final project
-            distribution can be assessed fairly. iREPS supplies decision
-            intelligence; the allocator still chooses the TEAM or SP.
+            How the project's meters have been allocated to each TEAM and SP,
+            and how far each is with them. Rest the pointer on the ? next to a
+            heading to see what it means. iREPS supplies the picture; the
+            allocator still chooses the TEAM or SP.
           </p>
         </div>
         <div style={styles.workbasePill}>
@@ -431,29 +485,32 @@ export default function TargetedBatchAllocationMatrixPage() {
 
       <div style={styles.summaryGrid}>
         <SummaryCard
-          label="Eligible TEAM/SP Targets"
-          value={eligibleTargets}
-          helper="Current MNC-scoped allocation candidates"
+          label="TEAMs / SPs"
+          value={organisations.length}
+          helper="Listed in the matrix below"
         />
         <SummaryCard
-          label="Historically Assigned"
+          label="Meters Assigned"
           value={totalAssigned}
-          helper="Completed work remains in cumulative allocation"
+          helper="All meters in batches allocated to a TEAM or SP (rejected batches left out)"
+        />
+        <SummaryCard
+          label="Not Started"
+          value={totalNotStarted}
+          percent={notStartedPct}
+          helper="No field work recorded yet"
+        />
+        <SummaryCard
+          label="In Progress"
+          value={totalInProgress}
+          percent={inProgressPct}
+          helper="Premise captured or No Access recorded; meter not yet captured"
         />
         <SummaryCard
           label="Completed"
           value={totalCompleted}
-          helper="Rows completed in the field"
-        />
-        <SummaryCard
-          label="Active Open"
-          value={totalRemaining}
-          helper="Open rows on ALLOCATED / ACCEPTED batches"
-        />
-        <SummaryCard
-          label="Rejected / Unresolved"
-          value={totalRejectedUnresolved}
-          helper="Shown separately until common reallocation rules resolve ownership"
+          percent={completedPct}
+          helper="Meter found and captured in the field"
         />
       </div>
 
@@ -495,16 +552,6 @@ export default function TargetedBatchAllocationMatrixPage() {
 
         {view === "ORG" ? (
           <>
-            <div style={styles.matrixExplanation}>
-              <strong>Two truths are kept separate.</strong> Assigned Meters is
-              cumulative project history and never disappears when work is
-              completed. Active Open is current unfinished workload on
-              ALLOCATED / ACCEPTED batches. Rejected work remains historical
-              and is shown separately as unresolved until the common batch
-              reallocation rule decides its operational ownership. Type averages
-              compare only currently eligible TEAMs with TEAMs and SPs with SPs.
-            </div>
-
             <div style={styles.typeFilterRow}>
               {[ALL, "TEAM", "SP"].map((type) => (
                 <button
@@ -527,35 +574,30 @@ export default function TargetedBatchAllocationMatrixPage() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <Th>Type</Th>
-                    <Th>TEAM / SP</Th>
-                    <Th>Eligibility</Th>
-                    <Th>Batches</Th>
-                    <Th>Assigned</Th>
-                    <Th>Completed</Th>
-                    <Th>Active Open</Th>
-                    <Th>Rejected / Unresolved</Th>
-                    <Th>Progress</Th>
-                    <Th>Project Share</Th>
-                    <Th>Eligible Type Avg</Th>
-                    <Th>Vs Type Avg</Th>
-                    <Th>Integrity</Th>
-                    {projectionActive ? <Th>Projected Assigned</Th> : null}
-                    {projectionActive ? <Th>Projected Active Open</Th> : null}
-                    {projectionActive ? <Th>Projected Vs Avg</Th> : null}
+                    <Th help="type" onHelp={setHelpKey}>Type</Th>
+                    <Th help="name" onHelp={setHelpKey}>TEAM / SP</Th>
+                    <Th help="batches" onHelp={setHelpKey}>Batches</Th>
+                    <Th help="assigned" onHelp={setHelpKey}>Meters Assigned</Th>
+                    <Th help="notStarted" onHelp={setHelpKey}>Not Started</Th>
+                    <Th help="inProgress" onHelp={setHelpKey}>In Progress</Th>
+                    <Th help="completed" onHelp={setHelpKey}>Completed</Th>
+                    <Th help="progress" onHelp={setHelpKey}>Progress</Th>
+                    <Th help="projectShare" onHelp={setHelpKey}>Project Share</Th>
+                    {projectionActive ? <Th help="projectedAssigned" onHelp={setHelpKey}>Projected Assigned</Th> : null}
+                    {projectionActive ? <Th help="projectedShare" onHelp={setHelpKey}>Projected Project Share</Th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 16 : 13}>
+                      <Td colSpan={projectionActive ? 11 : 9}>
                         Loading live Allocation Matrix...
                       </Td>
                     </tr>
                   ) : null}
                   {!loading && matrixError ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 16 : 13}>
+                      <Td colSpan={projectionActive ? 11 : 9}>
                         <div style={styles.errorNotice}>
                           {matrixErrorMessage ||
                             "The Allocation Matrix could not be loaded."}
@@ -565,7 +607,7 @@ export default function TargetedBatchAllocationMatrixPage() {
                   ) : null}
                   {!loading && !matrixError && visibleOrganisations.length === 0 ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 16 : 13}>
+                      <Td colSpan={projectionActive ? 11 : 9}>
                         No TEAM/SP targets match the current filters.
                       </Td>
                     </tr>
@@ -574,12 +616,13 @@ export default function TargetedBatchAllocationMatrixPage() {
                     !matrixError &&
                     visibleOrganisations.map((organisation) => {
                       const projection = projectionActive
-                        ? projectOrganisationAllocation({
+                        ? projectMatrixAllocation({
                             organisation,
                             allOrganisations: organisations,
                             incomingMeters,
                           })
                         : null;
+                      const matrix = organisation.matrix;
 
                       return (
                         <tr key={organisation.key}>
@@ -594,55 +637,13 @@ export default function TargetedBatchAllocationMatrixPage() {
                               <small>{organisation.memberCount} member(s)</small>
                             </div>
                           </Td>
-                          <Td>
-                            <span
-                              style={
-                                organisation.eligible
-                                  ? styles.eligibleBadge
-                                  : styles.historicalBadge
-                              }
-                            >
-                              {organisation.eligible
-                                ? "ELIGIBLE"
-                                : "HISTORY ONLY"}
-                            </span>
-                          </Td>
-                          <Td>{formatNumber(organisation.batches)}</Td>
-                          <Td strong>{formatNumber(organisation.assignedMeters)}</Td>
-                          <Td>{formatNumber(organisation.completedMeters)}</Td>
-                          <Td strong>{formatNumber(organisation.remainingMeters)}</Td>
-                          <Td>
-                            {formatNumber(organisation.rejectedUnresolvedMeters)}
-                          </Td>
-                          <Td><Percent value={organisation.progressPct} /></Td>
-                          <Td><Percent value={organisation.projectSharePct} /></Td>
-                          <Td>
-                            {organisation.eligible
-                              ? formatNumber(organisation.typeAverageAssigned, 1)
-                              : "NAv"}
-                          </Td>
-                          <Td>
-                            <span
-                              style={
-                                organisation.varianceFromTypeAverage > 0
-                                  ? styles.aboveAverage
-                                  : organisation.varianceFromTypeAverage < 0
-                                    ? styles.belowAverage
-                                    : styles.onAverage
-                              }
-                            >
-                              {signedNumber(organisation.varianceFromTypeAverage)}
-                            </span>
-                          </Td>
-                          <Td>
-                            {organisation.integrityIssueBatches > 0 ? (
-                              <span style={styles.integrityBadge}>
-                                {organisation.integrityIssueBatches} issue(s)
-                              </span>
-                            ) : (
-                              <span style={styles.integrityOk}>OK</span>
-                            )}
-                          </Td>
+                          <Td>{formatNumber(matrix.batches)}</Td>
+                          <Td strong>{formatNumber(matrix.assigned)}</Td>
+                          <Td><CountPercent count={matrix.notStarted} percent={matrix.notStartedPct} /></Td>
+                          <Td><CountPercent count={matrix.inProgress} percent={matrix.inProgressPct} /></Td>
+                          <Td><CountPercent count={matrix.completed} percent={matrix.completedPct} /></Td>
+                          <Td><Percent value={matrix.completedPct} /></Td>
+                          <Td><Percent value={matrix.projectSharePct} /></Td>
                           {projectionActive ? (
                             <Td strong>
                               {projection
@@ -653,16 +654,7 @@ export default function TargetedBatchAllocationMatrixPage() {
                           {projectionActive ? (
                             <Td>
                               {projection
-                                ? formatNumber(projection.projectedRemaining)
-                                : "—"}
-                            </Td>
-                          ) : null}
-                          {projectionActive ? (
-                            <Td>
-                              {projection
-                                ? signedNumber(
-                                    projection.projectedVarianceFromTypeAverage,
-                                  )
+                                ? <Percent value={projection.projectedProjectSharePct} />
                                 : "—"}
                             </Td>
                           ) : null}
@@ -737,11 +729,31 @@ export default function TargetedBatchAllocationMatrixPage() {
           </>
         )}
       </section>
+      {help ? <HelpWindow help={help} onClose={() => setHelpKey("")} /> : null}
     </section>
   );
 }
 
 const styles = {
+  // Rules TB-R045: numbers with percentages, "?" icons and the explanation window.
+  summaryPercent: { color: "#475569", fontSize: 15, fontWeight: 800 },
+  countPercent: { display: "grid", gap: 2 },
+  countValue: { color: "#0f172a", fontSize: 12 },
+  countPct: { color: "#64748b", fontSize: 10, fontWeight: 700 },
+  thContent: { display: "inline-flex", alignItems: "center", gap: 6 },
+  helpIcon: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 999, border: "1px solid #2563eb", background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 900, cursor: "help", padding: 0, lineHeight: 1 },
+  helpBackdrop: { position: "fixed", inset: 0, zIndex: 10000, background: "rgba(15, 23, 42, 0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
+  helpCard: { width: "min(94vw, 560px)", maxHeight: "86vh", display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 16, background: "#ffffff", boxShadow: "0 25px 80px rgba(15, 23, 42, 0.32)" },
+  helpHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 18px", borderBottom: "1px solid #e2e8f0", flexShrink: 0 },
+  helpTitle: { margin: 0, fontSize: 18, color: "#0f172a" },
+  helpClose: { border: "none", background: "#f1f5f9", color: "#0f172a", width: 32, height: 32, borderRadius: 16, fontSize: 18, cursor: "pointer" },
+  helpBody: { padding: "14px 18px 18px", overflowY: "auto", display: "grid", gap: 10 },
+  helpText: { margin: 0, color: "#334155", fontSize: 14, lineHeight: 1.55 },
+  helpFormula: { margin: 0, padding: "8px 10px", borderRadius: 10, background: "#eff6ff", color: "#1e3a8a", fontSize: 13, fontWeight: 800 },
+  helpTable: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  helpName: { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", color: "#0f172a", fontWeight: 800 },
+  helpValue: { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", color: "#334155", textAlign: "right", whiteSpace: "nowrap" },
+  helpTotal: { margin: 0, padding: "8px 10px", borderRadius: 10, background: "#f1f5f9", color: "#0f172a", fontSize: 13, fontWeight: 900 },
   page: { display: "grid", gap: 18 },
   backRow: { display: "flex", alignItems: "center", gap: 12 },
   backLink: {

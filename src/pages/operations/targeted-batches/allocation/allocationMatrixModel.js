@@ -45,6 +45,24 @@ function percentage(numerator, denominator) {
   return round((numerator / denominator) * 100, 1);
 }
 
+// Rules TB-R045: percentages with one decimal that add up to exactly 100% (largest remainder),
+// so a split never shows 99.9% or 100.1%.
+export function splitHundredPercent(counts = []) {
+  const values = safeArray(counts).map((value) => Math.max(0, finiteNumber(value, 0)));
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return values.map(() => 0);
+  const exact = values.map((value) => (value / total) * 1000);
+  const tenths = exact.map((value) => Math.floor(value));
+  let remaining = 1000 - tenths.reduce((sum, value) => sum + value, 0);
+  const order = exact.map((value, index) => [value - tenths[index], index]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (const [, index] of order) {
+    if (remaining <= 0) break;
+    tenths[index] += 1;
+    remaining -= 1;
+  }
+  return tenths.map((value) => value / 10);
+}
+
 function normalizeTargetType(value) {
   const normalized = upper(value);
   if (normalized === "SERVICE_PROVIDER") return "SP";
@@ -378,6 +396,20 @@ function emptyOrganisationMetrics(seed) {
     typeAverageAssigned: 0,
     varianceFromTypeAverage: null,
     lastActivityAtMs: 0,
+    // Rules TB-R045: the Allocation Matrix TEAM / SP view. Rejected batches are not this
+    // TEAM/SP's work and are left out of these numbers (counted in rejectedBatches only).
+    matrix: {
+      batches: 0,
+      rejectedBatches: 0,
+      assigned: 0,
+      notStarted: 0,
+      inProgress: 0,
+      completed: 0,
+      notStartedPct: 0,
+      inProgressPct: 0,
+      completedPct: 0,
+      projectSharePct: 0,
+    },
   };
 }
 
@@ -506,6 +538,15 @@ export function buildOrganisationAllocationMatrixResult({
     if (state === CANONICAL_TARGETED_BATCH_STATES.completed) {
       metric.completedBatches += 1;
     }
+
+    if (state === CANONICAL_TARGETED_BATCH_STATES.rejected) {
+      metric.matrix.rejectedBatches += 1;
+    } else {
+      metric.matrix.batches += 1;
+      metric.matrix.assigned += totalRows;
+      metric.matrix.completed += completedRows;
+      metric.matrix.inProgress += Math.max(startedRows - completedRows, 0);
+    }
   }
 
   const result = Array.from(organisations.values());
@@ -549,7 +590,16 @@ export function buildOrganisationAllocationMatrixResult({
     metric.varianceFromTypeAverage = metric.eligible
       ? round(metric.assignedMeters - sameType.average, 1)
       : null;
+
+    const matrix = metric.matrix;
+    matrix.notStarted = Math.max(matrix.assigned - matrix.completed - matrix.inProgress, 0);
+    [matrix.notStartedPct, matrix.inProgressPct, matrix.completedPct] = splitHundredPercent([matrix.notStarted, matrix.inProgress, matrix.completed]);
   }
+
+  const shares = splitHundredPercent(result.map((metric) => metric.matrix.assigned));
+  result.forEach((metric, index) => {
+    metric.matrix.projectSharePct = shares[index];
+  });
 
   const sortedOrganisations = result.sort((left, right) => {
     if (left.type !== right.type) return left.type.localeCompare(right.type);
@@ -612,6 +662,28 @@ export function projectOrganisationAllocation({
       projectedProjectAssigned,
     ),
     projectedTypeSharePct: percentage(projectedAssigned, projectedTypeAssigned),
+  };
+}
+
+// Rules TB-R045: the Allocation Matrix preview for a batch being allocated, on the matrix numbers.
+export function projectMatrixAllocation({
+  organisation,
+  allOrganisations = [],
+  incomingMeters = 0,
+} = {}) {
+  if (!organisation || organisation?.eligible === false) return null;
+  const incoming = Math.max(0, Math.floor(finiteNumber(incomingMeters, 0)));
+  if (incoming <= 0) return null;
+  const projectAssigned = safeArray(allOrganisations).reduce(
+    (sum, candidate) => sum + finiteNumber(candidate?.matrix?.assigned, 0),
+    0,
+  );
+  const projectedAssigned = finiteNumber(organisation?.matrix?.assigned, 0) + incoming;
+  return {
+    incomingMeters: incoming,
+    projectAssigned,
+    projectedAssigned,
+    projectedProjectSharePct: percentage(projectedAssigned, projectAssigned + incoming),
   };
 }
 
