@@ -58,6 +58,68 @@ export function buildBatchGeofenceRows({ batches = [], geofences = [], uid = "" 
   return rows.sort((left, right) => newest(right).localeCompare(newest(left)) || left.key.localeCompare(right.key));
 }
 
+// Rules TB-R044 (1.3.20): the columns, grouped Batch | Link | Geofence, with the owner's defaults.
+// Action always shows in the Link group and is not a chooser column.
+export const BATCH_GEOFENCE_GROUPS = Object.freeze([{ key: "batch", label: "Batch" }, { key: "link", label: "Link" }, { key: "geofence", label: "Geofence" }]);
+export const BATCH_GEOFENCE_COLUMNS = Object.freeze([
+  { key: "batchId", group: "batch", label: "Batch ID", show: true, value: row => row.batch?.id || (row.plannedBatchId ? `${row.plannedBatchId} (not created)` : "") },
+  { key: "batchCreated", group: "batch", label: "Batch created", show: false, type: "date", value: row => row.batch?.createdAt || "" },
+  { key: "batchBy", group: "batch", label: "Batch by", show: false, value: row => row.batch?.createdBy || "" },
+  { key: "batchMeters", group: "batch", label: "Batch meters", show: true, type: "number", value: row => row.batch?.meters ?? null },
+  { key: "source", group: "batch", label: "Source", show: false, value: row => row.batch?.source || "" },
+  { key: "status", group: "link", label: "Status", show: true, value: row => row.status },
+  { key: "geofence", group: "geofence", label: "Geofence", show: true, value: row => row.geofence?.name || "" },
+  { key: "kind", group: "geofence", label: "Kind", show: false, value: row => row.geofence?.kind || "" },
+  { key: "geofenceCreated", group: "geofence", label: "Geofence created", show: true, type: "date", value: row => row.geofence?.createdAt || "" },
+  { key: "geofenceBy", group: "geofence", label: "Geofence by", show: false, value: row => row.geofence?.createdBy || "" },
+  { key: "savedFor", group: "geofence", label: "Meters it was saved for", show: false, type: "number", value: row => row.geofence?.batchMeters ?? null },
+  { key: "salesMeters", group: "geofence", label: "Sales meters in it", show: false, type: "number", value: row => row.geofence?.salesMeters ?? null },
+  { key: "assets", group: "geofence", label: "Assets in it", show: false, type: "number", value: row => row.geofence?.assets ?? null },
+]);
+export function formatBatchGeofenceDate(iso) {
+  const date = iso ? new Date(iso) : null;
+  return !date || Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-ZA", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+export function displayBatchGeofenceValue(column, row) {
+  const value = column.value(row);
+  return value === null || value === undefined || value === "" ? "" : column.type === "date" ? formatBatchGeofenceDate(value) : String(value);
+}
+export const defaultBatchGeofenceColumns = () => Object.fromEntries(BATCH_GEOFENCE_COLUMNS.map(column => [column.key, column.show]));
+export const allBatchGeofenceColumns = () => Object.fromEntries(BATCH_GEOFENCE_COLUMNS.map(column => [column.key, true]));
+// A remembered choice from the browser; anything unknown falls back to the defaults.
+export function readBatchGeofenceColumns(stored) {
+  const defaults = defaultBatchGeofenceColumns();
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return defaults;
+  return Object.fromEntries(BATCH_GEOFENCE_COLUMNS.map(column => [column.key, typeof stored[column.key] === "boolean" ? stored[column.key] : defaults[column.key]]));
+}
+
+// The iREPS registry table standard (ui-rules/registry-tables.md): filter, then sort, then page.
+export const BATCH_GEOFENCE_PAGE_SIZES = Object.freeze([5, 10, 25, 50, 100]);
+export function filterBatchGeofenceRows(rows, { filters = {}, gapsOnly = false } = {}) {
+  const active = BATCH_GEOFENCE_COLUMNS.filter(column => text(filters[column.key]));
+  return rows.filter(row => (!gapsOnly || isBatchGeofenceGap(row))
+    && active.every(column => displayBatchGeofenceValue(column, row).toLowerCase().includes(text(filters[column.key]).toLowerCase())));
+}
+export function sortBatchGeofenceRows(rows, sort = {}) {
+  const column = BATCH_GEOFENCE_COLUMNS.find(item => item.key === sort.key);
+  if (!column) return rows;
+  const direction = sort.direction === "desc" ? -1 : 1;
+  const blank = value => value === null || value === undefined || value === "";
+  const compare = (left, right) => {
+    const a = column.value(left), b = column.value(right);
+    if (blank(a) || blank(b)) return blank(a) === blank(b) ? 0 : blank(a) ? 1 : -1;
+    return (column.type === "number" ? Number(a) - Number(b) : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })) * direction;
+  };
+  return [...rows].sort((left, right) => compare(left, right) || left.key.localeCompare(right.key));
+}
+export function paginateBatchGeofenceRows(rows, page, pageSize) {
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize)), current = Math.min(Math.max(1, page), totalPages);
+  return { rows: rows.slice((current - 1) * pageSize, current * pageSize), page: current, totalPages };
+}
+// Download exports every column, shown or hidden, plus what the Action column says.
+export const batchGeofenceDownloadColumns = () => [...BATCH_GEOFENCE_COLUMNS.map(column => ({ header: column.label, value: row => displayBatchGeofenceValue(column, row) })),
+  { header: "Action", value: row => row.canCreateBatch ? "Create its batch" : row.note }];
+
 // Create its batch: TB Draft for the geofence's meters under the batch ID it was saved for.
 export function salesDraftForGeofence({ fence, salesRows = [], lmPcode, lmName = "", scopeKey }) {
   const link = fence?.targetedBatch;

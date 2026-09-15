@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { BATCH_GEOFENCE_STATUS as S, buildBatchGeofenceRows, isBatchGeofenceGap, salesDraftForGeofence } from "./batchGeofenceModel.js";
+import { BATCH_GEOFENCE_STATUS as S, BATCH_GEOFENCE_COLUMNS, BATCH_GEOFENCE_PAGE_SIZES, buildBatchGeofenceRows, isBatchGeofenceGap, salesDraftForGeofence, defaultBatchGeofenceColumns,
+  allBatchGeofenceColumns, readBatchGeofenceColumns, filterBatchGeofenceRows, sortBatchGeofenceRows, paginateBatchGeofenceRows, batchGeofenceDownloadColumns } from "./batchGeofenceModel.js";
+import { pageReturn } from "../../../components/batch-map-path.js";
 import { buildTargetedBatchDraft } from "../../../redux/targetedBatchDraftModel.js";
 import { salesDraftIntent } from "../../operations/targeted-batches/draft/sales-batch-draft-model.js";
 
@@ -70,5 +72,50 @@ test("the page opens from both Sales tables, reads only, and Create its batch op
   const routes = await read("../../../routes/AppRoutes.jsx");
   assert.match(routes, /path="\/sales\/batches-geofences"[\s\S]{0,160}<BatchesGeofencesPage \/>/);
   assert.match(await read("../../../layouts/ConsoleLayout.jsx"), /pathname === "\/sales\/batches-geofences"\) \{\s*return "Batches & Geofences";/);
-  for (const table of ["../NonGpsBatchPlanningPage.jsx", "../PrepaidSales.jsx"]) assert.match(await read(table), /onClick=\{\(\) => navigate\("\/sales\/batches-geofences"\)\}>\s*Batches &amp; Geofences/);
+  assert.match(await read("../NonGpsBatchPlanningPage.jsx"), /navigate\("\/sales\/batches-geofences", \{ state: \{ from: \{ path: "\/sales\/non-gps-batch-planning", label: "Non-GPS Sales Table" \} \} \}\)\}>\s*Batches &amp; Geofences/);
+  assert.match(await read("../PrepaidSales.jsx"), /navigate\("\/sales\/batches-geofences", \{ state: \{ from: \{ path: "\/sales\/table", label: "GPS Sales Table" \} \} \}\)\}>\s*Batches &amp; Geofences/);
+});
+
+// Rules TB-R044 (1.3.20): groups, standard table, Columns chooser, Back link.
+test("the owner's default columns; a remembered choice is read safely", () => {
+  assert.deepEqual(Object.entries(defaultBatchGeofenceColumns()).filter(([, shown]) => shown).map(([key]) => key), ["batchId", "batchMeters", "status", "geofence", "geofenceCreated"]);
+  assert.deepEqual(BATCH_GEOFENCE_COLUMNS.map(column => column.group), ["batch", "batch", "batch", "batch", "batch", "link", "geofence", "geofence", "geofence", "geofence", "geofence", "geofence", "geofence"]);
+  assert.equal(Object.values(allBatchGeofenceColumns()).every(Boolean), true);
+  assert.deepEqual(readBatchGeofenceColumns(null), defaultBatchGeofenceColumns());
+  assert.deepEqual(readBatchGeofenceColumns([true]), defaultBatchGeofenceColumns());
+  const remembered = readBatchGeofenceColumns({ kind: true, batchId: false, status: "yes", unknown: true });
+  assert.deepEqual([remembered.kind, remembered.batchId, remembered.status, Object.hasOwn(remembered, "unknown")], [true, false, true, false]);
+});
+
+test("filter, then sort, then page, as the iREPS registry table standard", () => {
+  const geofences = [fence("A", { ...link("TGB_20260915_010101_AAAA", "UNLINKED", ["1", "2", "3"]), name: "Gf W4 Anne1" }), fence("B", { ...link("TGB_20260915_020202_BBBB", "UNLINKED", ["1"]), name: "Gf W6 Acacia" }), fence("C", { name: "Gf W6 Town", createdAt: "2026-08-02T00:00:00.000Z" })];
+  const rows = buildBatchGeofenceRows({ batches: [batch("TGB_20260810_101010_M6PQ", null, "2026-08-10T10:10:10.000Z")], geofences, uid: "U1" });
+  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { geofence: "w6" } }).map(row => row.key).sort(), ["G:B", "G:C"]);
+  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { geofenceCreated: "2026" }, gapsOnly: true }).map(row => row.key).sort(), ["G:A", "G:B"]);
+  const bySavedFor = sortBatchGeofenceRows(rows, { key: "savedFor", direction: "asc" }).map(row => row.key);
+  assert.deepEqual(bySavedFor.slice(0, 2), ["G:B", "G:A"]); assert.deepEqual(bySavedFor.slice(2).sort(), ["B:TGB_20260810_101010_M6PQ", "G:C"], "blanks last");
+  assert.deepEqual(sortBatchGeofenceRows(rows, { key: "savedFor", direction: "desc" }).map(row => row.key).slice(0, 2), ["G:A", "G:B"]);
+  assert.equal(sortBatchGeofenceRows(rows, { key: "" }), rows, "no sort keeps newest first");
+  assert.deepEqual(BATCH_GEOFENCE_PAGE_SIZES, [5, 10, 25, 50, 100]);
+  const many = Array.from({ length: 12 }, (_, index) => ({ key: String(index) }));
+  assert.deepEqual([paginateBatchGeofenceRows(many, 3, 5).rows.length, paginateBatchGeofenceRows(many, 3, 5).totalPages], [2, 3]);
+  assert.equal(paginateBatchGeofenceRows(many, 9, 5).page, 3, "a page past the end shows the last page");
+  const download = batchGeofenceDownloadColumns();
+  assert.equal(download.length, BATCH_GEOFENCE_COLUMNS.length + 1, "every column, shown or hidden, plus Action");
+  assert.equal(download.at(-1).value(rows.find(row => row.key === "G:A")), "Create its batch");
+});
+
+test("the page groups the columns, pages above and below, downloads every filtered row, and goes back", async () => {
+  const page = await read("../BatchesGeofencesPage.jsx");
+  const columnsButton = page.indexOf(">Columns</button>"), gpsLink = page.indexOf('to="/sales/table" style={styles.linkButton}>GPS Sales Table');
+  assert.ok(columnsButton > 0 && gpsLink > columnsButton, "Columns sits left of GPS Sales Table");
+  assert.match(page, /<Link to=\{back\.path\} style=\{styles\.backLink\}>← Back to \{back\.label\}<\/Link>\s*<section style=\{styles\.header\}>/, "Back sits above the heading");
+  assert.match(page, /const shown = \[\.\.\.BATCH_GEOFENCE_COLUMNS\.filter\(column => columns\[column\.key\] && column\.group === "batch"\),\s*\.\.\.BATCH_GEOFENCE_COLUMNS\.filter\(column => columns\[column\.key\] && column\.group === "link"\), ACTION,/);
+  assert.match(page, /index > 0 && shown\[index\]\.group !== shown\[index - 1\]\.group \? styles\.divider : null/);
+  assert.equal(page.match(/\{pagination\}/g).length, 2, "pagination above and below");
+  assert.match(page, /visibleRows=\{sorted\} columns=\{batchGeofenceDownloadColumns\(\)\}/, "download every filtered and sorted row, not the page");
+  assert.match(page, /\{current\.rows\.map\(row =>/, "the body renders the current page only");
+  assert.match(page, /try \{ window\.localStorage\.setItem\(COLUMNS_STORAGE_KEY/);
+  assert.deepEqual(pageReturn({ from: { path: "/sales/table", label: "GPS Sales Table" } }, { path: "/x", label: "X" }), { path: "/sales/table", label: "GPS Sales Table" });
+  assert.deepEqual(pageReturn({ from: { path: "https://evil.example" } }, { path: "/x", label: "X" }), { path: "/x", label: "X" }, "only in-app pages");
 });

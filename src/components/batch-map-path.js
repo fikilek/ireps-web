@@ -4,6 +4,14 @@ export function batchMapPath(tbId) {
   return `/sales/reporting/${encodeURIComponent(tbId)}/map`;
 }
 
+// A Back link's target (rules TB-R044, 1.3.20): the in-app page the user came from, else the fallback.
+export function pageReturn(state, fallback) {
+  const from = state?.from;
+  const path = typeof from?.path === "string" ? from.path : "";
+  if (!path.startsWith("/") || path.startsWith("//")) return fallback;
+  return { path, label: String(from?.label || "").trim() || fallback.label };
+}
+
 export function batchMapReturn(state) {
   const from = state?.from;
   const path = typeof from?.path === "string" ? from.path : "";

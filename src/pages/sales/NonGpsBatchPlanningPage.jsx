@@ -333,7 +333,7 @@ export default function NonGpsBatchPlanningPage() {
         <div style={styles.heroActions}>
           <div style={styles.roleBadge}>{role || "NAv"}</div>
           {/* Targeted Batch rules TB-R044. */}
-          <button type="button" style={styles.refreshButton} onClick={() => navigate("/sales/batches-geofences")}>
+          <button type="button" style={styles.refreshButton} onClick={() => navigate("/sales/batches-geofences", { state: { from: { path: "/sales/non-gps-batch-planning", label: "Non-GPS Sales Table" } } })}>
             Batches &amp; Geofences
           </button>
           <button
