@@ -27,6 +27,20 @@ export function composeGeofenceName(wardNumber, namePart) {
   return wardNumber && part ? `${geofenceNamePrefix(wardNumber)}${part}` : "";
 }
 
+// Geofences rules GF-R002: no two active geofences in a Ward share a name; capital letters and
+// extra spaces are ignored when comparing.
+export function geofenceNameKey(name) {
+  return normalizeGeofenceNamePart(name).toLowerCase();
+}
+export function findDuplicateGeofence(name, geofences = []) {
+  const key = geofenceNameKey(name);
+  if (!key) return null;
+  return geofences.find(fence => fence?.status === "ACTIVE" && geofenceNameKey(fence.name) === key) || null;
+}
+export function duplicateGeofenceNameMessage(fence) {
+  return `"${normalizeGeofenceNamePart(fence?.name)}" already exists. Choose another name.`;
+}
+
 export function checkGeofenceName(name, wardPcode) {
   const wardNumber = wardNumberFromPcode(wardPcode);
   if (!wardNumber) return { ok: false, reason: "The geofence Ward is missing or invalid." };

@@ -2,9 +2,10 @@ import { getGeoFencePointCount } from "./geofence-map-helpers";
 import { headerActionsStyle, countPillStyle, buttonStyle, primaryButtonStyle, drawingPanelStyle, drawingStatsStyle, countDetailStyle, integrityDetailStyle, modalBackdropStyle, modalCardStyle, modalHeaderStyle, modalCloseButtonStyle, modalCountsRowStyle, confirmIntroStyle, countCardGridStyle, countCardStyle, countLabelStyle, countValueStyle, confirmDetailsStyle, confirmFieldLabelStyle, modalActionsStyle, successBoxStyle, inputStyle, textareaStyle } from "./geofence-ui-styles";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import BusySpinner from "../../components/busy-spinner.jsx";
-import { composeGeofenceName, geofenceNamePart, geofenceNamePrefix } from "../../../functions/geofences/geofence-name.js";
+import { composeGeofenceName, geofenceNamePart, geofenceNamePrefix, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../functions/geofences/geofence-name.js";
 
 const namePrefixStyle = { padding: "10px 12px", border: "1px solid #CBD5E1", borderRadius: 10, background: "#F1F5F9", color: "#0F172A", fontWeight: 700, whiteSpace: "nowrap" };
+const duplicateNameStyle = { margin: "0 0 12px", padding: "8px 10px", borderRadius: 10, border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontSize: 13, fontWeight: 700 };
 function Modal({ title, children, onClose, width = 720 }) {
   return (
     <div style={modalBackdropStyle}>
@@ -145,7 +146,10 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
           </div>
         ) : null}
 </>); }
-export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null}) { return (<>
+export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null, existingGeofences = []}) {
+  // Geofences rules GF-R002: checked as each letter is typed; a taken name cannot go on to drawing.
+  const nameDuplicate = wardNumber ? findDuplicateGeofence(composeGeofenceName(wardNumber, geofenceNamePart(draftName)), existingGeofences) : null;
+  return (<>
       {listModalOpen ? (
         <Modal
           title={`Existing Geofences in ${wardLabel}`}
@@ -239,6 +243,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
               Full name: <strong>{composeGeofenceName(wardNumber, geofenceNamePart(draftName)) || `${geofenceNamePrefix(wardNumber)}…`}</strong>
             </p>
           ) : null}
+          {nameDuplicate ? <p role="alert" style={duplicateNameStyle}>{duplicateGeofenceNameMessage(nameDuplicate)}</p> : null}
 
           <label>
             Description
@@ -263,7 +268,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
               Cancel
             </button>
 
-            <button onClick={handleStartDrawing} style={primaryButtonStyle}>
+            <button onClick={handleStartDrawing} disabled={Boolean(nameDuplicate)} style={{ ...primaryButtonStyle, opacity: nameDuplicate ? 0.45 : 1, cursor: nameDuplicate ? "not-allowed" : "pointer" }}>
               Start Drawing
             </button>
           </div>

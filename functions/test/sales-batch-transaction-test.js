@@ -40,7 +40,7 @@ async function seed(n=1,{source="PREPAID_SALES_NON_GPS"}={}){
 }
 async function saveFence({db,request: req,codec}) {
  const {points,saveSalesIds: _ignored,...intent}=req.data;
- return createGeoFenceRequest({db,codec,request:{...req,data:{name:"Gf W1 Test named fence",description:"Owner description",parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:points.map(p=>Array.isArray(p)?{latitude:p[1],longitude:p[0]}:p),targetedBatch:intent}}});
+ return createGeoFenceRequest({db,codec,request:{...req,data:{name:`Gf W1 Test ${intent.tbId}`,description:"Owner description",parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:points.map(p=>Array.isArray(p)?{latitude:p[1],longitude:p[0]}:p),targetedBatch:intent}}});
 }
 async function fenceFor(tbId=f.tbId) {return (await db.collection("geo_fences").where("targetedBatch.tbId","==",tbId).get()).docs[0];}
 async function prepare(ids,{source="PREPAID_SALES_NON_GPS",tbId=f.tbId}={}){
@@ -266,7 +266,7 @@ test("concurrent identical fence requests produce exactly one ordinary auto ID",
  const results=await Promise.all(Array.from({length:4},()=>saveFence({db,request:request({...intent,points:f.fencePoints}),codec})));
  assert.equal(new Set(results.map(r=>r.geofenceId)).size,1);
  const docs=await db.collection("geo_fences").get();assert.equal(docs.size,1);
- const fence=docs.docs[0].data();assert.match(fence.id,/^[A-Za-z0-9]{20}$/);assert.equal(fence.name,"Gf W1 Test named fence");assert.equal(fence.description,"Owner description");assert.equal(fence.status,"ACTIVE");
+ const fence=docs.docs[0].data();assert.match(fence.id,/^[A-Za-z0-9]{20}$/);assert.equal(fence.name,`Gf W1 Test ${f.tbId}`);assert.equal(fence.description,"Owner description");assert.equal(fence.status,"ACTIVE");
  assert.deepEqual(Object.keys(fence.targetedBatch).sort(),["fingerprint","geometryHash","linkState","salesIds","tbId"]);
  assert.equal(fence.purpose,undefined);assert.equal(fence.proposedTbId,undefined);
  assert.equal((await saveFence({db,request:request({...intent,points:f.fencePoints}),codec})).reused,true);
@@ -289,6 +289,22 @@ test("normal area permission cannot widen batch planning permission",async()=>{
  await assert.rejects(saveFence({db,request:request({...intent,points:f.fencePoints}),codec}),/Only MNG/);
  const result=await createGeoFenceRequest({db,request:request({name:"Gf W1 Area",parents:{lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({longitude,latitude}))})});
  const area=(await db.doc(`geo_fences/${result.geofenceId}`).get()).data();assert.equal(area.status,"ACTIVE");assert.equal(area.targetedBatch,undefined);
+});
+// Geofences rules GF-R002: no two active geofences in a Ward share a name (capital letters ignored).
+test("a name taken by an active geofence in the Ward is refused for area and batch geofences; a removed one's name is free",async()=>{
+ const area=name=>request({name,parents:{lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({longitude,latitude}))});
+ const ids=await seed(),intent=await resolveIntent(ids);
+ await db.doc(`users/${f.actor.uid}`).update({"employment.role":"ADM"});
+ const first=await createGeoFenceRequest({db,request:area("Gf W1 Albert Street")});assert.equal(first.success,true);
+ await assert.rejects(createGeoFenceRequest({db,request:area("Gf W1 ALBERT STREET")}),{code:"already-exists",message:/"Gf W1 Albert Street" already exists\. Choose another name\./});
+ await db.doc(`users/${f.actor.uid}`).update({"employment.role":"MNG"});
+ await assert.rejects(createGeoFenceRequest({db,codec,request:request({name:"Gf W1 albert street",parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({longitude,latitude})),targetedBatch:intent})}),{code:"GEOFENCE_NAME_TAKEN"});
+ assert.equal((await db.collection("geo_fences").get()).size,1,"nothing was created");
+ const saved=await saveFence({db,request:request({...intent,points:f.fencePoints}),codec});assert.equal(saved.reused,false);
+ assert.equal((await saveFence({db,request:request({...intent,points:f.fencePoints}),codec})).reused,true,"saving again for the same batch is not a duplicate");
+ await db.doc(`geo_fences/${first.geofenceId}`).update({status:"INACTIVE"});
+ await db.doc(`users/${f.actor.uid}`).update({"employment.role":"ADM"});
+ assert.equal((await createGeoFenceRequest({db,request:area("Gf W1 Albert Street")})).success,true,"a removed geofence's name can be used again");
 });
 test("batch supervisor also needs normal MNC geofence permission",async()=>{
  const ids=await seed(),intent=await resolveIntent(ids);

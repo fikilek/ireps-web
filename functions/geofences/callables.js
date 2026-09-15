@@ -5,7 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore } from "firebase-admin/firestore";
 import { createSalesBatchGeofence } from "../targetedBatches/sales-batch-geofence.js";
 import { createProofCodec, salesBatchProofKey, callableFailure } from "../targetedBatches/sales-batch-resolution.js";
-import { checkGeofenceName } from "./geofence-name.js";
+import { checkGeofenceName, findDuplicateGeofence, duplicateGeofenceNameMessage } from "./geofence-name.js";
 
 import {
   validateCreateGeoFencePayload,
@@ -62,9 +62,16 @@ export async function createGeoFenceRequest({ db, request, codec }) {
   }
 
   const geoFenceRef = db.collection("geo_fences").doc();
-  await geoFenceRef.set(buildGeoFenceDocument({
-    id: geoFenceRef.id, name, description, parents, points, actorUid, actorName, now: new Date().toISOString(),
-  }));
+  // Geofences rules GF-R002: no two active geofences in a Ward share a name. Reading the Ward's
+  // geofences inside the transaction makes a concurrent create of the same name conflict.
+  await db.runTransaction(async (tx) => {
+    const wardFences = await tx.get(db.collection("geo_fences").where("parents.wardPcode", "==", parents.wardPcode));
+    const duplicate = findDuplicateGeofence(name, wardFences.docs.map((doc) => doc.data()));
+    if (duplicate) throw new HttpsError("already-exists", duplicateGeofenceNameMessage(duplicate));
+    tx.create(geoFenceRef, buildGeoFenceDocument({
+      id: geoFenceRef.id, name, description, parents, points, actorUid, actorName, now: new Date().toISOString(),
+    }));
+  });
 
   return {
     success: true,

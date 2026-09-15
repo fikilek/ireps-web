@@ -3,7 +3,7 @@ import { pageStyle, headerStyle, eyebrowStyle, wardSelectWrapStyle, wardSelectLa
 import { GeofenceToolbar, GeofenceDrawingBar, GeofenceDialogs } from "./geofence-shared-ui";
 import { ExistingGeoFenceLayer, DraftGeoFenceLayer, WardBoundaryPolygons } from "./geofence-map-layers";
 import { isUsableMapPoint, toUsableLatLng, normalizeBbox, fitMapToBbox, parseGeometry, geoJsonPolygonToGooglePaths } from "./geofence-map-helpers";
-import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../functions/geofences/geofence-name.js";
+import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../functions/geofences/geofence-name.js";
 // src/pages/operations/GeoFencesPage.jsx
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1370,6 +1370,13 @@ export default function GeoFencesPage() {
       return;
     }
 
+    // Geofences rules GF-R002: no two active geofences in a Ward share a name.
+    const duplicate = findDuplicateGeofence(standardDraftName, geofences);
+    if (duplicate) {
+      alert(duplicateGeofenceNameMessage(duplicate));
+      return;
+    }
+
     setSelectedGeoFence(null);
     setDraftPoints([]);
     setCreateModalOpen(false);
@@ -1421,6 +1428,12 @@ export default function GeoFencesPage() {
     }
 
     if (!canSaveDraft) return;
+
+    const duplicate = findDuplicateGeofence(standardDraftName, geofences);
+    if (duplicate) {
+      alert(duplicateGeofenceNameMessage(duplicate));
+      return;
+    }
 
     const successPayload = {
       name: standardDraftName,
@@ -1650,7 +1663,7 @@ export default function GeoFencesPage() {
         </APIProvider>
       </div>
 
-      <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess }} wardNumber={draftWardNumber}/>
+      <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess }} wardNumber={draftWardNumber} existingGeofences={geofences}/>
 
     </section>
   );

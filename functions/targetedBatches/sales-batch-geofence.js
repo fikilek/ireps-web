@@ -3,6 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { nonblank, validDocumentId } from "../salesAllMeters/sales-batch-policy.js";
 import { polygonFromPoints, normalizeBatchGeometry, strictlyInside, strictlyWithinWard } from "../geofences/sales-batch-geometry.js";
 import { assertCanCreateGeoFence, buildGeoFenceDocument } from "../geofences/helpers.js";
+import { findDuplicateGeofence, duplicateGeofenceNameMessage } from "../geofences/geofence-name.js";
 import { batchError, canonicalJson, materialHash, requireBatchIntent, readBatchActor, snapshotReader, proofScope, readDraftAssessment, createProofCodec, salesBatchProofKey, callableFailure } from "./sales-batch-resolution.js";
 
 export function requireSalesBatchFenceId(intent) {
@@ -40,6 +41,11 @@ export async function createSalesBatchGeofence({ db, request, codec, name, descr
     if (assessment.wards.length !== 1) throw batchError("MIXED_OR_UNRESOLVED_WARDS", "Exactly one Ward is required");
     const wardPcode = assessment.wards[0];
     if (parents.wardPcode !== wardPcode) throw batchError("GEOFENCE_SCOPE_INVALID", "The geofence must use the draft's authoritative Ward");
+    // Geofences rules GF-R002: a new batch geofence may not take an active geofence's name in the Ward.
+    // (Saving again for the same batch returned the saved geofence above.)
+    const wardFences = await read(db.collection("geo_fences").where("parents.wardPcode", "==", wardPcode));
+    const duplicate = findDuplicateGeofence(name, wardFences.docs.map(doc => doc.data()));
+    if (duplicate) throw batchError("GEOFENCE_NAME_TAKEN", duplicateGeofenceNameMessage(duplicate));
     const context = [...assessment.contexts.values()][0];
     if (!strictlyWithinWard(geometry, context.wardGeometry)) throw batchError("GEOFENCE_OUTSIDE_WARD", "The complete geofence must lie strictly inside the Ward, without touching its boundary");
     const ids = assessment.rows.filter(row => row.ready && strictlyInside(assessment.contexts.get(row.salesId).centroid, geometry)).map(row => row.salesId).sort();

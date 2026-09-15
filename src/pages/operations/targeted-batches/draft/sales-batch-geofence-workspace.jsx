@@ -12,7 +12,9 @@ import { buildGeofencePlanningDraftStats } from "../../geofencePlanningModel";
 import { mapShellStyle, wardSelectWrapStyle } from "../../geofence-ui-styles";
 import { geofenceKind, getGeoFencePath, pathsOverlap, pointsCentre, parseGeometry, geoJsonPolygonToGooglePaths, wardNameLabelPoint } from "../../geofence-map-helpers";
 import { useGetWardBoundariesByLmQuery } from "../../../../redux/mapWardsApi";
-import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode } from "../../../../../functions/geofences/geofence-name.js";
+import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../../../functions/geofences/geofence-name.js";
+import GeofenceProgressModal from "./geofence-progress-modal.jsx";
+import { geofenceProgress, GEOFENCE_PROGRESS_TIMEOUT_MS } from "./geofence-progress.js";
 import { NEARBY_LAYERS, combineNearbyLayers, locatedMeterBounds, mapPoint } from "../../../../features/maps/sales-batch-nearby.js";
 import { salesDraftWardLabel, salesDraftMessage } from "./sales-batch-draft-model";
 import { draftButtonStyle } from "./targetedBatchDraftReviewStyles";
@@ -26,6 +28,7 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const pendingFence = Boolean(draft.savedFence?.id && !draft.savedFence.status);
   const [mapTypeId, setMapTypeId] = useState("roadmap"), [selectedGeoFence, setSelectedGeoFence] = useState(null);
   const [listModalOpen, setListModalOpen] = useState(false), [createModalOpen, setCreateModalOpen] = useState(false), [confirmCreateModalOpen, setConfirmCreateModalOpen] = useState(false), [createSuccess, setCreateSuccess] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [draftName, setDraftName] = useState(""), [draftDescription, setDraftDescription] = useState(""), [error, setError] = useState("");
   const [visibility, setVisibility] = useState({ erfs: false, sales: false, premises: false, assets: false, geofences: false, wards: false });
   const [salesStatusVisibility, setSalesStatusVisibility] = useState({ notStarted: true, inProgress: true, completed: true });
@@ -80,17 +83,32 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
   const handleStartDrawing = () => {
     if (!scopeReady || saved || pendingFence || busy) return;
     if (!geofenceNamePart(draftName).trim()) { setError(`Type a name after "Gf W${draftWardNumber}".`); return; }
+    // Geofences rules GF-R002: no two active geofences in a Ward share a name.
+    const duplicate = findDuplicateGeofence(standardDraftName, geofences);
+    if (duplicate) { setError(duplicateGeofenceNameMessage(duplicate)); return; }
     drawing.clear(); drawing.setDrawing(true); setSelectedGeoFence(null); setCreateModalOpen(false); setError("");
   };
+  // Rules TB-R040 (1.3.22): a progress window from Save until Create Batch is really available.
   const handleConfirmCreate = async () => {
     if (!canSaveDraft) return;
+    const duplicate = findDuplicateGeofence(standardDraftName, geofences);
+    if (duplicate) { setError(duplicateGeofenceNameMessage(duplicate)); return; }
+    setConfirmCreateModalOpen(false);
+    setProgress({ phase: "saving", name: standardDraftName, wardLabel, fenceId: null, timedOut: false });
     try {
-      await onSave({ name: standardDraftName, description: draftDescription.trim() || "NAv", parents: { lmPcode, wardPcode,
+      const result = await onSave({ name: standardDraftName, description: draftDescription.trim() || "NAv", parents: { lmPcode, wardPcode,
         countryPcode: "ZA", provincePcode: lmPcode.slice(0, 3), dmPcode: lmPcode.slice(0, -1) }, points: draftPoints.map((point, order) => ({ latitude: point.lat, longitude: point.lng, order })) });
-      setCreateSuccess({ name: standardDraftName, wardLabel, stats: draftPreviewStats, isTcContext: false });
+      setProgress(current => current && { ...current, phase: "saved", fenceId: result?.geofenceId || null });
       handleCancelDraft();
-    } catch (failure) { setError(salesDraftMessage(failure.message || failure.error || "Couldn't create the geofence. Try the same request again.")); }
+    } catch (failure) { setProgress(null); setError(salesDraftMessage(failure.message || failure.error || "Couldn't create the geofence. Try the same request again.")); }
   };
+  const progressState = progress ? geofenceProgress({ phase: progress.phase, fenceId: progress.fenceId, fence: draft.savedFence, locating, createReady: !createDisabled, timedOut: progress.timedOut }) : null;
+  const waitingForLink = Boolean(progress && progress.phase === "saved" && !progress.timedOut && !progressState?.done);
+  useEffect(() => {
+    if (!waitingForLink) return undefined;
+    const timer = setTimeout(() => setProgress(current => current && { ...current, timedOut: true }), GEOFENCE_PROGRESS_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [waitingForLink]);
   const handleOpenCreateModal = () => { if (scopeReady && !saved && !pendingFence && !busy) { setCreateModalOpen(true); setError(""); } };
   const handleOpenCreateConfirm = () => { if (canSaveDraft) setConfirmCreateModalOpen(true); };
   const handleMapClick = event => { if (!isCreateMode || busy) return; const point = mapPoint(event.detail?.latLng); if (point) drawing.addPoint(point); };
@@ -131,7 +149,8 @@ export default function SalesBatchGeofenceWorkspace({ draft, model, live, drawin
     <p style={legendStyle}>Your draft's meters: G = position from address · S = Sales GPS; a thick outline marks a meter left out of the batch.
       Nearby Sales: <SalesStatusGlyph status={SALES_STATUSES.NOT_STARTED}/> Not Started · <SalesStatusGlyph status={SALES_STATUSES.IN_PROGRESS}/> In Progress · <SalesStatusGlyph status={SALES_STATUSES.COMPLETED}/> Completed (GPS Sales at their Sales GPS point; Non-GPS Sales in a batch at the position saved with their batch).
       Hover a meter or row to highlight both.</p>
-    <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} overlaps={overlapsNote} visibleGeofences={geofences} lockedWard wardNumber={draftWardNumber}/>
+    <GeofenceDialogs {...{ listModalOpen, wardLabel, setListModalOpen, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness }} overlaps={overlapsNote} visibleGeofences={geofences} existingGeofences={geofences} lockedWard wardNumber={draftWardNumber}/>
+    {progress && progressState ? <GeofenceProgressModal name={progress.name} wardLabel={progress.wardLabel} progress={progressState} fence={draft.savedFence} onClose={() => setProgress(null)}/> : null}
   </div>;
 }
 
