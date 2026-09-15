@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { BATCH_GEOFENCE_STATUS as S, BATCH_GEOFENCE_COLUMNS, BATCH_GEOFENCE_PAGE_SIZES, buildBatchGeofenceRows, isBatchGeofenceGap, salesDraftForGeofence, defaultBatchGeofenceColumns,
-  allBatchGeofenceColumns, readBatchGeofenceColumns, filterBatchGeofenceRows, sortBatchGeofenceRows, paginateBatchGeofenceRows, batchGeofenceDownloadColumns } from "./batchGeofenceModel.js";
+  allBatchGeofenceColumns, readBatchGeofenceColumns, filterBatchGeofenceRows, sortBatchGeofenceRows, paginateBatchGeofenceRows, batchGeofenceDownloadColumns, batchGeofenceSelectOptions } from "./batchGeofenceModel.js";
 import { pageReturn } from "../../../components/batch-map-path.js";
 import { buildTargetedBatchDraft } from "../../../redux/targetedBatchDraftModel.js";
 import { salesDraftIntent } from "../../operations/targeted-batches/draft/sales-batch-draft-model.js";
@@ -90,8 +90,10 @@ test("the owner's default columns; a remembered choice is read safely", () => {
 test("filter, then sort, then page, as the iREPS registry table standard", () => {
   const geofences = [fence("A", { ...link("TGB_20260915_010101_AAAA", "UNLINKED", ["1", "2", "3"]), name: "Gf W4 Anne1" }), fence("B", { ...link("TGB_20260915_020202_BBBB", "UNLINKED", ["1"]), name: "Gf W6 Acacia" }), fence("C", { name: "Gf W6 Town", createdAt: "2026-08-02T00:00:00.000Z" })];
   const rows = buildBatchGeofenceRows({ batches: [batch("TGB_20260810_101010_M6PQ", null, "2026-08-10T10:10:10.000Z")], geofences, uid: "U1" });
-  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { geofence: "w6" } }).map(row => row.key).sort(), ["G:B", "G:C"]);
-  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { geofenceCreated: "2026" }, gapsOnly: true }).map(row => row.key).sort(), ["G:A", "G:B"]);
+  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { batchId: "aaaa" } }).map(row => row.key), ["G:A"], "typed text, any case");
+  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { geofence: "Gf W6 Acacia" } }).map(row => row.key), ["G:B"], "a dropdown matches its value exactly");
+  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { geofence: "Gf W6" } }).map(row => row.key), []);
+  assert.deepEqual(filterBatchGeofenceRows(rows, { filters: { status: "Batch not created" }, gapsOnly: true }).map(row => row.key).sort(), ["G:A", "G:B"]);
   const bySavedFor = sortBatchGeofenceRows(rows, { key: "savedFor", direction: "asc" }).map(row => row.key);
   assert.deepEqual(bySavedFor.slice(0, 2), ["G:B", "G:A"]); assert.deepEqual(bySavedFor.slice(2).sort(), ["B:TGB_20260810_101010_M6PQ", "G:C"], "blanks last");
   assert.deepEqual(sortBatchGeofenceRows(rows, { key: "savedFor", direction: "desc" }).map(row => row.key).slice(0, 2), ["G:A", "G:B"]);
@@ -105,6 +107,31 @@ test("filter, then sort, then page, as the iREPS registry table standard", () =>
   assert.equal(download.at(-1).value(rows.find(row => row.key === "G:A")), "Create its batch");
 });
 
+// Rules TB-R044 (1.3.21): dropdowns for Batch by, Source, Status, Geofence, Kind, Geofence by;
+// the standard date filter for Batch created and Geofence created.
+test("dropdown and date filters", () => {
+  assert.deepEqual(BATCH_GEOFENCE_COLUMNS.filter(column => column.filter === "select").map(column => column.key), ["batchBy", "source", "status", "geofence", "kind", "geofenceBy"]);
+  assert.deepEqual(BATCH_GEOFENCE_COLUMNS.filter(column => column.filter === "date").map(column => column.key), ["batchCreated", "geofenceCreated"]);
+  const now = new Date(2026, 8, 15, 10, 0, 0); // Tuesday 15 Sep 2026, local time
+  const at = (day, hour = 9) => new Date(2026, 8, day, hour, 0, 0).toISOString();
+  const geofences = [fence("TODAY", { createdAt: at(15) }), fence("YESTERDAY", { createdAt: at(14, 23) }), fence("SUNDAY", { createdAt: at(13) }), fence("LASTWEEK", { createdAt: at(12) }),
+    fence("AUGUST", { createdAt: new Date(2026, 7, 31, 12).toISOString() }), fence("NONE", { createdAt: null })];
+  const rows = buildBatchGeofenceRows({ geofences });
+  const pick = filter => filterBatchGeofenceRows(rows, { filters: { geofenceCreated: filter }, now }).map(row => row.key.slice(2)).sort();
+  assert.deepEqual(pick({ mode: "TODAY" }), ["TODAY"]);
+  assert.deepEqual(pick({ mode: "YESTERDAY" }), ["YESTERDAY"]);
+  assert.deepEqual(pick({ mode: "PAST_3_DAYS" }), ["SUNDAY", "TODAY", "YESTERDAY"]);
+  assert.deepEqual(pick({ mode: "THIS_WEEK" }), ["SUNDAY", "TODAY", "YESTERDAY"], "the week starts on Sunday, as in the registries");
+  assert.deepEqual(pick({ mode: "THIS_MONTH" }), ["LASTWEEK", "SUNDAY", "TODAY", "YESTERDAY"]);
+  assert.deepEqual(pick({ mode: "CUSTOM", startDate: "2026-08-31", endDate: "2026-09-12" }), ["AUGUST", "LASTWEEK"]);
+  assert.deepEqual(pick({ mode: "ALL" }).length, 6, "no date filter keeps every row, even without a date");
+  const withBatches = buildBatchGeofenceRows({ batches: [batch("TGB_20260915_010101_AAAA", null, at(15)), { ...batch("TGB_20260915_020202_BBBB", null, at(15)), metadata: { createdByUser: "Simo" }, source: { type: "PREPAID_SALES" } }], geofences: [fence("X")] });
+  const column = key => BATCH_GEOFENCE_COLUMNS.find(item => item.key === key);
+  assert.deepEqual(batchGeofenceSelectOptions(withBatches, column("batchBy")), ["Simo", "Zamo Ngubs"]);
+  assert.deepEqual(batchGeofenceSelectOptions(withBatches, column("source")), ["GPS Sales", "Non-GPS Sales"]);
+  assert.deepEqual(batchGeofenceSelectOptions([], column("status")), Object.values(S), "Status lists every status");
+});
+
 test("the page groups the columns, pages above and below, downloads every filtered row, and goes back", async () => {
   const page = await read("../BatchesGeofencesPage.jsx");
   const columnsButton = page.indexOf(">Columns</button>"), gpsLink = page.indexOf('to="/sales/table" style={styles.linkButton}>GPS Sales Table');
@@ -116,6 +143,9 @@ test("the page groups the columns, pages above and below, downloads every filter
   assert.match(page, /visibleRows=\{sorted\} columns=\{batchGeofenceDownloadColumns\(\)\}/, "download every filtered and sorted row, not the page");
   assert.match(page, /\{current\.rows\.map\(row =>/, "the body renders the current page only");
   assert.match(page, /try \{ window\.localStorage\.setItem\(COLUMNS_STORAGE_KEY/);
+  assert.match(page, /column\.filter === "select" \? <select aria-label=\{`Filter \$\{column\.label\}`\}/);
+  assert.match(page, /column\.filter === "date" \? <DatetimeFilterButton filter=\{filters\[column\.key\] \|\| EMPTY_DATETIME_FILTER\}/);
+  assert.match(page, /<DatetimeFilterModal filter=\{filters\[dateFilterFor\] \|\| EMPTY_DATETIME_FILTER\}/, "the standard date filter window");
   assert.deepEqual(pageReturn({ from: { path: "/sales/table", label: "GPS Sales Table" } }, { path: "/x", label: "X" }), { path: "/sales/table", label: "GPS Sales Table" });
   assert.deepEqual(pageReturn({ from: { path: "https://evil.example" } }, { path: "/x", label: "X" }), { path: "/x", label: "X" }, "only in-app pages");
 });

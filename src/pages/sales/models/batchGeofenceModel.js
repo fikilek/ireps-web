@@ -62,19 +62,19 @@ export function buildBatchGeofenceRows({ batches = [], geofences = [], uid = "" 
 // Action always shows in the Link group and is not a chooser column.
 export const BATCH_GEOFENCE_GROUPS = Object.freeze([{ key: "batch", label: "Batch" }, { key: "link", label: "Link" }, { key: "geofence", label: "Geofence" }]);
 export const BATCH_GEOFENCE_COLUMNS = Object.freeze([
-  { key: "batchId", group: "batch", label: "Batch ID", show: true, value: row => row.batch?.id || (row.plannedBatchId ? `${row.plannedBatchId} (not created)` : "") },
-  { key: "batchCreated", group: "batch", label: "Batch created", show: false, type: "date", value: row => row.batch?.createdAt || "" },
-  { key: "batchBy", group: "batch", label: "Batch by", show: false, value: row => row.batch?.createdBy || "" },
-  { key: "batchMeters", group: "batch", label: "Batch meters", show: true, type: "number", value: row => row.batch?.meters ?? null },
-  { key: "source", group: "batch", label: "Source", show: false, value: row => row.batch?.source || "" },
-  { key: "status", group: "link", label: "Status", show: true, value: row => row.status },
-  { key: "geofence", group: "geofence", label: "Geofence", show: true, value: row => row.geofence?.name || "" },
-  { key: "kind", group: "geofence", label: "Kind", show: false, value: row => row.geofence?.kind || "" },
-  { key: "geofenceCreated", group: "geofence", label: "Geofence created", show: true, type: "date", value: row => row.geofence?.createdAt || "" },
-  { key: "geofenceBy", group: "geofence", label: "Geofence by", show: false, value: row => row.geofence?.createdBy || "" },
-  { key: "savedFor", group: "geofence", label: "Meters it was saved for", show: false, type: "number", value: row => row.geofence?.batchMeters ?? null },
-  { key: "salesMeters", group: "geofence", label: "Sales meters in it", show: false, type: "number", value: row => row.geofence?.salesMeters ?? null },
-  { key: "assets", group: "geofence", label: "Assets in it", show: false, type: "number", value: row => row.geofence?.assets ?? null },
+  { key: "batchId", group: "batch", label: "Batch ID", show: true, filter: "text", value: row => row.batch?.id || (row.plannedBatchId ? `${row.plannedBatchId} (not created)` : "") },
+  { key: "batchCreated", group: "batch", label: "Batch created", show: false, filter: "date", type: "date", value: row => row.batch?.createdAt || "" },
+  { key: "batchBy", group: "batch", label: "Batch by", show: false, filter: "select", value: row => row.batch?.createdBy || "" },
+  { key: "batchMeters", group: "batch", label: "Batch meters", show: true, filter: "text", type: "number", value: row => row.batch?.meters ?? null },
+  { key: "source", group: "batch", label: "Source", show: false, filter: "select", value: row => row.batch?.source || "" },
+  { key: "status", group: "link", label: "Status", show: true, filter: "select", value: row => row.status },
+  { key: "geofence", group: "geofence", label: "Geofence", show: true, filter: "select", value: row => row.geofence?.name || "" },
+  { key: "kind", group: "geofence", label: "Kind", show: false, filter: "select", value: row => row.geofence?.kind || "" },
+  { key: "geofenceCreated", group: "geofence", label: "Geofence created", show: true, filter: "date", type: "date", value: row => row.geofence?.createdAt || "" },
+  { key: "geofenceBy", group: "geofence", label: "Geofence by", show: false, filter: "select", value: row => row.geofence?.createdBy || "" },
+  { key: "savedFor", group: "geofence", label: "Meters it was saved for", show: false, filter: "text", type: "number", value: row => row.geofence?.batchMeters ?? null },
+  { key: "salesMeters", group: "geofence", label: "Sales meters in it", show: false, filter: "text", type: "number", value: row => row.geofence?.salesMeters ?? null },
+  { key: "assets", group: "geofence", label: "Assets in it", show: false, filter: "text", type: "number", value: row => row.geofence?.assets ?? null },
 ]);
 export function formatBatchGeofenceDate(iso) {
   const date = iso ? new Date(iso) : null;
@@ -95,10 +95,45 @@ export function readBatchGeofenceColumns(stored) {
 
 // The iREPS registry table standard (ui-rules/registry-tables.md): filter, then sort, then page.
 export const BATCH_GEOFENCE_PAGE_SIZES = Object.freeze([5, 10, 25, 50, 100]);
-export function filterBatchGeofenceRows(rows, { filters = {}, gapsOnly = false } = {}) {
-  const active = BATCH_GEOFENCE_COLUMNS.filter(column => text(filters[column.key]));
-  return rows.filter(row => (!gapsOnly || isBatchGeofenceGap(row))
-    && active.every(column => displayBatchGeofenceValue(column, row).toLowerCase().includes(text(filters[column.key]).toLowerCase())));
+// Rules TB-R044 (1.3.21): typed text, a dropdown of the table's values, or the standard iREPS date
+// filter ({ mode, startDate, endDate }: Today, Yesterday, Past 3 days, this calendar week or month,
+// custom range), with the same day ranges as the registry pages.
+const startOfDay = date => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+const endOfDay = date => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+const addDays = (date, days) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+const dateOnly = value => { const [year, month, day] = String(value || "").split("-").map(Number); return year && month && day ? new Date(year, month - 1, day) : null; };
+export function batchGeofenceDateRange(filter, now = new Date()) {
+  const mode = filter?.mode || "ALL", today = startOfDay(now);
+  if (mode === "TODAY") return { start: today, end: endOfDay(now) };
+  if (mode === "YESTERDAY") { const yesterday = addDays(today, -1); return { start: yesterday, end: endOfDay(yesterday) }; }
+  if (mode === "PAST_3_DAYS") return { start: addDays(today, -2), end: endOfDay(now) };
+  if (mode === "THIS_WEEK") { const sunday = addDays(today, -today.getDay()); return { start: sunday, end: endOfDay(addDays(sunday, 6)) }; }
+  if (mode === "THIS_MONTH") return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999) };
+  if (mode === "CUSTOM") { const start = dateOnly(filter.startDate), end = dateOnly(filter.endDate); return { start: start ? startOfDay(start) : null, end: end ? endOfDay(end) : null }; }
+  return { start: null, end: null };
+}
+const dateFilterActive = filter => Boolean(filter && typeof filter === "object" && filter.mode && filter.mode !== "ALL");
+export function batchGeofenceFilterActive(column, filter) {
+  return column.filter === "date" ? dateFilterActive(filter) : Boolean(text(filter));
+}
+function matchesFilter(column, row, filter, now) {
+  if (column.filter === "date") {
+    const date = column.value(row) ? new Date(column.value(row)) : null;
+    if (!date || Number.isNaN(date.getTime())) return false;
+    const { start, end } = batchGeofenceDateRange(filter, now);
+    return (!start || date >= start) && (!end || date <= end);
+  }
+  const shown = displayBatchGeofenceValue(column, row);
+  return column.filter === "select" ? shown === filter : shown.toLowerCase().includes(text(filter).toLowerCase());
+}
+export function filterBatchGeofenceRows(rows, { filters = {}, gapsOnly = false, now = new Date() } = {}) {
+  const active = BATCH_GEOFENCE_COLUMNS.filter(column => batchGeofenceFilterActive(column, filters[column.key]));
+  return rows.filter(row => (!gapsOnly || isBatchGeofenceGap(row)) && active.every(column => matchesFilter(column, row, filters[column.key], now)));
+}
+// The dropdown lists the values in the table; Status always lists every status.
+export function batchGeofenceSelectOptions(rows, column) {
+  if (column.key === "status") return Object.values(BATCH_GEOFENCE_STATUS);
+  return [...new Set(rows.map(row => displayBatchGeofenceValue(column, row)).filter(Boolean))].sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
 }
 export function sortBatchGeofenceRows(rows, sort = {}) {
   const column = BATCH_GEOFENCE_COLUMNS.find(item => item.key === sort.key);

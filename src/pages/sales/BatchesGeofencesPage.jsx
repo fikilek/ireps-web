@@ -10,10 +10,11 @@ import { useGetPermanentSalesBatchesQuery } from "../../redux/salesTargetedBatch
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { prepareTargetedBatchDraft, saveSalesDraftFence, selectTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import DownloadButtons from "../../components/DownloadButtons";
+import { DatetimeFilterButton, DatetimeFilterModal, EMPTY_DATETIME_FILTER } from "../../components/DatetimeFilter";
 import { pageReturn } from "../../components/batch-map-path.js";
 import { BATCH_GEOFENCE_COLUMNS, BATCH_GEOFENCE_GROUPS, BATCH_GEOFENCE_PAGE_SIZES, BATCH_GEOFENCE_STATUS, allBatchGeofenceColumns, batchGeofenceDownloadColumns, buildBatchGeofenceRows,
   defaultBatchGeofenceColumns, displayBatchGeofenceValue, filterBatchGeofenceRows, isBatchGeofenceGap, paginateBatchGeofenceRows, readBatchGeofenceColumns, salesDraftForGeofence,
-  sortBatchGeofenceRows } from "./models/batchGeofenceModel.js";
+  sortBatchGeofenceRows, batchGeofenceSelectOptions } from "./models/batchGeofenceModel.js";
 import { getActiveLmPcode, getActiveWorkbaseName } from "./salesUtils";
 
 // Targeted Batch rules TB-R044: every batch with its geofence and every geofence with its batch.
@@ -108,6 +109,8 @@ function ColumnsChooser({ columns, onChange, onClose }) {
 function BatchGeofenceTable({ rows, columns, loading, opening, onCreateBatch, scope }) {
   const [filters, setFilters] = useState({}), [gapsOnly, setGapsOnly] = useState(false);
   const [sort, setSort] = useState(DEFAULT_SORT), [page, setPage] = useState(1), [pageSize, setPageSize] = useState(BATCH_GEOFENCE_PAGE_SIZES[0]);
+  const [dateFilterFor, setDateFilterFor] = useState("");
+  const options = useMemo(() => Object.fromEntries(BATCH_GEOFENCE_COLUMNS.filter(column => column.filter === "select").map(column => [column.key, batchGeofenceSelectOptions(rows, column)])), [rows]);
   const filtered = useMemo(() => filterBatchGeofenceRows(rows, { filters, gapsOnly }), [rows, filters, gapsOnly]);
   const sorted = useMemo(() => sortBatchGeofenceRows(filtered, sort), [filtered, sort]);
   const current = paginateBatchGeofenceRows(sorted, page, pageSize);
@@ -141,7 +144,11 @@ function BatchGeofenceTable({ rows, columns, loading, opening, onCreateBatch, sc
               <span>{column.label}</span><span aria-hidden="true">{sort.key === column.key ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button>}
           </th>)}</tr>
           <tr>{shown.map((column, index) => <th key={column.key} style={{ ...styles.filterCell, ...divider(index) }}>
-            {column === ACTION ? null : <input aria-label={`Filter ${column.label}`} style={styles.filter} value={filters[column.key] || ""} onChange={event => setFilter(column.key, event.target.value)}/>}
+            {column === ACTION ? null
+              : column.filter === "select" ? <select aria-label={`Filter ${column.label}`} style={styles.filter} value={filters[column.key] || ""} onChange={event => setFilter(column.key, event.target.value)}>
+                <option value="">All</option>{options[column.key].map(option => <option key={option} value={option}>{option}</option>)}</select>
+              : column.filter === "date" ? <DatetimeFilterButton filter={filters[column.key] || EMPTY_DATETIME_FILTER} fieldLabel={column.label} onClick={() => setDateFilterFor(column.key)}/>
+              : <input aria-label={`Filter ${column.label}`} style={styles.filter} value={filters[column.key] || ""} onChange={event => setFilter(column.key, event.target.value)}/>}
           </th>)}</tr>
         </thead>
         <tbody>
@@ -158,6 +165,9 @@ function BatchGeofenceTable({ rows, columns, loading, opening, onCreateBatch, sc
       </table>
     </div>
     {pagination}
+    {dateFilterFor ? <DatetimeFilterModal filter={filters[dateFilterFor] || EMPTY_DATETIME_FILTER} fieldLabel={BATCH_GEOFENCE_COLUMNS.find(column => column.key === dateFilterFor).label}
+      onApply={filter => { setFilter(dateFilterFor, filter); setDateFilterFor(""); }} onClear={() => { setFilter(dateFilterFor, EMPTY_DATETIME_FILTER); setDateFilterFor(""); }}
+      onClose={() => setDateFilterFor("")}/> : null}
   </>;
 }
 
