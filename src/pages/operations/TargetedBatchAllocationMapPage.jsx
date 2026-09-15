@@ -25,6 +25,7 @@ import {
   buildAllocationMapModel,
   toggleAllocationSelection,
 } from "./targeted-batches/allocation/allocationMapModel";
+import { useAllocationMapSelection } from "./targeted-batches/allocation/allocationMapSelection";
 import {
   buildTargetPayload,
   buildUsersById,
@@ -49,10 +50,45 @@ function activeLm(workbase) {
   return String(workbase?.lmPcode || workbase?.pcode || workbase?.id || workbase?.localMunicipalityId || "").trim();
 }
 
+// 1.3.32: the label sits on its own overlay so the name, the meters and the TEAM or SP read on three
+// rows instead of one long line (a Marker label is a single line).
+function labelOverlayClass() {
+  return class AllocationLabelOverlay extends window.google.maps.OverlayView {
+    constructor({ point, lines, color, bold }) {
+      super();
+      Object.assign(this, { point, lines, color, bold, div: null });
+    }
+
+    onAdd() {
+      const div = document.createElement("div");
+      div.className = "ireps-geofence-label ireps-allocation-label";
+      div.style.color = this.color;
+      div.style.fontWeight = this.bold ? "800" : "600";
+      this.lines.forEach(line => {
+        const row = document.createElement("div");
+        row.textContent = line;
+        div.appendChild(row);
+      });
+      this.div = div;
+      this.getPanes()?.overlayLayer?.appendChild(div);
+    }
+
+    draw() {
+      const pixel = this.div && this.getProjection()?.fromLatLngToDivPixel(new window.google.maps.LatLng(this.point));
+      if (!pixel) return;
+      this.div.style.left = `${pixel.x}px`;
+      this.div.style.top = `${pixel.y}px`;
+    }
+
+    onRemove() { this.div?.remove(); this.div = null; }
+  };
+}
+
 function AllocationMapGeofences({ items, selectedIds, onToggle }) {
   const map = useMap();
   useEffect(() => {
     if (!map || !window.google?.maps) return undefined;
+    const LabelOverlay = labelOverlayClass();
     const drawn = [];
     for (const item of items) {
       const path = getGeoFencePath(item.fence);
@@ -66,9 +102,9 @@ function AllocationMapGeofences({ items, selectedIds, onToggle }) {
       drawn.push(polygon);
       const labelPoint = geofenceLabelPoint(item.fence);
       if (labelPoint) {
-        drawn.push(new window.google.maps.Marker({ position: labelPoint, map, title: item.label, clickable: false, zIndex: 90,
-          label: { text: item.label, className: "ireps-geofence-label", color: style.labelColor, fontWeight: selected ? "800" : "600", fontSize: "11px" },
-          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 1, fillOpacity: 0, strokeOpacity: 0 } }));
+        const overlay = new LabelOverlay({ point: labelPoint, lines: item.labelLines, color: style.labelColor, bold: selected });
+        overlay.setMap(map);
+        drawn.push(overlay);
       }
     }
     return () => drawn.forEach(shape => shape.setMap(null));
@@ -76,17 +112,19 @@ function AllocationMapGeofences({ items, selectedIds, onToggle }) {
   return null;
 }
 
-// Opens fitted to every batch geofence; "Show all" fits again.
+// Opens fitted to the batches on the map, and fits again when they change or "Fit to map" is pressed.
 function FitAll({ items, fitRequest }) {
   const map = useMap();
-  const fitted = useRef(-1);
+  const fitted = useRef("");
+  const shownKey = items.map(item => item.tbId).join(",");
   useEffect(() => {
-    if (!map || !window.google?.maps || !items.length || fitted.current === fitRequest) return;
+    const key = `${fitRequest}:${shownKey}`;
+    if (!map || !window.google?.maps || !items.length || fitted.current === key) return;
     const bounds = new window.google.maps.LatLngBounds();
     items.forEach(item => getGeoFencePath(item.fence).forEach(point => bounds.extend(point)));
     map.fitBounds(bounds, 48);
-    fitted.current = fitRequest;
-  }, [map, items, fitRequest]);
+    fitted.current = key;
+  }, [map, items, fitRequest, shownKey]);
   return null;
 }
 
@@ -102,7 +140,9 @@ export default function TargetedBatchAllocationMapPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [fitRequest, setFitRequest] = useState(0);
+  const [showAll, setShowAll] = useState(false);
   const [allocateTogether] = useAllocateSalesTargetedBatchesTogetherMutation();
+  const { selectedIds: tickedIds } = useAllocationMapSelection(lmPcode);
 
   const { data: matrixStream } = useGetTargetedBatchAllocationMatrixByLmQuery(lmPcode || skipToken);
   const { data: geofences = EMPTY } = useGetGeoFencesByLmQuery({ lmPcode }, { skip: !lmPcode });
@@ -112,15 +152,20 @@ export default function TargetedBatchAllocationMapPage() {
 
   const batches = matrixStream?.batches || EMPTY;
   const model = useMemo(() => buildAllocationMapModel({ batches, geofences }), [batches, geofences]);
-  const selection = useMemo(() => allocationSelection(model.items, selectedIds), [model.items, selectedIds]);
+  // TB-R047 (1.3.32): the map draws the batches ticked in TB Register, unless "Show all batches" is on.
+  const shown = useMemo(() => (showAll ? model.items : model.items.filter(item => tickedIds.includes(item.tbId))), [model.items, showAll, tickedIds]);
+  const counts = useMemo(() => ({ ready: shown.filter(item => item.state === ALLOCATION_MAP_STATES.READY).length, allocated: shown.filter(item => item.state === ALLOCATION_MAP_STATES.ALLOCATED).length }), [shown]);
+  const selection = useMemo(() => allocationSelection(shown, selectedIds), [shown, selectedIds]);
 
-  // A selected batch that stops being ready (for example allocated by someone else) leaves the window.
+  // A selected batch leaves the window when it stops being ready (allocated by someone else) or when
+  // its tick is taken off in TB Register.
   useEffect(() => {
     if (!selection.dropped.length) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedIds(current => current.filter(id => !selection.dropped.includes(id)));
-    setMessage(`${selection.dropped.join(", ")} ${selection.dropped.length === 1 ? "is" : "are"} no longer ready and left the allocation window.`);
-  }, [selection.dropped]);
+    const untickedOnly = selection.dropped.every(id => model.items.some(item => item.tbId === id && item.state === ALLOCATION_MAP_STATES.READY));
+    setMessage(`${selection.dropped.join(", ")} ${selection.dropped.length === 1 ? "is" : "are"} ${untickedOnly ? "no longer ticked in TB Register" : "no longer ready"} and left the allocation window.`);
+  }, [selection.dropped, model.items]);
 
   const usersById = useMemo(() => buildUsersById(users), [users]);
   const teams = useMemo(() => enrichTeamsWithMembers(directory?.teams || EMPTY, usersById), [directory?.teams, usersById]);
@@ -193,27 +238,37 @@ export default function TargetedBatchAllocationMapPage() {
       <header>
         <p style={styles.eyebrow}>Operations / TB Register</p>
         <h1 style={styles.title}>Allocation Map</h1>
-        <p style={styles.subtitle}>Every batch geofence in the municipality, across all Wards. Click the purple ones to put them in the allocation window, then allocate them together to one TEAM or SP (at most {ALLOCATION_MAP_MAX} at a time).</p>
+        <p style={styles.subtitle}>The batches you ticked in TB Register, across all Wards. Click the purple ones to put them in the allocation window, then allocate them together to one TEAM or SP (at most {ALLOCATION_MAP_MAX} at a time).</p>
       </header>
       {model.readyNotOnMap ? <div style={styles.note}>{model.readyNotOnMap} ready batch(es) have no geofence and are not on the map. Allocate them from TB Register as before.</div> : null}
       <div style={styles.layout}>
         <div style={styles.mapPane}>
           <div style={styles.mapBar}>
-            <span>{model.counts.ready} ready · {model.counts.allocated} allocated</span>
+            <span>{shown.length} of {model.items.length} batches shown · {counts.ready} ready · {counts.allocated} allocated</span>
             <span style={styles.legend}>
               <i style={{ ...styles.swatch, background: STATE_STYLES.READY.fillColor, borderColor: STATE_STYLES.READY.strokeColor }} />Ready, click to select
               <i style={{ ...styles.swatch, background: STATE_STYLES.SELECTED.fillColor, borderColor: STATE_STYLES.SELECTED.strokeColor }} />Selected
               <i style={{ ...styles.swatch, background: STATE_STYLES.ALLOCATED.fillColor, borderColor: STATE_STYLES.ALLOCATED.strokeColor }} />Allocated
             </span>
-            <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Show all</button>
+            <label style={styles.switch}>
+              <input type="checkbox" checked={showAll} onChange={event => setShowAll(event.target.checked)} />
+              Show all batches
+            </label>
+            <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Fit to map</button>
           </div>
           <div style={styles.map}>
-            {!key ? <p>Google Maps key missing</p> : loading ? <p style={styles.status}>Loading the batches…</p> : !model.items.length ? <p style={styles.status}>No batch geofences in this municipality yet.</p> : (
+            {!key ? <p>Google Maps key missing</p> : loading ? <p style={styles.status}>Loading the batches…</p>
+              : !model.items.length ? <p style={styles.status}>No batch geofences in this municipality yet.</p>
+              : !shown.length ? (
+                <p style={styles.status}>
+                  Tick the batches you want in <Link to="/operations/targeted-batches" style={styles.back}>TB Register</Link>, or switch on “Show all batches”.
+                </p>
+              ) : (
               <APIProvider apiKey={key}>
                 <GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={13} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
                   <WardBoundaryPolygons wards={wardLayer} />
-                  <AllocationMapGeofences items={model.items} selectedIds={selectedIds} onToggle={toggle} />
-                  <FitAll items={model.items} fitRequest={fitRequest} />
+                  <AllocationMapGeofences items={shown} selectedIds={selectedIds} onToggle={toggle} />
+                  <FitAll items={shown} fitRequest={fitRequest} />
                 </GoogleMap>
               </APIProvider>
             )}
@@ -261,6 +316,7 @@ const styles = {
   legend: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontWeight: 600, color: "#475569" },
   swatch: { display: "inline-block", width: 12, height: 12, border: "2px solid", marginLeft: 6 },
   smallButton: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "5px 10px", background: "#ffffff", color: "#1d4ed8", fontWeight: 800, cursor: "pointer" },
+  switch: { display: "inline-flex", alignItems: "center", gap: 6, color: "#334155", fontWeight: 700, cursor: "pointer" },
   map: { height: 620, borderRadius: 12, overflow: "hidden", background: "#f1f5f9" },
   status: { display: "grid", placeItems: "center", height: "100%", margin: 0, color: "#475569" },
   window: { display: "grid", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#ffffff", position: "sticky", top: 12 },

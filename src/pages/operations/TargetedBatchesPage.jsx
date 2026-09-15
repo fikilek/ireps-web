@@ -21,6 +21,7 @@ import {
   TARGETED_BATCH_SOURCE_TYPES,
   TARGETED_BATCH_UPLOAD_REGISTER_STATUSES,
 } from "../../redux/targetedBatchDraftModel";
+import { useAllocationMapSelection } from "./targeted-batches/allocation/allocationMapSelection";
 import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModal";
 import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModal";
 import { formatNumber } from "./targeted-batches/targetedBatchUtils";
@@ -622,6 +623,12 @@ export default function TargetedBatchesPage() {
   const pageStart = (safeCurrentPage - 1) * pageSize;
   const pagedUploads = sortedUploads.slice(pageStart, pageStart + pageSize);
 
+  // TB-R047 (1.3.32): the ticks that decide what the Allocation Map draws, kept per municipality.
+  // The heading tick covers every batch the filters leave listed, not only this page.
+  const ticked = useAllocationMapSelection(activeLmPcode);
+  const listedIds = useMemo(() => sortedUploads.map((upload) => upload.id).filter(Boolean), [sortedUploads]);
+  const allListedTicked = listedIds.length > 0 && listedIds.every((id) => ticked.selectedIds.includes(id));
+
   function resetToFirstPage() {
     setCurrentPage(1);
   }
@@ -861,10 +868,17 @@ export default function TargetedBatchesPage() {
             Open TB Dashboard
           </Link>
 
-          {/* Targeted Batch rules TB-R047: several batches to one TEAM or SP from a map. */}
+          {/* Targeted Batch rules TB-R047: several batches to one TEAM or SP from a map. The map
+              draws the batches ticked in the first column (1.3.32). */}
           <Link to="/operations/targeted-batches/allocation-map" style={styles.secondaryLinkButton}>
-            Allocation Map
+            Allocation Map ({ticked.selectedIds.length})
           </Link>
+
+          {ticked.selectedIds.length ? (
+            <button type="button" style={styles.clearTicksButton} onClick={ticked.clear}>
+              Clear
+            </button>
+          ) : null}
 
           {draft ? (
             <Link
@@ -970,6 +984,17 @@ export default function TargetedBatchesPage() {
           <table style={styles.table}>
             <thead>
               <tr>
+                {/* TB-R047 (1.3.32): the ticked batches are the ones the Allocation Map draws. */}
+                <Th>
+                  <input
+                    type="checkbox"
+                    checked={allListedTicked}
+                    onChange={() => ticked.toggleListed(listedIds)}
+                    disabled={!listedIds.length}
+                    title="Tick every batch listed below"
+                    aria-label="Tick every batch listed below for the Allocation Map"
+                  />
+                </Th>
                 <Th>Map</Th>
                 <SortableTh
                   label="TB ID"
@@ -1023,6 +1048,7 @@ export default function TargetedBatchesPage() {
                 <Th>Delete TB</Th>
               </tr>
               <tr>
+                <th style={styles.filterHeaderCell} />
                 <th style={styles.filterHeaderCell} />
                 <th style={styles.filterHeaderCell}>
                   <input
@@ -1151,7 +1177,7 @@ export default function TargetedBatchesPage() {
             <tbody>
               {sortedUploads.length === 0 ? (
                 <tr>
-                  <Td colSpan={11}>
+                  <Td colSpan={12}>
                     {uploads.length === 0
                       ? "No permanent Targeted Batches were found for this Local Municipality."
                       : "No permanent Targeted Batches match the selected filters."}
@@ -1166,6 +1192,16 @@ export default function TargetedBatchesPage() {
 
                 return (
                   <tr key={upload.id}>
+                    <Td>
+                      {/* TB-R047 (1.3.32): ticked batches show on the Allocation Map. */}
+                      <input
+                        type="checkbox"
+                        checked={ticked.isTicked(upload.id)}
+                        onChange={() => ticked.toggle(upload.id)}
+                        aria-label={`Show ${upload.id || "this batch"} on the Allocation Map`}
+                      />
+                    </Td>
+
                     <Td>
                       {/* TB-R043: opens the Batch Map; its back button returns here. */}
                       {upload.id ? <BatchMapLink tbId={upload.id} from={{ path: "/operations/targeted-batches", label: "TB Register" }} /> : null}
@@ -1419,6 +1455,16 @@ const styles = {
     justifyContent: "flex-end",
     gap: 10,
     flexWrap: "wrap",
+  },
+  clearTicksButton: {
+    border: 0,
+    background: "none",
+    color: "#2563eb",
+    fontWeight: 800,
+    fontSize: 13,
+    textDecoration: "underline",
+    cursor: "pointer",
+    padding: 0,
   },
   primaryButton: {
     display: "inline-flex",

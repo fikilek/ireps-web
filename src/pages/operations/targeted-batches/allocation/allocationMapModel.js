@@ -27,8 +27,14 @@ function linkedFence(batch, fences) {
   return fence && upper(fence.status) === "ACTIVE" ? fence : null;
 }
 
+// 1.3.32: the label reads on three rows — the name, the meters, then the TEAM or SP of an allocated
+// batch — so a crowded map never carries long one-line labels.
+export function allocationMapLabelLines(item) {
+  return [item.name, plural(item.meters, "meter"), ...(item.state === ALLOCATION_MAP_STATES.ALLOCATED && item.targetName ? [item.targetName] : [])];
+}
+
 export function allocationMapLabel(item) {
-  return [item.name, plural(item.meters, "meter"), ...(item.state === ALLOCATION_MAP_STATES.ALLOCATED && item.targetName ? [item.targetName] : [])].join(" · ");
+  return allocationMapLabelLines(item).join(" · ");
 }
 
 export function buildAllocationMapModel({ batches = [], geofences = [] } = {}) {
@@ -47,7 +53,7 @@ export function buildAllocationMapModel({ batches = [], geofences = [] } = {}) {
       tbId: batch.id, geofenceId: fence.id, name: text(fence.name) || fence.id, wardPcode, wardLabel: wardNumber ? `Ward ${wardNumber}` : wardPcode || "Ward unknown",
       meters: Number(batch.counts?.totalRows ?? batch.creation?.createdRows ?? 0) || 0, state, targetName: text(batch.allocation?.targetName), fence,
     };
-    items.push({ ...item, label: allocationMapLabel(item) });
+    items.push({ ...item, labelLines: allocationMapLabelLines(item), label: allocationMapLabel(item) });
   }
   items.sort((a, b) => a.name.localeCompare(b.name));
   return { items, readyNotOnMap, counts: { ready: items.filter(item => item.state === ALLOCATION_MAP_STATES.READY).length, allocated: items.filter(item => item.state === ALLOCATION_MAP_STATES.ALLOCATED).length } };

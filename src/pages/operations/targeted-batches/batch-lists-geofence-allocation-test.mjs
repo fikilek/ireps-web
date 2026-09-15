@@ -34,7 +34,7 @@ test("TB Register: Geofence column after Ward, with a text filter and sorting", 
   assert.match(page, /label="Geofence"\s+sortKey="geofence"/);
   assert.match(page, /aria-label="Filter Geofence"/);
   assert.match(page, /if \(sortKey === "geofence"\) return upload\?\.geofenceLabel \|\| "";/);
-  assert.match(page, /<Td colSpan=\{11\}>/);
+  assert.match(page, /<Td colSpan=\{12\}>/, "11 columns plus the Allocation Map tick box (1.3.32)");
 });
 
 test("TB Register: Map button first; Allocation (Allocate / Allocated) then Allocated To, each filterable (1.3.11)", async () => {

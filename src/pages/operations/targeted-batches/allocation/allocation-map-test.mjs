@@ -28,12 +28,14 @@ test("every batch geofence is on the map, labelled with its name and meters; all
     geofences: [fence({ id: "F_TB1", tbId: "TB1", name: "Gf W2 Boundary1", ward: "ZA5241002" }), fence({ id: "F_TB2", tbId: "TB2", name: "Gf W4 Cornhill1", ward: "ZA5241004" }),
       fence({ id: "F_TB3", tbId: "TB3", name: "Gf W6 Boundary1" }), fence({ id: "F_TB4", tbId: "TB4", name: "Gf W6 Started" })],
   });
-  assert.deepEqual(model.items.map(item => [item.name, item.state, item.label]), [
-    ["Gf W2 Boundary1", ALLOCATION_MAP_STATES.READY, "Gf W2 Boundary1 · 6 meters"],
-    ["Gf W4 Cornhill1", ALLOCATION_MAP_STATES.READY, "Gf W4 Cornhill1 · 8 meters"],
-    ["Gf W6 Boundary1", ALLOCATION_MAP_STATES.ALLOCATED, "Gf W6 Boundary1 · 2 meters · Kaiser Team"],
-    ["Gf W6 Started", ALLOCATION_MAP_STATES.UNAVAILABLE, "Gf W6 Started · 5 meters"],
+  // 1.3.32: the label reads on three rows — name, meters, then the TEAM or SP of an allocated batch.
+  assert.deepEqual(model.items.map(item => [item.name, item.state, item.labelLines]), [
+    ["Gf W2 Boundary1", ALLOCATION_MAP_STATES.READY, ["Gf W2 Boundary1", "6 meters"]],
+    ["Gf W4 Cornhill1", ALLOCATION_MAP_STATES.READY, ["Gf W4 Cornhill1", "8 meters"]],
+    ["Gf W6 Boundary1", ALLOCATION_MAP_STATES.ALLOCATED, ["Gf W6 Boundary1", "2 meters", "Kaiser Team"]],
+    ["Gf W6 Started", ALLOCATION_MAP_STATES.UNAVAILABLE, ["Gf W6 Started", "5 meters"]],
   ]);
+  assert.equal(model.items[2].label, "Gf W6 Boundary1 · 2 meters · Kaiser Team", "the one-line form stays for tooltips");
   assert.deepEqual([model.counts.ready, model.counts.allocated, model.readyNotOnMap], [2, 1, 2], "batches without a geofence are counted, not drawn");
   assert.deepEqual(model.items.map(item => item.wardLabel), ["Ward 2", "Ward 4", "Ward 6", "Ward 6"]);
   assert.equal(allocationMapLabel({ name: "Gf W6 One", meters: 1, state: ALLOCATION_MAP_STATES.READY }), "Gf W6 One · 1 meter");
@@ -68,7 +70,7 @@ test("the allocation window totals the selection and drops a batch that is no lo
 
 test("TB Register opens the Allocation Map, and the page allocates the selection in one step", async () => {
   const register = await read("../../TargetedBatchesPage.jsx");
-  assert.match(register, /<Link to="\/operations\/targeted-batches\/allocation-map" style=\{styles\.secondaryLinkButton\}>\s*Allocation Map/);
+  assert.match(register, /<Link to="\/operations\/targeted-batches\/allocation-map" style=\{styles\.secondaryLinkButton\}>\s*Allocation Map \(\{ticked\.selectedIds\.length\}\)/);
   const routes = await read("../../../../routes/AppRoutes.jsx");
   assert.match(routes, /path="\/operations\/targeted-batches\/allocation-map"/);
   assert.match(routes, /<TargetedBatchAllocationMapPage \/>/);
@@ -76,7 +78,7 @@ test("TB Register opens the Allocation Map, and the page allocates the selection
   assert.match(page, /useGetGeoFencesByLmQuery\(\{ lmPcode \}, \{ skip: !lmPcode \}\)/, "every geofence of the LM, all Wards");
   assert.match(page, /allocateTogether\(\{ tbIds: selection\.items\.map\(item => item\.tbId\), targetType: target\.type, targetId: target\.id \}\)/);
   assert.match(page, /all together or not at all/, "the confirmation says it is all or nothing");
-  assert.match(page, /label: \{ text: item\.label/, "the map label carries the name and meters");
+  assert.match(page, /lines: item\.labelLines/, "the map label is drawn row by row");
   assert.match(page, /clickable: ready/, "only ready geofences can be clicked");
   assert.match(page, /Nothing was allocated\./, "a failure says nothing changed");
   const api = await read("../../../../redux/salesTargetedBatchApi.js");
