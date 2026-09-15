@@ -4,7 +4,7 @@ import { buildMemberJoined, buildMemberLeft, memberHistoryId, openMemberPeriods,
 import { classifyTrn, isBatchTrn, summarizeFieldWork, teamOnDate } from "../teams/field-work-summary.js";
 import { getFieldWorkSummary } from "../teams/fieldWorkSummaryCallable.js";
 
-// Teams rules TM-R001 and Targeted Batch rules TB-R045 (1.3.25).
+// Teams rules TM-R001 and Targeted Batch rules TB-R045 (1.3.26).
 const period = (teamId, teamName, userUid, joinedAt, leftAt = null) => ({ teamId, teamName, userUid, joinedAt, leftAt });
 const trn = (uid, createdAt, extra = {}) => ({ accessData: { trnType: "METER_DISCOVERY", access: { hasAccess: "yes" } }, metadata: { createdByUid: uid, createdByUser: uid === "W1" ? "Peter Peter" : "Zamo Ngubs", createdAt }, serviceProvider: { id: "RSTE", name: "RSTE" }, ...extra });
 
@@ -27,15 +27,15 @@ test("only open periods are returned for closing", async () => {
   assert.deepEqual(filters, [["teamId", "==", "T1"], ["userUid", "==", "W1"]]);
 });
 
-test("batch work is left out; normal-path work is discovered, no access or other work", () => {
+test("batch work is left out; normal-path work is a transaction or No Access, never both", () => {
   assert.equal(isBatchTrn({ sourceModule: "SALES_TARGETED_BATCH" }), true);
   assert.equal(isBatchTrn({ targetedBatchContext: { tbId: "TGB_1" } }), true);
   assert.equal(isBatchTrn({ derived: { targetedBatch: { tbId: "TGB_1" } } }), true);
   assert.equal(isBatchTrn({ accessData: { trnType: "METER_DISCOVERY" } }), false);
-  assert.equal(classifyTrn({ accessData: { trnType: "METER_DISCOVERY", access: { hasAccess: "yes" } } }), "DISCOVERED");
-  assert.equal(classifyTrn({ accessData: { trnType: "METER_DISCOVERY", access: { hasAccess: "no" } } }), "NO_ACCESS");
-  assert.equal(classifyTrn({ accessData: { trnType: "METER_RECONNECTION", access: { hasAccess: "no" } } }), "NO_ACCESS");
-  assert.equal(classifyTrn({ accessData: { trnType: "METER_DISCONNECTION", access: { hasAccess: "yes" } } }), "OTHER");
+  for (const trnType of ["METER_DISCOVERY", "METER_INSTALLATION", "METER_REMOVAL", "METER_DISCONNECTION", "METER_RECONNECTION", "METER_COMMISSIONING", "METER_READING", "METER_INSPECTION"]) {
+    assert.equal(classifyTrn({ accessData: { trnType, access: { hasAccess: "yes" } } }), "TRANSACTION", trnType);
+    assert.equal(classifyTrn({ accessData: { trnType, access: { hasAccess: "no" } } }), "NO_ACCESS", trnType);
+  }
 });
 
 test("work is credited to the team on the date of the work; a move starts afresh in the new team", () => {
@@ -53,11 +53,11 @@ test("work is credited to the team on the date of the work; a move starts afresh
     trn("W1", "2026-09-08T10:00:00.000Z", { sourceModule: "SALES_TARGETED_BATCH", targetedBatchContext: { tbId: "TGB_1" } }),
     trn("M1", "2026-09-09T10:00:00.000Z", { accessData: { trnType: "METER_DISCONNECTION", access: { hasAccess: "yes" } } }),
   ] });
-  assert.deepEqual(summary.totals, { trns: 6, batchTrns: 1, normalTrns: 5, discovered: 2, noAccess: 1, other: 2 });
+  assert.deepEqual(summary.totals, { trns: 6, batchTrns: 1, normalTrns: 5, transactions: 4, noAccess: 1 });
   const byKey = Object.fromEntries(summary.groups.map(group => [group.key, group]));
-  assert.deepEqual([byKey["TEAM:T1"].discovered, byKey["TEAM:T1"].noAccess, byKey["TEAM:T1"].other], [1, 0, 0], "August work stays with the old team");
-  assert.deepEqual([byKey["TEAM:T2"].discovered, byKey["TEAM:T2"].noAccess, byKey["TEAM:T2"].other, byKey["TEAM:T2"].otherByType], [1, 1, 1, { METER_RECONNECTION: 1 }]);
-  assert.deepEqual([byKey["NO_TEAM:RSTE"].name, byKey["NO_TEAM:RSTE"].other, byKey["NO_TEAM:RSTE"].workers], ["RSTE (no team)", 1, ["Zamo Ngubs"]]);
+  assert.deepEqual([byKey["TEAM:T1"].transactions, byKey["TEAM:T1"].noAccess], [1, 0], "August work stays with the old team");
+  assert.deepEqual([byKey["TEAM:T2"].transactions, byKey["TEAM:T2"].noAccess], [2, 1], "a discovery and a reconnection; the No Access visit is not a transaction");
+  assert.deepEqual([byKey["NO_TEAM:RSTE"].name, byKey["NO_TEAM:RSTE"].transactions, byKey["NO_TEAM:RSTE"].workers], ["RSTE (no team)", 1, ["Zamo Ngubs"]]);
 });
 
 test("the totals Function is for management users of that LM only", async () => {
@@ -70,5 +70,5 @@ test("the totals Function is for management users of that LM only", async () => 
   await assert.rejects(getFieldWorkSummary({ db: db({ ...profile, employment: { role: "FWR" } }), request: { auth: { uid: "U" }, data: { lmPcode: "ZA5241" } } }), { code: "permission-denied" });
   await assert.rejects(getFieldWorkSummary({ db: db(profile), request: { auth: { uid: "U" }, data: { lmPcode: "ZA5242" } } }), { code: "permission-denied" });
   const result = await getFieldWorkSummary({ db: db(profile), request: { auth: { uid: "U" }, data: { lmPcode: "ZA5241" } } });
-  assert.equal(result.success, true); assert.equal(result.groups[0].key, "TEAM:T1"); assert.equal(result.totals.discovered, 1);
+  assert.equal(result.success, true); assert.equal(result.groups[0].key, "TEAM:T1"); assert.equal(result.totals.transactions, 1);
 });

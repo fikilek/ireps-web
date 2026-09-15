@@ -3,10 +3,10 @@ import { getFirestore } from "firebase-admin/firestore";
 import { TEAM_MEMBER_HISTORY } from "./member-history.js";
 import { summarizeFieldWork } from "./field-work-summary.js";
 
-// Targeted Batch rules TB-R045 (1.3.25): the Allocation Matrix's normal-path totals, worked out
+// Targeted Batch rules TB-R045 (1.3.26): the Allocation Matrix's normal-path totals, worked out
 // here so the page receives only the per-team totals, never every field work record.
 const MANAGEMENT_ROLES = new Set(["SPU", "ADM", "MNG", "SPV"]);
-const TRN_FIELDS = ["sourceModule", "targetedBatchContext.tbId", "derived.targetedBatch.tbId", "accessData.tbId", "accessData.trnType", "accessData.access.hasAccess",
+const TRN_FIELDS = ["sourceModule", "targetedBatchContext.tbId", "derived.targetedBatch.tbId", "accessData.tbId", "accessData.access.hasAccess",
   "metadata.createdByUid", "metadata.createdByUser", "metadata.createdAt", "metadata.createdAtDatetime", "serviceProvider.id", "serviceProvider.name"];
 const HISTORY_FIELDS = ["teamId", "teamName", "userUid", "joinedAt", "leftAt"];
 const workbaseId = value => (typeof value === "string" ? value : value?.id || value?.pcode || value?.lmPcode || "");

@@ -242,7 +242,7 @@ export default function TargetedBatchAllocationMatrixPage() {
     actorMncServiceProviderId || skipToken,
   );
 
-  // Rules TB-R045 (1.3.25): work outside batches, as totals worked out by the server.
+  // Rules TB-R045 (1.3.26): work outside batches, as totals worked out by the server.
   const {
     currentData: fieldWorkSummary,
     isFetching: fieldWorkFetching,
@@ -356,11 +356,12 @@ export default function TargetedBatchAllocationMatrixPage() {
   const totalInProgress = matrixTotal("inProgress");
   const totalCompleted = matrixTotal("completed");
   const [notStartedPct, inProgressPct, completedPct] = splitHundredPercent([totalNotStarted, totalInProgress, totalCompleted]);
-  const totalAllDiscovered = totalCompleted + matrixRows.reduce((sum, item) => sum + item.fieldWork.discovered, 0);
+  const totalWork = totalCompleted + matrixRows.reduce((sum, item) => sum + item.fieldWork.transactions, 0);
   const [helpKey, setHelpKey] = useState("");
   const help = helpKey ? matrixColumnHelp(helpKey, { organisations: visibleOrganisations, allOrganisations: matrixRows, incomingMeters }) : null;
   const workValue = (value) => (fieldWorkSummary ? formatNumber(value) : fieldWorkFailed ? "—" : "…");
-  const columnCount = (projectionActive ? 10 : 8) + 4;
+  const workPercent = (value) => (fieldWorkSummary ? <Percent value={value} /> : fieldWorkFailed ? "—" : "…");
+  const columnCount = (projectionActive ? 10 : 8) + 5;
   const integrityIssueBatches = allocationIntegrityIssues.length;
 
   const matrixLoading =
@@ -537,11 +538,11 @@ export default function TargetedBatchAllocationMatrixPage() {
           helper="Meter found and captured in the field"
         />
         <SummaryCard
-          label="All Meters Discovered"
-          value={totalAllDiscovered}
+          label="Total Work"
+          value={totalWork}
           helper={
             fieldWorkSummary
-              ? "Completed in batches + discovered outside batches"
+              ? "Completed in batches + transactions outside batches"
               : fieldWorkFailed
                 ? "Work outside batches could not be loaded"
                 : "Loading work outside batches…"
@@ -630,12 +631,12 @@ export default function TargetedBatchAllocationMatrixPage() {
             <div style={styles.tableWrap}>
               <table style={styles.table}>
                 <thead>
-                  {/* Rules TB-R045 (1.3.25): batch work, work outside batches and all work, divided. */}
+                  {/* Rules TB-R045 (1.3.26): batch work, work outside batches and total work, divided. */}
                   <tr>
                     <th colSpan={2} style={{ ...styles.bandTh, ...styles.bandIdentity }} />
                     <th colSpan={projectionActive ? 8 : 6} style={{ ...styles.bandTh, ...styles.bandSales, ...styles.divider }}>Batches (sales path)</th>
                     <th colSpan={3} style={{ ...styles.bandTh, ...styles.bandNormal, ...styles.divider }}>Outside batches (normal path)</th>
-                    <th colSpan={1} style={{ ...styles.bandTh, ...styles.bandAll, ...styles.divider }}>All Work</th>
+                    <th colSpan={2} style={{ ...styles.bandTh, ...styles.bandAll, ...styles.divider }}>Total Work</th>
                   </tr>
                   <tr>
                     <Th help="type" onHelp={setHelpKey}>Type</Th>
@@ -645,13 +646,14 @@ export default function TargetedBatchAllocationMatrixPage() {
                     <Th help="notStarted" onHelp={setHelpKey}>Not Started</Th>
                     <Th help="inProgress" onHelp={setHelpKey}>In Progress</Th>
                     <Th help="completed" onHelp={setHelpKey}>Completed</Th>
-                    <Th help="projectShare" onHelp={setHelpKey}>Project Share</Th>
+                    <Th help="batchesShare" onHelp={setHelpKey}>Batches Share</Th>
                     {projectionActive ? <Th help="projectedAssigned" onHelp={setHelpKey}>Projected Assigned</Th> : null}
-                    {projectionActive ? <Th help="projectedShare" onHelp={setHelpKey}>Projected Project Share</Th> : null}
-                    <Th help="discovered" onHelp={setHelpKey} divider>Meters Discovered</Th>
+                    {projectionActive ? <Th help="projectedBatchesShare" onHelp={setHelpKey}>Projected Batches Share</Th> : null}
+                    <Th help="transactions" onHelp={setHelpKey} divider>Transactions</Th>
                     <Th help="noAccess" onHelp={setHelpKey}>No Access</Th>
-                    <Th help="otherWork" onHelp={setHelpKey}>Other Work</Th>
-                    <Th help="allDiscovered" onHelp={setHelpKey} divider>All Meters Discovered</Th>
+                    <Th help="transactionsShare" onHelp={setHelpKey}>Transactions Share</Th>
+                    <Th help="totalWork" onHelp={setHelpKey} divider>Total Work</Th>
+                    <Th help="totalWorkShare" onHelp={setHelpKey}>Total Work Share</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -718,7 +720,7 @@ export default function TargetedBatchAllocationMatrixPage() {
                           <Td>{noBatches ? "—" : <CountPercent count={matrix.notStarted} percent={matrix.notStartedPct} />}</Td>
                           <Td>{noBatches ? "—" : <CountPercent count={matrix.inProgress} percent={matrix.inProgressPct} />}</Td>
                           <Td>{noBatches ? "—" : <CountPercent count={matrix.completed} percent={matrix.completedPct} />}</Td>
-                          <Td>{noBatches ? "—" : <Percent value={matrix.projectSharePct} />}</Td>
+                          <Td>{noBatches ? "—" : <Percent value={matrix.batchesSharePct} />}</Td>
                           {projectionActive ? (
                             <Td strong>
                               {projection
@@ -729,14 +731,15 @@ export default function TargetedBatchAllocationMatrixPage() {
                           {projectionActive ? (
                             <Td>
                               {projection
-                                ? <Percent value={projection.projectedProjectSharePct} />
+                                ? <Percent value={projection.projectedBatchesSharePct} />
                                 : "—"}
                             </Td>
                           ) : null}
-                          <Td divider>{workValue(fieldWork.discovered)}</Td>
+                          <Td divider>{workValue(fieldWork.transactions)}</Td>
                           <Td>{workValue(fieldWork.noAccess)}</Td>
-                          <Td>{workValue(fieldWork.other)}</Td>
-                          <Td divider strong>{workValue(fieldWork.allDiscovered)}</Td>
+                          <Td>{workPercent(fieldWork.transactionsSharePct)}</Td>
+                          <Td divider strong>{workValue(fieldWork.totalWork)}</Td>
+                          <Td>{workPercent(fieldWork.totalWorkSharePct)}</Td>
                         </tr>
                       );
                     })}
@@ -833,7 +836,7 @@ const styles = {
   helpName: { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", color: "#0f172a", fontWeight: 800 },
   helpValue: { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", color: "#334155", textAlign: "right", whiteSpace: "nowrap" },
   helpTotal: { margin: 0, padding: "8px 10px", borderRadius: 10, background: "#f1f5f9", color: "#0f172a", fontSize: 13, fontWeight: 900 },
-  // Rules TB-R045 (1.3.25): the column groups and their dividers.
+  // Rules TB-R045 (1.3.26): the column groups and their dividers.
   bandTh: { padding: "6px 10px", borderRight: "1px solid #cbd5e1", borderBottom: "1px solid #cbd5e1", textAlign: "center", fontSize: 10, fontWeight: 900, letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap" },
   bandIdentity: { background: "#f8fafc" },
   bandSales: { background: "#dbeafe", color: "#1e3a8a" },

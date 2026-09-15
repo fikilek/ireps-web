@@ -484,7 +484,7 @@ export const salesTargetedBatchApi = createApi({
     createSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onCreateTargetedBatchCallable")),
     deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
     allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
-    // Targeted Batch rules TB-R045 (1.3.25): work outside batches, totalled per team by the server
+    // Targeted Batch rules TB-R045 (1.3.26): work outside batches, totalled per team by the server
     // (Teams rules TM-R001), so the page never downloads the field work records themselves.
     getFieldWorkSummaryByLm: rtkBuilder.query({ ...callSalesBatch("getFieldWorkSummaryCallable"), keepUnusedDataFor: 300 }),
     // Rules 18.7 (1.3.17): one cache entry per layer. Switching a layer on loads only that layer;

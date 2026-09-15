@@ -408,7 +408,7 @@ function emptyOrganisationMetrics(seed) {
       notStartedPct: 0,
       inProgressPct: 0,
       completedPct: 0,
-      projectSharePct: 0,
+      batchesSharePct: 0,
     },
   };
 }
@@ -598,7 +598,7 @@ export function buildOrganisationAllocationMatrixResult({
 
   const shares = splitHundredPercent(result.map((metric) => metric.matrix.assigned));
   result.forEach((metric, index) => {
-    metric.matrix.projectSharePct = shares[index];
+    metric.matrix.batchesSharePct = shares[index];
   });
 
   const sortedOrganisations = result.sort(compareOrganisations);
@@ -616,12 +616,13 @@ function compareOrganisations(left, right) {
 }
 
 function emptyFieldWork() {
-  return { discovered: 0, noAccess: 0, other: 0, otherByType: {}, workers: [], allDiscovered: 0 };
+  return { transactions: 0, noAccess: 0, workers: [], transactionsSharePct: 0, totalWork: 0, totalWorkSharePct: 0 };
 }
 
-// Rules TB-R045 (1.3.25): work outside batches (the normal path), totalled per team by the server
+// Rules TB-R045 (1.3.26): work outside batches (the normal path), totalled per team by the server
 // and credited by team membership history (Teams rules TM-R001). Work by a worker in no team gets
 // its own "<SP> (no team)" row, and a team no longer listed keeps its own row, so no work is dropped.
+// Total Work = Completed (batches) + Transactions; each share column adds up to exactly 100%.
 export function addFieldWorkToMatrix(organisations = [], groups = []) {
   const rows = new Map(
     safeArray(organisations).map((organisation) => [
@@ -643,19 +644,21 @@ export function addFieldWorkToMatrix(organisations = [], groups = []) {
       });
     }
     const fieldWork = rows.get(key).fieldWork;
-    fieldWork.discovered += nonNegativeInteger(group?.discovered);
+    fieldWork.transactions += nonNegativeInteger(group?.transactions);
     fieldWork.noAccess += nonNegativeInteger(group?.noAccess);
-    fieldWork.other += nonNegativeInteger(group?.other);
-    for (const [type, value] of Object.entries(group?.otherByType || {})) {
-      fieldWork.otherByType[type] = (fieldWork.otherByType[type] || 0) + nonNegativeInteger(value);
-    }
     fieldWork.workers = Array.from(new Set([...fieldWork.workers, ...safeArray(group?.workers).map(cleanText).filter(Boolean)]));
   }
 
   const result = Array.from(rows.values());
   for (const row of result) {
-    row.fieldWork.allDiscovered = row.matrix.completed + row.fieldWork.discovered;
+    row.fieldWork.totalWork = row.matrix.completed + row.fieldWork.transactions;
   }
+  const transactionsShares = splitHundredPercent(result.map((row) => row.fieldWork.transactions));
+  const totalWorkShares = splitHundredPercent(result.map((row) => row.fieldWork.totalWork));
+  result.forEach((row, index) => {
+    row.fieldWork.transactionsSharePct = transactionsShares[index];
+    row.fieldWork.totalWorkSharePct = totalWorkShares[index];
+  });
   return result.sort(compareOrganisations);
 }
 
@@ -729,7 +732,7 @@ export function projectMatrixAllocation({
     incomingMeters: incoming,
     projectAssigned,
     projectedAssigned,
-    projectedProjectSharePct: percentage(projectedAssigned, projectAssigned + incoming),
+    projectedBatchesSharePct: percentage(projectedAssigned, projectAssigned + incoming),
   };
 }
 
