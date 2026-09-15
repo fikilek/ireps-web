@@ -1,4 +1,5 @@
 import { getGeoFencePointCount } from "./geofence-map-helpers";
+import { sortGeofencesNewestFirst, geofenceCreatedLabel, geofenceDescriptionLabel } from "./geofence-list.js";
 import { headerActionsStyle, countPillStyle, buttonStyle, primaryButtonStyle, drawingPanelStyle, drawingStatsStyle, countDetailStyle, integrityDetailStyle, modalBackdropStyle, modalCardStyle, modalHeaderStyle, modalCloseButtonStyle, modalCountsRowStyle, confirmIntroStyle, countCardGridStyle, countCardStyle, countLabelStyle, countValueStyle, confirmDetailsStyle, confirmFieldLabelStyle, modalActionsStyle, successBoxStyle, inputStyle, textareaStyle } from "./geofence-ui-styles";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import BusySpinner from "../../components/busy-spinner.jsx";
@@ -6,11 +7,14 @@ import { composeGeofenceName, geofenceNamePart, geofenceNamePrefix, findDuplicat
 
 const namePrefixStyle = { padding: "10px 12px", border: "1px solid #CBD5E1", borderRadius: 10, background: "#F1F5F9", color: "#0F172A", fontWeight: 700, whiteSpace: "nowrap" };
 const duplicateNameStyle = { margin: "0 0 12px", padding: "8px 10px", borderRadius: 10, border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontSize: 13, fontWeight: 700 };
+// Geofences rules GF-R003: the title and × stay fixed at the top; only the content scrolls.
+const fixedHeaderCardStyle = { display: "flex", flexDirection: "column", overflow: "hidden" };
+const scrollingBodyStyle = { flex: "1 1 auto", minHeight: 0, overflowY: "auto" };
 function Modal({ title, children, onClose, width = 720 }) {
   return (
     <div style={modalBackdropStyle}>
-      <div style={{ ...modalCardStyle, maxWidth: width }}>
-        <div style={modalHeaderStyle}>
+      <div style={{ ...modalCardStyle, ...fixedHeaderCardStyle, maxWidth: width }}>
+        <div style={{ ...modalHeaderStyle, flexShrink: 0 }}>
           <h2 style={{ margin: 0 }}>{title}</h2>
 
           <button onClick={onClose} style={modalCloseButtonStyle}>
@@ -18,7 +22,7 @@ function Modal({ title, children, onClose, width = 720 }) {
           </button>
         </div>
 
-        {children}
+        <div style={scrollingBodyStyle}>{children}</div>
       </div>
     </div>
   );
@@ -160,7 +164,8 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
             <p>No active geofences found in this ward.</p>
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
-              {visibleGeofences.map((geoFence) => (
+              {/* Geofences rules GF-R003: newest first. */}
+              {sortGeofencesNewestFirst(visibleGeofences).map((geoFence) => (
                 <div
                   key={geoFence.id}
                   style={{
@@ -184,8 +189,11 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
                       <strong>{geoFence.name || geoFence.id}</strong>
 
                       {geoFence.targetedBatch && <p>{geoFence.targetedBatch.tbId} · {geoFence.targetedBatch.linkState}</p>}
+                      <p style={{ margin: "4px 0 0", color: "#334155", fontSize: 13, fontStyle: "italic" }}>
+                        {geofenceCreatedLabel(geoFence)}
+                      </p>
                       <p style={{ margin: "4px 0 0", color: "#64748B" }}>
-                        {geoFence.description || "NAv"}
+                        {geofenceDescriptionLabel(geoFence)}
                       </p>
                     </div>
 
