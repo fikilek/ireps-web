@@ -444,6 +444,21 @@ function getOverallReportStatus(sourceStatuses) {
   return "ready";
 }
 
+// Rules 18.7 (1.3.30): Sales and Assets share one read of the nearby ERFs for the same Ward and
+// area, kept for 10 minutes; a failed read is forgotten so the next layer tries again.
+const NEARBY_ERF_READ_MS = 10 * 60 * 1000;
+const nearbyErfReads = new Map();
+function readNearbyErfsOnce(scope, readErfs) {
+  const key = JSON.stringify([scope.lmPcode, scope.wardPcode, scope.bounds]);
+  const known = nearbyErfReads.get(key);
+  if (known && Date.now() - known.at < NEARBY_ERF_READ_MS) return known.promise;
+  for (const [oldKey, entry] of nearbyErfReads) if (Date.now() - entry.at >= NEARBY_ERF_READ_MS) nearbyErfReads.delete(oldKey);
+  const promise = readErfs();
+  promise.catch(() => nearbyErfReads.delete(key));
+  nearbyErfReads.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
 export const salesTargetedBatchApi = createApi({
   reducerPath: "salesTargetedBatchApi",
   baseQuery: fakeBaseQuery(),
@@ -490,8 +505,9 @@ export const salesTargetedBatchApi = createApi({
     // Rules 18.7 (1.3.17): one cache entry per layer. Switching a layer on loads only that layer;
     // a loaded layer is not read again while its Ward and area stay the same. The entry reads the
     // Ward itself, so it never restarts because the draft snapshot is briefly waiting.
+    // Rules 18.7 (1.3.30): a layer switched off stays loaded for 10 minutes.
     getSalesBatchNearbyLayer: builder.query({
-      keepUnusedDataFor: 0,
+      keepUnusedDataFor: 600,
       queryFn: () => ({ data: { records: [], state: "Loading nearby records…" } }),
       async onCacheEntryAdded(args, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
         const stops = []; let active = true;
@@ -510,28 +526,42 @@ export const salesTargetedBatchApi = createApi({
           if (args.layer === "erfs" || args.layer === "premises") specs = [nearbyQuerySpec(args.layer, scope)];
           else {
             // Sales and Assets on the nearby ERFs only (nearbyErfLinkedPlan); never a Ward- or LM-wide read.
-            const erfSnapshot = await getDocs(read(nearbyQuerySpec("erfs", scope)));
+            // Rules 18.7 (1.3.30): Sales and Assets share one read of the nearby ERFs.
+            const erfSnapshot = await readNearbyErfsOnce(scope, () => getDocs(read(nearbyQuerySpec("erfs", scope))));
             if (!active || !isCurrent()) return;
             const { records: erfs } = nearbyLayerRecords("erfs", rowsOf(erfSnapshot), scope);
             ({ specs, truncated } = nearbyErfLinkedPlan(args.layer, { lmPcode: args.lmPcode, erfs, erfCapped: erfSnapshot.size > NEARBY_LIMIT }));
           }
           if (!specs.length) publish([], truncated ? "Incomplete: nearby read limit reached" : "Complete");
           const chunks = new Map();
+          // Rules 18.7 (1.3.30): the records are worked out again only when a record changed; an
+          // update that only says the server has confirmed the data changes the state line alone.
+          let rowsVersion = 0, computed = { version: -1, records: [], invalid: 0 }, published = null;
           const publishChunks = () => {
             if ([...chunks.values()].some(chunk => chunk.error)) return publish([], "Error: nearby records could not be loaded");
-            const merged = new Map(); let pending = chunks.size < specs.length, capped = false;
-            for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; for (const row of chunk.rows) merged.set(row.id, row); }
+            let pending = chunks.size < specs.length, capped = false;
+            for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; }
             try {
-              const { records, invalid } = nearbyLayerRecords(args.layer, [...merged.values()], scope);
-              publish(records, pending ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : truncated ? "Incomplete: nearby read limit reached"
-                : invalid ? `Incomplete: ${invalid} records have invalid scope or geometry` : "Complete");
+              if (computed.version !== rowsVersion) {
+                const merged = new Map();
+                for (const chunk of chunks.values()) for (const row of chunk.rows) merged.set(row.id, row);
+                computed = { version: rowsVersion, ...nearbyLayerRecords(args.layer, [...merged.values()], scope) };
+              }
+              const state = pending ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : truncated ? "Incomplete: nearby read limit reached"
+                : computed.invalid ? `Incomplete: ${computed.invalid} records have invalid scope or geometry` : "Complete";
+              if (published && published.records === computed.records && published.state === state) return;
+              published = { records: computed.records, state };
+              publish(computed.records, state);
             } catch { publish([], "Incomplete: Ward or layer geometry is invalid"); }
           };
           specs.forEach((spec, index) => stops.push(onSnapshot(read(spec), { includeMetadataChanges: true }, snapshot => {
             if (!active || !isCurrent()) return;
-            chunks.set(index, { rows: rowsOf(snapshot), capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
+            const previous = chunks.get(index);
+            const rowsChanged = !previous || previous.error || typeof snapshot.docChanges !== "function" || snapshot.docChanges().length > 0;
+            if (rowsChanged) rowsVersion += 1;
+            chunks.set(index, { rows: rowsChanged ? rowsOf(snapshot) : previous.rows, capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
             publishChunks();
-          }, () => { chunks.set(index, { error: true, rows: [] }); publishChunks(); })));
+          }, () => { chunks.set(index, { error: true, rows: [] }); rowsVersion += 1; publishChunks(); })));
           await cacheEntryRemoved;
         } catch { publish([], "Error: nearby records could not be loaded"); }
         finally { active = false; stops.forEach(stop => stop()); }

@@ -22,7 +22,31 @@ export function polygonFromPoints(points) {
   if (!equal(ring[0], ring.at(-1))) ring.push([...ring[0]]);
   return normalizeBatchGeometry({ type: "Polygon", coordinates: [ring] });
 }
+// Targeted Batch rules 18.7 (1.3.30): validating a large boundary (a Ward has thousands of points)
+// takes about a third of a second, and testing a point inside it takes microseconds. A shape this
+// function has validated is recognised and not validated again, and the same stored boundary text is
+// validated once, so checking many points against one Ward no longer freezes TB Draft. The shapes it
+// returns are never modified by their users.
+const VALIDATED = new WeakSet();
+const VALIDATED_OBJECTS = new WeakMap();
+const VALIDATED_TEXT = new Map();
+const VALIDATED_TEXT_LIMIT = 32;
 export function normalizeBatchGeometry(value) {
+  if (value && typeof value === "object") {
+    if (VALIDATED.has(value)) return value;
+    if (VALIDATED_OBJECTS.has(value)) return VALIDATED_OBJECTS.get(value);
+  }
+  if (typeof value === "string" && VALIDATED_TEXT.has(value)) return VALIDATED_TEXT.get(value);
+  const normalized = validateBatchGeometry(value);
+  VALIDATED.add(normalized);
+  if (value && typeof value === "object") VALIDATED_OBJECTS.set(value, normalized);
+  if (typeof value === "string") {
+    if (VALIDATED_TEXT.size >= VALIDATED_TEXT_LIMIT) VALIDATED_TEXT.delete(VALIDATED_TEXT.keys().next().value);
+    VALIDATED_TEXT.set(value, normalized);
+  }
+  return normalized;
+}
+function validateBatchGeometry(value) {
   let geometry = value;
   if (typeof geometry === "string") {
     if (geometry.length > MAX_GEOMETRY_BYTES) fail("Geometry exceeds the supported size");

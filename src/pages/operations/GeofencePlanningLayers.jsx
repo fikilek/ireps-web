@@ -427,7 +427,11 @@ export function GeofencePlanningLayerControls({
   geofencesCount = null, geofencesLoading = false,
   showWards = false, wardsCount = null, wardsLoading = false,
   countsNote = "",
+  // Rules 18.7 (1.3.30): TB Draft shows this instead of a count for a layer it has not loaded (not
+  // ticked), so an unticked layer is never read as "none". Other pages leave it out.
+  uncountedLabel = null,
 }) {
+  const countOf = (layer, value) => (uncountedLabel !== null && !requestedLayers.includes(layer) ? uncountedLabel : value);
   const summary = model?.salesSummary || {
     total: 0,
     notStarted: 0,
@@ -471,7 +475,7 @@ export function GeofencePlanningLayerControls({
         checked={visibility.erfs}
         label="ERFs"
         loading={layerIsLoading("erfs", layerStates, requestedLayers)}
-        count={model?.erfs?.length || 0}
+        count={countOf("erfs", model?.erfs?.length || 0)}
         onChange={() => onToggleLayer("erfs")}
       />
 
@@ -479,7 +483,7 @@ export function GeofencePlanningLayerControls({
         checked={visibility.sales}
         label={salesLabel}
         loading={layerIsLoading("sales", layerStates, requestedLayers)}
-        count={summary.total + summary.integrityExceptions}
+        count={countOf("sales", summary.total + summary.integrityExceptions)}
         onChange={() => onToggleLayer("sales")}
       />
 
@@ -526,7 +530,7 @@ export function GeofencePlanningLayerControls({
         checked={visibility.premises}
         label="Premises"
         loading={layerIsLoading("premises", layerStates, requestedLayers)}
-        count={model?.premises?.length || 0}
+        count={countOf("premises", model?.premises?.length || 0)}
         onChange={() => onToggleLayer("premises")}
       />
 
@@ -534,7 +538,7 @@ export function GeofencePlanningLayerControls({
         checked={visibility.assets}
         label="Assets"
         loading={layerIsLoading("assets", layerStates, requestedLayers)}
-        count={model?.assets?.length || 0}
+        count={countOf("assets", model?.assets?.length || 0)}
         onChange={() => onToggleLayer("assets")}
       />
 
