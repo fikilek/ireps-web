@@ -11,6 +11,7 @@ import {
 } from "../models/salesTargetedBatchMembershipModel";
 import { SALES_STATUSES } from "../models/salesStatusModel";
 import { NGP_SELECTION_MAX } from "../models/nonGpsBatchPlanningModel";
+import { REASONS_SHOWN_IN_COLUMNS } from "../models/sales-table-meter-note";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -453,9 +454,10 @@ export default function NonGpsStreetDetail({
                     </td>
                     <td style={styles.bodyCell}>
                       {target.canonicalAddress || "NAv"}
-                      {/* Current batch membership gets no note: the Batch ID column already
-                          shows it. Other reasons a meter cannot be ticked stay visible. */}
-                      {!target.batchable && target.batchabilityCode !== "CURRENT_TARGETED_BATCH"
+                      {/* A reason another column already shows gets no note: Batch ID shows
+                          current batch membership, Sales Meter Status shows In Progress /
+                          Completed. Other reasons a meter cannot be ticked stay visible. */}
+                      {!target.batchable && !REASONS_SHOWN_IN_COLUMNS.has(target.batchabilityCode)
                         ? <div>{target.batchabilityReason}</div> : null}
                     </td>
                     <td style={styles.bodyCell}>{target.meterNo || "NAv"}</td>
