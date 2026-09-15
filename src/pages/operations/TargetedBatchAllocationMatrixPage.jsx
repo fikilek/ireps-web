@@ -9,9 +9,11 @@ import {
   useGetTargetedBatchAllocationDirectoryQuery,
   useGetTargetedBatchAllocationMatrixByLmQuery,
   useGetTargetedBatchAllocationRowsByLmQuery,
+  useGetFieldWorkSummaryByLmQuery,
 } from "../../redux/salesTargetedBatchApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 import {
+  addFieldWorkToMatrix,
   buildOrganisationAllocationMatrixResult,
   buildUserExecutionMatrix,
   getCanonicalBatchState,
@@ -105,9 +107,9 @@ function HelpIcon({ label, onOpen }) {
   );
 }
 
-function Th({ children, help = null, onHelp = null }) {
+function Th({ children, help = null, onHelp = null, divider = false }) {
   return (
-    <th style={styles.th}>
+    <th style={{ ...styles.th, ...(divider ? styles.divider : null) }}>
       <span style={styles.thContent}>
         {children}
         {help && onHelp ? <HelpIcon label={String(children)} onOpen={() => onHelp(help)} /> : null}
@@ -149,10 +151,10 @@ function HelpWindow({ help, onClose }) {
   );
 }
 
-function Td({ children, strong = false, colSpan }) {
+function Td({ children, strong = false, colSpan, divider = false }) {
   return (
     <td
-      style={{ ...styles.td, ...(strong ? styles.strongCell : null) }}
+      style={{ ...styles.td, ...(strong ? styles.strongCell : null), ...(divider ? styles.divider : null) }}
       colSpan={colSpan}
     >
       {children}
@@ -240,6 +242,20 @@ export default function TargetedBatchAllocationMatrixPage() {
     actorMncServiceProviderId || skipToken,
   );
 
+  // Rules TB-R045 (1.3.25): work outside batches, as totals worked out by the server.
+  const {
+    currentData: fieldWorkSummary,
+    isFetching: fieldWorkFetching,
+    isError: fieldWorkFailed,
+    error: fieldWorkError,
+    refetch: refetchFieldWork,
+  } = useGetFieldWorkSummaryByLmQuery(
+    matrixLmPcode ? { lmPcode: matrixLmPcode } : skipToken,
+  );
+  const fieldWorkGroups = Array.isArray(fieldWorkSummary?.groups)
+    ? fieldWorkSummary.groups
+    : EMPTY_LIST;
+
   const { data: users = EMPTY_LIST, isLoading: usersLoading } =
     useGetUsersDirectoryQuery({ limit: 1000 });
 
@@ -283,6 +299,10 @@ export default function TargetedBatchAllocationMatrixPage() {
   );
   const organisations = organisationMatrixResult.organisations;
   const allocationIntegrityIssues = organisationMatrixResult.integrityIssues;
+  const matrixRows = useMemo(
+    () => addFieldWorkToMatrix(organisations, fieldWorkGroups),
+    [organisations, fieldWorkGroups],
+  );
 
   const usersMatrix = useMemo(
     () =>
@@ -305,7 +325,7 @@ export default function TargetedBatchAllocationMatrixPage() {
 
   const visibleOrganisations = useMemo(() => {
     const search = upper(searchText);
-    return organisations.filter((organisation) => {
+    return matrixRows.filter((organisation) => {
       if (
         targetTypeFilter !== ALL &&
         organisation.type !== targetTypeFilter
@@ -317,7 +337,7 @@ export default function TargetedBatchAllocationMatrixPage() {
         (value) => upper(value).includes(search),
       );
     });
-  }, [organisations, searchText, targetTypeFilter]);
+  }, [matrixRows, searchText, targetTypeFilter]);
 
   const visibleUsers = useMemo(() => {
     const search = upper(searchText);
@@ -336,8 +356,11 @@ export default function TargetedBatchAllocationMatrixPage() {
   const totalInProgress = matrixTotal("inProgress");
   const totalCompleted = matrixTotal("completed");
   const [notStartedPct, inProgressPct, completedPct] = splitHundredPercent([totalNotStarted, totalInProgress, totalCompleted]);
+  const totalAllDiscovered = totalCompleted + matrixRows.reduce((sum, item) => sum + item.fieldWork.discovered, 0);
   const [helpKey, setHelpKey] = useState("");
-  const help = helpKey ? matrixColumnHelp(helpKey, { organisations: visibleOrganisations, allOrganisations: organisations, incomingMeters }) : null;
+  const help = helpKey ? matrixColumnHelp(helpKey, { organisations: visibleOrganisations, allOrganisations: matrixRows, incomingMeters }) : null;
+  const workValue = (value) => (fieldWorkSummary ? formatNumber(value) : fieldWorkFailed ? "—" : "…");
+  const columnCount = (projectionActive ? 10 : 8) + 4;
   const integrityIssueBatches = allocationIntegrityIssues.length;
 
   const matrixLoading =
@@ -388,9 +411,10 @@ export default function TargetedBatchAllocationMatrixPage() {
           <h1 style={styles.title}>Allocation Matrix</h1>
           <p style={styles.subtitle}>
             How the project's meters have been allocated to each TEAM and SP,
-            and how far each is with them. Rest the pointer on the ? next to a
-            heading to see what it means. iREPS supplies the picture; the
-            allocator still chooses the TEAM or SP.
+            how far each is with them, and the field work each has done outside
+            batches. Rest the pointer on the ? next to a heading to see what it
+            means. iREPS supplies the picture; the allocator still chooses the
+            TEAM or SP.
           </p>
         </div>
         <div style={styles.workbasePill}>
@@ -512,6 +536,17 @@ export default function TargetedBatchAllocationMatrixPage() {
           percent={completedPct}
           helper="Meter found and captured in the field"
         />
+        <SummaryCard
+          label="All Meters Discovered"
+          value={totalAllDiscovered}
+          helper={
+            fieldWorkSummary
+              ? "Completed in batches + discovered outside batches"
+              : fieldWorkFailed
+                ? "Work outside batches could not be loaded"
+                : "Loading work outside batches…"
+          }
+        />
       </div>
 
       <section style={styles.panel}>
@@ -568,15 +603,44 @@ export default function TargetedBatchAllocationMatrixPage() {
                   {type === ALL ? "All TEAM / SP" : type}
                 </button>
               ))}
+              <span style={styles.fieldWorkStatus}>
+                {fieldWorkSummary
+                  ? `Work outside batches as at ${new Date(fieldWorkSummary.generatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+                  : fieldWorkFailed
+                    ? "Work outside batches could not be loaded"
+                    : "Loading work outside batches…"}
+                <button
+                  type="button"
+                  style={styles.refreshButton}
+                  disabled={!matrixLmPcode || fieldWorkFetching}
+                  onClick={() => refetchFieldWork()}
+                >
+                  {fieldWorkFetching ? "Refreshing…" : "Refresh"}
+                </button>
+              </span>
             </div>
+
+            {fieldWorkFailed ? (
+              <div style={{ ...styles.errorNotice, marginBottom: 12 }}>
+                Work outside batches could not be loaded:{" "}
+                {getErrorMessage(fieldWorkError) || "please try Refresh."}
+              </div>
+            ) : null}
 
             <div style={styles.tableWrap}>
               <table style={styles.table}>
                 <thead>
+                  {/* Rules TB-R045 (1.3.25): batch work, work outside batches and all work, divided. */}
+                  <tr>
+                    <th colSpan={2} style={{ ...styles.bandTh, ...styles.bandIdentity }} />
+                    <th colSpan={projectionActive ? 8 : 6} style={{ ...styles.bandTh, ...styles.bandSales, ...styles.divider }}>Batches (sales path)</th>
+                    <th colSpan={3} style={{ ...styles.bandTh, ...styles.bandNormal, ...styles.divider }}>Outside batches (normal path)</th>
+                    <th colSpan={1} style={{ ...styles.bandTh, ...styles.bandAll, ...styles.divider }}>All Work</th>
+                  </tr>
                   <tr>
                     <Th help="type" onHelp={setHelpKey}>Type</Th>
                     <Th help="name" onHelp={setHelpKey}>TEAM / SP</Th>
-                    <Th help="batches" onHelp={setHelpKey}>Batches</Th>
+                    <Th help="batches" onHelp={setHelpKey} divider>Batches</Th>
                     <Th help="assigned" onHelp={setHelpKey}>Meters Assigned</Th>
                     <Th help="notStarted" onHelp={setHelpKey}>Not Started</Th>
                     <Th help="inProgress" onHelp={setHelpKey}>In Progress</Th>
@@ -584,19 +648,23 @@ export default function TargetedBatchAllocationMatrixPage() {
                     <Th help="projectShare" onHelp={setHelpKey}>Project Share</Th>
                     {projectionActive ? <Th help="projectedAssigned" onHelp={setHelpKey}>Projected Assigned</Th> : null}
                     {projectionActive ? <Th help="projectedShare" onHelp={setHelpKey}>Projected Project Share</Th> : null}
+                    <Th help="discovered" onHelp={setHelpKey} divider>Meters Discovered</Th>
+                    <Th help="noAccess" onHelp={setHelpKey}>No Access</Th>
+                    <Th help="otherWork" onHelp={setHelpKey}>Other Work</Th>
+                    <Th help="allDiscovered" onHelp={setHelpKey} divider>All Meters Discovered</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 10 : 8}>
+                      <Td colSpan={columnCount}>
                         Loading live Allocation Matrix...
                       </Td>
                     </tr>
                   ) : null}
                   {!loading && matrixError ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 10 : 8}>
+                      <Td colSpan={columnCount}>
                         <div style={styles.errorNotice}>
                           {matrixErrorMessage ||
                             "The Allocation Matrix could not be loaded."}
@@ -606,7 +674,7 @@ export default function TargetedBatchAllocationMatrixPage() {
                   ) : null}
                   {!loading && !matrixError && visibleOrganisations.length === 0 ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 10 : 8}>
+                      <Td colSpan={columnCount}>
                         No TEAM/SP targets match the current filters.
                       </Td>
                     </tr>
@@ -622,6 +690,9 @@ export default function TargetedBatchAllocationMatrixPage() {
                           })
                         : null;
                       const matrix = organisation.matrix;
+                      const fieldWork = organisation.fieldWork;
+                      // Rows with work outside batches only have no batch numbers.
+                      const noBatches = organisation.fieldWorkOnly;
 
                       return (
                         <tr key={organisation.key}>
@@ -633,20 +704,26 @@ export default function TargetedBatchAllocationMatrixPage() {
                           <Td strong>
                             <div style={styles.nameCell}>
                               <span>{organisation.name}</span>
-                              <small>{organisation.memberCount} member(s)</small>
+                              <small>
+                                {organisation.noTeam
+                                  ? `${formatNumber(fieldWork.workers.length)} worker(s) in no team`
+                                  : noBatches
+                                    ? "Not in the current TEAM list"
+                                    : `${organisation.memberCount} member(s)`}
+                              </small>
                             </div>
                           </Td>
-                          <Td>{formatNumber(matrix.batches)}</Td>
-                          <Td strong>{formatNumber(matrix.assigned)}</Td>
-                          <Td><CountPercent count={matrix.notStarted} percent={matrix.notStartedPct} /></Td>
-                          <Td><CountPercent count={matrix.inProgress} percent={matrix.inProgressPct} /></Td>
-                          <Td><CountPercent count={matrix.completed} percent={matrix.completedPct} /></Td>
-                          <Td><Percent value={matrix.projectSharePct} /></Td>
+                          <Td divider>{noBatches ? "—" : formatNumber(matrix.batches)}</Td>
+                          <Td strong>{noBatches ? "—" : formatNumber(matrix.assigned)}</Td>
+                          <Td>{noBatches ? "—" : <CountPercent count={matrix.notStarted} percent={matrix.notStartedPct} />}</Td>
+                          <Td>{noBatches ? "—" : <CountPercent count={matrix.inProgress} percent={matrix.inProgressPct} />}</Td>
+                          <Td>{noBatches ? "—" : <CountPercent count={matrix.completed} percent={matrix.completedPct} />}</Td>
+                          <Td>{noBatches ? "—" : <Percent value={matrix.projectSharePct} />}</Td>
                           {projectionActive ? (
                             <Td strong>
                               {projection
                                 ? formatNumber(projection.projectedAssigned)
-                                : "Not eligible"}
+                                : noBatches ? "—" : "Not eligible"}
                             </Td>
                           ) : null}
                           {projectionActive ? (
@@ -656,6 +733,10 @@ export default function TargetedBatchAllocationMatrixPage() {
                                 : "—"}
                             </Td>
                           ) : null}
+                          <Td divider>{workValue(fieldWork.discovered)}</Td>
+                          <Td>{workValue(fieldWork.noAccess)}</Td>
+                          <Td>{workValue(fieldWork.other)}</Td>
+                          <Td divider strong>{workValue(fieldWork.allDiscovered)}</Td>
                         </tr>
                       );
                     })}
@@ -752,6 +833,15 @@ const styles = {
   helpName: { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", color: "#0f172a", fontWeight: 800 },
   helpValue: { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", color: "#334155", textAlign: "right", whiteSpace: "nowrap" },
   helpTotal: { margin: 0, padding: "8px 10px", borderRadius: 10, background: "#f1f5f9", color: "#0f172a", fontSize: 13, fontWeight: 900 },
+  // Rules TB-R045 (1.3.25): the column groups and their dividers.
+  bandTh: { padding: "6px 10px", borderRight: "1px solid #cbd5e1", borderBottom: "1px solid #cbd5e1", textAlign: "center", fontSize: 10, fontWeight: 900, letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap" },
+  bandIdentity: { background: "#f8fafc" },
+  bandSales: { background: "#dbeafe", color: "#1e3a8a" },
+  bandNormal: { background: "#fef3c7", color: "#92400e" },
+  bandAll: { background: "#dcfce7", color: "#166534" },
+  divider: { borderLeft: "2px solid #64748b" },
+  fieldWorkStatus: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 11, fontWeight: 700 },
+  refreshButton: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "5px 10px", background: "#ffffff", color: "#1d4ed8", fontSize: 11, fontWeight: 850, cursor: "pointer" },
   page: { display: "grid", gap: 18 },
   backRow: { display: "flex", alignItems: "center", gap: 12 },
   backLink: {

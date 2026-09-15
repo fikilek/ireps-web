@@ -484,6 +484,9 @@ export const salesTargetedBatchApi = createApi({
     createSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onCreateTargetedBatchCallable")),
     deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
     allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
+    // Targeted Batch rules TB-R045 (1.3.25): work outside batches, totalled per team by the server
+    // (Teams rules TM-R001), so the page never downloads the field work records themselves.
+    getFieldWorkSummaryByLm: rtkBuilder.query({ ...callSalesBatch("getFieldWorkSummaryCallable"), keepUnusedDataFor: 300 }),
     // Rules 18.7 (1.3.17): one cache entry per layer. Switching a layer on loads only that layer;
     // a loaded layer is not read again while its Ward and area stay the same. The entry reads the
     // Ward itself, so it never restarts because the draft snapshot is briefly waiting.
@@ -2629,7 +2632,7 @@ function callSalesBatch(name) {
 }
 export function useGetSalesBatchDraftSnapshotQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchDraftSnapshotQuery", arg, options); }
 export function useGetPermanentSalesBatchesQuery(arg, options) { return useScopedTargetedBatchRead("useGetPermanentSalesBatchesQuery", arg, options); }
-export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation } = salesTargetedBatchApi;
+export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation, useGetFieldWorkSummaryByLmQuery } = salesTargetedBatchApi;
 export function useGetSalesOperationalStatsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesOperationalStatsByLmQuery", arg, options); }
 export function useGetTargetedBatchAllocationContextByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationContextByIdQuery", arg, options); }
 export function useGetTargetedBatchAllocationDirectoryQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationDirectoryQuery", arg, options); }

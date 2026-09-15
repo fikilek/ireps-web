@@ -601,16 +601,62 @@ export function buildOrganisationAllocationMatrixResult({
     metric.matrix.projectSharePct = shares[index];
   });
 
-  const sortedOrganisations = result.sort((left, right) => {
-    if (left.type !== right.type) return left.type.localeCompare(right.type);
-    if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
-    return left.name.localeCompare(right.name);
-  });
+  const sortedOrganisations = result.sort(compareOrganisations);
 
   return {
     organisations: sortedOrganisations,
     integrityIssues,
   };
+}
+
+function compareOrganisations(left, right) {
+  if (left.type !== right.type) return left.type.localeCompare(right.type);
+  if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
+  return left.name.localeCompare(right.name);
+}
+
+function emptyFieldWork() {
+  return { discovered: 0, noAccess: 0, other: 0, otherByType: {}, workers: [], allDiscovered: 0 };
+}
+
+// Rules TB-R045 (1.3.25): work outside batches (the normal path), totalled per team by the server
+// and credited by team membership history (Teams rules TM-R001). Work by a worker in no team gets
+// its own "<SP> (no team)" row, and a team no longer listed keeps its own row, so no work is dropped.
+export function addFieldWorkToMatrix(organisations = [], groups = []) {
+  const rows = new Map(
+    safeArray(organisations).map((organisation) => [
+      organisation.key,
+      { ...organisation, fieldWork: emptyFieldWork() },
+    ]),
+  );
+
+  for (const group of safeArray(groups)) {
+    const isTeam = group?.type === "TEAM";
+    const id = cleanText(isTeam ? group?.teamId : group?.spId) || "UNKNOWN";
+    const key = isTeam ? targetKey("TEAM", id) : `NO_TEAM:${id}`;
+    if (!rows.has(key)) {
+      rows.set(key, {
+        ...emptyOrganisationMetrics({ key, type: isTeam ? "TEAM" : "SP", id, name: cleanText(group?.name) || id, memberCount: 0, eligible: false }),
+        fieldWorkOnly: true,
+        noTeam: !isTeam,
+        fieldWork: emptyFieldWork(),
+      });
+    }
+    const fieldWork = rows.get(key).fieldWork;
+    fieldWork.discovered += nonNegativeInteger(group?.discovered);
+    fieldWork.noAccess += nonNegativeInteger(group?.noAccess);
+    fieldWork.other += nonNegativeInteger(group?.other);
+    for (const [type, value] of Object.entries(group?.otherByType || {})) {
+      fieldWork.otherByType[type] = (fieldWork.otherByType[type] || 0) + nonNegativeInteger(value);
+    }
+    fieldWork.workers = Array.from(new Set([...fieldWork.workers, ...safeArray(group?.workers).map(cleanText).filter(Boolean)]));
+  }
+
+  const result = Array.from(rows.values());
+  for (const row of result) {
+    row.fieldWork.allDiscovered = row.matrix.completed + row.fieldWork.discovered;
+  }
+  return result.sort(compareOrganisations);
 }
 
 export function buildOrganisationAllocationMatrix(options = {}) {

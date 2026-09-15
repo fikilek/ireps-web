@@ -23,6 +23,7 @@ import {
   buildTeamCreatePayload,
   getUserDisplayName,
 } from "./helpers.js";
+import { TEAM_MEMBER_HISTORY, buildMemberJoined, buildMemberLeft, openMemberPeriods } from "./member-history.js";
 
 /* =====================================================
    CREATE TEAM
@@ -217,11 +218,19 @@ export const addTeamMember = onCall(async (request) => {
     now,
   );
 
-  await teamRef.update({
+  // Teams rules TM-R001: the membership period opens in the same write as the team update.
+  const joined = buildMemberJoined({
+    teamId, teamName: teamData?.team?.name, mncServiceProviderId: teamData?.ownership?.mncServiceProviderId,
+    userUid, userName: getUserDisplayName(candidateUserDoc), joinedAt: now, actorUid, actorName,
+  });
+  const batch = db.batch();
+  batch.update(teamRef, {
     "scope.memberUserIds": nextMemberUserIds,
     "scope.serviceProviderIds": nextServiceProviderIds,
     metadata,
   });
+  batch.create(db.collection(TEAM_MEMBER_HISTORY).doc(joined.id), joined);
+  await batch.commit();
 
   return {
     success: true,
@@ -297,11 +306,17 @@ export const removeTeamMember = onCall(async (request) => {
     now,
   );
 
-  await teamRef.update({
+  // Teams rules TM-R001: the member's open period closes in the same write as the team update.
+  const openPeriods = await openMemberPeriods(db, { teamId, userUid });
+  const left = buildMemberLeft({ leftAt: now, actorUid, actorName, reason: "REMOVED" });
+  const batch = db.batch();
+  batch.update(teamRef, {
     "scope.memberUserIds": nextMemberUserIds,
     "scope.serviceProviderIds": nextServiceProviderIds,
     metadata,
   });
+  for (const period of openPeriods) batch.update(period.ref, left);
+  await batch.commit();
 
   return {
     success: true,
@@ -346,7 +361,13 @@ export const deleteTeam = onCall(async (request) => {
 
   assertTeamBelongsToActorMnc(teamData, mncContext.mncServiceProviderId);
 
-  await teamRef.delete();
+  // Teams rules TM-R001: the team's open periods close; the history outlives the team.
+  const openPeriods = await openMemberPeriods(db, { teamId });
+  const left = buildMemberLeft({ leftAt: new Date().toISOString(), actorUid, actorName: getUserDisplayName(actorUserDoc), reason: "TEAM_DELETED" });
+  const batch = db.batch();
+  for (const period of openPeriods) batch.update(period.ref, left);
+  batch.delete(teamRef);
+  await batch.commit();
 
   return {
     success: true,

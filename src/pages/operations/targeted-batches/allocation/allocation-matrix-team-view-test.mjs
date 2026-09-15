@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { buildOrganisationAllocationMatrixResult, projectMatrixAllocation, splitHundredPercent } from "./allocationMatrixModel.js";
+import { addFieldWorkToMatrix, buildOrganisationAllocationMatrixResult, projectMatrixAllocation, splitHundredPercent } from "./allocationMatrixModel.js";
 import { matrixColumnHelp, MATRIX_COLUMN_KEYS } from "./allocationMatrixHelp.js";
 
 // Targeted Batch rules TB-R045: the Allocation Matrix TEAM / SP view.
@@ -73,13 +73,57 @@ test("every '?' explains the column with each TEAM's own numbers and the project
 
 test("the page shows the new columns with a '?' on every heading, and the removed ones are gone", async () => {
   const page = await readFile(new URL("../../TargetedBatchAllocationMatrixPage.jsx", import.meta.url), "utf8");
-  const headings = [...page.matchAll(/<Th help="([a-zA-Z]+)" onHelp=\{setHelpKey\}>([^<]+)<\/Th>/g)].map(match => [match[1], match[2]]);
+  const headings = [...page.matchAll(/<Th help="([a-zA-Z]+)" onHelp=\{setHelpKey\}(?: divider)?>([^<]+)<\/Th>/g)].map(match => [match[1], match[2]]);
   assert.deepEqual(headings, [["type", "Type"], ["name", "TEAM / SP"], ["batches", "Batches"], ["assigned", "Meters Assigned"], ["notStarted", "Not Started"], ["inProgress", "In Progress"],
-    ["completed", "Completed"], ["projectShare", "Project Share"], ["projectedAssigned", "Projected Assigned"], ["projectedShare", "Projected Project Share"]]);
+    ["completed", "Completed"], ["projectShare", "Project Share"], ["projectedAssigned", "Projected Assigned"], ["projectedShare", "Projected Project Share"],
+    ["discovered", "Meters Discovered"], ["noAccess", "No Access"], ["otherWork", "Other Work"], ["allDiscovered", "All Meters Discovered"]]);
+  assert.deepEqual(headings.map(([key]) => key), [...MATRIX_COLUMN_KEYS], "every column has its '?' window");
+  for (const band of ["Batches (sales path)", "Outside batches (normal path)", "All Work"]) assert.match(page, new RegExp(`>${band.replace(/[()]/g, "\\$&")}</th>`), band);
+  assert.match(page, /<Th help="discovered" onHelp=\{setHelpKey\} divider>/, "a divider starts each group");
+  assert.match(page, /useGetFieldWorkSummaryByLmQuery\(\s*matrixLmPcode \? \{ lmPcode: matrixLmPcode \} : skipToken,\s*\)/, "the totals come from the server, never the field work records");
   for (const removed of [">Progress</Th>", "Eligibility", "Active Open", "Rejected / Unresolved", "Eligible Type Avg", "Vs Type Avg", "Integrity</Th>", "Two truths are kept separate", "Historically Assigned"]) assert.doesNotMatch(page, new RegExp(removed.replace("/", "\\/")), removed);
   assert.match(page, /<CountPercent count=\{matrix\.notStarted\} percent=\{matrix\.notStartedPct\} \/>/);
   assert.match(page, /setTimeout\(onOpen, HELP_HOVER_DELAY_MS\)/, "resting the pointer opens the window");
   assert.match(page, /if \(event\.key === "Escape"\) onClose\(\);/);
   assert.match(page, /Allocation integrity warning/, "the warning about inconsistent batches stays");
-  for (const card of ["TEAMs / SPs", "Meters Assigned", "Not Started", "In Progress", "Completed"]) assert.match(page, new RegExp(`label="${card.replace("/", "\\/")}"`));
+  for (const card of ["TEAMs / SPs", "Meters Assigned", "Not Started", "In Progress", "Completed", "All Meters Discovered"]) assert.match(page, new RegExp(`label="${card.replace("/", "\\/")}"`));
+});
+
+// Rules TB-R045 (1.3.25) and Teams rules TM-R001: work outside batches.
+const groups = [
+  { key: "TEAM:KAISER", type: "TEAM", teamId: "KAISER", name: "Kaiser Team", discovered: 30, noAccess: 4, other: 3, otherByType: { METER_RECONNECTION: 2, METER_DISCONNECTION: 1 }, workers: ["Peter Peter"] },
+  { key: "TEAM:GONE", type: "TEAM", teamId: "GONE", name: "Old Team", discovered: 5, noAccess: 0, other: 0, otherByType: {}, workers: ["Zamo Ngubs"] },
+  { key: "NO_TEAM:RSTE", type: "NO_TEAM", spId: "RSTE", name: "RSTE (no team)", discovered: 7, noAccess: 1, other: 0, otherByType: {}, workers: ["Muzi Muzi", "Siya Siya"] },
+];
+
+test("work outside batches joins its TEAM's row; no-team work and teams no longer listed get their own rows", () => {
+  const batches = [batch({ id: "B1", totalRows: 10, completedRows: 4 })];
+  const { organisations } = buildOrganisationAllocationMatrixResult({ batches, rows: batches.flatMap(rowsFor), teams });
+  const rows = addFieldWorkToMatrix(organisations, groups);
+  const byKey = Object.fromEntries(rows.map(row => [row.key, row]));
+  assert.deepEqual([byKey["TEAM:KAISER"].fieldWork.discovered, byKey["TEAM:KAISER"].fieldWork.noAccess, byKey["TEAM:KAISER"].fieldWork.other], [30, 4, 3]);
+  assert.equal(byKey["TEAM:KAISER"].fieldWork.allDiscovered, 34, "4 Completed in batches + 30 discovered outside batches");
+  assert.equal(byKey["TEAM:KAISER"].fieldWorkOnly, undefined, "a listed TEAM keeps its batch numbers");
+  assert.deepEqual([byKey["TEAM:SIMO"].fieldWork.discovered, byKey["TEAM:SIMO"].fieldWork.allDiscovered], [0, 0]);
+  assert.deepEqual([byKey["TEAM:GONE"].fieldWorkOnly, byKey["TEAM:GONE"].eligible, byKey["TEAM:GONE"].name, byKey["TEAM:GONE"].fieldWork.allDiscovered], [true, false, "Old Team", 5]);
+  assert.deepEqual([byKey["NO_TEAM:RSTE"].type, byKey["NO_TEAM:RSTE"].noTeam, byKey["NO_TEAM:RSTE"].name, byKey["NO_TEAM:RSTE"].matrix.assigned], ["SP", true, "RSTE (no team)", 0]);
+  assert.equal(projectMatrixAllocation({ organisation: byKey["NO_TEAM:RSTE"], allOrganisations: rows, incomingMeters: 30 }), null, "a (no team) row cannot be allocated a batch");
+  assert.equal(organisations.find(item => item.key === "TEAM:KAISER").fieldWork, undefined, "the batch numbers are not changed");
+  assert.deepEqual(addFieldWorkToMatrix(organisations, []).map(row => row.key), organisations.map(row => row.key), "before the totals arrive the rows are the same");
+});
+
+test("each '?' of work outside batches explains how work is credited, with each row's numbers", () => {
+  const batches = [batch({ id: "B1", totalRows: 10, completedRows: 4 })];
+  const rows = addFieldWorkToMatrix(buildOrganisationAllocationMatrixResult({ batches, rows: batches.flatMap(rowsFor), teams }).organisations, groups);
+  const help = key => matrixColumnHelp(key, { organisations: rows, allOrganisations: rows });
+  const row = (key, name) => help(key).rows.find(([rowName]) => rowName === name)[1];
+  assert.equal(row("discovered", "Kaiser Team"), "30 meters"); assert.equal(help("discovered").total, "Project: 42 meters discovered outside batches");
+  assert.match(help("discovered").paragraphs.join(" "), /nothing is counted twice.*the work they did before stays with the old team, and the new team starts afresh/);
+  assert.match(help("noAccess").paragraphs.join(" "), /"\(no team\)" row of the worker's service provider/);
+  assert.equal(row("noAccess", "RSTE (no team)"), "1 visit");
+  assert.equal(row("otherWork", "Kaiser Team"), "3 (Meter disconnection 1, Meter reconnection 2)");
+  assert.equal(row("allDiscovered", "Kaiser Team"), "4 + 30 = 34"); assert.equal(help("allDiscovered").total, "Project: 4 + 42 = 46 meters");
+  assert.equal(row("name", "RSTE (no team)"), "2 workers in no team"); assert.equal(row("name", "Old Team"), "Not in the current TEAM list");
+  assert.equal(help("assigned").rows.some(([name]) => name === "RSTE (no team)"), false, "batch columns leave out rows without batches");
+  assert.equal(help("type").total, "TEAMs: 2 · SPs: 0", "only listed TEAMs and SPs are counted");
 });
