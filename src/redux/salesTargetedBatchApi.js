@@ -499,6 +499,8 @@ export const salesTargetedBatchApi = createApi({
     createSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onCreateTargetedBatchCallable")),
     deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
     allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
+    // Targeted Batch rules TB-R047: the Allocation Map allocates up to 15 batches to one TEAM or SP together.
+    allocateSalesTargetedBatchesTogether: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchesTogetherCallable")),
     // Targeted Batch rules TB-R045 (1.3.26): work outside batches, totalled per team by the server
     // (Teams rules TM-R001), so the page never downloads the field work records themselves.
     getFieldWorkSummaryByLm: rtkBuilder.query({ ...callSalesBatch("getFieldWorkSummaryCallable"), keepUnusedDataFor: 300 }),
@@ -2662,7 +2664,7 @@ function callSalesBatch(name) {
 }
 export function useGetSalesBatchDraftSnapshotQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchDraftSnapshotQuery", arg, options); }
 export function useGetPermanentSalesBatchesQuery(arg, options) { return useScopedTargetedBatchRead("useGetPermanentSalesBatchesQuery", arg, options); }
-export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation, useGetFieldWorkSummaryByLmQuery } = salesTargetedBatchApi;
+export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation, useAllocateSalesTargetedBatchesTogetherMutation, useGetFieldWorkSummaryByLmQuery } = salesTargetedBatchApi;
 export function useGetSalesOperationalStatsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesOperationalStatsByLmQuery", arg, options); }
 export function useGetTargetedBatchAllocationContextByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationContextByIdQuery", arg, options); }
 export function useGetTargetedBatchAllocationDirectoryQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationDirectoryQuery", arg, options); }

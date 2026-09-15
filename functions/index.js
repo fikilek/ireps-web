@@ -88,7 +88,7 @@ export { resolveSalesTargetedBatchCallable } from "./targetedBatches/sales-batch
 export { getFieldWorkSummaryCallable } from "./teams/fieldWorkSummaryCallable.js";
 export { assessSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-geofence.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
-import { onAllocateTargetedBatchCallable } from "./targetedBatches/allocationCallable.js";
+import { onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCallable } from "./targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
 import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatchRowsCallable.js";
 import { recordTargetedBatchNoAccessCallable } from "./targetedBatches/recordTargetedBatchNoAccessCallable.js";
@@ -208,6 +208,7 @@ export {
   onCreateTargetedBatchCallable,
   onDeleteTargetedBatchCallable,
   onAllocateTargetedBatchCallable,
+  onAllocateTargetedBatchesTogetherCallable,
   onAcceptRejectTargetedBatchCallable,
   getTargetedBatchRowsCallable,
   recordTargetedBatchNoAccessCallable,

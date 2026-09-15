@@ -45,6 +45,7 @@ import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPa
 import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
 import TargetedBatchAllocationMatrixPage from "../pages/operations/TargetedBatchAllocationMatrixPage";
+import TargetedBatchAllocationMapPage from "../pages/operations/TargetedBatchAllocationMapPage";
 import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
@@ -421,6 +422,16 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TargetedBatchesPage />
+              </RoleRoute>
+            }
+          />
+
+          {/* Targeted Batch rules TB-R047: the Allocation Map. */}
+          <Route
+            path="/operations/targeted-batches/allocation-map"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TargetedBatchAllocationMapPage />
               </RoleRoute>
             }
           />

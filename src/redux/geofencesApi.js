@@ -310,6 +310,41 @@ export const geofencesApi = createApi({
       },
     }),
 
+    // Targeted Batch rules TB-R047 (Allocation Map): every active geofence of the LM, the one map
+    // that covers every Ward. Two equality filters, so no composite index is needed.
+    getGeoFencesByLm: builder.query({
+      queryFn: () => ({ data: [] }),
+
+      async onCacheEntryAdded(
+        { lmPcode },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        if (!lmPcode) return;
+
+        const db = getFirestore();
+        const q = query(
+          collection(db, "geo_fences"),
+          where("parents.lmPcode", "==", lmPcode),
+          where("status", "==", "ACTIVE"),
+        );
+
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData(() => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).sort(byName));
+          });
+        } catch (error) {
+          console.log("getGeoFencesByLm stream error", error);
+        }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
+
     getNoGeofenceMetersByWard: builder.query({
       queryFn: () => ({ data: [] }),
 
@@ -588,6 +623,7 @@ export const geofencesApi = createApi({
 
 export const {
   useGetGeoFencesByWardQuery,
+  useGetGeoFencesByLmQuery,
   useGetNoGeofenceMetersByWardQuery,
   useGetGeofenceMemberMetersByWardQuery,
   useGetGeofenceMemberPremisesByWardQuery,

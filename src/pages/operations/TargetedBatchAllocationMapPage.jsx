@@ -1,0 +1,285 @@
+/* eslint-disable no-unused-vars -- JSX tags are used by React. */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
+
+import { useAuth } from "../../auth/useAuth";
+import {
+  useAllocateSalesTargetedBatchesTogetherMutation,
+  useGetTargetedBatchAllocationDirectoryQuery,
+  useGetTargetedBatchAllocationMatrixByLmQuery,
+} from "../../redux/salesTargetedBatchApi";
+import { useGetGeoFencesByLmQuery } from "../../redux/geofencesApi";
+import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
+import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
+import { WardBoundaryPolygons } from "./geofence-map-layers";
+import { geofenceLabelPoint, getGeoFencePath, geoJsonPolygonToGooglePaths, parseGeometry, pointsCentre, wardNameLabelPoint } from "./geofence-map-helpers";
+import { wardNumberFromPcode } from "../../../functions/geofences/geofence-name.js";
+import { buildOrganisationAllocationMatrixResult } from "./targeted-batches/allocation/allocationMatrixModel";
+import {
+  ALLOCATION_MAP_MAX,
+  ALLOCATION_MAP_STATES,
+  allocateButtonLabel,
+  allocationSelection,
+  buildAllocationMapModel,
+  toggleAllocationSelection,
+} from "./targeted-batches/allocation/allocationMapModel";
+import {
+  buildTargetPayload,
+  buildUsersById,
+  enrichServiceProvidersWithMembers,
+  enrichTeamsWithMembers,
+  getActorMncServiceProviderId,
+} from "./targeted-batches/allocation/targetedBatchAllocationUtils";
+
+// Targeted Batch rules TB-R047 (1.3.31): the Allocation Map. Every batch geofence of the LM on one map
+// (the one exception to one Ward per map), each labelled with its name and meter count. Clicking a ready
+// geofence puts its batch in the allocation window; one TEAM or SP is allocated the whole selection in
+// one all-or-nothing step.
+const EMPTY = Object.freeze([]);
+const STATE_STYLES = Object.freeze({
+  [ALLOCATION_MAP_STATES.READY]: { strokeColor: "#7c3aed", fillColor: "#c4b5fd", fillOpacity: 0.35, strokeWeight: 2, labelColor: "#5b21b6" },
+  SELECTED: { strokeColor: "#3b0764", fillColor: "#8b5cf6", fillOpacity: 0.5, strokeWeight: 4, labelColor: "#3b0764" },
+  [ALLOCATION_MAP_STATES.ALLOCATED]: { strokeColor: "#64748b", fillColor: "#cbd5e1", fillOpacity: 0.4, strokeWeight: 1.5, labelColor: "#334155" },
+  [ALLOCATION_MAP_STATES.UNAVAILABLE]: { strokeColor: "#94a3b8", fillColor: "#e2e8f0", fillOpacity: 0.3, strokeWeight: 1, labelColor: "#64748b" },
+});
+
+function activeLm(workbase) {
+  return String(workbase?.lmPcode || workbase?.pcode || workbase?.id || workbase?.localMunicipalityId || "").trim();
+}
+
+function AllocationMapGeofences({ items, selectedIds, onToggle }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+    const drawn = [];
+    for (const item of items) {
+      const path = getGeoFencePath(item.fence);
+      if (path.length < 3) continue;
+      const selected = selectedIds.includes(item.tbId);
+      const style = STATE_STYLES[selected ? "SELECTED" : item.state];
+      const ready = item.state === ALLOCATION_MAP_STATES.READY;
+      const polygon = new window.google.maps.Polygon({ paths: path, strokeColor: style.strokeColor, strokeOpacity: 1, strokeWeight: style.strokeWeight,
+        fillColor: style.fillColor, fillOpacity: style.fillOpacity, clickable: ready, zIndex: selected ? 80 : ready ? 70 : 60, map });
+      if (ready) polygon.addListener("click", () => onToggle(item));
+      drawn.push(polygon);
+      const labelPoint = geofenceLabelPoint(item.fence);
+      if (labelPoint) {
+        drawn.push(new window.google.maps.Marker({ position: labelPoint, map, title: item.label, clickable: false, zIndex: 90,
+          label: { text: item.label, className: "ireps-geofence-label", color: style.labelColor, fontWeight: selected ? "800" : "600", fontSize: "11px" },
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 1, fillOpacity: 0, strokeOpacity: 0 } }));
+      }
+    }
+    return () => drawn.forEach(shape => shape.setMap(null));
+  }, [map, items, selectedIds, onToggle]);
+  return null;
+}
+
+// Opens fitted to every batch geofence; "Show all" fits again.
+function FitAll({ items, fitRequest }) {
+  const map = useMap();
+  const fitted = useRef(-1);
+  useEffect(() => {
+    if (!map || !window.google?.maps || !items.length || fitted.current === fitRequest) return;
+    const bounds = new window.google.maps.LatLngBounds();
+    items.forEach(item => getGeoFencePath(item.fence).forEach(point => bounds.extend(point)));
+    map.fitBounds(bounds, 48);
+    fitted.current = fitRequest;
+  }, [map, items, fitRequest]);
+  return null;
+}
+
+export default function TargetedBatchAllocationMapPage() {
+  const authContext = useAuth();
+  const lmPcode = activeLm(authContext.activeWorkbase);
+  const mncId = getActorMncServiceProviderId(authContext);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [target, setTarget] = useState(null);
+  const [dragTarget, setDragTarget] = useState(null);
+  const [dropFocused, setDropFocused] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [fitRequest, setFitRequest] = useState(0);
+  const [allocateTogether] = useAllocateSalesTargetedBatchesTogetherMutation();
+
+  const { data: matrixStream } = useGetTargetedBatchAllocationMatrixByLmQuery(lmPcode || skipToken);
+  const { data: geofences = EMPTY } = useGetGeoFencesByLmQuery({ lmPcode }, { skip: !lmPcode });
+  const { data: lmWards } = useGetWardBoundariesByLmQuery(lmPcode, { skip: !lmPcode });
+  const { data: directory } = useGetTargetedBatchAllocationDirectoryQuery(mncId || skipToken);
+  const { data: users = EMPTY } = useGetUsersDirectoryQuery({ limit: 1000 });
+
+  const batches = matrixStream?.batches || EMPTY;
+  const model = useMemo(() => buildAllocationMapModel({ batches, geofences }), [batches, geofences]);
+  const selection = useMemo(() => allocationSelection(model.items, selectedIds), [model.items, selectedIds]);
+
+  // A selected batch that stops being ready (for example allocated by someone else) leaves the window.
+  useEffect(() => {
+    if (!selection.dropped.length) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedIds(current => current.filter(id => !selection.dropped.includes(id)));
+    setMessage(`${selection.dropped.join(", ")} ${selection.dropped.length === 1 ? "is" : "are"} no longer ready and left the allocation window.`);
+  }, [selection.dropped]);
+
+  const usersById = useMemo(() => buildUsersById(users), [users]);
+  const teams = useMemo(() => enrichTeamsWithMembers(directory?.teams || EMPTY, usersById), [directory?.teams, usersById]);
+  const serviceProviders = useMemo(() => enrichServiceProvidersWithMembers(directory?.serviceProviders || EMPTY, users), [directory?.serviceProviders, users]);
+  const workloads = useMemo(() => new Map(buildOrganisationAllocationMatrixResult({ batches, rows: matrixStream?.rows || EMPTY, teams, serviceProviders }).organisations.map(item => [item.key, item.matrix])),
+    [batches, matrixStream?.rows, teams, serviceProviders]);
+
+  const wardLayer = useMemo(() => {
+    const centre = pointsCentre(model.items.flatMap(item => getGeoFencePath(item.fence)));
+    return (lmWards || []).flatMap(ward => {
+      const pcode = ward.wardPcode || ward.id, paths = geoJsonPolygonToGooglePaths(parseGeometry(ward.geometry));
+      if (!paths.length) return [];
+      const number = wardNumberFromPcode(pcode);
+      return [{ id: pcode, paths, label: number ? `Ward ${number}` : ward.name, labelPoint: wardNameLabelPoint(paths, centre, { centroid: ward.centroid }) }];
+    });
+  }, [lmWards, model.items]);
+
+  const toggle = useMemo(() => item => {
+    setSelectedIds(current => {
+      const result = toggleAllocationSelection(current, item);
+      setMessage(result.message);
+      return result.selectedIds;
+    });
+    setError("");
+  }, []);
+
+  const chooseTarget = candidate => { const payload = buildTargetPayload(candidate); if (payload) { setTarget(payload); setError(""); } };
+  const onDrop = event => {
+    event.preventDefault(); setDropFocused(false);
+    let dropped = dragTarget;
+    try { dropped = JSON.parse(event.dataTransfer.getData("application/json")) || dropped; } catch { /* keep the dragged chip */ }
+    chooseTarget(dropped); setDragTarget(null);
+  };
+
+  const canAllocate = Boolean(selection.batches && target && !busy);
+  const allocate = async () => {
+    if (!canAllocate) return;
+    const label = allocateButtonLabel(selection, target);
+    if (!window.confirm(`${label}? Each batch is allocated with the same checks as TB Allocation, all together or not at all.`)) return;
+    setBusy(true); setError(""); setMessage(`Allocating ${selection.batches} batch(es) to ${target.name}…`);
+    try {
+      const result = await allocateTogether({ tbIds: selection.items.map(item => item.tbId), targetType: target.type, targetId: target.id }).unwrap();
+      setMessage(`${result.tbIds.length} batch(es) allocated to ${result.target?.name || target.name}. They now wait for the TEAM or SP to accept them.`);
+      setSelectedIds([]);
+    } catch (failure) {
+      setMessage("");
+      setError(`Nothing was allocated. ${failure?.error || failure?.message || "The allocation failed."}`);
+    } finally { setBusy(false); }
+  };
+
+  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const loading = !matrixStream?.sync || matrixStream.sync.status === "syncing";
+  const targetChip = candidate => {
+    const payload = buildTargetPayload(candidate), workload = workloads.get(`${payload?.type}:${payload?.id}`);
+    if (!payload) return null;
+    const chosen = target && target.type === payload.type && target.id === payload.id;
+    return (
+      <button key={`${payload.type}:${payload.id}`} type="button" draggable onDragStart={event => { setDragTarget(payload); event.dataTransfer.setData("application/json", JSON.stringify(payload)); event.dataTransfer.effectAllowed = "copy"; }}
+        onDragEnd={() => { setDragTarget(null); setDropFocused(false); }} onClick={() => chooseTarget(payload)} style={{ ...styles.chip, ...(chosen ? styles.chipChosen : null) }}
+        title={`${payload.type} · drag onto the allocation window or click`}>
+        <strong>{payload.name}</strong>
+        <small>{payload.type} · {workload ? `${workload.assigned} assigned · ${workload.notStarted} not started` : `${payload.memberCount} member(s)`}</small>
+      </button>
+    );
+  };
+
+  return (
+    <section style={styles.page}>
+      <Link to="/operations/targeted-batches" style={styles.back}>← Back to TB Register</Link>
+      <header>
+        <p style={styles.eyebrow}>Operations / TB Register</p>
+        <h1 style={styles.title}>Allocation Map</h1>
+        <p style={styles.subtitle}>Every batch geofence in the municipality, across all Wards. Click the purple ones to put them in the allocation window, then allocate them together to one TEAM or SP (at most {ALLOCATION_MAP_MAX} at a time).</p>
+      </header>
+      {model.readyNotOnMap ? <div style={styles.note}>{model.readyNotOnMap} ready batch(es) have no geofence and are not on the map. Allocate them from TB Register as before.</div> : null}
+      <div style={styles.layout}>
+        <div style={styles.mapPane}>
+          <div style={styles.mapBar}>
+            <span>{model.counts.ready} ready · {model.counts.allocated} allocated</span>
+            <span style={styles.legend}>
+              <i style={{ ...styles.swatch, background: STATE_STYLES.READY.fillColor, borderColor: STATE_STYLES.READY.strokeColor }} />Ready, click to select
+              <i style={{ ...styles.swatch, background: STATE_STYLES.SELECTED.fillColor, borderColor: STATE_STYLES.SELECTED.strokeColor }} />Selected
+              <i style={{ ...styles.swatch, background: STATE_STYLES.ALLOCATED.fillColor, borderColor: STATE_STYLES.ALLOCATED.strokeColor }} />Allocated
+            </span>
+            <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Show all</button>
+          </div>
+          <div style={styles.map}>
+            {!key ? <p>Google Maps key missing</p> : loading ? <p style={styles.status}>Loading the batches…</p> : !model.items.length ? <p style={styles.status}>No batch geofences in this municipality yet.</p> : (
+              <APIProvider apiKey={key}>
+                <GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={13} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
+                  <WardBoundaryPolygons wards={wardLayer} />
+                  <AllocationMapGeofences items={model.items} selectedIds={selectedIds} onToggle={toggle} />
+                  <FitAll items={model.items} fitRequest={fitRequest} />
+                </GoogleMap>
+              </APIProvider>
+            )}
+          </div>
+        </div>
+        <aside style={{ ...styles.window, ...(dropFocused ? styles.windowDrop : null) }} onDragOver={event => { event.preventDefault(); setDropFocused(true); }} onDragLeave={() => setDropFocused(false)} onDrop={onDrop}>
+          <h2 style={styles.windowTitle}>Allocation window</h2>
+          <p style={styles.totals}>{selection.batches ? `${selection.batches} batch(es) · ${selection.meters} meter(s) · ${selection.wards.join(", ")}` : "Click ready geofences on the map to add them here."}</p>
+          <ul style={styles.list}>
+            {selection.items.map(item => (
+              <li key={item.tbId} style={styles.listItem}>
+                <span><strong>{item.name}</strong><small style={styles.muted}>{item.wardLabel} · {item.meters} meter(s) · {item.tbId}</small></span>
+                <button type="button" aria-label={`Remove ${item.name}`} style={styles.remove} onClick={() => toggle(item)}>×</button>
+              </li>
+            ))}
+          </ul>
+          <div style={styles.dropZone}>{target ? <span>Allocating to <strong>{target.name}</strong> ({target.type}) <button type="button" style={styles.clear} onClick={() => setTarget(null)}>change</button></span> : "Drag a TEAM or SP here, or click one below."}</div>
+          <div style={styles.targets}>
+            <strong style={styles.groupTitle}>TEAMs</strong>
+            <div style={styles.chips}>{teams.length ? teams.map(targetChip) : <small style={styles.muted}>No TEAMs</small>}</div>
+            <strong style={styles.groupTitle}>Service providers</strong>
+            <div style={styles.chips}>{serviceProviders.length ? serviceProviders.map(targetChip) : <small style={styles.muted}>No SPs</small>}</div>
+          </div>
+          {message ? <p role="status" style={styles.message}>{message}</p> : null}
+          {error ? <p role="alert" style={styles.error}>{error}</p> : null}
+          <button type="button" style={{ ...styles.allocate, ...(canAllocate ? null : styles.allocateDisabled) }} disabled={!canAllocate} onClick={allocate}>
+            {busy ? "Allocating…" : allocateButtonLabel(selection, target)}
+          </button>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+const styles = {
+  page: { display: "grid", gap: 14 },
+  back: { color: "#2563eb", fontWeight: 800, fontSize: 13, textDecoration: "none" },
+  eyebrow: { margin: 0, color: "#2563eb", fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" },
+  title: { margin: "4px 0 0", color: "#0f172a", fontSize: 30 },
+  subtitle: { maxWidth: 900, margin: "8px 0 0", color: "#64748b", fontSize: 14, fontWeight: 600, lineHeight: 1.6 },
+  note: { border: "1px solid #fde68a", background: "#fffbeb", color: "#92400e", borderRadius: 12, padding: 12, fontSize: 13 },
+  layout: { display: "grid", gridTemplateColumns: "minmax(0, 1.7fr) minmax(300px, 1fr)", gap: 14, alignItems: "start" },
+  mapPane: { display: "grid", gap: 8, border: "1px solid #dbe4f0", borderRadius: 16, padding: 12, background: "#ffffff" },
+  mapBar: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, justifyContent: "space-between", fontSize: 13, color: "#334155", fontWeight: 700 },
+  legend: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontWeight: 600, color: "#475569" },
+  swatch: { display: "inline-block", width: 12, height: 12, border: "2px solid", marginLeft: 6 },
+  smallButton: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "5px 10px", background: "#ffffff", color: "#1d4ed8", fontWeight: 800, cursor: "pointer" },
+  map: { height: 620, borderRadius: 12, overflow: "hidden", background: "#f1f5f9" },
+  status: { display: "grid", placeItems: "center", height: "100%", margin: 0, color: "#475569" },
+  window: { display: "grid", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#ffffff", position: "sticky", top: 12 },
+  windowDrop: { borderColor: "#2563eb", boxShadow: "0 0 0 3px #bfdbfe" },
+  windowTitle: { margin: 0, fontSize: 18, color: "#0f172a" },
+  totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 },
+  list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" },
+  listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 13 },
+  muted: { display: "block", color: "#64748b", fontSize: 11 },
+  remove: { border: "none", background: "#f1f5f9", borderRadius: 999, width: 26, height: 26, cursor: "pointer", fontSize: 16 },
+  dropZone: { border: "2px dashed #93c5fd", borderRadius: 10, padding: 10, color: "#1d4ed8", fontSize: 13, background: "#eff6ff" },
+  clear: { marginLeft: 6, border: "none", background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", fontSize: 12 },
+  targets: { display: "grid", gap: 6 },
+  groupTitle: { fontSize: 12, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" },
+  chips: { display: "flex", flexWrap: "wrap", gap: 6 },
+  chip: { display: "grid", gap: 2, textAlign: "left", border: "1px solid #bfdbfe", borderRadius: 10, padding: "6px 10px", background: "#eff6ff", color: "#1e3a8a", cursor: "grab", fontSize: 12 },
+  chipChosen: { borderColor: "#1d4ed8", background: "#dbeafe", boxShadow: "0 0 0 2px #93c5fd" },
+  message: { margin: 0, color: "#166534", fontSize: 13, fontWeight: 700 },
+  error: { margin: 0, color: "#991b1b", fontSize: 13, fontWeight: 700 },
+  allocate: { border: "none", borderRadius: 12, padding: "12px 14px", background: "#2563eb", color: "#ffffff", fontWeight: 900, fontSize: 14, cursor: "pointer" },
+  allocateDisabled: { background: "#94a3b8", cursor: "not-allowed" },
+};

@@ -861,6 +861,11 @@ export default function TargetedBatchesPage() {
             Open TB Dashboard
           </Link>
 
+          {/* Targeted Batch rules TB-R047: several batches to one TEAM or SP from a map. */}
+          <Link to="/operations/targeted-batches/allocation-map" style={styles.secondaryLinkButton}>
+            Allocation Map
+          </Link>
+
           {draft ? (
             <Link
               to="/operations/targeted-batches/draft"

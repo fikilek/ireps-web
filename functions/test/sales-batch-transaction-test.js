@@ -7,7 +7,7 @@ import { createProofCodec, resolveSalesBatch } from "../targetedBatches/sales-ba
 import { assessSalesBatch } from "../targetedBatches/sales-batch-geofence.js";
 import { createGeoFenceRequest } from "../geofences/callables.js";
 import { createSalesBatch } from "../targetedBatches/sales-batch-creation.js";
-import { allocateNonGpsBatchAtomically, onAllocateTargetedBatchCallable } from "../targetedBatches/allocationCallable.js";
+import { allocateNonGpsBatchAtomically, allocateSalesBatchesTogether, onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCallable } from "../targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "../targetedBatches/acceptanceCallable.js";
 import { recordTargetedBatchNoAccess } from "../targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import { onGeoFenceCreated } from "../geofences/triggers.js";
@@ -345,3 +345,44 @@ test("old batch-only fence remains untouched and cannot be used for new creation
  await assert.rejects(assessSalesBatch({db,request:request({...intent,geofenceId:old.id}),codec}),/Create a new geofence/);
  assert.deepEqual((await db.doc(`geo_fences/${old.id}`).get()).data(),old);
 });
+// Rules TB-R047: the Allocation Map allocates several batches to one TEAM or SP together, all or nothing.
+const TB_B="TGB_20260913_120002_AB12";
+async function twoBatches(){
+ const [a,b]=await seed(2);
+ await createSalesBatch({db,request:request(await prepare([a])),codec});
+ await createSalesBatch({db,request:request(await prepare([b],{tbId:TB_B})),codec});
+ await db.doc(`users/${f.actor.uid}`).update({"employment.serviceProvider.id":"MNC1"});
+ await db.doc("users/FWR1").set({profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
+ await db.doc("teams/TEAM1").set({team:{status:"ACTIVE",name:"Test team"},ownership:{mncServiceProviderId:"MNC1"},scope:{memberUserIds:["FWR1"]},memberUids:["FWR1"]});
+ await db.doc("serviceProviders/SP1").set({status:"ACTIVE",name:"Test SP",clients:[{id:"MNC1",clientType:"SP",relationshipType:"SUBC"}]});
+ return {db,request:request({}),tbIds:[f.tbId,TB_B],targetType:"TEAM",targetId:"TEAM1",actorMncId:"MNC1",actorUid:f.actor.uid,actorName:f.actor.user};
+}
+test("the Allocation Map allocates the selected batches to one TEAM in one step, and a repeat changes nothing",async()=>{
+ const args=await twoBatches();
+ const result=await allocateSalesBatchesTogether(args);
+ assert.deepEqual([result.allocatedTbIds,result.totalRows,result.target.id],[[f.tbId,TB_B],2,"TEAM1"]);
+ for(const tbId of [f.tbId,TB_B]){
+  const parent=(await db.doc(`tb_uploads/${tbId}`).get()).data();
+  assert.deepEqual([parent.allocation.status,parent.allocation.targetId,parent.acceptance.status],["ALLOCATED","TEAM1","WAITING"]);
+  const rows=await db.collection("tb_rows").where("tbId","==",tbId).get();assert.ok(rows.docs.every(row=>row.data().allocation.targetId==="TEAM1"&&row.data().allocation.status==="ALLOCATED"));
+ }
+ const again=await allocateSalesBatchesTogether(args);assert.deepEqual([again.alreadyAllocatedTbIds,again.updatedRows],[[f.tbId,TB_B],0]);
+});
+test("the Allocation Map allocates nothing when one selected batch is allocated elsewhere, and names it",async()=>{
+ const args=await twoBatches();
+ await allocateNonGpsBatchAtomically({db,request:request({}),parentRef:db.doc(`tb_uploads/${TB_B}`),tbId:TB_B,targetType:"SP",targetId:"SP1",actorMncId:"MNC1",actorUid:f.actor.uid,actorName:f.actor.user,startedAtMs:Date.now()});
+ await assert.rejects(allocateSalesBatchesTogether(args),error=>error.details.tbId===TB_B&&/another TEAM\/SP/.test(error.message));
+ const first=(await db.doc(`tb_uploads/${f.tbId}`).get()).data();assert.notEqual(first.allocation?.status,"ALLOCATED","the other batch was not allocated");
+ const rows=await db.collection("tb_rows").where("tbId","==",f.tbId).get();assert.ok(rows.docs.every(row=>row.data().allocation.status!=="ALLOCATED"));
+});
+test("the Allocation Map Function allows 1 to 15 distinct batches and reports the batch that failed",async()=>{
+ await twoBatches();
+ const call=data=>onAllocateTargetedBatchesTogetherCallable.run(request({targetType:"TEAM",targetId:"TEAM1",...data}));
+ assert.equal((await call({tbIds:[]})).code,"INVALID_GROUP_ALLOCATION_SIZE");
+ assert.equal((await call({tbIds:Array.from({length:16},(_,i)=>`TGB_20260913_1200${String(i).padStart(2,"0")}_AB12`)})).code,"INVALID_GROUP_ALLOCATION_SIZE");
+ assert.equal((await call({tbIds:[f.tbId,f.tbId]})).code,"DUPLICATE_TARGETED_BATCH_ID");
+ const missing=await call({tbIds:[f.tbId,"TGB_20260913_120009_AB12"]});assert.deepEqual([missing.success,missing.code,missing.tbId],[false,"TARGETED_BATCH_NOT_FOUND","TGB_20260913_120009_AB12"]);
+ assert.notEqual((await db.doc(`tb_uploads/${f.tbId}`).get()).data().allocation?.status,"ALLOCATED","nothing is allocated when one batch fails");
+ const ok=await call({tbIds:[f.tbId,TB_B]});assert.deepEqual([ok.success,ok.code,ok.allocatedTbIds],[true,"TARGETED_BATCHES_ALLOCATED",[f.tbId,TB_B]]);
+});
+
