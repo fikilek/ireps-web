@@ -64,7 +64,8 @@ test("every '?' explains the column with each TEAM's own numbers and the project
   assert.deepEqual(matrixColumnHelp("notStarted", { organisations }).rows[0], ["Kaiser Team", `78 of 248 = ${n(31.5)}%`]);
   assert.match(matrixColumnHelp("notStarted", { organisations }).paragraphs[0], /no premise captured, no No Access recorded and no meter captured/);
   assert.match(matrixColumnHelp("inProgress", { organisations }).paragraphs[0], /premise has been captured or No Access has been recorded, but the meter has not been captured yet/);
-  assert.deepEqual(matrixColumnHelp("progress", { organisations }).rows[0], ["Kaiser Team", `142 ÷ 248 = ${n(57.2)}%`], "Progress is the Completed %");
+  assert.equal(matrixColumnHelp("progress", { organisations }), null, "Progress was removed (1.3.24); Completed % shows it");
+  assert.match(matrixColumnHelp("completed", { organisations }).paragraphs[0], /shows how far this TEAM \/ SP is through the meters assigned to it/);
   assert.deepEqual(matrixColumnHelp("batches", { organisations }).rows[1], ["Magubane Team", "16 batches · 1 rejected, left out"]);
   assert.deepEqual(matrixColumnHelp("projectedShare", { organisations, incomingMeters: 30 }).rows[0], ["Kaiser Team", `(248 + 30) ÷ (948 + 30) = ${n(28.4)}%`]);
   assert.equal(matrixColumnHelp("unknown", { organisations }), null);
@@ -74,8 +75,8 @@ test("the page shows the new columns with a '?' on every heading, and the remove
   const page = await readFile(new URL("../../TargetedBatchAllocationMatrixPage.jsx", import.meta.url), "utf8");
   const headings = [...page.matchAll(/<Th help="([a-zA-Z]+)" onHelp=\{setHelpKey\}>([^<]+)<\/Th>/g)].map(match => [match[1], match[2]]);
   assert.deepEqual(headings, [["type", "Type"], ["name", "TEAM / SP"], ["batches", "Batches"], ["assigned", "Meters Assigned"], ["notStarted", "Not Started"], ["inProgress", "In Progress"],
-    ["completed", "Completed"], ["progress", "Progress"], ["projectShare", "Project Share"], ["projectedAssigned", "Projected Assigned"], ["projectedShare", "Projected Project Share"]]);
-  for (const removed of ["Eligibility", "Active Open", "Rejected / Unresolved", "Eligible Type Avg", "Vs Type Avg", "Integrity</Th>", "Two truths are kept separate", "Historically Assigned"]) assert.doesNotMatch(page, new RegExp(removed.replace("/", "\\/")), removed);
+    ["completed", "Completed"], ["projectShare", "Project Share"], ["projectedAssigned", "Projected Assigned"], ["projectedShare", "Projected Project Share"]]);
+  for (const removed of [">Progress</Th>", "Eligibility", "Active Open", "Rejected / Unresolved", "Eligible Type Avg", "Vs Type Avg", "Integrity</Th>", "Two truths are kept separate", "Historically Assigned"]) assert.doesNotMatch(page, new RegExp(removed.replace("/", "\\/")), removed);
   assert.match(page, /<CountPercent count=\{matrix\.notStarted\} percent=\{matrix\.notStartedPct\} \/>/);
   assert.match(page, /setTimeout\(onOpen, HELP_HOVER_DELAY_MS\)/, "resting the pointer opens the window");
   assert.match(page, /if \(event\.key === "Escape"\) onClose\(\);/);

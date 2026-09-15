@@ -12,7 +12,7 @@ function projectTotals(all = []) {
 }
 const partOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
 
-export const MATRIX_COLUMN_KEYS = Object.freeze(["type", "name", "batches", "assigned", "notStarted", "inProgress", "completed", "progress", "projectShare", "projectedAssigned", "projectedShare"]);
+export const MATRIX_COLUMN_KEYS = Object.freeze(["type", "name", "batches", "assigned", "notStarted", "inProgress", "completed", "projectShare", "projectedAssigned", "projectedShare"]);
 
 export function matrixColumnHelp(key, { organisations = [], allOrganisations = organisations, incomingMeters = 0 } = {}) {
   const totals = projectTotals(allOrganisations);
@@ -53,14 +53,7 @@ export function matrixColumnHelp(key, { organisations = [], allOrganisations = o
     };
     case "notStarted": return state("notStarted", "Not Started", "Meters assigned to this TEAM / SP where no field work has been recorded yet: no premise captured, no No Access recorded and no meter captured. They are neither in progress nor completed.");
     case "inProgress": return state("inProgress", "In Progress", "Meters where field work has begun but is not finished: the premise has been captured or No Access has been recorded, but the meter has not been captured yet.");
-    case "completed": return state("completed", "Completed", "Meters that have been found and captured in the field (meter discovery done). This is finished work.");
-    case "progress": return {
-      title: "Progress",
-      paragraphs: ["How far this TEAM / SP is through the meters assigned to it. It is the same figure as the Completed percentage."],
-      formula: "Progress = Completed ÷ Meters Assigned",
-      rows: rows(matrix => `${count(matrix.completed)} ÷ ${count(matrix.assigned)} = ${pct(matrix.completedPct)}`),
-      total: `Project: ${count(totals.completed)} ÷ ${count(totals.assigned)} = ${pct(completedPct)}`,
-    };
+    case "completed": return state("completed", "Completed", "Meters that have been found and captured in the field (meter discovery done). This is finished work, and the Completed percentage shows how far this TEAM / SP is through the meters assigned to it.");
     case "projectShare": return {
       title: "Project Share",
       paragraphs: ["The part of all the meters handed out in this project that went to this TEAM / SP.", `Overall assigned in the project: ${count(totals.assigned)} meters.`],

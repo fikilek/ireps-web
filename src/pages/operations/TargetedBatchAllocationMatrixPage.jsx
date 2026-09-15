@@ -581,7 +581,6 @@ export default function TargetedBatchAllocationMatrixPage() {
                     <Th help="notStarted" onHelp={setHelpKey}>Not Started</Th>
                     <Th help="inProgress" onHelp={setHelpKey}>In Progress</Th>
                     <Th help="completed" onHelp={setHelpKey}>Completed</Th>
-                    <Th help="progress" onHelp={setHelpKey}>Progress</Th>
                     <Th help="projectShare" onHelp={setHelpKey}>Project Share</Th>
                     {projectionActive ? <Th help="projectedAssigned" onHelp={setHelpKey}>Projected Assigned</Th> : null}
                     {projectionActive ? <Th help="projectedShare" onHelp={setHelpKey}>Projected Project Share</Th> : null}
@@ -590,14 +589,14 @@ export default function TargetedBatchAllocationMatrixPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 11 : 9}>
+                      <Td colSpan={projectionActive ? 10 : 8}>
                         Loading live Allocation Matrix...
                       </Td>
                     </tr>
                   ) : null}
                   {!loading && matrixError ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 11 : 9}>
+                      <Td colSpan={projectionActive ? 10 : 8}>
                         <div style={styles.errorNotice}>
                           {matrixErrorMessage ||
                             "The Allocation Matrix could not be loaded."}
@@ -607,7 +606,7 @@ export default function TargetedBatchAllocationMatrixPage() {
                   ) : null}
                   {!loading && !matrixError && visibleOrganisations.length === 0 ? (
                     <tr>
-                      <Td colSpan={projectionActive ? 11 : 9}>
+                      <Td colSpan={projectionActive ? 10 : 8}>
                         No TEAM/SP targets match the current filters.
                       </Td>
                     </tr>
@@ -642,7 +641,6 @@ export default function TargetedBatchAllocationMatrixPage() {
                           <Td><CountPercent count={matrix.notStarted} percent={matrix.notStartedPct} /></Td>
                           <Td><CountPercent count={matrix.inProgress} percent={matrix.inProgressPct} /></Td>
                           <Td><CountPercent count={matrix.completed} percent={matrix.completedPct} /></Td>
-                          <Td><Percent value={matrix.completedPct} /></Td>
                           <Td><Percent value={matrix.projectSharePct} /></Td>
                           {projectionActive ? (
                             <Td strong>
