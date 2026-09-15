@@ -65,6 +65,7 @@ import UsersPage from "../pages/users/UsersPage";
 
 import PrepaidSales from "../pages/sales/PrepaidSales";
 import NonGpsBatchPlanningPage from "../pages/sales/NonGpsBatchPlanningPage";
+import BatchesGeofencesPage from "../pages/sales/BatchesGeofencesPage";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
 import SalesBatchReportPage from "../pages/sales/SalesBatchReportPage";
 import SalesBatchMapPage from "../pages/sales/SalesBatchMapPage";
@@ -189,6 +190,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <NonGpsBatchPlanningPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/sales/batches-geofences"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <BatchesGeofencesPage />
               </RoleRoute>
             }
           />

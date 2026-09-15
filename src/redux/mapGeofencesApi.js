@@ -37,6 +37,10 @@ function normalizeGeoFenceRow(id, data) {
 
     createdByUser: data?.metadata?.createdByUser || "NAv",
     updatedAt: data?.metadata?.updatedAt || data?.metadata?.createdAt || "NAv",
+    // Batches & Geofences (rules TB-R044).
+    createdAt: data?.metadata?.createdAt || null,
+    createdByUid: data?.metadata?.createdByUid || "",
+    salesMeterCount: Number.isFinite(Number(counts?.salesMeters)) ? Number(counts.salesMeters) : null,
   };
 }
 

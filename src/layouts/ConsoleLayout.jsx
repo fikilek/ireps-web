@@ -527,6 +527,10 @@ function getPageTitle(activeNavItem, pathname) {
     return "TB Draft";
   }
 
+  if (pathname === "/sales/batches-geofences") {
+    return "Batches & Geofences";
+  }
+
   if (/^\/operations\/targeted-batches\/[^/]+\/allocation$/.test(pathname)) {
     return "TB Allocation";
   }

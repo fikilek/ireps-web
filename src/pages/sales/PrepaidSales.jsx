@@ -464,6 +464,10 @@ export default function PrepaidSales() {
           >
             Non-GPS Sales Table
           </button>
+          {/* Targeted Batch rules TB-R044. */}
+          <button type="button" style={styles.ngpButton} onClick={() => navigate("/sales/batches-geofences")}>
+            Batches &amp; Geofences
+          </button>
           <div style={styles.roleBadge}>{role || "NAv"}</div>
           <button
             type="button"
