@@ -16,6 +16,7 @@ import {
   NGP_SELECTION_MAX,
   buildNgpTargetedBatchDraftPlan,
   buildNonGpsBatchPlanningModel,
+  quickSelectNgpStreetTargets,
   updateNgpStreetSelection,
   validateNgpSelection,
 } from "./models/nonGpsBatchPlanningModel";
@@ -278,6 +279,21 @@ export default function NonGpsBatchPlanningPage() {
     setSelectedIds(update.selectedIds);
   }
 
+  // Returns the message Street Detail shows when fewer meters were ticked than asked.
+  function quickSelectStreet({ streetTargets, orderedTargets, count }) {
+    setSelectionError("");
+
+    const result = quickSelectNgpStreetTargets({
+      selectedIds: activeSelectedIds,
+      streetTargets,
+      orderedTargets,
+      count,
+    });
+
+    if (result.ok) setSelectedIds(result.selectedIds);
+    return result.message;
+  }
+
   function clearSelection() {
     setSelectedIds(new Set());
     setSelectionError("");
@@ -434,6 +450,7 @@ export default function NonGpsBatchPlanningPage() {
               lmPcode={activeLmPcode}
               selectedIds={activeSelectedIds}
               onToggleTarget={toggleTarget}
+              onQuickSelect={quickSelectStreet}
               onBack={backToStreets}
             />
           ) : (

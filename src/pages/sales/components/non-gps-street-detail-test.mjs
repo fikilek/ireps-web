@@ -16,6 +16,21 @@ test("batch and work-status reasons have no note under the address; other reason
   assert.ok(!REASONS_SHOWN_IN_COLUMNS.has("NEEDS_MANUAL_ERFING"), "the Needs manual ERFing flag stays visible (TB-R041)");
 });
 
+test("Quick select sits under Select, sorts by address ascending and ticks through the page", async () => {
+  const detail = await read("./NonGpsStreetDetail.jsx");
+  const quick = await read("./NonGpsQuickSelect.jsx");
+  const page = await read("../NonGpsBatchPlanningPage.jsx");
+  assert.match(detail, /<th style=\{styles\.filterCell\}>\s*<NonGpsQuickSelect\s+onApply=\{handleQuickSelect\}/, "first filter cell, under Select");
+  assert.match(detail, /QUICK_SELECT_SORT = Object\.freeze\(\{ key: "address", direction: "asc" \}\)/);
+  assert.match(detail, /sortTargets\(\s*filterTargets\(street\.targets, filters, searchText\),\s*QUICK_SELECT_SORT,\s*\)/, "same filters as the table");
+  assert.match(detail, /setSortConfig\(QUICK_SELECT_SORT\);\s*setPage\(1\);/, "the table shows the order it ticked");
+  assert.match(quick, /const PRESET_COUNTS = \[5, 10, 20, 30\];/);
+  assert.match(quick, /max = NGP_SELECTION_MAX/);
+  assert.match(quick, />\s*OK\s*</);
+  assert.match(page, /onQuickSelect=\{quickSelectStreet\}/);
+  assert.match(page, /quickSelectNgpStreetTargets\(\{\s*selectedIds: activeSelectedIds,/);
+});
+
 test("the subtitle states the rules' batch size, 1–30", async () => {
   assert.equal(NGP_SELECTION_MAX, 30);
   const detail = await read("./NonGpsStreetDetail.jsx");

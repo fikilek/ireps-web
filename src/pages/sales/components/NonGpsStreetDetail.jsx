@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { formatNumber } from "../salesUtils";
 import NonGpsBatchingSummary from "./NonGpsBatchingSummary";
 import "./NonGpsKpi.css";
+import NonGpsQuickSelect from "./NonGpsQuickSelect";
 import SalesTargetedBatchDetailsModal from "./SalesTargetedBatchDetailsModal";
 import {
   getSalesTargetedBatchMembershipLabel,
@@ -201,11 +202,37 @@ function getSortValue(target, key) {
   return target?.canonicalAddress || "";
 }
 
+function filterTargets(targets, filters, searchText) {
+  return targets.filter(
+    (target) =>
+      includesSearch(target, searchText) &&
+      includesFilter(target.canonicalAddress, filters.address) &&
+      includesFilter(target.meterNo, filters.meterNo) &&
+      (!filters.salesStatus || target.salesWorkStatus === filters.salesStatus) &&
+      (!filters.batchId || getSalesTargetedBatchMembershipFilterKey(target.membership) === filters.batchId),
+  );
+}
+
+function sortTargets(rows, sortConfig) {
+  return [...rows].sort((left, right) => {
+    const comparison = compareValues(
+      getSortValue(left, sortConfig.key),
+      getSortValue(right, sortConfig.key),
+    );
+    const stableComparison = comparison || compareValues(left.id, right.id);
+    return sortConfig.direction === "asc" ? stableComparison : -stableComparison;
+  });
+}
+
+// Quick select always ticks in address order, smallest number first.
+const QUICK_SELECT_SORT = Object.freeze({ key: "address", direction: "asc" });
+
 export default function NonGpsStreetDetail({
   street,
   lmPcode = "",
   selectedIds = new Set(),
   onToggleTarget,
+  onQuickSelect,
   onBack,
 }) {
   const [searchText, setSearchText] = useState("");
@@ -217,6 +244,7 @@ export default function NonGpsStreetDetail({
   });
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
   const [openBatch, setOpenBatch] = useState(null);
+  const [quickSelectNotice, setQuickSelectNotice] = useState("");
   const openTarget = openBatch && street.targets.find((target) => target.id === openBatch.salesId);
   const openBatchIsCurrent = openTarget?.membership?.state === "MEMBER" &&
     openTarget.membership.tbId === openBatch?.tbId && openBatch.lmPcode === lmPcode;
@@ -235,25 +263,10 @@ export default function NonGpsStreetDetail({
     return [...ids].sort((left, right) => compareValues(left[1], right[1]));
   }, [street.targets]);
 
-  const filteredTargets = useMemo(() => {
-    const rows = street.targets.filter(
-      (target) =>
-        includesSearch(target, searchText) &&
-        includesFilter(target.canonicalAddress, filters.address) &&
-        includesFilter(target.meterNo, filters.meterNo) &&
-        (!filters.salesStatus || target.salesWorkStatus === filters.salesStatus) &&
-        (!filters.batchId || getSalesTargetedBatchMembershipFilterKey(target.membership) === filters.batchId),
-    );
-
-    return [...rows].sort((left, right) => {
-      const comparison = compareValues(
-        getSortValue(left, sortConfig.key),
-        getSortValue(right, sortConfig.key),
-      );
-      const stableComparison = comparison || compareValues(left.id, right.id);
-      return sortConfig.direction === "asc" ? stableComparison : -stableComparison;
-    });
-  }, [filters, searchText, sortConfig, street.targets]);
+  const filteredTargets = useMemo(
+    () => sortTargets(filterTargets(street.targets, filters, searchText), sortConfig),
+    [filters, searchText, sortConfig, street.targets],
+  );
 
   const totalPages = Math.max(1, Math.ceil(filteredTargets.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -279,6 +292,20 @@ export default function NonGpsStreetDetail({
   function handleSearchChange(value) {
     setSearchText(value);
     setPage(1);
+  }
+
+  // Ticks the first `count` meters of the filtered list in address order, the
+  // same rows the table shows after the sort, across every page.
+  function handleQuickSelect(count) {
+    const orderedTargets = sortTargets(
+      filterTargets(street.targets, filters, searchText),
+      QUICK_SELECT_SORT,
+    );
+    setSortConfig(QUICK_SELECT_SORT);
+    setPage(1);
+    setQuickSelectNotice(
+      onQuickSelect?.({ streetTargets: street.targets, orderedTargets, count }) || "",
+    );
   }
 
   return (
@@ -343,6 +370,13 @@ export default function NonGpsStreetDetail({
           setFilters({ ...EMPTY_FILTERS }); setSearchText(""); setPage(1);
         }}>Clear All Filters</button>
       )}
+      {quickSelectNotice ? (
+        <div role="status" style={styles.quickSelectNotice}>
+          <span>{quickSelectNotice}</span>
+          <button type="button" style={styles.noticeDismiss} onClick={() => setQuickSelectNotice("")}
+            aria-label="Dismiss quick select message">×</button>
+        </div>
+      ) : null}
 
       <PaginationControls
         currentPage={safePage}
@@ -390,7 +424,12 @@ export default function NonGpsStreetDetail({
               </th>
             </tr>
             <tr>
-              <th style={styles.filterCell} aria-hidden="true" />
+              <th style={styles.filterCell}>
+                <NonGpsQuickSelect
+                  onApply={handleQuickSelect}
+                  disabled={!street.targets.some((target) => target.batchable === true)}
+                />
+              </th>
               <th style={styles.filterCell}>
                 <ColumnFilter
                   value={filters.address}
@@ -443,7 +482,10 @@ export default function NonGpsStreetDetail({
                         type="checkbox"
                         checked={checked}
                         disabled={!batchable}
-                        onChange={() => onToggleTarget?.(target)}
+                        onChange={() => {
+                          setQuickSelectNotice("");
+                          onToggleTarget?.(target);
+                        }}
                         aria-label={`${checked ? "Deselect" : "Select"} ${meterLabel}`}
                         title={
                           !batchable
@@ -512,6 +554,29 @@ export default function NonGpsStreetDetail({
 }
 
 const styles = {
+  quickSelectNotice: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "0.75rem",
+    margin: "0 1.1rem 0.75rem",
+    padding: "0.65rem 0.8rem",
+    border: "1px solid #fde68a",
+    borderRadius: "0.6rem",
+    background: "#fffbeb",
+    color: "#92400e",
+    fontSize: "0.84rem",
+    fontWeight: 700,
+  },
+  noticeDismiss: {
+    border: 0,
+    padding: 0,
+    background: "transparent",
+    color: "#92400e",
+    fontSize: "1rem",
+    lineHeight: 1,
+    cursor: "pointer",
+  },
   batchLink: { border: 0, padding: 0, background: "none", color: "#1d4ed8",
     textDecoration: "underline", cursor: "pointer", font: "inherit", textAlign: "left" },
   panel: {

@@ -461,6 +461,103 @@ export function updateNgpStreetSelection({
   };
 }
 
+function describeQuickSelect({
+  requestedCount,
+  tickedCount,
+  availableCount,
+  otherSelectedCount,
+  limitedBy,
+  maxSelection,
+}) {
+  if (limitedBy === "AVAILABLE") {
+    if (availableCount === 0) return "No meters on this list can be ticked.";
+    return `You asked for ${requestedCount}, but only ${availableCount} meter${
+      availableCount === 1 ? "" : "s"
+    } on this list can be ticked. ${
+      availableCount === 1 ? "It is" : `All ${availableCount} are`
+    } ticked.`;
+  }
+
+  if (limitedBy === "CAPACITY") {
+    const others = `${otherSelectedCount} meter${
+      otherSelectedCount === 1 ? " is" : "s are"
+    } already ticked on other streets`;
+    if (tickedCount === 0) {
+      return `${others}. One batch holds at most ${maxSelection} meters, so none were ticked here. Untick some first.`;
+    }
+    return `You asked for ${requestedCount}, but ${others}. One batch holds at most ${maxSelection} meters, so ${tickedCount} ${
+      tickedCount === 1 ? "was" : "were"
+    } ticked here.`;
+  }
+
+  return "";
+}
+
+// Quick select: tick the first `count` batchable meters of `orderedTargets`
+// (the street list as shown, sorted by address) as if ticked by hand. It
+// replaces this street's ticks; ticks on other streets stay and count
+// towards the batch limit.
+export function quickSelectNgpStreetTargets({
+  selectedIds,
+  streetTargets = [],
+  orderedTargets = [],
+  count,
+  maxSelection = NGP_SELECTION_MAX,
+}) {
+  const max = Number(maxSelection || NGP_SELECTION_MAX);
+  const requestedCount = Number(count);
+  const unchanged = normalizeSelectedIdSet(selectedIds);
+
+  if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > max) {
+    return {
+      ok: false,
+      selectedIds: unchanged,
+      message: `Enter a number from 1 to ${max}.`,
+    };
+  }
+
+  const streetIds = new Set(
+    (Array.isArray(streetTargets) ? streetTargets : [])
+      .map((target) => String(target?.id || "").trim())
+      .filter(Boolean),
+  );
+  const nextSelectedIds = new Set([...unchanged].filter((id) => !streetIds.has(id)));
+  const otherSelectedCount = nextSelectedIds.size;
+  const remainingCapacity = Math.max(0, max - otherSelectedCount);
+
+  const candidateIds = [
+    ...new Set(
+      (Array.isArray(orderedTargets) ? orderedTargets : [])
+        .filter((target) => target?.batchable === true)
+        .map((target) => String(target?.id || "").trim())
+        .filter((id) => id && streetIds.has(id)),
+    ),
+  ];
+
+  const tickedCount = Math.min(requestedCount, remainingCapacity, candidateIds.length);
+  candidateIds.slice(0, tickedCount).forEach((id) => nextSelectedIds.add(id));
+
+  const limitedBy =
+    tickedCount === requestedCount
+      ? null
+      : remainingCapacity <= candidateIds.length
+        ? "CAPACITY"
+        : "AVAILABLE";
+
+  const result = {
+    ok: true,
+    selectedIds: nextSelectedIds,
+    requestedCount,
+    tickedCount,
+    availableCount: candidateIds.length,
+    otherSelectedCount,
+    remainingCapacity,
+    limitedBy,
+  };
+
+  return { ...result, message: describeQuickSelect({ ...result, maxSelection: max }) };
+}
+
 function compareNgpTargets(left, right) {
   const townComparison = compareNaturalValues(left?.town, right?.town);
   if (townComparison !== 0) return townComparison;

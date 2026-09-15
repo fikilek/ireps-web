@@ -12,6 +12,7 @@ import {
   evaluateNgpBatchability,
   formatAuthoritativeAddress,
   normalizePlanningKey,
+  quickSelectNgpStreetTargets,
   reconcileNgpVisibility,
   updateNgpStreetSelection,
   validateNgpSelection,
@@ -692,6 +693,129 @@ test("street selection tops up partial selection and never silently truncates to
   assert.equal(capacityBlocked.blockedByCapacity, true);
   assert.equal(capacityBlocked.requestedCount, 3);
   assert.equal(capacityBlocked.remainingCapacity, 2);
+});
+
+function quickSelectStreet() {
+  const model = buildNonGpsBatchPlanningModel([
+    makeRow({ id: "Q37", strNo: "37", strName: "Smith" }),
+    makeRow({ id: "Q17", strNo: "17", strName: "Smith" }),
+    makeRow({ id: "Q31", strNo: "31", strName: "Smith", masterVisibility: "VISIBLE" }),
+    makeRow({ id: "Q22", strNo: "22", strName: "Smith" }),
+    makeRow({ id: "Q35", strNo: "35", strName: "Smith" }),
+  ]);
+  const street = model.towns[0].streets[0];
+  // Street Detail passes the list in address order, smallest number first.
+  const ordered = ["Q17", "Q22", "Q31", "Q35", "Q37"].map((id) =>
+    street.targets.find((target) => target.id === id));
+  return { street, ordered };
+}
+
+test("quick select ticks the first N batchable meters in the order shown", () => {
+  const { street, ordered } = quickSelectStreet();
+  assert.equal(ordered.find((target) => target.id === "Q31").batchable, false);
+
+  const result = quickSelectNgpStreetTargets({
+    selectedIds: new Set(),
+    streetTargets: street.targets,
+    orderedTargets: ordered,
+    count: 3,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual([...result.selectedIds], ["Q17", "Q22", "Q35"], "Q31 cannot be ticked, so it is skipped");
+  assert.equal(result.tickedCount, 3);
+  assert.equal(result.limitedBy, null);
+  assert.equal(result.message, "");
+});
+
+test("quick select replaces this street's ticks and keeps ticks on other streets", () => {
+  const { street, ordered } = quickSelectStreet();
+  const result = quickSelectNgpStreetTargets({
+    selectedIds: new Set(["Q37", "Q35", "OTHER_STREET_1"]),
+    streetTargets: street.targets,
+    orderedTargets: ordered,
+    count: 2,
+  });
+  assert.deepEqual([...result.selectedIds].sort(), ["OTHER_STREET_1", "Q17", "Q22"]);
+  assert.equal(result.otherSelectedCount, 1);
+});
+
+test("quick select ticks what fits in one batch and says why", () => {
+  const { street, ordered } = quickSelectStreet();
+  const others = Array.from({ length: NGP_SELECTION_MAX - 2 }, (_, index) => `OTHER_${index}`);
+
+  const partial = quickSelectNgpStreetTargets({
+    selectedIds: new Set(others),
+    streetTargets: street.targets,
+    orderedTargets: ordered,
+    count: 4,
+  });
+  assert.equal(partial.tickedCount, 2);
+  assert.equal(partial.selectedIds.size, NGP_SELECTION_MAX);
+  assert.ok(partial.selectedIds.has("Q17") && partial.selectedIds.has("Q22"));
+  assert.equal(partial.limitedBy, "CAPACITY");
+  assert.equal(
+    partial.message,
+    "You asked for 4, but 28 meters are already ticked on other streets. One batch holds at most 30 meters, so 2 were ticked here.",
+  );
+
+  const full = quickSelectNgpStreetTargets({
+    selectedIds: new Set([...others, "OTHER_A", "OTHER_B"]),
+    streetTargets: street.targets,
+    orderedTargets: ordered,
+    count: 5,
+  });
+  assert.equal(full.tickedCount, 0);
+  assert.equal(full.selectedIds.size, NGP_SELECTION_MAX);
+  assert.equal(
+    full.message,
+    "30 meters are already ticked on other streets. One batch holds at most 30 meters, so none were ticked here. Untick some first.",
+  );
+});
+
+test("quick select ticks every available meter when fewer than asked", () => {
+  const { street, ordered } = quickSelectStreet();
+  const result = quickSelectNgpStreetTargets({
+    selectedIds: new Set(),
+    streetTargets: street.targets,
+    orderedTargets: ordered,
+    count: 30,
+  });
+  assert.equal(result.tickedCount, 4);
+  assert.equal(result.limitedBy, "AVAILABLE");
+  assert.equal(result.message, "You asked for 30, but only 4 meters on this list can be ticked. All 4 are ticked.");
+
+  const none = quickSelectNgpStreetTargets({
+    selectedIds: new Set(),
+    streetTargets: street.targets,
+    orderedTargets: ordered.filter((target) => target.id === "Q31"),
+    count: 5,
+  });
+  assert.equal(none.tickedCount, 0);
+  assert.equal(none.message, "No meters on this list can be ticked.");
+});
+
+test("quick select refuses counts outside 1–30 and meters from another street", () => {
+  const { street, ordered } = quickSelectStreet();
+  for (const count of [0, 31, 2.5, "abc", undefined]) {
+    const result = quickSelectNgpStreetTargets({
+      selectedIds: new Set(["Q17"]),
+      streetTargets: street.targets,
+      orderedTargets: ordered,
+      count,
+    });
+    assert.equal(result.ok, false, String(count));
+    assert.deepEqual([...result.selectedIds], ["Q17"]);
+    assert.equal(result.message, "Enter a number from 1 to 30.");
+  }
+
+  const foreign = { ...ordered[0], id: "ELSEWHERE" };
+  const result = quickSelectNgpStreetTargets({
+    selectedIds: new Set(),
+    streetTargets: street.targets,
+    orderedTargets: [foreign, ...ordered],
+    count: 1,
+  });
+  assert.deepEqual([...result.selectedIds], ["Q17"]);
 });
 
 test("NGP draft plan creates exactly one 1-30 PREPAID_SALES batch without ward scope", () => {
