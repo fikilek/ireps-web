@@ -1168,10 +1168,13 @@ test("the LM's newest category month decides: a meter missing from it has no cat
   assert.deepEqual([j2.category, j2.batchable, j2.batchabilityReason], ["NONE", false, "No category for 2026-08 — only CAT meters are batched"]);
 });
 
-test("the Non-GPS page shows the split under the three cards, the Show Normal switch and the Normal / No cat tag", () => {
+test("the Non-GPS page shows the split under the three cards, CAT in a blue pill on one line, the Show Normal switch and the Normal / No cat tag", () => {
   const page = readSource("../NonGpsBatchPlanningPage.jsx");
-  for (const card of ["noGps", "streetEligible", "exceptions"]) assert.ok(page.includes(`subtitle={categorySplitLine(planningModel.counts.byCategory.${card})}`), card);
-  assert.match(page, /`CAT \$\{formatNumber\(split\.cat \|\| 0\)\}`, `Normal \$\{formatNumber\(split\.normal \|\| 0\)\}`, \.\.\.\(split\.none \? \[`No cat \$\{formatNumber\(split\.none\)\}`\] : \[\]\)\]\.join\(" · "\)/);
+  for (const card of ["noGps", "streetEligible", "exceptions"]) assert.ok(page.includes(`subtitle={<CategorySplit split={planningModel.counts.byCategory.${card}} />}`), card);
+  assert.match(page, /<span style=\{styles\.catPill\}>CAT \{formatNumber\(split\.cat \|\| 0\)\}<\/span>/, "the CAT count is in the pill");
+  assert.match(page, /\.\.\.\(split\.none \? \[`No cat \$\{formatNumber\(split\.none\)\}`\] : \[\]\)/, "No cat only when there are any");
+  assert.match(page, /categorySplit: \{[^}]*whiteSpace: "nowrap"/, "one line that never wraps");
+  assert.match(page, /catPill: \{[^}]*background: "#2563eb", color: "#ffffff"[^}]*fontWeight: 900/, "a solid blue pill with white bold text");
   assert.match(page, /buildNonGpsBatchPlanningModel\(salesRows, \{ showNormal \}\)/);
   assert.match(page, /Show Normal/);
   assert.doesNotMatch(page, /Available for Town \/ street planning|Sales meters without usable GPS|Visible but not selectable/, "the split replaces the old subtitles");

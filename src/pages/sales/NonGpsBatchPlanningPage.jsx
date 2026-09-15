@@ -31,10 +31,16 @@ const VIEW_MODES = Object.freeze({
   EXCEPTIONS: "EXCEPTIONS",
 });
 
-// Targeted Batch rules TB-R046 (1.3.28): the CAT / Normal / No cat split under a card's number.
-// "No cat" appears only when there are any.
-function categorySplitLine(split = {}) {
-  return [`CAT ${formatNumber(split.cat || 0)}`, `Normal ${formatNumber(split.normal || 0)}`, ...(split.none ? [`No cat ${formatNumber(split.none)}`] : [])].join(" · ");
+// Targeted Batch rules TB-R046 (1.3.29): the CAT / Normal / No cat split under a card's number, on
+// one line. The CAT count, the target meters, stands out in a blue pill; "No cat" only when there are any.
+function CategorySplit({ split = {} }) {
+  const rest = [`Normal ${formatNumber(split.normal || 0)}`, ...(split.none ? [`No cat ${formatNumber(split.none)}`] : [])];
+  return (
+    <span style={styles.categorySplit}>
+      <span style={styles.catPill}>CAT {formatNumber(split.cat || 0)}</span>
+      <span>· {rest.join(" · ")}</span>
+    </span>
+  );
 }
 
 function SummaryCard({
@@ -411,19 +417,19 @@ export default function NonGpsBatchPlanningPage() {
             <SummaryCard
               label="No GPS"
               value={planningModel.counts.noGps}
-              subtitle={categorySplitLine(planningModel.counts.byCategory.noGps)}
+              subtitle={<CategorySplit split={planningModel.counts.byCategory.noGps} />}
             />
             <SummaryCard
               label="Street Eligible"
               value={planningModel.counts.streetEligible}
-              subtitle={categorySplitLine(planningModel.counts.byCategory.streetEligible)}
+              subtitle={<CategorySplit split={planningModel.counts.byCategory.streetEligible} />}
               active={viewMode === VIEW_MODES.PLANNING}
               onClick={openPlanningView}
             />
             <SummaryCard
               label="Exceptions"
               value={planningModel.counts.exceptions}
-              subtitle={categorySplitLine(planningModel.counts.byCategory.exceptions)}
+              subtitle={<CategorySplit split={planningModel.counts.byCategory.exceptions} />}
               active={viewMode === VIEW_MODES.EXCEPTIONS}
               onClick={openExceptionsView}
             />
@@ -576,7 +582,8 @@ const styles = {
   },
   summaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    // Rules TB-R046: wide enough for the CAT / Normal / No cat line to stay on one line.
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
     gap: "0.8rem",
   },
   summaryCard: {
@@ -602,6 +609,8 @@ const styles = {
   summaryLabel: { color: "#64748b", fontSize: "0.75rem", fontWeight: 900 },
   summaryValue: { color: "#0f172a", fontSize: "1.55rem" },
   summarySubtitle: { color: "#64748b", fontSize: "0.78rem" },
+  categorySplit: { display: "inline-flex", alignItems: "center", gap: "0.4rem", whiteSpace: "nowrap", color: "#64748b", fontSize: "0.8rem", fontWeight: 600 },
+  catPill: { borderRadius: 999, padding: "0.1rem 0.55rem", background: "#2563eb", color: "#ffffff", fontSize: "0.82rem", fontWeight: 900 },
   showNormal: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", color: "#0f172a", fontSize: "0.85rem", fontWeight: 800 },
   showNormalHint: { color: "#64748b", fontSize: "0.78rem", fontWeight: 600 },
   selectionBar: {
