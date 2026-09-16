@@ -875,8 +875,13 @@ export default function TargetedBatchesPage() {
           </Link>
 
           {ticked.selectedIds.length ? (
-            <button type="button" style={styles.clearTicksButton} onClick={ticked.clear}>
-              Clear
+            <button
+              type="button"
+              style={styles.clearTicksButton}
+              onClick={ticked.clear}
+              title="Take the ticks off every batch"
+            >
+              Clear ticks
             </button>
           ) : null}
 
@@ -1457,14 +1462,19 @@ const styles = {
     flexWrap: "wrap",
   },
   clearTicksButton: {
-    border: 0,
-    background: "none",
-    color: "#2563eb",
-    fontWeight: 800,
-    fontSize: 13,
-    textDecoration: "underline",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #cbd5e1",
+    borderRadius: 14,
+    background: "#ffffff",
+    color: "#475569",
+    padding: "11px 16px",
+    fontWeight: 900,
+    fontSize: "inherit",
+    fontFamily: "inherit",
     cursor: "pointer",
-    padding: 0,
+    textDecoration: "none",
   },
   primaryButton: {
     display: "inline-flex",
