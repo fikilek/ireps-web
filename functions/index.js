@@ -163,7 +163,10 @@ import {
 } from "./reportPlatform/emailDeliveryCallable.js";
 
 import { projectMeterDiscoveryAstMedia } from "./meterDiscovery/astMedia.js";
-import { validateMeterDiscoveryPayload } from "./meterDiscovery/validation.js";
+import {
+  anomalyPhotoRequired,
+  validateMeterDiscoveryPayload,
+} from "./meterDiscovery/validation.js";
 import {
   validateMeterInstallationElectricity,
 } from "./meterInstallation/validation.js";
@@ -1341,7 +1344,13 @@ function validateMeterCreationPayload({
   }
 
   const anomaly = String(ast?.anomalies?.anomaly || "").trim();
-  if (anomaly !== "Meter Ok" && !hasTaggedMedia(media, "anomalyPhoto")) {
+  const anomalyDetail = String(ast?.anomalies?.anomalyDetail || "").trim();
+  // Every detail except Operationally Ok needs its picture, so a Meter Ok
+  // bridge or bypass suspicion cannot be filed without evidence.
+  if (
+    anomalyPhotoRequired(anomaly, anomalyDetail) &&
+    !hasTaggedMedia(media, "anomalyPhoto")
+  ) {
     return buildFailureResult(
       "ANOMALY_PHOTO_REQUIRED",
       "Anomaly photo is required",

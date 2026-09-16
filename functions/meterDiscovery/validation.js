@@ -29,6 +29,24 @@ const ELECTRICITY_PLACEMENTS = new Set([
   "Other",
 ]);
 
+// The anomaly details that need no photo. Everything else does, including the
+// Meter Ok suspicions (Bridge / Bypass). The phone keeps the same list in
+// src/features/meters/formOptions.js; the two must agree or a submission that
+// passes on the phone is refused here.
+const ANOMALY_DETAILS_WITHOUT_PHOTO = Object.freeze(["Operationally Ok"]);
+
+export function anomalyPhotoRequired(anomaly, anomalyDetail) {
+  const name = String(anomaly || "").trim();
+  if (!name) return false;
+
+  const detail = String(anomalyDetail || "").trim();
+  // No detail: keep the old anomaly-only rule, so a queued or legacy
+  // submission captured before this change is not refused for want of a photo.
+  if (!detail) return name !== "Meter Ok";
+
+  return !ANOMALY_DETAILS_WITHOUT_PHOTO.includes(detail);
+}
+
 const OTHER_ANOMALY_VALUES = new Set([
   "Meter Blocked (By Munic)",
   "Meter Bridged (By Munic)",
@@ -492,7 +510,11 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
   }
 
   const anomaly = String(ast?.anomalies?.anomaly || "").trim();
-  if (anomaly !== "Meter Ok" && !hasTaggedMedia(media, "anomalyPhoto")) {
+  const anomalyDetail = String(ast?.anomalies?.anomalyDetail || "").trim();
+  if (
+    anomalyPhotoRequired(anomaly, anomalyDetail) &&
+    !hasTaggedMedia(media, "anomalyPhoto")
+  ) {
     return buildFailureResult(
       "ANOMALY_PHOTO_REQUIRED",
       "Anomaly photo is required",
@@ -670,6 +692,7 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
 }
 
 export const METER_DISCOVERY_VALIDATION_METADATA = Object.freeze({
+  anomalyDetailsWithoutPhoto: ANOMALY_DETAILS_WITHOUT_PHOTO,
   otherAnomalyValues: Object.freeze([...OTHER_ANOMALY_VALUES]),
   normalisationActionValues: Object.freeze([...NORMALISATION_ACTION_VALUES]),
   sealCommentEvidence: SEAL_COMMENT_EVIDENCE,

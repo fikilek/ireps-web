@@ -764,3 +764,42 @@ test("contract v2 Remaining Credit photo requires a usable URI or URL", () => {
   payload.media.push({ tag: "remainingCreditPhoto" });
   expectCode(payload, "REMAINING_CREDIT_PHOTO_REQUIRED");
 });
+
+// Meter Ok carries three details. Operationally Ok needs no picture; a bridge
+// or bypass suspicion does, so the suspicion always arrives with its evidence.
+test("Meter Ok suspicions require an anomaly photo, Operationally Ok does not", () => {
+  expectPass(baseElectricity());
+
+  for (const detail of ["Bridge Suspicion", "Bypass Suspicion"]) {
+    const missingPhoto = baseElectricity();
+    missingPhoto.ast.anomalies.anomalyDetail = detail;
+    expectCode(missingPhoto, "ANOMALY_PHOTO_REQUIRED");
+
+    const withPhoto = baseElectricity();
+    withPhoto.ast.anomalies.anomalyDetail = detail;
+    withPhoto.media.push(...media("anomalyPhoto"));
+    expectPass(withPhoto);
+  }
+
+  const water = baseWater();
+  water.ast.anomalies.anomalyDetail = "Bypass Suspicion";
+  expectCode(water, "ANOMALY_PHOTO_REQUIRED");
+
+  // Every other anomaly keeps needing its photo, exactly as before.
+  const faulty = baseElectricity();
+  faulty.ast.anomalies.anomaly = "Meter Faulty";
+  faulty.ast.anomalies.anomalyDetail = "Meter Display Blank";
+  expectCode(faulty, "ANOMALY_PHOTO_REQUIRED");
+});
+
+test("a submission with no anomaly detail keeps the old rule (queued or legacy payloads)", () => {
+  const meterOk = baseElectricity();
+  meterOk.ast.anomalies.anomalyDetail = "Operationally Ok";
+  expectPass(meterOk);
+
+  const faulty = baseElectricity();
+  faulty.ast.anomalies.anomaly = "Meter Faulty";
+  faulty.ast.anomalies.anomalyDetail = "Meter Burnt";
+  faulty.media.push(...media("anomalyPhoto"));
+  expectPass(faulty);
+});
