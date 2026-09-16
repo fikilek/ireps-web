@@ -607,6 +607,7 @@ export async function createOrLinkTargetedBatchPremise({
   premisePayload,
   actorUid,
   actorName,
+  authToken = {},
 }) {
   const context = normalizeTargetedBatchPremiseContext(
     premisePayload?.targetedBatchContext,
@@ -797,6 +798,37 @@ export async function createOrLinkTargetedBatchPremise({
         executionStatus: "IN_PROGRESS",
       };
     }
+
+    // Targeted Batch rules TB-R048 field-work guard (1.3.33): only an FWR or SPV of the TEAM or SP the
+    // batch is allocated to now may start a row, the same test Meter Discovery and No Access apply. So a
+    // premise captured before the batch was unallocated can never start a row after it is allocated to
+    // someone else. Read inside the transaction; a repeat of an existing link returned above is unaffected.
+    const actorProfileSnapshot = await transaction.get(
+      db.collection("users").doc(actorUid),
+    );
+    const actorProfile = actorProfileSnapshot.exists
+      ? actorProfileSnapshot.data() || {}
+      : {};
+    const allocationTarget = getTargetedBatchAllocation(parent);
+    let allocatedTeam = {};
+
+    if (allocationTarget.type === "TEAM" && allocationTarget.id) {
+      allocatedTeam = requireDocument(
+        await transaction.get(db.collection("teams").doc(allocationTarget.id)),
+        "TARGETED_BATCH_TEAM_NOT_FOUND",
+        "The allocated TEAM was not found.",
+      );
+    }
+
+    assertTargetedBatchExecutionAuthority({
+      parent,
+      actor: {
+        uid: actorUid,
+        role: targetedBatchActorRole(actorProfile, authToken),
+        spId: targetedBatchActorSpId(actorProfile, authToken),
+      },
+      team: allocatedTeam,
+    });
 
     if (!premiseSnapshot.exists) {
       transaction.create(premiseRef, {

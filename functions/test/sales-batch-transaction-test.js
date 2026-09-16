@@ -12,6 +12,7 @@ import { onAcceptRejectTargetedBatchCallable } from "../targetedBatches/acceptan
 import { recordTargetedBatchNoAccess } from "../targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import { onGeoFenceCreated } from "../geofences/triggers.js";
 import { deleteSalesBatch } from "../targetedBatches/deleteCallable.js";
+import { onUnallocateTargetedBatchCallable, unallocateSalesBatch } from "../targetedBatches/unallocateCallable.js";
 import { forgetSalesCategoryMonths } from "../salesAllMeters/sales-category-month.js";
 
 const host=process.env.FIRESTORE_EMULATOR_HOST;
@@ -386,3 +387,103 @@ test("the Allocation Map Function allows 1 to 15 distinct batches and reports th
  const ok=await call({tbIds:[f.tbId,TB_B]});assert.deepEqual([ok.success,ok.code,ok.allocatedTbIds],[true,"TARGETED_BATCHES_ALLOCATED",[f.tbId,TB_B]]);
 });
 
+
+// Targeted Batch rules TB-R048 (1.3.33): Unallocate.
+const withoutMetadata=doc=>{const copy=structuredClone(doc);delete copy.metadata;return copy;};
+async function unallocationFixture(){
+ const ids=await seed(1),intent=await prepare(ids);await createSalesBatch({db,request:request(intent),codec});
+ await db.doc(`users/${f.actor.uid}`).update({"employment.serviceProvider.id":"MNC1"});
+ await db.doc("users/FWR1").set({profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
+ await db.doc("users/MANAGER2").set({...structuredClone(f.profile),displayName:"Second Manager",employment:{role:"MNG",serviceProvider:{id:"MNC1"}}});
+ await db.doc("users/SUPERVISOR2").set({...structuredClone(f.profile),displayName:"Main Supervisor",employment:{role:"SPV",serviceProvider:{id:"MNC1"}}});
+ await db.doc("serviceProviders/MNC1").set({status:"ACTIVE",name:"Main SP",clients:[]});
+ await db.doc("teams/TEAM1").set({team:{status:"ACTIVE",name:"Test team"},ownership:{mncServiceProviderId:"MNC1"},scope:{memberUserIds:["FWR1"]},memberUids:["FWR1"]});
+ await db.doc("serviceProviders/SP1").set({status:"ACTIVE",name:"Test SP",clients:[{id:"MNC1",clientType:"SP",relationshipType:"SUBC"}]});
+ const parentRef=db.doc(`tb_uploads/${f.tbId}`);
+ const created={parent:(await parentRef.get()).data(),rows:(await db.collection("tb_rows").where("tbId","==",f.tbId).get()).docs.map(d=>d.data())};
+ const allocate=(targetType="TEAM")=>allocateNonGpsBatchAtomically({db,request:request({}),parentRef,tbId:f.tbId,targetType,targetId:targetType==="TEAM"?"TEAM1":"SP1",actorMncId:"MNC1",actorUid:f.actor.uid,actorName:f.actor.user,startedAtMs:Date.now()});
+ return {ids,parentRef,created,allocate};
+}
+const unallocate=(data={},uid=f.actor.uid)=>unallocateSalesBatch({db,request:{auth:{uid,token:{}},data:{tbId:f.tbId,expectedTargetType:"TEAM",expectedTargetId:"TEAM1",reason:"Allocated to the wrong team",...data}}});
+async function unallocationHistory(){return (await db.collection(`tb_uploads/${f.tbId}/history`).get()).docs.map(d=>d.data()).filter(h=>h.event==="TARGETED_BATCH_UNALLOCATED");}
+const acceptAs=(action="ACCEPT",extra={})=>onAcceptRejectTargetedBatchCallable.run({auth:{uid:"FWR1",token:{}},data:{tbId:f.tbId,action,...extra}});
+const noAccessRequest=(rowId,salesDocId,trnId)=>({auth:{uid:"FWR1",token:{}},data:{trnId,sourceModule:"SALES_TARGETED_BATCH",tbId:f.tbId,rowId,salesDocId,erfId:"ERF1",premiseId:null,capturedAt:"2026-09-16T08:00:00Z",reason:"Locked gate",media:[{tag:"noAccessPhoto",url:"gs://mock/photo.jpg"}],location:{gps:{lat:-28.5,lng:30.5}}}});
+
+test("unallocate returns an accepted batch exactly to its created state and it can be allocated to someone else",async()=>{
+ const {ids,created,allocate}=await unallocationFixture();
+ assert.equal((await allocate()).success,true);
+ assert.equal((await acceptAs()).success,true);
+ const salesBefore=(await db.doc(`sales-all-meters/${ids[0]}`).get()).data(),fence=(await fenceFor()).data(),team=(await db.doc("teams/TEAM1").get()).data();
+ const result=await unallocate();
+ assert.deepEqual([result.success,result.code,result.rows,result.previousTarget.id,result.previousAcceptance,result.authority],[true,"TARGETED_BATCH_UNALLOCATED",1,"TEAM1","ACCEPTED","ALLOCATOR"]);
+ const parent=(await db.doc(`tb_uploads/${f.tbId}`).get()).data(),rows=(await db.collection("tb_rows").where("tbId","==",f.tbId).get()).docs.map(d=>d.data());
+ assert.deepEqual(withoutMetadata(parent),withoutMetadata(created.parent),"the parent is exactly as it was created");
+ assert.deepEqual(rows.map(withoutMetadata),created.rows.map(withoutMetadata),"every row is exactly as it was created");
+ assert.deepEqual((await db.doc(`sales-all-meters/${ids[0]}`).get()).data(),salesBefore,"Sales is untouched");
+ assert.equal((await db.collection(`sales-all-meters/${ids[0]}/batchHistory`).get()).size,1,"no batch history is added");
+ assert.deepEqual((await fenceFor()).data(),fence,"the geofence is untouched");
+ assert.deepEqual((await db.doc("teams/TEAM1").get()).data(),team,"the team is untouched");
+ const [entry]=await unallocationHistory();
+ assert.deepEqual([entry.reason,entry.previousAllocation.targetId,entry.previousAcceptance.status,entry.rowCount,entry.authority,entry.override,entry.actor.uid],["Allocated to the wrong team","TEAM1","ACCEPTED",1,"ALLOCATOR",false,f.actor.uid]);
+ const again=await allocate("SP");assert.equal(again.success,true,JSON.stringify(again));
+ assert.equal((await db.doc(`tb_uploads/${f.tbId}`).get()).data().allocation.targetId,"SP1");
+});
+
+test("a rejected batch can be unallocated, which is its only way back",async()=>{
+ const {allocate}=await unallocationFixture();await allocate();
+ assert.equal((await acceptAs("REJECT",{rejectReason:"Too far"})).success,true);
+ const result=await unallocate();assert.deepEqual([result.success,result.previousAcceptance],[true,"REJECTED"]);
+ assert.equal((await db.doc(`tb_uploads/${f.tbId}`).get()).data().acceptance.status,"NOT_READY");
+});
+
+test("only the allocator unallocates; another supervisor is refused and a manager overrides on the record",async()=>{
+ const {allocate}=await unallocationFixture();await allocate();
+ await assert.rejects(unallocate({},"SUPERVISOR2"),{code:"UNALLOCATE_NOT_ALLOCATOR"});
+ assert.equal((await db.doc(`tb_uploads/${f.tbId}`).get()).data().allocation.status,"ALLOCATED","nothing changed");
+ const result=await unallocate({reason:"Allocator on leave"},"MANAGER2");
+ assert.deepEqual([result.success,result.authority],[true,"MANAGER_OVERRIDE"]);
+ const [entry]=await unallocationHistory();assert.deepEqual([entry.authority,entry.override,entry.actor.uid],["MANAGER_OVERRIDE",true,"MANAGER2"]);
+ assert.match(entry.note,/manager override of Test Supervisor/);
+});
+
+test("field work blocks unallocation, and the batch keeps its TEAM",async()=>{
+ const {ids,allocate}=await unallocationFixture();await allocate();
+ assert.equal((await acceptAs()).success,true);
+ const row=(await db.collection("tb_rows").where("tbId","==",f.tbId).get()).docs[0];
+ await recordTargetedBatchNoAccess({db,request:noAccessRequest(row.id,ids[0],"TRN_MDIS_EMULATOR_2")});
+ await assert.rejects(unallocate(),error=>["EXECUTION_STATE_INVALID","EXECUTION_STARTED"].includes(error.code));
+ const parent=(await db.doc(`tb_uploads/${f.tbId}`).get()).data();
+ assert.deepEqual([parent.allocation.status,parent.allocation.targetId],["ALLOCATED","TEAM1"]);
+ assert.equal((await unallocationHistory()).length,0);
+});
+
+test("No Access racing Unallocate: exactly one wins, never work on an unallocated batch",async()=>{
+ const {ids,allocate}=await unallocationFixture();await allocate();
+ assert.equal((await acceptAs()).success,true);
+ const row=(await db.collection("tb_rows").where("tbId","==",f.tbId).get()).docs[0];
+ const results=await Promise.allSettled([recordTargetedBatchNoAccess({db,request:noAccessRequest(row.id,ids[0],"TRN_MDIS_EMULATOR_3")}),unallocate()]);
+ assert.equal(results.filter(r=>r.status==="fulfilled").length,1,JSON.stringify(results.map(r=>r.status==="fulfilled"?"ok":r.reason?.code)));
+ const parent=(await db.doc(`tb_uploads/${f.tbId}`).get()).data(),live=(await row.ref.get()).data(),trn=await db.doc("trns/TRN_MDIS_EMULATOR_3").get();
+ if(parent.allocation.status==="ALLOCATED"){assert.equal(live.execution.status,"IN_PROGRESS");assert.equal(trn.exists,true);assert.equal((await unallocationHistory()).length,0);}
+ else{assert.equal(live.execution.status,"NOT_STARTED");assert.equal(live.allocation.status,"UNALLOCATED");assert.equal(trn.exists,false);assert.equal((await unallocationHistory()).length,1);}
+});
+
+test("a repeat changes nothing, and a batch now held by someone else is not unallocated",async()=>{
+ const {allocate}=await unallocationFixture();await allocate();
+ assert.equal((await unallocate()).code,"TARGETED_BATCH_UNALLOCATED");
+ const repeat=await unallocate();assert.deepEqual([repeat.success,repeat.code],[true,"TARGETED_BATCH_ALREADY_UNALLOCATED"]);
+ assert.equal((await unallocationHistory()).length,1,"a repeat writes no second record");
+ await allocate("SP");
+ await assert.rejects(unallocate(),{code:"UNALLOCATE_TARGET_CHANGED"});
+ assert.equal((await db.doc(`tb_uploads/${f.tbId}`).get()).data().allocation.targetId,"SP1");
+});
+
+test("the Unallocate Function refuses a missing reason and an older batch, and reports codes without throwing",async()=>{
+ const {parentRef,allocate}=await unallocationFixture();await allocate();
+ const call=data=>onUnallocateTargetedBatchCallable.run(request({tbId:f.tbId,expectedTargetType:"TEAM",expectedTargetId:"TEAM1",reason:"Wrong team",...data}));
+ assert.equal((await call({reason:"  "})).code,"UNALLOCATE_REASON_REQUIRED");
+ assert.equal((await call({expectedTargetType:"PERSON"})).code,"INVALID_UNALLOCATE_INTENT");
+ await parentRef.update({schemaVersion:"0.2.0"});
+ const legacy=await call({});assert.deepEqual([legacy.success,legacy.code],[false,"UNALLOCATE_LEGACY_BATCH"]);
+ assert.equal((await parentRef.get()).data().allocation.status,"ALLOCATED");
+});

@@ -4,14 +4,8 @@ import { SALES_BATCH_ID, SALES_ID, timestampMillis, validDocumentId } from "../s
 import { batchError, readBatchActor, snapshotReader, salesMetadataUpdate, callableFailure } from "./sales-batch-resolution.js";
 import { buildSalesBatchHistory, inspectSalesRemoval } from "./sales-batch-history.js";
 import { assertMutationSizes } from "./sales-batch-creation.js";
+import { assertNoLinkedExecution, assertUnexecuted } from "./execution-evidence.js";
 
-function assertUnexecuted(parent, rows) {
-  if (parent.schemaVersion === "0.3.0" && (parent.execution?.status !== "NOT_STARTED" || rows.some(row => row.execution?.status !== "NOT_STARTED"))) throw batchError("EXECUTION_STATE_INVALID", "Canonical execution state must prove that no work has started");
-  if (!["NOT_STARTED", undefined].includes(parent.execution?.status) || parent.execution?.startedAt || parent.execution?.completedAt || parent.counts?.executionStartedRows > 0 || parent.counts?.completedRows > 0 || ["IN_PROGRESS", "COMPLETED"].includes(parent.status)) throw batchError("EXECUTION_STARTED", "Execution permanently blocks batch deletion");
-  for (const row of rows) {
-    if (!["NOT_STARTED", undefined].includes(row.execution?.status) || row.execution?.startedAt || row.execution?.completedAt || row.execution?.outcome) throw batchError("EXECUTION_STARTED", `Execution on ${row.id} permanently blocks deletion`);
-  }
-}
 async function prepareUnlinks({ db, read, parent, snapshots, actor, at, reason }) {
   const plans = [], ids = new Set();
   for (const snapshot of snapshots) {
@@ -23,16 +17,7 @@ async function prepareUnlinks({ db, read, parent, snapshots, actor, at, reason }
     const sales = salesSnapshot.data(), removal = inspectSalesRemoval(sales, parent.id);
     if (timestampMillis(removal.exact.reference.date) !== timestampMillis(parent.metadata?.createdAt)) throw batchError("REFERENCE_DATE_CONFLICT", "The exact batch creation reference must match the parent timestamp");
     // Fresh rows have no execution refs. Legacy links must be inspected, never cleared blindly.
-    for (const [key, collection] of [["premiseId", "premises"], ["meterId", "asts"], ["trnId", "trns"]]) {
-      const id = row.refs?.[key];
-      if (!id) continue;
-      const linked = await read(db.doc(`${collection}/${id}`));
-      if (linked.exists) {
-        const record = linked.data();
-        const linkedBatch = record.source?.tbId || record.targetedBatch?.tbId || record.targetedBatchId;
-        if (key === "trnId" || key === "premiseId" || linkedBatch === parent.id || record.execution?.startedAt) throw batchError("LINKED_EXECUTION_PRESENT", `Linked ${collection} evidence blocks ordinary deletion`);
-      } else throw batchError("LINKED_EVIDENCE_MISSING", `Linked ${collection} evidence is unavailable; deletion cannot be proven safe`);
-    }
+    await assertNoLinkedExecution({ db, read, parent, row });
     const historyRef = db.doc(`sales-all-meters/${salesId}/batchHistory/${parent.id}__REMOVED_FROM_BATCH`);
     if ((await read(historyRef)).exists) throw batchError("REMOVAL_HISTORY_CONFLICT", "Immutable removal history already exists for a retained row");
     const history = buildSalesBatchHistory({ type: "REMOVED_FROM_BATCH", tbId: parent.id, rowId: row.id, salesId, geofenceId: parent.geofenceId ?? null, erfId: row.refs?.erfId ?? null, membershipSource: removal.membership.source, actor, at, revision: sales.erfResolution?.revision ?? null, reason, removalAudit: { parentStatus: parent.status, rowExecutionStatus: row.execution?.status || "NOT_STARTED", salesMeterStatus: "NOT_STARTED", parentAllocation: parent.allocation, parentAcceptance: parent.acceptance ?? null, rowAllocation: row.allocation, removedTbRef: { id: parent.id, date: removal.exact.reference.date } } });

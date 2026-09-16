@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { WARD_BOUNDARY_STYLE, geoJsonPolygonToGooglePaths, nearestPointOnPaths, parseGeometry, pointInPaths, pointsCentre, wardNameLabelPoint } from "../../geofence-map-helpers.js";
 
-// Targeted Batch rules 18.7 (1.3.8): TB Draft Wards layer; TB-R017 Allocate / Allocated.
+// Targeted Batch rules 18.7 (1.3.8): TB Draft Wards layer; TB-R017 Allocate / Unallocate (1.3.33).
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 const square = (west, east, north, south) => [[{ lat: north, lng: west }, { lat: north, lng: east }, { lat: south, lng: east }, { lat: south, lng: west }, { lat: north, lng: west }]];
 
@@ -59,9 +59,10 @@ test("TB Draft Wards layer: listed from the start, unticked, every LM Ward, load
   assert.match(panel, /<ToggleRow\s+checked=\{Boolean\(visibility\.wards\)\}\s+label="Wards"/, "never disabled, even for a multi-Ward draft");
 });
 
-test("TB Register action reads Allocate, then Allocated (TB-R017)", async () => {
+test("TB Register action reads Allocate, then Unallocate (TB-R017, TB-R048 1.3.33)", async () => {
   const register = await read("../../TargetedBatchesPage.jsx");
-  assert.match(register, /<span style=\{styles\.allocationStatusLabel\}>\s*Allocated\s*<\/span>/);
+  assert.match(register, /onClick=\{\(\) => openUnallocateModal\(upload\)\}\s*>\s*Unallocate\s*<\/button>/);
+  assert.doesNotMatch(register, /allocationStatusLabel/, "the static Allocated chip is gone");
   assert.match(register, /style=\{styles\.rowLinkButton\}\s+title="Open TB Allocation to allocate this batch to a team or service provider\."\s*>\s*Allocate\s*<\/Link>/);
   assert.doesNotMatch(register, /\{allocationState\.label\}/, "the column shows the action words, not the filter label");
 });

@@ -430,7 +430,7 @@ function buildLinkedFixture() {
       [`tb_uploads/${TB_ID}`]: {
         id: TB_ID,
         creation: { state: "READY" },
-        allocation: { status: "ALLOCATED" },
+        allocation: { status: "ALLOCATED", targetType: "TEAM", targetId: "TEAM_1" },
         acceptance: { status: "ACCEPTED" },
         execution: {
           status: "NOT_STARTED",
@@ -504,6 +504,14 @@ function buildLinkedFixture() {
           localMunicipality: { pcode: "ZA5241" },
           ward: { pcode: "ZA524100005" },
         },
+      },
+      // TB-R048 field-work guard (1.3.33): the worker belongs to the TEAM the batch is allocated to.
+      "teams/TEAM_1": {
+        team: { status: "ACTIVE", name: "Team 1" },
+        scope: { memberUserIds: ["USER_1"] },
+      },
+      "users/USER_1": {
+        profile: { displayName: "Field Worker", employment: { role: "FWR" } },
       },
     },
   };
@@ -834,4 +842,36 @@ test("meter discovery completes the batch only when every row is complete", asyn
   assert.equal(oneOfTwo.result.batchCompleted, false);
   assert.equal(oneOfTwo.db.read(`tb_uploads/${TB_ID}`).status, "IN_PROGRESS");
   assert.equal(oneOfTwo.db.read(`tb_uploads/${TB_ID}`).execution.status, "IN_PROGRESS");
+});
+
+// Targeted Batch rules TB-R048 field-work guard (1.3.33): only an FWR or SPV of the allocated TEAM or SP
+// may start a row, so a premise captured before an unallocation cannot start a row after reallocation.
+test("a worker outside the allocated TEAM cannot start a row, and nothing is written", async () => {
+  const fixture = buildLinkedFixture();
+  fixture.documents["users/OUTSIDER"] = { profile: { displayName: "Outsider", employment: { role: "FWR" } } };
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({ db, premiseRef, premisePayload: buildPremisePayload(fixture), actorUid: "OUTSIDER", actorName: "Outsider" }),
+    { code: "TARGETED_BATCH_NOT_ASSIGNED_TO_ACTOR" },
+  );
+  assert.equal(db.transactionWrites.length, 0);
+  assert.equal(db.read(`tb_rows/${ROW_ID}`).execution.status, "NOT_STARTED");
+});
+
+test("a manager is not a field worker and cannot start a row either", async () => {
+  const fixture = buildLinkedFixture();
+  fixture.documents["users/USER_1"] = { profile: { displayName: "Manager", employment: { role: "MNG" } } };
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({ db, premiseRef, premisePayload: buildPremisePayload(fixture), actorUid: "USER_1", actorName: "Manager" }),
+    { code: "TARGETED_BATCH_ACCESS_DENIED" },
+  );
+  assert.equal(db.transactionWrites.length, 0);
+});
+
+test("the premise callable passes the caller's token to the guard", async () => {
+  const indexSource = await readFile(new URL("../index.js", import.meta.url), "utf8");
+  assert.match(indexSource, /actorUid: caller\.uid,\s*actorName,\s*authToken: caller\.token \|\| \{\},/);
 });

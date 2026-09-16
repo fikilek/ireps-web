@@ -89,6 +89,7 @@ export { getFieldWorkSummaryCallable } from "./teams/fieldWorkSummaryCallable.js
 export { assessSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-geofence.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCallable } from "./targetedBatches/allocationCallable.js";
+import { onUnallocateTargetedBatchCallable } from "./targetedBatches/unallocateCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
 import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatchRowsCallable.js";
 import { recordTargetedBatchNoAccessCallable } from "./targetedBatches/recordTargetedBatchNoAccessCallable.js";
@@ -212,6 +213,7 @@ export {
   onDeleteTargetedBatchCallable,
   onAllocateTargetedBatchCallable,
   onAllocateTargetedBatchesTogetherCallable,
+  onUnallocateTargetedBatchCallable,
   onAcceptRejectTargetedBatchCallable,
   getTargetedBatchRowsCallable,
   recordTargetedBatchNoAccessCallable,
@@ -4787,6 +4789,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
         premisePayload: finalPayload,
         actorUid: caller.uid,
         actorName,
+        authToken: caller.token || {},
       });
     } else {
       await premiseRef.set(finalPayload);

@@ -1,4 +1,4 @@
-import { useGetPermanentSalesBatchesQuery, useDeleteSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
+import { useGetPermanentSalesBatchesQuery, useDeleteSalesTargetedBatchMutation, useUnallocateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "./targeted-batches/batch-geofence-label.js";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
@@ -24,6 +24,8 @@ import {
 import { useAllocationMapSelection } from "./targeted-batches/allocation/allocationMapSelection";
 import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModal";
 import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModal";
+import TargetedBatchUnallocateModal from "./targeted-batches/TargetedBatchUnallocateModal";
+import { getUnallocateEligibility } from "./targeted-batches/unallocateEligibility";
 import { formatNumber } from "./targeted-batches/targetedBatchUtils";
 
 const PREPAID_SALES_NON_GPS_SOURCE = "PREPAID_SALES_NON_GPS";
@@ -448,7 +450,7 @@ export default function TargetedBatchesPage() {
   const dispatch = useDispatch();
   const location = useLocation();
   const navigate = useNavigate();
-  const { activeWorkbase } = useAuth();
+  const { activeWorkbase, uid: actorUid, role: actorRole } = useAuth();
   const storedDraft = useSelector(selectTargetedBatchDraft);
   const draft = useMemo(
     () => getTargetedBatchDraftView(storedDraft),
@@ -473,6 +475,9 @@ export default function TargetedBatchesPage() {
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
   const [deleteBatchError, setDeleteBatchError] = useState("");
+  const [unallocateCandidate, setUnallocateCandidate] = useState(null);
+  const [isUnallocatingBatch, setIsUnallocatingBatch] = useState(false);
+  const [unallocateBatchError, setUnallocateBatchError] = useState("");
   const [registerStatusMessage, setRegisterStatusMessage] = useState("");
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
@@ -491,6 +496,7 @@ export default function TargetedBatchesPage() {
   const isRegisterLoading = !permanent?.ready && !permanent?.error;
   const registerLoadError = permanent?.error || "";
   const [deleteCallable] = useDeleteSalesTargetedBatchMutation();
+  const [unallocateCallable] = useUnallocateSalesTargetedBatchMutation();
 
   const uploads = permanentUploads;
 
@@ -668,6 +674,60 @@ export default function TargetedBatchesPage() {
       needsAttention,
     };
   }, [uploads]);
+
+  // Targeted Batch rules TB-R048 (1.3.33): Unallocate before field work. The button is only a hint;
+  // the Function rechecks every row, the allocator and the TEAM or SP shown here.
+  function openUnallocateModal(upload) {
+    const eligibility = getUnallocateEligibility(upload, { uid: actorUid, role: actorRole });
+
+    if (!eligibility.allowed) {
+      setRegisterStatusMessage(eligibility.reason);
+      return;
+    }
+
+    setUnallocateBatchError("");
+    setRegisterStatusMessage("");
+    setUnallocateCandidate({ upload, authority: eligibility.authority });
+  }
+
+  function closeUnallocateModal() {
+    if (isUnallocatingBatch) return;
+
+    setUnallocateCandidate(null);
+    setUnallocateBatchError("");
+  }
+
+  async function handleUnallocateTargetedBatch(reason) {
+    const upload = unallocateCandidate?.upload;
+    if (!upload?.id || isUnallocatingBatch) return;
+
+    setIsUnallocatingBatch(true);
+    setUnallocateBatchError("");
+    setRegisterStatusMessage("");
+
+    try {
+      const result = await unallocateCallable({
+        tbId: upload.id,
+        expectedTargetType: upload.allocation?.targetType,
+        expectedTargetId: upload.allocation?.targetId,
+        reason,
+      }).unwrap();
+
+      const from = result?.previousTarget?.name || upload.allocation?.targetName || "its TEAM or SP";
+      setRegisterStatusMessage(
+        result?.code === "TARGETED_BATCH_ALREADY_UNALLOCATED"
+          ? `${upload.id} was already unallocated.`
+          : `${upload.id} was unallocated from ${from}. It is ready to allocate again.`,
+      );
+      setUnallocateCandidate(null);
+    } catch (error) {
+      const code = String(error?.code || "TARGETED_BATCH_UNALLOCATE_FAILED").replace(/^functions\//, "").toUpperCase();
+      const message = error?.error || error?.message || "Targeted Batch unallocation failed.";
+      setUnallocateBatchError(`${code}: ${message}`);
+    } finally {
+      setIsUnallocatingBatch(false);
+    }
+  }
 
   function openDeleteModal(upload) {
     const eligibility = getDeleteEligibility(upload);
@@ -1194,6 +1254,7 @@ export default function TargetedBatchesPage() {
                 const creationReady = upload?.creation?.state === "READY";
                 const deleteEligibility = getDeleteEligibility(upload);
                 const allocationState = getAllocationState(upload);
+                const unallocateEligibility = getUnallocateEligibility(upload, { uid: actorUid, role: actorRole });
 
                 return (
                   <tr key={upload.id}>
@@ -1246,23 +1307,20 @@ export default function TargetedBatchesPage() {
                     </Td>
 
                     <Td>
-                      {/* TB-R017: the action reads Allocate while unallocated and Allocated once done. */}
+                      {/* TB-R017 / TB-R048 (1.3.33): the action reads Allocate while unallocated and Unallocate once allocated. */}
                       {allocationState.isAllocated ? (
-                        <span
+                        <button
+                          type="button"
                           style={{
-                            ...styles.allocationStatusBadge,
-                            ...styles.allocationStatusAllocated,
+                            ...styles.unallocateButton,
+                            ...(!unallocateEligibility.allowed ? styles.disabledButton : null),
                           }}
-                          title={
-                            allocationState.targetLabel
-                              ? `Allocated to ${allocationState.targetLabel}`
-                              : "This Targeted Batch has a permanent whole-batch allocation."
-                          }
+                          disabled={!unallocateEligibility.allowed}
+                          title={unallocateEligibility.reason}
+                          onClick={() => openUnallocateModal(upload)}
                         >
-                          <span style={styles.allocationStatusLabel}>
-                            Allocated
-                          </span>
-                        </span>
+                          Unallocate
+                        </button>
                       ) : (
                         <Link
                           to={`/operations/targeted-batches/${encodeURIComponent(
@@ -1387,6 +1445,17 @@ export default function TargetedBatchesPage() {
           error={deleteBatchError}
           onClose={closeDeleteModal}
           onConfirm={handleDeleteTargetedBatch}
+        />
+      ) : null}
+
+      {unallocateCandidate ? (
+        <TargetedBatchUnallocateModal
+          batch={unallocateCandidate.upload}
+          authority={unallocateCandidate.authority}
+          isUnallocating={isUnallocatingBatch}
+          error={unallocateBatchError}
+          onClose={closeUnallocateModal}
+          onConfirm={handleUnallocateTargetedBatch}
         />
       ) : null}
 
@@ -1731,6 +1800,19 @@ const styles = {
     padding: "12px 10px",
     verticalAlign: "top",
   },
+  unallocateButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #fcd34d",
+    borderRadius: 999,
+    background: "#fffbeb",
+    color: "#b45309",
+    padding: "7px 10px",
+    fontSize: 12,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
   rowLinkButton: {
     display: "inline-flex",
     alignItems: "center",
@@ -1755,27 +1837,6 @@ const styles = {
     fontSize: 12,
     fontWeight: 900,
     whiteSpace: "nowrap",
-  },
-  allocationStatusBadge: {
-    display: "inline-flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-    borderRadius: 999,
-    padding: "7px 10px",
-    fontSize: 11,
-    fontWeight: 900,
-    lineHeight: 1.1,
-    whiteSpace: "nowrap",
-  },
-  allocationStatusLabel: {
-    display: "block",
-  },
-  allocationStatusAllocated: {
-    border: "1px solid #86efac",
-    background: "#dcfce7",
-    color: "#166534",
   },
   deleteBatchButton: {
     display: "inline-flex",
