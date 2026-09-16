@@ -48,11 +48,18 @@ test("field work, an older batch or an unsettled allocation disables the button 
 
 test("TB Register sends the TEAM or SP it showed, and the confirmation requires a reason", async () => {
   const page = await read("../TargetedBatchesPage.jsx");
-  assert.match(page, /unallocateCallable\(\{\s*tbId: upload\.id,\s*expectedTargetType: upload\.allocation\?\.targetType,\s*expectedTargetId: upload\.allocation\?\.targetId,\s*reason,\s*\}\)\.unwrap\(\)/);
+  assert.match(page, /unallocateCallable\(\{\s*tbId: upload\.id,\s*expectedTargetType: unallocateCandidate\.targetType,\s*expectedTargetId: unallocateCandidate\.targetId,\s*expectedAllocatedAtMillis: unallocateCandidate\.allocatedAtMillis,\s*reason,\s*\}\)\.unwrap\(\)/, "the allocation as it was when the window opened");
+  assert.match(page, /const unallocateUpload = unallocateCandidate \? uploads\.find\(\(upload\) => upload\.id === unallocateCandidate\.tbId\) \|\| null : null;/, "the window reads the batch live");
+  assert.match(page, /changedSinceOpened=\{unallocateChanged && !isUnallocatingBatch\}/);
+  assert.match(page, /if \(error\?\.uncertain\) \{/, "a dropped connection is not reported as a failure");
+  assert.match(page, /\{registerStatusMessage \|\| creationStatusMessage\}/, "the latest action's message wins");
+  assert.match(page, /const effectiveAllocatedToFilter = allocatedToOptions\.includes\(allocatedToFilter\) \? allocatedToFilter : "";/);
   assert.match(page, /disabled=\{!unallocateEligibility\.allowed\}\s*title=\{unallocateEligibility\.reason\}/);
   assert.match(page, /<TargetedBatchUnallocateModal[\s\S]*authority=\{unallocateCandidate\.authority\}/);
   const modal = await read("./TargetedBatchUnallocateModal.jsx");
-  assert.match(modal, /const canConfirm = Boolean\(trimmedReason\) && trimmedReason\.length <= REASON_LIMIT && !isUnallocating;/);
+  assert.match(modal, /const canConfirm = Boolean\(trimmedReason\) && trimmedReason\.length <= REASON_LIMIT && !isUnallocating && !changedSinceOpened;/);
+  assert.match(modal, /This batch changed since you opened this window\./);
+  assert.match(modal, /whatever they submit for it is refused and nothing is recorded/);
   assert.match(modal, /acceptance === "ACCEPTED"/, "an accepted batch warns that it is on the team's phones");
   assert.match(modal, /recorded as a\s+manager override/);
   const api = await read("../../../redux/salesTargetedBatchApi.js");

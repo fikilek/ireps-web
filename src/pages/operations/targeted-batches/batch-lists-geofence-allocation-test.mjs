@@ -37,12 +37,12 @@ test("TB Register: Geofence column after Ward, with a text filter and sorting", 
   assert.match(page, /<Td colSpan=\{12\}>/, "11 columns plus the Allocation Map tick box (1.3.32)");
 });
 
-test("TB Register: Map button first; Allocation (Allocate / Allocated) then Allocated To, each filterable (1.3.11)", async () => {
+test("TB Register: Map button first; Allocation (Allocate / Unallocate) then Allocated To, each filterable (1.3.11, 1.3.33)", async () => {
   const page = await read("../TargetedBatchesPage.jsx");
   inOrder(page, ["<Th>Map</Th>", 'label="TB ID"', 'label="Allocation"', 'label="Allocated To"', 'label="Total"']);
   inOrder(page, ['aria-label="Filter Allocation"', 'aria-label="Filter Allocated To"', 'aria-label="Filter Total"']);
   assert.match(page, /<BatchMapLink tbId=\{upload\.id\} from=\{\{ path: "\/operations\/targeted-batches", label: "TB Register" \}\} \/>/);
-  assert.match(page, /if \(allocatedToFilter && allocationState\.targetName !== allocatedToFilter\)/);
+  assert.match(page, /if \(effectiveAllocatedToFilter && allocationState\.targetName !== effectiveAllocatedToFilter\)/, "a TEAM that no longer holds a batch stops filtering (TB-R048)");
   assert.match(page, /title=\{allocationState\.targetKind \|\| undefined\}>\s*\{allocationState\.targetName\}/);
   assert.doesNotMatch(page, /allocationTargetText/, "the Allocated chip no longer carries the name");
 });

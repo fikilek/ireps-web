@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { formatNumber } from "./targetedBatchUtils";
 
@@ -9,12 +9,18 @@ const REASON_LIMIT = 1000;
 export default function TargetedBatchUnallocateModal({
   batch,
   authority = "ALLOCATOR",
+  changedSinceOpened = false,
   isUnallocating = false,
   error = "",
   onClose,
   onConfirm,
 }) {
   const [reason, setReason] = useState("");
+  const reasonRef = useRef(null);
+
+  useEffect(() => {
+    reasonRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -37,7 +43,7 @@ export default function TargetedBatchUnallocateModal({
   const acceptance = String(batch?.acceptance?.status || "").toUpperCase();
   const acceptanceLabel = { WAITING: "Waiting for acceptance", ACCEPTED: "Accepted", REJECTED: "Rejected", NOT_READY: "Not ready" }[acceptance] || acceptance || "NAv";
   const trimmedReason = reason.trim();
-  const canConfirm = Boolean(trimmedReason) && trimmedReason.length <= REASON_LIMIT && !isUnallocating;
+  const canConfirm = Boolean(trimmedReason) && trimmedReason.length <= REASON_LIMIT && !isUnallocating && !changedSinceOpened;
 
   return (
     <div
@@ -96,8 +102,8 @@ export default function TargetedBatchUnallocateModal({
             <section style={styles.warningBox}>
               <strong>{targetName} has already accepted this batch.</strong>
               <p style={styles.infoText}>
-                It is on their phones. It leaves their work list as soon as they are online, and anything they
-                captured without signal is refused when it syncs.
+                It is on their phones. It leaves their list of batches when a phone is online. A worker who already
+                has its rows open is not moved out, but whatever they submit for it is refused and nothing is recorded.
               </p>
             </section>
           ) : null}
@@ -112,10 +118,21 @@ export default function TargetedBatchUnallocateModal({
             </section>
           ) : null}
 
+          {changedSinceOpened ? (
+            <section style={styles.errorBox}>
+              <strong>This batch changed since you opened this window.</strong>
+              <p style={styles.errorText}>
+                It was unallocated or allocated again by someone else. Close this window and check the batch in TB
+                Register before doing anything.
+              </p>
+            </section>
+          ) : null}
+
           <label style={styles.reasonLabel} htmlFor="unallocate-reason">
             Reason (required)
             <textarea
               id="unallocate-reason"
+              ref={reasonRef}
               style={styles.reasonInput}
               value={reason}
               maxLength={REASON_LIMIT}

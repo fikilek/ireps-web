@@ -404,7 +404,9 @@ async function unallocationFixture(){
  const allocate=(targetType="TEAM")=>allocateNonGpsBatchAtomically({db,request:request({}),parentRef,tbId:f.tbId,targetType,targetId:targetType==="TEAM"?"TEAM1":"SP1",actorMncId:"MNC1",actorUid:f.actor.uid,actorName:f.actor.user,startedAtMs:Date.now()});
  return {ids,parentRef,created,allocate};
 }
-const unallocate=(data={},uid=f.actor.uid)=>unallocateSalesBatch({db,request:{auth:{uid,token:{}},data:{tbId:f.tbId,expectedTargetType:"TEAM",expectedTargetId:"TEAM1",reason:"Allocated to the wrong team",...data}}});
+// TB Register sends the allocation it showed: the TEAM or SP and the moment it was allocated.
+const shownAllocationMillis=async()=>(await db.doc(`tb_uploads/${f.tbId}`).get()).data().allocation?.completedAt?.toMillis?.()??null;
+const unallocate=async(data={},uid=f.actor.uid)=>unallocateSalesBatch({db,request:{auth:{uid,token:{}},data:{tbId:f.tbId,expectedTargetType:"TEAM",expectedTargetId:"TEAM1",expectedAllocatedAtMillis:await shownAllocationMillis(),reason:"Allocated to the wrong team",...data}}});
 async function unallocationHistory(){return (await db.collection(`tb_uploads/${f.tbId}/history`).get()).docs.map(d=>d.data()).filter(h=>h.event==="TARGETED_BATCH_UNALLOCATED");}
 const acceptAs=(action="ACCEPT",extra={})=>onAcceptRejectTargetedBatchCallable.run({auth:{uid:"FWR1",token:{}},data:{tbId:f.tbId,action,...extra}});
 const noAccessRequest=(rowId,salesDocId,trnId)=>({auth:{uid:"FWR1",token:{}},data:{trnId,sourceModule:"SALES_TARGETED_BATCH",tbId:f.tbId,rowId,salesDocId,erfId:"ERF1",premiseId:null,capturedAt:"2026-09-16T08:00:00Z",reason:"Locked gate",media:[{tag:"noAccessPhoto",url:"gs://mock/photo.jpg"}],location:{gps:{lat:-28.5,lng:30.5}}}});
@@ -470,20 +472,37 @@ test("No Access racing Unallocate: exactly one wins, never work on an unallocate
 
 test("a repeat changes nothing, and a batch now held by someone else is not unallocated",async()=>{
  const {allocate}=await unallocationFixture();await allocate();
- assert.equal((await unallocate()).code,"TARGETED_BATCH_UNALLOCATED");
- const repeat=await unallocate();assert.deepEqual([repeat.success,repeat.code],[true,"TARGETED_BATCH_ALREADY_UNALLOCATED"]);
+ const shown=await shownAllocationMillis();
+ assert.equal((await unallocate({expectedAllocatedAtMillis:shown})).code,"TARGETED_BATCH_UNALLOCATED");
+ const repeat=await unallocate({expectedAllocatedAtMillis:shown});assert.deepEqual([repeat.success,repeat.code],[true,"TARGETED_BATCH_ALREADY_UNALLOCATED"]);
  assert.equal((await unallocationHistory()).length,1,"a repeat writes no second record");
  await allocate("SP");
  await assert.rejects(unallocate(),{code:"UNALLOCATE_TARGET_CHANGED"});
  assert.equal((await db.doc(`tb_uploads/${f.tbId}`).get()).data().allocation.targetId,"SP1");
 });
 
-test("the Unallocate Function refuses a missing reason and an older batch, and reports codes without throwing",async()=>{
+test("the Unallocate Function refuses a missing reason, a missing allocation, a stray acceptance and an older batch, reporting codes without throwing",async()=>{
  const {parentRef,allocate}=await unallocationFixture();await allocate();
- const call=data=>onUnallocateTargetedBatchCallable.run(request({tbId:f.tbId,expectedTargetType:"TEAM",expectedTargetId:"TEAM1",reason:"Wrong team",...data}));
+ const shown=await shownAllocationMillis();
+ const call=data=>onUnallocateTargetedBatchCallable.run(request({tbId:f.tbId,expectedTargetType:"TEAM",expectedTargetId:"TEAM1",expectedAllocatedAtMillis:shown,reason:"Wrong team",...data}));
  assert.equal((await call({reason:"  "})).code,"UNALLOCATE_REASON_REQUIRED");
  assert.equal((await call({expectedTargetType:"PERSON"})).code,"INVALID_UNALLOCATE_INTENT");
+ assert.equal((await call({expectedAllocatedAtMillis:undefined})).code,"INVALID_UNALLOCATE_INTENT","the allocation TB Register showed is required");
+ await parentRef.update({"acceptance.status":"NOT_READY"});
+ assert.equal((await call({})).code,"UNALLOCATE_ACCEPTANCE_INVALID","only Waiting, Accepted or Rejected");
+ await parentRef.update({"acceptance.status":"WAITING"});
  await parentRef.update({schemaVersion:"0.2.0"});
  const legacy=await call({});assert.deepEqual([legacy.success,legacy.code],[false,"UNALLOCATE_LEGACY_BATCH"]);
  assert.equal((await parentRef.get()).data().allocation.status,"ALLOCATED");
+});
+
+test("a batch allocated again to the same TEAM since TB Register showed it is not taken back",async()=>{
+ const {allocate}=await unallocationFixture();await allocate();
+ const shown=await shownAllocationMillis();
+ assert.equal((await unallocate({expectedAllocatedAtMillis:shown})).success,true);
+ await allocate();
+ await assert.rejects(unallocate({expectedAllocatedAtMillis:shown},"MANAGER2"),{code:"UNALLOCATE_TARGET_CHANGED"});
+ const parent=(await db.doc(`tb_uploads/${f.tbId}`).get()).data();
+ assert.deepEqual([parent.allocation.status,parent.allocation.targetId],["ALLOCATED","TEAM1"],"the new allocation stands");
+ assert.equal((await unallocationHistory()).length,1,"only the first unallocation is recorded");
 });

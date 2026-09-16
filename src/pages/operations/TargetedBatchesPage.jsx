@@ -446,6 +446,14 @@ function HelpModal({ type, onClose }) {
   );
 }
 
+// TB-R048: identifies the allocation TB Register shows, so Unallocate never takes back a later one.
+function allocationMillis(upload = {}) {
+  const at = upload?.allocation?.completedAt;
+  if (typeof at?.toMillis === "function") return at.toMillis();
+  if (Number.isFinite(at?.seconds)) return at.seconds * 1000 + Math.floor((at.nanoseconds || 0) / 1e6);
+  return null;
+}
+
 export default function TargetedBatchesPage() {
   const dispatch = useDispatch();
   const location = useLocation();
@@ -545,6 +553,10 @@ export default function TargetedBatchesPage() {
     [uploads],
   );
 
+  // A TEAM or SP that no longer holds any batch (for example after Unallocate) stops filtering, so the
+  // select never shows All over an empty table.
+  const effectiveAllocatedToFilter = allocatedToOptions.includes(allocatedToFilter) ? allocatedToFilter : "";
+
   const filteredUploads = useMemo(() => {
     const normalizedTbIdFilter = tbIdFilter.trim().toLowerCase();
     const normalizedTotalFilter = totalFilter.trim().toLowerCase();
@@ -570,7 +582,7 @@ export default function TargetedBatchesPage() {
       if (allocationFilter && allocationState.label !== allocationFilter) {
         return false;
       }
-      if (allocatedToFilter && allocationState.targetName !== allocatedToFilter) {
+      if (effectiveAllocatedToFilter && allocationState.targetName !== effectiveAllocatedToFilter) {
         return false;
       }
       if (
@@ -598,7 +610,7 @@ export default function TargetedBatchesPage() {
       return true;
     });
   }, [
-    allocatedToFilter,
+    effectiveAllocatedToFilter,
     allocationFilter,
     batchTypeFilter,
     createdByFilter,
@@ -675,6 +687,14 @@ export default function TargetedBatchesPage() {
     };
   }, [uploads]);
 
+  const unallocateUpload = unallocateCandidate ? uploads.find((upload) => upload.id === unallocateCandidate.tbId) || null : null;
+  const unallocateChanged = Boolean(
+    unallocateCandidate &&
+      (!unallocateUpload ||
+        unallocateUpload.allocation?.targetId !== unallocateCandidate.targetId ||
+        allocationMillis(unallocateUpload) !== unallocateCandidate.allocatedAtMillis),
+  );
+
   // Targeted Batch rules TB-R048 (1.3.33): Unallocate before field work. The button is only a hint;
   // the Function rechecks every row, the allocator and the TEAM or SP shown here.
   function openUnallocateModal(upload) {
@@ -687,7 +707,13 @@ export default function TargetedBatchesPage() {
 
     setUnallocateBatchError("");
     setRegisterStatusMessage("");
-    setUnallocateCandidate({ upload, authority: eligibility.authority });
+    setUnallocateCandidate({
+      tbId: upload.id,
+      authority: eligibility.authority,
+      targetType: upload.allocation?.targetType,
+      targetId: upload.allocation?.targetId,
+      allocatedAtMillis: allocationMillis(upload),
+    });
   }
 
   function closeUnallocateModal() {
@@ -698,8 +724,8 @@ export default function TargetedBatchesPage() {
   }
 
   async function handleUnallocateTargetedBatch(reason) {
-    const upload = unallocateCandidate?.upload;
-    if (!upload?.id || isUnallocatingBatch) return;
+    const upload = unallocateUpload;
+    if (!upload?.id || !unallocateCandidate || isUnallocatingBatch) return;
 
     setIsUnallocatingBatch(true);
     setUnallocateBatchError("");
@@ -708,8 +734,9 @@ export default function TargetedBatchesPage() {
     try {
       const result = await unallocateCallable({
         tbId: upload.id,
-        expectedTargetType: upload.allocation?.targetType,
-        expectedTargetId: upload.allocation?.targetId,
+        expectedTargetType: unallocateCandidate.targetType,
+        expectedTargetId: unallocateCandidate.targetId,
+        expectedAllocatedAtMillis: unallocateCandidate.allocatedAtMillis,
         reason,
       }).unwrap();
 
@@ -721,6 +748,12 @@ export default function TargetedBatchesPage() {
       );
       setUnallocateCandidate(null);
     } catch (error) {
+      // A dropped connection may hide a success. Repeating is safe: an unallocated batch is left alone,
+      // and a batch allocated again since is refused.
+      if (error?.uncertain) {
+        setUnallocateBatchError("The connection dropped before iREPS confirmed the result. If this batch now reads Allocate in TB Register, it worked. Pressing Unallocate again is safe.");
+        return;
+      }
       const code = String(error?.code || "TARGETED_BATCH_UNALLOCATE_FAILED").replace(/^functions\//, "").toUpperCase();
       const message = error?.error || error?.message || "Targeted Batch unallocation failed.";
       setUnallocateBatchError(`${code}: ${message}`);
@@ -971,7 +1004,7 @@ export default function TargetedBatchesPage() {
 
       {creationStatusMessage || registerStatusMessage ? (
         <div style={styles.successNotice}>
-          {creationStatusMessage || registerStatusMessage}
+          {registerStatusMessage || creationStatusMessage}
         </div>
       ) : null}
 
@@ -1161,7 +1194,7 @@ export default function TargetedBatchesPage() {
                 </th>
                 <th style={styles.filterHeaderCell}>
                   <select
-                    value={allocatedToFilter}
+                    value={effectiveAllocatedToFilter}
                     onChange={(event) => {
                       setAllocatedToFilter(event.target.value);
                       resetToFirstPage();
@@ -1448,10 +1481,11 @@ export default function TargetedBatchesPage() {
         />
       ) : null}
 
-      {unallocateCandidate ? (
+      {unallocateCandidate && unallocateUpload ? (
         <TargetedBatchUnallocateModal
-          batch={unallocateCandidate.upload}
+          batch={unallocateUpload}
           authority={unallocateCandidate.authority}
+          changedSinceOpened={unallocateChanged && !isUnallocatingBatch}
           isUnallocating={isUnallocatingBatch}
           error={unallocateBatchError}
           onClose={closeUnallocateModal}

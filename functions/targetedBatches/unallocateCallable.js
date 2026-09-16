@@ -11,18 +11,21 @@ import { assertNoLinkedExecution, assertUnexecuted } from "./execution-evidence.
 // Who: the user who allocated the batch unallocates their own work; any MNG may override when that
 // person is unavailable, and the history entry records the override.
 
-export const UNALLOCATE_ACCEPTANCE_STATES = Object.freeze(["NOT_READY", "WAITING", "ACCEPTED", "REJECTED"]);
+export const UNALLOCATE_ACCEPTANCE_STATES = Object.freeze(["WAITING", "ACCEPTED", "REJECTED"]);
 const TARGET_TYPES = ["TEAM", "SP"];
 const text = value => String(value ?? "").trim();
 const upper = value => text(value).toUpperCase();
 
 function readIntent(data = {}) {
   const tbId = text(data.tbId), expectedTargetType = upper(data.expectedTargetType), expectedTargetId = text(data.expectedTargetId);
-  const reason = text(data.reason);
+  const reason = text(data.reason), expectedAllocatedAtMillis = data.expectedAllocatedAtMillis;
   if (!SALES_BATCH_ID.test(tbId)) throw batchError("INVALID_UNALLOCATE_INTENT", "A valid Targeted Batch ID is required");
   if (!TARGET_TYPES.includes(expectedTargetType) || !validDocumentId(expectedTargetId)) throw batchError("INVALID_UNALLOCATE_INTENT", "The TEAM or SP shown in TB Register is required");
+  // The allocation TB Register showed is identified by its TEAM or SP and the moment it was allocated,
+  // so a batch allocated again since (even to the same TEAM or SP) is never taken back by mistake.
+  if (!Number.isFinite(expectedAllocatedAtMillis)) throw batchError("INVALID_UNALLOCATE_INTENT", "The allocation shown in TB Register is required");
   if (!nonblank(reason) || reason.length > 1000) throw batchError("UNALLOCATE_REASON_REQUIRED", "A reason of up to 1000 characters is required");
-  return { tbId, expectedTargetType, expectedTargetId, reason };
+  return { tbId, expectedTargetType, expectedTargetId, expectedAllocatedAtMillis, reason };
 }
 
 // The same main service provider test allocation uses: the actor may take a batch back only from a
@@ -125,14 +128,15 @@ export async function unallocateSalesBatch({ db, request, now = () => Timestamp.
     const rowsSnapshot = await read(db.collection("tb_rows").where("tbId", "==", intent.tbId).limit(31));
     const rows = rowsSnapshot.docs.map(row => row.data());
 
-    // A repeat after a lost response: nothing to do, nothing written.
-    if (isAlreadyUnallocated(parent, rows)) return { success: true, code: "TARGETED_BATCH_ALREADY_UNALLOCATED", tbId: intent.tbId, rows: rows.length };
-
     if (parent.schemaVersion !== "0.3.0") throw batchError("UNALLOCATE_LEGACY_BATCH", "Only batches of the current format can be unallocated; this older batch cannot");
     if (parent.creation?.state !== "READY") throw batchError("TARGETED_BATCH_NOT_READY", "The batch was never completely created");
+
+    // A repeat after a lost response: nothing to do, nothing written.
+    if (isAlreadyUnallocated(parent, rows)) return { success: true, code: "TARGETED_BATCH_ALREADY_UNALLOCATED", tbId: intent.tbId, rows: rows.length };
     assertUnexecuted(parent, rows, "unallocation");
     if (parent.status !== "ALLOCATED" || parent.allocation?.status !== "ALLOCATED" || !TARGET_TYPES.includes(parent.allocation?.targetType) || !validDocumentId(parent.allocation?.targetId)) throw batchError("UNALLOCATE_STATE_INVALID", "The batch is not in a settled allocated state");
     if (parent.allocation.targetType !== intent.expectedTargetType || parent.allocation.targetId !== intent.expectedTargetId) throw batchError("UNALLOCATE_TARGET_CHANGED", "The batch is now allocated to a different TEAM or SP; refresh TB Register");
+    if (parent.allocation.completedAt?.toMillis?.() !== intent.expectedAllocatedAtMillis) throw batchError("UNALLOCATE_TARGET_CHANGED", "The batch has been allocated again since TB Register showed it; refresh TB Register");
     if (!UNALLOCATE_ACCEPTANCE_STATES.includes(parent.acceptance?.status)) throw batchError("UNALLOCATE_ACCEPTANCE_INVALID", "The batch acceptance state is not recognised");
     const authority = unallocationAuthority({ actor, parent });
     await assertTargetWithinMnc({ db, read, targetType: parent.allocation.targetType, targetId: parent.allocation.targetId, mncId: actorMncId(actor.profile) });
