@@ -2,10 +2,10 @@
 import { useEffect, useId, useRef } from "react";
 import BusySpinner from "../../../../components/busy-spinner.jsx";
 
-// Targeted Batch rules TB-R040 (1.3.36): one window for checking, creating and the result.
+// Targeted Batch rules TB-R040 (1.3.36) and TB-R047 (1.3.37): one window for confirming, checking, working and the result.
 // While it works it has no buttons, keeps keyboard focus inside and ignores Escape, so nothing
 // behind it can be reached; a result window's Escape runs its escape action (OK, Close or Stay).
-export default function BatchCreationModal({ title, steps = null, lines = [], tone = "info", working = false, actions = [], escapeAction = null }) {
+export default function BatchCreationModal({ title, steps = null, lines = [], tone = "info", working = false, actions = [], escapeAction = null, children = null }) {
   const card = useRef(null), firstAction = useRef(null), linesId = useId();
   useEffect(() => { (firstAction.current || card.current)?.focus(); }, [actions.length, title]);
   useEffect(() => {
@@ -38,6 +38,7 @@ export default function BatchCreationModal({ title, steps = null, lines = [], to
         {working && !steps ? <BusySpinner label={lines[0] || "Working…"} size={18} asStatus={false}/> : null}
         {(working && !steps ? lines.slice(1) : lines).map((line, index) => <p key={index} style={lineStyle}>{line}</p>)}
       </div>
+      {children}
       {actions.length ? <div style={styles.actions}>
         {actions.map((action, index) => <button key={action.label} ref={index === 0 ? firstAction : null} type="button"
           style={action.primary ? styles.primary : styles.secondary} onClick={action.onClick}>{action.label}</button>)}
