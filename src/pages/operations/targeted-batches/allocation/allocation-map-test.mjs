@@ -5,6 +5,7 @@ import {
   ALLOCATION_MAP_MAX,
   ALLOCATION_MAP_STATES,
   allocateButtonLabel,
+  allocationFailureView,
   allocationMapLabel,
   allocationSelection,
   buildAllocationMapModel,
@@ -90,4 +91,22 @@ test("TB Register opens the Allocation Map, and the page allocates the selection
   assert.match(server, /function applyNonGpsBatchAllocation\(/);
   const index = await read("../../../../../functions/index.js");
   assert.match(index, /onAllocateTargetedBatchesTogetherCallable,/);
+});
+
+// TB-R047 (1.3.37): the result window after a failed or unconfirmed allocation.
+test("a dropped connection is not reported as nothing allocated; a failure names the batch and says what to do", () => {
+  const selection = { items: [{ tbId: "TB1", name: "Gf W4 Cornhill1", wardLabel: "Ward 4" }, { tbId: "TB2", name: "Gf W6 Acacia", wardLabel: "Ward 6" }] };
+  const target = { type: "TEAM", id: "T1", name: "Kaiser Team" };
+  const uncertain = allocationFailureView({ failure: { uncertain: true, error: "internal" }, selection, target });
+  assert.deepEqual([uncertain.kind, uncertain.title, uncertain.tone], ["uncertain", "Allocation not confirmed", "warning"]);
+  assert.doesNotMatch(uncertain.lines.join(" "), /Nothing was allocated/);
+  assert.match(uncertain.lines[1], /turn grey with its name.*press Allocate again with the same TEAM or SP/);
+  const batch = allocationFailureView({ failure: { code: "CANONICAL_ALLOCATION_STATE_INVALID", error: "Canonical row identity is incomplete", tbId: "TB2" }, selection, target });
+  assert.deepEqual([batch.kind, batch.title], ["failed", "Nothing was allocated"]);
+  assert.equal(batch.lines[0], "Gf W6 Acacia (Ward 6, TB2): Canonical row identity is incomplete");
+  assert.match(batch.lines[1], /Remove that batch/);
+  const team = allocationFailureView({ failure: { code: "ALLOCATION_TEAM_NOT_ACTIVE", error: "TEAM T1 is not ACTIVE." }, selection, target });
+  assert.deepEqual(team.lines, ["TEAM T1 is not ACTIVE.", "Choose another TEAM or SP with \"change\", then press Allocate again."]);
+  const other = allocationFailureView({ failure: { code: "UNAUTHORIZED_TARGETED_BATCH_ALLOCATION", error: "Not allowed" }, selection, target });
+  assert.match(other.lines[1], /^Nothing changed\./);
 });

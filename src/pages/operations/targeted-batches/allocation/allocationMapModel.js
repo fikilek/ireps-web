@@ -76,6 +76,31 @@ export function allocationSelection(items = [], selectedIds = []) {
     wards: [...new Set(selected.map(item => item.wardLabel))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) };
 }
 
+export const batchesText = count => batchPlural(count);
+export const metersText = count => plural(count, "meter");
+
+// TB-R047 (1.3.37): what the result window says when an allocation did not go through. A dropped
+// connection is not a failure (the server may have finished); a failure names the batch the server
+// gives and says what to do for that kind of failure.
+export function allocationFailureView({ failure = {}, selection = { items: [] }, target = null } = {}) {
+  const targetName = target?.name || "the TEAM or SP";
+  if (failure.uncertain) {
+    return { kind: "uncertain", title: "Allocation not confirmed", tone: "warning", lines: [
+      "The connection dropped before iREPS confirmed the result, so the batches may or may not be allocated.",
+      `Check the map: batches allocated to ${targetName} turn grey with its name. If they did not, press Allocate again with the same TEAM or SP; a batch already allocated to it is left as it is.`,
+    ] };
+  }
+  const message = failure.error || failure.message || "The allocation failed.";
+  const batch = failure.tbId ? selection.items.find(item => item.tbId === failure.tbId) : null;
+  const code = String(failure.code || "");
+  const targetProblem = /^ALLOCATION_(TEAM|SERVICE_PROVIDER|TARGET)_/.test(code);
+  const reason = batch ? `${batch.name} (${batch.wardLabel}, ${batch.tbId}): ${message}` : failure.tbId ? `${failure.tbId}: ${message}` : message;
+  const guidance = targetProblem ? "Choose another TEAM or SP with \"change\", then press Allocate again."
+    : failure.tbId ? "Remove that batch from the allocation window (×), then press Allocate again."
+    : "Nothing changed. Check the reason above, then try again; if it keeps failing, report it.";
+  return { kind: "failed", title: "Nothing was allocated", tone: "error", lines: [reason, guidance] };
+}
+
 export function allocateButtonLabel(selection, target) {
   if (!selection?.batches) return "Select batches on the map";
   if (!target) return "Choose a TEAM or SP";

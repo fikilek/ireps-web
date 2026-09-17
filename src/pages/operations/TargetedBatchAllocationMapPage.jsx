@@ -21,7 +21,10 @@ import {
   ALLOCATION_MAP_MAX,
   ALLOCATION_MAP_STATES,
   allocateButtonLabel,
+  allocationFailureView,
   allocationSelection,
+  batchesText,
+  metersText,
   buildAllocationMapModel,
   toggleAllocationSelection,
 } from "./targeted-batches/allocation/allocationMapModel";
@@ -142,7 +145,7 @@ export default function TargetedBatchAllocationMapPage() {
   const [busy, setBusy] = useState(false);
   const [fitRequest, setFitRequest] = useState(0);
   const [showAll, setShowAll] = useState(false);
-  // TB-R047 (1.3.37): confirm | allocating | done | failed, each with the selection and target it was opened for.
+  // TB-R047 (1.3.37): confirm | allocating | done | failed | uncertain, each with the selection and target it was opened for.
   const [allocationWindow, setAllocationWindow] = useState(null);
   const [allocateTogether] = useAllocateSalesTargetedBatchesTogetherMutation();
   const { selectedIds: tickedIds } = useAllocationMapSelection(lmPcode);
@@ -203,11 +206,13 @@ export default function TargetedBatchAllocationMapPage() {
     chooseTarget(dropped); setDragTarget(null);
   };
 
-  const canAllocate = Boolean(selection.batches && target && !busy);
+  const canAllocate = Boolean(selection.batches && target && !busy && !allocationWindow);
+  // While a window is open or the server works, nothing in the allocation window can change.
+  const locked = busy || Boolean(allocationWindow);
   // TB-R047 (1.3.37): Allocate opens a confirmation window, never the browser's OK/Cancel box.
   const allocate = () => {
     if (!canAllocate) return;
-    setError("");
+    setError(""); setMessage("");
     setAllocationWindow({ kind: "confirm", selection, target });
   };
   const sameSelection = (a, b) => a.items.map(item => item.tbId).join() === b.items.map(item => item.tbId).join();
@@ -216,24 +221,31 @@ export default function TargetedBatchAllocationMapPage() {
     const { selection, target } = allocationWindow;
     const live = allocationSelection(shown, selectedIds);
     if (!sameSelection(selection, live)) {
-      setAllocationWindow({ kind: "failed", selection, target, reason: "The selection changed while the confirmation was open.", unchanged: true });
+      const liveIds = live.items.map(item => item.tbId), left = selection.items.filter(item => !liveIds.includes(item.tbId));
+      setAllocationWindow({ kind: "failed", selection, target, title: "Nothing was allocated", tone: "error", lines: [
+        left.length ? `The selection changed while the confirmation was open: ${left.map(item => item.name).join(", ")} left the allocation window.` : "The selection changed while the confirmation was open.",
+        "Check the allocation window, then press Allocate again."] });
       return;
     }
     setAllocationWindow({ kind: "allocating", selection, target });
-    setBusy(true); setError(""); setMessage(`Allocating ${selection.batches} batch(es) to ${target.name}…`);
+    setBusy(true); setError(""); setMessage("");
     try {
       const result = await allocateTogether({ tbIds: selection.items.map(item => item.tbId), targetType: target.type, targetId: target.id }).unwrap();
-      setMessage(`${result.tbIds.length} batch(es) allocated to ${result.target?.name || target.name}. They now wait for the TEAM or SP to accept them.`);
       setSelectedIds([]);
       setAllocationWindow({ kind: "done", selection, target, allocatedIds: result.tbIds, targetName: result.target?.name || target.name });
     } catch (failure) {
-      const reason = failure?.error || failure?.message || "The allocation failed.";
-      setMessage("");
-      setError(`Nothing was allocated. ${reason}`);
-      setAllocationWindow({ kind: "failed", selection, target, reason });
+      setAllocationWindow({ selection, target, ...allocationFailureView({ failure, selection, target }) });
     } finally { setBusy(false); }
   };
-  const closeAllocationWindow = () => { if (allocationWindow?.kind !== "allocating") setAllocationWindow(null); };
+  // The result is written next to the Allocate button only once its window closes (one announcement at a time).
+  const closeAllocationWindow = () => {
+    const view = allocationWindow;
+    if (!view || view.kind === "allocating") return;
+    if (view.kind === "done") setMessage(`${batchesText(view.allocatedIds.length)} allocated to ${view.targetName}. They now wait for ${view.targetName} to accept them.`);
+    if (view.kind === "failed") setError(`Nothing was allocated. ${view.lines[0]}`);
+    if (view.kind === "uncertain") setError("Allocation not confirmed. Check the map before allocating again.");
+    setAllocationWindow(null);
+  };
 
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const loading = !matrixStream?.sync || matrixStream.sync.status === "syncing";
@@ -242,7 +254,7 @@ export default function TargetedBatchAllocationMapPage() {
     if (!payload) return null;
     const chosen = target && target.type === payload.type && target.id === payload.id;
     return (
-      <button key={`${payload.type}:${payload.id}`} type="button" draggable onDragStart={event => { setDragTarget(payload); event.dataTransfer.setData("application/json", JSON.stringify(payload)); event.dataTransfer.effectAllowed = "copy"; }}
+      <button key={`${payload.type}:${payload.id}`} type="button" disabled={locked} draggable={!locked} onDragStart={event => { setDragTarget(payload); event.dataTransfer.setData("application/json", JSON.stringify(payload)); event.dataTransfer.effectAllowed = "copy"; }}
         onDragEnd={() => { setDragTarget(null); setDropFocused(false); }} onClick={() => chooseTarget(payload)} style={{ ...styles.chip, ...(chosen ? styles.chipChosen : null) }}
         title={`${payload.type} · drag onto the allocation window or click`}>
         <strong style={styles.chipName}>{payload.name}</strong>
@@ -300,19 +312,19 @@ export default function TargetedBatchAllocationMapPage() {
             {selection.items.map(item => (
               <li key={item.tbId} style={styles.listItem}>
                 <span><strong>{item.name}</strong><small style={styles.muted}>{item.wardLabel} · {item.meters} meter(s) · {item.tbId}</small></span>
-                <button type="button" aria-label={`Remove ${item.name}`} style={styles.remove} onClick={() => toggle(item)}>×</button>
+                <button type="button" aria-label={`Remove ${item.name}`} style={styles.remove} disabled={locked} onClick={() => toggle(item)}>×</button>
               </li>
             ))}
           </ul>
-          <div style={styles.dropZone}>{target ? <span>Allocating to <strong>{target.name}</strong> ({target.type}) <button type="button" style={styles.clear} onClick={() => setTarget(null)}>change</button></span> : "Drag a TEAM or SP here, or click one below."}</div>
+          <div style={styles.dropZone}>{target ? <span>Allocating to <strong>{target.name}</strong> ({target.type}) <button type="button" style={styles.clear} disabled={locked} onClick={() => setTarget(null)}>change</button></span> : "Drag a TEAM or SP here, or click one below."}</div>
           {/* TB-R047 (1.3.37): TEAMs and Service providers side by side, each column scrolling on its own. */}
           <div style={styles.targetColumns}>
             <section style={styles.targetColumn} aria-label="TEAMs">
-              <strong style={styles.groupTitle}>TEAMs ({teams.length})</strong>
+              <strong style={styles.columnTitle}>TEAMs ({teams.length})</strong>
               <div style={styles.targetList}>{teams.length ? teams.map(targetChip) : <small style={styles.muted}>No TEAMs</small>}</div>
             </section>
             <section style={styles.targetColumn} aria-label="Service providers">
-              <strong style={styles.groupTitle}>Service providers ({serviceProviders.length})</strong>
+              <strong style={styles.columnTitle}>Service providers ({serviceProviders.length})</strong>
               <div style={styles.targetList}>{serviceProviders.length ? serviceProviders.map(targetChip) : <small style={styles.muted}>No SPs</small>}</div>
             </section>
           </div>
@@ -346,35 +358,33 @@ function BatchList({ items, allocatedIds = null }) {
 function AllocationWindow({ view, onConfirm, onClose }) {
   if (!view) return null;
   const { selection, target } = view;
-  const totals = `${selection.batches} batch(es) · ${selection.meters} meter(s) · ${selection.wards.join(", ")}`;
+  const totals = `${batchesText(selection.batches)} · ${metersText(selection.meters)} · ${selection.wards.join(", ")}`;
   if (view.kind === "confirm") {
     return (
       <BatchCreationModal title={allocateButtonLabel(selection, target)} escapeAction={onClose}
-        lines={[`You are about to allocate ${selection.batches} batch(es) (${selection.meters} meter(s)) to ${target.type === "TEAM" ? "TEAM" : "service provider"} ${target.name}.`, `${totals}.`, "Each batch is allocated with the same checks as TB Allocation, all together or not at all."]}
+        lines={[`You are about to allocate ${batchesText(selection.batches)} (${metersText(selection.meters)}) to ${target.type === "TEAM" ? "TEAM" : "service provider"} ${target.name}.`]}
         actions={[{ label: "Allocate", primary: true, onClick: onConfirm }, { label: "Cancel", onClick: onClose }]}>
         <BatchList items={selection.items} />
+        <p style={styles.windowTotals}>{totals}</p>
+        <p style={styles.windowNote}>Each batch is allocated with the same checks as TB Allocation, all together or not at all.</p>
       </BatchCreationModal>
     );
   }
   if (view.kind === "allocating") {
-    return <BatchCreationModal title={`Allocating ${selection.batches} batch(es) to ${target.name}…`} working
-      lines={[`Allocating ${totals}.`, "Please wait. Nothing is allocated until every batch passes its checks."]} />;
+    return <BatchCreationModal title={`Allocating ${batchesText(selection.batches)} to ${target.name}…`} working
+      lines={[totals, "Please wait. Nothing is allocated until every batch passes its checks."]} />;
   }
   if (view.kind === "done") {
     return (
-      <BatchCreationModal title={`${view.allocatedIds.length} batch(es) allocated to ${view.targetName}`} escapeAction={onClose}
+      <BatchCreationModal title={`${batchesText(view.allocatedIds.length)} allocated to ${view.targetName}`} escapeAction={onClose}
         lines={[`They now wait for ${view.targetName} to accept them.`]} actions={[{ label: "OK", primary: true, onClick: onClose }]}>
         <BatchList items={selection.items} allocatedIds={view.allocatedIds} />
       </BatchCreationModal>
     );
   }
-  return (
-    <BatchCreationModal title="Nothing was allocated" tone="error" escapeAction={onClose}
-      lines={[view.reason, view.unchanged
-        ? "The allocation window now shows the current selection. Check it, then press Allocate again."
-        : "The selection is still in the allocation window. Remove or fix the batch named above, then press Allocate again."]}
-      actions={[{ label: "OK", primary: true, onClick: onClose }]} />
-  );
+  // failed or uncertain (TB-R047 1.3.37): what went wrong and what to do.
+  return <BatchCreationModal title={view.title} tone={view.tone} escapeAction={onClose} lines={view.lines}
+    actions={[{ label: "OK", primary: true, onClick: onClose }]} />;
 }
 
 const styles = {
@@ -393,27 +403,29 @@ const styles = {
   switch: { display: "inline-flex", alignItems: "center", gap: 6, color: "#334155", fontWeight: 700, cursor: "pointer" },
   map: { height: 620, borderRadius: 12, overflow: "hidden", background: "#f1f5f9" },
   status: { display: "grid", placeItems: "center", height: "100%", margin: 0, color: "#475569" },
-  window: { display: "grid", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#ffffff", position: "sticky", top: 12 },
+  window: { display: "flex", flexDirection: "column", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#ffffff", position: "sticky", top: 12, maxHeight: "calc(100vh - 24px)", boxSizing: "border-box", overflow: "hidden" },
   windowDrop: { borderColor: "#2563eb", boxShadow: "0 0 0 3px #bfdbfe" },
-  windowTitle: { margin: 0, fontSize: 18, color: "#0f172a" },
-  totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 },
-  list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" },
+  windowTitle: { margin: 0, fontSize: 18, color: "#0f172a", flexShrink: 0 },
+  totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700, flexShrink: 0 },
+  list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, alignContent: "start", maxHeight: 260, minHeight: 0, flex: "0 1 auto", overflowY: "auto" },
   listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 13 },
   muted: { display: "block", color: "#64748b", fontSize: 11 },
   remove: { border: "none", background: "#f1f5f9", borderRadius: 999, width: 26, height: 26, cursor: "pointer", fontSize: 16 },
-  dropZone: { border: "2px dashed #93c5fd", borderRadius: 10, padding: 10, color: "#1d4ed8", fontSize: 13, background: "#eff6ff" },
+  dropZone: { border: "2px dashed #93c5fd", borderRadius: 10, padding: 10, color: "#1d4ed8", fontSize: 13, background: "#eff6ff", flexShrink: 0 },
   clear: { marginLeft: 6, border: "none", background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", fontSize: 12 },
-  targetColumns: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, alignItems: "start" },
-  targetColumn: { display: "grid", gap: 6, alignContent: "start", minWidth: 0 },
-  targetList: { display: "grid", gap: 6, alignContent: "start", maxHeight: 280, overflowY: "auto", paddingRight: 2 },
-  groupTitle: { fontSize: 12, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" },
+  targetColumns: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, alignItems: "stretch", flex: "1 1 auto", minHeight: 96 },
+  targetColumn: { display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 6, minWidth: 0, minHeight: 0 },
+  columnTitle: { display: "flex", alignItems: "flex-end", minHeight: 32, fontSize: 12, color: "#475569", letterSpacing: "0.02em" },
+  targetList: { display: "grid", gap: 6, alignContent: "start", maxHeight: 280, minHeight: 0, overflowY: "auto", scrollbarGutter: "stable", paddingRight: 2 },
   chip: { display: "grid", gap: 2, width: "100%", textAlign: "left", border: "1px solid #bfdbfe", borderRadius: 10, padding: "6px 10px", background: "#eff6ff", color: "#1e3a8a", cursor: "grab", fontSize: 12 },
   chipName: { overflowWrap: "anywhere" },
   windowList: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 280, overflowY: "auto" },
+  windowTotals: { margin: 0, color: "#0f172a", fontSize: 13, fontWeight: 800 },
+  windowNote: { margin: 0, color: "#334155", fontSize: 13, lineHeight: 1.5 },
   windowListItem: { display: "grid", gap: 2, border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 13 },
   chipChosen: { borderColor: "#1d4ed8", background: "#dbeafe", boxShadow: "0 0 0 2px #93c5fd" },
-  message: { margin: 0, color: "#166534", fontSize: 13, fontWeight: 700 },
-  error: { margin: 0, color: "#991b1b", fontSize: 13, fontWeight: 700 },
-  allocate: { border: "none", borderRadius: 12, padding: "12px 14px", background: "#2563eb", color: "#ffffff", fontWeight: 900, fontSize: 14, cursor: "pointer" },
+  message: { margin: 0, color: "#166534", fontSize: 13, fontWeight: 700, flexShrink: 0 },
+  error: { margin: 0, color: "#991b1b", fontSize: 13, fontWeight: 700, flexShrink: 0 },
+  allocate: { border: "none", borderRadius: 12, padding: "12px 14px", background: "#2563eb", color: "#ffffff", fontWeight: 900, fontSize: 14, cursor: "pointer", flexShrink: 0 },
   allocateDisabled: { background: "#94a3b8", cursor: "not-allowed" },
 };

@@ -2659,7 +2659,7 @@ function callSalesBatch(name) {
   return { async queryFn(payload) {
     try {
       const result = (await httpsCallable(functions, name, { timeout: 540000 })(payload)).data;
-      if (result?.success !== true) return { error: { status: "CUSTOM_ERROR", code: result?.code, error: result?.message || "Targeted Batch request failed" } };
+      if (result?.success !== true) return { error: { status: "CUSTOM_ERROR", code: result?.code, error: result?.message || "Targeted Batch request failed", tbId: result?.tbId || null, details: result?.details || null } };
       return { data: result };
     } catch (error) { return { error: { status: "CUSTOM_ERROR", code: error.code, error: error.message, uncertain: true } }; }
   } };

@@ -9,21 +9,28 @@ export default function BatchCreationModal({ title, steps = null, lines = [], to
   const card = useRef(null), firstAction = useRef(null), linesId = useId();
   useEffect(() => { (firstAction.current || card.current)?.focus(); }, [actions.length, title]);
   useEffect(() => {
-    const overflow = document.body.style.overflow;
+    const overflow = document.body.style.overflow, previous = document.activeElement;
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = overflow; };
+    // Focus never leaves the window, whichever way it tries to (Tab into a scrolling list, a click).
+    const keepFocusInside = event => { if (card.current && !card.current.contains(event.target)) card.current.focus(); };
+    document.addEventListener("focusin", keepFocusInside);
+    return () => {
+      document.removeEventListener("focusin", keepFocusInside);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected && !previous.disabled) previous.focus?.();
+    };
   }, []);
   const handleKeys = event => {
     if (event.key === "Escape") { event.preventDefault(); if (!working && escapeAction) escapeAction(); return; }
     if (event.key !== "Tab") return;
-    const nodes = [...card.current.querySelectorAll("button:not([disabled])")];
+    const nodes = [...card.current.querySelectorAll('button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
     if (!nodes.length) { event.preventDefault(); card.current.focus(); return; }
     const first = nodes[0], last = nodes.at(-1);
     if (event.shiftKey && (document.activeElement === first || document.activeElement === card.current)) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
   const lineStyle = tone === "error" ? styles.error : tone === "warning" ? styles.warning : styles.text;
-  return <div style={styles.backdrop}>
+  return <div style={styles.backdrop} onMouseDown={event => { if (event.target === event.currentTarget) { event.preventDefault(); card.current?.focus(); } }}>
     <div ref={card} tabIndex={-1} role={tone === "error" ? "alertdialog" : "dialog"} aria-modal="true" aria-label={title} aria-describedby={linesId}
       onKeyDown={handleKeys} style={styles.card}>
       <h2 style={styles.title}>{title}</h2>
