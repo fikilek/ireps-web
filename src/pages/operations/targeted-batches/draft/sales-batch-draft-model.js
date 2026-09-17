@@ -38,6 +38,8 @@ export function salesDraftResolutionFailure(error) {
 export function salesDraftMessage(value) {
   return String(value || "")
     .replace(/\bRecheck resolution\b/gi, "Locate meters again")
+    .replace(/;\s*retained draft is unchanged/gi, ". Your draft is unchanged.")
+    .replace(/\bretained draft\b/gi, "draft")
     .replace(/\bgeocoded position\b/gi, "Position from address")
     .replace(/\bgeocoding\b/gi, "meter location service")
     .replace(/\bgeocoded\b/gi, "located from address")

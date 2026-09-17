@@ -3,7 +3,7 @@ import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "./targeted-batches/batch-geofence-label.js";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import BatchMapLink from "../../components/batch-map-link.jsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 
@@ -27,6 +27,8 @@ import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModa
 import TargetedBatchUnallocateModal from "./targeted-batches/TargetedBatchUnallocateModal";
 import { getUnallocateEligibility } from "./targeted-batches/unallocateEligibility";
 import { formatNumber } from "./targeted-batches/targetedBatchUtils";
+import BatchCreationModal from "./targeted-batches/draft/batch-creation-modal.jsx";
+import { batchArrival, CREATION_ARRIVAL_TIMEOUT_MS } from "./targeted-batches/draft/batch-creation-window.js";
 
 const PREPAID_SALES_NON_GPS_SOURCE = "PREPAID_SALES_NON_GPS";
 const SOURCE_FILTER_OPTIONS = Array.from(
@@ -507,6 +509,39 @@ export default function TargetedBatchesPage() {
   const [unallocateCallable] = useUnallocateSalesTargetedBatchMutation();
 
   const uploads = permanentUploads;
+
+  // Rules TB-R040 (1.3.36): a batch handed over from TB Draft keeps "Opening TB Register" spinning
+  // until the register has loaded it, then shows Batch created with Allocate this batch.
+  const [arrivalTimedOut, setArrivalTimedOut] = useState(false);
+  const [arrivalSettled, setArrivalSettled] = useState(false);
+  const [arrivalDismissed, setArrivalDismissed] = useState(false);
+  const arrival = useMemo(
+    () => (arrivalDismissed ? null : batchArrival({ creation: creationResult, uploads, loading: isRegisterLoading, timedOut: arrivalTimedOut, settled: arrivalSettled, registerError: registerLoadError })),
+    [arrivalDismissed, creationResult, uploads, isRegisterLoading, arrivalTimedOut, arrivalSettled, registerLoadError],
+  );
+  const arrivalOpening = arrival?.phase === "opening";
+  const arrivalCreated = arrival?.phase === "created";
+  useEffect(() => {
+    if (!arrivalOpening) return undefined;
+    const timer = setTimeout(() => setArrivalTimedOut(true), CREATION_ARRIVAL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [arrivalOpening]);
+  // Once Batch created is shown it stays: a Firestore reconnect never turns it back into a spinner.
+  // (Set while rendering, as React recommends for values derived from an earlier render.)
+  if (arrivalCreated && !arrivalSettled) setArrivalSettled(true);
+  // TB Draft hands over without clearing its draft; clear it here before paint so nothing flashes.
+  const handedOverTbId = creationResult?.success ? creationResult?.batches?.[0]?.tbId : null;
+  useLayoutEffect(() => {
+    if (handedOverTbId && storedDraft?.id === handedOverTbId) dispatch(clearTargetedBatchDraft());
+  }, [handedOverTbId, storedDraft?.id, dispatch]);
+  // Clearing the hand-over state keeps the window from coming back on refresh or Back.
+  const finishArrival = (nextPath = null) => {
+    const created = arrival;
+    setArrivalDismissed(true);
+    if (!nextPath && created?.phase === "created") setRegisterStatusMessage(`Batch ${created.tbId} created with ${formatNumber(created.meters)} meters.`);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    if (nextPath) navigate(nextPath);
+  };
 
   const creationStatusMessage = useMemo(() => {
     if (!creationResult?.success || isRegisterLoading) return "";
@@ -1478,6 +1513,31 @@ export default function TargetedBatchesPage() {
           error={deleteBatchError}
           onClose={closeDeleteModal}
           onConfirm={handleDeleteTargetedBatch}
+        />
+      ) : null}
+
+      {arrival?.phase === "opening" ? (
+        <BatchCreationModal
+          title="Creating the batch"
+          working
+          steps={arrival.steps}
+          lines={[`${arrival.tbId} is created. Loading it in TB Register…`]}
+        />
+      ) : arrival?.phase === "created" ? (
+        <BatchCreationModal
+          title="Batch created"
+          lines={[
+            `Batch ID: ${arrival.tbId}`,
+            `Meters: ${formatNumber(arrival.meters)} · Ward: ${arrival.wardLabel || "NAv"} · Geofence: ${arrival.geofenceLabel || "NAv"}`,
+            ...(arrival.registerError ? [`TB Register could not be loaded: ${arrival.registerError}. The batch is created; refresh the page to see it.`]
+              : arrival.notYetListed ? ["TB Register has not listed it yet. It will appear shortly; refresh the page if it does not."] : []),
+            "Next: allocate it to a TEAM or service provider, now or later (also several batches at once on the Allocation Map).",
+          ]}
+          actions={[
+            { label: "Allocate this batch", primary: true, onClick: () => finishArrival(arrival.allocationPath) },
+            { label: "Stay on TB Register", onClick: () => finishArrival() },
+          ]}
+          escapeAction={() => finishArrival()}
         />
       ) : null}
 
