@@ -144,6 +144,12 @@ const STICKY_COLUMN_WIDTHS = {
 
 const HORIZONTALLY_STICKY_COLUMNS = new Set(["select", "meterNo"]);
 
+// The Geofences column fits the longest list on the page shown: at least its
+// STICKY_COLUMN_WIDTHS width, at most this, both for the whole cell; a longer
+// list ends in "…" and the cell's hover shows it all (Targeted Batch rules
+// 18.3, 1.3.44).
+const GEOFENCE_COLUMN_MAX_WIDTH = 360;
+
 const EMPTY_FILTERS = {
   meterNo: "",
   wardNos: [],
@@ -328,7 +334,10 @@ function getStickyStyle(columnKey, stickyLayout, isHeader = false) {
   const sizeStyle = {
     width: `${config.width}px`,
     minWidth: `${config.width}px`,
-    maxWidth: `${config.width}px`,
+    // No maximum on Geofences body cells: their names set the width, up to
+    // GEOFENCE_COLUMN_MAX_WIDTH. The header keeps it, so a long name chosen in
+    // its filter never widens the column.
+    ...(columnKey === "geofence" && !isHeader ? {} : { maxWidth: `${config.width}px` }),
   };
 
   if (!HORIZONTALLY_STICKY_COLUMNS.has(columnKey)) {
@@ -1713,7 +1722,9 @@ export default function SalesMetersTable({
                       }}
                       title={getRowGeofenceLabel(row) || "No geofence"}
                     >
-                      {getRowGeofenceLabel(row) || "No geofence"}
+                      <div style={styles.geofenceNames}>
+                        {getRowGeofenceLabel(row) || "No geofence"}
+                      </div>
                     </td>
                   ) : null}
 
@@ -2191,6 +2202,14 @@ const styles = {
     color: "#334155",
     background: "#ffffff",
     verticalAlign: "top",
+  },
+  geofenceNames: {
+    // Cells are border-box (index.css), so leave room for bodyCell's side
+    // padding (2 × 0.65rem) and right border.
+    maxWidth: `calc(${GEOFENCE_COLUMN_MAX_WIDTH}px - 1.3rem - 1px)`,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   meterCell: {
     fontWeight: 850,
