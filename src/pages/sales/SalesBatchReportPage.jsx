@@ -99,11 +99,15 @@ function Badge({ value }) {
   );
 }
 
-function SummaryCard({ label, value, helper }) {
+function SummaryCard({ label, value, helper, pendingText }) {
   return (
     <article style={styles.summaryCard}>
       <span style={styles.summaryLabel}>{label}</span>
-      <strong style={styles.summaryValue}>{formatNumber(value)}</strong>
+      {pendingText ? (
+        <strong style={styles.summaryPending}>{pendingText}</strong>
+      ) : (
+        <strong style={styles.summaryValue}>{formatNumber(value)}</strong>
+      )}
       <span style={styles.summaryHelper}>{helper}</span>
     </article>
   );
@@ -259,7 +263,7 @@ function NoAccessModal({ row, onClose }) {
   );
 }
 
-function RowDetailsModal({ row, onClose }) {
+function RowDetailsModal({ row, statusPending, onClose }) {
   return (
     <ModalShell
       title={`TB Row ${row.rowNo || "NAv"}`}
@@ -317,7 +321,10 @@ function RowDetailsModal({ row, onClose }) {
       <div style={styles.detailSection}>
         <h3 style={styles.detailTitle}>Field result</h3>
         <div style={styles.detailGrid}>
-          <InfoItem label="Execution" value={row.execution.status} />
+          <InfoItem
+            label="Execution"
+            value={statusPending ? "Counting…" : row.workStatus}
+          />
           <InfoItem
             label="No Access Attempts"
             value={formatNumber(row.noAccess.count)}
@@ -371,11 +378,22 @@ export default function SalesBatchReportPage() {
     TERMINAL_STREAM_STATES.has(status),
   );
   const loadError = cleanText(sync?.error?.message);
+  // TB-R054: a row's status needs its Sales meter (VISIBLE is Completed), so the
+  // counts and the row statuses wait for the Sales meters instead of showing a
+  // status that changes; rows that cannot be read show no number at all.
+  const rowsUnavailable = sourceStatuses.rows === "error";
+  const statusPending = !TERMINAL_STREAM_STATES.has(sourceStatuses.sales);
+  const salesUnread = !rowsUnavailable && sourceStatuses.sales === "error";
+  const statusPendingText = rowsUnavailable
+    ? "Not available"
+    : statusPending
+      ? "Counting…"
+      : "";
 
   const filterOptions = useMemo(
     () => ({
       wards: uniqueNonBlank(rows.map((row) => row.scope.wardLabel)),
-      executions: uniqueNonBlank(rows.map((row) => row.execution.status)),
+      executions: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"],
     }),
     [rows],
   );
@@ -400,9 +418,10 @@ export default function SalesBatchReportPage() {
       );
 
       if (search && !searchable.includes(search)) return false;
+      // TB-R054: until the Sales meters are read, a row's status is not known.
       if (
         executionFilter !== ALL_FILTER &&
-        row.execution.status !== executionFilter
+        (statusPending || row.workStatus !== executionFilter)
       ) {
         return false;
       }
@@ -437,6 +456,7 @@ export default function SalesBatchReportPage() {
     rows,
     searchText,
     executionFilter,
+    statusPending,
     wardFilter,
     meterMatchFilter,
     addressMatchFilter,
@@ -541,26 +561,37 @@ export default function SalesBatchReportPage() {
         </div>
       </section>
 
+      {salesUnread ? (
+        <div style={styles.notice}>
+          Some Sales meters could not be read, so their rows count by the batch
+          row status only.
+        </div>
+      ) : null}
+
       <div style={styles.summaryGrid}>
         <SummaryCard
           label="Total Rows"
           value={summary.total}
+          pendingText={rowsUnavailable ? statusPendingText : ""}
           helper="Permanent TB rows"
         />
         <SummaryCard
           label="Not Started"
           value={summary.notStarted}
+          pendingText={statusPendingText}
           helper="No field execution yet"
         />
         <SummaryCard
           label="In Progress"
           value={summary.inProgress}
+          pendingText={statusPendingText}
           helper="Active field rows"
         />
         <SummaryCard
           label="Completed"
           value={summary.completed}
-          helper="Completed field rows"
+          pendingText={statusPendingText}
+          helper="Meter found (VISIBLE) or row completed"
         />
         <SummaryCard
           label="Meters Discovered"
@@ -783,7 +814,7 @@ export default function SalesBatchReportPage() {
                     <Badge value={row.comparison.addressMatch} />
                   </Td>
                   <Td>
-                    <Badge value={row.execution.status} />
+                    <Badge value={statusPending ? "Counting…" : row.workStatus} />
                   </Td>
                   <Td>
                     <Badge value={row.premise.status} />
@@ -838,6 +869,7 @@ export default function SalesBatchReportPage() {
       {selectedRow ? (
         <RowDetailsModal
           row={selectedRow}
+          statusPending={statusPending}
           onClose={() => setSelectedRow(null)}
         />
       ) : null}
@@ -991,6 +1023,12 @@ const styles = {
     color: "#0f172a",
     fontSize: 25,
     lineHeight: 1.1,
+  },
+
+  summaryPending: {
+    color: "#64748b",
+    fontSize: 16,
+    lineHeight: 1.6,
   },
 
   summaryHelper: {

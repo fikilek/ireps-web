@@ -73,5 +73,6 @@ test("Sales Reporting: Geofence after Ward; Allocation (Allocated / Unallocated)
   assert.match(page, /filters\.allocatedTo === ALL_FILTER \|\|\s+getAllocatedToLabel\(batch\) === filters\.allocatedTo/);
   assert.match(page, /<td>\{getAllocationState\(batch\)\}<\/td>\s*<td>\s*<AllocatedToCell allocation=\{batch\?\.allocation\} \/>/);
   assert.doesNotMatch(page, /colSpan=\{10\}/);
-  assert.equal((page.match(/colSpan=\{12\}/g) || []).length, 3);
+  // Loading, stream failed, count filters waiting (TB-R054), no match: each spans all 12 columns.
+  assert.equal((page.match(/colSpan=\{12\}/g) || []).length, 4);
 });

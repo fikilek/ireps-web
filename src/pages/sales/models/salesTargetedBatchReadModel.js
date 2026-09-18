@@ -1,5 +1,5 @@
 import { resolveSalesCategoryForMonth } from "./salesCategoryModel.js";
-import { exactSalesTbRef, readTbRefBatchId, inspectSalesTbRefsIntegrity, resolveSalesTargetedBatchMembership } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { classifySalesWorkStatus, exactSalesTbRef, readTbRefBatchId, inspectSalesTbRefsIntegrity, resolveSalesTargetedBatchMembership } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import { canonicalTargetedBatchRowState } from "../../../../functions/targetedBatches/lifecycle.js";
 
 const canonicalState = (value, allowed) => allowed.includes(value) ? value : "UNAVAILABLE";
@@ -501,6 +501,30 @@ function getExecutionStatus(row = {}, fieldWork = {}) {
     normalizeUpper(firstText(fieldWork?.status, row?.execution?.status)) ||
     "NOT_STARTED"
   );
+}
+
+// Targeted Batch rules TB-R054 (1.3.45): one status per batch row, the same as the phone
+// (TB-R051). A VISIBLE Sales meter is Completed; otherwise the row's own status counts, and a
+// status that cannot be read is Not Started, so the three statuses always add up to the rows.
+const WORK_STATUS_KEYS = { NOT_STARTED: "notStarted", IN_PROGRESS: "inProgress", COMPLETED: "completed" };
+
+export function getTargetedBatchRowWorkStatus({ row = {}, sales = {} } = {}) {
+  if (classifySalesWorkStatus(sales || {}) === "COMPLETED") return "COMPLETED";
+  const rowStatus = normalizeUpper(row?.execution?.status);
+  return rowStatus === "COMPLETED" || rowStatus === "IN_PROGRESS" ? rowStatus : "NOT_STARTED";
+}
+
+export function countTargetedBatchRowsByBatch({ rows = [], salesById = {} } = {}) {
+  const countsByBatch = {};
+  for (const row of rows) {
+    const tbId = cleanText(row?.tbId);
+    if (!tbId) continue;
+    const counts = (countsByBatch[tbId] ??= { total: 0, notStarted: 0, inProgress: 0, completed: 0 });
+    const status = getTargetedBatchRowWorkStatus({ row, sales: salesById[cleanText(row?.salesAllMeterId)] });
+    counts.total += 1;
+    counts[WORK_STATUS_KEYS[status]] += 1;
+  }
+  return countsByBatch;
 }
 
 function getNoAccessCount(fieldWork = {}) {
@@ -1261,6 +1285,8 @@ export function normalizeTargetedBatchReportRow({
       lastActivityAtMs: getLastActivityAtMs(row, fieldWork, reference) || null,
     },
 
+    workStatus: getTargetedBatchRowWorkStatus({ row, sales }),
+
     noAccess: {
       count: noAccessCount,
       attempts: noAccessAttempts,
@@ -1298,9 +1324,10 @@ export function summarizeTargetedBatchReportRows(rows = []) {
     (summary, row) => {
       summary.total += 1;
 
-      if (row?.execution?.status === "COMPLETED") {
+      // TB-R054: the row's one status, so the three add up to the total.
+      if (row?.workStatus === "COMPLETED") {
         summary.completed += 1;
-      } else if (row?.execution?.status === "IN_PROGRESS") {
+      } else if (row?.workStatus === "IN_PROGRESS") {
         summary.inProgress += 1;
       } else {
         summary.notStarted += 1;

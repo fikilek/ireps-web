@@ -8,10 +8,19 @@ import {
   DatetimeFilterModal,
   EMPTY_DATETIME_FILTER,
 } from "../../components/DatetimeFilter";
-import { useGetTargetedBatchHeadersByLmQuery } from "../../redux/salesTargetedBatchApi";
+import {
+  useGetTargetedBatchHeadersByLmQuery,
+  useGetTargetedBatchRowCountsByLmQuery,
+} from "../../redux/salesTargetedBatchApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "../operations/targeted-batches/batch-geofence-label.js";
 import BatchMapLink from "../../components/batch-map-link.jsx";
+import {
+  getReportingCountsState,
+  hasCountFilter,
+  summarizeReportingCards,
+  withRowCounts,
+} from "./models/salesReportingCountsModel.js";
 
 const ALL_FILTER = "ALL";
 // Targeted Batch rules TB-R043: allocation shows as two filterable columns.
@@ -300,13 +309,30 @@ function AllocatedToCell({ allocation = {} }) {
   return <span title={kind || undefined}>{targetName}</span>;
 }
 
-function SummaryCard({ label, value, helper }) {
+function SummaryCard({ label, value, helper, pendingText }) {
   return (
     <article style={styles.summaryCard}>
       <span style={styles.summaryLabel}>{label}</span>
-      <strong style={styles.summaryValue}>{formatNumber(value)}</strong>
+      {value == null ? (
+        <strong style={styles.summaryPending}>{pendingText}</strong>
+      ) : (
+        <strong style={styles.summaryValue}>{formatNumber(value)}</strong>
+      )}
       <span style={styles.summaryHelper}>{helper}</span>
     </article>
+  );
+}
+
+// TB-R054: the = and + between the cards make them read as a sum; each sign
+// stays with its card when the cards wrap on a narrow screen.
+function SummaryTerm({ sign, children }) {
+  return (
+    <div style={styles.summaryTerm}>
+      <span style={styles.summarySign} aria-hidden="true">
+        {sign}
+      </span>
+      {children}
+    </div>
   );
 }
 
@@ -444,15 +470,15 @@ export default function SalesReportingPage() {
     error: targetedBatchQueryError,
   } = useGetTargetedBatchHeadersByLmQuery(activeLmPcode || skipToken);
 
+  // TB-R054: the counts come from the batch rows themselves, one status per row,
+  // never from the running totals on the batch.
+  const { data: rowCountStream, isError: isRowCountQueryError } =
+    useGetTargetedBatchRowCountsByLmQuery(activeLmPcode || skipToken);
+
   // TB-R043: each batch shows its geofence name, from the LM's active geofences.
   const { data: lmGeofences } = useGetGeoFencesByLmQuery(activeLmPcode || skipToken);
   const geofenceNames = useMemo(() => geofenceNamesById(lmGeofences), [lmGeofences]);
-  const batches = useMemo(
-    () =>
-      (Array.isArray(targetedBatchStream?.items) ? targetedBatchStream.items : [])
-        .map((batch) => ({ ...batch, geofenceLabel: batchGeofenceLabel(batch?.geofenceId, geofenceNames) })),
-    [targetedBatchStream, geofenceNames],
-  );
+  const countsByBatch = rowCountStream?.countsByBatch;
 
   const streamStatus = cleanText(targetedBatchStream?.sync?.status);
   const streamReady =
@@ -470,6 +496,33 @@ export default function SalesReportingPage() {
             "The live reporting stream could not be opened.",
         }
       : null);
+
+  const countsState = getReportingCountsState({
+    hasWorkbase: Boolean(activeLmPcode),
+    batchesStatus: streamStatus,
+    batchesFailed: Boolean(streamError),
+    rowCountSources: rowCountStream?.sync?.sources,
+    rowCountsFailed: isRowCountQueryError,
+  });
+  const countsPendingText =
+    countsState === "error" ? "Not available" : "Counting…";
+  const salesUnreadRows =
+    countsState === "ready" ? Number(rowCountStream?.salesUnreadRows || 0) : 0;
+  const countText = (value) =>
+    value == null ? countsPendingText : formatNumber(value);
+
+  const batches = useMemo(
+    () =>
+      (Array.isArray(targetedBatchStream?.items) ? targetedBatchStream.items : [])
+        .map((batch) =>
+          withRowCounts(
+            { ...batch, geofenceLabel: batchGeofenceLabel(batch?.geofenceId, geofenceNames) },
+            countsByBatch,
+            countsState,
+          ),
+        ),
+    [targetedBatchStream, geofenceNames, countsByBatch, countsState],
+  );
 
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [lastActivityFilter, setLastActivityFilter] = useState(
@@ -496,9 +549,14 @@ export default function SalesReportingPage() {
     [batches],
   );
 
+  // TB-R054: while the counts are not ready, a count filter cannot be applied,
+  // so the table and the cards wait instead of guessing.
+  const listPending = countsState !== "ready" && hasCountFilter(filters);
+
   const filteredBatches = useMemo(() => {
     return batches.filter((batch) => {
       const progress = batch?.progress || {};
+      const counted = Boolean(batch?.progress);
       const ward = cleanText(batch?.scope?.wardLabel) || "NAv";
       const allocation = getAllocationState(batch);
       const acceptanceStatus =
@@ -514,10 +572,11 @@ export default function SalesReportingPage() {
           getAllocatedToLabel(batch) === filters.allocatedTo) &&
         (filters.acceptance === ALL_FILTER ||
           acceptanceStatus === filters.acceptance) &&
-        matchesNumberFilter(progress?.total, filters.totalRows) &&
-        matchesNumberFilter(progress?.notStarted, filters.notStarted) &&
-        matchesNumberFilter(progress?.inProgress, filters.inProgress) &&
-        matchesNumberFilter(progress?.completed, filters.completed) &&
+        (!counted ||
+          (matchesNumberFilter(progress?.total, filters.totalRows) &&
+            matchesNumberFilter(progress?.notStarted, filters.notStarted) &&
+            matchesNumberFilter(progress?.inProgress, filters.inProgress) &&
+            matchesNumberFilter(progress?.completed, filters.completed))) &&
         matchesDatetimeFilter(batch?.lastActivityAtMs, lastActivityFilter)
       );
     });
@@ -548,26 +607,16 @@ export default function SalesReportingPage() {
     [sortedBatches, pageStartIndex, pageEndIndex],
   );
 
-  const summary = useMemo(() => {
-    return batches.reduce(
-      (accumulator, batch) => {
-        const progress = batch?.progress || {};
-
-        accumulator.batches += 1;
-        accumulator.rows += Number(progress?.total || 0);
-        accumulator.inProgress += Number(progress?.inProgress || 0);
-        accumulator.completed += Number(progress?.completed || 0);
-
-        return accumulator;
-      },
-      {
-        batches: 0,
-        rows: 0,
-        inProgress: 0,
-        completed: 0,
-      },
-    );
-  }, [batches]);
+  // TB-R054: the cards add up the batches the table shows after its filters.
+  const summary = useMemo(
+    () =>
+      summarizeReportingCards(filteredBatches, {
+        countsState,
+        listPending,
+        batchesReady: !activeLmPcode || (streamStatus === "ready" && !streamError),
+      }),
+    [filteredBatches, countsState, listPending, activeLmPcode, streamStatus, streamError],
+  );
 
   function updateFilter(key, value) {
     setCurrentPage(1);
@@ -643,28 +692,70 @@ export default function SalesReportingPage() {
         </div>
       ) : null}
 
-      <div style={styles.summaryGrid}>
+      <div
+        style={styles.summaryGrid}
+        role="group"
+        aria-label="Sales Rows = Not Started + In Progress + Completed"
+      >
         <SummaryCard
           label="Targeted Batches"
           value={summary.batches}
+          pendingText={countsPendingText}
           helper={activeWorkbaseName}
         />
         <SummaryCard
           label="Sales Rows"
           value={summary.rows}
-          helper="Across all visible batches"
+          pendingText={countsPendingText}
+          helper={
+            summary.batches == null
+              ? "Across the batches shown"
+              : `Across the ${formatNumber(summary.batches)} ${
+                  summary.batches === 1 ? "batch" : "batches"
+                } shown`
+          }
         />
-        <SummaryCard
-          label="In Progress"
-          value={summary.inProgress}
-          helper="Rows active in the field"
-        />
-        <SummaryCard
-          label="Completed"
-          value={summary.completed}
-          helper="Rows completed in the field"
-        />
+        <SummaryTerm sign="=">
+          <SummaryCard
+            label="Not Started"
+            value={summary.notStarted}
+            pendingText={countsPendingText}
+            helper="Rows not started in the field"
+          />
+        </SummaryTerm>
+        <SummaryTerm sign="+">
+          <SummaryCard
+            label="In Progress"
+            value={summary.inProgress}
+            pendingText={countsPendingText}
+            helper="Rows active in the field"
+          />
+        </SummaryTerm>
+        <SummaryTerm sign="+">
+          <SummaryCard
+            label="Completed"
+            value={summary.completed}
+            pendingText={countsPendingText}
+            helper="Meter found (VISIBLE) or row completed"
+          />
+        </SummaryTerm>
       </div>
+
+      {activeLmPcode && countsState === "error" ? (
+        <div style={styles.notice}>
+          The counts could not be read, so no numbers are shown. Reload the
+          page to try again.
+        </div>
+      ) : null}
+
+      {salesUnreadRows > 0 ? (
+        <div style={styles.notice}>
+          The Sales meters of {formatNumber(salesUnreadRows)}{" "}
+          {salesUnreadRows === 1 ? "row" : "rows"} could not be read, so{" "}
+          {salesUnreadRows === 1 ? "that row counts" : "those rows count"} by
+          the batch row status only.
+        </div>
+      ) : null}
 
       <section className="table-panel" style={styles.panel}>
         <div style={styles.panelHeader}>
@@ -677,7 +768,9 @@ export default function SalesReportingPage() {
 
           <div style={styles.panelHeaderActions}>
             <strong style={styles.resultCount}>
-              {formatNumber(sortedBatches.length)} shown
+              {listPending
+                ? countsPendingText
+                : `${formatNumber(sortedBatches.length)} shown`}
             </strong>
             <button
               type="button"
@@ -690,7 +783,7 @@ export default function SalesReportingPage() {
           </div>
         </div>
 
-        {streamReady && !streamError && totalRows > 0 ? (
+        {streamReady && !streamError && !listPending && totalRows > 0 ? (
           <PaginationControls
             currentPage={safeCurrentPage}
             pageSize={pageSize}
@@ -912,7 +1005,29 @@ export default function SalesReportingPage() {
                 </tr>
               ) : null}
 
-              {streamReady && !streamError && sortedBatches.length === 0 ? (
+              {streamReady && !streamError && listPending ? (
+                <tr>
+                  <td colSpan={12}>
+                    {countsState === "error" ? (
+                      <div style={styles.errorState}>
+                        The counts are not available, so the count filters
+                        cannot be applied. Clear Filters to see the batches.
+                      </div>
+                    ) : (
+                      <div style={styles.loadingState}>
+                        <span style={styles.spinner} />
+                        Counting rows; the count filters apply once they are
+                        counted.
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ) : null}
+
+              {streamReady &&
+              !streamError &&
+              !listPending &&
+              sortedBatches.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="muted">
                     {batches.length === 0
@@ -924,6 +1039,7 @@ export default function SalesReportingPage() {
 
               {streamReady &&
                 !streamError &&
+                !listPending &&
                 paginatedBatches.map((batch) => {
                   const progress = batch?.progress || {};
                   const ward = cleanText(batch?.scope?.wardLabel) || "NAv";
@@ -953,10 +1069,10 @@ export default function SalesReportingPage() {
                       <td>
                         <StatusBadge value={batch?.acceptance?.status} />
                       </td>
-                      <td>{formatNumber(progress?.total)}</td>
-                      <td>{formatNumber(progress?.notStarted)}</td>
-                      <td>{formatNumber(progress?.inProgress)}</td>
-                      <td>{formatNumber(progress?.completed)}</td>
+                      <td>{countText(progress?.total)}</td>
+                      <td>{countText(progress?.notStarted)}</td>
+                      <td>{countText(progress?.inProgress)}</td>
+                      <td>{countText(progress?.completed)}</td>
                       <td>
                         <Link
                           to={`/sales/reporting/${encodeURIComponent(batch.id)}`}
@@ -973,7 +1089,7 @@ export default function SalesReportingPage() {
           </table>
         </div>
 
-        {streamReady && !streamError && totalRows > 0 ? (
+        {streamReady && !streamError && !listPending && totalRows > 0 ? (
           <PaginationControls
             currentPage={safeCurrentPage}
             pageSize={pageSize}
@@ -1097,8 +1213,30 @@ const styles = {
 
   summaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
     gap: 12,
+  },
+
+  summaryTerm: {
+    display: "flex",
+    alignItems: "stretch",
+    gap: 10,
+    minWidth: 0,
+  },
+
+  summarySign: {
+    flex: "0 0 auto",
+    alignSelf: "center",
+    color: "#64748b",
+    fontSize: 24,
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+
+  summaryPending: {
+    color: "#64748b",
+    fontSize: 16,
+    lineHeight: 1.6,
   },
 
   summaryCard: {
@@ -1108,6 +1246,8 @@ const styles = {
     padding: 16,
     display: "grid",
     gap: 4,
+    flex: "1 1 auto",
+    minWidth: 0,
   },
 
   summaryLabel: {

@@ -58,6 +58,7 @@ import {
   buildTargetedBatchMapReadModel,
   buildTargetedBatchReport,
   cleanText,
+  countTargetedBatchRowsByBatch,
   getSalesOperationalPremiseIds,
   getTargetedBatchMapMembership,
   getTargetedBatchPremiseIds,
@@ -82,6 +83,24 @@ function createTargetedBatchHeadersStreamState(status = "idle") {
     sync: {
       status,
       source: "firestore-stream",
+      firstSnapshotAtMs: null,
+      lastSyncAtMs: null,
+      error: null,
+    },
+  };
+}
+
+function createTargetedBatchRowCountsStreamState(status = "idle") {
+  return {
+    countsByBatch: {},
+    salesUnreadRows: 0,
+    sync: {
+      status,
+      source: "firestore-stream",
+      sources: {
+        rows: status,
+        sales: status === "ready" ? "ready" : "idle",
+      },
       firstSnapshotAtMs: null,
       lastSyncAtMs: null,
       error: null,
@@ -850,6 +869,215 @@ export const salesTargetedBatchApi = createApi({
       keepUnusedDataFor: 300,
     }),
 
+    // Targeted Batch rules TB-R054 (1.3.45): Sales Reporting counts the batch rows themselves,
+    // one status per row, never the running totals on the batch. Sales meters are read in
+    // groups of up to 30 (see syncSalesGroups). Snapshots from the browser's cache are not
+    // final, and nothing is counted until every group has answered, so the page never shows
+    // a partial number.
+    getTargetedBatchRowCountsByLm: builder.query({
+      queryFn: (lmPcode) => ({
+        data: createTargetedBatchRowCountsStreamState(
+          cleanText(lmPcode) ? "syncing" : "ready",
+        ),
+      }),
+
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent },
+      ) {
+        const normalizedLmPcode = cleanText(lmPcode);
+        if (!normalizedLmPcode) return;
+
+        let active = true;
+        let unsubscribeRows = () => {};
+        let rows = [];
+        let rowsError = null;
+        const sources = { rows: "syncing", sales: "idle" };
+        const salesGroups = new Map();
+
+        const publish = () => {
+          if (!active || !isCurrent()) return;
+
+          const groups = [...salesGroups.values()];
+          if (sources.rows === "ready") {
+            sources.sales = groups.some((group) => !group.ready)
+              ? "syncing"
+              : groups.some((group) => group.error)
+                ? "error"
+                : "ready";
+          }
+          const counted =
+            sources.rows === "ready" && sources.sales !== "syncing";
+
+          let countsByBatch = {};
+          let salesUnreadRows = 0;
+          if (counted) {
+            const salesById = {};
+            const unreadSalesIds = new Set();
+            groups.forEach((group) => {
+              Object.assign(salesById, group.docs);
+              if (group.error) group.ids.forEach((id) => unreadSalesIds.add(id));
+            });
+            countsByBatch = countTargetedBatchRowsByBatch({ rows, salesById });
+            salesUnreadRows = rows.filter((row) =>
+              unreadSalesIds.has(cleanText(row?.salesAllMeterId)),
+            ).length;
+          }
+          const salesError = groups.find((group) => group.error)?.error || null;
+          const syncedAtMs = Date.now();
+
+          updateCachedData((draft) => {
+            draft.countsByBatch = countsByBatch;
+            draft.salesUnreadRows = salesUnreadRows;
+            draft.sync.status = getOverallReportStatus(sources);
+            draft.sync.sources = { ...sources };
+            draft.sync.firstSnapshotAtMs ??= syncedAtMs;
+            draft.sync.lastSyncAtMs = syncedAtMs;
+            draft.sync.error = rowsError || salesError;
+          });
+        };
+
+        const openSalesGroup = (key, ids) => {
+          const group = { ids, docs: {}, error: null, ready: false, unsubscribe: () => {} };
+          salesGroups.set(key, group);
+
+          group.unsubscribe = onSnapshot(
+            query(
+              collection(db, SALES_COLLECTION),
+              where(documentId(), "in", ids),
+            ),
+            { includeMetadataChanges: true },
+            (snapshot) => {
+              if (!active || !isCurrent() || salesGroups.get(key) !== group) return;
+
+              group.docs = Object.fromEntries(
+                snapshot.docs.map((salesSnapshot) => [
+                  salesSnapshot.id,
+                  salesSnapshot.data(),
+                ]),
+              );
+              group.error = null;
+              group.ready = snapshot.metadata?.fromCache !== true;
+              publish();
+            },
+            (error) => {
+              if (!active || !isCurrent() || salesGroups.get(key) !== group) return;
+
+              console.error(
+                "[SALES TARGETED BATCH API][ROW COUNTS SALES JOIN]",
+                error,
+              );
+              group.docs = {};
+              group.error = normalizeStreamError(error, "sales");
+              group.ready = true;
+              publish();
+            },
+          );
+        };
+
+        // Groups already open stay open while all their meters are still in batches. Meters not
+        // yet covered are packed batch by batch into groups of up to 30, so a new batch opens
+        // one group and a deleted batch closes only the group it was in.
+        const syncSalesGroups = () => {
+          const salesIdsByBatch = new Map();
+          rows.forEach((row) => {
+            const tbId = cleanText(row?.tbId);
+            const salesId = cleanText(row?.salesAllMeterId);
+            if (!tbId || !salesId) return;
+            if (!salesIdsByBatch.has(tbId)) salesIdsByBatch.set(tbId, new Set());
+            salesIdsByBatch.get(tbId).add(salesId);
+          });
+          const wantedIds = new Set();
+          salesIdsByBatch.forEach((salesIds) => salesIds.forEach((id) => wantedIds.add(id)));
+
+          const covered = new Set();
+          for (const [key, group] of salesGroups) {
+            if (group.ids.every((id) => wantedIds.has(id))) {
+              group.ids.forEach((id) => covered.add(id));
+            } else {
+              group.unsubscribe();
+              salesGroups.delete(key);
+            }
+          }
+
+          let pending = [];
+          const flush = () => {
+            if (pending.length > 0) openSalesGroup(pending.join(","), pending);
+            pending = [];
+          };
+          [...salesIdsByBatch.keys()].sort().forEach((tbId) => {
+            const missing = [...salesIdsByBatch.get(tbId)]
+              .filter((id) => !covered.has(id))
+              .sort();
+            missing.forEach((id) => covered.add(id));
+            chunkValues(missing).forEach((ids) => {
+              if (pending.length + ids.length > FIRESTORE_IN_CHUNK_SIZE) flush();
+              pending.push(...ids);
+            });
+          });
+          flush();
+        };
+
+        try {
+          await cacheDataLoaded;
+          if (!isCurrent()) return;
+
+          unsubscribeRows = onSnapshot(
+            query(
+              collection(db, TARGETED_BATCH_ROWS_COLLECTION),
+              where("scope.lmPcode", "==", normalizedLmPcode),
+            ),
+            { includeMetadataChanges: true },
+            (snapshot) => {
+              if (!active || !isCurrent()) return;
+
+              rows = snapshot.docs.map((rowSnapshot) => ({
+                id: rowSnapshot.id,
+                ...rowSnapshot.data(),
+              }));
+              sources.rows =
+                snapshot.metadata?.fromCache === true ? "syncing" : "ready";
+              rowsError = null;
+              syncSalesGroups();
+              publish();
+            },
+            (error) => {
+              if (!active || !isCurrent()) return;
+
+              console.error(
+                "[SALES TARGETED BATCH API][ROW COUNTS ROWS STREAM]",
+                error,
+              );
+              sources.rows = "error";
+              if (sources.sales === "idle") sources.sales = "error";
+              rowsError = normalizeStreamError(error, "rows");
+              publish();
+            },
+          );
+        } catch (error) {
+          console.error(
+            "[SALES TARGETED BATCH API][ROW COUNTS SETUP]",
+            error,
+          );
+          sources.rows = "error";
+          if (sources.sales === "idle") sources.sales = "error";
+          rowsError = normalizeStreamError(error, "rows");
+          publish();
+        }
+
+        try {
+          await cacheEntryRemoved;
+        } finally {
+          active = false;
+          unsubscribeRows();
+          salesGroups.forEach((group) => group.unsubscribe());
+          salesGroups.clear();
+        }
+      },
+
+      keepUnusedDataFor: 300,
+    }),
+
     getTargetedBatchDashboard: builder.query({
       queryFn: (arg) => {
         const { tbId, lmPcode } = resolveTargetedBatchDashboardArgs(arg);
@@ -1381,8 +1609,9 @@ export const salesTargetedBatchApi = createApi({
                 chunkResults.set(chunkIndex, {});
                 chunkErrors.add(chunkIndex);
                 rawState.salesById = projectSalesMapForMonth(combineChunkMaps(chunkResults), selectedMonth);
-                markSource("sales", "error", error);
+                // TB-R054: Open Report counts wait until every Sales group has answered.
                 if (chunkResults.size === chunks.length) {
+                  markSource("sales", "error", error);
                   restartPremiseListeners();
                 }
                 publish();
@@ -2683,6 +2912,7 @@ export function useGetTargetedBatchAllocationMatrixByLmQuery(arg, options) { ret
 export function useGetTargetedBatchAllocationRowsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationRowsByLmQuery", arg, options); }
 export function useGetTargetedBatchDashboardQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchDashboardQuery", arg, options); }
 export function useGetTargetedBatchHeadersByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchHeadersByLmQuery", arg, options); }
+export function useGetTargetedBatchRowCountsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchRowCountsByLmQuery", arg, options); }
 export function useGetTargetedBatchMapByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchMapByIdQuery", arg, options); }
 export function useGetTargetedBatchReportByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchReportByIdQuery", arg, options); }
 
