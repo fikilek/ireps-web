@@ -1,6 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import {
+  clearIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  terminate,
+} from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
@@ -38,7 +44,51 @@ console.log(
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Web Data Copy rules WD-R001: one saved copy of the records read, kept in the
+// browser and shared by all iREPS tabs (one tab talks to the server for all).
+// Endumeni's Sales alone are about 38 MB, so the standard 40 MB is too small.
+export const SAVED_COPY_MAX_BYTES = 200 * 1024 * 1024;
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+    cacheSizeBytes: SAVED_COPY_MAX_BYTES,
+  }),
+});
+
+// WD-R001.4: signing out, from any tab or page, deletes the saved copy and
+// returns the tab to the sign-in page. Every tab of the browser sees the
+// sign-out; the copy can only be deleted once all of them have stopped their
+// connection, so keep trying for up to 10 seconds.
+const SAVED_COPY_DELETE_TRIES = 20;
+const SAVED_COPY_DELETE_PAUSE_MS = 500;
+let signedInUid = null;
+
+async function deleteSavedCopy() {
+  await terminate(db);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await clearIndexedDbPersistence(db);
+      return;
+    } catch (error) {
+      if (attempt >= SAVED_COPY_DELETE_TRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, SAVED_COPY_DELETE_PAUSE_MS));
+    }
+  }
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    signedInUid = user.uid;
+    return;
+  }
+  if (!signedInUid) return;
+  signedInUid = null;
+  deleteSavedCopy()
+    .catch((error) => console.error("[iREPS Web Firebase] The saved copy could not be deleted at sign-out", error?.code || error?.message || error))
+    .finally(() => window.location.reload());
+});
+
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
 export const firebaseApp = app;

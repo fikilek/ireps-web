@@ -1,0 +1,99 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { SourceTextModule, SyntheticModule, createContext } from "node:vm";
+
+// Web Data Copy rules WD-R001: one saved copy shared by all tabs, deleted at sign-out.
+async function fixture({ clearFailures = 0 } = {}) {
+  const state = { calls: [], errors: [], settings: null, authCallback: null, clearFailures };
+  const context = createContext({
+    console: { log() {}, error: (...parts) => state.errors.push(parts) },
+    setTimeout: run => Promise.resolve().then(run),
+    window: { location: { reload: () => state.calls.push("reload") } },
+  });
+  const mocks = {
+    "firebase/app": { initializeApp: config => ({ config }) },
+    "firebase/auth": { getAuth: () => ({}), onAuthStateChanged: (_auth, callback) => { state.authCallback = callback; } },
+    "firebase/firestore": {
+      initializeFirestore: (_app, settings) => { state.settings = settings; return { name: "db" }; },
+      persistentLocalCache: options => ({ kind: "persistent", ...options }),
+      persistentMultipleTabManager: () => ({ kind: "multi-tab" }),
+      terminate: async () => { state.calls.push("terminate"); },
+      clearIndexedDbPersistence: async () => {
+        state.calls.push("clear");
+        if (state.clearFailures > 0) {
+          state.clearFailures -= 1;
+          throw Object.assign(new Error("another tab is still open"), { code: "failed-precondition" });
+        }
+      },
+    },
+    "firebase/functions": { getFunctions: () => ({}) },
+    "firebase/storage": { getStorage: () => ({}) },
+  };
+  const env = { MODE: "test", VITE_FIREBASE_API_KEY: "k", VITE_FIREBASE_AUTH_DOMAIN: "d", VITE_FIREBASE_PROJECT_ID: "p", VITE_FIREBASE_STORAGE_BUCKET: "b", VITE_FIREBASE_MESSAGING_SENDER_ID: "m", VITE_FIREBASE_APP_ID: "a" };
+  const module = new SourceTextModule(await readFile(new URL("./index.js", import.meta.url), "utf8"), {
+    context,
+    initializeImportMeta: meta => { meta.env = env; },
+  });
+  await module.link(name => {
+    assert.ok(mocks[name], `Unexpected dependency ${name}`);
+    const exports = mocks[name];
+    return new SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
+  });
+  await module.evaluate();
+  return { api: module.namespace, state };
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test("one saved copy, shared by all tabs, big enough for the Sales", async () => {
+  const { api, state } = await fixture();
+  assert.equal(api.SAVED_COPY_MAX_BYTES, 200 * 1024 * 1024);
+  assert.equal(state.settings.localCache.kind, "persistent");
+  assert.equal(state.settings.localCache.tabManager.kind, "multi-tab");
+  assert.equal(state.settings.localCache.cacheSizeBytes, api.SAVED_COPY_MAX_BYTES);
+});
+
+test("opening the sign-in page while signed out deletes nothing", async () => {
+  const { state } = await fixture();
+  state.authCallback(null);
+  await settle();
+  assert.deepEqual(state.calls, []);
+});
+
+test("signing out deletes the saved copy, then returns to the sign-in page", async () => {
+  const { state } = await fixture();
+  state.authCallback({ uid: "A" });
+  state.authCallback(null);
+  await settle();
+  assert.deepEqual(state.calls, ["terminate", "clear", "reload"]);
+  state.authCallback(null);
+  await settle();
+  assert.equal(state.calls.length, 3, "a second signed-out event does nothing");
+});
+
+test("while another tab is still closing, deleting is tried again", async () => {
+  const { state } = await fixture({ clearFailures: 3 });
+  state.authCallback({ uid: "A" });
+  state.authCallback(null);
+  await settle();
+  assert.deepEqual(state.calls, ["terminate", "clear", "clear", "clear", "clear", "reload"]);
+  assert.equal(state.errors.length, 0);
+});
+
+test("after 20 tries the failure is logged and the tab still returns to the sign-in page", async () => {
+  const { state } = await fixture({ clearFailures: 100 });
+  state.authCallback({ uid: "A" });
+  state.authCallback(null);
+  await settle();
+  assert.equal(state.calls.filter(call => call === "clear").length, 20);
+  assert.equal(state.calls.at(-1), "reload");
+  assert.equal(state.errors.length, 1);
+});
+
+test("every first-load reader asks for the server's confirmation of a saved copy", async () => {
+  for (const file of ["teamsApi", "usersApi", "serviceProvidersApi", "registryWardsApi", "registryMetersApi", "trnsApi"]) {
+    const source = await readFile(new URL(`../redux/${file}.js`, import.meta.url), "utf8");
+    assert.match(source, /const streamUnsubscribe = onSnapshot\(\s*\w+,\s*(?:\/\/[^\n]*\n\s*)*\{ includeMetadataChanges: true \},/, file);
+  }
+});

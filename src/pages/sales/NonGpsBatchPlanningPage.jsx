@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
+import { SALES_LOAD_TIMEOUT_ERROR, useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
@@ -388,12 +388,17 @@ export default function NonGpsBatchPlanningPage() {
       ) : null}
 
       {error ? (
-        <section style={{ ...styles.statePanel, ...styles.errorPanel }}>
-          <h2>Could not load Sales data</h2>
+        // Web Data Copy rules WD-R001.6: never an endless spinner; say why and offer Try again.
+        <section style={{ ...styles.statePanel, ...styles.errorPanel }} role="alert">
+          <h2>Sales could not be loaded</h2>
           <p>
-            Check Firestore access to sales-all-meters and confirm that records
-            exist for {activeLmPcode}.
+            {error.status === SALES_LOAD_TIMEOUT_ERROR.status
+              ? SALES_LOAD_TIMEOUT_ERROR.error
+              : `Check Firestore access to sales-all-meters and confirm that records exist for ${activeLmPcode}.`}
           </p>
+          <button type="button" style={styles.primaryButton} onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "Trying again..." : "Try again"}
+          </button>
         </section>
       ) : null}
 

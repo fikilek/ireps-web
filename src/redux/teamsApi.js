@@ -136,6 +136,9 @@ function readInitialTeams(arg, signal) {
 
     const streamUnsubscribe = onSnapshot(
       teamsQuery,
+      // Web Data Copy rules WD-R001.3: the server's confirmation of an unchanged
+      // (even empty) saved copy arrives only as a metadata change.
+      { includeMetadataChanges: true },
       (snapshot) => {
         const teams = buildTeamRows(snapshot);
         const fromCache = snapshot.metadata?.fromCache === true;

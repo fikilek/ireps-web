@@ -23,8 +23,10 @@ async function fixture() {
     },
     "firebase/firestore": {
       collection: (_db, name) => name, query: (...parts) => parts, where: (...parts) => parts,
-      onSnapshot: (query, rows, error) => {
-        const listener = { query, rows, error, stopped: false };
+      onSnapshot: (query, ...handlers) => {
+        const options = typeof handlers[0] === "function" ? null : handlers.shift();
+        const [rows, error] = handlers;
+        const listener = { query, options, rows, error, stopped: false };
         state.listeners.push(listener);
         return () => { listener.stopped = true; };
       },

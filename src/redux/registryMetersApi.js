@@ -147,6 +147,9 @@ function readInitialRegistryMeterRows(registryMetersQuery, signal) {
 
     const streamUnsubscribe = onSnapshot(
       registryMetersQuery,
+      // Web Data Copy rules WD-R001.3: the server's confirmation of an unchanged
+      // (even empty) saved copy arrives only as a metadata change.
+      { includeMetadataChanges: true },
       (snapshot) => {
         const rows = buildRegistryMeterRows(snapshot);
         const fromCache = snapshot.metadata?.fromCache === true;

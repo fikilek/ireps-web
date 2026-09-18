@@ -5,7 +5,7 @@ import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
+import { SALES_LOAD_TIMEOUT_ERROR, useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft, removeSalesDraftMeter, saveSalesDraftFence } from "../../redux/targetedBatchDraftSlice";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -534,9 +534,17 @@ export default function PrepaidSales() {
       ) : null}
 
       {salesWorkStatusError ? (
-        <section style={{ ...styles.statePanel, ...styles.errorPanel }}>
-          <h2>Could not load Sales work status</h2>
-          <p>Live Sales meters could not be loaded.</p>
+        // Web Data Copy rules WD-R001.6: never an endless spinner; say why and offer Try again.
+        <section style={{ ...styles.statePanel, ...styles.errorPanel }} role="alert">
+          <h2>Sales could not be loaded</h2>
+          <p>
+            {salesWorkStatusError.status === SALES_LOAD_TIMEOUT_ERROR.status
+              ? SALES_LOAD_TIMEOUT_ERROR.error
+              : "Live Sales meters could not be loaded."}
+          </p>
+          <button type="button" style={styles.primaryButton} onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "Trying again..." : "Try again"}
+          </button>
         </section>
       ) : null}
 

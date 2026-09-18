@@ -127,6 +127,9 @@ function readInitialRegistryWardRows(registryWardsQuery, signal) {
 
     const streamUnsubscribe = onSnapshot(
       registryWardsQuery,
+      // Web Data Copy rules WD-R001.3: the server's confirmation of an unchanged
+      // (even empty) saved copy arrives only as a metadata change.
+      { includeMetadataChanges: true },
       (snapshot) => {
         const rows = buildRegistryWardRows(snapshot);
         const fromCache = snapshot.metadata?.fromCache === true;

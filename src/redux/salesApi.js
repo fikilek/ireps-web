@@ -17,6 +17,12 @@ import {
 
 const SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
+// Web Data Copy rules WD-R001.6: a page that shows Sales stops waiting after 3 minutes.
+export const SALES_LOAD_TIME_LIMIT_MS = 180_000;
+export const SALES_LOAD_TIMEOUT_ERROR = Object.freeze({
+  status: "SALES_LOAD_TIMEOUT",
+  error: "The Sales records did not arrive within 3 minutes. Check the internet connection, then press Try again.",
+});
 const MAX_UPDATE_DIAGNOSTIC_LOGS = 10;
 
 const salesStreams = new Map();
@@ -542,16 +548,24 @@ function createSalesStream(scope) {
 
   stream.unsubscribeFirestore = onSnapshot(
     salesQuery,
+    // Web Data Copy rules WD-R001.3: when the server confirms the saved copy
+    // unchanged, only the metadata changes; ask for that event so a copy
+    // (even an empty one) becomes the server's answer.
+    { includeMetadataChanges: true },
     (snapshot) => {
       if (stream.closed || !isSalesReadScopeCurrent(scope)) return;
       const normalizationStartedAtMs = Date.now();
       const isInitialSnapshot = !stream.initialized;
+      const fromCache = snapshot.metadata?.fromCache === true;
       const changes = isInitialSnapshot
         ? snapshot.docs.map((documentSnapshot) => ({
             type: "added",
             doc: documentSnapshot,
           }))
         : snapshot.docChanges();
+
+      // A metadata-only event matters only when it brings the server's confirmation.
+      if (!isInitialSnapshot && changes.length === 0 && (fromCache || stream.serverConfirmed)) return;
 
       for (const change of changes) {
         const documentId = change.doc.id;
@@ -577,7 +591,6 @@ function createSalesStream(scope) {
       stream.latestRows = buildRowsFromStream(stream);
       stream.latestError = null;
 
-      const fromCache = snapshot.metadata?.fromCache === true;
       const normalizationMs = Date.now() - normalizationStartedAtMs;
       const elapsedMs = Date.now() - startedAtMs;
 
@@ -727,10 +740,18 @@ function readInitialSalesStream(scope, signal) {
       if (settled) return;
 
       settled = true;
+      clearTimeout(timeLimit);
       signal?.removeEventListener("abort", handleAbort);
       unsubscribe();
       resolve(result);
     };
+
+    // WD-R001.6: never an endless spinner. The cache entry's own subscription
+    // keeps the download going, so Try again shows the rows once they arrive.
+    const timeLimit = setTimeout(
+      () => finish({ error: SALES_LOAD_TIMEOUT_ERROR }),
+      SALES_LOAD_TIME_LIMIT_MS,
+    );
 
     const handleAbort = () => {
       finish({

@@ -9,9 +9,9 @@ import * as refs from "../pages/sales/models/salesTbRefsIntegrityModel.js";
 import { salesMapFenceMeters } from "../../functions/targetedBatches/sales-map-fence.js";
 import { polygonFromPoints } from "../../functions/geofences/sales-batch-geometry.js";
 
-async function fixture() {
+async function fixture({ timers = { setTimeout, clearTimeout } } = {}) {
   const state = { uid: "A", governanceCalls: 0, listeners: [], raw: {}, args: [] };
-  const context = createContext({ console: { info() {}, error() {} }, setTimeout, clearTimeout, Date, AbortController });
+  const context = createContext({ console: { info() {}, error() {} }, ...timers, Date, AbortController });
   const mocks = {
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
@@ -23,8 +23,10 @@ async function fixture() {
     },
     "firebase/firestore": {
       collection: (_db, name) => name, query: (...parts) => parts, where: (...parts) => parts,
-      onSnapshot: (query, rows, error) => {
-        const listener = { query, rows, error, stopped: false };
+      onSnapshot: (query, ...handlers) => {
+        const options = typeof handlers[0] === "function" ? null : handlers.shift();
+        const [rows, error] = handlers;
+        const listener = { query, options, rows, error, stopped: false };
         state.listeners.push(listener);
         return () => { listener.stopped = true; };
       },
@@ -181,5 +183,47 @@ test("the map's rows and the server's raw documents give the same count of meter
   assert.deepEqual(web, ["PLAIN"]);
   assert.deepEqual(server, ["DECIMALRISK", "EXTRAKEY", "PLAIN"]);
   assert.ok(web.every(id => server.includes(id)), "every meter the map counts, the server counts too");
+  api.setSalesReadSession(null);
+});
+
+// Web Data Copy rules WD-R001.3: with the saved copy, the server's confirmation of an
+// unchanged result is a metadata-only event; an empty saved copy is not final until then.
+test("the saved copy is confirmed by the server, even when it is empty", async () => {
+  const { api, state, scope } = await fixture();
+  let settled = false;
+  const pending = api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), {}).then(result => { settled = true; return result; });
+  assert.equal(state.listeners[0].options?.includeMetadataChanges, true);
+  const empty = fromCache => ({ metadata: { fromCache }, docs: [], docChanges: () => [] });
+  state.listeners[0].rows(empty(true));
+  await Promise.resolve();
+  assert.equal(settled, false, "an empty saved copy is not the server's answer");
+  state.listeners[0].rows(empty(false));
+  assert.deepEqual([...(await pending).data.rows], []);
+  api.setSalesReadSession(null);
+});
+
+// WD-R001.6: never an endless spinner; Try again reuses the download that is still running.
+test("a Sales read stops waiting after 3 minutes and Try again picks up the running download", async () => {
+  const pendingTimers = [];
+  const timers = {
+    setTimeout: (run, ms) => { pendingTimers.push({ run, ms, cleared: false }); return pendingTimers.length; },
+    clearTimeout: id => { if (pendingTimers[id - 1]) pendingTimers[id - 1].cleared = true; },
+  };
+  const { api, state, scope, snapshot } = await fixture({ timers });
+  const endpoint = api.salesApi.definitions.getSalesByLmPcode;
+  assert.equal(api.SALES_LOAD_TIME_LIMIT_MS, 180_000);
+  const first = endpoint.queryFn(scope("ZA5241"), {});
+  const limit = pendingTimers.find(timer => timer.ms === 180_000 && !timer.cleared);
+  assert.ok(limit, "a 3-minute limit is set");
+  limit.run();
+  const timedOut = await first;
+  assert.equal(timedOut.error.status, "SALES_LOAD_TIMEOUT");
+  assert.match(timedOut.error.error, /did not arrive within 3 minutes.*Try again/);
+  assert.equal(state.listeners[0].stopped, false, "the download keeps going");
+  const retry = endpoint.queryFn(scope("ZA5241"), {});
+  assert.equal(state.listeners.length, 1, "Try again does not start a second download");
+  state.listeners[0].rows(snapshot("LATE", "ZA5241"));
+  assert.equal((await retry).data.rows[0].id, "LATE");
+  assert.ok(pendingTimers.filter(timer => timer.ms === 180_000).every(timer => timer.cleared || timer === limit), "a finished read clears its limit");
   api.setSalesReadSession(null);
 });
