@@ -6,6 +6,7 @@ import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 import { useWarehouse } from "@/context/WarehouseContext";
 import { useGetGeoFencesByWardQuery } from "../../../redux/geofencesApi";
 import { useSalesMapFence } from "./use-sales-map-fence.jsx";
+import { useSalesMapLayers } from "./sales-map-layers.jsx";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
@@ -651,7 +652,10 @@ export default function SalesGpsMapSection({
     );
   }, [onWardGeofencesChange, selectedWardNo, wardGeofences]);
 
+  // Targeted Batch rules TB-R055.7: TB Draft's Map Layers for the area on screen.
+  const layers = useSalesMapLayers({ lmPcode: selectedLmPcode, wardPcode: selectedWardNo ? selectedWardPcode : "", wardGeofences });
   const fence = useSalesMapFence({
+    planning: layers.planning,
     canDraw: canDrawFence && Boolean(selectedWardNo),
     lmPcode: selectedLmPcode,
     wardPcode: selectedWardPcode,
@@ -858,6 +862,7 @@ export default function SalesGpsMapSection({
                 onClick={fence.handleMapClick}
                 style={{ width: "100%", height: "100%" }}
               >
+                {layers.renderOnMap(fence.isCreateMode)}
                 {fence.mapLayer}
                 <SalesWardBoundaryLayer
                   wardBoundary={selectedWardBoundary}
@@ -878,6 +883,7 @@ export default function SalesGpsMapSection({
                 />
               </Map>
             </APIProvider>
+            {layers.renderPanel(fence.isCreateMode)}
           </div>
 
           <div style={styles.footer}>
@@ -993,6 +999,8 @@ const styles = {
     cursor: "not-allowed",
   },
   mapWrap: {
+    // The Map Layers panel sits over the map (TB-R055.7).
+    position: "relative",
     width: "100%",
     height: "min(72vh, 720px)",
     minHeight: "520px",

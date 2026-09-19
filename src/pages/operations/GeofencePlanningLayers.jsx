@@ -430,8 +430,10 @@ export function GeofencePlanningLayerControls({
   // Rules 18.7 (1.3.30): TB Draft shows this instead of a count for a layer it has not loaded (not
   // ticked), so an unticked layer is never read as "none". Other pages leave it out.
   uncountedLabel = null,
+  // TB-R055.7: ticked layers that are not loaded either (the GPS Sales map zoomed out).
+  uncountedLayers = [],
 }) {
-  const countOf = (layer, value) => (uncountedLabel !== null && !requestedLayers.includes(layer) ? uncountedLabel : value);
+  const countOf = (layer, value) => (uncountedLabel !== null && (!requestedLayers.includes(layer) || uncountedLayers.includes(layer)) ? uncountedLabel : value);
   const summary = model?.salesSummary || {
     total: 0,
     notStarted: 0,

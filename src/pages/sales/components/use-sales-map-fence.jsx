@@ -19,9 +19,10 @@ import { salesDraftMessage } from "../../operations/targeted-batches/draft/sales
 import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../../functions/geofences/geofence-name.js";
 import { chunks, inGroups } from "../../../../functions/targetedBatches/sales-map-fence.js";
 import { salesMapFenceCount, salesMapFenceCountText, salesMapFenceErfIds, salesMapFenceLeftOut, salesMapFenceProgress } from "../models/salesMapFenceModel.js";
+import { salesMapLayerDrawStats } from "../models/salesMapLayersModel.js";
 
 const EMPTY_ERFS = new Map();
-const NO_STATS = { erfs: "—", premises: "—", assets: "—", sales: { total: "—", notStarted: "—", inProgress: "—", completed: "—", integrityExceptions: 0 } };
+const NO_PLANNING = Object.freeze({ model: {}, visibility: {}, zoomedOut: true });
 const TONES = { ok: "#166534", info: "#334155", busy: "#334155", error: "#b91c1c" };
 
 // The ERF centroids of the Ward's meters that can be batched, read (a few requests at a time) when
@@ -58,7 +59,7 @@ function useWatchedFence(fenceId) {
   return fence?.id === fenceId ? fence : null;
 }
 
-export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = "", wardLabel = "", rows = [], categoryMonth = null, wardGeofences = [], onSaved }) {
+export function useSalesMapFence({ planning = NO_PLANNING, canDraw = false, lmPcode = "", wardPcode = "", wardLabel = "", rows = [], categoryMonth = null, wardGeofences = [], onSaved }) {
   const drawing = useGeofencePolygonDraft();
   const [resolve] = useResolveSalesTargetedBatchMutation();
   const [createGeoFence] = useCreateGeoFenceMutation();
@@ -82,6 +83,8 @@ export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = ""
   const countText = wardChanged
     ? { tone: "error", text: `The Ward changed. This geofence is being drawn for ${drawWard.label}: select it again, or Cancel.` }
     : salesMapFenceCountText({ pointsCount: drawing.points.length, count, loading: erfs.loading, error: erfs.error });
+  // TB-R055.7: ERFs, Sales, Premises and Assets inside the shape, for the ticked layers.
+  const draftPreviewStats = useMemo(() => salesMapLayerDrawStats({ draftPoints: drawing.points, ...planning }), [drawing.points, planning]);
   const canSave = Boolean(count.canSave && !wardChanged && !erfs.loading && !erfs.error && !saving && standardName);
   const canStart = Boolean(canDraw && lmPcode && wardPcode && !busy);
 
@@ -157,18 +160,18 @@ export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = ""
   const drawButton = canDraw ? <button type="button" style={{ ...drawButtonStyle, opacity: canStart ? 1 : 0.5, cursor: canStart ? "pointer" : "not-allowed" }} disabled={!canStart}
     title="Draw the geofence for a GPS batch (at most 30 meters that can be batched)" onClick={() => { setDialogError(""); setCreateModalOpen(true); }}>
     Draw batch geofence</button> : null;
-  const panel = <GeofenceDrawingBar isCreateMode={isCreateMode} draftName={standardName} draftPoints={drawing.points} draftPolygonReady={drawing.points.length >= 3} draftPreviewStats={NO_STATS}
+  const panel = <GeofenceDrawingBar isCreateMode={isCreateMode} draftName={standardName} draftPoints={drawing.points} draftPolygonReady={drawing.points.length >= 3} draftPreviewStats={draftPreviewStats}
     handleUndoPoint={() => { if (!saving) drawing.undo(); }} handleRestartDraft={() => { if (!saving) drawing.setPoints([]); }} handleOpenCreateConfirm={() => { if (canSave) setConfirmOpen(true); }}
-    canSaveDraft={canSave} createState={{ isLoading: saving }} handleCancelDraft={cancel} draftInside={countLine} inline showStats={false}/>;
+    canSaveDraft={canSave} createState={{ isLoading: saving }} handleCancelDraft={cancel} draftInside={countLine} inline/>;
   const mapLayer = isCreateMode ? <DraftGeoFenceLayer draftPoints={drawing.points} color={count.over ? "#dc2626" : "#2563eb"}/> : null;
   const leftOut = progress?.leftOut || [];
   const dialogs = <>
     <GeofenceDialogs listModalOpen={false} wardLabel={ward.label} setListModalOpen={() => {}} visibleGeofences={[]} selectedGeoFence={null} setSelectedGeoFence={() => {}}
       createModalOpen={createModalOpen} setCreateModalOpen={open => { setCreateModalOpen(open); if (!open) setDialogError(""); }} draftName={draftName} setDraftName={changeName}
       draftDescription={draftDescription} setDraftDescription={setDraftDescription} handleStartDrawing={handleStartDrawing} confirmCreateModalOpen={confirmOpen}
-      setConfirmCreateModalOpen={open => { setConfirmOpen(open); if (!open) setDialogError(""); }} draftPreviewStats={NO_STATS} createState={{ isLoading: saving }}
+      setConfirmCreateModalOpen={open => { setConfirmOpen(open); if (!open) setDialogError(""); }} draftPreviewStats={draftPreviewStats} createState={{ isLoading: saving }}
       handleConfirmCreate={handleConfirmCreate} createSuccess={null} setCreateSuccess={() => {}} draftInside={countLine} completeness={null}
-      lockedWard wardNumber={ward.number} existingGeofences={wardGeofences} showCounts={false} createError={dialogError}/>
+      lockedWard wardNumber={ward.number} existingGeofences={wardGeofences} createError={dialogError}/>
     {progress && progressState ? <GeofenceProgressModal name={progress.name} wardLabel={progress.wardLabel} progress={progressState} fence={savedFence} onClose={() => setProgress(null)}
       linkedTo={`batch ${progress.tbId}`} stillLinkingText="Its ERFs and meters are still being linked. The table filters to it as soon as they are."
       next={<><strong>Next:</strong> the table now shows this geofence&apos;s {progress.salesIds.length} meter{progress.salesIds.length === 1 ? "" : "s"}, ticked. Press <strong>Create Target Batch</strong> to open TB Draft with this geofence, or create the batch later from <strong>Batches &amp; Geofences</strong>.
