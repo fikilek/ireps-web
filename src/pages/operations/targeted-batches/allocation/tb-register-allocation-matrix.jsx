@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 // Targeted Batch rules TB-R045 (1.3.51): the Allocation Matrix on TB Register. Closed when TB Register
 // opens, and nothing is read until it is opened, because the matrix reads every transaction of the
-// municipality. Hiding it unmounts the table, which ends its reads.
+// municipality. Hiding it unmounts the table; its reads end within about a minute.
 import { useState } from "react";
 
 import { AllocationIntegrityNotice, AllocationMatrixTeamSpTable } from "./allocation-matrix-table.jsx";
@@ -88,7 +88,8 @@ const styles = {
     fontWeight: 900,
     cursor: "pointer",
   },
-  body: { display: "grid", gap: 12, marginTop: 14 },
+  // One column that may be narrower than the table, so the table scrolls inside the panel.
+  body: { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, marginTop: 14 },
   warningNotice: {
     border: "1px solid #fde68a",
     background: "#fffbeb",

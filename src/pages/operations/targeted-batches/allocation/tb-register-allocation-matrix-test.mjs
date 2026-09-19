@@ -21,6 +21,7 @@ test("the section is closed when TB Register opens and reads nothing until it is
   assert.match(section, /\{open \? "Hide Allocation Matrix" : "Show Allocation Matrix"\}/);
   assert.match(section, /aria-expanded=\{open\}/);
   assert.match(section, /\{open && lmPcode \? <OpenAllocationMatrix lmPcode=\{lmPcode\} \/> : null\}/, "hiding unmounts the table, which ends its reads");
+  assert.match(section, /body: \{ display: "grid", gridTemplateColumns: "minmax\(0, 1fr\)",/, "the wide table scrolls inside the panel, never past it");
   // The reads start only inside the part that exists while the section is open.
   const opened = section.slice(section.indexOf("function OpenAllocationMatrix("), section.indexOf("export default function TbRegisterAllocationMatrix("));
   const closed = section.slice(section.indexOf("export default function TbRegisterAllocationMatrix("));
