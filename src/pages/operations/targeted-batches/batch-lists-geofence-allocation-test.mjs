@@ -66,7 +66,8 @@ test("the Batch Map button is shared, and the Batch Map returns to the list it c
 test("Sales Reporting: Geofence after Ward; Allocation (Allocated / Unallocated) then Allocated To (team), each filterable", async () => {
   const page = await read("../../sales/SalesReportingPage.jsx");
   assert.match(page, /const ALLOCATION_STATES = \["Allocated", "Unallocated"\];/);
-  inOrder(page, ['label="Ward"', 'label="Geofence"', 'label="Allocation"', 'label="Allocated To"', 'label="Acceptance"']);
+  // Acceptance became Batch Status (TB-R054, rules 1.3.59).
+  inOrder(page, ['label="Ward"', 'label="Geofence"', 'label="Allocation"', 'label="Allocated To"', 'label="Batch Status"']);
   assert.match(page, /label="Allocation"\s+sortKey="allocation"/);
   assert.match(page, /label="Allocated To"\s+sortKey="allocatedTo"/);
   assert.match(page, /includesText\(batch\?\.geofenceLabel, filters\.geofence\)/);
