@@ -361,6 +361,13 @@ export function AllocationMatrixTeamSpTable({ matrix, searchText = "", incomingM
         </table>
       </div>
       <LeftOutBatches issues={matrix.integrityIssues} />
+      {matrix.salesUnreadRows > 0 ? (
+        <div style={styles.leftOut}>
+          The Sales meters of {formatNumber(matrix.salesUnreadRows)}{" "}
+          {matrix.salesUnreadRows === 1 ? "row" : "rows"} could not be read, so{" "}
+          {matrix.salesUnreadRows === 1 ? "that row counts" : "those rows count"} by the batch row status only.
+        </div>
+      ) : null}
       {help ? <HelpWindow help={help} onClose={() => setHelpKey("")} /> : null}
     </>
   );

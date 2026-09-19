@@ -57,13 +57,14 @@ function formatNumber(value, maximumFractionDigits = 0) {
   });
 }
 
-function SummaryCard({ label, value, helper, percent = null }) {
+// Rules TB-R045 (1.3.57): while the batch rows are being counted, a card says so rather than 0.
+function SummaryCard({ label, value, helper, percent = null, pending = "" }) {
   return (
     <article style={styles.summaryCard}>
       <span style={styles.summaryLabel}>{label}</span>
-      <strong style={styles.summaryValue}>
-        {formatNumber(value, 1)}
-        {percent === null ? null : <span style={styles.summaryPercent}> · <Percent value={percent} /></span>}
+      <strong style={pending ? styles.summaryPending : styles.summaryValue}>
+        {pending || formatNumber(value, 1)}
+        {pending || percent === null ? null : <span style={styles.summaryPercent}> · <Percent value={percent} /></span>}
       </strong>
       <span style={styles.summaryHelper}>{helper}</span>
     </article>
@@ -192,6 +193,8 @@ export default function TargetedBatchAllocationMatrixPage() {
     contextStream?.sync?.error ||
     (contextQueryFailed ? contextQueryError : null);
   const contextMissing = Boolean(contextTbId && contextReady && !contextBatch);
+  // The cards show the same numbers as the table, so they wait for the same counts.
+  const cardsPending = matrix.loading ? "Counting…" : matrix.error ? "Not available" : "";
 
   return (
     <section style={styles.page}>
@@ -294,34 +297,40 @@ export default function TargetedBatchAllocationMatrixPage() {
 
       <div style={styles.summaryGrid}>
         <SummaryCard
+          pending={cardsPending}
           label="TEAMs / SPs"
           value={organisations.length}
           helper="Listed in the matrix below"
         />
         <SummaryCard
+          pending={cardsPending}
           label="Meters Assigned"
           value={totalAssigned}
           helper="All meters in batches allocated to a TEAM or SP (rejected batches left out)"
         />
         <SummaryCard
+          pending={cardsPending}
           label="Not Started"
           value={totalNotStarted}
           percent={notStartedPct}
           helper="No field work recorded yet"
         />
         <SummaryCard
+          pending={cardsPending}
           label="In Progress"
           value={totalInProgress}
           percent={inProgressPct}
           helper="Premise captured or No Access recorded; meter not yet captured"
         />
         <SummaryCard
+          pending={cardsPending}
           label="Completed"
           value={totalCompleted}
           percent={completedPct}
           helper="Meter found and captured in the field"
         />
         <SummaryCard
+          pending={cardsPending}
           label="Total Work"
           value={totalWork}
           helper={
@@ -554,6 +563,7 @@ const styles = {
     textTransform: "uppercase",
   },
   summaryValue: { color: "#0f172a", fontSize: 24 },
+  summaryPending: { color: "#64748b", fontSize: 16, fontWeight: 800 },
   summaryHelper: { color: "#64748b", fontSize: 10, lineHeight: 1.4 },
   panel: {
     padding: 16,

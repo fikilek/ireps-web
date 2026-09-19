@@ -85,3 +85,17 @@ test("the Matrix, TB Register and the Allocation Map read the row counts; the Al
   const allocate = await read("../../TargetedBatchAllocationPage.jsx");
   assert.doesNotMatch(allocate, /rowCountsByBatch/, "the Allocate page's own workload box is a separate change");
 });
+
+test("while counting, the cards say so instead of showing 0, and unread Sales meters are named", async () => {
+  const read = path => readFile(new URL(path, import.meta.url), "utf8");
+  const page = await read("../../TargetedBatchAllocationMatrixPage.jsx");
+  assert.match(page, /const cardsPending = matrix\.loading \? "Counting…" : matrix\.error \? "Not available" : "";/);
+  assert.equal((page.match(/pending=\{cardsPending\}/g) || []).length, 6, "every card waits for the counts");
+  assert.match(page, /\{pending \|\| formatNumber\(value, 1\)\}/);
+  assert.match(page, /\{pending \|\| percent === null \? null :/, "no percentage while counting");
+  const hook = await read("./use-allocation-matrix.js");
+  assert.match(hook, /const salesUnreadRows = countsState === "ready" \? Number\(rowCountsStream\?\.salesUnreadRows \|\| 0\) : 0;/);
+  const table = await read("./allocation-matrix-table.jsx");
+  assert.match(table, /\{matrix\.salesUnreadRows > 0 \? \(/);
+  assert.match(table, /could not be read, so\{" "\}/, "counted by the batch row status only");
+});

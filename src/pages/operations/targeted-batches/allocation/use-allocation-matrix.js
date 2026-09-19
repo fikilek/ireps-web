@@ -50,6 +50,8 @@ export function useAllocationMatrix(lmPcode) {
   });
   // Until every row is counted the numbers are not shown (loading), and never the running totals.
   const rowCountsByBatch = countsState === "ready" ? rowCountsStream?.countsByBatch || NO_ROW_COUNTS : NO_ROW_COUNTS;
+  // TB-R054: rows whose Sales meter could not be read are counted by the batch row only; say so.
+  const salesUnreadRows = countsState === "ready" ? Number(rowCountsStream?.salesUnreadRows || 0) : 0;
 
   const {
     data: allocationDirectory,
@@ -124,6 +126,7 @@ export function useAllocationMatrix(lmPcode) {
   return {
     lmPcode,
     actorMncServiceProviderId,
+    salesUnreadRows,
     batches,
     users,
     enrichedTeams,
