@@ -283,7 +283,9 @@ function statusTone(status = "") {
   }
 }
 
-function StatusBadge({ value }) {
+// TB-R054 (1.3.59): `note` is the work of an accepted batch. It sits inside the badge, centred under the
+// word, in the badge's own colour, so the batch reads as one thing (owner, 2026-09-19).
+function StatusBadge({ value, note = "" }) {
   const tone = statusTone(value);
 
   return (
@@ -293,9 +295,11 @@ function StatusBadge({ value }) {
         ...(tone === "success" ? styles.badgeSuccess : null),
         ...(tone === "warning" ? styles.badgeWarning : null),
         ...(tone === "danger" ? styles.badgeDanger : null),
+        ...(note ? styles.badgeWithNote : null),
       }}
     >
-      {cleanText(value).replaceAll("_", " ") || "NAv"}
+      <span>{cleanText(value).replaceAll("_", " ") || "NAv"}</span>
+      {note ? <span style={styles.badgeNote}>{note}</span> : null}
     </span>
   );
 }
@@ -1071,15 +1075,16 @@ export default function SalesReportingPage() {
                         <AllocatedToCell allocation={batch?.allocation} />
                       </td>
                       <td>
-                        <StatusBadge value={batch?.acceptance?.status} />
-                        {/* TB-R054 (1.3.59): once the team has accepted, how far its work is, under the badge. */}
-                        {normalizeUpper(batch?.acceptance?.status) === "ACCEPTED" ? (
-                          <div style={styles.batchStatusWork}>
-                            {countsState === "ready"
-                              ? batchWorkStatusLabel(batchStatusValue(batch, countsState))
-                              : countsPendingText}
-                          </div>
-                        ) : null}
+                        <StatusBadge
+                          value={batch?.acceptance?.status}
+                          note={
+                            normalizeUpper(batch?.acceptance?.status) === "ACCEPTED"
+                              ? countsState === "ready"
+                                ? batchWorkStatusLabel(batchStatusValue(batch, countsState))
+                                : countsPendingText
+                              : ""
+                          }
+                        />
                       </td>
                       <td>{countText(progress?.total)}</td>
                       <td>{countText(progress?.notStarted)}</td>
@@ -1435,9 +1440,15 @@ const styles = {
     whiteSpace: "nowrap",
   },
 
-  batchStatusWork: {
-    marginTop: "0.2rem",
-    color: "#64748b",
+  badgeWithNote: {
+    flexDirection: "column",
+    alignItems: "center",
+    textAlign: "center",
+    gap: 1,
+    lineHeight: 1.25,
+    padding: "5px 10px",
+  },
+  badgeNote: {
     fontSize: 8,
     fontWeight: 600,
   },

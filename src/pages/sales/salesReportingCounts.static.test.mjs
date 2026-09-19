@@ -49,9 +49,11 @@ test("TB-R054 (1.3.59): the column is Batch Status, with the work of an accepted
   assert.match(reporting, /filterOptions\.batchStatuses\.map/);
   assert.match(reporting, /batchStatusLabel\(status\)/);
   // The work line shows only under an ACCEPTED badge, and says what the count cells say while they wait.
-  assert.match(reporting, /normalizeUpper\(batch\?\.acceptance\?\.status\) === "ACCEPTED" \? \(/);
+  assert.match(reporting, /normalizeUpper\(batch\?\.acceptance\?\.status\) === "ACCEPTED"/);
   assert.match(reporting, /countsState === "ready"\s*\?\s*batchWorkStatusLabel\(batchStatusValue\(batch, countsState\)\)\s*:\s*countsPendingText/);
-  // The badge itself is unchanged: it still shows the batch's own acceptance word (owner, 2026-09-19).
-  assert.match(reporting, /<StatusBadge value=\{batch\?\.acceptance\?\.status\} \/>/);
+  // The badge shows the batch's own acceptance word, with the work centred inside it (owner, 2026-09-19).
+  assert.match(reporting, /<StatusBadge\s+value=\{batch\?\.acceptance\?\.status\}\s+note=\{/);
+  assert.match(reporting, /badgeNote: \{\s*fontSize: 8/);
+  assert.match(reporting, /badgeWithNote: \{\s*flexDirection: "column",\s*alignItems: "center",\s*textAlign: "center"/);
   assert.ok(!/filters\.acceptance/.test(reporting), "the old acceptance filter key is gone");
 });
