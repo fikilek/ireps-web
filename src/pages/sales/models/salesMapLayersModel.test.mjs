@@ -50,7 +50,7 @@ test("the drawing bar says why a layer count is not shown", () => {
 test("the GPS Sales map carries TB Draft's panel and layers, and the drawing shows their counts", async () => {
   const section = await readFile(new URL("../components/SalesGpsMapSection.jsx", import.meta.url), "utf8");
   assert.match(section, /const layers = useSalesMapLayers\(/);
-  assert.match(section, /\{layers\.renderOnMap\(fence\.isCreateMode\)\}/);
+  assert.match(section, /\{layers\.renderOnMap\(fence\.isCreateMode, pinPoints\)\}/, "the red pins go with it (1.3.50)");
   assert.match(section, /\{layers\.renderPanel\(fence\.isCreateMode\)\}/);
   assert.match(section, /planning: layers\.planning,/);
   const layers = await readFile(new URL("../components/sales-map-layers.jsx", import.meta.url), "utf8");

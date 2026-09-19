@@ -55,9 +55,11 @@ export function useSalesMapLayers({ lmPcode = "", wardPcode = "", wardGeofences 
   }), [lmWards]);
   const wardsLoading = Boolean(visibility.wards && (wardsFetching || !lmWards?.length));
 
-  const renderOnMap = isCreateMode => <>
+  // `meterPoints` are the map's red GPS pins ({ lat, lng }, a fixed list): an ERF number on a pin
+  // moves just below it (1.3.50).
+  const renderOnMap = (isCreateMode, meterPoints = NO_METER_POINTS) => <>
     <SalesMapViewport onChange={onViewportChange}/>
-    <GeofencePlanningLayers model={model} visibility={visibility} salesStatusVisibility={salesStatusVisibility} isCreateMode={isCreateMode} meterPoints={NO_METER_POINTS}/>
+    <GeofencePlanningLayers model={model} visibility={visibility} salesStatusVisibility={salesStatusVisibility} isCreateMode={isCreateMode} meterPoints={meterPoints}/>
     {visibility.wards ? <WardBoundaryPolygons wards={wardLayer}/> : null}
     <ExistingGeoFenceLayer geofences={visibility.geofences ? wardGeofences : NO_GEOFENCES} selectedGeoFenceId="" onSelectGeoFence={ignoreSelect} interactive={!isCreateMode} fitSelected={false}/>
   </>;

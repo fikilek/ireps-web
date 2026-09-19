@@ -13,6 +13,9 @@ const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
 const DEFAULT_MARKER_SCALE = 7;
 const HOVERED_MARKER_SCALE = 10;
 const FOCUSED_MARKER_SCALE = 11;
+// TB-R055.7 (1.3.50): the red GPS pins sit above the ERF lines and numbers (42) and below the
+// other ticked layers' icons and the points of a shape being drawn.
+const METER_MARKER_Z_INDEX = 60;
 
 function normalizeMeterId(value) {
   return String(value || "").trim();
@@ -453,7 +456,7 @@ function SalesGpsMarkers({
         map,
         title: `Meter ${point.meterNo}`,
         icon: buildMeterMarkerIcon(),
-        zIndex: 40,
+        zIndex: METER_MARKER_Z_INDEX,
       });
 
       marker.addListener("click", () => {
@@ -501,7 +504,7 @@ function SalesGpsMarkers({
         pointMeterId === normalizedHoveredMeterId;
 
       marker.setIcon(buildMeterMarkerIcon({ isHovered, isFocused }));
-      marker.setZIndex(isFocused ? 1200 : isHovered ? 1000 : 40);
+      marker.setZIndex(isFocused ? 1200 : isHovered ? 1000 : METER_MARKER_Z_INDEX);
     });
 
     clustererRef.current?.render?.();
@@ -699,6 +702,11 @@ export default function SalesGpsMapSection({
     () => getWardGpsPoints(mapRows, selectedWardNo),
     [mapRows, selectedWardNo],
   );
+  // Where a red pin sits on an ERF's centre, the ERF number moves just below it (TB-R055.7, 1.3.50).
+  const pinPoints = useMemo(
+    () => points.map((point) => ({ lat: point.latitude, lng: point.longitude })),
+    [points],
+  );
 
   const gpsMeterCount = useMemo(
     () => new Set(points.map((point) => point.meterId)).size,
@@ -862,7 +870,7 @@ export default function SalesGpsMapSection({
                 onClick={fence.handleMapClick}
                 style={{ width: "100%", height: "100%" }}
               >
-                {layers.renderOnMap(fence.isCreateMode)}
+                {layers.renderOnMap(fence.isCreateMode, pinPoints)}
                 {fence.mapLayer}
                 <SalesWardBoundaryLayer
                   wardBoundary={selectedWardBoundary}
