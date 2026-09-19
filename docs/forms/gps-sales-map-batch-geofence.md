@@ -65,7 +65,10 @@ Errors you can get after pressing Save (the server's refusals). Nothing is saved
 | "The batch LM must be your active assigned workbase" | Your active workbase is not this municipality | Switch workbase (Profile), reload, try again |
 | "Your user profile is unavailable" / "Sign in to continue" | Your sign-in or profile could not be read | Sign out, sign in, try again |
 | "The geofence must use the draft's authoritative Ward" / "Exactly one Ward is required" | The meters' ERFs are not all in this Ward | Draw around meters of one Ward only |
-| "Couldn't …" / "Targeted Batch processing failed; retained draft is unchanged" | The server could not be reached, or something unexpected failed | Try again. If it keeps happening, report it |
+| "Couldn't …" / "Targeted Batch processing failed; retained draft is unchanged" | The server could not be reached while the meters were located, or something unexpected failed | Try again. If it keeps happening, report it |
+| **Geofence not confirmed** — "iREPS could not confirm whether it was saved." | The connection dropped while the geofence was being saved; the server may have saved it | Open **Batches & Geofences**. If the geofence is there, use **Create its batch**; if not, save again |
+
+If the Sales table itself fails to load while you save (the page shows "Sales could not be loaded"), the map closes. A geofence that was saved still shows on **Batches & Geofences**.
 
 **Left out** (in the Geofence created window, not an error): a counted meter that could not be made ready, with its reason — for example "ERF 1234 is unavailable" or "COMPLETED — not batchable" (it changed after you counted). The geofence and batch go ahead without it.
 

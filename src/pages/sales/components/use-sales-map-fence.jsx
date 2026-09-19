@@ -86,7 +86,8 @@ export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = ""
   const canStart = Boolean(canDraw && lmPcode && wardPcode && !busy);
 
   const changeName = value => { setDraftName(value); setDialogError(""); };
-  const cancel = () => { drawing.clear(); setConfirmOpen(false); setDraftName(""); setDraftDescription(""); setDialogError(""); setDrawWard(null); };
+  // Not while a save runs: its result decides whether the drawing is still needed.
+  const cancel = () => { if (saving) return; drawing.clear(); setConfirmOpen(false); setDraftName(""); setDraftDescription(""); setDialogError(""); setDrawWard(null); };
   const handleStartDrawing = () => {
     if (!geofenceNamePart(draftName).trim()) { setDialogError(`Type a name after "Gf W${ward.number}".`); return; }
     const duplicate = findDuplicateGeofence(standardName, wardGeofences);
@@ -117,8 +118,14 @@ export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = ""
       if (!ready.length) throw new Error(`None of the ${counted.length} meters could be made ready for a batch. ${salesMapFenceLeftOut({ counted, savedIds: [], rows: located.rows, meters: rows }).join("; ")}`);
       const targetedBatch = { tbId, lmPcode, source: "PREPAID_SALES", geofenceId: null, salesIds: ready.map(row => row.salesId), reason: `Selected from GPS Sales Table · geofence ${name}`,
         salesPeriodFrom: null, salesPeriodTo: null, resolutionProofs: Object.fromEntries(ready.map(row => [row.salesId, row.proof])) };
-      const result = await createGeoFence({ name, description: draftDescription.trim() || "NAv", points, salesMapFence: true, targetedBatch,
-        parents: { lmPcode, wardPcode: saveWard.pcode, countryPcode: "ZA", provincePcode: lmPcode.slice(0, 3), dmPcode: lmPcode.slice(0, -1) } }).unwrap();
+      let result;
+      try {
+        result = await createGeoFence({ name, description: draftDescription.trim() || "NAv", points, salesMapFence: true, targetedBatch,
+          parents: { lmPcode, wardPcode: saveWard.pcode, countryPcode: "ZA", provincePcode: lmPcode.slice(0, 3), dmPcode: lmPcode.slice(0, -1) } }).unwrap();
+      } catch (transport) {
+        // No answer from the server: it may still have saved the geofence.
+        throw Object.assign(new Error(transport?.message || "The server did not answer."), { uncertain: true });
+      }
       if (result?.success !== true) throw new Error(result?.message || "The geofence could not be saved.");
       const savedIds = result.savedSalesIds || targetedBatch.salesIds;
       setProgress(current => current && { ...current, phase: "saved", fenceId: result.geofenceId, salesIds: savedIds,
@@ -126,7 +133,7 @@ export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = ""
       drawing.clear(); setDraftName(""); setDraftDescription(""); setDrawWard(null);
     } catch (error) {
       setProgress(null);
-      setFailure({ name, message: salesDraftMessage(error?.error || error?.message || "The geofence could not be saved. Try again.") });
+      setFailure({ name, uncertain: error?.uncertain === true, message: salesDraftMessage(error?.error || error?.message || "The geofence could not be saved. Try again.") });
     } finally { setSaving(false); }
   };
 
@@ -166,7 +173,10 @@ export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = ""
       linkedTo={`batch ${progress.tbId}`} stillLinkingText="Its ERFs and meters are still being linked. The table filters to it as soon as they are."
       next={<><strong>Next:</strong> the table now shows this geofence&apos;s {progress.salesIds.length} meter{progress.salesIds.length === 1 ? "" : "s"}, ticked. Press <strong>Create Target Batch</strong> to open TB Draft with this geofence, or create the batch later from <strong>Batches &amp; Geofences</strong>.
         {leftOut.length ? <><br/><strong>Left out ({leftOut.length}):</strong> {leftOut.join("; ")}.</> : null}</>}/> : null}
-    {failure ? <BatchCreationModal title="Geofence not saved" tone="error" lines={[`${failure.name}: ${failure.message}`, "Nothing was saved. Your drawing is still on the map: change it and press Save again, or Cancel."]}
+    {failure ? <BatchCreationModal title={failure.uncertain ? "Geofence not confirmed" : "Geofence not saved"} tone="error"
+      lines={failure.uncertain
+        ? [`${failure.name}: ${failure.message}`, "iREPS could not confirm whether it was saved. Check Batches & Geofences before you save it again; if it is there, create its batch from there."]
+        : [`${failure.name}: ${failure.message}`, "Nothing was saved. Your drawing is still on the map: change it and press Save again, or Cancel."]}
       actions={[{ label: "OK", primary: true, onClick: () => setFailure(null) }]} escapeAction={() => setFailure(null)}/> : null}
   </>;
   return { drawButton, panel, mapLayer, dialogs, handleMapClick, isCreateMode, busy };
