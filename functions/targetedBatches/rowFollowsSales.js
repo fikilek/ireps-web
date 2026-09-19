@@ -137,7 +137,7 @@ export function establishFinder(facts) {
 }
 
 // The batch's TEAM or SP (allocationCallable.js / premiseLink.js getTargetedBatchAllocation).
-export const allocationTarget = parent => ({ type: upper(parent?.allocation?.targetType || parent?.allocation?.target?.type), id: text(parent?.allocation?.targetId || parent?.allocation?.target?.id) });
+export const allocationTarget = parent => ({ type: upper(parent?.allocation?.targetType || parent?.allocation?.target?.type), id: text(parent?.allocation?.targetId || parent?.allocation?.target?.id), name: text(parent?.allocation?.targetName || parent?.allocation?.target?.name) });
 export const isOwnFind = (target, finder) => (target.type === "TEAM" ? Boolean(finder.teamId) && finder.teamId === target.id : Boolean(finder.spId) && finder.spId === target.id);
 // The batch a batch (sales-path) TRN names (field-work-summary.js isBatchTrn), else null.
 export const trnBatchId = trn => text(trn?.targetedBatchContext?.tbId) || text(trn?.derived?.targetedBatch?.tbId) || text(trn?.accessData?.tbId) || null;
@@ -326,6 +326,10 @@ export function buildRowFollowsSalesWrites(plan, facts, { ts, now, serverTime })
     statusBefore: statusOf(parent.status, parent.execution), statusAfter, rule: RULE, runId: plan.runId, rulesVersion: RULES_VERSION,
     finder: finderRecord, astId: plan.astId, trnId: plan.trnId, findAt: ts(plan.findAtMs), actor, metadata: hMeta };
   const finderText = `${finder.teamName || (finder.spId ? `service provider ${finder.spId}` : "?")} (${finder.user}) on ${day(plan.findAtMs)}`;
+  // A find matches the batch through the worker's team or their service provider. The note names the one that matched,
+  // so nobody reads the worker's other organisation as the one credited.
+  const matchedText = plan.target ? `${plan.target.name || plan.target.id} (${plan.target.type === "SP" ? "service provider" : "team"})` : "";
+  const ownFindText = `${finder.user}${finder.teamName && plan.target?.type !== "SP" ? "" : finder.teamName ? `, of team ${finder.teamName},` : ""} on ${day(plan.findAtMs)}`;
 
   if (plan.decision === DECISIONS.CLOSE) {
     const fields = closedRowFields(row, plan, ts);
@@ -343,7 +347,7 @@ export function buildRowFollowsSalesWrites(plan, facts, { ts, now, serverTime })
       { op: "update", path: parentPath, data: patch },
       { op: "create", path: `${parentPath}/history/ROW_CLOSED__${plan.rowId}`, data: { event: ROW_CLOSED_EVENT, ...common, rowBefore: plainRow(row), rowAfter: fields,
         findType: plan.findType ?? "METER_DISCOVERY", premiseKept: plan.premiseKept, foundBeforeRowStart: plan.foundBeforeRowStart ?? false, findPremiseId: plan.findPremiseId, rowErfId: plan.rowErfId, findErfId: plan.findErfId, foundOnOtherErf: plan.foundOnOtherErf, warnings: after.warnings || [],
-        note: `Meter ${plan.salesId} became Visible, found by ${finderText}, the batch's own ${plan.target?.type === "SP" ? "service provider" : "team"}; the row is closed as Completed${plan.findType === "METER_INSTALLATION" ? " (found by a Meter Installation)" : ""}${plan.foundOnOtherErf ? ", found on another ERF" : ""}${plan.foundBeforeRowStart ? `, at the row's start ${new Date(plan.completedAtMs).toISOString()} because the row was started after the find` : ""} (rules ${RULES_VERSION}, ${RULE})` } },
+        note: `Meter ${plan.salesId} became Visible, found by ${ownFindText} for ${matchedText}, which the batch is allocated to; the row is closed as Completed${plan.findType === "METER_INSTALLATION" ? " (found by a Meter Installation)" : ""}${plan.foundOnOtherErf ? ", found on another ERF" : ""}${plan.foundBeforeRowStart ? `, at the row's start ${new Date(plan.completedAtMs).toISOString()} because the row was started after the find` : ""} (rules ${RULES_VERSION}, ${RULE})` } },
     ];
   }
 

@@ -228,6 +228,19 @@ test("an installation by the batch's own team closes the row as Completed, with 
   assert.equal(buildRowFollowsSalesWrites(d, facts(), options).find(w => w.path.startsWith("tb_rows/")).data["execution.outcome"], "METER_DISCOVERED_OUTSIDE_BATCH");
 });
 
+// Rules TB-R056: a worker can be in a team and under a service provider. The history must name the one the batch
+// is allocated to, so nobody reads the worker's other organisation as the one credited (found on DEV, 19 Sep).
+test("the history names the team or service provider the batch is allocated to", () => {
+  const f = facts();
+  const note = () => buildRowFollowsSalesWrites(decideRowFollowsSales(f), f, options).find(w => w.path.includes("/history/ROW_CLOSED__")).data.note;
+  assert.match(note(), /Team One \(team\), which the batch is allocated to/);
+  // The same worker under a service provider: the service provider is named, not their team.
+  const sp = facts({ parent: { ...f.parent, allocation: { ...f.parent.allocation, targetType: "SP", targetId: "SP1", targetName: "Lefu Metering" } },
+    finderProfile: { ...f.finderProfile, employment: { ...(f.finderProfile?.employment || {}), role: "SPV", serviceProvider: { id: "SP1", name: "Lefu Metering" } } } });
+  const spNote = buildRowFollowsSalesWrites(decideRowFollowsSales(sp), sp, options).find(w => w.path.includes("/history/ROW_CLOSED__")).data.note;
+  assert.match(spNote, /Lefu Metering \(service provider\), which the batch is allocated to/);
+});
+
 test("a close is logged instead whenever anything does not fit", () => {
   const held = f => { const r = decideRowFollowsSales(f); assert.equal(r.decision, DECISIONS.LOG, JSON.stringify(r)); return r.code; };
   const base = facts();
