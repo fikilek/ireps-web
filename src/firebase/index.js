@@ -58,23 +58,22 @@ export const db = initializeFirestore(app, {
 
 // WD-R001.4: signing out, from any tab or page, deletes the saved copy and
 // returns the tab to the sign-in page. Every tab of the browser sees the
-// sign-out; the copy can only be deleted once all of them have stopped their
-// connection, so keep trying for up to 10 seconds.
-const SAVED_COPY_DELETE_TRIES = 20;
-const SAVED_COPY_DELETE_PAUSE_MS = 500;
+// sign-out and stops its connection. The browser deletes the copy only once
+// all of them have; until then it waits rather than failing, so give up
+// after 10 seconds and go to the sign-in page either way.
+export const SAVED_COPY_DELETE_LIMIT_MS = 10_000;
 let signedInUid = null;
 
-async function deleteSavedCopy() {
-  await terminate(db);
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await clearIndexedDbPersistence(db);
-      return;
-    } catch (error) {
-      if (attempt >= SAVED_COPY_DELETE_TRIES) throw error;
-      await new Promise((resolve) => setTimeout(resolve, SAVED_COPY_DELETE_PAUSE_MS));
-    }
-  }
+function deleteSavedCopy() {
+  let timer = null;
+  const timeUp = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("The saved copy was not deleted within 10 seconds.")),
+      SAVED_COPY_DELETE_LIMIT_MS,
+    );
+  });
+  const deleting = terminate(db).then(() => clearIndexedDbPersistence(db));
+  return Promise.race([deleting, timeUp]).finally(() => clearTimeout(timer));
 }
 
 onAuthStateChanged(auth, (user) => {

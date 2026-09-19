@@ -773,9 +773,10 @@ function readInitialSalesStream(scope, signal) {
       scope,
       {
         onRows: ({ rows, fromCache }) => {
-          const hasUsableInitialResult = !fromCache || rows.length > 0;
-
-          if (!hasUsableInitialResult) return;
+          // Web Data Copy rules WD-R001.3: the saved copy may hold only the Sales
+          // records other pages read (TB Draft, Batches & Geofences), so the first
+          // answer shown is the server's, never the copy's.
+          if (fromCache) return;
           finish({ data: { rows, streamError: null } });
         },
         onError: (error) => finish({ error }),

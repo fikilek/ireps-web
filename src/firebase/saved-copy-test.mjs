@@ -4,11 +4,14 @@ import { readFile } from "node:fs/promises";
 import { SourceTextModule, SyntheticModule, createContext } from "node:vm";
 
 // Web Data Copy rules WD-R001: one saved copy shared by all tabs, deleted at sign-out.
-async function fixture({ clearFailures = 0 } = {}) {
-  const state = { calls: [], errors: [], settings: null, authCallback: null, clearFailures };
+// While another tab still has the copy open, the browser's delete waits (it never
+// fails), so the fake delete either finishes or never settles.
+async function fixture({ deleteFinishes = true } = {}) {
+  const state = { calls: [], errors: [], timers: [], settings: null, authCallback: null };
   const context = createContext({
     console: { log() {}, error: (...parts) => state.errors.push(parts) },
-    setTimeout: run => Promise.resolve().then(run),
+    setTimeout: (run, ms) => { state.timers.push({ run, ms, cleared: false }); return state.timers.length; },
+    clearTimeout: id => { if (state.timers[id - 1]) state.timers[id - 1].cleared = true; },
     window: { location: { reload: () => state.calls.push("reload") } },
   });
   const mocks = {
@@ -19,12 +22,9 @@ async function fixture({ clearFailures = 0 } = {}) {
       persistentLocalCache: options => ({ kind: "persistent", ...options }),
       persistentMultipleTabManager: () => ({ kind: "multi-tab" }),
       terminate: async () => { state.calls.push("terminate"); },
-      clearIndexedDbPersistence: async () => {
+      clearIndexedDbPersistence: () => {
         state.calls.push("clear");
-        if (state.clearFailures > 0) {
-          state.clearFailures -= 1;
-          throw Object.assign(new Error("another tab is still open"), { code: "failed-precondition" });
-        }
+        return deleteFinishes ? Promise.resolve() : new Promise(() => {});
       },
     },
     "firebase/functions": { getFunctions: () => ({}) },
@@ -62,38 +62,43 @@ test("opening the sign-in page while signed out deletes nothing", async () => {
 });
 
 test("signing out deletes the saved copy, then returns to the sign-in page", async () => {
-  const { state } = await fixture();
+  const { api, state } = await fixture();
   state.authCallback({ uid: "A" });
   state.authCallback(null);
   await settle();
   assert.deepEqual(state.calls, ["terminate", "clear", "reload"]);
+  assert.equal(api.SAVED_COPY_DELETE_LIMIT_MS, 10_000);
+  assert.ok(state.timers.every(timer => timer.cleared), "the 10-second limit is cleared once the copy is deleted");
+  assert.equal(state.errors.length, 0);
   state.authCallback(null);
   await settle();
   assert.equal(state.calls.length, 3, "a second signed-out event does nothing");
 });
 
-test("while another tab is still closing, deleting is tried again", async () => {
-  const { state } = await fixture({ clearFailures: 3 });
+test("while another tab still holds the copy, the tab goes to sign-in after 10 seconds", async () => {
+  const { state } = await fixture({ deleteFinishes: false });
   state.authCallback({ uid: "A" });
   state.authCallback(null);
   await settle();
-  assert.deepEqual(state.calls, ["terminate", "clear", "clear", "clear", "clear", "reload"]);
-  assert.equal(state.errors.length, 0);
-});
-
-test("after 20 tries the failure is logged and the tab still returns to the sign-in page", async () => {
-  const { state } = await fixture({ clearFailures: 100 });
-  state.authCallback({ uid: "A" });
-  state.authCallback(null);
+  assert.deepEqual(state.calls, ["terminate", "clear"], "waiting for the other tab");
+  const limit = state.timers.find(timer => timer.ms === 10_000 && !timer.cleared);
+  assert.ok(limit, "a 10-second limit is running");
+  limit.run();
   await settle();
-  assert.equal(state.calls.filter(call => call === "clear").length, 20);
-  assert.equal(state.calls.at(-1), "reload");
-  assert.equal(state.errors.length, 1);
+  assert.deepEqual(state.calls, ["terminate", "clear", "reload"]);
+  assert.equal(state.errors.length, 1, "the failure is logged");
 });
 
-test("every first-load reader asks for the server's confirmation of a saved copy", async () => {
+test("every first-load reader shows only the server's answer", async () => {
   for (const file of ["teamsApi", "usersApi", "serviceProvidersApi", "registryWardsApi", "registryMetersApi", "trnsApi"]) {
     const source = await readFile(new URL(`../redux/${file}.js`, import.meta.url), "utf8");
-    assert.match(source, /const streamUnsubscribe = onSnapshot\(\s*\w+,\s*(?:\/\/[^\n]*\n\s*)*\{ includeMetadataChanges: true \},/, file);
+    assert.match(source, /const streamUnsubscribe = onSnapshot\(\s*\w+,\s*(?:\/\/[^\n]*\n\s*)*\{ includeMetadataChanges: true \},/, `${file} hears the server's confirmation`);
+    assert.match(source, /const fromCache = snapshot\.metadata\?\.fromCache === true;\s*(?:\/\/[^\n]*\n\s*)*if \(fromCache\) return;/, `${file} never finishes on the saved copy`);
   }
+});
+
+test("where a person is sent after sign-in is decided on the server's profile", async () => {
+  const source = await readFile(new URL("../auth/AuthProvider.jsx", import.meta.url), "utf8");
+  assert.match(source, /onSnapshot\(\s*userProfileRef,\s*(?:\/\/[^\n]*\n\s*)*\{ includeMetadataChanges: true \},/);
+  assert.match(source, /if \(!profileConfirmed && snapshot\.metadata\.fromCache\) return;\s*profileConfirmed = true;/);
 });

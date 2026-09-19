@@ -51,10 +51,18 @@ export function AuthProvider({ children }) {
         setProfileLoading(true);
 
         const userProfileRef = doc(db, "users", currentUser.uid);
+        let profileConfirmed = false;
 
         unsubscribeProfile = onSnapshot(
           userProfileRef,
+          // Web Data Copy rules WD-R001.3: where a person is sent (password change,
+          // onboarding, the console) is decided on the server's profile, never on the
+          // saved copy; later updates follow as they come.
+          { includeMetadataChanges: true },
           (snapshot) => {
+            if (!profileConfirmed && snapshot.metadata.fromCache) return;
+            profileConfirmed = true;
+
             if (!snapshot.exists()) {
               setProfile(null);
               setProfileExists(false);

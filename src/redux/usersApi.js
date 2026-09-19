@@ -151,7 +151,9 @@ function readInitialUsers(arg, signal) {
         const users = buildUserRows(snapshot);
         const fromCache = snapshot.metadata?.fromCache === true;
 
-        if (fromCache && users.length === 0) return;
+        // Web Data Copy rules WD-R001.3: the saved copy may hold only part of
+        // the list, so the first answer shown is the server's.
+        if (fromCache) return;
 
         finish({ data: users });
       },

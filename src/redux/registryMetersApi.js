@@ -157,7 +157,9 @@ function readInitialRegistryMeterRows(registryMetersQuery, signal) {
         // An empty local cache is not proof that the registry is empty.
         // Keep RTK Query in its initial loading state until Firestore
         // confirms the first snapshot from the server.
-        if (fromCache && rows.length === 0) return;
+        // Web Data Copy rules WD-R001.3: the saved copy may hold only part of
+        // the list, so the first answer shown is the server's.
+        if (fromCache) return;
 
         finish({ data: rows });
       },

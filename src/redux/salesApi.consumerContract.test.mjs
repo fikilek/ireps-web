@@ -186,32 +186,74 @@ test("the map's rows and the server's raw documents give the same count of meter
   api.setSalesReadSession(null);
 });
 
-// Web Data Copy rules WD-R001.3: with the saved copy, the server's confirmation of an
-// unchanged result is a metadata-only event; an empty saved copy is not final until then.
-test("the saved copy is confirmed by the server, even when it is empty", async () => {
+// Web Data Copy rules WD-R001.3: the saved copy is never the first answer. It may be empty,
+// or hold only the Sales records other pages read; the server's confirmation of an
+// unchanged result is a metadata-only event.
+const listed = (fromCache, ids = []) => ({ metadata: { fromCache }, docs: ids.map(id => ({ id, data: () => ({ lmPcode: "ZA5241", monthlySalesC: {}, monthlyUnits: {}, monthlyCategories: {} }) })), docChanges: () => [] });
+
+test("an empty saved copy waits for the server's confirmation", async () => {
   const { api, state, scope } = await fixture();
   let settled = false;
   const pending = api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), {}).then(result => { settled = true; return result; });
   assert.equal(state.listeners[0].options?.includeMetadataChanges, true);
-  const empty = fromCache => ({ metadata: { fromCache }, docs: [], docChanges: () => [] });
-  state.listeners[0].rows(empty(true));
+  state.listeners[0].rows(listed(true));
   await Promise.resolve();
   assert.equal(settled, false, "an empty saved copy is not the server's answer");
-  state.listeners[0].rows(empty(false));
+  state.listeners[0].rows(listed(false));
   assert.deepEqual([...(await pending).data.rows], []);
   api.setSalesReadSession(null);
 });
 
-// WD-R001.6: never an endless spinner; Try again reuses the download that is still running.
+test("a partial saved copy is never shown as the full Sales list", async () => {
+  const { api, state, scope } = await fixture();
+  let settled = false;
+  const pending = api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), {}).then(result => { settled = true; return result; });
+  state.listeners[0].rows(listed(true, ["FROM_TB_DRAFT"]));
+  await Promise.resolve();
+  assert.equal(settled, false, "the copy's 1 record is not the LM's Sales");
+  state.listeners[0].rows({ ...listed(false, ["FROM_TB_DRAFT", "SERVER_2", "SERVER_3"]), docChanges: () => ["SERVER_2", "SERVER_3"].map(id => ({ type: "added", doc: { id, data: () => ({ lmPcode: "ZA5241" }) } })) });
+  assert.deepEqual([...(await pending).data.rows.map(row => row.id)].sort(), ["FROM_TB_DRAFT", "SERVER_2", "SERVER_3"]);
+  api.setSalesReadSession(null);
+});
+
+test("after the server's confirmation, metadata-only events change nothing; real changes still arrive", async () => {
+  const { api, state, scope } = await fixture();
+  const updates = [];
+  let loaded;
+  const endpoint = api.salesApi.definitions.getSalesByLmPcode;
+  endpoint.onCacheEntryAdded(scope("ZA5241"), {
+    updateCachedData: recipe => updates.push(recipe()),
+    cacheDataLoaded: new Promise(resolve => { loaded = resolve; }),
+    cacheEntryRemoved: new Promise(() => {}),
+  });
+  const first = endpoint.queryFn(scope("ZA5241"), {});
+  state.listeners[0].rows(listed(false, ["A1"]));
+  await first;
+  loaded();
+  await new Promise(resolve => setImmediate(resolve));
+  const before = updates.length;
+  state.listeners[0].rows(listed(false, ["A1"]));
+  state.listeners[0].rows(listed(true, ["A1"]));
+  assert.equal(updates.length, before, "metadata-only events are skipped");
+  state.listeners[0].rows({ ...listed(false, ["A1"]), docChanges: () => [{ type: "added", doc: { id: "A2", data: () => ({ lmPcode: "ZA5241" }) } }] });
+  assert.equal(updates.length, before + 1);
+  assert.deepEqual([...updates.at(-1).rows.map(row => row.id)].sort(), ["A1", "A2"]);
+  api.setSalesReadSession(null);
+});
+
+// WD-R001.6: never an endless spinner. The page's cache entry keeps its own subscription,
+// which keeps the download running, so Try again picks it up.
 test("a Sales read stops waiting after 3 minutes and Try again picks up the running download", async () => {
   const pendingTimers = [];
   const timers = {
     setTimeout: (run, ms) => { pendingTimers.push({ run, ms, cleared: false }); return pendingTimers.length; },
     clearTimeout: id => { if (pendingTimers[id - 1]) pendingTimers[id - 1].cleared = true; },
   };
+  const runDue = () => { for (const timer of pendingTimers) if (!timer.cleared && !timer.ran && timer.ms !== 180_000) { timer.ran = true; timer.run(); } };
   const { api, state, scope, snapshot } = await fixture({ timers });
   const endpoint = api.salesApi.definitions.getSalesByLmPcode;
   assert.equal(api.SALES_LOAD_TIME_LIMIT_MS, 180_000);
+  endpoint.onCacheEntryAdded(scope("ZA5241"), { updateCachedData() {}, cacheDataLoaded: new Promise(() => {}), cacheEntryRemoved: new Promise(() => {}) });
   const first = endpoint.queryFn(scope("ZA5241"), {});
   const limit = pendingTimers.find(timer => timer.ms === 180_000 && !timer.cleared);
   assert.ok(limit, "a 3-minute limit is set");
@@ -219,11 +261,27 @@ test("a Sales read stops waiting after 3 minutes and Try again picks up the runn
   const timedOut = await first;
   assert.equal(timedOut.error.status, "SALES_LOAD_TIMEOUT");
   assert.match(timedOut.error.error, /did not arrive within 3 minutes.*Try again/);
-  assert.equal(state.listeners[0].stopped, false, "the download keeps going");
+  runDue();
+  assert.equal(state.listeners[0].stopped, false, "the cache entry's subscription keeps the download going");
   const retry = endpoint.queryFn(scope("ZA5241"), {});
   assert.equal(state.listeners.length, 1, "Try again does not start a second download");
   state.listeners[0].rows(snapshot("LATE", "ZA5241"));
   assert.equal((await retry).data.rows[0].id, "LATE");
   assert.ok(pendingTimers.filter(timer => timer.ms === 180_000).every(timer => timer.cleared || timer === limit), "a finished read clears its limit");
+  api.setSalesReadSession(null);
+});
+
+test("without any page holding the Sales, a timed-out download is let go", async () => {
+  const pendingTimers = [];
+  const timers = {
+    setTimeout: (run, ms) => { pendingTimers.push({ run, ms, cleared: false }); return pendingTimers.length; },
+    clearTimeout: id => { if (pendingTimers[id - 1]) pendingTimers[id - 1].cleared = true; },
+  };
+  const { api, state, scope } = await fixture({ timers });
+  const first = api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), {});
+  pendingTimers.find(timer => timer.ms === 180_000).run();
+  await first;
+  for (const timer of pendingTimers) if (!timer.cleared && timer.ms !== 180_000) timer.run();
+  assert.equal(state.listeners[0].stopped, true);
   api.setSalesReadSession(null);
 });

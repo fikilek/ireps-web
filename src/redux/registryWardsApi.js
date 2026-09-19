@@ -134,7 +134,9 @@ function readInitialRegistryWardRows(registryWardsQuery, signal) {
         const rows = buildRegistryWardRows(snapshot);
         const fromCache = snapshot.metadata?.fromCache === true;
 
-        if (fromCache && rows.length === 0) return;
+        // Web Data Copy rules WD-R001.3: the saved copy may hold only part of
+        // the list, so the first answer shown is the server's.
+        if (fromCache) return;
 
         finish({ data: rows });
       },
