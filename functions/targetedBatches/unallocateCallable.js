@@ -3,6 +3,7 @@ import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
 import { SALES_BATCH_ID, exactSalesTbRef, nonblank, validDocumentId } from "../salesAllMeters/sales-batch-policy.js";
 import { batchError, callableFailure, readBatchActor, snapshotReader } from "./sales-batch-resolution.js";
 import { assertNoLinkedExecution, assertUnexecuted } from "./execution-evidence.js";
+import { readRowsTakenOut } from "./rowFollowsSales.js";
 
 // Targeted Batch rules TB-R048 (1.3.33): Unallocate. An allocated batch on which no field work has
 // started goes back exactly to how it stood before allocation, so it can be allocated again, to anyone.
@@ -61,9 +62,11 @@ function isAlreadyUnallocated(parent, rows) {
   return parent.status === "READY_FOR_ALLOCATION" && parent.allocation?.status === "NOT_STARTED" && !parent.allocation?.targetId && rows.every(row => row.allocation?.status === "UNALLOCATED" && !row.allocation?.targetId);
 }
 
-function assertRowsAllocatedToParentTarget({ tbId, parent, snapshots }) {
+// rowsTakenOut: the rows TB-R053 or TB-R056 took out of the batch, counted from its history (rules TB-R056 option A, 1.3.52):
+// the batch's rows are then its created rows minus those.
+function assertRowsAllocatedToParentTarget({ tbId, parent, snapshots, rowsTakenOut = 0 }) {
   const expected = parent.counts?.totalRows;
-  if (snapshots.length < 1 || snapshots.length > 30 || snapshots.length !== expected || snapshots.length !== parent.creation?.createdRows || expected !== parent.creation?.expectedRows) throw batchError("BATCH_COUNT_MISMATCH", "Permanent row and parent counts do not reconcile");
+  if (snapshots.length < 1 || snapshots.length > 30 || snapshots.length !== expected || snapshots.length !== parent.creation?.createdRows - rowsTakenOut || parent.creation?.createdRows !== parent.creation?.expectedRows) throw batchError("BATCH_COUNT_MISMATCH", "Permanent row and parent counts do not reconcile");
   const slots = new Set(), meters = new Set();
   for (const snapshot of snapshots) {
     const row = snapshot.data();
@@ -140,7 +143,8 @@ export async function unallocateSalesBatch({ db, request, now = () => Timestamp.
     if (!UNALLOCATE_ACCEPTANCE_STATES.includes(parent.acceptance?.status)) throw batchError("UNALLOCATE_ACCEPTANCE_INVALID", "The batch acceptance state is not recognised");
     const authority = unallocationAuthority({ actor, parent });
     await assertTargetWithinMnc({ db, read, targetType: parent.allocation.targetType, targetId: parent.allocation.targetId, mncId: actorMncId(actor.profile) });
-    assertRowsAllocatedToParentTarget({ tbId: intent.tbId, parent, snapshots: rowsSnapshot.docs });
+    const rowsTakenOut = await readRowsTakenOut({ db, read, tbId: intent.tbId });
+    assertRowsAllocatedToParentTarget({ tbId: intent.tbId, parent, snapshots: rowsSnapshot.docs, rowsTakenOut });
     for (const row of rows) await assertNoLinkedExecution({ db, read, parent, row, action: "unallocation" });
     await assertSalesReferencesUntouched({ db, read, tbId: intent.tbId, rows });
 

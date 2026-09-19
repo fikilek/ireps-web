@@ -88,6 +88,9 @@ export { resolveSalesTargetedBatchCallable } from "./targetedBatches/sales-batch
 export { getFieldWorkSummaryCallable } from "./teams/fieldWorkSummaryCallable.js";
 export { getBatchStatsCallable } from "./targetedBatches/batchStatsCallable.js";
 export { assessSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-geofence.js";
+// Targeted Batch rules TB-R056 (1.3.52, 1.3.56): a batch row follows its Sales meter when the meter becomes VISIBLE.
+// When a batch's allocation or acceptance changes, the rule runs again for its VISIBLE meters whose rows are still open.
+export { onSalesMeterVisibleBatchRow, onTargetedBatchStateRowFollowsSales } from "./targetedBatches/rowFollowsSalesTrigger.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCallable } from "./targetedBatches/allocationCallable.js";
 import { onUnallocateTargetedBatchCallable } from "./targetedBatches/unallocateCallable.js";

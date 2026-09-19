@@ -1,4 +1,5 @@
 import { readBatchActor, snapshotReader } from "./sales-batch-resolution.js";
+import { readRowsTakenOut } from "./rowFollowsSales.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -407,7 +408,10 @@ export function requiresAtomicSalesAllocation(parent) {
   return (parent.schemaVersion === "0.3.0" && ["PREPAID_SALES", "PREPAID_SALES_NON_GPS"].includes(parent.source?.type)) || isNonGpsTargetedBatch(parent);
 }
 
-function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
+// rowsTakenOut: the rows TB-R053 or TB-R056 took out, counted from the batch's history (rules TB-R056 option A, 1.3.52):
+// its rows are then the rows as created minus those. Old Non-GPS batches count the same way, since TB-R056 takes rows out
+// of them too (rule point 2 has no exception for them).
+function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId, rowsTakenOut = 0) {
   const candidates = [
     {
       field: "counts.totalRows",
@@ -416,6 +420,7 @@ function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
     {
       field: "creation.expectedRows",
       raw: parent?.creation?.expectedRows,
+      takenOut: rowsTakenOut,
     },
   ].filter(({ raw }) => raw !== null && raw !== undefined && raw !== "");
 
@@ -427,10 +432,10 @@ function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
     );
   }
 
-  const parsed = candidates.map(({ field, raw }) => ({
+  const parsed = candidates.map(({ field, raw, takenOut = 0 }) => ({
     field,
     raw,
-    value: Number(raw),
+    value: Number(raw) - takenOut,
   }));
   const invalid = parsed.find(
     ({ value }) => !Number.isInteger(value) || value < 1 || value > 30,
@@ -453,6 +458,7 @@ function getAuthoritativeNonGpsExpectedRows(parent = {}, tbId) {
       {
         countsTotalRows: parent?.counts?.totalRows ?? null,
         creationExpectedRows: parent?.creation?.expectedRows ?? null,
+        rowsTakenOut,
       },
     );
   }
@@ -504,9 +510,12 @@ async function planNonGpsBatchAllocation({ db, request, transaction, parentRef, 
     );
   }
 
+  // Every Sales batch allocated here (0.3.0, and every Non-GPS batch, old ones too): TB-R056 takes rows out of any batch.
+  const rowsTakenOut = await readRowsTakenOut({ db, read: (ref) => transaction.get(ref), tbId });
   const expectedRows = getAuthoritativeNonGpsExpectedRows(
     liveParent,
     tbId,
+    rowsTakenOut,
   );
 
   if (liveRowSnapshots.length !== expectedRows) {
@@ -534,7 +543,7 @@ async function planNonGpsBatchAllocation({ db, request, transaction, parentRef, 
 
   if (liveParent.schemaVersion === "0.3.0") {
     const slots = new Set(), meters = new Set();
-    if (liveParent.execution?.status !== "NOT_STARTED" || !["NOT_STARTED", "ALLOCATED"].includes(liveParent.allocation?.status) || liveParent.creation?.createdRows !== expectedRows) throw controlledError("CANONICAL_ALLOCATION_STATE_INVALID", "Canonical parent lifecycle and counts are incomplete");
+    if (liveParent.execution?.status !== "NOT_STARTED" || !["NOT_STARTED", "ALLOCATED"].includes(liveParent.allocation?.status) || liveParent.creation?.createdRows - rowsTakenOut !== expectedRows) throw controlledError("CANONICAL_ALLOCATION_STATE_INVALID", "Canonical parent lifecycle and counts are incomplete");
     for (const snapshot of liveRowSnapshots) {
       const row = snapshot.data();
       if (row.schemaVersion !== "0.3.0" || row.id !== snapshot.id || row.tbId !== tbId || !Number.isInteger(row.rowNo) || row.rowNo < 1 || slots.has(row.rowNo) || !row.salesAllMeterId || meters.has(row.salesAllMeterId) || row.decision?.status !== "ACCEPT" || row.allocation?.allocatable !== true || !["UNALLOCATED", "ALLOCATED"].includes(row.allocation?.status) || row.execution?.status !== "NOT_STARTED") throw controlledError("CANONICAL_ALLOCATION_STATE_INVALID", "Canonical row identity, decision, allocation or execution is incomplete");
