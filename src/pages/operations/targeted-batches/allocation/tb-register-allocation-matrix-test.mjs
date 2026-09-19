@@ -12,6 +12,7 @@ test("the Show Allocation Matrix button sits between Allocation Map and Clear ti
   const clear = register.indexOf("Clear ticks\n") >= 0 ? register.indexOf("Clear ticks\n") : register.indexOf("Clear ticks\r\n");
   assert.ok(map > 0 && button > map && clear > button, "Allocation Map, then the button, then Clear ticks");
   assert.match(register, /aria-expanded=\{isAllocationMatrixOpen\}/);
+  assert.match(register, /disabled=\{!activeLmPcode \|\| isRegisterLoading\}/, "not while the register (and so the place the matrix opens) is still loading");
   assert.match(register, /onClick=\{\(\) => setIsAllocationMatrixOpen\(\(current\) => !current\)\}/);
   assert.match(register, /\.\.\.\(isAllocationMatrixOpen \? styles\.secondaryLinkButton : styles\.primaryButton\),/, "blue while closed");
 });

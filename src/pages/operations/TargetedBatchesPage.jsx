@@ -1011,10 +1011,11 @@ export default function TargetedBatchesPage() {
             type="button"
             style={{
               ...(isAllocationMatrixOpen ? styles.secondaryLinkButton : styles.primaryButton),
-              ...(!activeLmPcode ? styles.disabledButton : null),
+              ...(!activeLmPcode || isRegisterLoading ? styles.disabledButton : null),
             }}
             aria-expanded={isAllocationMatrixOpen}
-            disabled={!activeLmPcode}
+            // The matrix shows under the summary cards, which appear once the register has loaded.
+            disabled={!activeLmPcode || isRegisterLoading}
             onClick={() => setIsAllocationMatrixOpen((current) => !current)}
           >
             {isAllocationMatrixOpen ? "Hide Allocation Matrix" : "Show Allocation Matrix"}
