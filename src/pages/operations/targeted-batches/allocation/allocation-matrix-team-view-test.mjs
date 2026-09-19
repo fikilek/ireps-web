@@ -72,9 +72,14 @@ test("every '?' explains the column with each TEAM's own numbers and the project
   assert.equal(matrixColumnHelp("unknown", { organisations }), null);
 });
 
+// The TEAM / SP table and its numbers are shared by the Allocation Matrix page and TB Register (1.3.51).
+const source = path => readFile(new URL(path, import.meta.url), "utf8");
+const matrixSources = async () => ({ page: await source("../../TargetedBatchAllocationMatrixPage.jsx"), table: await source("./allocation-matrix-table.jsx"), numbers: await source("./use-allocation-matrix.js") });
+
 test("the page shows the new columns with a '?' on every heading, and the removed ones are gone", async () => {
-  const page = await readFile(new URL("../../TargetedBatchAllocationMatrixPage.jsx", import.meta.url), "utf8");
-  const headings = [...page.matchAll(/<Th help="([a-zA-Z]+)" onHelp=\{setHelpKey\}(?: divider)?>([^<]+)<\/Th>/g)].map(match => [match[1], match[2]]);
+  const { page: pageOnly, table, numbers } = await matrixSources();
+  const page = [pageOnly, table, numbers].join("\n");
+  const headings = [...table.matchAll(/<Th help="([a-zA-Z]+)" onHelp=\{setHelpKey\}(?: divider)?>([^<]+)<\/Th>/g)].map(match => [match[1], match[2]]);
   assert.deepEqual(headings, [["type", "Type"], ["name", "TEAM / SP"], ["batches", "Batches"], ["assigned", "Meters Assigned"], ["notStarted", "Not Started"], ["inProgress", "In Progress"],
     ["completed", "Completed"], ["batchesShare", "Batches Share"], ["projectedAssigned", "Projected Assigned"], ["projectedBatchesShare", "Projected Batches Share"],
     ["transactions", "Transactions"], ["noAccess", "No Access"], ["transactionsShare", "Transactions Share"], ["totalWork", "Total Work"], ["totalWorkShare", "Total Work Share"]]);
@@ -82,14 +87,14 @@ test("the page shows the new columns with a '?' on every heading, and the remove
   for (const band of ["Batches (sales path)", "Outside batches (normal path)", "Total Work"]) assert.match(page, new RegExp(`>${band.replace(/[()]/g, "\\$&")}</th>`), band);
   assert.match(page, /<Th help="transactions" onHelp=\{setHelpKey\} divider>/, "a divider starts each group");
   assert.match(page, /<Th help="totalWork" onHelp=\{setHelpKey\} divider>/);
-  assert.match(page, /useGetFieldWorkSummaryByLmQuery\(\s*matrixLmPcode \? \{ lmPcode: matrixLmPcode \} : skipToken,\s*\)/, "the totals come from the server, never the field work records");
+  assert.match(numbers, /useGetFieldWorkSummaryByLmQuery\(lmPcode \? \{ lmPcode \} : skipToken\)/, "the totals come from the server, never the field work records");
   for (const removed of [">Progress</Th>", "Eligibility", "Active Open", "Rejected / Unresolved", "Eligible Type Avg", "Vs Type Avg", "Integrity</Th>", "Two truths are kept separate", "Historically Assigned",
     "Project Share", "Meters Discovered", "Other Work", "All Work<"]) assert.doesNotMatch(page, new RegExp(removed.replace("/", "\\/")), removed);
   assert.match(page, /<CountPercent count=\{matrix\.notStarted\} percent=\{matrix\.notStartedPct\} \/>/);
   assert.match(page, /setTimeout\(onOpen, HELP_HOVER_DELAY_MS\)/, "resting the pointer opens the window");
   assert.match(page, /if \(event\.key === "Escape"\) onClose\(\);/);
   assert.match(page, /Allocation integrity warning/, "the warning about inconsistent batches stays");
-  for (const card of ["TEAMs / SPs", "Meters Assigned", "Not Started", "In Progress", "Completed", "Total Work"]) assert.match(page, new RegExp(`label="${card.replace("/", "\\/")}"`));
+  for (const card of ["TEAMs / SPs", "Meters Assigned", "Not Started", "In Progress", "Completed", "Total Work"]) assert.match(pageOnly, new RegExp(`label="${card.replace("/", "\\/")}"`));
 });
 
 // Rules TB-R045 (1.3.26) and Teams rules TM-R001: work outside batches.
@@ -158,7 +163,7 @@ test("the totals row adds up the rows shown; with every row shown the shares are
 });
 
 test("the page shows the totals row under the table, with no totals for the allocation preview", async () => {
-  const page = await readFile(new URL("../../TargetedBatchAllocationMatrixPage.jsx", import.meta.url), "utf8");
+  const { table: page } = await matrixSources();
   assert.match(page, /const totals = matrixTotals\(visibleOrganisations, matrixRows\);/, "the rows shown, as parts of all rows");
   const foot = page.slice(page.indexOf("<tfoot>"), page.indexOf("</tfoot>"));
   assert.match(foot, /<span>Total<\/span>/);

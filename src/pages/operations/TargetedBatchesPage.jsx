@@ -22,6 +22,7 @@ import {
   TARGETED_BATCH_UPLOAD_REGISTER_STATUSES,
 } from "../../redux/targetedBatchDraftModel";
 import { useAllocationMapSelection } from "./targeted-batches/allocation/allocationMapSelection";
+import TbRegisterAllocationMatrix from "./targeted-batches/allocation/tb-register-allocation-matrix.jsx";
 import TargetedBatchUploadModal from "./targeted-batches/TargetedBatchUploadModal";
 import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModal";
 import TargetedBatchUnallocateModal from "./targeted-batches/TargetedBatchUnallocateModal";
@@ -1056,6 +1057,9 @@ export default function TargetedBatchesPage() {
         <SummaryCard label="Allocated" value={summary.allocated} />
         <SummaryCard label="Needs Attention" value={summary.needsAttention} />
       </div>
+
+      {/* Rules TB-R045 (1.3.51): the Allocation Matrix, closed until opened. */}
+      <TbRegisterAllocationMatrix lmPcode={activeLmPcode} />
 
       <div style={styles.panel}>
         <div style={styles.panelHeader}>
