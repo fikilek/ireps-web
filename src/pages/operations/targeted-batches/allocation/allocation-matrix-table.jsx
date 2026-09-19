@@ -131,8 +131,8 @@ function LeftOutBatches({ issues }) {
       </button>
       {showList ? (
         <ul style={styles.leftOutList}>
-          {issues.map((issue) => (
-            <li key={issue.batchId}>
+          {issues.map((issue, index) => (
+            <li key={`${issue.batchId}:${index}`}>
               {issue.batchId}{issue.target?.name ? ` (${issue.target.name})` : ""}: {matrixLeftOutReasons(issue)}
             </li>
           ))}

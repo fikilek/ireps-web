@@ -55,7 +55,7 @@ export function matrixColumnHelp(key, { organisations = [], allOrganisations = o
     case "batches": return {
       title: "Batches",
       paragraphs: ["How many batches have been allocated to this TEAM / SP since the project started, whatever state they are in.",
-        "Batches this TEAM / SP rejected are left out of every number in this table, because they are not its work. A batch whose records do not add up is left out too and listed in the warning at the top of the page."],
+        "Batches this TEAM / SP rejected are left out of every number in this table, because they are not its work. A batch whose records do not add up is left out too; the line under the table says how many, and Show which names them."],
       rows: rows(matrix => `${batchesLabel(matrix.batches)}${matrix.rejectedBatches ? ` · ${count(matrix.rejectedBatches)} rejected, left out` : ""}`),
       total: `Project: ${batchesLabel(totals.batches)}${totals.rejectedBatches ? ` · ${count(totals.rejectedBatches)} rejected, left out` : ""}`,
     };

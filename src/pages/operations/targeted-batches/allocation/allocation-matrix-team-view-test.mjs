@@ -97,6 +97,7 @@ test("the page shows the new columns with a '?' on every heading, and the remove
   assert.doesNotMatch(page, /Allocation integrity warning|AllocationIntegrityNotice|quarantined/);
   assert.match(table, /<\/table>\s*<\/div>\s*<LeftOutBatches issues=\{matrix\.integrityIssues\} \/>/, "under the table");
   assert.match(table, /\{showList \? "Hide" : "Show which"\}/);
+  assert.match(matrixColumnHelp("batches", { organisations: [] }).paragraphs.join(" "), /the line under the table says how many, and Show which names them/, "the ? window points to the line, not the old box");
   for (const card of ["TEAMs / SPs", "Meters Assigned", "Not Started", "In Progress", "Completed", "Total Work"]) assert.match(pageOnly, new RegExp(`label="${card.replace("/", "\\/")}"`));
 });
 
