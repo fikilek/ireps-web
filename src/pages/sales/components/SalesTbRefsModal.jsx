@@ -9,7 +9,7 @@ import { useGetPermanentSalesBatchesQuery } from "../../../redux/salesTargetedBa
 import { useBatchGeofence } from "./use-batch-geofence.js";
 import { NO_GEOFENCE_LABEL } from "../../operations/targeted-batches/batch-geofence-label.js";
 
-import { acceptanceText, allocationText, batchTypeText, workStatusText } from "./sales-tb-refs-model.js";
+import { acceptanceText, allocationText, batchTypeText, upper, workStatusText } from "./sales-tb-refs-model.js";
 
 // The batch behind one reference: read live, so the window always shows how the batch stands now.
 function BatchSummary({ lmPcode, tbId, salesId }) {
@@ -30,8 +30,11 @@ function BatchSummary({ lmPcode, tbId, salesId }) {
     ["Ward", batch.scope?.wardName || (batch.scope?.wardNumber ? `Ward ${batch.scope.wardNumber}` : "NAv")],
     ["Allocated to", allocationText(batch)],
     ["Acceptance", acceptanceText(batch.acceptance?.status)],
-    ["Batch status", workStatusText(batch.execution?.status || batch.status)],
-    ["Meters in the batch", data?.ready ? String(rows.length) : "Counting…"],
+    // The owner read "Batch status: In Progress" as this meter's status (DEV, 19 Sep). The label and the
+    // count now say plainly that it is the whole batch, not the meter.
+    ["Status of the whole batch", data?.ready
+      ? `${workStatusText(batch.execution?.status || batch.status)} · ${rows.filter(item => upper(item?.execution?.status) === "COMPLETED").length} of ${rows.length} meters completed`
+      : "Counting…"],
   ];
   const meterDetails = meterRow ? [
     ["Row number", meterRow.rowNo ? `Row ${meterRow.rowNo}` : asText(meterRow.id)],
