@@ -18,6 +18,7 @@ import BatchMapLink from "../../components/batch-map-link.jsx";
 import {
   BATCH_STATUS_VALUES,
   batchStatusLabel,
+  batchStatusOrder,
   batchStatusValue,
   batchWorkStatusLabel,
   getReportingCountsState,
@@ -252,12 +253,7 @@ function getSortValue(batch, key) {
   if (key === "allocation") return getAllocationState(batch);
   if (key === "allocatedTo") return getAllocatedToLabel(batch);
   // TB-R054 (1.3.59): sorted in the order a batch moves through: not ready, waiting, accepted (by its work), rejected.
-  if (key === "batchStatus") {
-    const value = batchStatusValue(batch, progress ? "ready" : "counting");
-    const order = [...BATCH_STATUS_VALUES];
-    const index = order.indexOf(value);
-    return index < 0 ? order.length : index;
-  }
+  if (key === "batchStatus") return batchStatusOrder(batchStatusValue(batch));
   if (key === "totalRows") return Number(progress?.total || 0);
   if (key === "notStarted") return Number(progress?.notStarted || 0);
   if (key === "inProgress") return Number(progress?.inProgress || 0);
@@ -548,6 +544,11 @@ export default function SalesReportingPage() {
         batches.map((batch) => cleanText(batch?.scope?.wardLabel) || "NAv"),
       ),
       allocatedTo: unique(batches.map((batch) => getAllocatedToLabel(batch))),
+      // The six of TB-R054 (1.3.59), plus any other word a batch actually carries, so nothing is hidden.
+      batchStatuses: unique([
+        ...BATCH_STATUS_VALUES,
+        ...batches.map((batch) => batchStatusValue(batch)),
+      ]),
 
     }),
     [batches],
@@ -896,7 +897,7 @@ export default function SalesReportingPage() {
                     onChange={(value) => updateFilter("batchStatus", value)}
                   >
                     <option value={ALL_FILTER}>All</option>
-                    {BATCH_STATUS_VALUES.map((status) => (
+                    {filterOptions.batchStatuses.map((status) => (
                       <option key={status} value={status}>
                         {batchStatusLabel(status)}
                       </option>
@@ -1074,7 +1075,9 @@ export default function SalesReportingPage() {
                         {/* TB-R054 (1.3.59): once the team has accepted, how far its work is, under the badge. */}
                         {normalizeUpper(batch?.acceptance?.status) === "ACCEPTED" ? (
                           <div style={styles.batchStatusWork}>
-                            {batchWorkStatusLabel(batchStatusValue(batch, progress ? countsState : "counting"))}
+                            {countsState === "ready"
+                              ? batchWorkStatusLabel(batchStatusValue(batch, countsState))
+                              : countsPendingText}
                           </div>
                         ) : null}
                       </td>
@@ -1435,8 +1438,8 @@ const styles = {
   batchStatusWork: {
     marginTop: "0.2rem",
     color: "#64748b",
-    fontSize: "0.72rem",
-    fontWeight: 700,
+    fontSize: 8,
+    fontWeight: 600,
   },
   badge: {
     display: "inline-flex",

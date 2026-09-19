@@ -23,3 +23,14 @@ export function allocationText(batch) {
   return [name || "Name missing", kind ? `(${kind})` : ""].filter(Boolean).join(" ");
 }
 
+// The batch's rows as Sales Reporting counts them (TB-R054), so the window and the table agree.
+export function rowProgress(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  const statusOf = row => upper(row?.execution?.status) || "NOT_STARTED";
+  return {
+    total: list.length,
+    completed: list.filter(row => statusOf(row) === "COMPLETED").length,
+    inProgress: list.filter(row => statusOf(row) === "IN_PROGRESS").length,
+    notStarted: list.filter(row => statusOf(row) === "NOT_STARTED").length,
+  };
+}

@@ -101,13 +101,25 @@ export function batchWorkStatus(progress = {}) {
 // accepted batch has no work status yet, so it stays "ACCEPTED" and the column says "Counting…".
 export function batchStatusValue(batch, countsState = "ready") {
   const acceptance = String(batch?.acceptance?.status ?? "").trim().toUpperCase() || "NOT_READY";
-  if (acceptance !== "ACCEPTED") return BATCH_STATUS_VALUES.includes(acceptance) ? acceptance : "NOT_READY";
+  // A word we do not know (an older batch, or one whose acceptance cannot be read) keeps its own word, so the
+  // badge, the filter and the sort all show the same thing and nothing hides under "Not ready".
+  if (acceptance !== "ACCEPTED") return acceptance;
   if (countsState !== "ready" || !batch?.progress) return "ACCEPTED";
   return `ACCEPTED_${batchWorkStatus(batch.progress)}`;
 }
 
 export function batchStatusLabel(value) {
-  return BATCH_STATUS_LABELS[value] || (value === "ACCEPTED" ? "Accepted · Counting…" : "NAv");
+  if (BATCH_STATUS_LABELS[value]) return BATCH_STATUS_LABELS[value];
+  if (value === "ACCEPTED") return "Accepted · Counting…";
+  return String(value ?? "").trim().replaceAll("_", " ") || "NAv";
+}
+
+// The order the column sorts in: a batch moves down the list. One still being counted, or carrying a word we do
+// not know, sits with the accepted ones rather than after Rejected.
+export function batchStatusOrder(value) {
+  const index = BATCH_STATUS_VALUES.indexOf(value);
+  if (index >= 0) return index;
+  return value === "ACCEPTED" ? BATCH_STATUS_VALUES.indexOf("ACCEPTED_NOT_STARTED") : BATCH_STATUS_VALUES.length;
 }
 
 // The three accepted values need the row counts, so a filter on them waits like a count filter (TB-R054).

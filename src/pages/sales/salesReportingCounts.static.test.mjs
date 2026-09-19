@@ -31,7 +31,7 @@ test("the cards follow the table filters and read Sales Rows = Not Started + In 
 test("no old number while counting, and count filters wait for the counts", () => {
   assert.match(reporting, /countsState === "error" \? "Not available" : "Counting…"/);
   assert.match(reporting, /<td>\{countText\(progress\?\.notStarted\)\}<\/td>/);
-  assert.match(reporting, /const listPending = countsState !== "ready" && hasCountFilter\(filters\)/);
+  assert.match(reporting, /const listPending = countsState !== "ready" && hasCountsDependentFilter\(filters\)/);
   assert.equal(reporting.match(/!listPending && totalRows > 0/g)?.length, 2);
   assert.match(reporting, /!listPending &&\s+paginatedBatches\.map/);
 });
@@ -42,4 +42,16 @@ test("Open Report shows and filters each row by its one status, after the Sales 
   assert.match(report, /value=\{statusPending \? "Counting…" : row\.workStatus\}\s+\/>/);
   assert.match(report, /const statusPending = !TERMINAL_STREAM_STATES\.has\(sourceStatuses\.sales\)/);
   assert.doesNotMatch(report, /value=\{row\.execution\.status\}/);
+});
+
+test("TB-R054 (1.3.59): the column is Batch Status, with the work of an accepted batch under the badge", () => {
+  assert.match(reporting, /label="Batch Status"\s+sortKey="batchStatus"/);
+  assert.match(reporting, /filterOptions\.batchStatuses\.map/);
+  assert.match(reporting, /batchStatusLabel\(status\)/);
+  // The work line shows only under an ACCEPTED badge, and says what the count cells say while they wait.
+  assert.match(reporting, /normalizeUpper\(batch\?\.acceptance\?\.status\) === "ACCEPTED" \? \(/);
+  assert.match(reporting, /countsState === "ready"\s*\?\s*batchWorkStatusLabel\(batchStatusValue\(batch, countsState\)\)\s*:\s*countsPendingText/);
+  // The badge itself is unchanged: it still shows the batch's own acceptance word (owner, 2026-09-19).
+  assert.match(reporting, /<StatusBadge value=\{batch\?\.acceptance\?\.status\} \/>/);
+  assert.ok(!/filters\.acceptance/.test(reporting), "the old acceptance filter key is gone");
 });

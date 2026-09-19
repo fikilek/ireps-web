@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { ACCEPTANCE_TEXT, acceptanceText, allocationText, batchTypeText, workStatusText } from "./sales-tb-refs-model.js";
+import { ACCEPTANCE_TEXT, acceptanceText, allocationText, batchTypeText, rowProgress, workStatusText } from "./sales-tb-refs-model.js";
 
 test("the batch type is named as TB Register names it", () => {
   assert.equal(batchTypeText({ source: { type: "PREPAID_SALES" } }), "GPS");
@@ -29,6 +29,12 @@ test("only the three statuses are used", () => {
   assert.equal(acceptanceText(null), "NAv");
 });
 
+test("the whole batch's word comes from its rows", () => {
+  const rows = [{ execution: { status: "COMPLETED" } }, { execution: { status: "NOT_STARTED" } }, { execution: {} }];
+  assert.deepEqual(rowProgress(rows), { total: 3, completed: 1, inProgress: 0, notStarted: 2 });
+  assert.deepEqual(rowProgress([]), { total: 0, completed: 0, inProgress: 0, notStarted: 0 });
+});
+
 test("the window asks for the batch, its geofence and this meter's row, and says so in plain words", () => {
   const modal = fs.readFileSync(new URL("./SalesTbRefsModal.jsx", import.meta.url), "utf8");
   for (const needle of [
@@ -41,7 +47,7 @@ test("the window asks for the batch, its geofence and this meter's row, and says
     '["Allocated to",',
     '["Acceptance",',
     '["Status of the whole batch",',
-    'meters completed`',
+    'batchWorkStatus(rowProgress(rows))',
     "This meter in the batch",
     "Open the batch's rows",
     "The batch this meter is in now",
