@@ -110,6 +110,7 @@ export function parentAfter(before, states, fallback) {
 // The worker who captured the meter's field record: the AST meter_master links, whose TRN has the same ID. Their team is
 // the one they belonged to on the find date (TM-R001); their service provider comes from their profile.
 export const profileSpId = profile => text(profile?.profile?.employment?.serviceProvider?.id || profile?.employment?.serviceProvider?.id || profile?.serviceProvider?.id) || null;
+export const profileSpName = profile => text(profile?.profile?.employment?.serviceProvider?.name || profile?.employment?.serviceProvider?.name || profile?.serviceProvider?.name) || null;
 export const profileRole = profile => text(profile?.employment?.role || profile?.profile?.employment?.role || profile?.role) || null;
 export const profileName = profile => text(profile?.profile?.displayName || profile?.displayName || profile?.name || profile?.profile?.personal?.fullName) || null;
 // facts: meterMaster, ast, trn, finderProfile, memberHistory. Returns { ok, reason?, finder? }.
@@ -133,7 +134,7 @@ export function establishFinder(facts) {
   const role = profileRole(profile);
   // The history names the finder (Sales schema TB6: actor uid, user and role are required).
   if (!user || !role) return { ok: false, reason: "FINDER_PROFILE_INCOMPLETE", astId, trnId, uid, findAtMs };
-  return { ok: true, finder: { uid, user, role, teamId: period?.teamId ?? null, teamName: period ? period.teamName ?? period.teamId : null, spId }, astId, trnId, findAtMs };
+  return { ok: true, finder: { uid, user, role, teamId: period?.teamId ?? null, teamName: period ? period.teamName ?? period.teamId : null, spId, spName: profileSpName(profile) }, astId, trnId, findAtMs };
 }
 
 // The batch's TEAM or SP (allocationCallable.js / premiseLink.js getTargetedBatchAllocation).
@@ -325,7 +326,8 @@ export function buildRowFollowsSalesWrites(plan, facts, { ts, now, serverTime })
   const common = { tbId: plan.tbId, rowId: plan.rowId, rowNo: plan.rowNo, salesId: plan.salesId, countsBefore: storedCounts(parent), countsAfter: after.counts,
     statusBefore: statusOf(parent.status, parent.execution), statusAfter, rule: RULE, runId: plan.runId, rulesVersion: RULES_VERSION,
     finder: finderRecord, astId: plan.astId, trnId: plan.trnId, findAt: ts(plan.findAtMs), actor, metadata: hMeta };
-  const finderText = `${finder.teamName || (finder.spId ? `service provider ${finder.spId}` : "?")} (${finder.user}) on ${day(plan.findAtMs)}`;
+  const finderOrg = finder.teamName || (finder.spName ? `service provider ${finder.spName}` : finder.spId ? "their service provider" : "no team");
+  const finderText = `${finderOrg} (${finder.user}) on ${day(plan.findAtMs)}`;
   // A find matches the batch through the worker's team or their service provider. The note names the one that matched,
   // so nobody reads the worker's other organisation as the one credited.
   const matchedText = plan.target ? `${plan.target.name || plan.target.id} (${plan.target.type === "SP" ? "service provider" : "team"})` : "";

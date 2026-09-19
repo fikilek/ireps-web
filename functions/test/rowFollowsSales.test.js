@@ -239,6 +239,11 @@ test("the history names the team or service provider the batch is allocated to",
     finderProfile: { ...f.finderProfile, employment: { ...(f.finderProfile?.employment || {}), role: "SPV", serviceProvider: { id: "SP1", name: "Lefu Metering" } } } });
   const spNote = buildRowFollowsSalesWrites(decideRowFollowsSales(sp), sp, options).find(w => w.path.includes("/history/ROW_CLOSED__")).data.note;
   assert.match(spNote, /Lefu Metering \(service provider\), which the batch is allocated to/);
+  // A removal names the finder's own organisation in words, never a database id (found on DEV, 19 Sep).
+  const other = facts({ finderProfile: { ...f.finderProfile, employment: { role: "FWR", serviceProvider: { id: "SP9", name: "Cat Matlala Meters 24" } } }, memberHistory: [] });
+  const removal = buildRowFollowsSalesWrites(decideRowFollowsSales(other), other, options).find(w => w.path.includes("/history/ROW_REMOVED__")).data;
+  assert.match(removal.note, /service provider Cat Matlala Meters 24 \(/);
+  assert.ok(!/SP9/.test(removal.note), "no database id in the note");
 });
 
 test("a close is logged instead whenever anything does not fit", () => {
