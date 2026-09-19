@@ -30,7 +30,7 @@ test("the download keeps the full geofence list", async () => {
 async function wardFilter() {
   const table = await read("./SalesMetersTable.jsx");
   const source = ["normalizeWardNumber", "rowHasNoWardValue", "rowMatchesWardFilter"]
-    .map(name => table.match(new RegExp(`function ${name}\\([^]*?\\n}\\n`))[0]).join("\n");
+    .map(name => table.match(new RegExp(`function ${name}\\([^]*?\\r?\\n}\\r?\\n`))[0]).join("\n");
   return new Function(`const WARD_FILTER_NAV = "__NAV__";\n${source}\nreturn rowMatchesWardFilter;`)();
 }
 
