@@ -21,8 +21,10 @@ test("only ticked layers load, also while a geofence is being drawn", async () =
 
 test("a loaded layer stays loaded, Sales and Assets share one ERF read, and no-change updates are not worked through", async () => {
   const api = await read("../../../../redux/salesTargetedBatchApi.js");
-  const layerEndpoint = api.slice(api.indexOf("getSalesBatchNearbyLayer: builder.query({"), api.indexOf("getSalesBatchDraftSnapshot: builder.query({"));
-  assert.match(layerEndpoint, /keepUnusedDataFor: 600,/, "10 minutes after it is switched off");
+  // The endpoint's code is shared with the GPS Sales map (TB-R055.7); TB Draft keeps an area 10 minutes.
+  const layerEndpoint = api.slice(api.indexOf("function nearbyLayerEndpoint(keepUnusedDataFor) {"), api.indexOf("export const salesTargetedBatchApi = createApi({"));
+  assert.ok(layerEndpoint.length > 1000, "the shared endpoint code is found");
+  assert.match(api, /getSalesBatchNearbyLayer: builder\.query\(nearbyLayerEndpoint\(600\)\)/, "10 minutes after it is switched off");
   assert.match(layerEndpoint, /await readNearbyErfsOnce\(scope, \(\) => getDocs\(read\(nearbyQuerySpec\("erfs", scope\)\)\)\)/);
   assert.match(api, /function readNearbyErfsOnce\(scope, readErfs\) \{/);
   assert.match(layerEndpoint, /const rowsChanged = !previous \|\| previous\.error \|\| typeof snapshot\.docChanges !== "function" \|\| snapshot\.docChanges\(\)\.length > 0;/);

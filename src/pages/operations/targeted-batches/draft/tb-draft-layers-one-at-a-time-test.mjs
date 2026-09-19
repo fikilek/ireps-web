@@ -19,7 +19,8 @@ test("loaded layers do not restart while TB Draft briefly waits for draft data",
   assert.match(workspace, /useGetGeoFencesByWardQuery\(\{ lmPcode, wardPcode \}, \{ skip: !lmPcode \|\| !wardPcode \}\)/);
   assert.match(workspace, /disabled=\{!layersReady\}/);
   const api = await read("../../../../redux/salesTargetedBatchApi.js");
-  assert.match(api, /getSalesBatchNearbyLayer: builder\.query\(\{/);
+  // The endpoint's code is shared with the GPS Sales map (TB-R055.7): nearbyLayerEndpoint.
+  assert.match(api, /getSalesBatchNearbyLayer: builder\.query\(nearbyLayerEndpoint\(600\)\)/);
   assert.match(api, /const wardSnapshot = await getDoc\(doc\(db, "wards", args\.wardPcode\)\);/, "the layer reads its Ward itself");
   assert.doesNotMatch(api, /getSalesBatchNearby: builder\.query/);
 });

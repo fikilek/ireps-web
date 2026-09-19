@@ -16,10 +16,32 @@ export function salesMapLayerArea({ south, west, north, east, zoom } = {}) {
   return { minLat: snap(south, Math.floor), maxLat: snap(north, Math.ceil), minLng: snap(west, Math.floor), maxLng: snap(east, Math.ceil) };
 }
 
-// Inside the shape, for the ticked layers that are loaded; "—" for any other (as TB Draft, 18.7).
-export function salesMapLayerDrawStats({ draftPoints = [], model = {}, visibility = {}, zoomedOut = false } = {}) {
+// The whole shape lies inside the loaded area (the area on screen, widened to the grid).
+export function shapeInsideArea(draftPoints = [], bounds = null) {
+  return Boolean(bounds) && draftPoints.length > 0 && draftPoints.every(point => point.lat >= bounds.minLat && point.lat <= bounds.maxLat && point.lng >= bounds.minLng && point.lng <= bounds.maxLng);
+}
+
+// The ticked layers whose count inside the shape is final: fully loaded ("Complete") for an area that
+// holds the whole shape. Any other shows "—" (as TB Draft, 18.7): a count still loading, cut off at
+// 500 records, or missing the part of the shape off screen would look final but be too low.
+export function salesMapLayerCountedLayers({ draftPoints = [], visibility = {}, zoomedOut = false, layerStates = {}, bounds = null } = {}) {
+  if (zoomedOut || !shapeInsideArea(draftPoints, bounds)) return [];
+  return NEARBY_LAYERS.filter(layer => visibility[layer] && layerStates[layer] === "Complete");
+}
+
+// What the drawing bar says about those counts.
+export function salesMapLayerDrawNotes({ draftPoints = [], visibility = {}, zoomedOut = false, layerStates = {}, bounds = null } = {}) {
+  const ticked = NEARBY_LAYERS.filter(layer => visibility[layer]);
+  if (!ticked.length || draftPoints.length < 3) return [];
+  if (zoomedOut) return [`Layer counts: ${SALES_MAP_LAYER_ZOOMED_OUT.toLowerCase()}.`];
+  if (!shapeInsideArea(draftPoints, bounds)) return ["Layer counts: part of the shape is off screen. Move the map so the whole shape shows."];
+  return ticked.filter(layer => layerStates[layer] !== "Complete").map(layer => `${layer}: ${layerStates[layer] || "Loading nearby records…"}`);
+}
+
+// Inside the shape, for the ticked layers whose count is final; "—" for any other (as TB Draft, 18.7).
+export function salesMapLayerDrawStats({ draftPoints = [], model = {}, ...state } = {}) {
   const stats = buildGeofencePlanningDraftStats({ draftPoints, ...model });
-  const counted = zoomedOut ? [] : NEARBY_LAYERS.filter(layer => visibility[layer]), none = "—";
+  const counted = salesMapLayerCountedLayers({ draftPoints, ...state }), none = "—";
   return { ...stats,
     erfs: counted.includes("erfs") ? stats.erfs : none,
     premises: counted.includes("premises") ? stats.premises : none,

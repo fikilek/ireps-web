@@ -459,6 +459,72 @@ function readNearbyErfsOnce(scope, readErfs) {
   return promise;
 }
 
+// Rules 18.7: a nearby layer (ERFs, Sales, Premises or Assets) for a Ward and an area. TB Draft keeps
+// an area 10 minutes (its area is fixed per draft); the GPS Sales map follows the screen (TB-R055.7).
+function nearbyLayerEndpoint(keepUnusedDataFor) {
+  return {
+    keepUnusedDataFor,
+    queryFn: () => ({ data: { records: [], state: "Loading nearby records…" } }),
+    async onCacheEntryAdded(args, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
+      const stops = []; let active = true;
+      const publish = (records, state) => { if (active && isCurrent()) updateCachedData(() => ({ records, state })); };
+      const read = spec => query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1));
+      const rowsOf = snapshot => snapshot.docs.slice(0, NEARBY_LIMIT).map(item => ({ ...item.data(), id: item.id }));
+      try {
+        await cacheDataLoaded;
+        if (!isCurrent() || !args.bounds || !args.wardPcode || !NEARBY_LAYERS.includes(args.layer)) return;
+        const wardSnapshot = await getDoc(doc(db, "wards", args.wardPcode));
+        if (!active || !isCurrent()) return;
+        const ward = wardSnapshot.exists() ? wardSnapshot.data() : null;
+        if (ward?.parents?.localMunicipalityId !== args.lmPcode || !ward?.geometry) { publish([], "Error: the Ward boundary could not be loaded"); return; }
+        const scope = { ...args, wardGeometry: ward.geometry };
+        let specs, truncated = false;
+        if (args.layer === "erfs" || args.layer === "premises") specs = [nearbyQuerySpec(args.layer, scope)];
+        else {
+          // Sales and Assets on the nearby ERFs only (nearbyErfLinkedPlan); never a Ward- or LM-wide read.
+          // Rules 18.7 (1.3.30): Sales and Assets share one read of the nearby ERFs.
+          const erfSnapshot = await readNearbyErfsOnce(scope, () => getDocs(read(nearbyQuerySpec("erfs", scope))));
+          if (!active || !isCurrent()) return;
+          const { records: erfs } = nearbyLayerRecords("erfs", rowsOf(erfSnapshot), scope);
+          ({ specs, truncated } = nearbyErfLinkedPlan(args.layer, { lmPcode: args.lmPcode, erfs, erfCapped: erfSnapshot.size > NEARBY_LIMIT }));
+        }
+        if (!specs.length) publish([], truncated ? "Incomplete: nearby read limit reached" : "Complete");
+        const chunks = new Map();
+        // Rules 18.7 (1.3.30): the records are worked out again only when a record changed; an
+        // update that only says the server has confirmed the data changes the state line alone.
+        let rowsVersion = 0, computed = { version: -1, records: [], invalid: 0 }, published = null;
+        const publishChunks = () => {
+          if ([...chunks.values()].some(chunk => chunk.error)) return publish([], "Error: nearby records could not be loaded");
+          let pending = chunks.size < specs.length, capped = false;
+          for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; }
+          try {
+            if (computed.version !== rowsVersion) {
+              const merged = new Map();
+              for (const chunk of chunks.values()) for (const row of chunk.rows) merged.set(row.id, row);
+              computed = { version: rowsVersion, ...nearbyLayerRecords(args.layer, [...merged.values()], scope) };
+            }
+            const state = pending ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : truncated ? "Incomplete: nearby read limit reached"
+              : computed.invalid ? `Incomplete: ${computed.invalid} records have invalid scope or geometry` : "Complete";
+            if (published && published.records === computed.records && published.state === state) return;
+            published = { records: computed.records, state };
+            publish(computed.records, state);
+          } catch { publish([], "Incomplete: Ward or layer geometry is invalid"); }
+        };
+        specs.forEach((spec, index) => stops.push(onSnapshot(read(spec), { includeMetadataChanges: true }, snapshot => {
+          if (!active || !isCurrent()) return;
+          const previous = chunks.get(index);
+          const rowsChanged = !previous || previous.error || typeof snapshot.docChanges !== "function" || snapshot.docChanges().length > 0;
+          if (rowsChanged) rowsVersion += 1;
+          chunks.set(index, { rows: rowsChanged ? rowsOf(snapshot) : previous.rows, capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
+          publishChunks();
+        }, () => { chunks.set(index, { error: true, rows: [] }); rowsVersion += 1; publishChunks(); })));
+        await cacheEntryRemoved;
+      } catch { publish([], "Error: nearby records could not be loaded"); }
+      finally { active = false; stops.forEach(stop => stop()); }
+    },
+  };
+}
+
 export const salesTargetedBatchApi = createApi({
   reducerPath: "salesTargetedBatchApi",
   baseQuery: fakeBaseQuery(),
@@ -510,67 +576,10 @@ export const salesTargetedBatchApi = createApi({
     // a loaded layer is not read again while its Ward and area stay the same. The entry reads the
     // Ward itself, so it never restarts because the draft snapshot is briefly waiting.
     // Rules 18.7 (1.3.30): a layer switched off stays loaded for 10 minutes.
-    getSalesBatchNearbyLayer: builder.query({
-      keepUnusedDataFor: 600,
-      queryFn: () => ({ data: { records: [], state: "Loading nearby records…" } }),
-      async onCacheEntryAdded(args, { updateCachedData, cacheDataLoaded, cacheEntryRemoved, isCurrent }) {
-        const stops = []; let active = true;
-        const publish = (records, state) => { if (active && isCurrent()) updateCachedData(() => ({ records, state })); };
-        const read = spec => query(collection(db, spec.collection), ...spec.conditions.map(condition => where(...condition)), limit(NEARBY_LIMIT + 1));
-        const rowsOf = snapshot => snapshot.docs.slice(0, NEARBY_LIMIT).map(item => ({ ...item.data(), id: item.id }));
-        try {
-          await cacheDataLoaded;
-          if (!isCurrent() || !args.bounds || !args.wardPcode || !NEARBY_LAYERS.includes(args.layer)) return;
-          const wardSnapshot = await getDoc(doc(db, "wards", args.wardPcode));
-          if (!active || !isCurrent()) return;
-          const ward = wardSnapshot.exists() ? wardSnapshot.data() : null;
-          if (ward?.parents?.localMunicipalityId !== args.lmPcode || !ward?.geometry) { publish([], "Error: the Ward boundary could not be loaded"); return; }
-          const scope = { ...args, wardGeometry: ward.geometry };
-          let specs, truncated = false;
-          if (args.layer === "erfs" || args.layer === "premises") specs = [nearbyQuerySpec(args.layer, scope)];
-          else {
-            // Sales and Assets on the nearby ERFs only (nearbyErfLinkedPlan); never a Ward- or LM-wide read.
-            // Rules 18.7 (1.3.30): Sales and Assets share one read of the nearby ERFs.
-            const erfSnapshot = await readNearbyErfsOnce(scope, () => getDocs(read(nearbyQuerySpec("erfs", scope))));
-            if (!active || !isCurrent()) return;
-            const { records: erfs } = nearbyLayerRecords("erfs", rowsOf(erfSnapshot), scope);
-            ({ specs, truncated } = nearbyErfLinkedPlan(args.layer, { lmPcode: args.lmPcode, erfs, erfCapped: erfSnapshot.size > NEARBY_LIMIT }));
-          }
-          if (!specs.length) publish([], truncated ? "Incomplete: nearby read limit reached" : "Complete");
-          const chunks = new Map();
-          // Rules 18.7 (1.3.30): the records are worked out again only when a record changed; an
-          // update that only says the server has confirmed the data changes the state line alone.
-          let rowsVersion = 0, computed = { version: -1, records: [], invalid: 0 }, published = null;
-          const publishChunks = () => {
-            if ([...chunks.values()].some(chunk => chunk.error)) return publish([], "Error: nearby records could not be loaded");
-            let pending = chunks.size < specs.length, capped = false;
-            for (const chunk of chunks.values()) { capped = capped || chunk.capped; pending = pending || chunk.pending; }
-            try {
-              if (computed.version !== rowsVersion) {
-                const merged = new Map();
-                for (const chunk of chunks.values()) for (const row of chunk.rows) merged.set(row.id, row);
-                computed = { version: rowsVersion, ...nearbyLayerRecords(args.layer, [...merged.values()], scope) };
-              }
-              const state = pending ? "Incomplete: waiting for the server" : capped ? `Incomplete: ${NEARBY_LIMIT}-record read limit reached` : truncated ? "Incomplete: nearby read limit reached"
-                : computed.invalid ? `Incomplete: ${computed.invalid} records have invalid scope or geometry` : "Complete";
-              if (published && published.records === computed.records && published.state === state) return;
-              published = { records: computed.records, state };
-              publish(computed.records, state);
-            } catch { publish([], "Incomplete: Ward or layer geometry is invalid"); }
-          };
-          specs.forEach((spec, index) => stops.push(onSnapshot(read(spec), { includeMetadataChanges: true }, snapshot => {
-            if (!active || !isCurrent()) return;
-            const previous = chunks.get(index);
-            const rowsChanged = !previous || previous.error || typeof snapshot.docChanges !== "function" || snapshot.docChanges().length > 0;
-            if (rowsChanged) rowsVersion += 1;
-            chunks.set(index, { rows: rowsChanged ? rowsOf(snapshot) : previous.rows, capped: snapshot.size > NEARBY_LIMIT, pending: snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites });
-            publishChunks();
-          }, () => { chunks.set(index, { error: true, rows: [] }); rowsVersion += 1; publishChunks(); })));
-          await cacheEntryRemoved;
-        } catch { publish([], "Error: nearby records could not be loaded"); }
-        finally { active = false; stops.forEach(stop => stop()); }
-      },
-    }),
+    getSalesBatchNearbyLayer: builder.query(nearbyLayerEndpoint(600)),
+    // Targeted Batch rules TB-R055.7 (1.3.49): the GPS Sales map's area follows the screen, so an
+    // area it has left is let go after 20 seconds, not 10 minutes (no pile of live listeners).
+    getSalesMapNearbyLayer: builder.query(nearbyLayerEndpoint(20)),
     getSalesBatchDraftSnapshot: builder.query({
       keepUnusedDataFor: 0,
       queryFn: () => ({ data: { ready: false, sales: {}, erfs: {}, wards: {}, fence: null, parent: null, error: null } }),
@@ -2682,3 +2691,4 @@ export function useGetTargetedBatchDetailsByIdQuery(arg, options) {
 }
 
 export function useGetSalesBatchNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchNearbyLayerQuery", arg, options); }
+export function useGetSalesMapNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesMapNearbyLayerQuery", arg, options); }

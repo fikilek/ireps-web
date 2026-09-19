@@ -19,7 +19,7 @@ import { salesDraftMessage } from "../../operations/targeted-batches/draft/sales
 import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../../functions/geofences/geofence-name.js";
 import { chunks, inGroups } from "../../../../functions/targetedBatches/sales-map-fence.js";
 import { salesMapFenceCount, salesMapFenceCountText, salesMapFenceErfIds, salesMapFenceLeftOut, salesMapFenceProgress } from "../models/salesMapFenceModel.js";
-import { salesMapLayerDrawStats } from "../models/salesMapLayersModel.js";
+import { salesMapLayerDrawNotes, salesMapLayerDrawStats } from "../models/salesMapLayersModel.js";
 
 const EMPTY_ERFS = new Map();
 const NO_PLANNING = Object.freeze({ model: {}, visibility: {}, zoomedOut: true });
@@ -85,6 +85,8 @@ export function useSalesMapFence({ planning = NO_PLANNING, canDraw = false, lmPc
     : salesMapFenceCountText({ pointsCount: drawing.points.length, count, loading: erfs.loading, error: erfs.error });
   // TB-R055.7: ERFs, Sales, Premises and Assets inside the shape, for the ticked layers.
   const draftPreviewStats = useMemo(() => salesMapLayerDrawStats({ draftPoints: drawing.points, ...planning }), [drawing.points, planning]);
+  const layerNotes = useMemo(() => salesMapLayerDrawNotes({ draftPoints: drawing.points, ...planning }), [drawing.points, planning]);
+  const completeness = layerNotes.length ? <div role="status" style={{ color: "#92400e", fontSize: 13 }}>{layerNotes.map(note => <span key={note} style={{ display: "block" }}>{note}</span>)}</div> : null;
   const canSave = Boolean(count.canSave && !wardChanged && !erfs.loading && !erfs.error && !saving && standardName);
   const canStart = Boolean(canDraw && lmPcode && wardPcode && !busy);
 
@@ -162,7 +164,7 @@ export function useSalesMapFence({ planning = NO_PLANNING, canDraw = false, lmPc
     Draw batch geofence</button> : null;
   const panel = <GeofenceDrawingBar isCreateMode={isCreateMode} draftName={standardName} draftPoints={drawing.points} draftPolygonReady={drawing.points.length >= 3} draftPreviewStats={draftPreviewStats}
     handleUndoPoint={() => { if (!saving) drawing.undo(); }} handleRestartDraft={() => { if (!saving) drawing.setPoints([]); }} handleOpenCreateConfirm={() => { if (canSave) setConfirmOpen(true); }}
-    canSaveDraft={canSave} createState={{ isLoading: saving }} handleCancelDraft={cancel} draftInside={countLine} inline/>;
+    canSaveDraft={canSave} createState={{ isLoading: saving }} handleCancelDraft={cancel} draftInside={countLine} completeness={completeness} inline/>;
   const mapLayer = isCreateMode ? <DraftGeoFenceLayer draftPoints={drawing.points} color={count.over ? "#dc2626" : "#2563eb"}/> : null;
   const leftOut = progress?.leftOut || [];
   const dialogs = <>
@@ -170,7 +172,7 @@ export function useSalesMapFence({ planning = NO_PLANNING, canDraw = false, lmPc
       createModalOpen={createModalOpen} setCreateModalOpen={open => { setCreateModalOpen(open); if (!open) setDialogError(""); }} draftName={draftName} setDraftName={changeName}
       draftDescription={draftDescription} setDraftDescription={setDraftDescription} handleStartDrawing={handleStartDrawing} confirmCreateModalOpen={confirmOpen}
       setConfirmCreateModalOpen={open => { setConfirmOpen(open); if (!open) setDialogError(""); }} draftPreviewStats={draftPreviewStats} createState={{ isLoading: saving }}
-      handleConfirmCreate={handleConfirmCreate} createSuccess={null} setCreateSuccess={() => {}} draftInside={countLine} completeness={null}
+      handleConfirmCreate={handleConfirmCreate} createSuccess={null} setCreateSuccess={() => {}} draftInside={countLine} completeness={completeness}
       lockedWard wardNumber={ward.number} existingGeofences={wardGeofences} createError={dialogError}/>
     {progress && progressState ? <GeofenceProgressModal name={progress.name} wardLabel={progress.wardLabel} progress={progressState} fence={savedFence} onClose={() => setProgress(null)}
       linkedTo={`batch ${progress.tbId}`} stillLinkingText="Its ERFs and meters are still being linked. The table filters to it as soon as they are."
