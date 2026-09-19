@@ -61,13 +61,13 @@ export function matrixColumnHelp(key, { organisations = [], allOrganisations = o
     };
     case "assigned": return {
       title: "Meters Assigned",
-      paragraphs: ["The total number of meters in all the batches allocated to this TEAM / SP since the project started, whatever state they are in. Completed meters stay in this number; it never goes down when work is done."],
+      paragraphs: ["The total number of meters in all the batches allocated to this TEAM / SP since the project started, whatever state they are in. Completed meters stay in this number; it never goes down when work is done.", "Counted from the batch rows themselves, one status per row, the same way Sales Reporting counts them."],
       rows: rows(matrix => `${count(matrix.assigned)} meters in ${batchesLabel(matrix.batches)}`),
       total: `Project total: ${count(totals.assigned)} meters`,
     };
     case "notStarted": return state("notStarted", "Not Started", "Meters assigned to this TEAM / SP where no field work has been recorded yet: no premise captured, no No Access recorded and no meter captured. They are neither in progress nor completed.");
     case "inProgress": return state("inProgress", "In Progress", "Meters where field work has begun but is not finished: the premise has been captured or No Access has been recorded, but the meter has not been captured yet.");
-    case "completed": return state("completed", "Completed", "Meters that have been found and captured in the field (meter discovery done). This is finished work, and the Completed percentage shows how far this TEAM / SP is through the meters assigned to it.");
+    case "completed": return state("completed", "Completed", "Meters that have been found and captured in the field (meter discovery done). This is finished work, and the Completed percentage shows how far this TEAM / SP is through the meters assigned to it. A meter whose Sales record is VISIBLE counts as Completed, as on Sales Reporting.");
     case "batchesShare": return {
       title: "Batches Share",
       paragraphs: ["The part of all the meters handed out in batches that went to this TEAM / SP.", `Overall assigned in batches: ${count(totals.assigned)} meters.`],

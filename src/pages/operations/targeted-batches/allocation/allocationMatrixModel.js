@@ -191,7 +191,9 @@ function getBatchUnallocatedRows(batch = {}) {
   return nonNegativeInteger(rawValue, Math.max(total - allocated, 0));
 }
 
-export function getBatchAllocationIntegrity(batch = {}) {
+// `countFromRows` (TB-R045, 1.3.57): the matrix counts the batch rows themselves, so the running
+// totals on the batch are neither used nor checked; only states and the TEAM / SP are.
+export function getBatchAllocationIntegrity(batch = {}, { countFromRows = false } = {}) {
   const state = getCanonicalBatchState(batch);
   const target = getTargetFromAllocation(batch?.allocation);
   const totalRows = getBatchTotalRows(batch);
@@ -247,16 +249,18 @@ export function getBatchAllocationIntegrity(batch = {}) {
     issues.push("EXECUTION_WITHOUT_ACCEPTANCE");
   }
   if (!target) issues.push("ALLOCATION_TARGET_MISSING");
-  if (totalRows < 1) issues.push("TOTAL_ROWS_MISSING");
-  if (allocatedRows !== totalRows) issues.push("ALLOCATED_ROW_COUNT_MISMATCH");
-  if (unallocatedRows !== 0) issues.push("UNALLOCATED_ROWS_REMAIN");
-  if (completedRows > totalRows) issues.push("COMPLETED_ROW_COUNT_INVALID");
-  if (startedRows > totalRows) issues.push("STARTED_ROW_COUNT_INVALID");
-  if (
-    state === CANONICAL_TARGETED_BATCH_STATES.completed &&
-    completedRows !== totalRows
-  ) {
-    issues.push("COMPLETED_PARENT_ROW_COUNT_MISMATCH");
+  if (!countFromRows) {
+    if (totalRows < 1) issues.push("TOTAL_ROWS_MISSING");
+    if (allocatedRows !== totalRows) issues.push("ALLOCATED_ROW_COUNT_MISMATCH");
+    if (unallocatedRows !== 0) issues.push("UNALLOCATED_ROWS_REMAIN");
+    if (completedRows > totalRows) issues.push("COMPLETED_ROW_COUNT_INVALID");
+    if (startedRows > totalRows) issues.push("STARTED_ROW_COUNT_INVALID");
+    if (
+      state === CANONICAL_TARGETED_BATCH_STATES.completed &&
+      completedRows !== totalRows
+    ) {
+      issues.push("COMPLETED_PARENT_ROW_COUNT_MISMATCH");
+    }
   }
 
   return {
@@ -335,7 +339,7 @@ function makeOrganisationSeed(target = {}, fallbackType = "") {
   };
 }
 
-function getActiveAllocationRowIntegrity({ batch, rows = [], target } = {}) {
+function getActiveAllocationRowIntegrity({ batch, rows = [], target, countFromRows = false } = {}) {
   const state = getCanonicalBatchState(batch);
   if (state === CANONICAL_TARGETED_BATCH_STATES.completed) {
     return { ok: true, issues: [] };
@@ -345,7 +349,7 @@ function getActiveAllocationRowIntegrity({ batch, rows = [], target } = {}) {
   const batchId = getBatchId(batch);
   const issues = [];
 
-  if (rows.length !== expectedRows) {
+  if (!countFromRows && rows.length !== expectedRows) {
     issues.push("PHYSICAL_ROW_COUNT_MISMATCH");
   }
 
@@ -415,12 +419,19 @@ function emptyOrganisationMetrics(seed) {
   };
 }
 
+const EMPTY_ROW_COUNTS = Object.freeze({ total: 0, notStarted: 0, inProgress: 0, completed: 0 });
+
+// `rowCountsByBatch` (TB-R045, 1.3.57): { [tbId]: { total, notStarted, inProgress, completed } } counted
+// from the batch rows as Sales Reporting does (TB-R054). With it, the TEAM / SP numbers come from the
+// rows and the batch's running totals are ignored; without it (the Allocate page), nothing changes.
 export function buildOrganisationAllocationMatrixResult({
   batches = [],
   rows = [],
   teams = [],
   serviceProviders = [],
+  rowCountsByBatch = null,
 } = {}) {
+  const countFromRows = Boolean(rowCountsByBatch);
   const organisations = new Map();
   const rowsByBatch = new Map();
   const integrityIssues = [];
@@ -445,7 +456,7 @@ export function buildOrganisationAllocationMatrixResult({
   const supportedBatches = safeArray(batches).filter(isSupportedSalesTargetedBatch);
 
   for (const batch of supportedBatches) {
-    const integrity = getBatchAllocationIntegrity(batch);
+    const integrity = getBatchAllocationIntegrity(batch, { countFromRows });
     const target = integrity.target;
     const batchId = getBatchId(batch) || "UNKNOWN_BATCH";
 
@@ -503,6 +514,7 @@ export function buildOrganisationAllocationMatrixResult({
       batch,
       rows: rowsByBatch.get(getBatchId(batch)) || [],
       target,
+      countFromRows,
     });
     if (!physicalIntegrity.ok) {
       metric.integrityIssueBatches += 1;
@@ -516,9 +528,10 @@ export function buildOrganisationAllocationMatrixResult({
     }
 
     const state = integrity.state;
-    const totalRows = integrity.totalRows;
-    const completedRows = Math.min(integrity.completedRows, totalRows);
-    const startedRows = Math.min(integrity.startedRows, totalRows);
+    const rowCounts = countFromRows ? rowCountsByBatch[getBatchId(batch)] || EMPTY_ROW_COUNTS : null;
+    const totalRows = rowCounts ? rowCounts.total : integrity.totalRows;
+    const completedRows = rowCounts ? rowCounts.completed : Math.min(integrity.completedRows, totalRows);
+    const startedRows = rowCounts ? rowCounts.completed + rowCounts.inProgress : Math.min(integrity.startedRows, totalRows);
     const unfinishedRows = Math.max(totalRows - completedRows, 0);
 
     metric.batches += 1;

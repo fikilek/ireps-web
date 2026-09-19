@@ -1,6 +1,7 @@
 // Targeted Batch rules TB-R045: the Allocation Matrix's TEAM / SP numbers for one LM. Used by the
 // Allocation Matrix page and by the Allocation Matrix section on TB Register (1.3.51), so both
-// always show the same numbers.
+// always show the same numbers. Since 1.3.57 the TEAM / SP numbers are counted from the batch rows,
+// with the same counts as Sales Reporting (TB-R054).
 import { useMemo } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -9,8 +10,10 @@ import {
   useGetFieldWorkSummaryByLmQuery,
   useGetTargetedBatchAllocationDirectoryQuery,
   useGetTargetedBatchAllocationMatrixByLmQuery,
+  useGetTargetedBatchRowCountsByLmQuery,
 } from "../../../../redux/salesTargetedBatchApi";
 import { useGetUsersDirectoryQuery } from "../../../../redux/usersApi";
+import { getReportingCountsState } from "../../../sales/models/salesReportingCountsModel.js";
 import { addFieldWorkToMatrix, buildOrganisationAllocationMatrixResult } from "./allocationMatrixModel";
 import {
   buildUsersById,
@@ -20,6 +23,7 @@ import {
 } from "./targetedBatchAllocationUtils";
 
 const EMPTY_LIST = Object.freeze([]);
+const NO_ROW_COUNTS = Object.freeze({});
 const listOf = (value) => (Array.isArray(value) ? value : EMPTY_LIST);
 
 export function useAllocationMatrix(lmPcode) {
@@ -30,6 +34,22 @@ export function useAllocationMatrix(lmPcode) {
     isError: matrixQueryFailed,
     error: matrixQueryError,
   } = useGetTargetedBatchAllocationMatrixByLmQuery(lmPcode || skipToken);
+
+  // Rules TB-R045 (1.3.57): one status per batch row, shared with Sales Reporting's read.
+  const {
+    data: rowCountsStream,
+    isError: rowCountsQueryFailed,
+    error: rowCountsQueryError,
+  } = useGetTargetedBatchRowCountsByLmQuery(lmPcode || skipToken);
+  const countsState = getReportingCountsState({
+    hasWorkbase: Boolean(lmPcode),
+    batchesStatus: matrixStream?.sync?.status,
+    batchesFailed: matrixQueryFailed || Boolean(matrixStream?.sync?.error),
+    rowCountSources: rowCountsStream?.sync?.sources,
+    rowCountsFailed: rowCountsQueryFailed,
+  });
+  // Until every row is counted the numbers are not shown (loading), and never the running totals.
+  const rowCountsByBatch = countsState === "ready" ? rowCountsStream?.countsByBatch || NO_ROW_COUNTS : NO_ROW_COUNTS;
 
   const {
     data: allocationDirectory,
@@ -73,8 +93,9 @@ export function useAllocationMatrix(lmPcode) {
         rows: integrityRows,
         teams: enrichedTeams,
         serviceProviders: enrichedServiceProviders,
+        rowCountsByBatch,
       }),
-    [batches, integrityRows, enrichedTeams, enrichedServiceProviders],
+    [batches, integrityRows, enrichedTeams, enrichedServiceProviders, rowCountsByBatch],
   );
   const organisations = organisationMatrixResult.organisations;
   const matrixRows = useMemo(
@@ -84,6 +105,7 @@ export function useAllocationMatrix(lmPcode) {
 
   const loading =
     (Boolean(lmPcode) && matrixStream?.sync?.status === "syncing") ||
+    countsState === "counting" ||
     (Boolean(actorMncServiceProviderId) &&
       allocationDirectory?.sync?.status === "syncing") ||
     usersLoading;
@@ -92,6 +114,11 @@ export function useAllocationMatrix(lmPcode) {
     (matrixQueryFailed ? matrixQueryError : null) ||
     allocationDirectory?.sync?.error ||
     (directoryQueryFailed ? directoryQueryError : null) ||
+    (countsState === "error"
+      ? rowCountsStream?.sync?.error ||
+        (rowCountsQueryFailed ? rowCountsQueryError : null) ||
+        { message: "The batch rows could not be counted." }
+      : null) ||
     null;
 
   return {

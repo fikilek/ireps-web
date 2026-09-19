@@ -9,6 +9,7 @@ import {
   useAllocateSalesTargetedBatchesTogetherMutation,
   useGetTargetedBatchAllocationDirectoryQuery,
   useGetTargetedBatchAllocationMatrixByLmQuery,
+  useGetTargetedBatchRowCountsByLmQuery,
 } from "../../redux/salesTargetedBatchApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/geofencesApi";
 import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
@@ -17,6 +18,7 @@ import { WardBoundaryPolygons } from "./geofence-map-layers";
 import { geofenceLabelPoint, getGeoFencePath, geoJsonPolygonToGooglePaths, parseGeometry, pointsCentre, wardNameLabelPoint } from "./geofence-map-helpers";
 import { wardNumberFromPcode } from "../../../functions/geofences/geofence-name.js";
 import { buildOrganisationAllocationMatrixResult } from "./targeted-batches/allocation/allocationMatrixModel";
+import { getReportingCountsState } from "../sales/models/salesReportingCountsModel.js";
 import {
   ALLOCATION_MAP_MAX,
   ALLOCATION_MAP_STATES,
@@ -43,6 +45,7 @@ import BatchCreationModal from "./targeted-batches/draft/batch-creation-modal.js
 // geofence puts its batch in the allocation window; one TEAM or SP is allocated the whole selection in
 // one all-or-nothing step.
 const EMPTY = Object.freeze([]);
+const NO_ROW_COUNTS = Object.freeze({});
 const STATE_STYLES = Object.freeze({
   [ALLOCATION_MAP_STATES.READY]: { strokeColor: "#7c3aed", fillColor: "#c4b5fd", fillOpacity: 0.35, strokeWeight: 2, labelColor: "#5b21b6" },
   SELECTED: { strokeColor: "#3b0764", fillColor: "#8b5cf6", fillOpacity: 0.5, strokeWeight: 4, labelColor: "#3b0764" },
@@ -176,8 +179,16 @@ export default function TargetedBatchAllocationMapPage() {
   const usersById = useMemo(() => buildUsersById(users), [users]);
   const teams = useMemo(() => enrichTeamsWithMembers(directory?.teams || EMPTY, usersById), [directory?.teams, usersById]);
   const serviceProviders = useMemo(() => enrichServiceProvidersWithMembers(directory?.serviceProviders || EMPTY, users), [directory?.serviceProviders, users]);
-  const workloads = useMemo(() => new Map(buildOrganisationAllocationMatrixResult({ batches, rows: matrixStream?.rows || EMPTY, teams, serviceProviders }).organisations.map(item => [item.key, item.matrix])),
-    [batches, matrixStream?.rows, teams, serviceProviders]);
+  // TB-R045 (1.3.57): each TEAM / SP's workload is counted from the batch rows, as in the Allocation
+  // Matrix and Sales Reporting; until every row is counted the chips show member counts instead.
+  const { data: rowCountsStream, isError: rowCountsFailed } = useGetTargetedBatchRowCountsByLmQuery(lmPcode || skipToken);
+  const countsState = getReportingCountsState({ hasWorkbase: Boolean(lmPcode), batchesStatus: matrixStream?.sync?.status, batchesFailed: Boolean(matrixStream?.sync?.error),
+    rowCountSources: rowCountsStream?.sync?.sources, rowCountsFailed });
+  const rowCountsByBatch = countsState === "ready" ? rowCountsStream?.countsByBatch || NO_ROW_COUNTS : null;
+  const workloads = useMemo(() => (rowCountsByBatch
+    ? new Map(buildOrganisationAllocationMatrixResult({ batches, rows: matrixStream?.rows || EMPTY, teams, serviceProviders, rowCountsByBatch }).organisations.map(item => [item.key, item.matrix]))
+    : new Map()),
+  [batches, matrixStream?.rows, teams, serviceProviders, rowCountsByBatch]);
 
   const wardLayer = useMemo(() => {
     const centre = pointsCentre(model.items.flatMap(item => getGeoFencePath(item.fence)));
