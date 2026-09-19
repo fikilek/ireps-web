@@ -24,3 +24,32 @@ test("the download keeps the full geofence list", async () => {
   const table = await read("./SalesMetersTable.jsx");
   assert.match(table, /value: \(row\) => getRowGeofenceLabel\(row\) \|\| "No geofence"/);
 });
+
+// Rules 18.3 (1.3.46): with Wards chosen, the Geofences filter lists only the geofences
+// of meters in those Wards; the table rows and the list use the same Ward test.
+async function wardFilter() {
+  const table = await read("./SalesMetersTable.jsx");
+  const source = ["normalizeWardNumber", "rowHasNoWardValue", "rowMatchesWardFilter"]
+    .map(name => table.match(new RegExp(`function ${name}\\([^]*?\\n}\\n`))[0]).join("\n");
+  return new Function(`const WARD_FILTER_NAV = "__NAV__";\n${source}\nreturn rowMatchesWardFilter;`)();
+}
+
+test("the Ward test: none chosen, a chosen Ward, or NAv for a meter without a Ward", async () => {
+  const matches = await wardFilter();
+  const ward6 = { wardNumbers: ["006"], wardNumberLabel: "006" };
+  const ward4 = { wardNumbers: ["004"], wardNumberLabel: "004" };
+  const noWard = { wardNumbers: [], wardNumberLabel: "NAv" };
+  assert.equal(matches(ward4, new Set()), true, "no Ward chosen: every meter");
+  assert.equal(matches(ward6, new Set(["006"])), true);
+  assert.equal(matches(ward4, new Set(["006"])), false);
+  assert.equal(matches(ward4, new Set(["006", "004"])), true);
+  assert.equal(matches(noWard, new Set(["__NAV__"])), true);
+  assert.equal(matches(ward6, new Set(["__NAV__"])), false);
+});
+
+test("the Geofences filter lists only the geofences of meters in the chosen Wards", async () => {
+  const table = await read("./SalesMetersTable.jsx");
+  assert.match(table, /const salesGeofenceOptions = useMemo\(\(\) => \{\s*const selectedWardNos = new Set\(filters\.wardNos\);\s*const byId = new Map\(\);\s*classifiedRows\.forEach\(\(row\) => \{\s*if \(!rowMatchesWardFilter\(row, selectedWardNos\)\) return;/);
+  assert.match(table, /\}, \[classifiedRows, filters\.wardNos\]\);\s*const geofenceOptions = useMemo/, "the list follows the Ward filter");
+  assert.match(table, /const matchesWard = rowMatchesWardFilter\(row, selectedWardNos\);/, "the table rows use the same Ward test");
+});

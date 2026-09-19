@@ -399,6 +399,14 @@ function rowHasNoWardValue(row = {}) {
   return !wardLabel || wardNumbers.length === 0;
 }
 
+// The Ward No filter: no Ward chosen, a chosen Ward, or NAv for a meter without one.
+function rowMatchesWardFilter(row = {}, selectedWardNos = new Set()) {
+  if (selectedWardNos.size === 0) return true;
+  if (selectedWardNos.has(WARD_FILTER_NAV) && rowHasNoWardValue(row)) return true;
+  const rowWardNumbers = Array.isArray(row?.wardNumbers) ? row.wardNumbers : [];
+  return rowWardNumbers.some((wardNo) => selectedWardNos.has(wardNo));
+}
+
 function getRowMapMeterId(row = {}) {
   return String(row?.id || row?.meterNo || "").trim();
 }
@@ -613,10 +621,14 @@ export default function SalesMetersTable({
     [classifiedRows],
   );
 
+  // Targeted Batch rules 18.3 (1.3.46): with Wards chosen, the Geofences filter
+  // lists only the geofences of meters in those Wards.
   const salesGeofenceOptions = useMemo(() => {
+    const selectedWardNos = new Set(filters.wardNos);
     const byId = new Map();
 
     classifiedRows.forEach((row) => {
+      if (!rowMatchesWardFilter(row, selectedWardNos)) return;
       getRowGeofenceRefs(row).forEach((ref) => {
         if (byId.has(ref.id)) return;
 
@@ -630,7 +642,7 @@ export default function SalesMetersTable({
     return Array.from(byId.values()).sort((left, right) =>
       compareNatural(left.name, right.name),
     );
-  }, [classifiedRows]);
+  }, [classifiedRows, filters.wardNos]);
 
   const geofenceOptions = useMemo(() => {
     const byId = new Map();
@@ -713,13 +725,7 @@ export default function SalesMetersTable({
         );
       });
 
-      const rowWardNumbers = Array.isArray(row?.wardNumbers)
-        ? row.wardNumbers
-        : [];
-      const matchesWard =
-        selectedWardNos.size === 0 ||
-        (selectedWardNos.has(WARD_FILTER_NAV) && rowHasNoWardValue(row)) ||
-        rowWardNumbers.some((wardNo) => selectedWardNos.has(wardNo));
+      const matchesWard = rowMatchesWardFilter(row, selectedWardNos);
 
       const rowGeofenceRefs = getRowGeofenceRefs(row);
       const matchesGeofence =
