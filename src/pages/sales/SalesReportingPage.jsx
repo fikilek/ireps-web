@@ -16,8 +16,12 @@ import { useGetGeoFencesByLmQuery } from "../../redux/mapGeofencesApi";
 import { NO_GEOFENCE_LABEL, batchGeofenceLabel, geofenceNamesById } from "../operations/targeted-batches/batch-geofence-label.js";
 import BatchMapLink from "../../components/batch-map-link.jsx";
 import {
+  BATCH_STATUS_VALUES,
+  batchStatusLabel,
+  batchStatusValue,
+  batchWorkStatusLabel,
   getReportingCountsState,
-  hasCountFilter,
+  hasCountsDependentFilter,
   summarizeReportingCards,
   withRowCounts,
 } from "./models/salesReportingCountsModel.js";
@@ -35,7 +39,7 @@ const EMPTY_FILTERS = {
   geofence: "",
   allocation: ALL_FILTER,
   allocatedTo: ALL_FILTER,
-  acceptance: ALL_FILTER,
+  batchStatus: ALL_FILTER,
   totalRows: "",
   notStarted: "",
   inProgress: "",
@@ -247,8 +251,12 @@ function getSortValue(batch, key) {
   if (key === "geofence") return cleanText(batch?.geofenceLabel);
   if (key === "allocation") return getAllocationState(batch);
   if (key === "allocatedTo") return getAllocatedToLabel(batch);
-  if (key === "acceptance") {
-    return cleanText(batch?.acceptance?.status) || "NOT_READY";
+  // TB-R054 (1.3.59): sorted in the order a batch moves through: not ready, waiting, accepted (by its work), rejected.
+  if (key === "batchStatus") {
+    const value = batchStatusValue(batch, progress ? "ready" : "counting");
+    const order = [...BATCH_STATUS_VALUES];
+    const index = order.indexOf(value);
+    return index < 0 ? order.length : index;
   }
   if (key === "totalRows") return Number(progress?.total || 0);
   if (key === "notStarted") return Number(progress?.notStarted || 0);
@@ -540,18 +548,14 @@ export default function SalesReportingPage() {
         batches.map((batch) => cleanText(batch?.scope?.wardLabel) || "NAv"),
       ),
       allocatedTo: unique(batches.map((batch) => getAllocatedToLabel(batch))),
-      acceptanceStatuses: unique(
-        batches.map(
-          (batch) => cleanText(batch?.acceptance?.status) || "NOT_READY",
-        ),
-      ),
+
     }),
     [batches],
   );
 
   // TB-R054: while the counts are not ready, a count filter cannot be applied,
   // so the table and the cards wait instead of guessing.
-  const listPending = countsState !== "ready" && hasCountFilter(filters);
+  const listPending = countsState !== "ready" && hasCountsDependentFilter(filters);
 
   const filteredBatches = useMemo(() => {
     return batches.filter((batch) => {
@@ -559,8 +563,7 @@ export default function SalesReportingPage() {
       const counted = Boolean(batch?.progress);
       const ward = cleanText(batch?.scope?.wardLabel) || "NAv";
       const allocation = getAllocationState(batch);
-      const acceptanceStatus =
-        cleanText(batch?.acceptance?.status) || "NOT_READY";
+      const batchStatus = batchStatusValue(batch, counted ? countsState : "counting");
 
       return (
         includesText(batch?.id, filters.batchId) &&
@@ -570,8 +573,8 @@ export default function SalesReportingPage() {
           allocation === filters.allocation) &&
         (filters.allocatedTo === ALL_FILTER ||
           getAllocatedToLabel(batch) === filters.allocatedTo) &&
-        (filters.acceptance === ALL_FILTER ||
-          acceptanceStatus === filters.acceptance) &&
+        (filters.batchStatus === ALL_FILTER ||
+          batchStatus === filters.batchStatus) &&
         (!counted ||
           (matchesNumberFilter(progress?.total, filters.totalRows) &&
             matchesNumberFilter(progress?.notStarted, filters.notStarted) &&
@@ -580,7 +583,7 @@ export default function SalesReportingPage() {
         matchesDatetimeFilter(batch?.lastActivityAtMs, lastActivityFilter)
       );
     });
-  }, [batches, filters, lastActivityFilter]);
+  }, [batches, countsState, filters, lastActivityFilter]);
 
   const sortedBatches = useMemo(() => {
     const rows = [...filteredBatches];
@@ -883,19 +886,19 @@ export default function SalesReportingPage() {
                 </th>
                 <th>
                   <SortButton
-                    label="Acceptance"
-                    sortKey="acceptance"
+                    label="Batch Status"
+                    sortKey="batchStatus"
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
                   <FilterSelect
-                    value={filters.acceptance}
-                    onChange={(value) => updateFilter("acceptance", value)}
+                    value={filters.batchStatus}
+                    onChange={(value) => updateFilter("batchStatus", value)}
                   >
                     <option value={ALL_FILTER}>All</option>
-                    {filterOptions.acceptanceStatuses.map((status) => (
+                    {BATCH_STATUS_VALUES.map((status) => (
                       <option key={status} value={status}>
-                        {status.replaceAll("_", " ")}
+                        {batchStatusLabel(status)}
                       </option>
                     ))}
                   </FilterSelect>
@@ -1068,6 +1071,12 @@ export default function SalesReportingPage() {
                       </td>
                       <td>
                         <StatusBadge value={batch?.acceptance?.status} />
+                        {/* TB-R054 (1.3.59): once the team has accepted, how far its work is, under the badge. */}
+                        {normalizeUpper(batch?.acceptance?.status) === "ACCEPTED" ? (
+                          <div style={styles.batchStatusWork}>
+                            {batchWorkStatusLabel(batchStatusValue(batch, progress ? countsState : "counting"))}
+                          </div>
+                        ) : null}
                       </td>
                       <td>{countText(progress?.total)}</td>
                       <td>{countText(progress?.notStarted)}</td>
@@ -1423,6 +1432,12 @@ const styles = {
     whiteSpace: "nowrap",
   },
 
+  batchStatusWork: {
+    marginTop: "0.2rem",
+    color: "#64748b",
+    fontSize: "0.72rem",
+    fontWeight: 700,
+  },
   badge: {
     display: "inline-flex",
     borderRadius: 999,

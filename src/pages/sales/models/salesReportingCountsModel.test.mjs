@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EMPTY_PROGRESS,
+  BATCH_STATUS_VALUES,
+  batchStatusLabel,
+  batchStatusValue,
+  batchWorkStatusLabel,
   getReportingCountsState as stateOf,
   hasCountFilter,
+  hasCountsDependentFilter,
   summarizeReportingCards,
   withRowCounts,
 } from "./salesReportingCountsModel.js";
@@ -57,4 +62,39 @@ test("a count filter is any of the four count columns", () => {
   for (const key of ["totalRows", "notStarted", "inProgress", "completed"]) {
     assert.equal(hasCountFilter({ [key]: "0" }), true);
   }
+});
+
+// Targeted Batch rules TB-R054 (1.3.59): the Batch Status column. Not ready, Waiting and Rejected stay
+// as they are; an accepted batch also says how far its work is, from the rows the table counts.
+test("an accepted batch says how far its work is; the others keep their word", () => {
+  const accepted = progress => ({ acceptance: { status: "ACCEPTED" }, progress });
+  assert.equal(batchStatusValue({ acceptance: { status: "NOT_READY" } }), "NOT_READY");
+  assert.equal(batchStatusValue({}), "NOT_READY");
+  assert.equal(batchStatusValue({ acceptance: { status: "WAITING" } }), "WAITING");
+  assert.equal(batchStatusValue({ acceptance: { status: "REJECTED" } }), "REJECTED");
+  assert.equal(batchStatusValue(accepted({ total: 3, notStarted: 3, inProgress: 0, completed: 0 })), "ACCEPTED_NOT_STARTED");
+  assert.equal(batchStatusValue(accepted({ total: 3, notStarted: 2, inProgress: 1, completed: 0 })), "ACCEPTED_IN_PROGRESS");
+  assert.equal(batchStatusValue(accepted({ total: 3, notStarted: 1, inProgress: 0, completed: 2 })), "ACCEPTED_IN_PROGRESS");
+  assert.equal(batchStatusValue(accepted({ total: 3, notStarted: 0, inProgress: 0, completed: 3 })), "ACCEPTED_COMPLETED");
+  // A batch with no rows yet is Not Started, and nothing is guessed while the rows are still being counted.
+  assert.equal(batchStatusValue(accepted({ total: 0, notStarted: 0, inProgress: 0, completed: 0 })), "ACCEPTED_NOT_STARTED");
+  assert.equal(batchStatusValue(accepted(), "counting"), "ACCEPTED");
+  assert.equal(batchStatusValue({ acceptance: { status: "ACCEPTED" } }, "ready"), "ACCEPTED");
+});
+
+test("the words under and in the badge, and the filter's six values", () => {
+  assert.equal(batchWorkStatusLabel("ACCEPTED_NOT_STARTED"), "Not Started");
+  assert.equal(batchWorkStatusLabel("ACCEPTED_IN_PROGRESS"), "In Progress");
+  assert.equal(batchWorkStatusLabel("ACCEPTED_COMPLETED"), "Completed");
+  assert.equal(batchWorkStatusLabel("ACCEPTED"), "Counting…");
+  assert.deepEqual(BATCH_STATUS_VALUES.map(batchStatusLabel), [
+    "Not ready", "Waiting", "Accepted · Not Started", "Accepted · In Progress", "Accepted · Completed", "Rejected",
+  ]);
+});
+
+test("a filter on an accepted batch's work waits for the rows, like a count filter", () => {
+  assert.equal(hasCountsDependentFilter({ batchStatus: "ACCEPTED_COMPLETED" }), true);
+  assert.equal(hasCountsDependentFilter({ batchStatus: "WAITING" }), false);
+  assert.equal(hasCountsDependentFilter({ batchStatus: "", completed: "3" }), true);
+  assert.equal(hasCountsDependentFilter({}), false);
 });
