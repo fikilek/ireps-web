@@ -1,6 +1,76 @@
+/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { inspectSalesTbRefsIntegrity, readTbRefBatchId, resolveSalesTargetedBatchMembership } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
+import { skipToken } from "@reduxjs/toolkit/query";
+
+import { useGetPermanentSalesBatchesQuery } from "../../../redux/salesTargetedBatchApi";
+import { useBatchGeofence } from "./use-batch-geofence.js";
+import { NO_GEOFENCE_LABEL } from "../../operations/targeted-batches/batch-geofence-label.js";
+
+import { acceptanceText, allocationText, batchTypeText, workStatusText } from "./sales-tb-refs-model.js";
+
+// The batch behind one reference: read live, so the window always shows how the batch stands now.
+function BatchSummary({ lmPcode, tbId, salesId }) {
+  const { data } = useGetPermanentSalesBatchesQuery(lmPcode && tbId ? { lmPcode, tbId } : skipToken, { skip: !lmPcode || !tbId });
+  const batch = data?.batch || null;
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const geofence = useBatchGeofence(lmPcode, batch?.geofenceId);
+
+  if (!lmPcode || !tbId) return null;
+  if (!data?.ready && !batch) return <p style={styles.batchNote}>Reading the batch…</p>;
+  if (!batch) return <p style={styles.batchNote}>This batch cannot be read. It may have been deleted.</p>;
+
+  const meterRow = rows.find(item => item?.sourceSalesAllMeterId === salesId) || null;
+  const details = [
+    ["Created", `${formatDate(batch.metadata?.createdAt)}${batch.metadata?.createdByUser ? ` by ${batch.metadata.createdByUser}` : ""}`],
+    ["Geofence", !batch.geofenceId ? NO_GEOFENCE_LABEL : geofence?.name || batch.geofenceId],
+    ["Batch type", batchTypeText(batch)],
+    ["Ward", batch.scope?.wardName || (batch.scope?.wardNumber ? `Ward ${batch.scope.wardNumber}` : "NAv")],
+    ["Allocated to", allocationText(batch)],
+    ["Acceptance", acceptanceText(batch.acceptance?.status)],
+    ["Batch status", workStatusText(batch.execution?.status || batch.status)],
+    ["Meters in the batch", data?.ready ? String(rows.length) : "Counting…"],
+  ];
+  const meterDetails = meterRow ? [
+    ["Row number", meterRow.rowNo ? `Row ${meterRow.rowNo}` : asText(meterRow.id)],
+    ["Row status", workStatusText(meterRow.execution?.status || meterRow.completionStatus)],
+    ["ERF", meterRow.location?.erfNo ? `ERF ${meterRow.location.erfNo}` : asText(meterRow.refs?.erfId)],
+    ["Premise ID", asText(meterRow.refs?.premiseId, "None yet")],
+  ] : [];
+
+  return (
+    <>
+      <dl style={styles.detailGrid}>
+        {details.map(([label, value]) => (
+          <div key={label} style={styles.detailItem}>
+            <dt style={styles.detailLabel}>{label}</dt>
+            <dd style={styles.detailValue}>{asText(value)}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {meterDetails.length ? (
+        <div style={styles.fieldWorkSection}>
+          <h3 style={styles.fieldWorkTitle}>This meter in the batch</h3>
+          <dl style={styles.detailGrid}>
+            {meterDetails.map(([label, value]) => (
+              <div key={label} style={styles.detailItem}>
+                <dt style={styles.detailLabel}>{label}</dt>
+                <dd style={styles.detailValue}>{asText(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+
+      <Link to={`/operations/targeted-batches/${encodeURIComponent(tbId)}`} style={styles.openRowsLink}>
+        Open the batch's rows
+      </Link>
+    </>
+  );
+}
 
 function asText(value, fallback = "NAv") {
   const text = String(value ?? "").trim();
@@ -148,8 +218,17 @@ export default function SalesTbRefsModal({ row, onClose }) {
                         <strong style={styles.referenceId}>
                           {readTbRefBatchId(ref) || "Invalid historical reference"}
                         </strong>
+                        {membership.state === "MEMBER" && membership.tbId === readTbRefBatchId(ref) ? (
+                          <span style={styles.currentChip}>The batch this meter is in now</span>
+                        ) : null}
                       </div>
                     </div>
+
+                    <BatchSummary
+                      lmPcode={row.lmPcode}
+                      tbId={readTbRefBatchId(ref)}
+                      salesId={row.id || row.meterNoNormalized || row.meterNo}
+                    />
 
                     <dl style={styles.detailGrid}>
                       <div style={styles.detailItem}>
@@ -331,6 +410,29 @@ const styles = {
     fontSize: "0.8rem",
     fontWeight: 750,
     overflowWrap: "anywhere",
+  },
+  batchNote: {
+    margin: "0.35rem 0 0",
+    color: "#64748b",
+    fontSize: "0.82rem",
+  },
+  currentChip: {
+    display: "inline-block",
+    marginTop: "0.3rem",
+    padding: "0.15rem 0.45rem",
+    borderRadius: "999px",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: "0.68rem",
+    fontWeight: 900,
+  },
+  openRowsLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    marginTop: "0.6rem",
+    color: "#1d4ed8",
+    fontWeight: 800,
+    fontSize: "0.82rem",
   },
   fieldWorkSection: {
     marginTop: "0.8rem",
