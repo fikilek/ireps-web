@@ -126,3 +126,40 @@ export function matrixColumnHelp(key, { organisations = [], allOrganisations = o
     default: return null;
   }
 }
+
+// Rules TB-R045 (1.3.54): batches left out of the matrix, in plain words, for the quiet line under
+// the table. A reason code can repeat (one per batch row), so each is said once.
+const LEFT_OUT_REASONS = Object.freeze({
+  SUCCESSFUL_STATE_WITHOUT_READY_CREATION: "the batch was never fully created",
+  SUCCESSFUL_STATE_WITHOUT_ALLOCATED_STATUS: "the batch is not marked as allocated",
+  ACCEPTANCE_WITHOUT_ALLOCATION: "it was accepted or rejected without being allocated",
+  EXECUTION_WITHOUT_ACCEPTANCE: "field work started before the batch was accepted",
+  ALLOCATION_TARGET_MISSING: "no TEAM or SP is recorded",
+  TOTAL_ROWS_MISSING: "its number of meters is missing",
+  ALLOCATED_ROW_COUNT_MISMATCH: "its allocated meters don't match its number of meters",
+  UNALLOCATED_ROWS_REMAIN: "some of its meters are still unallocated",
+  COMPLETED_ROW_COUNT_INVALID: "more meters are completed than it holds",
+  STARTED_ROW_COUNT_INVALID: "more meters are started than it holds",
+  COMPLETED_PARENT_ROW_COUNT_MISMATCH: "it is marked completed while meters remain",
+  PHYSICAL_ROW_BATCH_MISMATCH: "a batch row belongs to another batch",
+  PHYSICAL_ROW_NOT_ALLOCATED: "a batch row is not allocated",
+  PHYSICAL_ROW_TARGET_MISMATCH: "a batch row is allocated to another TEAM or SP",
+});
+
+export function matrixLeftOutReasons(issue = {}) {
+  const reasons = [...new Set(issue.issues || [])].map((code) => {
+    if (code !== "PHYSICAL_ROW_COUNT_MISMATCH") return LEFT_OUT_REASONS[code] || "its records don't match";
+    const { expected, found } = issue.rows || {};
+    if (found === 0) return "its batch rows are missing";
+    return Number.isInteger(found) && Number.isInteger(expected)
+      ? `it has ${plural(found, "batch row")} for ${plural(expected, "meter")}`
+      : "its batch rows don't match its number of meters";
+  });
+  return [...new Set(reasons)].join("; ");
+}
+
+export function matrixLeftOutSummary(issues = []) {
+  const n = issues.length;
+  if (!n) return "";
+  return `${batchesLabel(n)} ${n === 1 ? "is" : "are"} left out of these numbers because ${n === 1 ? "its records don't" : "their records don't"} match.`;
+}

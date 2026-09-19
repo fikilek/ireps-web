@@ -3,7 +3,7 @@
 // opens, and nothing is read until it is opened, because the matrix reads every transaction of the
 // municipality. Hiding it unmounts the table; its reads end within about a minute. The Show / Hide
 // button is in TB Register's row of buttons (1.3.53); the matrix opens under the summary cards.
-import { AllocationIntegrityNotice, AllocationMatrixTeamSpTable } from "./allocation-matrix-table.jsx";
+import { AllocationMatrixTeamSpTable } from "./allocation-matrix-table.jsx";
 import { useAllocationMatrix } from "./use-allocation-matrix.js";
 
 function OpenAllocationMatrix({ lmPcode }) {
@@ -16,7 +16,6 @@ function OpenAllocationMatrix({ lmPcode }) {
           allocation targets cannot be resolved.
         </div>
       ) : null}
-      <AllocationIntegrityNotice issues={matrix.integrityIssues} />
       <div>
         <AllocationMatrixTeamSpTable matrix={matrix} />
       </div>

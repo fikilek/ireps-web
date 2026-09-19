@@ -373,6 +373,8 @@ function getActiveAllocationRowIntegrity({ batch, rows = [], target } = {}) {
   return {
     ok: issues.length === 0,
     issues: Array.from(new Set(issues)),
+    // Rules TB-R045 (1.3.54): the counts behind a row-count mismatch, for its plain-words reason.
+    rows: { expected: expectedRows, found: rows.length },
   };
 }
 
@@ -508,6 +510,7 @@ export function buildOrganisationAllocationMatrixResult({
         batchId,
         issues: [...physicalIntegrity.issues],
         target: { type: target.type, id: target.id, name: target.name },
+        rows: physicalIntegrity.rows,
       });
       continue;
     }

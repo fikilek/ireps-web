@@ -44,7 +44,7 @@ test("it is the Allocation Matrix page's own table, without search, Users view o
   const section = await read("./tb-register-allocation-matrix.jsx");
   const page = await read("../../TargetedBatchAllocationMatrixPage.jsx");
   assert.match(section, /<AllocationMatrixTeamSpTable matrix=\{matrix\} \/>/, "no search text and no incoming meters");
-  assert.match(section, /<AllocationIntegrityNotice issues=\{matrix\.integrityIssues\} \/>/, "the warning about batches left out");
+  assert.doesNotMatch(section, /AllocationIntegrityNotice|Allocation integrity warning/, "batches left out are named under the shared table (1.3.54)");
   assert.match(page, /const matrix = useAllocationMatrix\(matrixLmPcode\);/);
   assert.match(page, /<AllocationMatrixTeamSpTable matrix=\{matrix\} searchText=\{searchText\} incomingMeters=\{incomingMeters\} \/>/);
   for (const [name, source] of [["page", page], ["TB Register section", section]]) {

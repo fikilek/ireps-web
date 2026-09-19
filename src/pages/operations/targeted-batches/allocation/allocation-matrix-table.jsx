@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { matrixTotals, projectMatrixAllocation } from "./allocationMatrixModel";
-import { matrixColumnHelp } from "./allocationMatrixHelp";
+import { matrixColumnHelp, matrixLeftOutReasons, matrixLeftOutSummary } from "./allocationMatrixHelp";
 
 const ALL = "ALL";
 
@@ -118,26 +118,26 @@ export function Td({ children, strong = false, colSpan, divider = false, total =
   );
 }
 
-// Rules TB-R045: batches with inconsistent records are left out of the numbers and listed here.
-export function AllocationIntegrityNotice({ issues }) {
+// Rules TB-R045 (1.3.54): batches with inconsistent records are left out of the numbers. A quiet
+// line under the table says how many and why; Show which names each, in plain words.
+function LeftOutBatches({ issues }) {
+  const [showList, setShowList] = useState(false);
   if (!issues?.length) return null;
   return (
-    <div style={styles.integrityNotice}>
-      <strong>Allocation integrity warning:</strong> {issues.length}{" "}
-      batch(es) are quarantined from allocation totals until corrected.
-      <div style={styles.integrityIssueList}>
-        {issues.slice(0, 8).map((issue) => (
-          <span key={`${issue.batchId}:${issue.issues.join("|")}`}>
-            <strong>{issue.batchId}</strong>: {issue.issues.join(", ")}
-          </span>
-        ))}
-        {issues.length > 8 ? (
-          <span>
-            +{issues.length - 8} additional integrity issue
-            batch(es)
-          </span>
-        ) : null}
-      </div>
+    <div style={styles.leftOut}>
+      <span>{matrixLeftOutSummary(issues)}</span>{" "}
+      <button type="button" style={styles.leftOutToggle} aria-expanded={showList} onClick={() => setShowList((current) => !current)}>
+        {showList ? "Hide" : "Show which"}
+      </button>
+      {showList ? (
+        <ul style={styles.leftOutList}>
+          {issues.map((issue) => (
+            <li key={issue.batchId}>
+              {issue.batchId}{issue.target?.name ? ` (${issue.target.name})` : ""}: {matrixLeftOutReasons(issue)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -360,6 +360,7 @@ export function AllocationMatrixTeamSpTable({ matrix, searchText = "", incomingM
           ) : null}
         </table>
       </div>
+      <LeftOutBatches issues={matrix.integrityIssues} />
       {help ? <HelpWindow help={help} onClose={() => setHelpKey("")} /> : null}
     </>
   );
@@ -400,20 +401,10 @@ const styles = {
     borderRadius: 12,
     padding: 12,
   },
-  integrityNotice: {
-    border: "1px solid #fca5a5",
-    background: "#fff1f2",
-    color: "#9f1239",
-    borderRadius: 14,
-    padding: 14,
-  },
-  integrityIssueList: {
-    display: "grid",
-    gap: 4,
-    marginTop: 8,
-    fontSize: 11,
-    lineHeight: 1.45,
-  },
+  // Rules TB-R045 (1.3.54): the quiet line about batches left out, under the table.
+  leftOut: { marginTop: 10, color: "#64748b", fontSize: 12, lineHeight: 1.5 },
+  leftOutToggle: { border: 0, background: "none", padding: 0, color: "#1d4ed8", fontSize: 12, fontWeight: 800, cursor: "pointer", textDecoration: "underline" },
+  leftOutList: { margin: "6px 0 0", paddingLeft: 18, display: "grid", gap: 2 },
   typeFilterRow: { display: "flex", gap: 7, marginBottom: 12, flexWrap: "wrap" },
   filterButton: {
     border: "1px solid #cbd5e1",

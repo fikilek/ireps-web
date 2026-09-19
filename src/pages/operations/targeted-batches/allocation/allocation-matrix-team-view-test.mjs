@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { addFieldWorkToMatrix, buildOrganisationAllocationMatrixResult, matrixTotals, projectMatrixAllocation, splitHundredPercent } from "./allocationMatrixModel.js";
-import { matrixColumnHelp, MATRIX_COLUMN_KEYS } from "./allocationMatrixHelp.js";
+import { matrixColumnHelp, matrixLeftOutReasons, matrixLeftOutSummary, MATRIX_COLUMN_KEYS } from "./allocationMatrixHelp.js";
 
 // Targeted Batch rules TB-R045: the Allocation Matrix TEAM / SP view.
 // Numbers are shown in the viewer's own format, as the table does.
@@ -93,7 +93,10 @@ test("the page shows the new columns with a '?' on every heading, and the remove
   assert.match(page, /<CountPercent count=\{matrix\.notStarted\} percent=\{matrix\.notStartedPct\} \/>/);
   assert.match(page, /setTimeout\(onOpen, HELP_HOVER_DELAY_MS\)/, "resting the pointer opens the window");
   assert.match(page, /if \(event\.key === "Escape"\) onClose\(\);/);
-  assert.match(page, /Allocation integrity warning/, "the warning about inconsistent batches stays");
+  // Rules TB-R045 (1.3.54): batches left out are named in a quiet line under the table, not a red box.
+  assert.doesNotMatch(page, /Allocation integrity warning|AllocationIntegrityNotice|quarantined/);
+  assert.match(table, /<\/table>\s*<\/div>\s*<LeftOutBatches issues=\{matrix\.integrityIssues\} \/>/, "under the table");
+  assert.match(table, /\{showList \? "Hide" : "Show which"\}/);
   for (const card of ["TEAMs / SPs", "Meters Assigned", "Not Started", "In Progress", "Completed", "Total Work"]) assert.match(pageOnly, new RegExp(`label="${card.replace("/", "\\/")}"`));
 });
 
@@ -170,4 +173,22 @@ test("the page shows the totals row under the table, with no totals for the allo
   for (const cell of ["totals.batches", "totals.assigned", "count={totals.notStarted}", "count={totals.inProgress}", "count={totals.completed}", "totals.batchesSharePct",
     "workValue(totals.transactions)", "workValue(totals.noAccess)", "workPercent(totals.transactionsSharePct)", "workValue(totals.totalWork)", "workPercent(totals.totalWorkSharePct)"]) assert.ok(foot.includes(cell), cell);
   assert.equal((foot.match(/\{projectionActive \? <Td total>—<\/Td> : null\}/g) || []).length, 2, "projections cannot be added up");
+});
+
+// Rules TB-R045 (1.3.54): batches left out, said once each in plain words.
+test("a batch left out is named with its TEAM and a plain reason, and not counted", () => {
+  const whole = batch({ id: "B1", totalRows: 10, completedRows: 4 });
+  const noRows = batch({ id: "B2", targetId: "SIMO", targetName: "Simo Team", totalRows: 229, execution: "NOT_STARTED" });
+  const someRows = batch({ id: "B3", totalRows: 9 });
+  const rows = [...rowsFor(whole), ...rowsFor(someRows).slice(0, 5)];
+  const { organisations, integrityIssues } = buildOrganisationAllocationMatrixResult({ batches: [whole, noRows, someRows], rows, teams });
+  assert.deepEqual(integrityIssues.map(issue => [issue.batchId, issue.target.name, issue.rows]), [["B2", "Simo Team", { expected: 229, found: 0 }], ["B3", "Kaiser Team", { expected: 9, found: 5 }]]);
+  assert.equal(organisations.find(item => item.id === "SIMO").matrix.assigned, 0, "left out of the numbers");
+  assert.equal(organisations.find(item => item.id === "KAISER").matrix.assigned, 10);
+  assert.equal(matrixLeftOutReasons(integrityIssues[0]), "its batch rows are missing");
+  assert.equal(matrixLeftOutReasons(integrityIssues[1]), "it has 5 batch rows for 9 meters");
+  assert.equal(matrixLeftOutReasons({ issues: ["PHYSICAL_ROW_TARGET_MISMATCH", "PHYSICAL_ROW_TARGET_MISMATCH", "NEW_CODE"] }), "a batch row is allocated to another TEAM or SP; its records don't match", "each reason once; an unknown code still reads plainly");
+  assert.equal(matrixLeftOutSummary(integrityIssues), "2 batches are left out of these numbers because their records don't match.");
+  assert.equal(matrixLeftOutSummary(integrityIssues.slice(0, 1)), "1 batch is left out of these numbers because its records don't match.");
+  assert.equal(matrixLeftOutSummary([]), "");
 });

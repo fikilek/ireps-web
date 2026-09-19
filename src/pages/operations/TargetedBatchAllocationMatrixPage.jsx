@@ -15,7 +15,6 @@ import {
   splitHundredPercent,
 } from "./targeted-batches/allocation/allocationMatrixModel";
 import {
-  AllocationIntegrityNotice,
   AllocationMatrixTeamSpTable,
   Percent,
   Td,
@@ -292,8 +291,6 @@ export default function TargetedBatchAllocationMatrixPage() {
           Allocation context could not be loaded: {getErrorMessage(contextError)}
         </div>
       ) : null}
-
-      <AllocationIntegrityNotice issues={matrix.integrityIssues} />
 
       <div style={styles.summaryGrid}>
         <SummaryCard
