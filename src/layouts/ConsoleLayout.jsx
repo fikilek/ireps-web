@@ -542,6 +542,11 @@ function getPageTitle(activeNavItem, pathname) {
     return "TB Dashboard";
   }
 
+  // Targeted Batch rules TB-R057 (1.3.55): named before the TB Rows pattern, which would match it.
+  if (pathname === "/operations/targeted-batches/stats") {
+    return "Batch Stats";
+  }
+
   if (/^\/operations\/targeted-batches\/[^/]+$/.test(pathname)) {
     return "TB Rows";
   }

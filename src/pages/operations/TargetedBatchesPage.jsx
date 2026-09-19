@@ -1021,6 +1021,9 @@ export default function TargetedBatchesPage() {
             {isAllocationMatrixOpen ? "Hide Allocation Matrix" : "Show Allocation Matrix"}
           </button>
 
+          {/* Targeted Batch rules TB-R057 (1.3.55): Batch Stats for the active LM. */}
+          <Link to="/operations/targeted-batches/stats" style={styles.secondaryLinkButton}>Batch Stats</Link>
+
           {ticked.selectedIds.length ? (
             <button
               type="button"

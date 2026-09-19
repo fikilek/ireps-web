@@ -46,6 +46,7 @@ import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinal
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
 import TargetedBatchAllocationMatrixPage from "../pages/operations/TargetedBatchAllocationMatrixPage";
 import TargetedBatchAllocationMapPage from "../pages/operations/TargetedBatchAllocationMapPage";
+import BatchStatsPage from "../pages/operations/BatchStatsPage";
 import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
@@ -450,6 +451,16 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TargetedBatchDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          {/* Targeted Batch rules TB-R057 (1.3.55): Batch Stats. */}
+          <Route
+            path="/operations/targeted-batches/stats"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <BatchStatsPage />
               </RoleRoute>
             }
           />

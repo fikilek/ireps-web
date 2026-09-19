@@ -86,6 +86,7 @@ import { onBgoChildTrnExecutionSummaryWritten } from "./bgo/executionSummaryTrig
 import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
 export { resolveSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-resolution.js";
 export { getFieldWorkSummaryCallable } from "./teams/fieldWorkSummaryCallable.js";
+export { getBatchStatsCallable } from "./targetedBatches/batchStatsCallable.js";
 export { assessSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-geofence.js";
 import { onDeleteTargetedBatchCallable } from "./targetedBatches/deleteCallable.js";
 import { onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCallable } from "./targetedBatches/allocationCallable.js";
