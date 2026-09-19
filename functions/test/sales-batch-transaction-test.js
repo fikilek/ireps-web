@@ -515,20 +515,34 @@ async function seedMapMeters(n){
  await Promise.all(ids.map(id=>db.doc(`sales-all-meters/${id}`).update({erfNumbers:["123"]})));
  return ids;
 }
-const mapSave=targetedBatch=>createGeoFenceRequest({db,codec,request:request({name:"Gf W1 Map",description:"NAv",salesMapFence:true,targetedBatch,
- parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({latitude,longitude}))})});
-test("TB-R055: a GPS Sales map geofence saves with exactly its meters that can be batched; GPS meters never go to Google",async()=>{
- const ids=await seedMapMeters(2);
- const intent={tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES",salesIds:ids,reason:"Selected from GPS Sales Table · geofence Gf W1 Map",salesPeriodFrom:null,salesPeriodTo:null};
+const mapSave=(targetedBatch,{uid=f.actor.uid,name="Gf W1 Map"}={})=>createGeoFenceRequest({db,codec,request:{auth:{uid,token:{}},data:{name,description:"NAv",salesMapFence:true,targetedBatch,
+ parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({latitude,longitude}))}}});
+async function locatedIntent(ids,tbId=f.tbId){
+ const intent={tbId,lmPcode:"ZA5241",source:"PREPAID_SALES",salesIds:ids,reason:"Selected from GPS Sales Table · geofence Gf W1 Map",salesPeriodFrom:null,salesPeriodTo:null};
  const resolved=await resolveSalesBatch({db,request:request(intent),codec,geocode:async()=>assert.fail("GPS meters are never sent to Google")});
- intent.resolutionProofs=Object.fromEntries(resolved.rows.map(row=>[row.salesId,row.proof]));
- await assert.rejects(mapSave({...intent,salesIds:[ids[0]]}),{code:"SALES_MAP_FENCE_CHANGED"},"a meter the map did not count is refused");
- assert.equal(await fenceFor(),undefined,"nothing was saved");
- const saved=await mapSave(intent);
+ assert.equal(resolved.rows.every(row=>row.ready),true,JSON.stringify(resolved));
+ return {...intent,resolutionProofs:Object.fromEntries(resolved.rows.map(row=>[row.salesId,row.proof]))};
+}
+test("TB-R055: a GPS Sales map geofence saves with its meters that can be batched; GPS meters never go to Google",async()=>{
+ const ids=await seedMapMeters(2);
+ const saved=await mapSave(await locatedIntent(ids));
  assert.equal(saved.success,true,JSON.stringify(saved));
  assert.deepEqual(saved.savedSalesIds,[...ids].sort());
  const fence=(await fenceFor()).data();
  assert.deepEqual([fence.targetedBatch.linkState,fence.targetedBatch.salesIds],["UNLINKED",[...ids].sort()],"Batches & Geofences shows it as Batch not created");
+});
+test("TB-R055: a counted meter that could not be made ready is left out; the geofence holds the others",async()=>{
+ const ids=await seedMapMeters(2);
+ const intent=await locatedIntent([ids[0]],"TGB_20260913_120007_AB12");
+ const saved=await mapSave(intent);
+ assert.equal(saved.success,true,JSON.stringify(saved));
+ assert.deepEqual(saved.savedSalesIds,[ids[0]]);
+});
+test("TB-R055: someone who may not plan batches gets no count and no geofence",async()=>{
+ await seedMapMeters(1);
+ await db.doc("users/FWR1").set({...f.profile,employment:{...f.profile.employment,role:"FWR"}});
+ await assert.rejects(mapSave({tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES",salesIds:["00123"],resolutionProofs:{}},{uid:"FWR1"}),{code:"PERMISSION_DENIED"});
+ assert.equal(await fenceFor(),undefined);
 });
 test("TB-R055: a GPS Sales map geofence with 31 meters that can be batched is never saved",async()=>{
  const ids=await seedMapMeters(31);

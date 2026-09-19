@@ -42,6 +42,17 @@ export function salesMapFenceCountText({ pointsCount = 0, count, loading = false
   return { tone: "ok", text: counted };
 }
 
+// The counted meters that the saved geofence does not hold, each with its meter number and why
+// (TB-R055.4): not made ready when located, or not accepted when the geofence was saved.
+export function salesMapFenceLeftOut({ counted = [], savedIds = [], rows = [], meters = [] } = {}) {
+  const saved = new Set(savedIds), located = new Map(rows.map(row => [row.salesId, row])), byId = new Map(meters.map(meter => [meter.id, meter]));
+  return counted.filter(id => !saved.has(id)).map(id => {
+    const row = located.get(id);
+    const reason = row && !(row.ready && row.proof) ? row.reason || "it could not be made ready" : "it was not accepted when the geofence was saved";
+    return `${row?.meterNo || byId.get(id)?.meterNo || id} (${reason})`;
+  });
+}
+
 // Save -> linked, as TB Draft's progress window, without TB Draft's third step (TB-R055.5).
 export const SALES_MAP_FENCE_PROGRESS_STEPS = Object.freeze([
   { key: "save", label: "Saving the geofence" },

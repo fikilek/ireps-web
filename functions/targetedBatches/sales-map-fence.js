@@ -1,12 +1,20 @@
 // Targeted Batch rules TB-R055 (1.3.47): a batch geofence drawn on the GPS Sales map holds at most
 // 30 meters that can be batched. The web map and createGeoFence count them with the same code:
-// a GPS meter that can be batched (CAT, Not Started, not in a batch) whose ERF centroid is strictly
-// inside the geofence (TB-R039). Plain module: no Firebase imports, shared with the web.
-import { evaluateSalesBatchability, hasUsableSalesGps, inspectSavedErfDecision, singlePipelineErf } from "../salesAllMeters/sales-batch-policy.js";
+// a GPS meter that can be batched (CAT, Not Started, not in a batch) with the street address and
+// town the field needs, whose ERF centroid is strictly inside the geofence (TB-R039).
+// Plain module: no Firebase imports, shared with the web.
+import { evaluateSalesBatchability, hasUsableSalesGps, inspectSavedErfDecision, nonblank, salesStreetAddress, singlePipelineErf } from "../salesAllMeters/sales-batch-policy.js";
 import { batchGeometryBounds, strictlyInside } from "../geofences/sales-batch-geometry.js";
 
 export const SALES_MAP_FENCE_LIMIT = 30;
 const QUERY_CHUNK = 30;
+const QUERIES_AT_ONCE = 10;
+
+// The resolver refuses a meter without a street address or town (resolveSalesBatch), so such a
+// meter never goes into a batch and is not counted as one that can be batched.
+export function salesMapFenceAddressReady(row = {}) {
+  return nonblank(salesStreetAddress(row)) && nonblank(row.town);
+}
 
 // The ERF a GPS meter is batched on: its saved ERF decision, else its one pipeline ERF,
 // exactly as the resolver chooses it (resolveSalesBatch).
@@ -27,7 +35,7 @@ export function salesMapFenceMeters({ salesRows = [], erfsById = new Map(), geom
   const ids = new Set();
   for (const row of salesRows) {
     const salesId = row?.id;
-    if (!salesId || !hasUsableSalesGps(row)) continue;
+    if (!salesId || !hasUsableSalesGps(row) || !salesMapFenceAddressReady(row)) continue;
     if (!evaluateSalesBatchability(row, { salesId, lmPcode, source: "PREPAID_SALES", categoryMonth }).batchable) continue;
     const erf = erfsById.get(salesMapFenceErfId(row));
     if (!erf || erf.admin?.ward?.pcode !== wardPcode || erf.admin?.localMunicipality?.pcode !== lmPcode) continue;
@@ -36,10 +44,16 @@ export function salesMapFenceMeters({ salesRows = [], erfsById = new Map(), geom
   return [...ids].sort();
 }
 
-const chunks = values => {
+export const chunks = (values, size = QUERY_CHUNK) => {
   const list = [...new Set(values)];
-  return Array.from({ length: Math.ceil(list.length / QUERY_CHUNK) }, (_, index) => list.slice(index * QUERY_CHUNK, (index + 1) * QUERY_CHUNK));
+  return Array.from({ length: Math.ceil(list.length / size) }, (_, index) => list.slice(index * size, (index + 1) * size));
 };
+// Runs `run` over the items a few at a time: fast for a large area, without a burst of reads.
+export async function inGroups(items, run, atOnce = QUERIES_AT_ONCE) {
+  const results = [];
+  for (const group of chunks(items.map((_, index) => index), atOnce)) results.push(...await Promise.all(group.map(index => run(items[index]))));
+  return results;
+}
 
 // Server search: the Ward's ERFs around the geofence (the nearby-ERF query TB Draft uses), those
 // whose centroid is inside, then the Sales on them (GPS Sales list their pipeline ERF numbers in
@@ -57,19 +71,20 @@ export async function findSalesMapFenceMeters({ db, geometry, lmPcode, wardPcode
   }
   if (!erfsById.size) return [];
   const salesById = new Map();
-  const collect = snapshot => { for (const doc of snapshot.docs) salesById.set(doc.id, { ...doc.data(), id: doc.id }); };
   const erfNumbers = [...erfsById.values()].map(erf => String(erf.sg?.erfNo ?? "").trim()).filter(Boolean);
-  for (const chunk of chunks(erfNumbers)) collect(await db.collection("sales-all-meters").where("lmPcode", "==", lmPcode).where("erfNumbers", "array-contains-any", chunk).get());
-  for (const chunk of chunks([...erfsById.keys()])) collect(await db.collection("sales-all-meters").where("erfId", "in", chunk).get());
+  const queries = [
+    ...chunks(erfNumbers).map(chunk => db.collection("sales-all-meters").where("lmPcode", "==", lmPcode).where("erfNumbers", "array-contains-any", chunk)),
+    ...chunks([...erfsById.keys()]).map(chunk => db.collection("sales-all-meters").where("erfId", "in", chunk)),
+  ];
+  for (const snapshot of await inGroups(queries, found => found.get())) for (const doc of snapshot.docs) salesById.set(doc.id, { ...doc.data(), id: doc.id });
   return salesMapFenceMeters({ salesRows: [...salesById.values()], erfsById, geometry, lmPcode, wardPcode, categoryMonth });
 }
 
-// createGeoFence refuses a Sales-map geofence with more than 30 meters that can be batched, with
-// none, or whose meters differ from those counted on the map (something changed meanwhile).
-export function salesMapFenceProblem({ insideIds = [], sentIds = [] }) {
-  const inside = [...insideIds].sort(), sent = [...sentIds].sort();
-  if (inside.length > SALES_MAP_FENCE_LIMIT) return { code: "SALES_MAP_FENCE_TOO_MANY", message: `This geofence holds ${inside.length} meters that can be batched. The limit is ${SALES_MAP_FENCE_LIMIT}. Draw a smaller geofence.` };
-  if (!inside.length) return { code: "NO_READY_METERS", message: "This geofence holds no meter that can be batched." };
-  if (inside.length !== sent.length || inside.some((id, index) => id !== sent[index])) return { code: "SALES_MAP_FENCE_CHANGED", message: `The meters that can be batched inside this geofence changed while it was drawn (now ${inside.length}). Check the count on the map and save again.` };
+// createGeoFence refuses a Sales-map geofence with more than 30 meters that can be batched, or with
+// none. Which of them are saved is decided as for every batch geofence: the located meters whose ERF
+// centroid is inside; the web names any it counted that were left out.
+export function salesMapFenceProblem({ insideIds = [] }) {
+  if (insideIds.length > SALES_MAP_FENCE_LIMIT) return { code: "SALES_MAP_FENCE_TOO_MANY", message: `This geofence holds ${insideIds.length} meters that can be batched. The limit is ${SALES_MAP_FENCE_LIMIT}. Draw a smaller geofence.` };
+  if (!insideIds.length) return { code: "NO_READY_METERS", message: "This geofence holds no meter that can be batched." };
   return null;
 }

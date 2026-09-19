@@ -549,6 +549,8 @@ export default function SalesMetersTable({
 }) {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [selectionMessage, setSelectionMessage] = useState("");
+  // Targeted Batch rules TB-R055: while a geofence is drawn or saved on the map, the Ward is locked.
+  const [fenceBusy, setFenceBusy] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState(
     DEFAULT_COLUMN_VISIBILITY,
   );
@@ -966,6 +968,10 @@ export default function SalesMetersTable({
   }
 
   function toggleGpsMap() {
+    if (showGpsMap && fenceBusy) {
+      setSelectionMessage("A geofence is being drawn or saved on the map. Finish or cancel it before hiding the map.");
+      return;
+    }
     setShowGpsMap((current) => {
       if (current) clearMapRowInteraction();
       return !current;
@@ -977,7 +983,14 @@ export default function SalesMetersTable({
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
+  function wardLocked() {
+    if (!fenceBusy) return false;
+    setSelectionMessage("A geofence is being drawn or saved on the map. Finish or cancel it before changing the Ward.");
+    return true;
+  }
+
   function updateWardFilter(values = []) {
+    if (wardLocked()) return;
     clearMapRowInteraction();
     setCurrentPage(1);
     setWardGeofenceOptions([]);
@@ -1118,6 +1131,7 @@ export default function SalesMetersTable({
 
   function toggleColumn(columnKey) {
     const willHide = columnVisibility[columnKey] === true;
+    if (willHide && columnKey === "wardNo" && wardLocked()) return;
 
     setColumnVisibility((current) => ({
       ...current,
@@ -1160,6 +1174,7 @@ export default function SalesMetersTable({
   }
 
   function resetColumnFilters() {
+    if (filters.wardNos.length && wardLocked()) return;
     clearMapRowInteraction();
     setFilters(DEFAULT_FILTERS);
     setSortConfig(DEFAULT_SORT);
@@ -1270,6 +1285,7 @@ export default function SalesMetersTable({
           fenceRows={fenceWardRows}
           fenceCategoryMonth={fenceCategoryMonth}
           onSalesMapFenceSaved={handleSalesMapFenceSaved}
+          onFenceBusyChange={setFenceBusy}
         />
       ) : null}
       <PaginationControls

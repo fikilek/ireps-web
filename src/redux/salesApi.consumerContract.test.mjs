@@ -6,6 +6,8 @@ import { SourceTextModule, SyntheticModule, createContext } from "node:vm";
 import * as categories from "../pages/sales/models/salesCategoryModel.js";
 import * as months from "../pages/sales/models/salesMonthModel.js";
 import * as refs from "../pages/sales/models/salesTbRefsIntegrityModel.js";
+import { salesMapFenceMeters } from "../../functions/targetedBatches/sales-map-fence.js";
+import { polygonFromPoints } from "../../functions/geofences/sales-batch-geometry.js";
 
 async function fixture() {
   const state = { uid: "A", governanceCalls: 0, listeners: [], raw: {}, args: [] };
@@ -145,5 +147,39 @@ test("current membership projection preserves absence, null and invalid scalar e
   const invalid = api.normalizeSalesRow("1", { tbRefs: [{ id: "" }] });
   assert.equal(invalid.tbRefs.length, 1); // Preserve malformed raw entries for diagnosis.
   assert.equal(invalid.tbRefsIntegrity.valid, false);
+  api.setSalesReadSession(null);
+});
+
+// Targeted Batch rules TB-R055: the GPS Sales map counts table rows (normalized here), the server
+// counts raw Sales documents; both must find the same meters that can be batched.
+test("the map's rows and the server's raw documents give the same count of meters that can be batched", async () => {
+  const { api } = await fixture();
+  const MONTH = "2026-08", LM = "ZA5241", WARD = "ZA5241006";
+  const raw = (id, extra = {}) => ({ master: { id, visibility: "INVISIBLE" }, meterNo: id, meterNoNormalized: id, lmPcode: LM, town: "DUNDEE", adr: { strNo: "6", strName: "PATHER", strType: "-" },
+    tbRefs: [], targetedBatchId: null, hasUsableGps: true, erfNumbers: ["3/928"],
+    ErfCandidates: [{ ErfId: "ERF1", ErfNumber: "3/928", WardNumber: "006", WardPcode: WARD, LmPcode: LM, Latitude: 5, Longitude: 5 }],
+    monthlyCategories: { [MONTH]: { leakageCategory: "CAT4 - Long Gap (4+ months)", riskTier: "High", riskScore: 9 } }, ...extra });
+  const docs = {
+    PLAIN: raw("PLAIN"),
+    DECIMALRISK: raw("DECIMALRISK", { monthlyCategories: { [MONTH]: { leakageCategory: "CAT2 - Ghost Purchaser (1-3 mo)", riskTier: "High", riskScore: 7.5 } } }),
+    EXTRAKEY: raw("EXTRAKEY", { monthlyCategories: { [MONTH]: { leakageCategory: "CAT5 - Stopped Purchasing", riskTier: "High", riskScore: 8, source: "contour" } } }),
+    NORMAL: raw("NORMAL", { monthlyCategories: { [MONTH]: { leakageCategory: "Normal - No Leakage Flag", riskTier: "Normal", riskScore: 0 } } }),
+    COMPLETED: raw("COMPLETED", { master: { id: "COMPLETED", visibility: "VISIBLE" } }),
+    NOADDRESS: raw("NOADDRESS", { adr: { strNo: "", strName: "", strType: "-" } }),
+  };
+  const erfsById = new Map([["ERF1", { admin: { ward: { pcode: WARD }, localMunicipality: { pcode: LM } }, centroid: { lat: 5, lng: 5 } }]]);
+  const geometry = polygonFromPoints([[0, 0], [10, 0], [10, 10], [0, 10]]);
+  const count = salesRows => [...salesMapFenceMeters({ salesRows, erfsById, geometry, lmPcode: LM, wardPcode: WARD, categoryMonth: MONTH })];
+  const server = count(Object.entries(docs).map(([id, data]) => ({ ...data, id })));
+  const web = count(Object.entries(docs).map(([id, data]) => api.normalizeSalesRow(id, data)));
+  // Category entries in the schema's shape (three fields, whole risk score) count the same.
+  assert.deepEqual(web.filter(id => id === "PLAIN"), ["PLAIN"]);
+  assert.equal(server.includes("PLAIN"), true);
+  for (const id of ["NORMAL", "COMPLETED", "NOADDRESS"]) assert.equal(web.includes(id) || server.includes(id), false, id);
+  // An entry outside the schema's shape is "no category" on the web but CAT to the server, so the
+  // server's count can only be the stricter one: the limit of 30 can never be passed that way.
+  assert.deepEqual(web, ["PLAIN"]);
+  assert.deepEqual(server, ["DECIMALRISK", "EXTRAKEY", "PLAIN"]);
+  assert.ok(web.every(id => server.includes(id)), "every meter the map counts, the server counts too");
   api.setSalesReadSession(null);
 });

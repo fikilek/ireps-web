@@ -590,6 +590,7 @@ export default function SalesGpsMapSection({
   fenceRows = [],
   fenceCategoryMonth = null,
   onSalesMapFenceSaved,
+  onFenceBusyChange,
 }) {
   const { available, sync } = useWarehouse();
   const [fitRequest, setFitRequest] = useState(0);
@@ -660,6 +661,11 @@ export default function SalesGpsMapSection({
     wardGeofences,
     onSaved: onSalesMapFenceSaved,
   });
+  // While a geofence is being drawn or saved, the Ward stays as it is (TB-R055).
+  useEffect(() => {
+    onFenceBusyChange?.(fence.busy);
+    return () => onFenceBusyChange?.(false);
+  }, [fence.busy, onFenceBusyChange]);
 
   const hasNoGeofenceSelected = selectedGeofenceId === "NONE";
   const activeSelectedGeofenceId = selectedGeofenceId || "";
@@ -757,6 +763,8 @@ export default function SalesGpsMapSection({
                 onSelectedWardNoChange?.(event.target.value);
               }}
               style={styles.wardSelect}
+              disabled={fence.busy}
+              title={fence.busy ? "Finish or cancel the geofence first" : undefined}
             >
               <option value="">Select ward</option>
               {wardOptions.map((wardNo) => (

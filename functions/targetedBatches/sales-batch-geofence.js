@@ -25,9 +25,11 @@ export async function createSalesBatchGeofence({ db, request, codec, name, descr
   // meters that can be batched, counted the same way as on the map.
   if (request.data.salesMapFence === true) {
     if (intent.source !== "PREPAID_SALES") throw batchError("SALES_MAP_FENCE_GPS_ONLY", "Only GPS Sales are batched from the GPS Sales map");
+    // Only someone who may plan batches in this LM gets a count (the transaction checks again).
+    await readBatchActor({ db, request, lmPcode: intent.lmPcode });
     const categoryMonth = await latestSalesCategoryMonth(db, intent.lmPcode);
     const insideIds = await findSalesMapFenceMeters({ db, geometry, lmPcode: intent.lmPcode, wardPcode: parents.wardPcode, categoryMonth });
-    const problem = salesMapFenceProblem({ insideIds, sentIds: intent.salesIds });
+    const problem = salesMapFenceProblem({ insideIds });
     if (problem) throw batchError(problem.code, problem.message);
   }
   const geometryHash = materialHash(geometry), ref = db.collection("geo_fences").doc();

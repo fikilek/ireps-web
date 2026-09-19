@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SALES_MAP_FENCE_LIMIT, salesMapFenceCount, salesMapFenceCountText, salesMapFenceDraftChoice, salesMapFenceErfIds, salesMapFenceProgress } from "./salesMapFenceModel.js";
+import { SALES_MAP_FENCE_LIMIT, salesMapFenceCount, salesMapFenceCountText, salesMapFenceDraftChoice, salesMapFenceErfIds, salesMapFenceLeftOut, salesMapFenceProgress } from "./salesMapFenceModel.js";
 
 // Targeted Batch rules TB-R055 (1.3.47): the GPS Sales map's live count and hand-off.
 const LM = "ZA5241", WARD = "ZA5241006", MONTH = "2026-08";
@@ -42,6 +42,18 @@ test("the count waits for 3 points, a shape that does not cross itself, and the 
   const crossing = [{ lat: 0, lng: 0 }, { lat: 10, lng: 10 }, { lat: 0, lng: 10 }, { lat: 10, lng: 0 }];
   assert.match(salesMapFenceCountText({ pointsCount: 4, count: count([], new Map(), crossing) }).text, /crosses itself/);
   assert.match(salesMapFenceCountText({ pointsCount: 4, count: count([], new Map()), loading: true }).text, /Counting/);
+});
+
+test("a meter without a street address or town is not counted: the field could not find it", () => {
+  const rows = [row("A", "E1"), row("NOADDRESS", "E2", [5, 5], { adr: { strNo: "", strName: "-" } }), row("NOTOWN", "E3", [5, 5], { town: "" })];
+  const erfs = new Map([["E1", erf(5, 5)], ["E2", erf(5, 5)], ["E3", erf(5, 5)]]);
+  assert.deepEqual(count(rows, erfs).batchableIds, ["A"]);
+  assert.equal(count(rows, erfs).inside, 3, "they are still Sales meters inside");
+});
+
+test("meters counted but left out are named with the reason", () => {
+  const leftOut = salesMapFenceLeftOut({ counted: ["A", "B", "C"], savedIds: ["A"], rows: [{ salesId: "A", ready: true, proof: "p", meterNo: "0001" }, { salesId: "B", ready: false, reason: "ERF 12 is unavailable", meterNo: "0002" }, { salesId: "C", ready: true, proof: "p", meterNo: "0003" }] });
+  assert.deepEqual(leftOut, ["0002 (ERF 12 is unavailable)", "0003 (it was not accepted when the geofence was saved)"]);
 });
 
 test("only the ERFs of meters that can be batched are read", () => {

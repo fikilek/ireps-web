@@ -152,7 +152,8 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
         ) : null}
 </>); }
 // `showCounts`: the GPS Sales map confirms with its own count in `draftInside` (TB-R055).
-export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null, existingGeofences = [], showCounts = true}) {
+// `createError`: a message shown inside the open window (a name to type, a name just taken).
+export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null, existingGeofences = [], showCounts = true, createError = ""}) {
   // Geofences rules GF-R002: checked as each letter is typed; a taken name cannot go on to drawing.
   const nameDuplicate = wardNumber ? findDuplicateGeofence(composeGeofenceName(wardNumber, geofenceNamePart(draftName)), existingGeofences) : null;
   return (<>
@@ -254,6 +255,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
             </p>
           ) : null}
           {nameDuplicate ? <p role="alert" style={duplicateNameStyle}>{duplicateGeofenceNameMessage(nameDuplicate)}</p> : null}
+          {createError && !nameDuplicate ? <p role="alert" style={duplicateNameStyle}>{createError}</p> : null}
 
           <label>
             Description
@@ -331,6 +333,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
           {draftInside}
           {overlaps}
           {completeness}
+          {createError ? <p role="alert" style={duplicateNameStyle}>{createError}</p> : null}
           <div style={confirmDetailsStyle}>
             <div>
               <span style={confirmFieldLabelStyle}>Geofence Name</span>
