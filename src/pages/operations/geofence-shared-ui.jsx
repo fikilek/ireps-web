@@ -88,7 +88,8 @@ export function GeofenceToolbar({wardControl, filterControl, geofencesLoading, g
           ) : null}
         </div>
 ); }
-export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftPolygonReady, draftPreviewStats, handleUndoPoint, handleRestartDraft, handleOpenCreateConfirm, canSaveDraft, createState, handleCancelDraft, draftInside, completeness, inline = false}) { return (<>
+// `showStats`: the GPS Sales map shows its own count in `draftInside` instead (TB-R055).
+export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftPolygonReady, draftPreviewStats, handleUndoPoint, handleRestartDraft, handleOpenCreateConfirm, canSaveDraft, createState, handleCancelDraft, draftInside, completeness, inline = false, showStats = true}) { return (<>
         {isCreateMode ? (
           <div style={inline ? { ...drawingPanelStyle, position: "relative", inset: "auto", marginBottom: 10 } : drawingPanelStyle}>
             <strong>Creating: {draftName}</strong>
@@ -98,7 +99,7 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
               {draftPolygonReady ? "• Ready to save" : "• Minimum 3 required"}
             </span>
 
-            <span style={drawingStatsStyle}>
+            {showStats ? <span style={drawingStatsStyle}>
               ERFs: <strong>{draftPreviewStats.erfs}</strong> • Sales:{" "}
               <strong>{draftPreviewStats.sales.total}</strong>{" "}
               (Not Started {draftPreviewStats.sales.notStarted}, In Progress{" "}
@@ -113,7 +114,7 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
                   <strong>{draftPreviewStats.sales.integrityExceptions}</strong>
                 </>
               ) : null}
-            </span>
+            </span> : null}
 
             {draftInside}
             {completeness}
@@ -150,7 +151,8 @@ export function GeofenceDrawingBar({isCreateMode, draftName, draftPoints, draftP
           </div>
         ) : null}
 </>); }
-export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null, existingGeofences = []}) {
+// `showCounts`: the GPS Sales map confirms with its own count in `draftInside` (TB-R055).
+export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, visibleGeofences, selectedGeoFence, setSelectedGeoFence, createModalOpen, setCreateModalOpen, draftName, setDraftName, draftDescription, setDraftDescription, handleStartDrawing, confirmCreateModalOpen, setConfirmCreateModalOpen, draftPreviewStats, createState, handleConfirmCreate, createSuccess, setCreateSuccess, draftInside, completeness, overlaps = null, lockedWard = false, wardNumber = null, existingGeofences = [], showCounts = true}) {
   // Geofences rules GF-R002: checked as each letter is typed; a taken name cannot go on to drawing.
   const nameDuplicate = wardNumber ? findDuplicateGeofence(composeGeofenceName(wardNumber, geofenceNamePart(draftName)), existingGeofences) : null;
   return (<>
@@ -294,7 +296,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
             coverage.
           </p>
 
-          <div style={countCardGridStyle}>
+          {showCounts ? <div style={countCardGridStyle}>
             <div style={countCardStyle}>
               <span style={countLabelStyle}>ERFs</span>
               <strong style={countValueStyle}>{draftPreviewStats.erfs}</strong>
@@ -324,7 +326,7 @@ export function GeofenceDialogs({listModalOpen, wardLabel, setListModalOpen, vis
               <span style={countLabelStyle}>Assets</span>
               <strong style={countValueStyle}>{draftPreviewStats.assets}</strong>
             </div>
-          </div>
+          </div> : null}
 
           {draftInside}
           {overlaps}

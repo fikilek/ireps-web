@@ -5,6 +5,8 @@ import { polygonFromPoints, normalizeBatchGeometry, strictlyInside, strictlyWith
 import { assertCanCreateGeoFence, buildGeoFenceDocument } from "../geofences/helpers.js";
 import { findDuplicateGeofence, duplicateGeofenceNameMessage } from "../geofences/geofence-name.js";
 import { batchError, canonicalJson, materialHash, requireBatchIntent, readBatchActor, snapshotReader, proofScope, readDraftAssessment, createProofCodec, salesBatchProofKey, callableFailure } from "./sales-batch-resolution.js";
+import { latestSalesCategoryMonth } from "../salesAllMeters/sales-category-month.js";
+import { findSalesMapFenceMeters, salesMapFenceProblem } from "./sales-map-fence.js";
 
 export function requireSalesBatchFenceId(intent) {
   if (!validDocumentId(intent.geofenceId)) throw batchError("GEOFENCE_REQUIRED", "Create a new geofence for this draft");
@@ -19,6 +21,15 @@ export function assertDedicatedFence(fence, intent, actor, { linked = false } = 
 export async function createSalesBatchGeofence({ db, request, codec, name, description, parents, rawPoints }) {
   const intent = requireBatchIntent(request.data.targetedBatch), geometry = polygonFromPoints(rawPoints);
   if (parents.lmPcode !== intent.lmPcode) throw batchError("GEOFENCE_SCOPE_INVALID", "The geofence and draft must have the same LM");
+  // Targeted Batch rules TB-R055: a geofence drawn on the GPS Sales map never holds more than 30
+  // meters that can be batched, counted the same way as on the map.
+  if (request.data.salesMapFence === true) {
+    if (intent.source !== "PREPAID_SALES") throw batchError("SALES_MAP_FENCE_GPS_ONLY", "Only GPS Sales are batched from the GPS Sales map");
+    const categoryMonth = await latestSalesCategoryMonth(db, intent.lmPcode);
+    const insideIds = await findSalesMapFenceMeters({ db, geometry, lmPcode: intent.lmPcode, wardPcode: parents.wardPcode, categoryMonth });
+    const problem = salesMapFenceProblem({ insideIds, sentIds: intent.salesIds });
+    if (problem) throw batchError(problem.code, problem.message);
+  }
   const geometryHash = materialHash(geometry), ref = db.collection("geo_fences").doc();
   return db.runTransaction(async tx => {
     const read = snapshotReader(tx), actor = await readBatchActor({ db, request, lmPcode: intent.lmPcode, read });

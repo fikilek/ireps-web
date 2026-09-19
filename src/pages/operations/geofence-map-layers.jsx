@@ -169,7 +169,8 @@ export function WardBoundaryPolygons({ wards = [] }) {
   return null;
 }
 
-export function DraftGeoFenceLayer({ draftPoints }) {
+// `color`: the Sales map turns the shape red when it holds too many meters (TB-R055).
+export function DraftGeoFenceLayer({ draftPoints, color = "#2563eb" }) {
   const map = useMap();
   const polygonRef = useRef(null);
   const markersRef = useRef([]);
@@ -197,7 +198,7 @@ export function DraftGeoFenceLayer({ draftPoints }) {
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
           scale: 8,
-          fillColor: "#2563eb",
+          fillColor: color,
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 2,
@@ -214,10 +215,10 @@ export function DraftGeoFenceLayer({ draftPoints }) {
     if (draftPoints.length >= 3) {
       const polygon = new window.google.maps.Polygon({
         paths: draftPoints,
-        strokeColor: "#2563eb",
+        strokeColor: color,
         strokeOpacity: 1,
         strokeWeight: 3,
-        fillColor: "#2563eb",
+        fillColor: color,
         fillOpacity: 0.22,
         clickable: false,
         zIndex: 160,
@@ -236,7 +237,7 @@ export function DraftGeoFenceLayer({ draftPoints }) {
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, [map, draftPoints]);
+  }, [map, draftPoints, color]);
 
   return null;
 }

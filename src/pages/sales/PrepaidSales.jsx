@@ -6,7 +6,11 @@ import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
-import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
+import { prepareTargetedBatchDraft, removeSalesDraftMeter, saveSalesDraftFence } from "../../redux/targetedBatchDraftSlice";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../firebase";
+import { salesDraftForGeofence } from "./models/batchGeofenceModel";
+import { salesMapFenceDraftChoice } from "./models/salesMapFenceModel.js";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import SalesMetersTable from "./components/SalesMetersTable";
 import {
@@ -179,6 +183,8 @@ export default function PrepaidSales() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isTargetBatchModalOpen, setIsTargetBatchModalOpen] = useState(false);
   const [targetBatchScopeError, setTargetBatchScopeError] = useState("");
+  // Targeted Batch rules TB-R055: the geofence last drawn on the GPS Sales map, until its batch opens.
+  const [salesMapFence, setSalesMapFence] = useState(null);
 
   const {
     currentData: currentSalesRows,
@@ -215,6 +221,7 @@ export default function PrepaidSales() {
     setSelectedIds(new Set());
     setIsTargetBatchModalOpen(false);
     setTargetBatchScopeError("");
+    setSalesMapFence(null);
   }, [salesScopeKey]);
 
   useEffect(() => {
@@ -305,6 +312,26 @@ export default function PrepaidSales() {
     setTargetBatchScopeError("");
   }
 
+  async function openSalesMapFenceDraft(removeIds = []) {
+    try {
+      const snapshot = await getDoc(doc(db, "geo_fences", salesMapFence.id));
+      const fence = snapshot.exists() ? { ...snapshot.data(), id: snapshot.id } : null;
+      const plan = salesDraftForGeofence({ fence, salesRows: salesWorkStatusRows, lmPcode: activeLmPcode, lmName: activeWorkbaseName, scopeKey: salesScopeKey });
+      if (!plan.ok) {
+        setTargetBatchScopeError(plan.message);
+        return;
+      }
+      dispatch(prepareTargetedBatchDraft(plan.payload));
+      dispatch(saveSalesDraftFence({ tbId: plan.payload.id, fence: { id: fence.id } }));
+      removeIds.forEach((salesId) => dispatch(removeSalesDraftMeter({ tbId: plan.payload.id, salesId })));
+      setIsTargetBatchModalOpen(false);
+      setSalesMapFence(null);
+      navigate("/operations/targeted-batches/draft");
+    } catch {
+      setTargetBatchScopeError("Couldn't read the geofence right now. Try again.");
+    }
+  }
+
   function handleOpenTargetedBatch() {
     setTargetBatchScopeError("");
 
@@ -319,6 +346,18 @@ export default function PrepaidSales() {
       setTargetBatchScopeError(
         "Targeted Batch creation is blocked because no Sales meters are selected.",
       );
+      return;
+    }
+
+    // Targeted Batch rules TB-R055.6: meters ticked from a geofence drawn on the GPS Sales map open
+    // that geofence's TB Draft, as Create its batch does.
+    const fenceChoice = salesMapFenceDraftChoice({ fence: salesMapFence, selectedIds, rows: salesWorkStatusRows });
+    if (fenceChoice.kind === "outside") {
+      setTargetBatchScopeError(fenceChoice.message);
+      return;
+    }
+    if (fenceChoice.kind === "fence") {
+      openSalesMapFenceDraft(fenceChoice.removeIds);
       return;
     }
 
@@ -544,6 +583,10 @@ export default function PrepaidSales() {
             downloadScope={quickDownloadScope}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
+            fenceRows={salesWorkStatusRows}
+            fenceCategoryMonth={batchCategoryMonth}
+            canDrawFence={role === "MNG" || role === "SPV"}
+            onSalesMapFenceSaved={setSalesMapFence}
             initialTbId={dashboardMapContext.tbId}
             initialShowGpsMap={dashboardMapContext.openMap}
           />

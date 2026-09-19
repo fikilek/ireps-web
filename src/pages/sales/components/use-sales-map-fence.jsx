@@ -1,0 +1,153 @@
+/* eslint-disable no-unused-vars -- JSX tags are used by React. */
+// Targeted Batch rules TB-R055 (1.3.47): draw a GPS batch geofence on the GPS Sales map, with a live
+// count of the meters that can be batched (at most 30), save it as the batch's own geofence, then
+// hand its meters to the table. The geofence tools are the ones TB Draft and Geo-Fences use.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { collection, documentId, getDocs, query, where } from "firebase/firestore";
+import { db } from "../../../firebase";
+import { useCreateGeoFenceMutation } from "../../../redux/geofencesApi";
+import { useResolveSalesTargetedBatchMutation } from "../../../redux/salesTargetedBatchApi";
+import { buildTargetedBatchDraftId } from "../../../redux/targetedBatchDraftModel";
+import { useGeofencePolygonDraft } from "../../../features/maps/use-geofence-polygon-draft";
+import { mapPoint } from "../../../features/maps/sales-batch-nearby.js";
+import { GeofenceDrawingBar, GeofenceDialogs } from "../../operations/geofence-shared-ui";
+import { DraftGeoFenceLayer } from "../../operations/geofence-map-layers";
+import GeofenceProgressModal from "../../operations/targeted-batches/draft/geofence-progress-modal.jsx";
+import { GEOFENCE_PROGRESS_TIMEOUT_MS } from "../../operations/targeted-batches/draft/geofence-progress.js";
+import { salesDraftMessage } from "../../operations/targeted-batches/draft/sales-batch-draft-model";
+import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../../functions/geofences/geofence-name.js";
+import { salesMapFenceCount, salesMapFenceCountText, salesMapFenceErfIds, salesMapFenceProgress } from "../models/salesMapFenceModel.js";
+
+const ERF_CHUNK = 30;
+const EMPTY_ERFS = new Map();
+const NO_STATS = { erfs: "—", premises: "—", assets: "—", sales: { total: "—", notStarted: "—", inProgress: "—", completed: "—", integrityExceptions: 0 } };
+const TONES = { ok: "#166534", info: "#334155", busy: "#334155", error: "#b91c1c" };
+
+// The ERF centroids of the Ward's meters that can be batched, read once when drawing starts.
+function useSalesMapFenceErfs(erfIds, enabled) {
+  const key = enabled && erfIds.length ? erfIds.join("|") : "";
+  const [state, setState] = useState({ key: "", erfsById: EMPTY_ERFS, error: "" });
+  useEffect(() => {
+    if (!key) return undefined;
+    let active = true;
+    (async () => {
+      const ids = key.split("|"), erfsById = new Map();
+      try {
+        for (let index = 0; index < ids.length; index += ERF_CHUNK) {
+          const snapshot = await getDocs(query(collection(db, "ireps_erfs"), where(documentId(), "in", ids.slice(index, index + ERF_CHUNK))));
+          snapshot.docs.forEach(doc => erfsById.set(doc.id, doc.data()));
+        }
+        if (active) setState({ key, erfsById, error: "" });
+      } catch {
+        if (active) setState({ key, erfsById: EMPTY_ERFS, error: "The ERFs of this Ward could not be read, so the meters cannot be counted. Cancel and try again." });
+      }
+    })();
+    return () => { active = false; };
+  }, [key]);
+  const ready = !key || state.key === key;
+  return { erfsById: key && ready ? state.erfsById : EMPTY_ERFS, loading: !ready, error: key && ready ? state.error : "" };
+}
+
+export function useSalesMapFence({ canDraw = false, lmPcode = "", wardPcode = "", wardLabel = "", rows = [], categoryMonth = null, wardGeofences = [], onSaved }) {
+  const drawing = useGeofencePolygonDraft();
+  const [resolve] = useResolveSalesTargetedBatchMutation();
+  const [createGeoFence] = useCreateGeoFenceMutation();
+  const [createModalOpen, setCreateModalOpen] = useState(false), [confirmOpen, setConfirmOpen] = useState(false);
+  const [draftName, setDraftName] = useState(""), [draftDescription, setDraftDescription] = useState("");
+  const [error, setError] = useState(""), [saving, setSaving] = useState(false), [progress, setProgress] = useState(null);
+  const wardNumber = wardNumberFromPcode(wardPcode);
+  const standardName = composeGeofenceName(wardNumber, geofenceNamePart(draftName));
+  const isCreateMode = drawing.drawing;
+
+  const erfIds = useMemo(() => salesMapFenceErfIds(rows, { lmPcode, categoryMonth }), [rows, lmPcode, categoryMonth]);
+  const erfs = useSalesMapFenceErfs(erfIds, isCreateMode || confirmOpen);
+  const count = useMemo(() => salesMapFenceCount({ points: drawing.points, rows, erfsById: erfs.erfsById, lmPcode, wardPcode, categoryMonth }),
+    [drawing.points, rows, erfs.erfsById, lmPcode, wardPcode, categoryMonth]);
+  const countText = salesMapFenceCountText({ pointsCount: drawing.points.length, count, loading: erfs.loading, error: erfs.error });
+  const canSave = Boolean(count.canSave && !erfs.loading && !erfs.error && !saving && standardName);
+  const canStart = Boolean(canDraw && lmPcode && wardPcode && !isCreateMode && !saving && !progress);
+
+  const cancel = () => { drawing.clear(); setConfirmOpen(false); setDraftName(""); setDraftDescription(""); setError(""); };
+  const handleStartDrawing = () => {
+    if (!geofenceNamePart(draftName).trim()) { setError(`Type a name after "Gf W${wardNumber}".`); return; }
+    const duplicate = findDuplicateGeofence(standardName, wardGeofences);
+    if (duplicate) { setError(duplicateGeofenceNameMessage(duplicate)); return; }
+    drawing.clear(); drawing.setDrawing(true); setCreateModalOpen(false); setError("");
+  };
+  const handleMapClick = event => {
+    if (!isCreateMode || saving) return;
+    const point = mapPoint(event.detail?.latLng);
+    if (point) drawing.addPoint(point);
+  };
+
+  // Save: locate the meters (GPS: from the Sales record, no Google), then save the geofence as the
+  // batch's own; the server counts again and refuses more than 30 (TB-R055.3, .4).
+  const handleConfirmCreate = async () => {
+    if (!canSave) return;
+    const duplicate = findDuplicateGeofence(standardName, wardGeofences);
+    if (duplicate) { setError(duplicateGeofenceNameMessage(duplicate)); return; }
+    const salesIds = count.batchableIds, tbId = buildTargetedBatchDraftId(), name = standardName;
+    const points = drawing.points.map((point, order) => ({ latitude: point.lat, longitude: point.lng, order }));
+    setConfirmOpen(false); setSaving(true); setError("");
+    setProgress({ phase: "saving", name, fenceId: null, timedOut: false, tbId, salesIds });
+    try {
+      const located = await resolve({ tbId, lmPcode, source: "PREPAID_SALES", salesIds }).unwrap();
+      const notReady = (located.rows || []).filter(row => !row.ready || !row.proof);
+      if (notReady.length || (located.rows || []).length !== salesIds.length) {
+        throw new Error(`${notReady.length || "Some"} meter${notReady.length === 1 ? "" : "s"} could not be made ready: ${notReady.slice(0, 3).map(row => `${row.meterNo || row.salesId} (${row.reason})`).join("; ")}. Nothing was saved.`);
+      }
+      const targetedBatch = { tbId, lmPcode, source: "PREPAID_SALES", geofenceId: null, salesIds, reason: `Selected from GPS Sales Table · geofence ${name}`,
+        salesPeriodFrom: null, salesPeriodTo: null, resolutionProofs: Object.fromEntries(located.rows.map(row => [row.salesId, row.proof])) };
+      const result = await createGeoFence({ name, description: draftDescription.trim() || "NAv", points, salesMapFence: true, targetedBatch,
+        parents: { lmPcode, wardPcode, countryPcode: "ZA", provincePcode: lmPcode.slice(0, 3), dmPcode: lmPcode.slice(0, -1) } }).unwrap();
+      if (result?.success !== true) throw new Error(result?.message || "The geofence could not be saved. Nothing was created.");
+      setProgress(current => current && { ...current, phase: "saved", fenceId: result.geofenceId, salesIds: result.savedSalesIds || salesIds });
+      drawing.clear(); setDraftName(""); setDraftDescription("");
+    } catch (failure) {
+      setProgress(null);
+      setError(salesDraftMessage(failure?.error || failure?.message || "The geofence could not be saved. Try again."));
+    } finally { setSaving(false); }
+  };
+
+  // Progress until the server has linked the geofence (TB-R055.5), then hand it to the table once.
+  const savedFence = progress?.fenceId ? wardGeofences.find(fence => fence.id === progress.fenceId) || null : null;
+  const progressState = progress ? salesMapFenceProgress({ phase: progress.phase, fenceId: progress.fenceId, fence: savedFence, timedOut: progress.timedOut }) : null;
+  const waiting = Boolean(progress?.phase === "saved" && !progress.timedOut && !progressState?.done);
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = setTimeout(() => setProgress(current => current && { ...current, timedOut: true }), GEOFENCE_PROGRESS_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [waiting]);
+  const handedOver = useRef("");
+  useEffect(() => {
+    if (!progressState?.done || !progress?.fenceId || handedOver.current === progress.fenceId) return;
+    handedOver.current = progress.fenceId;
+    onSaved?.({ id: progress.fenceId, name: progress.name, tbId: progress.tbId, salesIds: progress.salesIds });
+  }, [progressState?.done, progress, onSaved]);
+
+  const countLine = <p role="status" style={{ margin: 0, color: TONES[countText.tone], fontWeight: count.over ? 900 : 750 }}>{countText.text}</p>;
+  const drawButton = canDraw ? <button type="button" style={{ ...drawButtonStyle, opacity: canStart ? 1 : 0.5, cursor: canStart ? "pointer" : "not-allowed" }} disabled={!canStart}
+    title={wardPcode ? "Draw the geofence for a GPS batch (at most 30 meters that can be batched)" : "Select a Ward first"} onClick={() => { setError(""); setCreateModalOpen(true); }}>
+    Draw batch geofence</button> : null;
+  const panel = <>
+    {error ? <p role="alert" style={errorStyle}>{error}</p> : null}
+    <GeofenceDrawingBar isCreateMode={isCreateMode} draftName={standardName} draftPoints={drawing.points} draftPolygonReady={drawing.points.length >= 3} draftPreviewStats={NO_STATS}
+      handleUndoPoint={() => { if (!saving) drawing.undo(); }} handleRestartDraft={() => { if (!saving) drawing.setPoints([]); }} handleOpenCreateConfirm={() => { if (canSave) setConfirmOpen(true); }}
+      canSaveDraft={canSave} createState={{ isLoading: saving }} handleCancelDraft={cancel} draftInside={countLine} inline showStats={false}/>
+  </>;
+  const mapLayer = isCreateMode ? <DraftGeoFenceLayer draftPoints={drawing.points} color={count.over ? "#dc2626" : "#2563eb"}/> : null;
+  const dialogs = <>
+    <GeofenceDialogs listModalOpen={false} wardLabel={wardLabel} setListModalOpen={() => {}} visibleGeofences={[]} selectedGeoFence={null} setSelectedGeoFence={() => {}}
+      createModalOpen={createModalOpen} setCreateModalOpen={setCreateModalOpen} draftName={draftName} setDraftName={setDraftName} draftDescription={draftDescription} setDraftDescription={setDraftDescription}
+      handleStartDrawing={handleStartDrawing} confirmCreateModalOpen={confirmOpen} setConfirmCreateModalOpen={setConfirmOpen} draftPreviewStats={NO_STATS} createState={{ isLoading: saving }}
+      handleConfirmCreate={handleConfirmCreate} createSuccess={null} setCreateSuccess={() => {}} draftInside={countLine} completeness={null}
+      lockedWard wardNumber={wardNumber} existingGeofences={wardGeofences} showCounts={false}/>
+    {progress && progressState ? <GeofenceProgressModal name={progress.name} wardLabel={wardLabel} progress={progressState} fence={savedFence} onClose={() => setProgress(null)}
+      linkedTo={`batch ${progress.tbId}`} stillLinkingText="Its ERFs and meters are still being linked. The table filters to it as soon as they are."
+      next={<><strong>Next:</strong> the table now shows this geofence&apos;s {progress.salesIds.length} meter{progress.salesIds.length === 1 ? "" : "s"}, ticked. Press <strong>Create Target Batch</strong> to open TB Draft with this geofence, or create the batch later from <strong>Batches &amp; Geofences</strong>.</>}/> : null}
+  </>;
+  return { drawButton, panel, mapLayer, dialogs, handleMapClick, isCreateMode };
+}
+
+const drawButtonStyle = { alignSelf: "flex-end", border: "1px solid #7c3aed", borderRadius: "0.65rem", padding: "0.52rem 0.7rem", background: "#7c3aed", color: "#ffffff", fontWeight: 850 };
+const errorStyle = { margin: "0 1rem 0.6rem", padding: "0.6rem 0.8rem", borderRadius: "0.6rem", border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 750 };

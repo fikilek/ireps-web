@@ -5,6 +5,7 @@ import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 
 import { useWarehouse } from "@/context/WarehouseContext";
 import { useGetGeoFencesByWardQuery } from "../../../redux/geofencesApi";
+import { useSalesMapFence } from "./use-sales-map-fence.jsx";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
@@ -584,6 +585,11 @@ export default function SalesGpsMapSection({
   hoveredMeterId = "",
   focusedMeterId = "",
   focusRequest = 0,
+  // Targeted Batch rules TB-R055: drawing a GPS batch geofence on this map.
+  canDrawFence = false,
+  fenceRows = [],
+  fenceCategoryMonth = null,
+  onSalesMapFenceSaved,
 }) {
   const { available, sync } = useWarehouse();
   const [fitRequest, setFitRequest] = useState(0);
@@ -643,6 +649,17 @@ export default function SalesGpsMapSection({
       })),
     );
   }, [onWardGeofencesChange, selectedWardNo, wardGeofences]);
+
+  const fence = useSalesMapFence({
+    canDraw: canDrawFence && Boolean(selectedWardNo),
+    lmPcode: selectedLmPcode,
+    wardPcode: selectedWardPcode,
+    wardLabel: selectedWardNo ? `Ward ${selectedWardNo}` : "",
+    rows: fenceRows,
+    categoryMonth: fenceCategoryMonth,
+    wardGeofences,
+    onSaved: onSalesMapFenceSaved,
+  });
 
   const hasNoGeofenceSelected = selectedGeofenceId === "NONE";
   const activeSelectedGeofenceId = selectedGeofenceId || "";
@@ -767,8 +784,11 @@ export default function SalesGpsMapSection({
           >
             {hasSelectedGeofence ? "Fit Geofence" : "Fit Ward"}
           </button>
+          {fence.drawButton}
         </div>
       </div>
+
+      {selectedWardNo ? fence.panel : null}
 
       {!selectedWardNo ? (
         <div style={styles.emptyState}>
@@ -827,8 +847,10 @@ export default function SalesGpsMapSection({
                 mapTypeId="roadmap"
                 gestureHandling="greedy"
                 disableDefaultUI={false}
+                onClick={fence.handleMapClick}
                 style={{ width: "100%", height: "100%" }}
               >
+                {fence.mapLayer}
                 <SalesWardBoundaryLayer
                   wardBoundary={selectedWardBoundary}
                   fitRequest={fitRequest}
@@ -867,6 +889,7 @@ export default function SalesGpsMapSection({
           </div>
         </>
       )}
+      {fence.dialogs}
     </section>
   );
 }

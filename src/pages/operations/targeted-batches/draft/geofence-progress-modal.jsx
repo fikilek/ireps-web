@@ -4,16 +4,19 @@ import { geofenceFinalCounts } from "./geofence-progress.js";
 
 // Targeted Batch rules TB-R040 (1.3.22): progress while the geofence is saved and linked, then
 // Geofence created with the next step. It never creates the batch; OK only closes it.
-export default function GeofenceProgressModal({ name, wardLabel, progress, fence, onClose }) {
+// The GPS Sales map (TB-R055) passes its own `linkedTo`, `stillLinkingText` and `next`.
+export default function GeofenceProgressModal({ name, wardLabel, progress, fence, onClose, linkedTo = "this draft",
+  stillLinkingText = "Its ERFs and meters are still being linked. If Create Batch isn't available yet, wait a moment.",
+  next = <><strong>Next:</strong> press <strong>Create Batch</strong> (next to Satellite) to create the batch now, or create it later from <strong>Batches &amp; Geofences</strong>.</> }) {
   const counts = geofenceFinalCounts(fence);
   return <div style={styles.backdrop}>
     <div role="dialog" aria-modal="true" aria-label={progress.done ? "Geofence created" : `Creating ${name}`} style={styles.card}>
       {progress.done ? <>
         <h2 style={styles.title}>Geofence created</h2>
-        <p style={styles.text}><strong>{name}</strong> is saved in {wardLabel} and linked to this draft.</p>
+        <p style={styles.text}><strong>{name}</strong> is saved in {wardLabel} and linked to {linkedTo}.</p>
         <p style={styles.counts}>ERFs {counts.erfs} · Sales meters {counts.salesMeters} · Premises {counts.premises} · Assets {counts.assets}</p>
-        {progress.stillLinking ? <p role="status" style={styles.warning}>Its ERFs and meters are still being linked. If Create Batch isn't available yet, wait a moment.</p> : null}
-        <p style={styles.next}><strong>Next:</strong> press <strong>Create Batch</strong> (next to Satellite) to create the batch now, or create it later from <strong>Batches &amp; Geofences</strong>.</p>
+        {progress.stillLinking ? <p role="status" style={styles.warning}>{stillLinkingText}</p> : null}
+        <p style={styles.next}>{next}</p>
         <div style={styles.actions}><button type="button" style={styles.okButton} onClick={onClose}>OK</button></div>
       </> : <>
         <h2 style={styles.title}>Creating {name}</h2>

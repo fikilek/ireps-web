@@ -541,6 +541,11 @@ export default function SalesMetersTable({
   downloadScope = {},
   selectedIds,
   onSelectedIdsChange,
+  // Targeted Batch rules TB-R055: every Sales row (whatever the table filters) for the map's count.
+  fenceRows = [],
+  fenceCategoryMonth = null,
+  canDrawFence = false,
+  onSalesMapFenceSaved,
 }) {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [selectionMessage, setSelectionMessage] = useState("");
@@ -702,6 +707,21 @@ export default function SalesMetersTable({
   const mapSelectedGeofenceId = singleSelectedWardNo
     ? singleSelectedGeofenceId
     : "";
+
+  // Targeted Batch rules TB-R055: the map counts the chosen Ward's meters from every Sales row.
+  const fenceWardRows = useMemo(() => {
+    if (!singleSelectedWardNo) return [];
+    const ward = new Set([singleSelectedWardNo]);
+    return (Array.isArray(fenceRows) ? fenceRows : []).filter((row) => rowMatchesWardFilter(row, ward));
+  }, [fenceRows, singleSelectedWardNo]);
+
+  // After the geofence is saved and linked: show its meters and tick them (TB-R055.5).
+  const handleSalesMapFenceSaved = useCallback((savedFence) => {
+    setCurrentPage(1);
+    setFilters((current) => ({ ...current, geofenceIds: [savedFence.id] }));
+    onSelectedIdsChange?.(new Set(savedFence.salesIds));
+    onSalesMapFenceSaved?.(savedFence);
+  }, [onSelectedIdsChange, onSalesMapFenceSaved]);
 
   useEffect(() => {
     // External navigation to another target filter starts its first page.
@@ -1246,6 +1266,10 @@ export default function SalesMetersTable({
           hoveredMeterId={hoveredMapMeterId}
           focusedMeterId={focusedMapMeterId}
           focusRequest={mapFocusRequest}
+          canDrawFence={canDrawFence}
+          fenceRows={fenceWardRows}
+          fenceCategoryMonth={fenceCategoryMonth}
+          onSalesMapFenceSaved={handleSalesMapFenceSaved}
         />
       ) : null}
       <PaginationControls

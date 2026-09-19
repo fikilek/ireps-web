@@ -506,3 +506,32 @@ test("a batch allocated again to the same TEAM since TB Register showed it is no
  assert.deepEqual([parent.allocation.status,parent.allocation.targetId],["ALLOCATED","TEAM1"],"the new allocation stands");
  assert.equal((await unallocationHistory()).length,1,"only the first unallocation is recorded");
 });
+
+// Targeted Batch rules TB-R055 (1.3.47): a geofence drawn on the GPS Sales map. GPS Sales list their
+// pipeline ERF numbers in `erfNumbers`; the fixture ERF gets the number real ERFs carry.
+async function seedMapMeters(n){
+ const ids=await seed(n,{source:"PREPAID_SALES"});
+ await db.doc("ireps_erfs/ERF1").update({"sg.erfNo":"123"});
+ await Promise.all(ids.map(id=>db.doc(`sales-all-meters/${id}`).update({erfNumbers:["123"]})));
+ return ids;
+}
+const mapSave=targetedBatch=>createGeoFenceRequest({db,codec,request:request({name:"Gf W1 Map",description:"NAv",salesMapFence:true,targetedBatch,
+ parents:{countryPcode:"ZA",provincePcode:"ZA5",dmPcode:"ZA524",lmPcode:"ZA5241",wardPcode:"ZA5241001"},points:f.fencePoints.map(([longitude,latitude])=>({latitude,longitude}))})});
+test("TB-R055: a GPS Sales map geofence saves with exactly its meters that can be batched; GPS meters never go to Google",async()=>{
+ const ids=await seedMapMeters(2);
+ const intent={tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES",salesIds:ids,reason:"Selected from GPS Sales Table · geofence Gf W1 Map",salesPeriodFrom:null,salesPeriodTo:null};
+ const resolved=await resolveSalesBatch({db,request:request(intent),codec,geocode:async()=>assert.fail("GPS meters are never sent to Google")});
+ intent.resolutionProofs=Object.fromEntries(resolved.rows.map(row=>[row.salesId,row.proof]));
+ await assert.rejects(mapSave({...intent,salesIds:[ids[0]]}),{code:"SALES_MAP_FENCE_CHANGED"},"a meter the map did not count is refused");
+ assert.equal(await fenceFor(),undefined,"nothing was saved");
+ const saved=await mapSave(intent);
+ assert.equal(saved.success,true,JSON.stringify(saved));
+ assert.deepEqual(saved.savedSalesIds,[...ids].sort());
+ const fence=(await fenceFor()).data();
+ assert.deepEqual([fence.targetedBatch.linkState,fence.targetedBatch.salesIds],["UNLINKED",[...ids].sort()],"Batches & Geofences shows it as Batch not created");
+});
+test("TB-R055: a GPS Sales map geofence with 31 meters that can be batched is never saved",async()=>{
+ const ids=await seedMapMeters(31);
+ await assert.rejects(mapSave({tbId:f.tbId,lmPcode:"ZA5241",source:"PREPAID_SALES",salesIds:ids.slice(0,30),resolutionProofs:{}}),{code:"SALES_MAP_FENCE_TOO_MANY",message:/holds 31 meters that can be batched\. The limit is 30/});
+ assert.equal(await fenceFor(),undefined);
+});
