@@ -1,9 +1,8 @@
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 // Targeted Batch rules TB-R045 (1.3.51): the Allocation Matrix on TB Register. Closed when TB Register
 // opens, and nothing is read until it is opened, because the matrix reads every transaction of the
-// municipality. Hiding it unmounts the table; its reads end within about a minute.
-import { useState } from "react";
-
+// municipality. Hiding it unmounts the table; its reads end within about a minute. The Show / Hide
+// button is in TB Register's row of buttons (1.3.53); the matrix opens under the summary cards.
 import { AllocationIntegrityNotice, AllocationMatrixTeamSpTable } from "./allocation-matrix-table.jsx";
 import { useAllocationMatrix } from "./use-allocation-matrix.js";
 
@@ -25,29 +24,16 @@ function OpenAllocationMatrix({ lmPcode }) {
   );
 }
 
-export default function TbRegisterAllocationMatrix({ lmPcode }) {
-  const [open, setOpen] = useState(false);
+export default function TbRegisterAllocationMatrix({ lmPcode, open }) {
+  if (!open || !lmPcode) return null;
   return (
     <section style={styles.panel} aria-label="Allocation Matrix">
-      <div style={styles.header}>
-        <div>
-          <h3 style={styles.title}>Allocation Matrix</h3>
-          <p style={styles.subtitle}>
-            How the meters are shared out between TEAMs and SPs, how far each is
-            with them, and their work outside batches. It loads only when shown.
-          </p>
-        </div>
-        <button
-          type="button"
-          style={open ? styles.hideButton : styles.showButton}
-          aria-expanded={open}
-          disabled={!lmPcode}
-          onClick={() => setOpen((current) => !current)}
-        >
-          {open ? "Hide Allocation Matrix" : "Show Allocation Matrix"}
-        </button>
-      </div>
-      {open && lmPcode ? <OpenAllocationMatrix lmPcode={lmPcode} /> : null}
+      <h3 style={styles.title}>Allocation Matrix</h3>
+      <p style={styles.subtitle}>
+        How the meters are shared out between TEAMs and SPs, how far each is
+        with them, and their work outside batches.
+      </p>
+      <OpenAllocationMatrix lmPcode={lmPcode} />
     </section>
   );
 }
@@ -61,33 +47,8 @@ const styles = {
     padding: 18,
     marginBottom: 16,
   },
-  header: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-    flexWrap: "wrap",
-  },
   title: { margin: 0, fontSize: 18, color: "#0f172a" },
   subtitle: { margin: "6px 0 0", color: "#64748b", fontSize: 13 },
-  showButton: {
-    border: 0,
-    borderRadius: 14,
-    background: "#2563eb",
-    color: "#ffffff",
-    padding: "10px 14px",
-    fontWeight: 900,
-    cursor: "pointer",
-  },
-  hideButton: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 14,
-    background: "#ffffff",
-    color: "#1d4ed8",
-    padding: "10px 14px",
-    fontWeight: 900,
-    cursor: "pointer",
-  },
   // One column that may be narrower than the table, so the table scrolls inside the panel.
   body: { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, marginTop: 14 },
   warningNotice: {

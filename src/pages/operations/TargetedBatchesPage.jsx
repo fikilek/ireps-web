@@ -469,6 +469,8 @@ export default function TargetedBatchesPage() {
   );
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  // Targeted Batch rules TB-R045 (1.3.51): the Allocation Matrix is closed whenever TB Register opens.
+  const [isAllocationMatrixOpen, setIsAllocationMatrixOpen] = useState(false);
   const [activeHelpModal, setActiveHelpModal] = useState(null);
   const [sourceFilter, setSourceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -1003,6 +1005,21 @@ export default function TargetedBatchesPage() {
             Allocation Map ({ticked.selectedIds.length})
           </Link>
 
+          {/* Targeted Batch rules TB-R045 (1.3.53): shows or hides the Allocation Matrix under the
+              summary cards. */}
+          <button
+            type="button"
+            style={{
+              ...(isAllocationMatrixOpen ? styles.secondaryLinkButton : styles.primaryButton),
+              ...(!activeLmPcode ? styles.disabledButton : null),
+            }}
+            aria-expanded={isAllocationMatrixOpen}
+            disabled={!activeLmPcode}
+            onClick={() => setIsAllocationMatrixOpen((current) => !current)}
+          >
+            {isAllocationMatrixOpen ? "Hide Allocation Matrix" : "Show Allocation Matrix"}
+          </button>
+
           {ticked.selectedIds.length ? (
             <button
               type="button"
@@ -1059,7 +1076,7 @@ export default function TargetedBatchesPage() {
       </div>
 
       {/* Rules TB-R045 (1.3.51): the Allocation Matrix, closed until opened. */}
-      <TbRegisterAllocationMatrix lmPcode={activeLmPcode} />
+      <TbRegisterAllocationMatrix lmPcode={activeLmPcode} open={isAllocationMatrixOpen} />
 
       <div style={styles.panel}>
         <div style={styles.panelHeader}>
