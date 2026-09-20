@@ -47,7 +47,10 @@ export const becameVisible = (before, after) => after?.master?.visibility === "V
 // A batch with a geofence (0.3.0) keeps its creation record; Allocate, Unallocate and Delete count its rows as created
 // minus the rows TB-R053 or TB-R056 took out, read live from the batch's own history (never from a stored count).
 // TB-R053 entries carry the clean-up run ID (CLEANUP2_...); TB-R056 entries carry rule TB-R056.
-export const isRuleRowRemoval = entry => entry?.event === ROW_REMOVED_EVENT && (entry.rule === RULE || /^CLEANUP2_/.test(text(entry.runId)));
+// Rules TB-R060 (1.3.60): a meter a supervisor or manager took out of a batch is counted the same way, so
+// the batch can still be allocated, unallocated and deleted afterwards.
+export const ROW_REMOVAL_RULES = Object.freeze(["TB-R056", "TB-R060"]);
+export const isRuleRowRemoval = entry => entry?.event === ROW_REMOVED_EVENT && (ROW_REMOVAL_RULES.includes(entry.rule) || /^CLEANUP2_/.test(text(entry.runId)));
 export function countRowsTakenOut(historyEntries = []) {
   return new Set(historyEntries.filter(isRuleRowRemoval).map(entry => text(entry.rowId) || text(entry.id))).size;
 }
@@ -290,13 +293,13 @@ export const trnMark = (plan, batchCompleted) => ({ tbId: plan.tbId, rowId: plan
 
 // A stored Timestamp is kept when the planned time is the same instant.
 const tsOf = (existing, ms, ts) => (ms === null ? null : millis(existing) === ms ? existing : ts(ms));
-const storedCounts = parent => Object.fromEntries(COUNT_KEYS.map(k => [k, parent.counts?.[k] ?? null]));
-const statusOf = (status, execution) => ({ status: status ?? null, execution: execution?.status ?? null, startedAt: execution?.startedAt ?? null, completedAt: execution?.completedAt ?? null });
-const plainRow = row => { const { idConflict: _conflict, ...data } = row; return data; };
+export const storedCounts = parent => Object.fromEntries(COUNT_KEYS.map(k => [k, parent.counts?.[k] ?? null]));
+export const statusOf = (status, execution) => ({ status: status ?? null, execution: execution?.status ?? null, startedAt: execution?.startedAt ?? null, completedAt: execution?.completedAt ?? null });
+export const plainRow = row => { const { idConflict: _conflict, ...data } = row; return data; };
 const day = ms => new Date(ms).toISOString().slice(0, 10);
 
 // Counts recounted from the rows, status per section 4; allocation, acceptance, creation and selection are never written.
-function parentPatch(parent, after, actor, at, ts) {
+export function parentPatch(parent, after, actor, at, ts) {
   const patch = { ...Object.fromEntries(COUNT_KEYS.map(k => [`counts.${k}`, after.counts[k]])), "metadata.updatedAt": at, "metadata.updatedByUid": actor.uid, "metadata.updatedByUser": actor.user };
   if (after.branch !== "UNCHANGED") Object.assign(patch, { status: after.status, "execution.status": after.execution.status,
     "execution.startedAt": tsOf(parent.execution?.startedAt, after.execution.startedAt, ts), "execution.completedAt": tsOf(parent.execution?.completedAt, after.execution.completedAt, ts) });

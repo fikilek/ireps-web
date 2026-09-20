@@ -3,6 +3,8 @@ import * as logger from "firebase-functions/logger";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import { writeRegistryMreadFromTrn } from "../registry/mread/writeRegistryMreadFromTrn.js";
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { astMeterNo, checkBatchWork } from "../targetedBatches/batch-work-guard.js";
 
 import {
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
@@ -545,6 +547,33 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       const astDoc = astSnap.data() || {};
       const premiseData = premiseSnap.data() || {};
 
+      // Targeted Batch rules TB-R059 (1.3.60): a DCN, RCN, Removal, Inspection or Reading on a meter that
+      // sits in another team's allocated batch is refused, and nothing is written. This path names only the
+      // AST, so the meter number comes from the AST already read here. Read inside the transaction, before
+      // any write, so the facts and the refusal are one picture.
+      const batchWorkCheck = await checkBatchWork({
+        db,
+        read: (refOrQuery) => tx.get(refOrQuery),
+        meterNo: astMeterNo(astDoc),
+        uid: actorUid,
+        log: logger,
+      });
+
+      if (!batchWorkCheck.allowed) {
+        responsePayload = buildFailureResult(
+          batchWorkCheck.code,
+          batchWorkCheck.message,
+          {
+            trnId,
+            trnType,
+            astId,
+            batch: batchWorkCheck.details,
+          },
+        );
+
+        return;
+      }
+
       // ------------------------------------------------------------
       // WMS DCN EXECUTION PATH
       // DCN execution updates the existing instructionTrnId.
@@ -1059,8 +1088,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       stack: error?.stack || "NAv",
     });
 
+    // An error that already carries an iREPS code keeps it, so the phone can tell a refusal iREPS
+    // decided on (TB-R059, 1.3.62) from an unknown failure.
     return buildFailureResult(
-      "UNKNOWN_ERROR",
+      error?.irepsCode || "UNKNOWN_ERROR",
       error?.message || "Failed to submit lifecycle transaction",
     );
   }

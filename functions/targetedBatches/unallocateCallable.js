@@ -30,11 +30,12 @@ function readIntent(data = {}) {
 }
 
 // The same main service provider test allocation uses: the actor may take a batch back only from a
-// TEAM or SP they could have allocated it to.
-function actorMncId(profile = {}) {
+// TEAM or SP they could have allocated it to. Taking a meter out of a batch (TB-R060, 1.3.62) needs the
+// same authority, so both are exported and there is one test of it.
+export function actorMncId(profile = {}) {
   return text(profile.profile?.employment?.serviceProvider?.id || profile.employment?.serviceProvider?.id || profile.serviceProvider?.id);
 }
-async function assertTargetWithinMnc({ db, read, targetType, targetId, mncId }) {
+export async function assertTargetWithinMnc({ db, read, targetType, targetId, mncId }) {
   if (!mncId) throw batchError("ACTOR_MNC_SERVICE_PROVIDER_MISSING", "The signed-in user is not linked to a main service provider");
   if (targetType === "TEAM") {
     const team = await read(db.doc(`teams/${targetId}`));

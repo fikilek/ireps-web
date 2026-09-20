@@ -312,6 +312,31 @@ class FakeDocumentReference {
   }
 }
 
+// A collection query, enough for the reads the batch-work guard makes (TB-R059): equality filters on a
+// collection, read through the same transaction as the documents.
+class FakeQuery {
+  constructor(store, collectionName, filters = []) {
+    this.store = store;
+    this.collectionName = collectionName;
+    this.filters = filters;
+  }
+
+  where(field, op, value) {
+    return new FakeQuery(this.store, this.collectionName, [
+      ...this.filters,
+      [field, value],
+    ]);
+  }
+
+  limit() {
+    return this;
+  }
+
+  async get() {
+    return this.store.runQuery(this);
+  }
+}
+
 class FakeDocumentSnapshot {
   constructor(ref, value) {
     this.ref = ref;
@@ -359,6 +384,8 @@ class FakeFirestore {
     return {
       doc: (id) =>
         new FakeDocumentReference(this, collectionName, id),
+      where: (field, op, value) =>
+        new FakeQuery(this, collectionName, [[field, value]]),
     };
   }
 
@@ -366,15 +393,44 @@ class FakeFirestore {
     return cloneValue(this.documents.get(path));
   }
 
+  runQuery(query) {
+    const at = (value, path) =>
+      path
+        .split(".")
+        .reduce(
+          (cursor, key) =>
+            cursor === undefined || cursor === null ? undefined : cursor[key],
+          value,
+        );
+    const docs = [...this.documents.entries()]
+      .filter(
+        ([path]) =>
+          path.startsWith(`${query.collectionName}/`) &&
+          path.split("/").length === 2,
+      )
+      .filter(([, value]) =>
+        query.filters.every(([field, wanted]) => at(value, field) === wanted),
+      )
+      .map(([path, value]) => ({
+        id: path.split("/").at(-1),
+        ref: new FakeDocumentReference(this, query.collectionName, path.split("/").at(-1)),
+        data: () => cloneValue(value),
+      }));
+
+    return { docs, empty: docs.length === 0 };
+  }
+
   async runTransaction(callback) {
     const writes = [];
 
     const transaction = {
       get: async (ref) =>
-        new FakeDocumentSnapshot(
-          ref,
-          cloneValue(this.documents.get(ref.path)),
-        ),
+        ref instanceof FakeQuery
+          ? this.runQuery(ref)
+          : new FakeDocumentSnapshot(
+            ref,
+            cloneValue(this.documents.get(ref.path)),
+          ),
       create: (ref, value) => {
         writes.push({ type: "create", ref, value: cloneValue(value) });
       },
@@ -846,9 +902,29 @@ test("meter discovery completes the batch only when every row is complete", asyn
 
 // Targeted Batch rules TB-R048 field-work guard (1.3.33): only an FWR or SPV of the allocated TEAM or SP
 // may start a row, so a premise captured before an unallocation cannot start a row after reallocation.
+// Work on a batched meter belongs to the batch's team (TB-R059), so an outsider is turned away by that
+// rule first, in the sentence naming the batch, its geofence, the team and the date.
 test("a worker outside the allocated TEAM cannot start a row, and nothing is written", async () => {
   const fixture = buildLinkedFixture();
   fixture.documents["users/OUTSIDER"] = { profile: { displayName: "Outsider", employment: { role: "FWR" } } };
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({ db, premiseRef, premisePayload: buildPremisePayload(fixture), actorUid: "OUTSIDER", actorName: "Outsider" }),
+    { code: "METER_IN_ANOTHER_TEAMS_BATCH" },
+  );
+  assert.equal(db.transactionWrites.length, 0);
+  assert.equal(db.read(`tb_rows/${ROW_ID}`).execution.status, "NOT_STARTED");
+});
+
+// TB-R059 lets the worker through on their open team membership (TM-R001); the TB-R048 field-work guard
+// still has the last word, because the allocated TEAM does not list them.
+test("the field-work guard still refuses a worker the allocated TEAM does not list", async () => {
+  const fixture = buildLinkedFixture();
+  fixture.documents["users/OUTSIDER"] = { profile: { displayName: "Outsider", employment: { role: "FWR" } } };
+  fixture.documents["team_member_history/TEAM_1__OUTSIDER__1"] = {
+    id: "TEAM_1__OUTSIDER__1", teamId: "TEAM_1", userUid: "OUTSIDER", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null,
+  };
   const db = new FakeFirestore(fixture.documents);
   const premiseRef = db.collection("premises").doc(fixture.premiseId);
   await assert.rejects(

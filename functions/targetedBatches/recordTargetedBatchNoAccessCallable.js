@@ -13,6 +13,8 @@ import {
 import {
   buildSalesAllMetersOperationalMetadataPatch,
 } from "../salesAllMeters/helpers.js";
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { checkBatchWork } from "./batch-work-guard.js";
 
 export const SALES_TARGETED_BATCH_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 
@@ -332,6 +334,14 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
       const teamSnap = await transaction.get(db.collection("teams").doc(targetId));
       team = requireDocument(teamSnap, "TARGETED_BATCH_TEAM_NOT_FOUND", "Allocated TEAM not found.");
     }
+    // Targeted Batch rules TB-R059 (1.3.60): No Access on a meter in another team's allocated batch is
+    // refused in the same plain words as every other form. The batch checks around it are unchanged; this
+    // one runs first only so the worker is told which batch, geofence, team and date stand in the way.
+    const batchWork = await checkBatchWork({
+      db, read: (refOrQuery) => transaction.get(refOrQuery),
+      meterNo: input.salesDocId, uid: actor.uid, log: logger,
+    });
+    if (!batchWork.allowed) throw controlledError(batchWork.code, batchWork.message, batchWork.details);
     assertAuthority({parent, actor, team});
 
     if (trnSnap.exists) {

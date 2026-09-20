@@ -8,6 +8,9 @@ import {
   getActorNameFromRequest,
 } from "../meterLifecycle/helpers.js";
 
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { astMeterNo, checkBatchWork } from "../targetedBatches/batch-work-guard.js";
+
 import {
   COMMISSIONING_TRN_TYPE,
   buildCommissioningTrnPayload,
@@ -128,6 +131,32 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
 
       const astDoc = astSnap.data() || {};
 
+      // Targeted Batch rules TB-R059 (1.3.60): commissioning a meter that sits in another team's allocated
+      // batch is refused, and nothing is written. The meter number comes from the AST read above.
+      const batchWorkCheck = await checkBatchWork({
+        db,
+        read: (refOrQuery) => tx.get(refOrQuery),
+        meterNo: astMeterNo(astDoc),
+        uid: actorUid,
+        log: logger,
+      });
+
+      if (!batchWorkCheck.allowed) {
+        responsePayload = buildFailureResult(
+          batchWorkCheck.code,
+          batchWorkCheck.message,
+          {
+            trnId,
+            trnType,
+            astId,
+            premiseId,
+            batch: batchWorkCheck.details,
+          },
+        );
+
+        return;
+      }
+
       const commissioningCheck = validateCommissioningAgainstAst({
         data,
         astDoc,
@@ -185,8 +214,10 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
       stack: error?.stack || "NAv",
     });
 
+    // An error that already carries an iREPS code keeps it, so the phone can tell a refusal iREPS
+    // decided on (TB-R059, 1.3.62) from an unknown failure.
     return buildFailureResult(
-      "UNKNOWN_ERROR",
+      error?.irepsCode || "UNKNOWN_ERROR",
       error?.message || "Failed to create commissioning TRN",
     );
   }

@@ -12,6 +12,8 @@ import {
 import {
   buildSalesAllMetersOperationalMetadataPatch,
 } from "../salesAllMeters/helpers.js";
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { checkBatchWork } from "./batch-work-guard.js";
 
 export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 export const TARGETED_BATCH_PREMISE_OPERATION_TYPE = "METER_DISCOVERY";
@@ -818,6 +820,19 @@ export async function createOrLinkTargetedBatchPremise({
         "TARGETED_BATCH_TEAM_NOT_FOUND",
         "The allocated TEAM was not found.",
       );
+    }
+
+    // Targeted Batch rules TB-R059 (1.3.60): the same refusal in the same plain words as every other form,
+    // naming the batch, its geofence, the team and the date. The TB-R048 guard below is unchanged.
+    const batchWork = await checkBatchWork({
+      db,
+      read: (refOrQuery) => transaction.get(refOrQuery),
+      meterNo: context.salesDocId,
+      uid: actorUid,
+    });
+
+    if (!batchWork.allowed) {
+      throw controlledError(batchWork.code, batchWork.message, batchWork.details);
     }
 
     assertTargetedBatchExecutionAuthority({

@@ -112,6 +112,7 @@ export default function TargetedBatchRowsTable({
   totalPages,
   onPageChange,
   onPageSizeChange,
+  takeOut = null,
 }) {
   return (
     <>
@@ -119,6 +120,8 @@ export default function TargetedBatchRowsTable({
         <table style={styles.table}>
           <thead>
             <tr>
+              {/* Targeted Batch rules TB-R060 (1.3.60): a supervisor or manager ticks the meters to take out. */}
+              {takeOut ? <th style={styles.th} scope="col">Take out</th> : null}
               <th style={styles.th}>Row</th>
               <th style={styles.th}>Outcome</th>
               <th style={styles.th}>Rejection Reason</th>
@@ -142,13 +145,25 @@ export default function TargetedBatchRowsTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={18} style={styles.td}>
+                <td colSpan={takeOut ? 19 : 18} style={styles.td}>
                   No TB rows match the current filters.
                 </td>
               </tr>
             ) : (
               rows.map((row) => (
                 <tr key={row.rowKey}>
+                  {takeOut ? (
+                    <td style={styles.td}>
+                      <input
+                        type="checkbox"
+                        checked={takeOut.selectedKeys.includes(row.rowKey)}
+                        disabled={Boolean(takeOut.blockedReason(row))}
+                        onChange={() => takeOut.onToggle(row.rowKey)}
+                        aria-label={`Take meter ${row.meterNo || row.rowNo} out of the batch`}
+                        title={takeOut.blockedReason(row) || "Take this meter out of the batch"}
+                      />
+                    </td>
+                  ) : null}
                   <td style={styles.td}>{row.rowNo}</td>
                   <td style={styles.td}><StatusBadge value={row.outcome} /></td>
                   <td style={styles.td}>{row.rejectionReason || "—"}</td>

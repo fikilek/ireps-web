@@ -87,6 +87,8 @@ import { onCreateTargetedBatchCallable } from "./targetedBatches/callables.js";
 export { resolveSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-resolution.js";
 export { getFieldWorkSummaryCallable } from "./teams/fieldWorkSummaryCallable.js";
 export { getBatchStatsCallable } from "./targetedBatches/batchStatsCallable.js";
+// Targeted Batch rules TB-R060 (1.3.60): a supervisor or manager takes a meter out of a batch.
+export { onTakeMeterOutOfBatchCallable } from "./targetedBatches/takeOutOfBatchCallable.js";
 export { assessSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-geofence.js";
 // Targeted Batch rules TB-R056 (1.3.52, 1.3.56): a batch row follows its Sales meter when the meter becomes VISIBLE.
 // When a batch's allocation or acceptance changes, the rule runs again for its VISIBLE meters whose rows are still open.
@@ -103,6 +105,8 @@ import {
   createOrLinkTargetedBatchPremise,
   validateTargetedBatchMeterDiscoverySubmission,
 } from "./targetedBatches/premiseLink.js";
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { checkBatchWork } from "./targetedBatches/batch-work-guard.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -3177,6 +3181,21 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       );
     }
 
+    // Targeted Batch rules TB-R059 (1.3.60): while a meter sits in an allocated batch, only that team or
+    // service provider may work on it. Checked before anything is written, whether the phone came through
+    // the batch or straight to the meter. A No Access discovery carries no meter number, so the batch it
+    // declares names the Sales meter.
+    const batchWorkCheck = await checkBatchWork({
+      db,
+      meterNo: meterNoNormalized || data?.targetedBatchContext?.salesDocId || "",
+      uid: caller.uid,
+      log: logger,
+    });
+
+    if (!batchWorkCheck.allowed) {
+      return buildFailureResult(batchWorkCheck.code, batchWorkCheck.message);
+    }
+
     const targetedBatchValidation =
       await validateTargetedBatchMeterDiscoverySubmission({
         db,
@@ -4905,6 +4924,25 @@ export const onMeterInstallationCallable = onCall(async (request) => {
         success: false,
         code: "PREMISE_NOT_FOUND",
         message: "Parent premise does not exist in premises collection",
+      };
+    }
+
+    // Targeted Batch rules TB-R059 (1.3.60): a meter in another team's allocated batch is refused here too,
+    // before the installation transaction writes anything.
+    const batchWorkCheck = await checkBatchWork({
+      db,
+      meterNo: meterNoNormalized || data?.targetedBatchContext?.salesDocId || "",
+      uid: caller.uid,
+      log: logger,
+    });
+
+    if (!batchWorkCheck.allowed) {
+      return {
+        success: false,
+        code: batchWorkCheck.code,
+        message: batchWorkCheck.message,
+        trnId,
+        astId: "NAv",
       };
     }
 

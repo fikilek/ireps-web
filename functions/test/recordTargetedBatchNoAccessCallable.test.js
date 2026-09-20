@@ -39,13 +39,43 @@ class FakeRef {
   }
 }
 
+// A collection query, enough for the reads the batch-work guard makes (TB-R059): equality filters on a
+// collection, read through the same transaction as the documents.
+class FakeQuery {
+  constructor(db, name, filters = []) {
+    this.db = db;
+    this.name = name;
+    this.filters = filters;
+  }
+  where(field, _op, value) {
+    return new FakeQuery(this.db, this.name, [...this.filters, [field, value]]);
+  }
+  limit() {
+    return this;
+  }
+  async get() {
+    return this.db.runQuery(this);
+  }
+}
+
 class FakeDb {
   constructor(documents) {
     this.documents = new Map(Object.entries(documents).map(([k, v]) => [k, clone(v)]));
     this.writes = [];
   }
   collection(name) {
-    return {doc: (id) => new FakeRef(`${name}/${id}`)};
+    return {
+      doc: (id) => new FakeRef(`${name}/${id}`),
+      where: (field, op, value) => new FakeQuery(this, name, [[field, value]]),
+    };
+  }
+  runQuery(query) {
+    const at = (value, path) => path.split(".").reduce((cursor, key) => (cursor === undefined || cursor === null ? undefined : cursor[key]), value);
+    const docs = [...this.documents.entries()]
+      .filter(([path]) => path.startsWith(`${query.name}/`) && path.split("/").length === 2)
+      .filter(([, value]) => query.filters.every(([field, wanted]) => at(value, field) === wanted))
+      .map(([path, value]) => ({id: path.split("/").at(-1), ref: new FakeRef(path), data: () => clone(value)}));
+    return {docs, empty: docs.length === 0};
   }
   doc(path) {
     const ref = new FakeRef(path);
@@ -61,7 +91,7 @@ class FakeDb {
   async runTransaction(callback) {
     const pending = [];
     const tx = {
-      get: async (ref) => this.snapshot(ref),
+      get: async (ref) => (ref instanceof FakeQuery ? this.runQuery(ref) : this.snapshot(ref)),
       create: (ref, value) => pending.push({type: "create", ref, value: clone(value)}),
       update: (ref, value) => pending.push({type: "update", ref, value: clone(value)}),
     };
@@ -133,10 +163,24 @@ test("requires authentication and supported role with zero writes", async () => 
 test("TEAM and SP authority succeed; unrelated actors and direct allocation fail", async () => {
   await record(new FakeDb(fixture()));
   await record(new FakeDb(fixture({targetType: "SP"})));
+  // Work on a batched meter belongs to the batch's team (TB-R059), so a worker who is not in it is turned
+  // away by that rule first, in the sentence naming the batch, its geofence, the team and the date. A batch
+  // whose target iREPS cannot place is nobody's to work on either (1.3.62).
   for (const [targetType, mutate, code] of [
-    ["TEAM", (docs) => { docs[`teams/TEAM_1`].memberUids = ["OTHER"]; }, "TARGETED_BATCH_NOT_ASSIGNED_TO_ACTOR"],
-    ["SP", (docs) => { docs[`tb_uploads/${TB}`].allocation.targetId = "SP_2"; }, "TARGETED_BATCH_NOT_ASSIGNED_TO_ACTOR"],
-    ["TEAM", (docs) => { docs[`tb_uploads/${TB}`].allocation.targetType = "USER"; }, "TARGETED_BATCH_ALLOCATION_TARGET_INVALID"],
+    ["TEAM", (docs) => { docs[`teams/TEAM_1`].memberUids = ["OTHER"]; }, "METER_IN_ANOTHER_TEAMS_BATCH"],
+    ["SP", (docs) => { docs[`tb_uploads/${TB}`].allocation.targetId = "SP_2"; }, "METER_IN_ANOTHER_TEAMS_BATCH"],
+    ["TEAM", (docs) => { docs[`tb_uploads/${TB}`].allocation.targetType = "USER"; }, "METER_IN_ANOTHER_TEAMS_BATCH"],
+    // TB-R059 lets the worker through on their open team membership (TM-R001), and the batch's own
+    // authority still has the last word: the allocated TEAM does not list them.
+    ["TEAM", (docs) => {
+      docs[`teams/TEAM_1`].memberUids = ["OTHER"];
+      docs["team_member_history/TEAM_1__U1__1"] = {id: "TEAM_1__U1__1", teamId: "TEAM_1", userUid: "U1", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null};
+    }, "TARGETED_BATCH_NOT_ASSIGNED_TO_ACTOR"],
+    // Nobody has been given the work of this batch, so TB-R059 has nothing to say; the batch's own
+    // authority refuses because it names no TEAM or SP to be assigned to.
+    ["TEAM", (docs) => {
+      docs[`tb_uploads/${TB}`].allocation = {status: "NOT_STARTED", targetType: "", targetId: ""};
+    }, "TARGETED_BATCH_ALLOCATION_TARGET_INVALID"],
   ]) {
     const docs = fixture({targetType});
     mutate(docs);
