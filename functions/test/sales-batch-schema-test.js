@@ -11,12 +11,12 @@ import { creationPayload } from "../targetedBatches/sales-batch-creation.js";
 const fixture=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 const schemaRoot=process.env.IREPS_SCHEMAS_ROOT || "C:/dev/ireps-schemas";
 const head=execFileSync("git",["--no-optional-locks","-c",`safe.directory=${schemaRoot}`,"-C",schemaRoot,"rev-parse","HEAD"],{encoding:"utf8"}).trim();
-assert.equal(head,"46a58aa3f9aca872b8539b5cd0f40435a0178cfd","Mount the approved immutable schema checkout");
+assert.equal(head,"09c763e592adc800391d2f070802fc96ce079e4a","Mount the approved immutable schema checkout");
 const ajv=new Ajv2020({allErrors:true,allowUnionTypes:true,strictTypes:false,strictRequired:false,coerceTypes:false,useDefaults:false,removeAdditional:false});
 for(const keyword of ["x-ireps","x-firestore-type"])ajv.addKeyword({keyword,valid:true});
 addFormats(ajv);
 const validators={};
-for(const [name,hash] of [["tb-uploads","DEC4A0C0495E6DC66214C7F4F8843B9B35763BD2AF8EA6173566E15818E256B7"],["tb-rows","4E455583CA01DC27E62D6791688E5F1958DB720E64C599E3546AF7A941944F97"]]){
+for(const [name,hash] of [["tb-uploads","DEC4A0C0495E6DC66214C7F4F8843B9B35763BD2AF8EA6173566E15818E256B7"],["tb-rows","66772ACCD7DC23731915CDE9A4A8BC625D3DE3C7E98D09A521917B18A77BBC80"]]){
  const bytes=fs.readFileSync(`${schemaRoot}/${name}/${name}-schema.json`);
  assert.equal(crypto.createHash("sha256").update(bytes).digest("hex").toUpperCase(),hash,"Canonical schema content changed");
  const schema=JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/,""));ajv.addSchema(schema);
