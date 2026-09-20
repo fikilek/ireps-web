@@ -17,7 +17,7 @@ test("the red pins sit above the ERF numbers and below the other layers' icons a
   const pins = Number(section.match(/const METER_MARKER_Z_INDEX = (\d+);/)[1]);
   const planning = await read("../../operations/GeofencePlanningLayers.jsx");
   const shared = await read("../../operations/geofence-map-layers.jsx");
-  const erfLabels = zIndexAfter(planning, 'className: "ireps-erf-label"');
+  const erfLabels = zIndexAfter(planning, "...ERF_LABEL_STYLE");
   assert.ok(pins > erfLabels, `pins ${pins} above ERF numbers ${erfLabels}`);
   const salesIcons = planning.match(/SALES_STATUSES\.INTEGRITY_EXCEPTION \? (\d+) : (\d+),/).slice(1).map(Number);
   const above = {

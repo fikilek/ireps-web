@@ -208,6 +208,32 @@ export function wardNameLabelPoint(paths, towards, { steps = [40, 80, 160, 320],
   return toUsableLatLng(centroid) || pointsCentre(paths[0] || []);
 }
 
+// Rules 18.7 (1.3.2): one ERF look for every map. The ERF number only, on the centroid, small and
+// light on an off-white label (.ireps-erf-label in index.css) so it stays readable on satellite too.
+export const ERF_BOUNDARY_STYLE = Object.freeze({
+  strokeColor: "#0284c7",
+  strokeOpacity: 0.7,
+  strokeWeight: 1,
+  fillColor: "#38bdf8",
+  fillOpacity: 0.035,
+});
+
+// TB-R061 (1.3.64): the Meter Location window draws one ERF at window size rather than a whole
+// Ward of them, so it keeps the same colours with a heavier line and a slightly stronger fill.
+export const ERF_FOCUS_BOUNDARY_STYLE = Object.freeze({
+  ...ERF_BOUNDARY_STYLE,
+  strokeOpacity: 1,
+  strokeWeight: 3,
+  fillOpacity: 0.12,
+});
+
+export const ERF_LABEL_STYLE = Object.freeze({
+  className: "ireps-erf-label",
+  color: "#334155",
+  fontWeight: "400",
+  fontSize: "10px",
+});
+
 // Targeted Batch rules 18.7 (1.3.3): area geofences are green, batch geofences
 // (those linked to a Targeted Batch) purple; a selected geofence stays red.
 export const GEOFENCE_KIND_COLORS = Object.freeze({ area: "#10b981", batch: "#7c3aed" });

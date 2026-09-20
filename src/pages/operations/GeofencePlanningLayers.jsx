@@ -12,6 +12,7 @@ import {
   SALES_STATUS_GLYPHS,
   erfIdsUnderMeterIcons,
 } from "./geofence-map-icons.js";
+import { ERF_BOUNDARY_STYLE, ERF_LABEL_STYLE } from "./geofence-map-helpers";
 import BusySpinner from "../../components/busy-spinner.jsx";
 
 const ERF_LABEL_MIN_ZOOM = 17;
@@ -143,11 +144,7 @@ export function GeofencePlanningLayers({
 
         const polygon = new window.google.maps.Polygon({
           paths: path,
-          strokeColor: "#0284c7",
-          strokeOpacity: 0.7,
-          strokeWeight: 1,
-          fillColor: "#38bdf8",
-          fillOpacity: 0.035,
+          ...ERF_BOUNDARY_STYLE,
           clickable: !isCreateMode,
           zIndex: 35,
         });
@@ -201,10 +198,7 @@ export function GeofencePlanningLayers({
           title: `ERF ${erf.erfNo}`,
           label: {
             text: String(erf.erfNo || "E"),
-            className: "ireps-erf-label",
-            color: "#334155",
-            fontWeight: "400",
-            fontSize: "10px",
+            ...ERF_LABEL_STYLE,
           },
           icon: {
             path: window.google.maps.SymbolPath.CIRCLE,
