@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { formatCurrencyFromCents, formatNumber } from "../targetedBatchUtils";
 import { tbRowsStyles as styles } from "./targetedBatchRowsStyles";
+import { rowOutcomeText } from "./targetedBatchRowsModel";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -167,7 +168,13 @@ export default function TargetedBatchRowsTable({
                   <td style={styles.td}>{row.rowNo}</td>
                   <td style={styles.td}><StatusBadge value={row.outcome} /></td>
                   <td style={styles.td}>{row.rejectionReason || "—"}</td>
-                  <td style={{ ...styles.td, ...styles.strongCell }}>{row.meterNo || "NAv"}</td>
+                  <td style={{ ...styles.td, ...styles.strongCell }}>
+                    {row.meterNo || "NAv"}
+                    {/* TB-R064 (1.3.67): the number found, beside the number expected. */}
+                    {row.foundMeterNo ? (
+                      <div style={styles.referenceLine}>Found {row.foundMeterNo}</div>
+                    ) : null}
+                  </td>
                   <td style={styles.td}>{row.accountNumber || "NAv"}</td>
                   <td style={styles.td}>{row.customerName || "NAv"}</td>
                   <td style={styles.td}>{row.address || "NAv"}</td>
@@ -184,7 +191,13 @@ export default function TargetedBatchRowsTable({
                   <td style={styles.td}><StatusBadge value={row.fieldAcceptanceStatus} /></td>
                   <td style={styles.td}><StatusBadge value={row.premiseStatus} /></td>
                   <td style={styles.td}><StatusBadge value={row.meterDiscoveryStatus} /></td>
-                  <td style={styles.td}><StatusBadge value={row.completionStatus} /></td>
+                  <td style={styles.td}>
+                    <StatusBadge value={row.completionStatus} />
+                    {/* TB-R064 (1.3.67): what the field work found, in plain words. */}
+                    {rowOutcomeText(row) ? (
+                      <div style={styles.referenceLine}>{rowOutcomeText(row)}</div>
+                    ) : null}
+                  </td>
                   <td style={{ ...styles.td, ...styles.strongCell }}>{row.tbRowId || "NAv"}</td>
                   <td style={styles.td}>
                     {row.totalSalesC === null

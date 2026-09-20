@@ -281,7 +281,10 @@ export function decideRowFollowsSales(facts) {
 export function closedRowFields(row, plan, ts) {
   const findAt = ts(plan.findAtMs);
   return {
-    execution: { status: "COMPLETED", startedAt: row.execution?.startedAt || findAt, completedAt: ts(plan.completedAtMs ?? plan.findAtMs), outcome: rowOutcome(plan) },
+    // TB-R064 (1.3.67): when the meter found is not the row's own meter, the row records the number that
+    // was found, so TB Register and its CSV can show it beside the number expected without a second read.
+    execution: { status: "COMPLETED", startedAt: row.execution?.startedAt || findAt, completedAt: ts(plan.completedAtMs ?? plan.findAtMs), outcome: rowOutcome(plan),
+      foundMeterNo: plan.meterMatch === false ? plan.discoveredMeterNo || null : null },
     refs: { erfId: row.refs?.erfId ?? null, premiseId: plan.premiseId, meterId: plan.astId, trnId: plan.trnId },
   };
 }
@@ -346,6 +349,7 @@ export function buildRowFollowsSalesWrites(plan, facts, { ts, now, serverTime })
     if (!integrity.valid) throw new Error(`The closed tbRefs of ${plan.salesId} would be invalid: ${integrity.issues.join(", ")}`);
     return [
       { op: "update", path: `tb_rows/${plan.rowId}`, data: { "execution.status": "COMPLETED", "execution.startedAt": fields.execution.startedAt, "execution.completedAt": fields.execution.completedAt, "execution.outcome": fields.execution.outcome,
+        "execution.foundMeterNo": fields.execution.foundMeterNo,
         "refs.premiseId": fields.refs.premiseId, "refs.meterId": fields.refs.meterId, "refs.trnId": fields.refs.trnId,
         // As a batch completion names the capturer: the worker who made the find.
         "metadata.updatedAt": at, "metadata.updatedByUid": finder.uid, "metadata.updatedByUser": finder.user } },

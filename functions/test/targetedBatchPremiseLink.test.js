@@ -867,7 +867,7 @@ test("linked helper failure creates no premise or partial linkage", async () => 
 });
 
 // Rules section 14: the batch stays In Progress until every row is complete, then Completed.
-async function linkThenDiscover(totalRows) {
+async function linkThenDiscover(totalRows, capturedMeterNo = null) {
   const fixture = buildLinkedFixture();
   fixture.documents[`tb_uploads/${TB_ID}`].counts.totalRows = totalRows;
   const db = new FakeFirestore(fixture.documents);
@@ -879,14 +879,27 @@ async function linkThenDiscover(totalRows) {
     id: "TRN_MDIS_TEST_1",
     targetedBatchContext: { ...premise.targetedBatchContext, premiseId: fixture.premiseId },
     accessData: { premise: { id: fixture.premiseId } },
-    ast: { astData: { astNo: fixture.salesDocId } },
+    ast: { astData: { astNo: capturedMeterNo || fixture.salesDocId } },
     metadata: { createdByUid: "USER_1", createdByUser: "Field Worker" },
   };
   const result = await db.runTransaction((transaction) => completeTargetedBatchMeterDiscoveryInTransaction({
-    transaction, db, trnData, astId: "TRN_MDIS_TEST_1", normalizedMeterNo: fixture.salesDocId,
+    transaction, db, trnData, astId: "TRN_MDIS_TEST_1", normalizedMeterNo: capturedMeterNo || fixture.salesDocId,
   }));
   return { db, result };
 }
+
+// Targeted Batch rules TB-R064 (1.3.67): a worker who captures a different number through the batch's own
+// form records what was found on the row, so TB Register never shows the row's own meter as matched.
+test("the batch form records the number found when it is not the row's own meter", async () => {
+  const same = await linkThenDiscover(2);
+  assert.equal(same.result.meterMatch, true);
+  assert.equal(same.db.read(`tb_rows/${ROW_ID}`).execution.foundMeterNo, null);
+
+  const different = await linkThenDiscover(2, "04298085599");
+  assert.equal(different.result.meterMatch, false);
+  assert.equal(different.db.read(`tb_rows/${ROW_ID}`).execution.foundMeterNo, "04298085599");
+  assert.equal(different.db.read(`tb_rows/${ROW_ID}`).execution.status, "COMPLETED");
+});
 
 test("meter discovery completes the batch only when every row is complete", async () => {
   const single = await linkThenDiscover(1);

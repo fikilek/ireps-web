@@ -1695,6 +1695,10 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     "execution.startedAt": row?.execution?.startedAt || now,
     "execution.completedAt": now,
     "execution.outcome": "METER_DISCOVERED",
+    // Targeted Batch rules TB-R064 (1.3.67): when the worker captured a different number from the one the
+    // row was sent for, the row records what was found, so TB Register says so instead of showing the row's
+    // own meter as matched and waiting to be inspected.
+    "execution.foundMeterNo": salesCompletion.meterMatch === false ? normalizeMeterNo(discoveredMeterNo) || null : null,
     "refs.premiseId": premiseId,
     "refs.meterId": astId,
     "refs.trnId": trnId,

@@ -185,6 +185,8 @@ test("closing the row writes the O: / F: numbers, the mark, the recount and the 
   const rowWrite = at(writes, `tb_rows/${ROW_ID}`);
   assert.equal(rowWrite.data["execution.status"], "COMPLETED");
   assert.equal(rowWrite.data["execution.outcome"], ROW_OUTCOME, "marked: a different meter was found here");
+  // TB-R064 (1.3.67): the row records the number found, so TB Register and its CSV can show it.
+  assert.equal(rowWrite.data["execution.foundMeterNo"], FOUND, "the number found is on the row");
   assert.equal(rowWrite.data["execution.completedAt"].toMillis(), FIND_MS);
   assert.deepEqual([rowWrite.data["refs.meterId"], rowWrite.data["refs.trnId"]], ["TRN_MDIS_1", "TRN_MDIS_1"]);
 
@@ -347,6 +349,7 @@ test("the whole capture settles every expected meter at the ERF and never fails 
   // batch is completed by the record alone.
   assert.deepEqual(results.map(result => [result.salesId, result.code]), [[GPS_METER, "NO_BATCH"], [EXPECTED, "ROW_CLOSED"]]);
   assert.equal(db.store.get(`tb_rows/${ROW_ID}`).execution.outcome, ROW_OUTCOME);
+  assert.equal(db.store.get(`tb_rows/${ROW_ID}`).execution.foundMeterNo, FOUND);
   assert.equal(classifySalesWorkStatus(db.store.get(`sales-all-meters/${GPS_METER}`)), "COMPLETED");
 
   // The meter just captured is never treated as expected at its own ERF.

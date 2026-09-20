@@ -1,7 +1,7 @@
 import {
   TARGETED_BATCH_ROW_DECISIONS,
   TARGETED_BATCH_SOURCE_TYPES,
-} from "../../../../redux/targetedBatchDraftModel";
+} from "../../../../redux/targetedBatchDraftModel.js";
 import { normalizePermanentSalesBatchRow } from "../../../sales/models/salesTargetedBatchReadModel.js";
 
 export const TB_ROW_NOT_APPLICABLE = "NOT_APPLICABLE";
@@ -114,10 +114,12 @@ function normalizeAllocationTarget(row) {
   };
 }
 
-function normalizeLifecycleStatus({ explicit, hasReference, fallback }) {
+function normalizeLifecycleStatus({ explicit, hasReference, fallback, completed = false }) {
   const normalized = asUpper(explicit);
   if (normalized) return normalized;
-  if (hasReference) return "CREATED";
+  // Targeted Batch rules TB-R064 (1.3.67): a completed row with a discovery recorded has a finished
+  // meter discovery, whichever meter was found. It read CREATED before, so MD Completed counted none.
+  if (hasReference) return completed ? "COMPLETED" : "CREATED";
   return fallback;
 }
 
@@ -180,16 +182,6 @@ export function normalizeTargetedBatchRow({ row = {}, index, batch }) {
   const premiseStatus = rejected
     ? TB_ROW_NOT_APPLICABLE
     : explicitPremiseStatus || (premiseId ? "LINKED" : TB_ROW_NOT_STARTED);
-  const meterDiscoveryStatus = rejected
-    ? TB_ROW_NOT_APPLICABLE
-    : normalizeLifecycleStatus({
-        explicit:
-          row?.meterDiscoveryStatus ??
-          row?.mdStatus ??
-          row?.meterDiscovery?.status,
-        hasReference: Boolean(meterDiscoveryTrnId),
-        fallback: TB_ROW_NOT_STARTED,
-      });
   const explicitCompletionStatus = asUpper(
     row?.completionStatus ??
       row?.workflowStatus ??
@@ -199,6 +191,17 @@ export function normalizeTargetedBatchRow({ row = {}, index, batch }) {
     ? TB_ROW_NOT_APPLICABLE
     : explicitCompletionStatus ||
       (row?.completedAt ? "COMPLETED" : TB_ROW_NOT_STARTED);
+  const meterDiscoveryStatus = rejected
+    ? TB_ROW_NOT_APPLICABLE
+    : normalizeLifecycleStatus({
+        explicit:
+          row?.meterDiscoveryStatus ??
+          row?.mdStatus ??
+          row?.meterDiscovery?.status,
+        hasReference: Boolean(meterDiscoveryTrnId),
+        fallback: TB_ROW_NOT_STARTED,
+        completed: completionStatus === "COMPLETED",
+      });
 
   const rowNo = firstText(row?.rowNo) || String(index + 1);
   const sourceReference = salesAllMeterId
@@ -237,6 +240,9 @@ export function normalizeTargetedBatchRow({ row = {}, index, batch }) {
     meterDiscoveryStatus,
     meterDiscoveryTrnId: meterDiscoveryTrnId || null,
     completionStatus,
+    // TB-R064 (1.3.67): what the field work actually found, in the row's own words.
+    executionOutcome: firstText(row?.executionOutcome, row?.execution?.outcome) || null,
+    foundMeterNo: firstText(row?.foundMeterNo, row?.execution?.foundMeterNo) || null,
     astId: astId || null,
     salesAllMeterId: salesAllMeterId || null,
     totalSalesC:
@@ -338,6 +344,18 @@ export function buildTargetedBatchRowFilterOptions(rows) {
     meterDiscoveryStatus: uniqueValues("meterDiscoveryStatus"),
     completionStatus: uniqueValues("completionStatus"),
   };
+}
+
+// Targeted Batch rules TB-R064 (1.3.67): the outcome of the work, said in plain words beside the status.
+// An outcome with no plain wording shows nothing rather than an internal code.
+export const ROW_OUTCOME_TEXT = Object.freeze({
+  METER_DISCOVERED: "Meter found",
+  METER_DISCOVERED_OUTSIDE_BATCH: "Found outside the batch",
+  METER_INSTALLED_OUTSIDE_BATCH: "Installed outside the batch",
+  DIFFERENT_METER_FOUND_AT_ERF: "A different meter was found here",
+});
+export function rowOutcomeText(row = {}) {
+  return ROW_OUTCOME_TEXT[asUpper(row?.executionOutcome)] || "";
 }
 
 export function buildTargetedBatchRowsSummary(rows) {

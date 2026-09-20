@@ -315,6 +315,8 @@ export function buildDifferentMeterAtErfWrites(plan, facts, { ts, now, serverTim
     { op: "update", path: `${TARGETED_BATCH_COLLECTIONS.rows}/${plan.rowId}`, data: {
       "execution.status": "COMPLETED", "execution.startedAt": fields.execution.startedAt,
       "execution.completedAt": fields.execution.completedAt, "execution.outcome": fields.execution.outcome,
+      // TB-R064 (1.3.67): the number found, on the row itself.
+      "execution.foundMeterNo": fields.execution.foundMeterNo,
       "refs.premiseId": fields.refs.premiseId, "refs.meterId": fields.refs.meterId, "refs.trnId": fields.refs.trnId,
       "metadata.updatedAt": at, "metadata.updatedByUid": finder.uid, "metadata.updatedByUser": finder.user } },
     { op: "update", path: salesPath, data: { [FIELD]: record, tbRefs: tbRefsAfter, ...salesMeta } },
