@@ -107,6 +107,7 @@ import {
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -3308,6 +3309,26 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       log: logger,
     });
 
+    // Targeted Batch rules TB-R063 (1.3.66): a different meter at the ERF completes the Sales meter. The
+    // discovery is written, so the server now checks whether a Sales meter was expected at this ERF under
+    // another number. If it was, that meter has been replaced: it is recorded as such, reads Completed and
+    // its batch row closes, so nobody is sent back and it is never batched again. Never fails the
+    // submission: the work is already saved, and anything it cannot settle is logged for the office.
+    await recordDifferentMeterAtErf({
+      db,
+      Timestamp,
+      FieldValue,
+      meterNo: meterNoNormalized,
+      erfId: data?.accessData?.erfId || "",
+      premiseId,
+      trnId: data.id,
+      trnType: data?.accessData?.trnType || "METER_DISCOVERY",
+      astId: data.id,
+      uid: caller.uid,
+      foundAt: now,
+      log: logger,
+    });
+
     logger.info("onMeterDiscoveryCallable --trn saved", {
       trnId: data.id,
       meterType,
@@ -5265,6 +5286,24 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       trnId,
       trnType: accessData?.trnType || "METER_INSTALLATION",
       now,
+      log: logger,
+    });
+
+    // Targeted Batch rules TB-R063 (1.3.66): a meter installed at an ERF where a different Sales meter was
+    // expected replaces that meter, so it reads Completed and its batch row closes. Never fails the
+    // submission: the installation is already written.
+    await recordDifferentMeterAtErf({
+      db,
+      Timestamp,
+      FieldValue,
+      meterNo: meterNoNormalized,
+      erfId: accessData?.erfId || "",
+      premiseId,
+      trnId,
+      trnType: accessData?.trnType || "METER_INSTALLATION",
+      astId: trnId,
+      uid: caller.uid,
+      foundAt: now,
       log: logger,
     });
 

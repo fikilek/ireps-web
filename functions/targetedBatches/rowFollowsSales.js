@@ -20,7 +20,10 @@ export const NEW_SCHEMA = "0.3.0";
 export const OUTCOME = "METER_DISCOVERED_OUTSIDE_BATCH";
 // Rules 1.3.56: a Meter Installation by the batch's own team closes the row too (owner, 2026-09-19), with its own row outcome.
 export const OUTCOME_BY_FIND = Object.freeze({ METER_DISCOVERY: OUTCOME, METER_INSTALLATION: "METER_INSTALLED_OUTSIDE_BATCH" });
-const rowOutcome = plan => OUTCOME_BY_FIND[plan.findType] || OUTCOME;
+// Rules TB-R063 (1.3.66) closes a row for a DIFFERENT meter found at the ERF and reuses these same shapes,
+// so it names its own row outcome and its own label ("a different meter was found here") instead.
+const rowOutcome = plan => plan.rowOutcome || OUTCOME_BY_FIND[plan.findType] || OUTCOME;
+const tbRefOutcomeLabel = plan => plan.outcomeLabel || "Meter Discovered";
 export const DECISIONS = Object.freeze({ NONE: "NONE", CLOSE: "CLOSE", REMOVE: "REMOVE", LOG: "LOG" });
 export const REMOVAL_REASONS = Object.freeze({ ANOTHER_TEAM: "FOUND_BY_ANOTHER_TEAM", UNALLOCATED: "FOUND_WHILE_UNALLOCATED" });
 export const COUNT_KEYS = Object.freeze(["totalRows", "acceptedRows", "rejectedRows", "allocatableRows", "allocatedRows", "unallocatedRows", "executionStartedRows", "completedRows"]);
@@ -284,7 +287,7 @@ export function closedRowFields(row, plan, ts) {
 }
 export function closedTbRef(ref, row, plan, ts, now) {
   const fw = ref.fieldWork || {};
-  return { ...ref, rowId: row.id, fieldWork: { ...fw, status: "COMPLETED", outcomeCode: "METER_DISCOVERED", outcomeLabel: "Meter Discovered",
+  return { ...ref, rowId: row.id, fieldWork: { ...fw, status: "COMPLETED", outcomeCode: "METER_DISCOVERED", outcomeLabel: tbRefOutcomeLabel(plan),
     targetedMeterNo: plan.targetedMeterNo, discoveredMeterNo: plan.discoveredMeterNo, meterMatch: plan.meterMatch,
     premiseId: plan.premiseId, meterId: plan.astId, trnId: plan.trnId, submittedAt: fw.submittedAt || ts(plan.findAtMs), updatedAt: now } };
 }

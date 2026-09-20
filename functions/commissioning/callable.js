@@ -1,6 +1,6 @@
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 
 import {
   buildFailureResult,
@@ -10,6 +10,7 @@ import {
 
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
+import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
   COMMISSIONING_TRN_TYPE,
@@ -72,6 +73,10 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
     // Targeted Batch rules TB-R062 (1.3.65): kept for after the transaction, so a use of the
     // illegally-connected gate is recorded only when the work itself went through.
     let batchWorkDecision = null;
+    // Targeted Batch rules TB-R063 (1.3.66): the meter and the ERF this work recorded, kept for after the
+    // transaction, so a Sales meter replaced at that ERF is settled only once the work itself is committed.
+    let workMeterNo = "";
+    let workErfId = "";
 
     await db.runTransaction(async (tx) => {
       const trnSnap = await tx.get(trnRef);
@@ -150,6 +155,8 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
       });
 
       batchWorkDecision = batchWorkCheck;
+      workMeterNo = astMeterNo(astDoc);
+      workErfId = astDoc?.accessData?.erfId || data?.accessData?.erfId || "";
 
       if (!batchWorkCheck.allowed) {
         responsePayload = buildFailureResult(
@@ -213,6 +220,10 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
     // once the work itself is committed, so the office can count them per worker and per team.
     if (responsePayload?.success === true) {
       await recordErfOverride({ db, decision: batchWorkDecision, trnId, trnType, log: logger });
+      // Targeted Batch rules TB-R063 (1.3.66): a Sales meter was expected at this ERF under another number.
+      // It has been replaced, so it reads Completed and its batch row closes. Never fails the submission.
+      await recordDifferentMeterAtErf({ db, Timestamp, FieldValue, meterNo: workMeterNo, erfId: workErfId, premiseId,
+        trnId, trnType, astId, uid: actorUid, log: logger });
     }
 
     return (

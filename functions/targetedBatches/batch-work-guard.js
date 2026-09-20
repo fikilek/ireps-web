@@ -192,8 +192,9 @@ export function batchAllocation(parent = {}) {
 export const explicitlyUnallocated = (allocation = {}) => ["", "NOT_STARTED"].includes(upper(allocation.status)) && !text(allocation.id);
 
 // Is this worker inside the team or the service provider the batch is allocated to? One test, used by
-// TB-R059 on the meter and by TB-R062 on the ERF.
-function workerInside({ allocation, allocatedTeam, finderUid, finderTeamId, finderSpId }) {
+// TB-R059 on the meter, by TB-R062 on the ERF and by TB-R063 (1.3.66) to decide whether a find at the
+// batch's ERF is the batch's own work, so the credit follows the finder and never the wrong team.
+export function workerInside({ allocation, allocatedTeam, finderUid, finderTeamId, finderSpId }) {
   if (allocation.type === "TEAM" && sameId(finderTeamId, allocation.id)) return "TEAM_HISTORY";
   if (allocation.type === "TEAM" && text(finderUid) && teamMemberIds(allocatedTeam).has(text(finderUid))) return "TEAM_MEMBER_LIST";
   if (allocation.type === "SP" && sameId(finderSpId, allocation.id)) return "SP";

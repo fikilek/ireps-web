@@ -9,8 +9,9 @@
 // this batch's work, while the batch's own manager still can.
 //
 // 1.3.65 (TB-R062) adds the ERF: a DIFFERENT meter number discovered on the batch's ERF by another team is
-// refused and writes nothing, the same discovery reported as illegally connected goes through and writes
-// its override record, and the batch's own row never moves either way.
+// refused and writes nothing, and the same discovery reported as illegally connected goes through and
+// writes its override record. Since 1.3.66 (TB-R063) that find also closes the batch's row, because the
+// Sales meter expected at that ERF has been replaced; the credit still does not follow the outsider.
 //
 // index.js is imported first because it calls initializeApp(); the callables read that default app.
 import test, { beforeEach, after } from "node:test";
@@ -400,13 +401,22 @@ test("the batch's own team may discover a different meter on their own ERF, with
   const result = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR1"));
   assert.deepEqual([result.success, result.code], [true, "SUCCESS"], JSON.stringify(result));
   assert.equal((await db.collection("batch_erf_overrides").get()).empty, true, "the ERF is their own, so no gate was used");
+  // Rules TB-R063 (1.3.66): the Sales meter expected at that ERF has been replaced, so its row closes as
+  // Completed and the batch's own team keeps the credit, as a batch completion does.
+  const closed = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0].data();
+  assert.deepEqual([closed.execution.status, closed.execution.outcome], ["COMPLETED", "DIFFERENT_METER_FOUND_AT_ERF"]);
+  assert.equal((await data(`trns/TRN_MDIS_${OTHER_METER}_FWR1`)).derived.targetedBatch.tbId, TB);
 });
 
 test("an illegally connected meter goes through on another team's ERF, and the use is recorded", async () => {
   const [a] = await allocatedBatch();
   const erfId = await erfOfBatchedMeter(a);
   const parent = await data(`tb_uploads/${TB}`);
-  const rowBefore = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0];
+
+  // The gate never applies to the batch's own meter number: that stays TB-R059's ownership test. Proved
+  // first, while the batch's rows are still open.
+  const ownNumber = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(a, "FWR2")));
+  assert.deepEqual([ownNumber.success, ownNumber.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], "the gate never applies to the batch's own meter number");
 
   const result = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(OTHER_METER, "FWR2")));
   assert.deepEqual([result.success, result.code], [true, "SUCCESS"], JSON.stringify(result));
@@ -432,13 +442,16 @@ test("an illegally connected meter goes through on another team's ERF, and the u
   assert.equal((await db.collection("batch_erf_overrides").where("worker.uid", "==", "FWR2").get()).size, 1);
   assert.equal((await db.collection("batch_erf_overrides").where("worker.teamId", "==", "TEAM2").get()).size, 1);
 
-  // It stays an ordinary normal-path find: the batch's row is untouched, so the allocated team keeps their
-  // work and their count, and the batch's own meter is still theirs alone.
-  const rowAfter = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0];
-  assert.deepEqual(rowAfter.data(), rowBefore.data(), "the allocated team's row never moves");
-  assert.deepEqual(await data(`tb_uploads/${TB}`), parent, "the batch itself never moves");
-  const own = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(a, "FWR2")));
-  assert.deepEqual([own.success, own.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], "the gate never applies to the batch's own meter number");
+  // Rules TB-R063 (1.3.66): the Sales meter expected at that ERF has been replaced, so its row closes as
+  // Completed, marked, and nobody is sent back. The credit does NOT follow the outsider: the find is not
+  // linked to the batch, so the Allocation Matrix counts it as that worker's own transaction.
+  const rowAfter = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0].data();
+  assert.deepEqual([rowAfter.execution.status, rowAfter.execution.outcome], ["COMPLETED", "DIFFERENT_METER_FOUND_AT_ERF"]);
+  assert.equal((await data(`trns/TRN_MDIS_${OTHER_METER}_FWR2`)).derived?.targetedBatch, undefined, "the find stays the finder's own transaction");
+  assert.equal((await data(`sales-all-meters/${a}`)).differentMeterFound.creditedToBatch, false);
+  // The batch itself is only recounted; its allocation, acceptance and geofence never move.
+  const parentAfter = await data(`tb_uploads/${TB}`);
+  assert.deepEqual([parentAfter.allocation, parentAfter.acceptance, parentAfter.geofenceId], [parent.allocation, parent.acceptance, parent.geofenceId]);
 });
 
 test("the ERF is free again once the batch's row on it is Completed, or the batch names nobody", async () => {
