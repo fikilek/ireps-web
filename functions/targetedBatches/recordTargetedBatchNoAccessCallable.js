@@ -337,9 +337,13 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
     // Targeted Batch rules TB-R059 (1.3.60): No Access on a meter in another team's allocated batch is
     // refused in the same plain words as every other form. The batch checks around it are unchanged; this
     // one runs first only so the worker is told which batch, geofence, team and date stand in the way.
+    // Rules TB-R062 (1.3.65): the ERF too. A No Access records no meter, so it reports no anomaly and the
+    // illegally-connected gate never opens for it.
     const batchWork = await checkBatchWork({
       db, read: (refOrQuery) => transaction.get(refOrQuery),
-      meterNo: input.salesDocId, uid: actor.uid, log: logger,
+      meterNo: input.salesDocId, uid: actor.uid,
+      erfId: input.erfId, premiseId: normalizeText(row?.refs?.premiseId),
+      log: logger,
     });
     if (!batchWork.allowed) throw controlledError(batchWork.code, batchWork.message, batchWork.details);
     assertAuthority({parent, actor, team});

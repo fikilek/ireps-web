@@ -4,7 +4,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import { writeRegistryMreadFromTrn } from "../registry/mread/writeRegistryMreadFromTrn.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { astMeterNo, checkBatchWork } from "../targetedBatches/batch-work-guard.js";
+import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
 
 import {
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
@@ -505,6 +505,9 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     const premiseRef = db.collection("premises").doc(premiseId);
 
     let responsePayload = null;
+    // Targeted Batch rules TB-R062 (1.3.65): kept for after the transaction, so a use of the
+    // illegally-connected gate is recorded only when the work itself went through.
+    let batchWorkDecision = null;
 
     await db.runTransaction(async (tx) => {
       // ------------------------------------------------------------
@@ -551,13 +554,21 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       // sits in another team's allocated batch is refused, and nothing is written. This path names only the
       // AST, so the meter number comes from the AST already read here. Read inside the transaction, before
       // any write, so the facts and the refusal are one picture.
+      //
+      // Rules TB-R062 (1.3.65): the ERF too — the AST's own ERF, or the premise this work is using. The
+      // anomaly is read from what this form captured, falling back to what the AST already holds.
       const batchWorkCheck = await checkBatchWork({
         db,
         read: (refOrQuery) => tx.get(refOrQuery),
         meterNo: astMeterNo(astDoc),
         uid: actorUid,
+        erfId: astDoc?.accessData?.erfId || data?.accessData?.erfId || "",
+        premiseId,
+        anomaly: [data, astDoc?.ast],
         log: logger,
       });
+
+      batchWorkDecision = batchWorkCheck;
 
       if (!batchWorkCheck.allowed) {
         responsePayload = buildFailureResult(
@@ -1055,6 +1066,12 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         },
       );
     });
+
+    // Targeted Batch rules TB-R062 (1.3.65): one document per use of the illegally-connected gate, written
+    // once the work itself is committed, so the office can count them per worker and per team.
+    if (responsePayload?.success === true) {
+      await recordErfOverride({ db, decision: batchWorkDecision, trnId, trnType, log: logger });
+    }
 
     if (trnType === "METER_READING" && responsePayload?.success === true) {
       try {

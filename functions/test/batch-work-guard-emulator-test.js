@@ -8,6 +8,10 @@
 // of a batch (TB-R060) needs Unallocate's authority — a supervisor of another service provider cannot free
 // this batch's work, while the batch's own manager still can.
 //
+// 1.3.65 (TB-R062) adds the ERF: a DIFFERENT meter number discovered on the batch's ERF by another team is
+// refused and writes nothing, the same discovery reported as illegally connected goes through and writes
+// its override record, and the batch's own row never moves either way.
+//
 // index.js is imported first because it calls initializeApp(); the callables read that default app.
 import test, { beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
@@ -112,17 +116,19 @@ async function dump() {
 // ---------------------------------------------------------------- the four field-work submissions
 const media = (...tags) => tags.map(tag => ({ tag, url: `https://example.test/${tag}.jpg` }));
 const PARENTS = { countryPcode: "ZA", provincePcode: "ZA5", dmPcode: "ZA524", lmPcode: "ZA5241", wardPcode: "ZA5241001" };
-const accessData = (trnType, meterNo) => ({ trnType, erfId: "ERF1", erfNo: f.erf.erfNo || "100", parents: PARENTS,
+// Rules TB-R062 (1.3.65): the ERF the form declares, because the lock is on the ERF. ERF1 is the fixture's
+// own, the one the batch's rows sit on; a test that wants a place the batch does not hold names another.
+const accessData = (trnType, meterNo, erfId = "ERF1") => ({ trnType, erfId, erfNo: f.erf.erfNo || "100", parents: PARENTS,
   premise: { id: `PREM_${meterNo}`, address: "1 TEST STREET", propertyType: "ERF RESIDENTIAL" }, access: { hasAccess: "yes", reason: "NAv" } });
-const meterWork = (meterNo, trnType, id) => ({
-  id, accessData: accessData(trnType, meterNo),
+const meterWork = (meterNo, trnType, id, erfId = "ERF1") => ({
+  id, accessData: accessData(trnType, meterNo, erfId),
   ast: { astData: { astNo: meterNo, astManufacturer: "Conlog", astName: "Model X", meter: { phase: "single", type: "prepaid", category: "Normal", seal: { sealNo: "S-1", comment: "" }, keypad: { serialNo: "K-1", comment: "" }, cb: { size: "60A", comment: "" } } },
     anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: [] }, ogs: { hasOffGridSupply: "no" }, normalisation: { actionTaken: ["none"] },
     location: { placement: "Boundary Wall", gps: { lat: -28.16, lng: 30.23 } } },
   meterType: "electricity", media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto"),
   status: { state: "CONNECTED" }, serviceProvider: { id: "SP1", name: "Test SP" },
 });
-const discovery = (meterNo, uid) => ({ auth: { uid, token: {} }, data: meterWork(meterNo, "METER_DISCOVERY", `TRN_MDIS_${meterNo}_${uid}`) });
+const discovery = (meterNo, uid, erfId = "ERF1") => ({ auth: { uid, token: {} }, data: meterWork(meterNo, "METER_DISCOVERY", `TRN_MDIS_${meterNo}_${uid}`, erfId) });
 const installation = (meterNo, uid) => ({ auth: { uid, token: {} }, data: meterWork(meterNo, "METER_INSTALLATION", `TRN_MINST_${meterNo}_${uid}`) });
 const disconnection = (meterNo, uid) => ({ auth: { uid, token: {} }, data: {
   id: `TRN_MDCN_${meterNo}_${uid}`, accessData: { trnType: "METER_DISCONNECTION", premise: { id: `PREM_${meterNo}` }, parents: PARENTS, access: { hasAccess: "yes", reason: "NAv" } },
@@ -141,10 +147,12 @@ const seedAst = (meterNo) => db.doc(`asts/AST_${meterNo}`).set({ trnId: `AST_${m
   accessData: { premise: { id: `PREM_${meterNo}` }, parents: PARENTS }, status: { state: "FIELD" },
   metadata: { createdAt: "2026-09-18T09:30:00.000Z", createdByUid: "FWR1", createdByUser: "Worker One", updatedAt: "2026-09-18T09:30:00.000Z", updatedByUid: "FWR1", updatedByUser: "Worker One" } });
 
-async function expectedSentence() {
+// TB-R062: at an ERF the worker may have typed another number, so that sentence names the ERF.
+async function expectedSentence(about = "meter") {
   const parent = await data(`tb_uploads/${TB}`);
   const fence = await data(`geo_fences/${parent.geofenceId}`);
-  return `This meter is in batch ${TB}, geofence ${fence.name}, allocated to Team One on ${allocationDateWords(parent.allocation.completedAt)}. Only that team can work on it.`;
+  const what = about === "erf" ? "This ERF is in batch" : "This meter is in batch";
+  return `${what} ${TB}, geofence ${fence.name}, allocated to Team One on ${allocationDateWords(parent.allocation.completedAt)}. Only that team can work on it.`;
 }
 
 test("a Meter Discovery on another team's batched meter is refused and writes nothing", async () => {
@@ -220,9 +228,12 @@ test("the batch's own team is not stopped by this rule on a Commissioning", asyn
 });
 
 test("a meter in no batch is free for any team, and a VISIBLE batched meter is free again", async () => {
-  const [a] = await allocatedBatch();
-  await db.doc("premises/PREM_99999").set({ id: "PREM_99999", erfId: "ERF1", parents: PARENTS, address: "2 TEST STREET", propertyType: "ERF RESIDENTIAL", services: {} });
-  const free = await onMeterDiscoveryCallable.run(discovery("99999", "FWR2"));
+  // One meter, so the batch holds one ERF; rules TB-R062 (1.3.65) locks the ERF, so a second row of the
+  // same batch on the same ERF would hold it whatever this meter's own state is.
+  const [a] = await allocatedBatch(1);
+  // A meter in no batch, at a place this batch does not hold: free for anybody.
+  await db.doc("premises/PREM_99999").set({ id: "PREM_99999", erfId: "ERF2", parents: PARENTS, address: "2 TEST STREET", propertyType: "ERF RESIDENTIAL", services: {} });
+  const free = await onMeterDiscoveryCallable.run(discovery("99999", "FWR2", "ERF2"));
   assert.deepEqual([free.success, free.code], [true, "SUCCESS"], JSON.stringify(free));
 
   await seedAst(a);
@@ -233,7 +244,7 @@ test("a meter in no batch is free for any team, and a VISIBLE batched meter is f
 });
 
 test("a Completed batch row releases the meter, and an unallocated batch never held it", async () => {
-  const [a] = await allocatedBatch();
+  const [a] = await allocatedBatch(1);
   await seedAst(a);
   await db.doc(`sales-all-meters/${a}`).update({ "master.visibility": "INVISIBLE" });
   const rowId = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0].id;
@@ -331,7 +342,141 @@ test("the batch's own manager takes the meter out, and the meter is free again",
   assert.equal((await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).empty, true, "the row left the batch");
   assert.equal((await data(`sales-all-meters/${a}/batchHistory/${TB}__REMOVED_FROM_BATCH`)).reason, "TAKEN_OUT_OF_BATCH");
 
-  // TB-R059 and TB-R060 together: the meter is free, so anybody may work on it now.
+  // TB-R059 and TB-R060 together: the meter is free. Rules TB-R062 (1.3.65): the batch's other row still
+  // sits on the same ERF, and while it is open that ERF is still Team One's, so the place is not free yet.
+  const held = await onMeterDiscoveryCallable.run(discovery(a, "FWR2"));
+  assert.deepEqual([held.success, held.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], JSON.stringify(held));
+
+  // With the batch's last row on that ERF Completed, the ERF is free too, and anybody may work there.
+  const otherRow = (await db.collection("tb_rows").where("tbId", "==", TB).get()).docs[0];
+  await otherRow.ref.update({ "execution.status": "COMPLETED", "execution.completedAt": Timestamp.now() });
   const free = await onMeterDiscoveryCallable.run(discovery(a, "FWR2"));
+  assert.deepEqual([free.success, free.code], [true, "SUCCESS"], JSON.stringify(free));
+});
+
+// ---------------------------------------------------------------- TB-R062 (1.3.65): the ERF's own team
+// The hole the owner proved on DEV: a meter ending 4817 captured at ERF 3490 while the batch's own 4816
+// stayed Not Started. TB-R059 looked at the meter number, so a different number at the same place walked
+// past it. Here the batch's own meter stays Not Started and another team's worker discovers a DIFFERENT
+// meter number on the batch's ERF. It must be refused — and let through, and recorded, when that meter is
+// reported as illegally connected.
+const OTHER_METER = "04817";
+
+// The batch's own ERF, taken from the row the real pipeline created, and a premise on it for a meter the
+// batch does not hold. The forms declare that same ERF, exactly as the phone does.
+async function erfOfBatchedMeter(meterNo) {
+  const rows = await db.collection("tb_rows").where("salesAllMeterId", "==", meterNo).get();
+  const erfId = rows.docs[0].data()?.refs?.erfId;
+  assert.equal(erfId, "ERF1", "the batch's row must sit on the fixture ERF");
+  await db.doc(`premises/PREM_${OTHER_METER}`).set({ id: `PREM_${OTHER_METER}`, erfId, parents: PARENTS, address: "1 TEST STREET", propertyType: "ERF RESIDENTIAL", services: {} });
+  return erfId;
+}
+
+// The same Meter Discovery, with the meter reported as illegally connected: the anomaly the phone offers,
+// and the normalisation action that goes with it, each with the photo the form demands.
+function illegallyConnected(request) {
+  const next = structuredClone(request);
+  next.data.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter", otherAnomalies: [] };
+  next.data.ast.normalisation = { actionTaken: ["Illegal connection - meter disconnected"] };
+  next.data.media = media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "anomalyPhoto", "normalisationPhoto");
+  return next;
+}
+
+test("a DIFFERENT meter number at another team's batched ERF is refused, and writes nothing", async () => {
+  const [a] = await allocatedBatch();
+  await erfOfBatchedMeter(a);
+  const before = await dump();
+  const result = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
+  assert.deepEqual([result.success, result.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], JSON.stringify(result));
+  assert.equal(result.message, await expectedSentence("erf"));
+  assert.equal((await db.doc(`trns/TRN_MDIS_${OTHER_METER}_FWR2`).get()).exists, false);
+  assert.equal((await db.collection("batch_erf_overrides").get()).empty, true, "a refusal is never an override");
+  assert.deepEqual(await dump(), before, "a refused discovery on another team's ERF writes nothing");
+});
+
+test("the batch's own team may discover a different meter on their own ERF, with nothing recorded", async () => {
+  const [a] = await allocatedBatch();
+  await erfOfBatchedMeter(a);
+  const result = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR1"));
+  assert.deepEqual([result.success, result.code], [true, "SUCCESS"], JSON.stringify(result));
+  assert.equal((await db.collection("batch_erf_overrides").get()).empty, true, "the ERF is their own, so no gate was used");
+});
+
+test("an illegally connected meter goes through on another team's ERF, and the use is recorded", async () => {
+  const [a] = await allocatedBatch();
+  const erfId = await erfOfBatchedMeter(a);
+  const parent = await data(`tb_uploads/${TB}`);
+  const rowBefore = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0];
+
+  const result = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(OTHER_METER, "FWR2")));
+  assert.deepEqual([result.success, result.code], [true, "SUCCESS"], JSON.stringify(result));
+  assert.equal((await db.doc(`trns/TRN_MDIS_${OTHER_METER}_FWR2`).get()).exists, true);
+
+  // Rules TB-R062: one document per use, under the TRN id, holding the worker, their team, the ERF, the
+  // batch and the team it is allocated to — so the office can count them per worker AND per team.
+  const override = await data(`batch_erf_overrides/TRN_MDIS_${OTHER_METER}_FWR2`);
+  assert.equal(override.rule, "TB-R062");
+  assert.deepEqual(
+    { uid: override.worker.uid, name: override.worker.name, teamId: override.worker.teamId, teamName: override.worker.teamName, serviceProviderId: override.worker.serviceProviderId },
+    { uid: "FWR2", name: "Worker Two", teamId: "TEAM2", teamName: "Team Two", serviceProviderId: "SP1" },
+  );
+  assert.deepEqual([override.erfId, override.meterNo, override.trnId, override.trnType], [erfId, OTHER_METER, `TRN_MDIS_${OTHER_METER}_FWR2`, "METER_DISCOVERY"]);
+  assert.deepEqual(
+    { tbId: override.batch.tbId, geofenceId: override.batch.geofenceId, targetType: override.batch.targetType, targetId: override.batch.targetId, targetName: override.batch.targetName },
+    { tbId: TB, geofenceId: parent.geofenceId, targetType: "TEAM", targetId: "TEAM1", targetName: "Team One" },
+  );
+  assert.equal(override.batch.rowMeterNo, a, "the batch row that holds the ERF is named");
+  assert.equal(override.anomaly.text, "Illegally Connected; Illegal connection - meter disconnected");
+  assert.equal(typeof override.recordedAt, "string");
+  // Counted per worker and per team, both plain equality reads that need no new index.
+  assert.equal((await db.collection("batch_erf_overrides").where("worker.uid", "==", "FWR2").get()).size, 1);
+  assert.equal((await db.collection("batch_erf_overrides").where("worker.teamId", "==", "TEAM2").get()).size, 1);
+
+  // It stays an ordinary normal-path find: the batch's row is untouched, so the allocated team keeps their
+  // work and their count, and the batch's own meter is still theirs alone.
+  const rowAfter = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0];
+  assert.deepEqual(rowAfter.data(), rowBefore.data(), "the allocated team's row never moves");
+  assert.deepEqual(await data(`tb_uploads/${TB}`), parent, "the batch itself never moves");
+  const own = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(a, "FWR2")));
+  assert.deepEqual([own.success, own.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], "the gate never applies to the batch's own meter number");
+});
+
+test("the ERF is free again once the batch's row on it is Completed, or the batch names nobody", async () => {
+  const [a] = await allocatedBatch(1);
+  await erfOfBatchedMeter(a);
+  const rowId = (await db.collection("tb_rows").where("salesAllMeterId", "==", a).get()).docs[0].id;
+
+  await db.doc(`tb_rows/${rowId}`).update({ "execution.status": "COMPLETED", "execution.completedAt": Timestamp.now() });
+  const completed = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
+  assert.deepEqual([completed.success, completed.code], [true, "SUCCESS"], JSON.stringify(completed));
+  assert.equal((await db.collection("batch_erf_overrides").get()).empty, true, "a free ERF needs no gate");
+
+  await db.doc(`trns/TRN_MDIS_${OTHER_METER}_FWR2`).delete();
+  await db.doc(`tb_rows/${rowId}`).update({ "execution.status": "NOT_STARTED", "execution.completedAt": null });
+  assert.equal((await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"))).code, METER_IN_ANOTHER_TEAMS_BATCH, "the row is open again, so the ERF is the team's again");
+
+  await db.doc(`tb_uploads/${TB}`).update({ "allocation.status": "NOT_STARTED", "allocation.targetId": FieldValue.delete(), "allocation.targetType": FieldValue.delete(), "allocation.targetName": FieldValue.delete() });
+  const unallocated = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
+  assert.deepEqual([unallocated.success, unallocated.code], [true, "SUCCESS"], "nobody has been given this work, so the ERF holds nobody");
+});
+
+test("a row taken out of the batch stops holding its ERF (TB-R060), row by row", async () => {
+  const [a] = await allocatedBatch();
+  await erfOfBatchedMeter(a);
+  assert.equal((await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"))).code, METER_IN_ANOTHER_TEAMS_BATCH);
+
+  // TB-R060 deletes the row, so it stops matching the ERF by itself — but the batch's other row is on the
+  // same ERF, and every row of an allocated batch holds the ERF it sits on.
+  const takenOut = await takeOut(f.actor.uid, [a], "Batched by mistake: this meter belongs to next month's work.");
+  assert.equal(takenOut.success, true, JSON.stringify(takenOut));
+  const rows = await db.collection("tb_rows").where("tbId", "==", TB).get();
+  assert.equal(rows.size, 1, "the row left the batch");
+  const still = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
+  assert.deepEqual([still.success, still.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], JSON.stringify(still));
+  assert.equal(still.message.includes(TB), true, "the sentence still names the batch that holds the ERF");
+
+  // Once the batch has no open row left on that ERF, the place is free for anybody.
+  await rows.docs[0].ref.update({ "execution.status": "COMPLETED", "execution.completedAt": Timestamp.now() });
+  const free = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
   assert.deepEqual([free.success, free.code], [true, "SUCCESS"], JSON.stringify(free));
 });

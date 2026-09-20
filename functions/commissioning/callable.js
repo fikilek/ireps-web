@@ -9,7 +9,7 @@ import {
 } from "../meterLifecycle/helpers.js";
 
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { astMeterNo, checkBatchWork } from "../targetedBatches/batch-work-guard.js";
+import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
 
 import {
   COMMISSIONING_TRN_TYPE,
@@ -69,6 +69,9 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
     const premiseRef = db.collection("premises").doc(premiseId);
 
     let responsePayload = null;
+    // Targeted Batch rules TB-R062 (1.3.65): kept for after the transaction, so a use of the
+    // illegally-connected gate is recorded only when the work itself went through.
+    let batchWorkDecision = null;
 
     await db.runTransaction(async (tx) => {
       const trnSnap = await tx.get(trnRef);
@@ -133,13 +136,20 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
 
       // Targeted Batch rules TB-R059 (1.3.60): commissioning a meter that sits in another team's allocated
       // batch is refused, and nothing is written. The meter number comes from the AST read above.
+      // Rules TB-R062 (1.3.65): so is commissioning any meter on an ERF that belongs to another team's
+      // allocated batch, unless the meter is reported as illegally connected.
       const batchWorkCheck = await checkBatchWork({
         db,
         read: (refOrQuery) => tx.get(refOrQuery),
         meterNo: astMeterNo(astDoc),
         uid: actorUid,
+        erfId: astDoc?.accessData?.erfId || data?.accessData?.erfId || "",
+        premiseId,
+        anomaly: [data, astDoc?.ast],
         log: logger,
       });
+
+      batchWorkDecision = batchWorkCheck;
 
       if (!batchWorkCheck.allowed) {
         responsePayload = buildFailureResult(
@@ -198,6 +208,12 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
         },
       );
     });
+
+    // Targeted Batch rules TB-R062 (1.3.65): one document per use of the illegally-connected gate, written
+    // once the work itself is committed, so the office can count them per worker and per team.
+    if (responsePayload?.success === true) {
+      await recordErfOverride({ db, decision: batchWorkDecision, trnId, trnType, log: logger });
+    }
 
     return (
       responsePayload ||

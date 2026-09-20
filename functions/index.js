@@ -106,7 +106,7 @@ import {
   validateTargetedBatchMeterDiscoverySubmission,
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { checkBatchWork } from "./targetedBatches/batch-work-guard.js";
+import { checkBatchWork, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -3185,10 +3185,17 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     // service provider may work on it. Checked before anything is written, whether the phone came through
     // the batch or straight to the meter. A No Access discovery carries no meter number, so the batch it
     // declares names the Sales meter.
+    //
+    // Rules TB-R062 (1.3.65): and the ERF this discovery is happening on belongs to the team the batch on
+    // it is allocated to, whatever meter number is typed — which is the hole this closes. The one gate is a
+    // meter reported as illegally connected: it goes through, and the use is recorded once the TRN is saved.
     const batchWorkCheck = await checkBatchWork({
       db,
       meterNo: meterNoNormalized || data?.targetedBatchContext?.salesDocId || "",
       uid: caller.uid,
+      erfId: data?.accessData?.erfId || "",
+      premiseId,
+      anomaly: data,
       log: logger,
     });
 
@@ -3288,6 +3295,18 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     };
 
     await trnRef.set(finalPayload, { merge: true });
+
+    // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's ERF.
+    // Recorded once the work itself is saved, one document per use, so the office can list it and count it
+    // per worker and per team. The find stays an ordinary normal-path find: the batch's row is untouched.
+    await recordErfOverride({
+      db,
+      decision: batchWorkCheck,
+      trnId: data.id,
+      trnType: data?.accessData?.trnType || "METER_DISCOVERY",
+      now,
+      log: logger,
+    });
 
     logger.info("onMeterDiscoveryCallable --trn saved", {
       trnId: data.id,
@@ -4928,11 +4947,16 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     }
 
     // Targeted Batch rules TB-R059 (1.3.60): a meter in another team's allocated batch is refused here too,
-    // before the installation transaction writes anything.
+    // before the installation transaction writes anything. Rules TB-R062 (1.3.65): so is any meter number
+    // installed on an ERF that belongs to another team's allocated batch, unless it is reported as
+    // illegally connected, and that use is recorded with the work.
     const batchWorkCheck = await checkBatchWork({
       db,
       meterNo: meterNoNormalized || data?.targetedBatchContext?.salesDocId || "",
       uid: caller.uid,
+      erfId: accessData?.erfId || "",
+      premiseId,
+      anomaly: data,
       log: logger,
     });
 
@@ -5232,6 +5256,17 @@ export const onMeterInstallationCallable = onCall(async (request) => {
         astId: trnId,
       };
     }
+
+    // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's ERF,
+    // and the installation went through. One document per use, recorded after the work is written.
+    await recordErfOverride({
+      db,
+      decision: batchWorkCheck,
+      trnId,
+      trnType: accessData?.trnType || "METER_INSTALLATION",
+      now,
+      log: logger,
+    });
 
     return {
       success: true,
