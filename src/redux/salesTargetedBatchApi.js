@@ -601,10 +601,10 @@ export const salesTargetedBatchApi = createApi({
     // a loaded layer is not read again while its Ward and area stay the same. The entry reads the
     // Ward itself, so it never restarts because the draft snapshot is briefly waiting.
     // Rules 18.7 (1.3.30): a layer switched off stays loaded for 10 minutes.
+    // Rules 18.7: a layer switched off stays loaded 10 minutes. Since TB-R055.7 (1.3.63) the GPS
+    // Sales map loads near the work exactly as TB Draft does, so both maps read through this one
+    // endpoint; the area-on-screen endpoint of 1.3.49, let go after 20 seconds, is retired.
     getSalesBatchNearbyLayer: builder.query(nearbyLayerEndpoint(600)),
-    // Targeted Batch rules TB-R055.7 (1.3.49): the GPS Sales map's area follows the screen, so an
-    // area it has left is let go after 20 seconds, not 10 minutes (no pile of live listeners).
-    getSalesMapNearbyLayer: builder.query(nearbyLayerEndpoint(20)),
     getSalesBatchDraftSnapshot: builder.query({
       keepUnusedDataFor: 0,
       queryFn: () => ({ data: { ready: false, sales: {}, erfs: {}, wards: {}, fence: null, parent: null, error: null } }),
@@ -2927,4 +2927,3 @@ export function useGetTargetedBatchDetailsByIdQuery(arg, options) {
 }
 
 export function useGetSalesBatchNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchNearbyLayerQuery", arg, options); }
-export function useGetSalesMapNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesMapNearbyLayerQuery", arg, options); }

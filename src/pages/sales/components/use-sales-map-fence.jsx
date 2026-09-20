@@ -8,7 +8,6 @@ import { db } from "../../../firebase";
 import { useCreateGeoFenceMutation } from "../../../redux/geofencesApi";
 import { useResolveSalesTargetedBatchMutation } from "../../../redux/salesTargetedBatchApi";
 import { buildTargetedBatchDraftId } from "../../../redux/targetedBatchDraftModel";
-import { useGeofencePolygonDraft } from "../../../features/maps/use-geofence-polygon-draft";
 import { mapPoint } from "../../../features/maps/sales-batch-nearby.js";
 import { GeofenceDrawingBar, GeofenceDialogs } from "../../operations/geofence-shared-ui";
 import { DraftGeoFenceLayer } from "../../operations/geofence-map-layers";
@@ -22,7 +21,7 @@ import { salesMapFenceCount, salesMapFenceCountText, salesMapFenceErfIds, salesM
 import { salesMapLayerDrawNotes, salesMapLayerDrawStats } from "../models/salesMapLayersModel.js";
 
 const EMPTY_ERFS = new Map();
-const NO_PLANNING = Object.freeze({ model: {}, visibility: {}, zoomedOut: true });
+const NO_PLANNING = Object.freeze({ model: {}, visibility: {}, ready: false });
 const TONES = { ok: "#166534", info: "#334155", busy: "#334155", error: "#b91c1c" };
 
 // The ERF centroids of the Ward's meters that can be batched, read (a few requests at a time) when
@@ -59,8 +58,9 @@ function useWatchedFence(fenceId) {
   return fence?.id === fenceId ? fence : null;
 }
 
-export function useSalesMapFence({ planning = NO_PLANNING, canDraw = false, lmPcode = "", wardPcode = "", wardLabel = "", rows = [], categoryMonth = null, wardGeofences = [], onSaved }) {
-  const drawing = useGeofencePolygonDraft();
+// `drawing` (useGeofencePolygonDraft) is owned by the map section, as TB Draft's page owns its own:
+// the Map Layers also need the points of the shape being drawn, to load only near it (1.3.63).
+export function useSalesMapFence({ drawing, planning = NO_PLANNING, canDraw = false, lmPcode = "", wardPcode = "", wardLabel = "", rows = [], categoryMonth = null, wardGeofences = [], onSaved }) {
   const [resolve] = useResolveSalesTargetedBatchMutation();
   const [createGeoFence] = useCreateGeoFenceMutation();
   const [createModalOpen, setCreateModalOpen] = useState(false), [confirmOpen, setConfirmOpen] = useState(false);

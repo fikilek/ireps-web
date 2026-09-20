@@ -6,8 +6,8 @@ import { SourceTextModule, SyntheticModule, createContext } from "node:vm";
 // Web Data Copy rules WD-R001: one saved copy shared by all tabs, deleted at sign-out.
 // While another tab still has the copy open, the browser's delete waits (it never
 // fails), so the fake delete either finishes or never settles.
-async function fixture({ deleteFinishes = true } = {}) {
-  const state = { calls: [], errors: [], timers: [], settings: null, authCallback: null };
+async function fixture({ deleteFinishes = true, savedCopyInUse = true } = {}) {
+  const state = { calls: [], errors: [], timers: [], settings: null, authCallback: null, indexManager: null, indexesAskedFor: [] };
   const context = createContext({
     console: { log() {}, error: (...parts) => state.errors.push(parts) },
     setTimeout: (run, ms) => { state.timers.push({ run, ms, cleared: false }); return state.timers.length; },
@@ -21,6 +21,12 @@ async function fixture({ deleteFinishes = true } = {}) {
       initializeFirestore: (_app, settings) => { state.settings = settings; return { name: "db" }; },
       persistentLocalCache: options => ({ kind: "persistent", ...options }),
       persistentMultipleTabManager: () => ({ kind: "multi-tab" }),
+      // The browser hands back a lookup keeper only while the saved copy is in use.
+      getPersistentCacheIndexManager: db => {
+        state.indexManager = savedCopyInUse ? { db } : null;
+        return state.indexManager;
+      },
+      enablePersistentCacheIndexAutoCreation: manager => { state.indexesAskedFor.push(manager); },
       terminate: async () => { state.calls.push("terminate"); },
       clearIndexedDbPersistence: () => {
         state.calls.push("clear");
@@ -52,6 +58,24 @@ test("one saved copy, shared by all tabs, big enough for the Sales", async () =>
   assert.equal(state.settings.localCache.kind, "persistent");
   assert.equal(state.settings.localCache.tabManager.kind, "multi-tab");
   assert.equal(state.settings.localCache.cacheSizeBytes, api.SAVED_COPY_MAX_BYTES);
+});
+
+// WD-R001: without its own lookups the saved copy answers a question about one small area by
+// reading every record it has saved for that collection, which is what made the map layers of
+// 18.7 and TB-R055.7 stick after the saved copy was added.
+test("the saved copy builds its own lookups, so one area is not answered by reading everything", async () => {
+  const { api, state } = await fixture();
+  assert.ok(state.indexManager, "the browser hands back a lookup keeper while the saved copy is in use");
+  assert.equal(state.indexManager.db, api.db, "the lookups are for the saved copy this app uses");
+  assert.deepEqual(state.indexesAskedFor, [state.indexManager], "the lookups are asked for once, at start-up");
+  assert.equal(api.savedCopyIndexes, state.indexManager);
+});
+
+test("no saved copy in use means nothing is assumed about lookups", async () => {
+  const { api, state } = await fixture({ savedCopyInUse: false });
+  assert.equal(api.savedCopyIndexes, null);
+  assert.deepEqual(state.indexesAskedFor, [], "nothing is asked for when there is no saved copy to build them in");
+  assert.equal(state.errors.length, 0);
 });
 
 test("opening the sign-in page while signed out deletes nothing", async () => {

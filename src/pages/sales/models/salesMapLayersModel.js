@@ -1,47 +1,43 @@
-// Targeted Batch rules TB-R055.7 (1.3.49): TB Draft's Map Layers on the GPS Sales map, for the area
-// on screen. A read holds at most 500 records, so ERFs, Sales, Premises and Assets load only when
-// zoomed in to street level; the area is widened to a fixed grid so small moves reuse the same read.
-import { NEARBY_LAYERS } from "../../../features/maps/sales-batch-nearby.js";
+// Targeted Batch rules TB-R055.7 (1.3.63): TB Draft's Map Layers on the GPS Sales map, loading only
+// near the work, exactly as TB Draft does (18.7): within 50 m of the geofence being drawn, or, when
+// nothing is being drawn, within 50 m of the area covering the ticked meters, and inside the Ward.
+// Nothing loads until meters are ticked or a geofence is being drawn. Until 1.3.63 these layers
+// loaded for the area on screen, which pulled hundreds of ERFs far from the meters being batched.
+import { NEARBY_LAYERS, locatedMeterBounds } from "../../../features/maps/sales-batch-nearby.js";
 import { buildGeofencePlanningDraftStats } from "../../operations/geofencePlanningModel.js";
 
-export const SALES_MAP_LAYER_MIN_ZOOM = 17;
-export const SALES_MAP_LAYER_GRID = 0.0025; // degrees, about 275 m
-export const SALES_MAP_LAYER_ZOOMED_OUT = "Zoom in to street level to load";
+// What the panel says about the layers and their counts (18.7, 1.3.63).
+export const SALES_MAP_LAYER_COUNTS_NOTE = "Layers show the area near the work · counts are for that area";
+// What a layer line says while there is no work to be near.
+export const SALES_MAP_LAYER_NO_WORK = "Tick meters or draw a geofence";
 
-const snap = (value, round) => Number((round(value / SALES_MAP_LAYER_GRID) * SALES_MAP_LAYER_GRID).toFixed(4));
-
-// The area on screen widened to the grid, or null when zoomed out too far (or not known yet).
-export function salesMapLayerArea({ south, west, north, east, zoom } = {}) {
-  if (![south, west, north, east, zoom].every(Number.isFinite) || zoom < SALES_MAP_LAYER_MIN_ZOOM) return null;
-  return { minLat: snap(south, Math.floor), maxLat: snap(north, Math.ceil), minLng: snap(west, Math.floor), maxLng: snap(east, Math.ceil) };
+// The area near the work, TB Draft's own 50 m box (locatedMeterBounds, 18.7): the shape being drawn
+// when one is, else the ticked meters. Null when there is neither, so nothing loads.
+export function salesMapLayerArea({ drawingPoints = [], tickedPoints = [] } = {}) {
+  const points = drawingPoints.length ? drawingPoints : tickedPoints;
+  return locatedMeterBounds(points.map(point => ({ point })));
 }
 
-// The whole shape lies inside the loaded area (the area on screen, widened to the grid).
-export function shapeInsideArea(draftPoints = [], bounds = null) {
-  return Boolean(bounds) && draftPoints.length > 0 && draftPoints.every(point => point.lat >= bounds.minLat && point.lat <= bounds.maxLat && point.lng >= bounds.minLng && point.lng <= bounds.maxLng);
-}
-
-// The ticked layers whose count inside the shape is final: fully loaded ("Complete") for an area that
-// holds the whole shape. Any other shows "—" (as TB Draft, 18.7): a count still loading, cut off at
-// 500 records, or missing the part of the shape off screen would look final but be too low.
-export function salesMapLayerCountedLayers({ draftPoints = [], visibility = {}, zoomedOut = false, layerStates = {}, bounds = null } = {}) {
-  if (zoomedOut || !shapeInsideArea(draftPoints, bounds)) return [];
+// The ticked layers whose count inside the shape is final: fully loaded ("Complete") for the area
+// near the work, which always holds the whole shape while one is drawn. Any other shows "—" (as TB
+// Draft, 18.7): a count still loading, or cut off at 500 records, would look final but be too low.
+export function salesMapLayerCountedLayers({ visibility = {}, ready = false, layerStates = {} } = {}) {
+  if (!ready) return [];
   return NEARBY_LAYERS.filter(layer => visibility[layer] && layerStates[layer] === "Complete");
 }
 
 // What the drawing bar says about those counts.
-export function salesMapLayerDrawNotes({ draftPoints = [], visibility = {}, zoomedOut = false, layerStates = {}, bounds = null } = {}) {
+export function salesMapLayerDrawNotes({ draftPoints = [], visibility = {}, ready = false, layerStates = {} } = {}) {
   const ticked = NEARBY_LAYERS.filter(layer => visibility[layer]);
   if (!ticked.length || draftPoints.length < 3) return [];
-  if (zoomedOut) return [`Layer counts: ${SALES_MAP_LAYER_ZOOMED_OUT.toLowerCase()}.`];
-  if (!shapeInsideArea(draftPoints, bounds)) return ["Layer counts: part of the shape is off screen. Move the map so the whole shape shows."];
+  if (!ready) return ["Layer counts: the layers near this shape are not loaded yet."];
   return ticked.filter(layer => layerStates[layer] !== "Complete").map(layer => `${layer}: ${layerStates[layer] || "Loading nearby records…"}`);
 }
 
 // Inside the shape, for the ticked layers whose count is final; "—" for any other (as TB Draft, 18.7).
 export function salesMapLayerDrawStats({ draftPoints = [], model = {}, ...state } = {}) {
   const stats = buildGeofencePlanningDraftStats({ draftPoints, ...model });
-  const counted = salesMapLayerCountedLayers({ draftPoints, ...state }), none = "—";
+  const counted = salesMapLayerCountedLayers(state), none = "—";
   return { ...stats,
     erfs: counted.includes("erfs") ? stats.erfs : none,
     premises: counted.includes("premises") ? stats.premises : none,

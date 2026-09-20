@@ -1281,6 +1281,7 @@ export default function SalesMetersTable({
           hoveredMeterId={hoveredMapMeterId}
           focusedMeterId={focusedMapMeterId}
           focusRequest={mapFocusRequest}
+          selectedMeterIds={selectedIdSet}
           canDrawFence={canDrawFence}
           fenceRows={fenceWardRows}
           fenceCategoryMonth={fenceCategoryMonth}
