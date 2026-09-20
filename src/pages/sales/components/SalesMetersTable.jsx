@@ -1,4 +1,4 @@
-import { addSalesSelection, evaluateSalesBatchability, hasUsableSalesGps as hasPolicySalesGps, newestSalesCategoryMonth } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { addSalesSelection, evaluateSalesBatchability, hasUsableSalesGps as hasPolicySalesGps, newestSalesCategoryMonth, SAME_METER } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -11,6 +11,7 @@ import SalesRangeFilterModal from "./SalesRangeFilterModal";
 import MultiSelectFilter from "./MultiSelectFilter";
 import { hasUsableSalesGps } from "../models/salesGpsModel";
 import { salesTableMeterNote } from "../models/sales-table-meter-note.js";
+import { SAME_METER_FILTER_OPTIONS, sameMeterSortRank, sameMeterText } from "../models/site-meter-model.js";
 import {
   TARGET_FILTERS,
   compareNatural,
@@ -84,6 +85,9 @@ const RISK_TIER_ORDER = [
 ];
 
 const DEFAULT_COLUMN_VISIBILITY = {
+  // Targeted Batch rules TB-R065 (1.3.69): shown by default, beside Meter Number.
+  siteMeter: true,
+  sameMeter: true,
   wardNo: true,
   geofence: true,
   tbRefs: true,
@@ -103,6 +107,8 @@ const DEFAULT_COLUMN_VISIBILITY = {
 };
 
 const COLUMN_OPTIONS = [
+  { key: "siteMeter", label: "Site Meter" },
+  { key: "sameMeter", label: "Same Meter" },
   { key: "wardNo", label: "Ward No" },
   { key: "geofence", label: "Geofences" },
   { key: "tbRefs", label: "TB IDs" },
@@ -124,6 +130,8 @@ const COLUMN_OPTIONS = [
 const STICKY_COLUMN_WIDTHS = {
   select: 54,
   meterNo: 155,
+  siteMeter: 155,
+  sameMeter: 130,
   wardNo: 105,
   geofence: 220,
   tbRefs: 130,
@@ -144,6 +152,7 @@ const STICKY_COLUMN_WIDTHS = {
 
 const HORIZONTALLY_STICKY_COLUMNS = new Set(["select", "meterNo"]);
 
+
 // The Geofences column fits the longest list on the page shown: at least its
 // STICKY_COLUMN_WIDTHS width, at most this, both for the whole cell; a longer
 // list ends in "…" and the cell's hover shows it all (Targeted Batch rules
@@ -152,6 +161,8 @@ const GEOFENCE_COLUMN_MAX_WIDTH = 360;
 
 const EMPTY_FILTERS = {
   meterNo: "",
+  siteMeterNo: "",
+  sameMeters: [],
   wardNos: [],
   geofenceIds: [],
   tbIds: [],
@@ -488,6 +499,9 @@ function getSortValue(row, sortKey) {
   }
 
   if (sortKey === "updatedAt") return Number(row?.updatedAtMs || 0);
+  // TB-R065 (1.3.69): sorting puts the meters nobody has seen last, and the different ones first.
+  if (sortKey === "siteMeter") return row?.siteMeterNo || "";
+  if (sortKey === "sameMeter") return sameMeterSortRank(row?.sameMeter);
   if (sortKey === "wardNo") return row?.wardNumberLabel || "";
   if (sortKey === "geofence") return getRowGeofenceLabel(row);
   if (sortKey === "tbRefs") return getRowTbRefs(row).length;
@@ -736,6 +750,8 @@ export default function SalesMetersTable({
     const selectedGeofenceIds = new Set(filters.geofenceIds);
     const selectedTbIds = new Set(filters.tbIds);
     const selectedSalesStatuses = new Set(filters.salesStatuses);
+    // TB-R065 (1.3.69): NAv is one of the three values, so it filters like the other two.
+    const selectedSameMeters = new Set(filters.sameMeters);
     const selectedSalesCategories = new Set(filters.leakageCategories);
     const selectedTowns = new Set(filters.towns);
 
@@ -778,6 +794,8 @@ export default function SalesMetersTable({
       return (
         matchesTargetFilter(row, targetFilter, latestMonthKey) &&
         includesText(row?.meterNo, filters.meterNo) &&
+        includesText(row?.siteMeterNo, filters.siteMeterNo) &&
+        (selectedSameMeters.size === 0 || selectedSameMeters.has(row?.sameMeter)) &&
         matchesWard &&
         matchesGeofence &&
         matchesTb &&
@@ -836,6 +854,15 @@ export default function SalesMetersTable({
       {
         header: "Meter Number",
         value: (row) => row?.meterNo || "NAv",
+      },
+      // Targeted Batch rules TB-R065 (1.3.69): the meter found on site travels with the download.
+      {
+        header: "Site Meter",
+        value: (row) => row?.siteMeterNo || "NAv",
+      },
+      {
+        header: "Same Meter",
+        value: (row) => sameMeterText(row?.sameMeter),
       },
       {
         header: "Ward No",
@@ -928,6 +955,8 @@ export default function SalesMetersTable({
   const selectedIdSet = selectedIds || new Set();
   const hasActiveColumnFilters =
     Boolean(String(filters.meterNo || "").trim()) ||
+    Boolean(String(filters.siteMeterNo || "").trim()) ||
+    filters.sameMeters.length > 0 ||
     filters.wardNos.length > 0 ||
     filters.geofenceIds.length > 0 ||
     filters.tbIds.length > 0 ||
@@ -1147,6 +1176,8 @@ export default function SalesMetersTable({
 
       return {
         ...current,
+        siteMeterNo: columnKey === "siteMeter" ? "" : current.siteMeterNo,
+        sameMeters: columnKey === "sameMeter" ? [] : current.sameMeters,
         wardNos: columnKey === "wardNo" ? [] : current.wardNos,
         geofenceIds:
           columnKey === "wardNo" || columnKey === "geofence"
@@ -1335,6 +1366,43 @@ export default function SalesMetersTable({
                   placeholder="Meter number"
                 />
               </th>
+
+              {columnVisibility.siteMeter ? (
+                <th style={{ ...styles.headerCell, ...getStickyStyle("siteMeter", stickyLayout, true) }}>
+                  <SortButton
+                    label="Site Meter"
+                    sortKey="siteMeter"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    value={filters.siteMeterNo}
+                    onChange={(value) => updateFilter("siteMeterNo", value)}
+                    placeholder="Site meter"
+                  />
+                </th>
+              ) : null}
+
+              {columnVisibility.sameMeter ? (
+                <th style={{ ...styles.headerCell, ...getStickyStyle("sameMeter", stickyLayout, true) }}>
+                  <SortButton
+                    label="Same Meter"
+                    sortKey="sameMeter"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <MultiSelectFilter
+                    allLabel="All meters"
+                    ariaLabel="Filter Sales meters by whether the meter on site is the same meter"
+                    menuMinWidth={200}
+                    onChange={(values) => updateFilter("sameMeters", Array.isArray(values) ? values : [])}
+                    options={SAME_METER_FILTER_OPTIONS}
+                    selectedCountLabel="values selected"
+                    style={styles.headerSelect}
+                    value={filters.sameMeters}
+                  />
+                </th>
+              ) : null}
 
               {columnVisibility.wardNo ? (
                 <th style={{ ...styles.headerCell, ...getStickyStyle("wardNo", stickyLayout, true) }}>
@@ -1754,6 +1822,29 @@ export default function SalesMetersTable({
                     </button>
                     {row.meterNote ? <span style={styles.noGpsHelper}>{row.meterNote}</span> : null}
                   </td>
+
+                  {columnVisibility.siteMeter ? (
+                    <td style={{ ...styles.bodyCell, ...styles.meterCell, ...getStickyStyle("siteMeter", stickyLayout) }} title={row.siteMeterNo || "Nobody has been there yet"}>
+                      {row.siteMeterNo || "NAv"}
+                    </td>
+                  ) : null}
+
+                  {columnVisibility.sameMeter ? (
+                    <td style={{ ...styles.bodyCell, ...getStickyStyle("sameMeter", stickyLayout) }}>
+                      <span
+                        style={{
+                          ...styles.salesStatusBadge,
+                          ...(row.sameMeter === SAME_METER.YES
+                            ? styles.salesStatusCompleted
+                            : row.sameMeter === SAME_METER.NO
+                              ? styles.sameMeterNo
+                              : styles.salesStatusNotStarted),
+                        }}
+                      >
+                        {sameMeterText(row.sameMeter)}
+                      </span>
+                    </td>
+                  ) : null}
 
                   {columnVisibility.wardNo ? (
                     <td style={{ ...styles.bodyCell, ...getStickyStyle("wardNo", stickyLayout) }} title={row.wardNumberLabel || "NAv"}>
@@ -2303,6 +2394,12 @@ const styles = {
     borderColor: "#cbd5e1",
     background: "#f8fafc",
     color: "#475569",
+  },
+  // TB-R065 (1.3.69): a different meter on site is the exception the eye must catch.
+  sameMeterNo: {
+    borderColor: "#fca5a5",
+    background: "#fef2f2",
+    color: "#b91c1c",
   },
   salesStatusInProgress: {
     borderColor: "#fcd34d",

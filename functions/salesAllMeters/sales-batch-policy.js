@@ -122,6 +122,39 @@ export function classifySalesWorkStatus(row = {}) {
   const integrity = inspectSalesTbRefsIntegrity(row.tbRefs);
   return integrity.entries.some(entry => entry.classifiable && row.tbRefs[entry.index].fieldWork?.status === "IN_PROGRESS") ? "IN_PROGRESS" : "NOT_STARTED";
 }
+// Targeted Batch rules TB-R065 (1.3.69): the meter recorded on site, and whether it is the meter on the
+// Sales list. Worked out from the Sales record as it stands; nothing new is stored. In order: the different
+// meter found at this meter's ERF (TB-R063), then the number the batch's own field work recorded, then the
+// meter's own number once it is visible in the master data, because a visible meter was found as itself.
+// No evidence at all is NAv on screen, never a guess.
+export const SAME_METER = Object.freeze({ YES: "YES", NO: "NO", NAV: "NAV" });
+export function salesSiteMeter(row = {}, salesId = null) {
+  const identity = nonblank(salesId) ? salesId : nonblank(row.meterNoNormalized) ? row.meterNoNormalized : nonblank(row.id) ? row.id : "";
+  const own = identity.trim().toUpperCase().replace(/\s+/g, "");
+  // The same cleaning the writers use when they decide meterMatch: trimmed, upper case, no spaces.
+  const clean = value => value.trim().toUpperCase().replace(/\s+/g, "");
+  const found = (meterNo, source) => {
+    const site = clean(meterNo);
+    return { meterNo: site, sameMeter: own && site === own ? SAME_METER.YES : SAME_METER.NO, source };
+  };
+  const different = inspectDifferentMeterFound(row);
+  if (different.found) return found(different.record.meterNo, "DIFFERENT_METER_FOUND");
+  // Legacy records carry TbRefs, as membership and integrity already read it. The newest finished field
+  // work wins: a meter worked in an old batch and again later shows the meter found last, not first.
+  const refs = Array.isArray(row.tbRefs) ? row.tbRefs : Array.isArray(row.TbRefs) ? row.TbRefs : [];
+  let newest = null;
+  for (const entry of inspectSalesTbRefsIntegrity(refs).entries) {
+    const fieldWork = refs[entry.index]?.fieldWork;
+    if (!entry.classifiable || fieldWork?.status !== "COMPLETED" || !nonblank(fieldWork.discoveredMeterNo)) continue;
+    const at = timestampMillis(fieldWork.updatedAt) ?? timestampMillis(fieldWork.submittedAt) ?? 0;
+    if (!newest || at >= newest.at) newest = { at, meterNo: fieldWork.discoveredMeterNo };
+  }
+  if (newest) return found(newest.meterNo, "FIELD_WORK");
+  const visibility = Object.hasOwn(row, "master") ? row.master?.visibility : row.masterVisibility;
+  if (visibility === "VISIBLE" && own) return { meterNo: own, sameMeter: SAME_METER.YES, source: "VISIBLE" };
+  return { meterNo: null, sameMeter: SAME_METER.NAV, source: "NONE" };
+}
+
 export const classifySalesTableWorkStatus = classifySalesWorkStatus;
 export function buildSalesTableWorkStatusRows({ salesRows = [] } = {}) {
   return (Array.isArray(salesRows) ? salesRows : []).map(row => ({ ...row, salesWorkStatus: classifySalesWorkStatus(row) }));

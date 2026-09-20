@@ -1,4 +1,4 @@
-import { classifySalesWorkStatus, hasUsableSalesGps, coordinateNumber } from "../../functions/salesAllMeters/sales-batch-policy.js";
+import { classifySalesWorkStatus, hasUsableSalesGps, coordinateNumber, salesSiteMeter } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
@@ -336,6 +336,7 @@ export function normalizeSalesRow(id, data = {}) {
   const derivedSales2024C = sumCalendarYear(monthlySalesC, 2024);
   const derivedSales2025C = sumCalendarYear(monthlySalesC, 2025);
   const rawTbRefs = data.tbRefs !== undefined ? data.tbRefs : data.TbRefs;
+  const siteMeter = salesSiteMeter(data, id);
   const derivedSales2026C = sumCalendarYear(monthlySalesC, 2026);
 
   const customerName = data.customerName || data.customerSurname || data.Customer || data.Surname || "";
@@ -408,6 +409,10 @@ export function normalizeSalesRow(id, data = {}) {
     master: data.master ? { ...data.master } : null,
     meterType: data.meterType ?? data.MeterType ?? data.meterMode ?? data.MeterMode ?? data.tariffType ?? "PREPAID",
     salesWorkStatus: classifySalesWorkStatus(data),
+    // Targeted Batch rules TB-R065 (1.3.69): the meter recorded on site, and whether it is this meter.
+    // Read off the Sales document itself, like the work status, so every screen reads one answer.
+    siteMeterNo: siteMeter.meterNo,
+    sameMeter: siteMeter.sameMeter,
     ...(Object.hasOwn(data, "erfId") ? { erfId: data.erfId } : {}),
     ...(Object.hasOwn(data, "erfResolution") ? { erfResolution: toSerializableValue(data.erfResolution) } : {}),
     ...(Object.hasOwn(data, "erfLookup") ? { erfLookup: toSerializableValue(data.erfLookup) } : {}),

@@ -956,7 +956,8 @@ test("NGP tables display canonical Sales Meter Status columns", () => {
   assert.doesNotMatch(planning, /label="Discovered"/);
 
   assert.match(detail, /label="Sales Meter Status"/);
-  assert.match(detail, /\{target\.salesWorkStatus\}/);
+  // The status is shown in the owner's words (three statuses, no internal codes).
+  assert.match(detail, /getSalesStatusLabel\(target\.salesWorkStatus\)/);
   assert.doesNotMatch(detail, />Account Number</);
   assert.doesNotMatch(detail, />Planning Status</);
 });
@@ -1109,7 +1110,13 @@ test("visibility columns, KPI context, dropdown and modal wiring stay narrow", (
     assert.ok(planning.includes('matchesCountFilter(street.counters.' + key));
   }
   assert.equal((planning.match(/colSpan=\{8\}/g) || []).length, 2);
-  assert.match(detail, /colSpan=\{5\}/);
+  // Targeted Batch rules TB-R065 (1.3.69): Site Meter and Same Meter make seven columns.
+  assert.match(detail, /colSpan=\{7\}/);
+  assert.match(detail, /sortKey="siteMeter"/);
+  assert.match(detail, /sameMeterText\(target.sameMeter\)/);
+  // Three statuses, in the owner's words, never the internal code.
+  assert.match(detail, /getSalesStatusLabel\(target.salesWorkStatus\)/);
+  assert.doesNotMatch(detail, />NOT_STARTED</);
   assert.match(detail, /aria-label="Filter Batch ID"/);
   assert.match(planning, /NonGpsBatchingSummary counters=\{townStatusCounters\}/);
   assert.match(planning, /NonGpsBatchingSummary counters=\{selectedTown.counters\}/);
