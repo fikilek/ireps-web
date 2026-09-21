@@ -3295,6 +3295,20 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       },
     };
 
+    // MN-R001 section 7: the worker said this meter must be disconnected. The
+    // disconnection is its own transaction, so until it arrives this discovery
+    // carries the work as outstanding and the office can see it.
+    if (
+      Array.isArray(finalPayload?.ast?.normalisation?.actionTaken) &&
+      finalPayload.ast.normalisation.actionTaken.includes("Disconnect meter")
+    ) {
+      finalPayload.ast.normalisation.followUp = {
+        required: "METER_DISCONNECTION",
+        status: "Not Started",
+        trnId: "",
+      };
+    }
+
     await trnRef.set(finalPayload, { merge: true });
 
     // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's ERF.

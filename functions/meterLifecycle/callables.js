@@ -8,6 +8,7 @@ import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatche
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
+  markParentFollowUpCompleted,
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
   buildFailureResult,
   buildLifecycleTrnPayload,
@@ -1082,6 +1083,29 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       // It has been replaced, so it reads Completed and its batch row closes. Never fails the submission.
       await recordDifferentMeterAtErf({ db, Timestamp, FieldValue, meterNo: workMeterNo, erfId: workErfId, premiseId,
         trnId, trnType, astId, uid: actorUid, log: logger });
+    }
+
+    // MN-R001 section 7: the finding that called for this disconnection now has
+    // it. Never fails the submission: the work is saved, and anything that
+    // cannot be linked is logged for the office.
+    if (
+      trnType === "METER_DISCONNECTION" &&
+      responsePayload?.success === true
+    ) {
+      try {
+        await markParentFollowUpCompleted({
+          db,
+          parentTrnId: data?.origin?.parentTrnId,
+          parentTrnType: data?.origin?.parentTrnType,
+          trnId,
+        });
+      } catch (linkError) {
+        logger.error("onMeterLifecycleTrnCallable -- parent follow-up not linked", {
+          trnId,
+          parentTrnId: data?.origin?.parentTrnId || "NAv",
+          message: linkError?.message || String(linkError),
+        });
+      }
     }
 
     if (trnType === "METER_READING" && responsePayload?.success === true) {
