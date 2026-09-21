@@ -111,16 +111,20 @@ test("Field Data states the month and carries the schema columns in order, then 
 });
 
 test("Field Data writes NAv for what the record does not hold, South African time, and photo links", () => {
-  const { workbook } = readWorkbook(makeDataset());
+  const rows = [row(), row({ trnId: "LATE", captureDate: "2026-09-30T21:30:00.000Z" })];
+  const artifact = buildGmrExcelArtifact({ dataset: makeDataset(rows), fileName: "gmr.xlsx" });
+  // Read the saved bytes back, as Excel would, whatever this machine's time zone.
+  const workbook = XLSX.read(artifact.bytes, { type: "array", cellNF: true });
   const sheet = workbook.Sheets["Field Data"];
   const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[2];
-  const cellFor = (name) => sheet[XLSX.utils.encode_cell({ r: 3, c: header.indexOf(name) })];
+  const cellFor = (name, r = 3) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
+  // The text Excel shows, from the stored number and its stored format.
+  const shown = (cell) => cell.w;
 
   assert.equal(cellFor("Property Name").v, "NAv");
   assert.equal(cellFor("Reason For Not Acting").v, "NAv");
-  const captured = cellFor("Capture Date").v;
-  assert.ok(captured instanceof Date);
-  assert.equal(captured.getUTCHours(), 10, "08:00 UTC is 10:00 in South Africa");
+  assert.equal(shown(cellFor("Capture Date")), "2026-09-10 10:00", "08:00 UTC is 10:00 in South Africa");
+  assert.equal(shown(cellFor("Capture Date", 4)), "2026-09-30 23:30", "late on the last day stays in the month");
   assert.equal(cellFor("Photo 2").v, "Photo 2");
   assert.equal(cellFor("Photo 2").l.Target, "https://example.test/2.jpg");
 });
@@ -192,6 +196,28 @@ test("Field Stats keeps None for Meter Ok, counts no action by reason, and split
   const control = Object.fromEntries(model.controlLines.map((line) => [line.label, line.count]));
   assert.equal(control["Submitted this month but not on Field Data (must be 0)"], 0);
   assert.equal(control["Transactions without a batch (AD HOC)"], 2);
+});
+
+test("None is for Meter Ok only, and workers are told apart by user, not by name", () => {
+  const rows = [
+    row({ trnId: "A", fieldWorkerUid: "U1", fieldWorkerName: "Sipho Dlamini" }),
+    row({ trnId: "B", fieldWorkerUid: "U2", fieldWorkerName: "Sipho Dlamini" }),
+    row({
+      trnId: "C",
+      meterType: "WATER",
+      primaryFinding: "Illegally Connected",
+      findingGroup: "Illegally Connected",
+      normalisationActions: ["NONE"],
+      onVendingList: null,
+    }),
+  ];
+  const model = buildGmrFieldStatsModel(makeDataset(rows));
+  const none = model.groups.find((group) => group.name === "Normalisation").rows.find((item) => item.label === "None");
+  assert.equal(none.total, 2, "a water finding with NONE is not a Meter Ok None");
+  assert.equal(model.workers.length, 2, "two people with the same name stay two columns");
+  const labels = model.workers.map((key) => model.workerLabels.get(key));
+  assert.equal(new Set(labels).size, 2);
+  assert.ok(labels.every((label) => label.startsWith("Sipho Dlamini")));
 });
 
 test("the control lines count unplaced work, meters off the vending list, and stale visibility once per meter", () => {

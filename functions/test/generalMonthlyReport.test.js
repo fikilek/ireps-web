@@ -237,6 +237,14 @@ test("the Sales category is the reporting month's only, and a malformed month is
   assert.equal(getGmrSalesCategory(sales, "2026-07"), null);
 });
 
+test("a meter number that is not a real number is shown but never looked up on Sales", () => {
+  const trn = discovery();
+  trn.ast.astData.astNo = "N/AV";
+  const row = buildGmrFieldRow({ trnId: "T", trn, reportMonth: "2026-09" });
+  assert.equal(row.fieldFoundMeterNo, "N/AV");
+  assert.equal(row.onVendingList, null);
+});
+
 function fakeDb(collections) {
   return {
     collection(name) {
@@ -261,6 +269,23 @@ function fakeDb(collections) {
     },
   };
 }
+
+test("a bad meter number does not stop the report, and completed work with no readable time is listed", async () => {
+  const slashed = discovery();
+  slashed.ast.astData.astNo = "12/34";
+  const noTime = disconnection({ workflow: { state: "COMPLETED", completedAt: "", completedByUid: "U2" }, metadata: { createdAt: "2026-09-02T08:00:00.000Z" } });
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db: fakeDb({}),
+    reportMonth: "2026-09",
+    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
+    loadTransactions: async () => new Map([["TRN_SLASH", slashed], ["TRN_NO_TIME", noTime]]),
+  });
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_SLASH"]);
+  assert.equal(dataset.fieldRows[0].onVendingList, null);
+  assert.equal(dataset.unplaced.length, 1);
+  assert.equal(dataset.unplaced[0].trnId, "TRN_NO_TIME");
+  assert.match(dataset.unplaced[0].reason, /completion time cannot be read/);
+});
 
 test("the dataset is the month's submitted transactions, in time order, never read from the registry", async () => {
   const unfinished = disconnection({ workflow: { state: "ACCEPTED" } });

@@ -66,16 +66,21 @@ function getPath(row, key) {
     .reduce((value, part) => (value === null || value === undefined ? undefined : value[part]), row);
 }
 
-// Excel has no time zone: write the South African wall-clock time.
-function toJohannesburgExcelDate(iso) {
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const EXCEL_EPOCH_OFFSET_DAYS = 25569;
+
+// Excel has no time zone. The South African wall-clock time is written as an
+// Excel serial number, so the browser's own time zone can never shift it.
+export function toJohannesburgExcelSerial(iso) {
   const milliseconds = new Date(iso || "").getTime();
   if (!Number.isFinite(milliseconds)) return null;
-  return new Date(milliseconds + JOHANNESBURG_OFFSET_MS);
+  return (milliseconds + JOHANNESBURG_OFFSET_MS) / MILLISECONDS_PER_DAY + EXCEL_EPOCH_OFFSET_DAYS;
 }
 
 function formatJohannesburg(iso) {
-  const date = toJohannesburgExcelDate(iso);
-  if (!date) return GMR_NAV;
+  const milliseconds = new Date(iso || "").getTime();
+  if (!Number.isFinite(milliseconds)) return GMR_NAV;
+  const date = new Date(milliseconds + JOHANNESBURG_OFFSET_MS);
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
@@ -83,7 +88,7 @@ function formatJohannesburg(iso) {
 function cellValue(row, item) {
   const value = getPath(row, item.key);
   if (item.type === "photo") return value ? item.header : "";
-  if (item.type === "datetime") return toJohannesburgExcelDate(value) || GMR_NAV;
+  if (item.type === "datetime") return toJohannesburgExcelSerial(value) ?? GMR_NAV;
   if (value === null || value === undefined || value === "") return GMR_NAV;
   return value;
 }
@@ -110,7 +115,7 @@ function buildFieldDataSheet(dataset) {
   ];
   const headerRow = 2;
 
-  const worksheet = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true, UTC: true });
+  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!autofilter"] = {
     ref: `A${headerRow + 1}:${XLSX.utils.encode_col(columns.length - 1)}${headerRow + 1 + rows.length}`,
   };
@@ -122,7 +127,7 @@ function buildFieldDataSheet(dataset) {
     columns.forEach((item, columnIndex) => {
       const cell = worksheet[XLSX.utils.encode_cell({ r: headerRow + 1 + rowIndex, c: columnIndex })];
       if (!cell) return;
-      if (item.type === "datetime" && cell.v instanceof Date) cell.z = "yyyy-mm-dd hh:mm";
+      if (item.type === "datetime" && typeof cell.v === "number") cell.z = "yyyy-mm-dd hh:mm";
       if (item.type === "photo") {
         const url = getPath(row, item.key);
         if (url) cell.l = { Target: String(url), Tooltip: `Open ${item.header}` };
@@ -135,7 +140,8 @@ function buildFieldDataSheet(dataset) {
 
 function buildStatsBlock(aoa, title, model, columnsKey, mapKey) {
   const names = model[columnsKey];
-  aoa.push([title, "", ...names, "TOTAL"]);
+  const labels = columnsKey === "workers" ? names.map((key) => model.workerLabels.get(key) || key) : names;
+  aoa.push([title, "", ...labels, "TOTAL"]);
   model.groups.forEach((group) => {
     aoa.push([group.name.toUpperCase()]);
     group.rows.forEach((item) => {
@@ -198,7 +204,7 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   XLSX.utils.book_append_sheet(workbook, stats.worksheet, GMR_SHEET_NAMES[1]);
 
   const bytes = toUint8Array(
-    XLSX.write(workbook, { bookType: "xlsx", type: "array", cellDates: true, compression: true }),
+    XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true }),
   );
 
   return { format: "XLSX", fileName, bytes, stats: stats.model };

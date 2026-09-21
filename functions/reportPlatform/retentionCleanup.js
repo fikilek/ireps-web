@@ -1,5 +1,7 @@
 import {
   GENERATED_REPORTS_ROOT,
+  REPORT_FINALIZATION_STATE,
+  REPORT_STORAGE_METADATA_KEYS,
   deriveServerEnvironment,
   getReportRetentionDays,
 } from "./config.js";
@@ -257,14 +259,23 @@ export async function cleanupGeneratedReports({
       }
 
       const retentionDays = getReportRetentionDays(parsed.reportType);
+      const finalized =
+        exact.metadata?.metadata?.[REPORT_STORAGE_METADATA_KEYS.STATE] ===
+        REPORT_FINALIZATION_STATE;
 
-      if (retentionDays === null) {
+      // GMR-R003 keeps a finished report until someone deletes it. An upload
+      // that was never finalized cannot be seen or deleted by its owner, so it
+      // still expires after the default period.
+      if (retentionDays === null && finalized) {
         result.retained += 1;
         continue;
       }
 
+      const effectiveDays = retentionDays === null
+        ? getReportRetentionDays("DEFAULT")
+        : retentionDays;
       const expiresAt = new Date(
-        version.createdAt.getTime() + retentionDays * MILLISECONDS_PER_DAY,
+        version.createdAt.getTime() + effectiveDays * MILLISECONDS_PER_DAY,
       );
 
       if (serverNow.getTime() < expiresAt.getTime()) {

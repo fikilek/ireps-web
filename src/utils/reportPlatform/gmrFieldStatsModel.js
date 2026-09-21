@@ -51,8 +51,32 @@ function isNoneOnly(actions = []) {
   return actions.length === 1 && text(actions[0]).toLowerCase() === "none";
 }
 
+// Workers are told apart by user, not by display name: two people with the
+// same name stay apart, and one person is one column.
 function workerOf(row) {
-  return text(row?.fieldWorkerName) || GMR_NAV;
+  const uid = text(row?.fieldWorkerUid);
+  if (uid) return `uid:${uid}`;
+  const name = text(row?.fieldWorkerName);
+  return name ? `name:${name}` : GMR_NAV;
+}
+
+function buildWorkerLabels(rows, workers) {
+  const nameByKey = new Map();
+  rows.forEach((row) => {
+    const key = workerOf(row);
+    if (!nameByKey.has(key) || nameByKey.get(key) === GMR_NAV) {
+      nameByKey.set(key, text(row?.fieldWorkerName) || GMR_NAV);
+    }
+  });
+  const count = new Map();
+  workers.forEach((key) => count.set(nameByKey.get(key), (count.get(nameByKey.get(key)) || 0) + 1));
+  return new Map(
+    workers.map((key) => {
+      const name = nameByKey.get(key) || GMR_NAV;
+      const clash = count.get(name) > 1 && key.startsWith("uid:");
+      return [key, clash ? `${name} (${key.slice(4, 10)})` : name];
+    }),
+  );
 }
 
 function teamOf(row) {
@@ -78,7 +102,12 @@ function countRow(label, rows, workers, teams, weight) {
 export function buildGmrFieldStatsModel(dataset = {}) {
   const rows = Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [];
   const unplaced = Array.isArray(dataset?.unplaced) ? dataset.unplaced : [];
-  const workers = [...new Set(rows.map(workerOf))].sort((left, right) => left.localeCompare(right));
+  const workerKeys = [...new Set(rows.map(workerOf))];
+  const provisional = buildWorkerLabels(rows, workerKeys);
+  const workers = workerKeys.sort(
+    (left, right) => provisional.get(left).localeCompare(provisional.get(right)) || left.localeCompare(right),
+  );
+  const workerLabels = buildWorkerLabels(rows, workers);
   const teams = [...new Set(rows.map(teamOf))].sort((left, right) => left.localeCompare(right));
   const row = (label, weight) => countRow(label, rows, workers, teams, weight);
 
@@ -115,8 +144,13 @@ export function buildGmrFieldStatsModel(dataset = {}) {
           row(label, (item) =>
             FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && (item?.normalisationActions || []).includes(label) ? 1 : 0),
         ),
+        // GMR-R031: None belongs to Meter Ok only.
         row("None", (item) =>
-          FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && isNoneOnly(item?.normalisationActions) && !text(item?.noActionReason) ? 1 : 0),
+          FINDING_TRN_TYPES.has(item?.trnType) &&
+          item?.hasAccess &&
+          text(item?.findingGroup).startsWith("Meter Ok") &&
+          isNoneOnly(item?.normalisationActions) &&
+          !text(item?.noActionReason) ? 1 : 0),
         ...reasons.map((reason) =>
           row(`No action taken — ${reason}`, (item) =>
             FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && text(item?.noActionReason) === reason ? 1 : 0),
@@ -140,9 +174,10 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     },
   ];
 
-  const electricityFound = rows.filter(
-    (item) => item?.trnType === "METER_DISCOVERY" && item?.hasAccess && item?.meterType === "ELECTRICITY" && text(item?.fieldFoundMeterNo),
-  );
+  // Only rows judged against the vending list carry Yes or No (electricity, a
+  // real meter number).
+  const judged = rows.filter((item) => item?.hasAccess && ["Yes", "No"].includes(item?.onVendingList));
+  const electricityFound = judged.filter((item) => item?.trnType === "METER_DISCOVERY");
   const distinctMeters = (items) => new Set(items.map((item) => text(item?.fieldFoundMeterNo))).size;
   const unresolvedWorkers = new Set(
     rows.filter((item) => ["Unassigned", "Multiple"].includes(teamOf(item))).map(workerOf),
@@ -155,7 +190,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     {
       label: "Visibility mark that disagrees with Sales",
       count: distinctMeters(
-        electricityFound.filter(
+        judged.filter(
           (item) =>
             (item?.visibility === "Invisible" && item?.onVendingList === "Yes") ||
             (item?.visibility === "Visible" && item?.onVendingList === "No"),
@@ -181,6 +216,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
 
   return {
     workers,
+    workerLabels,
     teams,
     groups,
     controlLines,

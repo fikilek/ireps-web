@@ -1,4 +1,4 @@
-// General Monthly Report (GMR 1.1.0, schema 1.0.1).
+// General Monthly Report (GMR 1.1.0, schema 1.0.2).
 //
 // The report is the month's field transactions: one Field Data row per
 // submitted transaction, read from `trns` (GMR-R005). Premises, Sales, assets
@@ -14,7 +14,7 @@ export const GMR_GENERATION_MODE = "MONTHLY_GMR";
 export const GMR_REPORT_TYPE = "GENERAL_MONTHLY_REPORT";
 export const GMR_SCHEMA_VERSION = 2;
 export const GMR_RULES_VERSION = "1.1.0";
-export const GMR_REPORT_SCHEMA_VERSION = "1.0.1";
+export const GMR_REPORT_SCHEMA_VERSION = "1.0.2";
 
 const ALLOWED_GMR_ROLES = new Set(["SPU", "ADM", "MNG", "SPV"]);
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
@@ -54,6 +54,18 @@ function normalizeUpper(value) {
 function normalizeMeterNo(value) {
   const text = nullableText(value);
   return text ? text.replace(/\s+/g, "").toUpperCase() : null;
+}
+
+// Only a real meter number is looked up on Sales (the meter master rule);
+// anything else, such as "N/AV", is shown as recorded and never looked up.
+export function isGmrLookupMeterNo(value) {
+  return /^[A-Z0-9]+$/.test(cleanText(value));
+}
+
+// A Firestore document id cannot contain "/" or be "." or "..".
+function isDocumentId(value) {
+  const id = cleanText(value);
+  return Boolean(id) && !id.includes("/") && id !== "." && id !== "..";
 }
 
 function titleCaseAddressPart(value) {
@@ -443,7 +455,9 @@ export function buildGmrFieldRow({
     fieldComment: nullableText(trn?.fieldComment?.text),
     visibility: displayVisibility(ast?.master?.visibility),
     onVendingList:
-      fieldFoundMeterNo && isElectricity ? (fieldSalesExists ? "Yes" : "No") : null,
+      isGmrLookupMeterNo(fieldFoundMeterNo) && isElectricity
+        ? (fieldSalesExists ? "Yes" : "No")
+        : null,
     startedFrom:
       nullableText(trn?.origin?.parentTrnId) ||
       nullableText(trn?.origin?.parentInspectionTrnId),
@@ -519,7 +533,7 @@ async function assertGmrAccess({ db, request, lmPcode }) {
 }
 
 async function getDocsByIds(db, collectionName, ids = []) {
-  const uniqueIds = Array.from(new Set(ids.map((id) => cleanText(id)).filter(Boolean)));
+  const uniqueIds = Array.from(new Set(ids.map((id) => cleanText(id)).filter(isDocumentId)));
   const results = new Map();
 
   for (let index = 0; index < uniqueIds.length; index += 100) {
@@ -565,12 +579,11 @@ async function selectMonthTransactions(db, lmPcode, window) {
     byLm.where("workflow.state", "==", "COMPLETED").where("workflow.completedAt", ">=", startDate).where("workflow.completedAt", "<", endDate).get(),
   ]);
 
+  // Workflow work created this month is kept too: if it was completed but its
+  // completion time cannot be read, it is listed instead of vanishing.
   const selected = new Map();
   [createdText, createdStamp].forEach((snapshot) => {
-    snapshot.docs.forEach((doc) => {
-      const trn = doc.data() || {};
-      if (!hasWorkflow(trn)) selected.set(doc.id, trn);
-    });
+    snapshot.docs.forEach((doc) => selected.set(doc.id, doc.data() || {}));
   });
   [completedText, completedStamp].forEach((snapshot) => {
     snapshot.docs.forEach((doc) => selected.set(doc.id, doc.data() || {}));
@@ -593,9 +606,25 @@ export async function buildGeneralMonthlyReportDataset({
   const window = validateGmrReportMonth(reportMonth, generatedAt);
   const selected = await loadTransactions(db, lmPcode, window);
 
-  const entries = [...selected.entries()].filter(([, trn]) =>
-    isGmrTransactionInMonth(trn, window),
-  );
+  const entries = [];
+  const unplaced = [];
+  selected.forEach((trn, trnId) => {
+    if (isGmrTransactionInMonth(trn, window)) {
+      entries.push([trnId, trn]);
+      return;
+    }
+    if (
+      hasWorkflow(trn) &&
+      normalizeUpper(trn.workflow.state) === "COMPLETED" &&
+      !timestampToIso(trn.workflow.completedAt)
+    ) {
+      unplaced.push({
+        trnId,
+        trnType: getGmrTrnType(trn) || null,
+        reason: "Completed, but the completion time cannot be read, so its month is unknown.",
+      });
+    }
+  });
 
   const premiseIds = [];
   const salesIds = [];
@@ -603,7 +632,11 @@ export async function buildGeneralMonthlyReportDataset({
   const workerUids = [];
   entries.forEach(([trnId, trn]) => {
     premiseIds.push(trn?.accessData?.premise?.id);
-    salesIds.push(trn?.targetedBatchContext?.salesDocId, normalizeMeterNo(getAstData(trn)?.astNo));
+    const fieldFoundMeterNo = normalizeMeterNo(getAstData(trn)?.astNo);
+    salesIds.push(
+      trn?.targetedBatchContext?.salesDocId,
+      isGmrLookupMeterNo(fieldFoundMeterNo) ? fieldFoundMeterNo : null,
+    );
     astIds.push(getGmrAstId(trnId, trn));
     workerUids.push(getFieldWorker(trn).uid);
   });
@@ -616,12 +649,12 @@ export async function buildGeneralMonthlyReportDataset({
   ]);
 
   const fieldRows = [];
-  const unplaced = [];
 
   entries.forEach(([trnId, trn]) => {
     try {
       const fieldFoundMeterNo = normalizeMeterNo(getAstData(trn)?.astNo);
-      const salesId = cleanText(trn?.targetedBatchContext?.salesDocId) || fieldFoundMeterNo;
+      const lookupMeterNo = isGmrLookupMeterNo(fieldFoundMeterNo) ? fieldFoundMeterNo : null;
+      const salesId = cleanText(trn?.targetedBatchContext?.salesDocId) || lookupMeterNo;
       const worker = getFieldWorker(trn);
       fieldRows.push(
         buildGmrFieldRow({
@@ -630,7 +663,7 @@ export async function buildGeneralMonthlyReportDataset({
           reportMonth: window.reportMonth,
           premise: premisesById.get(cleanText(trn?.accessData?.premise?.id)) || null,
           sales: salesId ? salesById.get(salesId) || null : null,
-          fieldSalesExists: fieldFoundMeterNo ? salesById.has(fieldFoundMeterNo) : false,
+          fieldSalesExists: lookupMeterNo ? salesById.has(lookupMeterNo) : false,
           ast: astsById.get(getGmrAstId(trnId, trn)) || null,
           team: resolveGmrTeamAt(teamPeriods, worker.uid, getGmrSubmissionTime(trn)),
         }),
