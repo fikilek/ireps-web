@@ -2,16 +2,19 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // TEMPORARY REPORT PLATFORM V1 SPRINT POLICY
-    //
-    // Authenticated Storage read/write access is intentionally retained while
-    // Report Platform functionality is completed and integration-tested.
-    //
-    // This is NOT the final Report Platform security model.
-    // Storage hardening is intentionally deferred to the final sprint security
-    // component and must be completed before final TEST/LIVE rollout.
-    match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+    // Saved reports carry customer names, account numbers and addresses, so only
+    // the person who generated a report may reach it (GMR-R004). The server
+    // lists, signs downloads and deletes through the Admin SDK, which these
+    // rules do not govern.
+    match /generated-reports/{ownerUid}/{reportPath=**} {
+      allow read, write: if request.auth != null && request.auth.uid == ownerUid;
+    }
+
+    // Every other path keeps signed-in access until its own area is hardened.
+    // Saved reports are excluded here, or this rule would open them again.
+    match /{topFolder}/{rest=**} {
+      allow read, write: if request.auth != null
+        && topFolder != 'generated-reports';
     }
   }
 }

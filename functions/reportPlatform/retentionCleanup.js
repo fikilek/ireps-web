@@ -257,6 +257,12 @@ export async function cleanupGeneratedReports({
       }
 
       const retentionDays = getReportRetentionDays(parsed.reportType);
+
+      if (retentionDays === null) {
+        result.retained += 1;
+        continue;
+      }
+
       const expiresAt = new Date(
         version.createdAt.getTime() + retentionDays * MILLISECONDS_PER_DAY,
       );

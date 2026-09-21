@@ -96,7 +96,7 @@ beforeEach(async () => {
   await testEnv.clearStorage();
 });
 
-describe("temporary authenticated Storage sprint policy", () => {
+describe("Storage policy: saved reports belong to their owner, other paths keep signed-in access", () => {
   test("authenticated users retain read/write/delete access to existing non-report Storage paths", async () => {
     const userA = storageForAuthenticatedUser(OWNER_A);
     const userB = storageForAuthenticatedUser(OWNER_B);
@@ -118,39 +118,26 @@ describe("temporary authenticated Storage sprint policy", () => {
     }
   });
 
-  test("authenticated users may read/write/overwrite/delete generated reports during the sprint", async () => {
-    const userA = storageForAuthenticatedUser(OWNER_A);
-    const userB = storageForAuthenticatedUser(OWNER_B);
-
-    await assertSucceeds(uploadReport(userA));
-    await assertSucceeds(read(userB, REPORT_PATH));
-    await assertSucceeds(uploadReport(userB));
-    await assertSucceeds(remove(userA, REPORT_PATH));
-  });
-
-  test("authenticated users may access another authenticated user's generated-report namespace during the temporary sprint policy", async () => {
-    const userB = storageForAuthenticatedUser(OWNER_B);
-
-    await assertSucceeds(uploadReport(userB, REPORT_PATH));
-    await assertSucceeds(read(userB, REPORT_PATH));
-    await assertSucceeds(remove(userB, REPORT_PATH));
-  });
-
-  test("authenticated users may list generated reports during the temporary sprint policy", async () => {
+  test("the owner may save, read, list and delete their own generated reports (GMR-R004)", async () => {
     const userA = storageForAuthenticatedUser(OWNER_A);
 
     await assertSucceeds(uploadReport(userA, REPORT_PATH));
     await assertSucceeds(uploadReport(userA, SECOND_REPORT_PATH));
+    await assertSucceeds(read(userA, REPORT_PATH));
+    await assertSucceeds(listAll(objectRef(userA, "generated-reports/UserA")));
+    await assertSucceeds(remove(userA, REPORT_PATH));
+  });
 
-    const result = await assertSucceeds(
-      listAll(objectRef(userA, "generated-reports/UserA")),
-    );
+  test("another signed-in user can neither read, overwrite, delete nor list someone else's reports", async () => {
+    const userB = storageForAuthenticatedUser(OWNER_B);
 
-    if (result.items.length !== 0 && result.prefixes.length === 0) {
-      throw new Error(
-        "Expected generated-report hierarchy to be visible to authenticated users.",
-      );
-    }
+    await seed(REPORT_PATH, { contentType: XLSX_CONTENT_TYPE });
+
+    await assertFails(read(userB, REPORT_PATH));
+    await assertFails(uploadReport(userB, REPORT_PATH));
+    await assertFails(remove(userB, REPORT_PATH));
+    await assertFails(listAll(objectRef(userB, "generated-reports/UserA")));
+    await assertFails(listAll(objectRef(userB, "generated-reports")));
   });
 
   test("unauthenticated users remain denied everywhere, including generated reports", async () => {

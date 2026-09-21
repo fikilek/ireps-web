@@ -40,19 +40,17 @@ export function buildGeneralMonthlyReportFileName({
 
 function assertDataset(dataset) {
   if (!dataset || typeof dataset !== "object") {
-    throw new TypeError("A canonical GMR dataset is required.");
+    throw new TypeError("The server returned no report data.");
   }
   if (dataset.reportType !== GENERAL_MONTHLY_REPORT_TYPE) {
-    throw new TypeError("The GMR dataset reportType is invalid.");
+    throw new TypeError("The server returned a different report.");
   }
-  if (!Array.isArray(dataset.rows) || dataset.rows.length === 0) {
-    throw new RangeError("GMR Builder v0.1 requires at least one meter row.");
-  }
+  // A month with no field work still produces a report (GMR-R008).
   if (!Array.isArray(dataset.fieldRows)) {
-    throw new TypeError("The GMR dataset fieldRows are required.");
+    throw new TypeError("The server returned no Field Data rows.");
   }
   if (!cleanReportMonth(dataset.reportMonth)) {
-    throw new TypeError("The GMR dataset reportMonth is invalid.");
+    throw new TypeError("The server returned an invalid reporting month.");
   }
 }
 
@@ -77,7 +75,7 @@ export function buildGeneralMonthlyManagedReport({
     !(artifact.bytes instanceof Uint8Array) ||
     artifact.bytes.byteLength <= 0
   ) {
-    throw new Error("General Monthly Report artifact is invalid.");
+    throw new Error("The workbook could not be built.");
   }
 
   const summary = dataset.summary || {};
@@ -93,29 +91,23 @@ export function buildGeneralMonthlyManagedReport({
       generationMode: dataset?.generationMode || "MONTHLY_GMR",
       reportMonth: dataset.reportMonth,
       reportingPeriodLabel: dataset?.reportingPeriodLabel || null,
-      activityScope: dataset?.activityScope || null,
-      monthlyDiscoveryCount: summary.monthlyDiscoveryCount ?? dataset.fieldRows.length,
-      monthlyInterventionEventCount:
-        summary.monthlyInterventionEventCount ?? dataset?.interventionEvents?.length ?? 0,
-      populationSize: dataset?.populationSize || dataset.rows.length,
-      populationTotal: summary.populationTotal ?? null,
-      visiblePopulation: summary.visiblePopulation ?? null,
-      invisiblePopulation: summary.invisiblePopulation ?? null,
-      visibleSelected: summary.visibleSelected ?? null,
-      invisibleSelected: summary.invisibleSelected ?? null,
-      targetCategorySelected: summary.targetCategorySelected ?? null,
-      normalCategorySelected: summary.normalCategorySelected ?? null,
-      categoryNotAvailableSelected: summary.categoryNotAvailableSelected ?? null,
+      isIncompleteMonth: Boolean(dataset?.isIncompleteMonth),
+      payableTotal: summary.payableTotal ?? dataset.fieldRows.length,
+      unplacedCount: summary.unplacedCount ?? 0,
+      rulesVersion: dataset?.rulesVersion || null,
+      reportSchemaVersion: dataset?.reportSchemaVersion || null,
       snapshotGeneratedAt: dataset.generatedAt || null,
       schemaVersion: dataset.schemaVersion ?? null,
     },
-    itemCount: dataset.rows.length,
+    itemCount: dataset.fieldRows.length,
     fileName,
   };
 
   return { artifact, metadata };
 }
 
+// GMR-R028/R029: each step is reported, and the report is saved before it is
+// offered to the browser.
 export function createGeneralMonthlyReportManagedGenerator({
   persist = persistGeneratedReport,
   download = downloadBrowserArtifact,
@@ -128,15 +120,29 @@ export function createGeneralMonthlyReportManagedGenerator({
   return async function generateGeneralMonthlyReportManaged({
     dataset,
     generatedAt = new Date(),
+    onStep = () => {},
   }) {
+    onStep("BUILD");
+    // Let the page show the step before the workbook is built.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const { artifact, metadata } = buildGeneralMonthlyManagedReport({
       dataset,
       generatedAt,
       buildArtifact,
     });
 
-    const persistence = await persist({ artifact, metadata });
+    onStep("SAVE");
+    let persistence;
+    try {
+      persistence = await persist({ artifact, metadata });
+    } catch (error) {
+      // The workbook exists even though it was not saved: hand it back so the
+      // page can still offer this copy.
+      error.gmrArtifact = artifact;
+      throw error;
+    }
 
+    onStep("DOWNLOAD");
     let downloaded = true;
     try {
       download(artifact);

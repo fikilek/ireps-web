@@ -7,403 +7,265 @@ import {
   createGeneralMonthlyReportManagedGenerator,
 } from "../src/pages/reports/generalMonthlyReportArtifact.js";
 import {
+  GMR_FIELD_DATA_COLUMNS,
+  GMR_SHEET_NAMES,
   buildGmrExcelArtifact,
-  getGmrMasterColumnDefinitions,
 } from "../src/utils/reportPlatform/buildGmrExcelArtifact.js";
+import { buildGmrFieldStatsModel } from "../src/utils/reportPlatform/gmrFieldStatsModel.js";
 
-const MONTH_KEYS = [
-  "2023-12", "2024-01", "2024-02", "2024-03", "2024-04", "2024-05",
-  "2024-06", "2024-07", "2024-08", "2024-09", "2024-10", "2024-11",
-  "2024-12", "2025-01", "2025-02", "2025-03", "2025-04", "2025-05",
-  "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11",
-  "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05",
-  "2026-06", "2026-07", "2026-08", "2026-09",
-];
-
-function makeRow(index) {
-  const invisible = index < 2;
-  const categories = [
-    "Normal - No Leakage Flag",
-    "CAT1 - Zero Purchaser",
-    "CAT5 - Stopped Purchasing",
-    "CAT8 - Energy Without Purchase",
-    null,
-    "CAT3 - Micro Purchaser (<R400)",
-    "Normal - No Leakage Flag",
-  ];
-  const salesCategory = categories[index] ?? null;
+function row(overrides = {}) {
   return {
-    originalProjectMeterNo: invisible ? `ORIG${index}` : `METER${index}`,
-    fieldFoundMeterNo: `METER${index}`,
-    iRepsMeterId: `TRN_MD_${index}`,
-    registryVisibility: invisible ? "Invisible" : "Visible",
-    fieldFoundMeterInSales: invisible ? "No" : "Yes",
-    fieldFoundSalesMeterNo: invisible ? null : `METER${index}`,
-    salesHistorySourceMeterNo: invisible ? `ORIG${index}` : `METER${index}`,
-    salesHistoryAvailable: "Yes",
-    salesCategory,
-    targetCategory: salesCategory && /^CAT[1-8]\b/i.test(salesCategory) ? "Yes" : salesCategory ? "No" : null,
-    accountNumber: `ACC${index}`,
-    customerName: `Customer ${index}`,
-    iRepsPremiseId: `PREM${index}`,
-    lm: "Endumeni",
-    lmPcode: "ZA5241",
-    ward: `Ward ${(index % 3) + 2}`,
-    areaWorkbase: "Endumeni",
-    erf: String(1000 + index),
-    streetNo: String(index + 1),
-    streetNumber: String(index + 1),
-    streetName: "Example",
+    captureDate: "2026-09-10T08:00:00.000Z",
+    trnId: "TRN_MD_1",
+    trnType: "METER_DISCOVERY",
+    trnTypeLabel: "Meter Discovery",
+    channel: "Field",
+    fieldWorkerUid: "U1",
+    fieldWorkerName: "Lefu Worker",
+    team: "Team A",
+    batchId: "TB_9",
+    streetNo: "14",
+    streetName: "Van Rensburg",
     streetType: "Street",
-    suburbName: "Example Suburb",
-    fullAddress: `${index + 1} Example Street`,
-    batchId: index === 0 ? "AD HOC" : `TB_${index}`,
-    areaName: "Example Suburb",
+    suburbName: "Dundee",
+    gpsCoordinates: "-28.1, 30.2",
+    ward: "Ward 6",
     propertyType: "Residential",
-    propertyName: index === 1 ? null : `Property ${index}`,
-    propertyUnitNo: index === 1 ? null : `Unit ${index}`,
-    investigationStatus: "Completed",
-    investigationDate: "2026-08-15T10:00:00.000Z",
-    fieldWorkerName: `Field Worker ${index}`,
-    fieldStatsTeam: index < 2 ? "Kaiser Team" : index < 5 ? "Peter Team" : "Unassigned",
-    captureDate: "2026-08-15T10:00:00.000Z",
-    gpsCoordinates: `-28.12${index}, 30.65${index}`,
-    photoUrls: index === 0
-      ? [
-          "https://example.test/photo-1.jpg",
-          "https://example.test/photo-2.jpg",
-          "https://example.test/photo-3.jpg",
-          "https://example.test/photo-4.jpg",
-          "https://example.test/photo-5.jpg",
-          "https://example.test/photo-6.jpg",
-          "https://example.test/photo-7.jpg",
-        ]
-      : ["https://example.test/photo-1.jpg"],
-    normalisation: index === 0 ? "Meter Disconnection • Issue Fine" : null,
-    sealNo: index === 0 ? "SEAL-001" : null,
-    fieldComment: index === 0 ? "Customer present during audit." : null,
-    propertyAccessible: "Yes",
-    meterExists: "Yes",
-    meterNumberVerified: invisible ? "Incorrect" : "Correct",
-    sameDifferent: invisible ? "Different" : "Same",
-    meterPlacement: index === 0 ? "Kiosk" : index === 1 ? null : "Pole Bottom",
-    remainingCredit: index === 0 ? "12.5" : index === 1 ? "0" : null,
-    meterAccessible: "Yes",
-    meterKind: "prepaid",
+    propertyName: null,
+    propertyUnitNo: null,
     meterMode: "Prepaid",
     meterPhase: "Single Phase",
-    meterUtilityType: "electricity",
-    meterConnectionStatus: "CONNECTED",
-    primaryFinding: invisible ? "Illegally Connected" : "Meter Ok",
-    findingDetail: invisible ? "Straight Connection (Meter Bypass)" : "Meter Ok",
-    illegalConnectionIndicator: invisible ? "Yes" : "No",
-    findingDate: "2026-08-15T10:00:00.000Z",
-    latestRelevantTrnType: "METER_DISCOVERY",
-    latestRelevantTrnId: `TRN_MD_${index}`,
-    interventionRequired: invisible ? "Yes" : "No",
-    interventionStatus: invisible ? "Required" : "Not Required",
-    interventionCount: 0,
-    disconnected: "No",
-    reconnected: "No",
-    monthlyPurchases: Object.fromEntries(MONTH_KEYS.map((key) => [key, null])),
-    latestPurchasingStatus: null,
-    revenueAssessmentStatus: "Insufficient Data",
+    meterPlacement: "Outside",
+    originalProjectMeterNo: "07141234567",
+    fieldFoundMeterNo: "07141234567",
+    sameDifferent: "Same",
+    remainingCredit: "12.5",
+    salesCategory: "CAT4 - Long Gap",
+    primaryFinding: "Meter Ok",
+    findingDetail: "Operationally Ok",
+    normalisation: "none",
+    noActionReason: null,
+    sealNo: "S1",
+    fieldComment: null,
+    visibility: "Visible",
+    onVendingList: "Yes",
+    startedFrom: null,
+    followUpRequired: null,
+    followUpStatus: null,
+    followUpTrnId: null,
+    photoUrls: ["https://example.test/1.jpg", "https://example.test/2.jpg"],
+    hasAccess: true,
+    meterType: "ELECTRICITY",
+    findingGroup: "Meter Ok · Operationally Ok",
+    normalisationActions: ["none"],
+    ...overrides,
   };
 }
 
-function makeDataset() {
-  const rows = Array.from({ length: 7 }, (_, index) => makeRow(index));
-  rows[0].monthlyPurchases["2026-06"] = 0;
-  rows[0].monthlyPurchases["2026-07"] = null;
-  rows[0].monthlyPurchases["2026-09"] = 125;
-  rows[1].monthlyPurchases["2026-06"] = 9463.97;
-  rows[1].latestAvailablePurchaseValue = 9463.97;
-  rows[1].latestPurchasingStatus = "Purchasing";
-
+function makeDataset(fieldRows = [row()], extra = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     reportType: "GENERAL_MONTHLY_REPORT",
-    generatedAt: "2026-09-02T06:51:00.000Z",
-    reportMonth: "2026-08",
-    reportingPeriodLabel: "August 2026",
-    activityScope: "REGISTRY_LINKED_DISCOVERY_AND_COMPLETED_DCN_RCN",
-    municipality: { lmPcode: "ZA5241", lmName: "Endumeni" },
     generationMode: "MONTHLY_GMR",
-    populationSize: rows.length,
-    monthKeys: MONTH_KEYS,
-    zamoReport: {
-      observedMaxPhotoCount: 7,
-      photoColumnCount: 6,
-      hardCeiling: 6,
-      truncatedPhotoCount: 1,
-    },
-    summary: {
-      populationTotal: 7,
-      visiblePopulation: 5,
-      invisiblePopulation: 2,
-      unclassifiedPopulation: 0,
-      selectedTotal: 7,
-      visibleSelected: 5,
-      invisibleSelected: 2,
-      unclassifiedSelected: 0,
-      fieldFoundSalesMatchedSelected: 5,
-      salesHistoryAvailableSelected: 7,
-      premiseLinkedSelected: 7,
-      targetCategorySelected: 4,
-      normalCategorySelected: 2,
-      categoryNotAvailableSelected: 1,
-      monthlyDiscoveryCount: rows.length,
-      monthlyInterventionEventCount: 0,
-      metersWithInterventions: 0,
-      interventionEventCount: 0,
-      exceptionCount: 1,
-    },
-    rows,
-    fieldRows: rows,
-    interventionEvents: [],
-    exceptions: [
-      {
-        meterKey: "TRN_MD_0",
-        fieldFoundMeterNo: "METER0",
-        registryVisibility: "Invisible",
-        exceptionType: "FIELD_FOUND_METER_NOT_IN_SALES",
-        sourceJoin: "registry_meters -> sales-all-meters",
-        severity: "INFO",
-        details: "Field-found meter is absent from current Sales.",
-        resolutionStatus: "OPEN",
-        resolutionNotes: null,
-      },
-    ],
+    generatedAt: "2026-09-21T10:05:00.000Z",
+    reportMonth: "2026-09",
+    reportingPeriodLabel: "September 2026",
+    isIncompleteMonth: true,
+    municipality: { lmPcode: "ZA5241", lmName: "Endumeni" },
+    photoColumnCount: Math.max(0, ...fieldRows.map((item) => item.photoUrls.length)),
+    fieldRows,
+    unplaced: [],
+    summary: { payableTotal: fieldRows.length, unplacedCount: 0 },
+    ...extra,
   };
 }
 
-function workbookFrom(dataset, fileName = "gmr_test.xlsx") {
-  const artifact = buildGmrExcelArtifact({ dataset, fileName });
-  return {
-    artifact,
-    workbook: XLSX.read(artifact.bytes, { type: "array", cellDates: true }),
-  };
+function readWorkbook(dataset) {
+  const artifact = buildGmrExcelArtifact({ dataset, fileName: "gmr.xlsx" });
+  return { artifact, workbook: XLSX.read(artifact.bytes, { type: "array", cellDates: true }) };
 }
 
-test("GMR workbook keeps the ten approved sheets and all full-context meter rows", () => {
-  const dataset = makeDataset();
-  const { artifact, workbook } = workbookFrom(dataset);
-  assert.equal(artifact.format, "XLSX");
-  assert.ok(artifact.bytes.byteLength > 0);
-  assert.deepEqual(workbook.SheetNames, [
-    "GMR Dashboard",
-    "GMR Master Meter",
-    "Property Analysis",
-    "Meter Verification",
-    "Intervention & Recovery Detail",
-    "Financial Analysis",
-    "Field Data",
-    "Field Stats",
-    "Reconciliation Exceptions",
-    "Data Dictionary",
-  ]);
-  const range = XLSX.utils.decode_range(workbook.Sheets["GMR Master Meter"]["!ref"]);
-  assert.equal(range.e.r + 1, 9);
-  const columns = getGmrMasterColumnDefinitions(MONTH_KEYS);
-  assert.ok(columns.some((item) => item.header === "Purchase Value Sep-2026"));
+test("the workbook holds exactly Field Data and Field Stats, in that order", () => {
+  const { workbook } = readWorkbook(makeDataset());
+  assert.deepEqual(workbook.SheetNames, [...GMR_SHEET_NAMES]);
 });
 
-test("Field Data keeps its approved columns while using fieldRows instead of full rows", () => {
-  const dataset = makeDataset();
-  dataset.fieldRows = dataset.rows.slice(0, 2);
-  dataset.summary.monthlyDiscoveryCount = 2;
-  const { workbook } = workbookFrom(dataset, "gmr_zamo.xlsx");
-  const zamo = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
-
-  assert.deepEqual(zamo[0], [
-    "Capture Date", "Field Worker Name", "Sales Category", "Batch ID", "Street No", "Street Name",
-    "Street Type", "SuburbName", "GPS Coordinates", "Ward", "Property Type",
-    "Property Name", "Unit No", "Meter Mode", "Meter Phase", "Meter Placement",
-    "Original / Project Meter Number", "Field-Found Meter Number", "Same/Different", "Remaining Credit",
-    "Primary Finding", "Finding Explanation", "Normalisation", "Seal No", "Comment",
-    "Photo 1", "Photo 2", "Photo 3", "Photo 4", "Photo 5", "Photo 6",
-  ]);
-  assert.equal(zamo.length, 3);
-  assert.equal(zamo[0].length, 31);
-  assert.equal(zamo[0].indexOf("Sales Category") + 1, zamo[0].indexOf("Batch ID"));
-  assert.equal(zamo[0].indexOf("Meter Placement") + 1, zamo[0].indexOf("Original / Project Meter Number"));
-  assert.equal(zamo[0].indexOf("Same/Different") + 1, zamo[0].indexOf("Remaining Credit"));
-  assert.equal(zamo[1][zamo[0].indexOf("Sales Category")], "Normal - No Leakage Flag");
-  assert.equal(zamo[1][zamo[0].indexOf("Meter Placement")], "Kiosk");
-  assert.equal(zamo[1][zamo[0].indexOf("Remaining Credit")], "12.5");
-  assert.equal(zamo[2][zamo[0].indexOf("Meter Placement")], "NAv");
-  assert.equal(zamo[2][zamo[0].indexOf("Remaining Credit")], "0");
-
-  const fieldDataSheet = workbook.Sheets["Field Data"];
-  assert.equal(fieldDataSheet["!autofilter"].ref, "A1:AE3");
-  const remainingCreditCol = zamo[0].indexOf("Remaining Credit");
-  const credit12Cell = fieldDataSheet[XLSX.utils.encode_cell({ r: 1, c: remainingCreditCol })];
-  const creditZeroCell = fieldDataSheet[XLSX.utils.encode_cell({ r: 2, c: remainingCreditCol })];
-  assert.equal(credit12Cell.t, "s");
-  assert.equal(credit12Cell.v, "12.5");
-  assert.equal(creditZeroCell.t, "s");
-  assert.equal(creditZeroCell.v, "0");
-
-  const master = workbook.Sheets["GMR Master Meter"];
-  const range = XLSX.utils.decode_range(master["!ref"]);
-  assert.equal(range.e.r + 1, 9, "Master remains full seven-meter context");
+test("the workbook is written compressed", () => {
+  const { artifact } = readWorkbook(makeDataset());
+  const view = new DataView(artifact.bytes.buffer, artifact.bytes.byteOffset);
+  assert.equal(view.getUint32(0, true), 0x04034b50, "starts with a zip entry");
+  assert.equal(view.getUint16(8, true), 8, "the first part is deflated, not stored");
 });
 
-test("Field Data preserves AD HOC, NAv and photo hyperlink behaviour", () => {
-  const dataset = makeDataset();
-  dataset.fieldRows[2].batchId = null;
-  dataset.fieldRows[2].streetNo = null;
-  dataset.fieldRows[2].streetName = null;
-  dataset.fieldRows[2].streetType = null;
-  dataset.fieldRows[2].suburbName = null;
-  dataset.fieldRows[2].sameDifferent = null;
-  dataset.fieldRows[2].meterPlacement = null;
-  dataset.fieldRows[2].remainingCredit = null;
-  dataset.fieldRows[2].sealNo = null;
-  dataset.fieldRows[2].fieldComment = null;
-  const { workbook } = workbookFrom(dataset, "gmr_values.xlsx");
-  const zamo = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
-  assert.equal(zamo[1][zamo[0].indexOf("Batch ID")], "AD HOC");
-  assert.equal(zamo[3][zamo[0].indexOf("Batch ID")], "AD HOC");
-  assert.equal(zamo[3][zamo[0].indexOf("Street No")], "NAv");
-  assert.equal(zamo[3][zamo[0].indexOf("Same/Different")], "NAv");
-  assert.equal(zamo[3][zamo[0].indexOf("Meter Placement")], "NAv");
-  assert.equal(zamo[3][zamo[0].indexOf("Remaining Credit")], "NAv");
-  const photo1Col = zamo[0].indexOf("Photo 1");
-  const photoCell = workbook.Sheets["Field Data"][XLSX.utils.encode_cell({ r: 1, c: photo1Col })];
-  assert.equal(photoCell.l.Target, "https://example.test/photo-1.jpg");
+test("Field Data states the month and carries the schema columns in order, then one photo column per photo", () => {
+  const { workbook } = readWorkbook(makeDataset());
+  const sheet = workbook.Sheets["Field Data"];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+  assert.match(rows[0][0], /^Endumeni — September 2026 \(incomplete month\) — General Monthly Report: Field Data$/);
+  assert.match(rows[1][0], /month they reached the server, South African time\. Generated 2026-09-21 12:05\./);
+  assert.deepEqual(rows[2], [...GMR_FIELD_DATA_COLUMNS.map((item) => item.header), "Photo 1", "Photo 2"]);
+  assert.equal(GMR_FIELD_DATA_COLUMNS.length, 36);
+  assert.equal(rows[2][1], "Transaction Number");
+  assert.equal(rows[3][1], "TRN_MD_1");
 });
 
-test("Field Stats uses reportMonth rather than generatedAt and counts only fieldRows", () => {
-  const dataset = makeDataset();
-  dataset.generatedAt = "2026-09-02T06:51:00.000Z";
-  dataset.fieldRows = dataset.rows.slice(0, 3);
-  dataset.fieldRows[0].fieldWorkerName = "Worker B";
-  dataset.fieldRows[1].fieldWorkerName = "Worker A";
-  dataset.fieldRows[2].fieldWorkerName = "Worker A";
-  dataset.fieldRows[1].normalisation = "Issue Fine";
-  dataset.summary.monthlyDiscoveryCount = 3;
+test("Field Data writes NAv for what the record does not hold, South African time, and photo links", () => {
+  const { workbook } = readWorkbook(makeDataset());
+  const sheet = workbook.Sheets["Field Data"];
+  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[2];
+  const cellFor = (name) => sheet[XLSX.utils.encode_cell({ r: 3, c: header.indexOf(name) })];
 
-  const { workbook } = workbookFrom(dataset, "gmr_zamo_stats.xlsx");
-  const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
-  assert.equal(stats[0][0], "AUGUST 2026 - METER AUDIT");
-  const totalAuditRow = stats.find((row) => row[1] === "TOTAL: METER DISCOVERY RECORDS");
-  assert.ok(totalAuditRow);
-  assert.equal(totalAuditRow[totalAuditRow.length - 1], 3);
-  const normalisationTitleRow = stats.find((row) => row[0] === "AUGUST 2026 - NORMALISATION");
-  assert.ok(normalisationTitleRow);
-  const totalNormalisationRow = stats.find((row) => row[1] === "TOTAL: NORMALISATION");
-  assert.equal(totalNormalisationRow[totalNormalisationRow.length - 1], 3);
+  assert.equal(cellFor("Property Name").v, "NAv");
+  assert.equal(cellFor("Reason For Not Acting").v, "NAv");
+  const captured = cellFor("Capture Date").v;
+  assert.ok(captured instanceof Date);
+  assert.equal(captured.getUTCHours(), 10, "08:00 UTC is 10:00 in South Africa");
+  assert.equal(cellFor("Photo 2").v, "Photo 2");
+  assert.equal(cellFor("Photo 2").l.Target, "https://example.test/2.jpg");
 });
 
-test("zero selected-month activity still generates valid Field Data and Field Stats", () => {
-  const dataset = makeDataset();
-  dataset.fieldRows = [];
-  dataset.interventionEvents = [];
-  dataset.summary.monthlyDiscoveryCount = 0;
-  dataset.summary.monthlyInterventionEventCount = 0;
-  dataset.summary.metersWithInterventions = 0;
-  const { workbook } = workbookFrom(dataset, "gmr_zero_activity.xlsx");
-
-  const fieldData = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
-  assert.equal(fieldData.length, 1);
-  assert.equal(fieldData[0].length, 31);
-  assert.equal(workbook.Sheets["Field Data"]["!autofilter"].ref, "A1:AE1");
-  const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
-  assert.equal(stats[0][0], "AUGUST 2026 - METER AUDIT");
-  const total = stats.find((row) => row[1] === "TOTAL: METER DISCOVERY RECORDS");
-  assert.ok(total);
-  assert.equal(total[total.length - 1], 0);
+test("a month with no field work still makes a report", () => {
+  const { workbook } = readWorkbook(makeDataset([]));
+  assert.deepEqual(workbook.SheetNames, [...GMR_SHEET_NAMES]);
+  const managed = buildGeneralMonthlyManagedReport({ dataset: makeDataset([]), generatedAt: new Date("2026-09-21T10:05:00.000Z") });
+  assert.equal(managed.metadata.itemCount, 0);
 });
 
-test("workbook tolerates no Sales month evidence while retaining full meter context", () => {
-  const dataset = makeDataset();
-  dataset.monthKeys = [];
-  dataset.rows.forEach((row) => { row.monthlyPurchases = {}; });
-  dataset.fieldRows = dataset.rows.slice(0, 1);
-  const { workbook } = workbookFrom(dataset, "gmr_no_sales_months.xlsx");
-  const columns = getGmrMasterColumnDefinitions([]);
-  assert.equal(columns.some((item) => item.header.startsWith("Purchase Value ")), false);
-  assert.ok(workbook.Sheets["GMR Master Meter"]);
+test("Field Stats keeps None for Meter Ok, counts no action by reason, and splits suspicions", () => {
+  const rows = [
+    row({ trnId: "A" }),
+    row({ trnId: "B", findingGroup: "Meter Ok · Suspicion", findingDetail: "Bypass Suspicion" }),
+    row({
+      trnId: "C",
+      primaryFinding: "Illegally Connected",
+      findingGroup: "Illegally Connected",
+      normalisationActions: ["none"],
+      noActionReason: "Not recorded - captured before this rule",
+    }),
+    row({
+      trnId: "D",
+      fieldWorkerName: "Sipho Worker",
+      team: "Team B",
+      primaryFinding: "Illegally Connected",
+      findingGroup: "Illegally Connected",
+      normalisationActions: ["Disconnect meter", "Tamper removed"],
+      followUpRequired: "Meter Disconnection",
+      followUpStatus: "Completed",
+    }),
+    row({
+      trnId: "E",
+      primaryFinding: "Illegally Connected",
+      findingGroup: "Illegally Connected",
+      normalisationActions: ["Disconnect meter"],
+      followUpRequired: "Meter Disconnection",
+      followUpStatus: "No disconnection record",
+    }),
+    row({ trnId: "F", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", batchId: "AD HOC", findingGroup: null, normalisationActions: [], team: "Team B", fieldWorkerName: "Sipho Worker" }),
+    row({ trnId: "G", hasAccess: false, primaryFinding: "No Access", findingGroup: "No Access", normalisationActions: [], batchId: "AD HOC", photoUrls: [] }),
+  ];
+  const model = buildGmrFieldStatsModel(makeDataset(rows));
+  const find = (group, label) => model.groups.find((item) => item.name === group).rows.find((item) => item.label === label);
+
+  assert.equal(find("Transactions", "Payable total").total, 7);
+  assert.equal(find("Transactions", "Meter Disconnection").total, 1);
+  assert.equal(find("Findings", "Meter Ok · Operationally Ok").total, 1);
+  assert.equal(find("Findings", "Meter Ok · Suspicion").total, 1);
+  assert.equal(find("Findings", "Illegally Connected").total, 3);
+  assert.equal(find("Findings", "No Access").total, 1);
+  assert.equal(find("Normalisation", "None").total, 2, "None belongs to the Meter Ok rows only");
+  assert.equal(find("Normalisation", "No action taken — Not recorded - captured before this rule").total, 1);
+  assert.equal(find("Normalisation", "Disconnect meter").total, 2);
+  assert.equal(find("Normalisation", "Tamper removed").total, 1);
+  assert.equal(find("Disconnections called for", "Called for").total, 2);
+  assert.equal(find("Disconnections called for", "Completed").total, 1);
+  assert.equal(find("Disconnections called for", "No disconnection record").total, 1);
+  assert.equal(find("Outside batches (AD HOC)", "Meter Disconnection").total, 1);
+
+  const byWorker = find("Transactions", "Payable total").byWorker;
+  const byTeam = find("Transactions", "Payable total").byTeam;
+  const sum = (map) => [...map.values()].reduce((total, value) => total + value, 0);
+  assert.equal(sum(byWorker), 7);
+  assert.equal(sum(byTeam), 7);
+  assert.equal(byTeam.get("Team B"), 2);
+
+  const control = Object.fromEntries(model.controlLines.map((line) => [line.label, line.count]));
+  assert.equal(control["Submitted this month but not on Field Data (must be 0)"], 0);
+  assert.equal(control["Transactions without a batch (AD HOC)"], 2);
 });
 
-test("GMR Excel preserves confirmed zero and renders missing purchase evidence as Not Available", () => {
-  const dataset = makeDataset();
-  const { workbook } = workbookFrom(dataset, "gmr_purchase_values.xlsx");
-  const master = workbook.Sheets["GMR Master Meter"];
-  const columns = getGmrMasterColumnDefinitions(MONTH_KEYS);
-  const juneIndex = columns.findIndex((item) => item.header === "Purchase Value Jun-2026");
-  const julyIndex = columns.findIndex((item) => item.header === "Purchase Value Jul-2026");
-  const septemberIndex = columns.findIndex((item) => item.header === "Purchase Value Sep-2026");
-  const juneCell = master[XLSX.utils.encode_cell({ r: 2, c: juneIndex })];
-  const julyCell = master[XLSX.utils.encode_cell({ r: 2, c: julyIndex })];
-  const septemberCell = master[XLSX.utils.encode_cell({ r: 2, c: septemberIndex })];
-  assert.equal(juneCell.v, 0);
-  assert.equal(juneCell.t, "n");
-  assert.equal(julyCell.v, "Not Available");
-  assert.equal(julyCell.t, "s");
-  assert.equal(septemberCell.v, 125, "purchase history later than August remains present");
+test("the control lines count unplaced work, meters off the vending list, and stale visibility once per meter", () => {
+  const rows = [
+    row({ trnId: "A", fieldFoundMeterNo: "M1", onVendingList: "No", visibility: "Invisible", salesCategory: null }),
+    row({ trnId: "B", fieldFoundMeterNo: "M1", onVendingList: "No", visibility: "Invisible", salesCategory: null }),
+    row({ trnId: "C", fieldFoundMeterNo: "M2", onVendingList: "Yes", visibility: "Invisible" }),
+    row({ trnId: "D", fieldFoundMeterNo: "W1", meterType: "WATER", onVendingList: null, salesCategory: null }),
+    row({ trnId: "E", team: "Unassigned", fieldWorkerName: "New Worker", gpsCoordinates: null }),
+  ];
+  const model = buildGmrFieldStatsModel(makeDataset(rows, { unplaced: [{ trnId: "X", reason: "The submission time cannot be read." }] }));
+  const control = Object.fromEntries(model.controlLines.map((line) => [line.label, line.count]));
+
+  assert.equal(control["Submitted this month but not on Field Data (must be 0)"], 1);
+  assert.equal(control["Meters found that are not on the vending list"], 1);
+  assert.equal(control["Visibility mark that disagrees with Sales"], 1);
+  assert.equal(control["Transactions with no Sales Category"], 2, "water is never on the vending list");
+  assert.equal(control["Missing GPS, photograph or normalisation answer"], 1);
+  assert.equal(control["Workers whose team could not be resolved"], 1);
 });
 
-test("Dashboard separates reporting month from generated timestamp and full population from monthly activity", () => {
-  const dataset = makeDataset();
-  dataset.fieldRows = dataset.rows.slice(0, 2);
-  dataset.summary.monthlyDiscoveryCount = 2;
-  dataset.summary.monthlyInterventionEventCount = 1;
-  const { workbook } = workbookFrom(dataset, "gmr_dashboard.xlsx");
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["GMR Dashboard"], { header: 1, defval: "" });
-  assert.ok(rows.some((row) => row[0] === "Reporting Month" && row[1] === "August 2026"));
-  assert.ok(rows.some((row) => row[0] === "Generated At"));
-  assert.ok(rows.some((row) => row[0] === "Total Meters" && row[1] === 7));
-  assert.ok(rows.some((row) => row[0] === "Meter Discovery Records" && row[1] === 2));
-  assert.ok(rows.some((row) => row[0] === "Completed DCN / RCN Events" && row[1] === 1));
+test("the Field Stats sheet lists the work not placed on Field Data", () => {
+  const { workbook } = readWorkbook(makeDataset([row()], { unplaced: [{ trnId: "TRN_X", reason: "The submission time cannot be read." }] }));
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
+  const headerIndex = rows.findIndex((item) => item[0] === "NOT ON FIELD DATA");
+  assert.ok(headerIndex > 0);
+  assert.deepEqual(rows[headerIndex + 1].slice(1, 3), ["TRN_X", "The submission time cannot be read."]);
 });
 
-test("managed GMR identity carries reporting month while itemCount remains full meter population", () => {
-  const dataset = makeDataset();
-  dataset.fieldRows = dataset.rows.slice(0, 3);
-  dataset.summary.monthlyDiscoveryCount = 3;
-  dataset.summary.monthlyInterventionEventCount = 2;
-  const result = buildGeneralMonthlyManagedReport({
-    dataset,
-    generatedAt: new Date("2026-09-02T06:51:00.000Z"),
+test("the saved report names the month and counts its transactions", () => {
+  const managed = buildGeneralMonthlyManagedReport({ dataset: makeDataset([row(), row({ trnId: "B" })]), generatedAt: new Date("2026-09-21T10:05:00.000Z") });
+  assert.equal(managed.metadata.itemCount, 2);
+  assert.equal(managed.metadata.sourceScope.reportMonth, "2026-09");
+  assert.equal(managed.metadata.sourceScope.payableTotal, 2);
+  assert.equal(managed.metadata.sourceScope.isIncompleteMonth, true);
+  assert.match(managed.metadata.fileName, /^general_monthly_report_endumeni_2026-09_\d{12}\.xlsx$/);
+});
+
+test("the report is saved before it is offered to the browser, and each step is reported", async () => {
+  const calls = [];
+  const generate = createGeneralMonthlyReportManagedGenerator({
     buildArtifact({ fileName }) {
       return { format: "XLSX", fileName, bytes: Uint8Array.from([1, 2, 3]) };
     },
-  });
-  assert.equal(result.metadata.reportType, "GENERAL_MONTHLY_REPORT");
-  assert.equal(result.metadata.format, "XLSX");
-  assert.equal(result.metadata.itemCount, 7);
-  assert.equal(result.metadata.sourceScope.reportMonth, "2026-08");
-  assert.equal(result.metadata.sourceScope.reportingPeriodLabel, "August 2026");
-  assert.equal(result.metadata.sourceScope.monthlyDiscoveryCount, 3);
-  assert.equal(result.metadata.sourceScope.monthlyInterventionEventCount, 2);
-  assert.equal(result.metadata.sourceScope.activityScope, "REGISTRY_LINKED_DISCOVERY_AND_COMPLETED_DCN_RCN");
-  assert.match(result.metadata.fileName, /^general_monthly_report_endumeni_2026-08_\d{12}\.xlsx$/);
-});
-
-test("managed GMR persistence happens before browser download and uses the same artifact", async () => {
-  const dataset = makeDataset();
-  const calls = [];
-  let persistedArtifact;
-  let downloadedArtifact;
-  const generate = createGeneralMonthlyReportManagedGenerator({
-    buildArtifact({ fileName }) {
-      return { format: "XLSX", fileName, bytes: Uint8Array.from([1, 2, 3, 4]) };
-    },
     async persist({ artifact }) {
       calls.push("persist");
-      persistedArtifact = artifact;
-      return { lifecycle: { reportId: "RPT_GMR_1" } };
+      return { lifecycle: { reportId: "RPT_1" }, artifact };
     },
-    download(artifact) {
+    download() {
       calls.push("download");
-      downloadedArtifact = artifact;
     },
   });
-  const result = await generate({ dataset, generatedAt: new Date("2026-09-02T06:51:00.000Z") });
+  const steps = [];
+  const result = await generate({ dataset: makeDataset(), onStep: (step) => steps.push(step) });
   assert.deepEqual(calls, ["persist", "download"]);
-  assert.strictEqual(persistedArtifact, downloadedArtifact);
-  assert.strictEqual(result.artifact, persistedArtifact);
-  assert.equal(result.persistence.lifecycle.reportId, "RPT_GMR_1");
+  assert.deepEqual(steps, ["BUILD", "SAVE", "DOWNLOAD"]);
+  assert.equal(result.downloaded, true);
+});
+
+test("a failed save still hands back the built workbook", async () => {
+  const generate = createGeneralMonthlyReportManagedGenerator({
+    buildArtifact({ fileName }) {
+      return { format: "XLSX", fileName, bytes: Uint8Array.from([1, 2, 3]) };
+    },
+    async persist() {
+      throw new Error("Storage is unavailable.");
+    },
+    download() {
+      throw new Error("must not download an unsaved report automatically");
+    },
+  });
+  await assert.rejects(generate({ dataset: makeDataset() }), (error) => {
+    assert.equal(error.message, "Storage is unavailable.");
+    assert.ok(error.gmrArtifact?.bytes instanceof Uint8Array);
+    return true;
+  });
 });

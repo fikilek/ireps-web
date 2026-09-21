@@ -16,16 +16,16 @@ export default function ReportsLandingPage() {
         <Link className="module-card" to="/reports/general-monthly">
           <h3>General Monthly Report</h3>
           <p className="muted">
-            Generate the Endumeni meter, property, intervention, and revenue
-            workbook. Builder v0.1 uses a controlled 200-meter sample.
+            Every Endumeni field transaction for one month, with the counts per
+            field worker and per team.
           </p>
         </Link>
 
         <Link className="module-card" to="/reports/generated">
           <h3>Generated Reports</h3>
           <p className="muted">
-            Download or delete your managed report artifacts before they expire
-            automatically after 3 days.
+            Download or delete your saved reports. Monthly reports are kept until
+            you delete them; other reports expire after 3 days.
           </p>
         </Link>
 

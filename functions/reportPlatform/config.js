@@ -48,7 +48,8 @@ export const REPORT_RETENTION_DAYS = Object.freeze({
   [REPORT_TYPES.ANOMALY]: 3,
   [REPORT_TYPES.NORMALISATION]: 3,
   [REPORT_TYPES.USER_ACTIVITY]: 3,
-  [REPORT_TYPES.GENERAL_MONTHLY_REPORT]: 3,
+  // GMR-R003: kept until a person deletes it.
+  [REPORT_TYPES.GENERAL_MONTHLY_REPORT]: null,
   [REPORT_TYPES.REGISTRY_WARDS]: 3,
   [REPORT_TYPES.REGISTRY_ERFS]: 3,
   [REPORT_TYPES.REGISTRY_PREMISES]: 3,
@@ -77,7 +78,9 @@ export function getLockedReportFormat(reportType) {
   return LOCKED_REPORT_FORMATS[reportType] || null;
 }
 
+// null means the report never expires and is kept until a person deletes it.
 export function getReportRetentionDays(reportType) {
+  if (REPORT_RETENTION_DAYS[reportType] === null) return null;
   return REPORT_RETENTION_DAYS[reportType] || REPORT_RETENTION_DAYS.DEFAULT;
 }
 

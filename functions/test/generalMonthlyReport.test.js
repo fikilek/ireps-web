@@ -1,546 +1,298 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import {
-  buildCanonicalGmrMeterRow,
   buildGeneralMonthlyReportDataset,
-  buildGmrMonthKeysFromSales,
-  buildGmrTeamMembershipIndex,
-  buildZamoReportPhotoConfig,
+  buildGmrFieldRow,
   getGmrReportMonthWindow,
-  isTimestampInGmrReportMonth,
-  resolveGmrFieldStatsTeam,
-  selectGmrPopulationMeters,
+  getGmrSalesCategory,
+  getGmrSubmissionTime,
+  isGmrTransactionInMonth,
+  resolveGmrTeamAt,
   validateGmrReportMonth,
 } from "../reports/generalMonthlyReport.js";
 
-function registryMeter(index, visibility = "VISIBLE") {
+const SEPTEMBER = getGmrReportMonthWindow("2026-09");
+
+function discovery(overrides = {}) {
   return {
-    id: `TRN_MD_${String(index).padStart(4, "0")}`,
-    meterNo: `METER${index}`,
-    visibility,
-    premiseId: `PREM_${index}`,
-    erfNo: String(1000 + index),
-    parents: {
-      lmPcode: "ZA5241",
-      wardPcode: `ZA5241${String((index % 3) + 1).padStart(3, "0")}`,
+    meterType: "electricity",
+    accessData: {
+      trnType: "METER_DISCOVERY",
+      access: { hasAccess: "yes" },
+      premise: { id: "PREM_1" },
+      parents: { lmPcode: "ZA5241", wardPcode: "ZA5241006" },
     },
+    ast: {
+      astData: { astNo: "0714 1234567", meter: { type: "prepaid", phase: "single", seal: { sealNo: "S1" }, remainingCredit: "12.5" } },
+      anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok" },
+      normalisation: { actionTaken: ["none"], noActionReason: "" },
+      location: { gps: { lat: -28.1, lng: 30.2 }, placement: "Outside" },
+    },
+    metadata: {
+      createdAt: "2026-09-10T08:00:00.000Z",
+      createdByUid: "U1",
+      createdByUser: "Lefu Worker",
+    },
+    media: [{ tag: "astNoPhoto", url: "https://example.test/1.jpg" }],
+    ...overrides,
   };
 }
 
-function discoveryEntry(registry, createdAt = "2026-08-10T08:00:00.000Z") {
+function disconnection(overrides = {}) {
   return {
-    id: registry.id,
-    data: {
-      accessData: {
-        trnType: "METER_DISCOVERY",
-        access: { hasAccess: "yes" },
-        premise: { id: registry.premiseId },
-        parents: registry.parents,
-        erfNo: registry.erfNo,
-      },
-      ast: {
-        astData: {
-          astNo: registry.meterNo,
-          meter: { type: "prepaid", phase: "single" },
-        },
-        anomalies: { anomaly: "Meter Ok", anomalyDetail: "Meter Ok" },
-        location: { gps: { lat: -28.123, lng: 30.654 } },
-      },
-      meterType: "electricity",
-      metadata: {
-        createdAt,
-        updatedAt: "2026-09-10T08:00:00.000Z",
-        createdByUid: "USER_1",
-        createdByUser: "Field Worker One",
-      },
-      serviceProvider: { name: "Example SP" },
+    meterType: "electricity",
+    accessData: {
+      trnType: "METER_DISCONNECTION",
+      access: { hasAccess: "yes" },
+      premise: { id: "PREM_1" },
+      parents: { lmPcode: "ZA5241", wardPcode: "ZA5241006" },
     },
+    ast: { astData: { astId: "TRN_MD_1", astNo: "07141234567", meter: {} } },
+    origin: { channel: "FIELD", parentTrnId: "TRN_MD_1", parentTrnType: "METER_DISCOVERY" },
+    workflow: {
+      state: "COMPLETED",
+      completedAt: "2026-09-10T09:00:00.000Z",
+      completedByUid: "U2",
+      completedByUser: "Sipho Worker",
+    },
+    metadata: { createdAt: "2026-08-30T08:00:00.000Z", createdByUid: "MNG1", createdByUser: "Manager" },
+    media: [],
+    ...overrides,
   };
 }
 
-function salesEntry(id, monthlySalesC = {}, legacySales = undefined) {
-  return {
-    id,
-    data: {
-      meterNoNormalized: id,
-      leakageCategory: "Normal - No Leakage Flag",
-      monthlySalesC,
-      ...(legacySales ? { Sales: legacySales } : {}),
-    },
-  };
-}
-
-test("GMR full population includes every Endumeni registry meter in deterministic order", () => {
-  const meters = [
-    registryMeter(5, "VISIBLE"),
-    registryMeter(2, "INVISIBLE"),
-    registryMeter(9, "UNKNOWN"),
-    registryMeter(1, "VISIBLE"),
-  ];
-
-  const result = selectGmrPopulationMeters(meters);
-  assert.equal(result.selected.length, 4);
-  assert.equal(result.summary.selectedTotal, 4);
-  assert.equal(result.summary.visibleSelected, 2);
-  assert.equal(result.summary.invisibleSelected, 1);
-  assert.equal(result.summary.unclassifiedSelected, 1);
-  assert.deepEqual(new Set(result.selected.map((meter) => meter.id)), new Set(meters.map((meter) => meter.id)));
+test("the month is South African time, the future is refused and the current month is incomplete", () => {
+  assert.equal(SEPTEMBER.startIso, "2026-08-31T22:00:00.000Z");
+  assert.equal(SEPTEMBER.endIso, "2026-09-30T22:00:00.000Z");
+  assert.throws(() => validateGmrReportMonth("2026-10", new Date("2026-09-21T10:00:00Z")), /future/);
+  assert.equal(validateGmrReportMonth("2026-09", new Date("2026-09-21T10:00:00Z")).isIncompleteMonth, true);
+  assert.equal(validateGmrReportMonth("2026-08", new Date("2026-09-21T10:00:00Z")).isIncompleteMonth, false);
+  assert.throws(() => getGmrReportMonthWindow("2026-13"), /YYYY-MM/);
 });
 
-test("GMR premise enrichment still reads the authoritative premises collection", () => {
-  const source = readFileSync(new URL("../reports/generalMonthlyReport.js", import.meta.url), "utf8");
-  assert.match(source, /getDocsByIds\(db,\s*"premises",\s*premiseIds\)/);
-  assert.doesNotMatch(source, /getDocsByIds\(db,\s*"registry_premises",\s*premiseIds\)/);
+test("work counts when it reached the server: creation with no workflow, completion with one", () => {
+  assert.equal(getGmrSubmissionTime(discovery()), "2026-09-10T08:00:00.000Z");
+  assert.equal(getGmrSubmissionTime(disconnection()), "2026-09-10T09:00:00.000Z");
+  assert.equal(getGmrSubmissionTime(disconnection({ workflow: { state: "ACCEPTED" } })), null);
+
+  const installation = discovery({ accessData: { ...discovery().accessData, trnType: "METER_INSTALLATION" } });
+  assert.equal(getGmrSubmissionTime(installation), "2026-09-10T08:00:00.000Z");
+
+  // 23:30 on 31 August, South African time, is still August.
+  const lateAugust = discovery({ metadata: { createdAt: "2026-08-31T21:30:00.000Z" } });
+  assert.equal(isGmrTransactionInMonth(lateAugust, SEPTEMBER), false);
+  const earlySeptember = discovery({ metadata: { createdAt: "2026-08-31T22:00:00.000Z" } });
+  assert.equal(isGmrTransactionInMonth(earlySeptember, SEPTEMBER), true);
+  // An office instruction issued in August and completed in September is September's work.
+  assert.equal(isGmrTransactionInMonth(disconnection(), SEPTEMBER), true);
 });
 
-test("Johannesburg August reporting window uses half-open UTC instants", () => {
-  const window = getGmrReportMonthWindow("2026-08");
-  assert.equal(window.startIso, "2026-07-31T22:00:00.000Z");
-  assert.equal(window.endIso, "2026-08-31T22:00:00.000Z");
-  assert.equal(window.reportingPeriodLabel, "August 2026");
-
-  assert.equal(isTimestampInGmrReportMonth("2026-07-31T21:59:59.999Z", window), false);
-  assert.equal(isTimestampInGmrReportMonth("2026-07-31T22:00:00.000Z", window), true);
-  assert.equal(isTimestampInGmrReportMonth("2026-08-31T21:59:59.999Z", window), true);
-  assert.equal(isTimestampInGmrReportMonth("2026-08-31T22:00:00.000Z", window), false);
-});
-
-test("report month validation rejects malformed and future months", () => {
-  assert.throws(() => validateGmrReportMonth("2026-13", new Date("2026-09-02T08:00:00.000Z")), /YYYY-MM/);
-  assert.throws(() => validateGmrReportMonth("26-08", new Date("2026-09-02T08:00:00.000Z")), /YYYY-MM/);
-  assert.throws(() => validateGmrReportMonth("2026-10", new Date("2026-09-02T08:00:00.000Z")), /future/);
-  assert.equal(validateGmrReportMonth("2026-09", new Date("2026-09-02T08:00:00.000Z")).reportMonth, "2026-09");
-  assert.equal(validateGmrReportMonth("2026-08", new Date("2026-09-02T08:00:00.000Z")).reportMonth, "2026-08");
-});
-
-test("dynamic Sales month keys span the full contiguous observed range beyond August 2026", () => {
-  const keys = buildGmrMonthKeysFromSales([
-    salesEntry("M1", { "2023-11": 100, "2026-01": 0 }),
-    salesEntry("M2", { "2026-10": 200 }),
-  ]);
-
-  assert.equal(keys[0], "2023-11");
-  assert.equal(keys.at(-1), "2026-10");
-  assert.ok(keys.includes("2024-07"));
-  assert.ok(keys.includes("2026-09"));
-  assert.equal(keys.length, 36);
-});
-
-test("dynamic Sales month keys include legacy Sales evidence and return empty when none exists", () => {
-  const keys = buildGmrMonthKeysFromSales([
-    { data: { Sales: { "2025-12": 100, "2026-02": 200 } } },
-    { data: { monthlySalesC: { "2026-04": 30000 } } },
-  ]);
-  assert.deepEqual(keys, ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04"]);
-  assert.deepEqual(buildGmrMonthKeysFromSales([{ data: {} }]), []);
-});
-
-test("Discovery row anchors capture/investigation date to metadata.createdAt, not updatedAt", () => {
-  const registry = registryMeter(1, "VISIBLE");
-  const discovery = discoveryEntry(registry, "2026-08-31T21:30:00.000Z");
-  discovery.data.metadata.updatedAt = "2026-09-02T10:00:00.000Z";
-  const sales = salesEntry("METER1", { "2026-08": 0, "2026-09": 12345 });
-
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: sales,
-    sourceSalesEntry: sales,
-    lifecycleTrns: [],
-    monthKeys: ["2026-08", "2026-09"],
+test("a discovery row carries the schema columns from the transaction and its enrichment", () => {
+  const row = buildGmrFieldRow({
+    trnId: "TRN_MD_1",
+    trn: discovery({ targetedBatchContext: { tbId: "TB_9", meterNo: "07141234567", salesDocId: "07141234567" } }),
+    reportMonth: "2026-09",
+    premise: { address: { strNo: "14", strName: "VAN RENSBURG", strType: "STREET", suburbName: "Dundee" }, propertyType: { type: "Residential", name: "Block A", unitNo: "A1" } },
+    sales: { monthlyCategories: { "2026-09": { leakageCategory: "CAT4 - Long Gap", riskTier: "Medium", riskScore: 40 } } },
+    fieldSalesExists: true,
+    ast: { master: { visibility: "VISIBLE" } },
+    team: "Kaizer Team",
   });
 
-  assert.equal(row.captureDate, "2026-08-31T21:30:00.000Z");
-  assert.equal(row.investigationDate, "2026-08-31T21:30:00.000Z");
-  assert.equal(row.investigationMonthPurchase, 0);
-});
-
-test("Invisible field-found meter retains targeted Sales history and approved Field Data values", () => {
-  const registry = registryMeter(2, "INVISIBLE");
-  registry.meterNo = "FIELD999";
-  registry.meterKind = "prepaid";
-  registry.meterType = "electricity";
-  registry.meterPhase = "single";
-
-  const discovery = discoveryEntry(registry, "2026-06-15T10:00:00.000Z");
-  discovery.data.ast.astData.astNo = "FIELD999";
-  discovery.data.ast.astData.meter.seal = { sealNo: "SEAL-001" };
-  discovery.data.ast.anomalies = {
-    anomaly: "Illegally Connected",
-    anomalyDetail: "Straight Connection (Meter Bypass)",
-  };
-  discovery.data.ast.normalisation = { actionTaken: ["Meter number corrected", "Address corrected"] };
-  discovery.data.targetedBatchContext = {
-    tbId: "TB_1",
-    rowId: "ROW_1",
-    salesDocId: "ORIG123",
-    meterNo: "ORIG123",
-    accountNumber: "ACC001",
-    customerName: "Example Customer",
-  };
-  discovery.data.fieldComment = { text: "Meter audit completed with customer present." };
-  discovery.data.media = [
-    { url: "https://example.test/photo-1.jpg" },
-    { url: "https://example.test/photo-2.jpg" },
-  ];
-
-  const premiseEntry = {
-    id: registry.premiseId,
-    data: {
-      erfNo: registry.erfNo,
-      address: { strNo: "14A", strName: "vAN rENSBURG", strType: "sTREET", suburbName: "Example Suburb" },
-      propertyType: { name: "Block A", type: "Residential", unitNo: "A1" },
-      occupancy: { status: "Accessed" },
-      parents: registry.parents,
-    },
-  };
-  const sourceSalesEntry = {
-    id: "ORIG123",
-    data: {
-      meterNoNormalized: "ORIG123",
-      accountNumber: "ACC001",
-      customerName: "Example Customer",
-      leakageCategory: "CAT5 - Stopped Purchasing",
-      monthlySalesC: { "2026-04": 0, "2026-05": 25000, "2026-06": 10000 },
-    },
-  };
-
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry,
-    fieldSalesEntry: null,
-    sourceSalesEntry,
-    lifecycleTrns: [],
-    fieldStatsTeam: "Kaiser Team",
-    monthKeys: ["2026-04", "2026-05", "2026-06"],
-  });
-
-  assert.equal(row.registryVisibility, "Invisible");
-  assert.equal(row.originalProjectMeterNo, "ORIG123");
-  assert.equal(row.fieldFoundMeterNo, "FIELD999");
-  assert.equal(row.monthlyPurchases["2026-04"], 0);
-  assert.equal(row.monthlyPurchases["2026-05"], 250);
-  assert.equal(row.sameDifferent, "Different");
+  assert.equal(row.trnId, "TRN_MD_1");
+  assert.equal(row.trnTypeLabel, "Meter Discovery");
+  assert.equal(row.channel, "Field");
+  assert.equal(row.fieldWorkerName, "Lefu Worker");
+  assert.equal(row.team, "Kaizer Team");
+  assert.equal(row.batchId, "TB_9");
   assert.equal(row.streetName, "Van Rensburg");
-  assert.equal(row.primaryFinding, "Illegally Connected");
-  assert.equal(row.normalisation, "Meter number corrected • Address corrected");
-  assert.equal(row.fieldStatsTeam, "Kaiser Team");
+  assert.equal(row.ward, "Ward 6");
   assert.equal(row.meterMode, "Prepaid");
+  assert.equal(row.meterPhase, "Single Phase");
+  assert.equal(row.fieldFoundMeterNo, "07141234567");
+  assert.equal(row.sameDifferent, "Same");
+  assert.equal(row.salesCategory, "CAT4 - Long Gap");
+  assert.equal(row.primaryFinding, "Meter Ok");
+  assert.equal(row.findingGroup, "Meter Ok · Operationally Ok");
+  assert.equal(row.normalisation, "none");
+  assert.equal(row.noActionReason, null);
+  assert.equal(row.visibility, "Visible");
+  assert.equal(row.onVendingList, "Yes");
+  assert.deepEqual(row.photoUrls, ["https://example.test/1.jpg"]);
 });
 
-test("GMR exposes Zamo enrichment from authoritative Sales and Meter Discovery paths", () => {
-  const registry = registryMeter(20, "VISIBLE");
-  registry.meterKind = "prepaid";
-  registry.meterType = "electricity";
+test("work outside a batch is AD HOC and a water meter is never judged against the vending list", () => {
+  const row = buildGmrFieldRow({ trnId: "T", trn: discovery({ meterType: "water" }), reportMonth: "2026-09" });
+  assert.equal(row.batchId, "AD HOC");
+  assert.equal(row.onVendingList, null);
+  const electricity = buildGmrFieldRow({ trnId: "T", trn: discovery(), reportMonth: "2026-09", fieldSalesExists: false });
+  assert.equal(electricity.onVendingList, "No");
+});
 
-  const discovery = discoveryEntry(registry, "2026-08-15T10:00:00.000Z");
-  discovery.data.ast.astData.meter.category = "Bulk";
-  discovery.data.ast.location.placement = "Kiosk";
-  discovery.data.ast.astData.meter.remainingCredit = " 12.5 ";
+test("no access is its own row with the recorded reason", () => {
+  const trn = discovery({
+    accessData: { ...discovery().accessData, access: { hasAccess: "no", reason: "Gate locked" } },
+    ast: {},
+  });
+  const row = buildGmrFieldRow({ trnId: "T", trn, reportMonth: "2026-09" });
+  assert.equal(row.primaryFinding, "No Access");
+  assert.equal(row.findingDetail, "Gate locked");
+  assert.equal(row.findingGroup, "No Access");
+  assert.equal(row.hasAccess, false);
+});
 
-  const sourceSalesEntry = {
-    id: registry.meterNo,
-    data: {
-      meterNoNormalized: registry.meterNo,
-      monthlyCategories: {
-        "2026-08": {
-          leakageCategory: "CAT1 - Zero Purchaser",
-          riskTier: "High",
-          riskScore: 3,
+test("a finding left with no action shows the reason, and a suspicion is not a healthy meter", () => {
+  const trn = discovery();
+  trn.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter" };
+  trn.ast.normalisation = { actionTaken: ["none"], noActionReason: "Not recorded - captured before this rule" };
+  const row = buildGmrFieldRow({ trnId: "T", trn, reportMonth: "2026-09" });
+  assert.equal(row.noActionReason, "Not recorded - captured before this rule");
+  assert.equal(row.findingGroup, "Illegally Connected");
+  assert.equal(row.followUpStatus, null);
+
+  const suspicion = discovery();
+  suspicion.ast.anomalies = { anomaly: "Meter Ok", anomalyDetail: "Bypass Suspicion" };
+  assert.equal(buildGmrFieldRow({ trnId: "T", trn: suspicion, reportMonth: "2026-09" }).findingGroup, "Meter Ok · Suspicion");
+});
+
+test("what a finding called for: done, not started, or recorded before the follow-up existed", () => {
+  const done = discovery();
+  done.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter" };
+  done.ast.normalisation = {
+    actionTaken: ["Disconnect meter"],
+    noActionReason: "",
+    followUp: { required: "METER_DISCONNECTION", status: "Completed", trnId: "TRN_DCN_1" },
+  };
+  const doneRow = buildGmrFieldRow({ trnId: "T", trn: done, reportMonth: "2026-09" });
+  assert.equal(doneRow.followUpRequired, "Meter Disconnection");
+  assert.equal(doneRow.followUpStatus, "Completed");
+  assert.equal(doneRow.followUpTrnId, "TRN_DCN_1");
+
+  const old = discovery();
+  old.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter" };
+  old.ast.normalisation = { actionTaken: ["Disconnect meter"], noActionReason: "" };
+  const oldRow = buildGmrFieldRow({ trnId: "T", trn: old, reportMonth: "2026-09" });
+  assert.equal(oldRow.followUpStatus, "No disconnection record");
+  assert.equal(oldRow.followUpRequired, "Meter Disconnection");
+});
+
+test("an inspection is read from what it captured, like a discovery", () => {
+  const inspection = disconnection({
+    accessData: { ...disconnection().accessData, trnType: "METER_INSPECTION" },
+    origin: { channel: "OFFICE" },
+    inspection: {
+      captured: {
+        ast: {
+          astData: { astNo: "07141234567", meter: { type: "prepaid", phase: "three" } },
+          anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" },
+          normalisation: { actionTaken: ["Meter replaced"], noActionReason: "" },
         },
       },
     },
-  };
-
-  const buildRow = () => buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: null,
-    sourceSalesEntry,
-    lifecycleTrns: [],
-    monthKeys: [],
-    reportMonth: "2026-08",
   });
-
-  const row = buildRow();
-  assert.equal(row.salesCategory, "CAT1 - Zero Purchaser");
-  assert.notEqual(row.salesCategory, "Bulk", "Mobile physical meter category must not become Sales Category");
-  assert.equal(row.meterPlacement, "Kiosk");
-  assert.equal(row.remainingCredit, "12.5");
-
-  discovery.data.ast.astData.meter.remainingCredit = " -5 ";
-  assert.equal(buildRow().remainingCredit, "-5");
-
-  discovery.data.ast.astData.meter.remainingCredit = 0;
-  assert.equal(buildRow().remainingCredit, "0");
-
-  discovery.data.ast.astData.meter.remainingCredit = "   ";
-  assert.equal(buildRow().remainingCredit, null);
+  const row = buildGmrFieldRow({ trnId: "T", trn: inspection, reportMonth: "2026-09" });
+  assert.equal(row.trnTypeLabel, "Meter Inspection");
+  assert.equal(row.channel, "Office");
+  assert.equal(row.fieldWorkerName, "Sipho Worker");
+  assert.equal(row.primaryFinding, "Meter Faulty");
+  assert.equal(row.findingGroup, "Meter Faulty");
+  assert.equal(row.normalisation, "Meter replaced");
+  assert.equal(row.meterPhase, "Three Phase");
 });
 
-test("GMR leaves Meter Placement and Remaining Credit unavailable when discovery source does not provide them", () => {
-  const registry = registryMeter(21, "VISIBLE");
-  registry.meterType = "water";
-  const discovery = discoveryEntry(registry, "2026-08-16T10:00:00.000Z");
-  discovery.data.meterType = "water";
-  delete discovery.data.ast.location.placement;
-  delete discovery.data.ast.astData.meter.remainingCredit;
-
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: null,
-    sourceSalesEntry: null,
-    lifecycleTrns: [],
-    monthKeys: [],
-    reportMonth: "2026-08",
-  });
-
-  assert.equal(row.meterPlacement, null);
-  assert.equal(row.remainingCredit, null);
+test("a disconnection names who completed it and the finding it followed", () => {
+  const row = buildGmrFieldRow({ trnId: "TRN_DCN_1", trn: disconnection(), reportMonth: "2026-09" });
+  assert.equal(row.fieldWorkerName, "Sipho Worker");
+  assert.equal(row.channel, "Field");
+  assert.equal(row.startedFrom, "TRN_MD_1");
+  assert.equal(row.primaryFinding, null);
+  assert.equal(row.findingGroup, null);
+  assert.equal(row.batchId, "AD HOC");
 });
 
-test("current monthlySalesC evidence takes precedence and legacy Sales fills only absent months", () => {
-  const registry = registryMeter(3);
-  const discovery = discoveryEntry(registry, "2026-05-10T10:00:00.000Z");
-  const sales = {
-    id: "METER3",
-    data: {
-      meterNoNormalized: "METER3",
-      monthlySalesC: { "2026-05": 0, "2026-07": "bad" },
-      Sales: { "2026-05": 999, "2026-06": 123.45, "2026-07": 77 },
-    },
-  };
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: sales,
-    sourceSalesEntry: sales,
-    lifecycleTrns: [],
-    monthKeys: ["2026-05", "2026-06", "2026-07"],
-  });
-  assert.equal(row.monthlyPurchases["2026-05"], 0);
-  assert.equal(row.monthlyPurchases["2026-06"], 123.45);
-  assert.equal(row.monthlyPurchases["2026-07"], null);
-});
-
-test("GMR Field Stats team attribution follows current team membership with Unassigned and Multiple handling", () => {
-  const index = buildGmrTeamMembershipIndex([
-    { id: "TEAM_KAISER", data: { team: { name: "Kaiser Team", status: "ACTIVE" }, scope: { memberUserIds: ["USER_1", "USER_MULTI"] } } },
-    { id: "TEAM_PETER", data: { team: { name: "Peter Team", status: "ACTIVE" }, scope: { memberUserIds: ["USER_2", "USER_MULTI"] } } },
-    { id: "TEAM_INACTIVE", data: { team: { name: "Inactive Team", status: "INACTIVE" }, scope: { memberUserIds: ["USER_3"] } } },
-  ]);
-  assert.equal(resolveGmrFieldStatsTeam("USER_1", index), "Kaiser Team");
-  assert.equal(resolveGmrFieldStatsTeam("USER_2", index), "Peter Team");
-  assert.equal(resolveGmrFieldStatsTeam("USER_MULTI", index), "Multiple");
-  assert.equal(resolveGmrFieldStatsTeam("USER_3", index), "Unassigned");
-});
-
-test("Zamo Report photo columns follow observed data up to six-photo ceiling", () => {
-  assert.deepEqual(buildZamoReportPhotoConfig([
-    { photoUrls: ["p1", "p2", "p3"] },
-    { photoUrls: ["p1", "p2", "p3", "p4", "p5", "p6", "p7"] },
-    { photoUrls: [] },
-  ]), {
-    observedMaxPhotoCount: 7,
-    photoColumnCount: 6,
-    hardCeiling: 6,
-    truncatedPhotoCount: 1,
-  });
-});
-
-test("GMR intervention summary retains full lifecycle state without inventing fine revenue", () => {
-  const registry = registryMeter(4);
-  const discovery = discoveryEntry(registry, "2026-08-01T08:00:00.000Z");
-  const sales = salesEntry("METER4", { "2026-06": 0 });
-  const lifecycleTrns = [
-    {
-      id: "TRN_DCN_1",
-      data: {
-        accessData: { trnType: "METER_DISCONNECTION" },
-        ast: { astData: { astId: registry.id } },
-        workflow: { state: "COMPLETED", completedAt: "2026-07-10T08:00:00.000Z", completedByUser: "Field User" },
-        disconnection: { level: { label: "Meter" }, supplyDisconnected: { answer: "yes" } },
-        executionOutcome: { success: true },
-      },
-    },
-    {
-      id: "TRN_RCN_1",
-      data: {
-        accessData: { trnType: "METER_RECONNECTION" },
-        ast: { astData: { astId: registry.id } },
-        workflow: { state: "COMPLETED", completedAt: "2026-08-12T08:00:00.000Z", completedByUser: "Field User 2" },
-        reconnection: { supplyReconnected: { answer: "yes" } },
-        executionOutcome: { success: true },
-      },
-    },
+test("the team is the one the worker was in when the work was submitted", () => {
+  const periods = [
+    { userUid: "U1", teamId: "T_A", teamName: "Team A", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: "2026-09-05T00:00:00.000Z" },
+    { userUid: "U1", teamId: "T_B", teamName: "Team B", joinedAt: "2026-09-05T00:00:00.000Z", leftAt: null },
+    { userUid: "U3", teamId: "T_A", teamName: "Team A", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null },
+    { userUid: "U3", teamId: "T_B", teamName: "Team B", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null },
   ];
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: sales,
-    sourceSalesEntry: sales,
-    lifecycleTrns,
-    monthKeys: ["2026-06"],
-  });
-  assert.equal(row.interventionCount, 2);
-  assert.equal(row.disconnected, "Yes");
-  assert.equal(row.reconnected, "Yes");
-  assert.equal(row.latestInterventionType, "METER_RECONNECTION");
-  assert.equal(row.totalFinesPaidR, null);
-  assert.equal(row.lifecycleEvents.length, 2);
+  assert.equal(resolveGmrTeamAt(periods, "U1", "2026-09-01T10:00:00.000Z"), "Team A");
+  assert.equal(resolveGmrTeamAt(periods, "U1", "2026-09-10T10:00:00.000Z"), "Team B");
+  assert.equal(resolveGmrTeamAt(periods, "U3", "2026-09-10T10:00:00.000Z"), "Multiple");
+  assert.equal(resolveGmrTeamAt(periods, "U9", "2026-09-10T10:00:00.000Z"), "Unassigned");
 });
 
-test("completed no-access DCN attempt is lifecycle activity but not a successful disconnection", () => {
-  const registry = registryMeter(5);
-  const discovery = discoveryEntry(registry, "2026-08-01T08:00:00.000Z");
-  const sales = salesEntry("METER5", { "2026-06": 0 });
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: sales,
-    sourceSalesEntry: sales,
-    lifecycleTrns: [{
-      id: "TRN_DCN_NO_ACCESS",
-      data: {
-        accessData: { trnType: "METER_DISCONNECTION" },
-        ast: { astData: { astId: registry.id } },
-        workflow: { state: "COMPLETED", completedAt: "2026-08-10T08:00:00.000Z", completedByUser: "Field User" },
-        executionOutcome: { outcome: "NO_ACCESS", success: false },
-      },
-    }],
-    monthKeys: ["2026-06"],
-  });
-  assert.equal(row.interventionCount, 1);
-  assert.equal(row.interventionStatus, "Pending");
-  assert.equal(row.disconnected, "No");
-  assert.equal(row.reconnected, "No");
+test("the Sales category is the reporting month's only, and a malformed month is not used", () => {
+  const sales = {
+    leakageCategory: "LEGACY",
+    monthlyCategories: {
+      "2026-08": { leakageCategory: "AUGUST", riskTier: "Low", riskScore: 0 },
+      "2026-09": { leakageCategory: "SEPTEMBER", riskScore: 2 },
+    },
+  };
+  assert.equal(getGmrSalesCategory(sales, "2026-08"), "AUGUST");
+  assert.equal(getGmrSalesCategory(sales, "2026-09"), null);
+  assert.equal(getGmrSalesCategory(sales, "2026-07"), null);
 });
 
-test("consecutive zero-purchase count respects contiguous calendar months", () => {
-  const registry = registryMeter(6);
-  const discovery = discoveryEntry(registry, "2026-05-10T10:00:00.000Z");
-  const sales = salesEntry("METER6", { "2026-04": 10000, "2026-05": 0, "2026-06": 0 });
-  const row = buildCanonicalGmrMeterRow({
-    registry,
-    discoveryEntry: discovery,
-    premiseEntry: null,
-    fieldSalesEntry: sales,
-    sourceSalesEntry: sales,
-    lifecycleTrns: [],
-    monthKeys: ["2026-04", "2026-05", "2026-06"],
-  });
-  assert.equal(row.latestAvailablePurchaseValue, 0);
-  assert.equal(row.latestPurchasingStatus, "Zero Purchase");
-  assert.equal(row.consecutiveZeroPurchaseMonths, 2);
-});
-
-
-function getPathValue(value, path) {
-  return String(path).split(".").reduce((current, part) => current?.[part], value);
-}
-
-function fakeFirestore(seed) {
-  function snapshot(id, data) {
-    return { id, exists: Boolean(data), data: () => data };
-  }
-  function collection(name) {
-    const source = seed[name] || {};
-    return {
-      doc(id) { return { __collection: name, id }; },
-      where(path, operator, expected) {
-        assert.equal(operator, "==");
-        return {
-          async get() {
-            return {
-              docs: Object.entries(source)
-                .filter(([, data]) => getPathValue(data, path) === expected)
-                .map(([id, data]) => snapshot(id, data)),
-            };
-          },
-        };
-      },
-      async get() {
-        return { docs: Object.entries(source).map(([id, data]) => snapshot(id, data)) };
-      },
-    };
-  }
+function fakeDb(collections) {
   return {
-    collection,
+    collection(name) {
+      if (name === "registry_meters") throw new Error("The Meter Registry must never be read.");
+      const store = collections[name] || {};
+      return {
+        doc: (id) => ({ collectionName: name, id }),
+        where: (field, op, values) => ({
+          get: async () => ({
+            docs: Object.entries(store)
+              .filter(([, data]) => op === "in" && values.includes(data[field]))
+              .map(([id, data]) => ({ id, data: () => data })),
+          }),
+        }),
+      };
+    },
     async getAll(...refs) {
-      return refs.map((ref) => snapshot(ref.id, seed[ref.__collection]?.[ref.id]));
+      return refs.map((ref) => {
+        const data = (collections[ref.collectionName] || {})[ref.id];
+        return { id: ref.id, exists: Boolean(data), data: () => data };
+      });
     },
   };
 }
 
-test("August and September keep the same full meter rows while only TRN-driven activity changes", async () => {
-  const r1 = registryMeter(11, "VISIBLE");
-  const r2 = registryMeter(12, "VISIBLE");
-  const d1 = discoveryEntry(r1, "2026-08-15T08:00:00.000Z").data;
-  const d2 = discoveryEntry(r2, "2026-09-01T08:00:00.000Z").data;
-  const seed = {
-    registry_meters: { [r1.id]: r1, [r2.id]: r2 },
-    trns: {
-      [r1.id]: d1,
-      [r2.id]: d2,
-      TRN_DCN_AUG: {
-        accessData: { trnType: "METER_DISCONNECTION", parents: { lmPcode: "ZA5241" } },
-        ast: { astData: { astId: r1.id } },
-        workflow: { state: "COMPLETED", completedAt: "2026-08-20T08:00:00.000Z", completedByUser: "Worker" },
-        executionOutcome: { success: true },
-      },
-      TRN_RCN_SEP: {
-        accessData: { trnType: "METER_RECONNECTION", parents: { lmPcode: "ZA5241" } },
-        ast: { astData: { astId: r1.id } },
-        workflow: { state: "COMPLETED", completedAt: "2026-09-01T12:00:00.000Z", completedByUser: "Worker" },
-        executionOutcome: { success: true },
-      },
+test("the dataset is the month's submitted transactions, in time order, never read from the registry", async () => {
+  const unfinished = disconnection({ workflow: { state: "ACCEPTED" } });
+  const transactions = new Map([
+    ["TRN_DCN_1", disconnection()],
+    ["TRN_MD_1", discovery()],
+    ["TRN_DCN_OPEN", unfinished],
+    ["TRN_MD_AUG", discovery({ metadata: { createdAt: "2026-08-20T08:00:00.000Z", createdByUid: "U1", createdByUser: "Lefu Worker" } })],
+  ]);
+  const db = fakeDb({
+    premises: { PREM_1: { address: { strNo: "14" } } },
+    "sales-all-meters": {},
+    asts: { TRN_MD_1: { master: { visibility: "INVISIBLE" } } },
+    team_member_history: {
+      h1: { userUid: "U1", teamId: "T_A", teamName: "Team A", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null },
     },
-    teams: {},
-    premises: {
-      [r1.premiseId]: { parents: r1.parents, address: { strNo: "1", strName: "Main", strType: "Street" } },
-      [r2.premiseId]: { parents: r2.parents, address: { strNo: "2", strName: "Main", strType: "Street" } },
-    },
-    "sales-all-meters": {
-      [r1.meterNo]: { meterNoNormalized: r1.meterNo, monthlySalesC: { "2026-07": 10000, "2026-09": 20000 } },
-      [r2.meterNo]: { meterNoNormalized: r2.meterNo, monthlySalesC: { "2026-08": 30000 } },
-    },
-  };
-  const db = fakeFirestore(seed);
-  const generatedAt = new Date("2026-09-02T08:00:00.000Z");
-  const august = await buildGeneralMonthlyReportDataset({ db, reportMonth: "2026-08", generatedAt });
-  const september = await buildGeneralMonthlyReportDataset({ db, reportMonth: "2026-09", generatedAt });
+  });
 
-  assert.equal(august.rows.length, 2);
-  assert.equal(september.rows.length, 2);
-  assert.deepEqual(august.rows.map((row) => row.iRepsMeterId), september.rows.map((row) => row.iRepsMeterId));
-  assert.deepEqual(august.fieldRows.map((row) => row.iRepsMeterId), [r1.id]);
-  assert.deepEqual(september.fieldRows.map((row) => row.iRepsMeterId), [r2.id]);
-  assert.deepEqual(august.interventionEvents.map((event) => event.eventId), ["TRN_DCN_AUG"]);
-  assert.deepEqual(september.interventionEvents.map((event) => event.eventId), ["TRN_RCN_SEP"]);
-  assert.equal(august.summary.selectedTotal, 2);
-  assert.equal(september.summary.selectedTotal, 2);
-  assert.equal(august.summary.monthlyDiscoveryCount, 1);
-  assert.equal(september.summary.monthlyDiscoveryCount, 1);
-  assert.ok(august.monthKeys.includes("2026-09"), "August GMR keeps later available purchase history");
-  assert.equal(august.rows.find((row) => row.iRepsMeterId === r1.id).reconnected, "Yes", "Master context retains full lifecycle history");
-});
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db,
+    reportMonth: "2026-09",
+    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
+    loadTransactions: async () => transactions,
+  });
 
-test("source contains strict MONTHLY_GMR fieldRows and completed lifecycle allocation", () => {
-  const source = readFileSync(new URL("../reports/generalMonthlyReport.js", import.meta.url), "utf8");
-  assert.match(source, /GMR_GENERATION_MODE = "MONTHLY_GMR"/);
-  assert.match(source, /const fieldRows = \[\]/);
-  assert.match(source, /metadata\?\.createdAt/);
-  assert.match(source, /workflow\?\.state/);
-  assert.match(source, /workflow\?\.completedAt/);
-  assert.doesNotMatch(source, /export const GMR_MONTH_KEYS/);
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_MD_1", "TRN_DCN_1"]);
+  assert.equal(dataset.summary.payableTotal, 2);
+  assert.equal(dataset.summary.unplacedCount, 0);
+  assert.equal(dataset.isIncompleteMonth, true);
+  assert.equal(dataset.fieldRows[0].team, "Team A");
+  assert.equal(dataset.fieldRows[0].visibility, "Invisible");
+  assert.equal(dataset.fieldRows[0].onVendingList, "No");
+  assert.equal(dataset.fieldRows[1].team, "Unassigned");
+  assert.equal(dataset.photoColumnCount, 1);
 });

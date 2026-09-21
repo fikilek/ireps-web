@@ -34,6 +34,7 @@ export function downloadBrowserArtifact(artifact) {
     anchor.click();
   } finally {
     anchor.remove();
-    URL.revokeObjectURL(objectUrl);
+    // Revoking at once can cancel the save in some browsers.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   }
 }
