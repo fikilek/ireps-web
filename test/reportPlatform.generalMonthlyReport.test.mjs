@@ -7,8 +7,9 @@ import {
   createGeneralMonthlyReportManagedGenerator,
 } from "../src/pages/reports/generalMonthlyReportArtifact.js";
 import {
-  GMR_FIELD_DATA_COLUMNS,
+  GMR_EXTRA_FIELD_DATA_COLUMNS,
   GMR_SHEET_NAMES,
+  GMR_ZAMO_FIELD_DATA_COLUMNS,
   buildGmrExcelArtifact,
 } from "../src/utils/reportPlatform/buildGmrExcelArtifact.js";
 import { buildGmrFieldStatsModel } from "../src/utils/reportPlatform/gmrFieldStatsModel.js";
@@ -97,36 +98,50 @@ test("the workbook is written compressed", () => {
   assert.equal(view.getUint16(8, true), 8, "the first part is deflated, not stored");
 });
 
-test("Field Data states the month and carries the schema columns in order, then one photo column per photo", () => {
-  const { workbook } = readWorkbook(makeDataset());
-  const sheet = workbook.Sheets["Field Data"];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+const ZAMO_HEADERS = [
+  "Capture Date", "Field Worker Name", "Sales Category", "Batch ID", "Street No", "Street Name",
+  "Street Type", "SuburbName", "GPS Coordinates", "Ward", "Property Type", "Property Name", "Unit No",
+  "Meter Mode", "Meter Phase", "Meter Placement", "Original / Project Meter Number",
+  "Field-Found Meter Number", "Same/Different", "Remaining Credit", "Primary Finding",
+  "Finding Explanation", "Normalisation", "Seal No", "Comment",
+  "Photo 1", "Photo 2", "Photo 3", "Photo 4", "Photo 5", "Photo 6",
+];
 
-  assert.match(rows[0][0], /^Endumeni — September 2026 \(incomplete month\) — General Monthly Report: Field Data$/);
-  assert.match(rows[1][0], /month they reached the server, South African time\. Generated 2026-09-21 12:05\./);
-  assert.deepEqual(rows[2], [...GMR_FIELD_DATA_COLUMNS.map((item) => item.header), "Photo 1", "Photo 2"]);
-  assert.equal(GMR_FIELD_DATA_COLUMNS.length, 36);
-  assert.equal(rows[2][1], "Transaction Number");
-  assert.equal(rows[3][1], "TRN_MD_1");
+test("Field Data keeps Zamo's 31 columns exactly, in row 1, with the added columns after Photo 6", () => {
+  const eightPhotos = row({ photoUrls: Array.from({ length: 8 }, (_, index) => `https://example.test/${index + 1}.jpg`) });
+  const { workbook } = readWorkbook(makeDataset([row(), eightPhotos]));
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
+
+  assert.deepEqual(GMR_ZAMO_FIELD_DATA_COLUMNS.map((item) => item.header), ZAMO_HEADERS);
+  assert.deepEqual(rows[0].slice(0, 31), ZAMO_HEADERS, "Zamo's columns come first, untouched");
+  assert.deepEqual(rows[0].slice(31, 31 + GMR_EXTRA_FIELD_DATA_COLUMNS.length), GMR_EXTRA_FIELD_DATA_COLUMNS.map((item) => item.header));
+  assert.equal(rows[0][31], "Transaction Type");
+  assert.equal(rows[0][32], "Transaction Number");
+  assert.deepEqual(rows[0].slice(-2), ["Photo 7", "Photo 8"], "a seventh photograph goes last, never inside Zamo's columns");
+  assert.equal(rows[1][3], "TB_9");
+  assert.equal(rows[1][32], "TRN_MD_1");
 });
 
-test("Field Data writes NAv for what the record does not hold, South African time, and photo links", () => {
-  const rows = [row(), row({ trnId: "LATE", captureDate: "2026-09-30T21:30:00.000Z" })];
+test("Field Data writes AD HOC, NAv, the South African date and photo links as Zamo had them", () => {
+  const rows = [
+    row({ batchId: null }),
+    row({ trnId: "LATE", captureDate: "2026-09-30T21:30:00.000Z" }),
+  ];
   const artifact = buildGmrExcelArtifact({ dataset: makeDataset(rows), fileName: "gmr.xlsx" });
   // Read the saved bytes back, as Excel would, whatever this machine's time zone.
   const workbook = XLSX.read(artifact.bytes, { type: "array", cellNF: true });
   const sheet = workbook.Sheets["Field Data"];
-  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[2];
-  const cellFor = (name, r = 3) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
-  // The text Excel shows, from the stored number and its stored format.
-  const shown = (cell) => cell.w;
+  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
+  const cellFor = (name, r = 1) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
 
+  assert.equal(cellFor("Batch ID").v, "AD HOC");
   assert.equal(cellFor("Property Name").v, "NAv");
   assert.equal(cellFor("Reason For Not Acting").v, "NAv");
-  assert.equal(shown(cellFor("Capture Date")), "2026-09-10 10:00", "08:00 UTC is 10:00 in South Africa");
-  assert.equal(shown(cellFor("Capture Date", 4)), "2026-09-30 23:30", "late on the last day stays in the month");
+  assert.equal(cellFor("Capture Date").w, "2026-09-10");
+  assert.equal(cellFor("Capture Date", 2).w, "2026-09-30", "23:30 on the last day stays in the month");
   assert.equal(cellFor("Photo 2").v, "Photo 2");
   assert.equal(cellFor("Photo 2").l.Target, "https://example.test/2.jpg");
+  assert.equal(cellFor("Photo 3").v, "", "no photograph, empty cell, as before");
 });
 
 test("a month with no field work still makes a report", () => {
@@ -136,88 +151,106 @@ test("a month with no field work still makes a report", () => {
   assert.equal(managed.metadata.itemCount, 0);
 });
 
-test("Field Stats keeps None for Meter Ok, counts no action by reason, and splits suspicions", () => {
+test("Field Stats starts with Zamo's three blocks exactly as before", () => {
+  const rows = [
+    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" }),
+    row({ trnId: "B", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter", normalisation: "Disconnect meter" }),
+    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: "none", noActionReason: "Not recorded - captured before this rule" }),
+    row({ trnId: "D", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
+  ];
+  const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
+  // The extra counts below are wider, so drop the empty cells that pad each line.
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })
+    .map((line) => {
+      const cells = [...line];
+      while (cells.length && cells.at(-1) === "") cells.pop();
+      return cells;
+    });
+
+  assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER AUDIT"]);
+  assert.deepEqual(sheet[1], ["ITEM", "METER STATUS", "Lefu Motlou", "Peter Peter", "TOTAL"], "discovery workers only, by name");
+  assert.deepEqual(sheet[2], [1, "ILLEGALLY CONNECTED", 0, 2, 2]);
+  assert.deepEqual(sheet[3], [2, "METER DAMAGED", 0, 0, 0]);
+  assert.deepEqual(sheet[4], [3, "METER FAULTY", 0, 0, 0]);
+  assert.deepEqual(sheet[5], [4, "METER OK", 1, 0, 1]);
+  assert.deepEqual(sheet[6], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 2, 3]);
+  assert.deepEqual(sheet[8], ["SEPTEMBER 2026 - NORMALISATION"]);
+  assert.deepEqual(sheet[9], [1, "DISCONNECT METER", 0, 1, 1]);
+  assert.deepEqual(sheet[10], [2, "NONE", 1, 1, 2]);
+  assert.deepEqual(sheet[11], ["", "TOTAL: NORMALISATION", 1, 2, 3]);
+  assert.deepEqual(sheet[14], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
+  assert.deepEqual(sheet[15], [1, "ILLEGALLY CONNECTED", 0, 2, 2]);
+  assert.deepEqual(sheet[19], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 2, 3]);
+
+  const merges = workbook.Sheets["Field Stats"]["!merges"];
+  assert.deepEqual(merges.slice(0, 2).map((merge) => merge.s.r), [0, 8], "the two titles span the sheet, as before");
+});
+
+test("a no-access discovery adds its own NO ACCESS line to Zamo's METER AUDIT", () => {
   const rows = [
     row({ trnId: "A" }),
+    row({ trnId: "G", hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: null, normalisationActions: [], photoUrls: [] }),
+  ];
+  const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
+  const labels = sheet.slice(2, 8).map((line) => line[1]);
+  assert.deepEqual(labels, ["ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY", "METER OK", "NO ACCESS", "TOTAL: METER DISCOVERY RECORDS"]);
+  assert.ok(sheet.some((line) => line[1] === "NOT AVAILABLE"), "its normalisation line reads NOT AVAILABLE, as Zamo's sheet does");
+});
+
+test("the extra counts sit below Zamo's Teams block", () => {
+  const rows = [
+    row({ trnId: "A", fieldWorkerName: "Lefu Motlou" }),
     row({ trnId: "B", findingGroup: "Meter Ok · Suspicion", findingDetail: "Bypass Suspicion" }),
     row({
       trnId: "C",
       primaryFinding: "Illegally Connected",
+      findingDetail: "Bridge Wire On The Meter",
       findingGroup: "Illegally Connected",
       normalisationActions: ["none"],
       noActionReason: "Not recorded - captured before this rule",
     }),
     row({
       trnId: "D",
-      fieldWorkerName: "Sipho Worker",
-      team: "Team B",
       primaryFinding: "Illegally Connected",
-      findingGroup: "Illegally Connected",
-      normalisationActions: ["Disconnect meter", "Tamper removed"],
-      followUpRequired: "Meter Disconnection",
-      followUpStatus: "Completed",
-    }),
-    row({
-      trnId: "E",
-      primaryFinding: "Illegally Connected",
+      findingDetail: "Straight Connection (Meter Bypassed)",
       findingGroup: "Illegally Connected",
       normalisationActions: ["Disconnect meter"],
       followUpRequired: "Meter Disconnection",
-      followUpStatus: "No disconnection record",
+      followUpStatus: "Completed",
     }),
-    row({ trnId: "F", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", batchId: "AD HOC", findingGroup: null, normalisationActions: [], team: "Team B", fieldWorkerName: "Sipho Worker" }),
-    row({ trnId: "G", hasAccess: false, primaryFinding: "No Access", findingGroup: "No Access", normalisationActions: [], batchId: "AD HOC", photoUrls: [] }),
+    row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", batchId: "AD HOC", findingGroup: null, normalisationActions: [] }),
   ];
+  const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
+  const titleRow = (title) => sheet.findIndex((line) => line[0] === `SEPTEMBER 2026 - ${title}`);
+  const teamsRow = sheet.findIndex((line) => line[0] === "Teams");
+
+  ["METER STATUS DETAIL", "NO ACTION TAKEN", "TRANSACTIONS", "DISCONNECTIONS CALLED FOR", "OUTSIDE BATCHES (AD HOC)", "CONTROL LINES"]
+    .forEach((title) => assert.ok(titleRow(title) > teamsRow, `${title} comes after Zamo's Teams block`));
+
   const model = buildGmrFieldStatsModel(makeDataset(rows));
-  const find = (group, label) => model.groups.find((item) => item.name === group).rows.find((item) => item.label === label);
+  const block = (key) => model.blocks.find((item) => item.key === key);
+  const lineOf = (key, label) => block(key).lines.find((item) => item.label === label);
 
-  assert.equal(find("Transactions", "Payable total").total, 7);
-  assert.equal(find("Transactions", "Meter Disconnection").total, 1);
-  assert.equal(find("Findings", "Meter Ok · Operationally Ok").total, 1);
-  assert.equal(find("Findings", "Meter Ok · Suspicion").total, 1);
-  assert.equal(find("Findings", "Illegally Connected").total, 3);
-  assert.equal(find("Findings", "No Access").total, 1);
-  assert.equal(find("Normalisation", "None").total, 2, "None belongs to the Meter Ok rows only");
-  assert.equal(find("Normalisation", "No action taken — Not recorded - captured before this rule").total, 1);
-  assert.equal(find("Normalisation", "Disconnect meter").total, 2);
-  assert.equal(find("Normalisation", "Tamper removed").total, 1);
-  assert.equal(find("Disconnections called for", "Called for").total, 2);
-  assert.equal(find("Disconnections called for", "Completed").total, 1);
-  assert.equal(find("Disconnections called for", "No disconnection record").total, 1);
-  assert.equal(find("Outside batches (AD HOC)", "Meter Disconnection").total, 1);
-
-  const byWorker = find("Transactions", "Payable total").byWorker;
-  const byTeam = find("Transactions", "Payable total").byTeam;
-  const sum = (map) => [...map.values()].reduce((total, value) => total + value, 0);
-  assert.equal(sum(byWorker), 7);
-  assert.equal(sum(byTeam), 7);
-  assert.equal(byTeam.get("Team B"), 2);
-
-  const control = Object.fromEntries(model.controlLines.map((line) => [line.label, line.count]));
-  assert.equal(control["Submitted this month but not on Field Data (must be 0)"], 0);
-  assert.equal(control["Transactions without a batch (AD HOC)"], 2);
+  assert.equal(lineOf("METER_STATUS_DETAIL", "METER OK - BYPASS SUSPICION").total, 1);
+  assert.equal(lineOf("METER_STATUS_DETAIL", "ILLEGALLY CONNECTED - BRIDGE WIRE ON THE METER").total, 1);
+  assert.equal(lineOf("NO_ACTION", "NOT RECORDED - CAPTURED BEFORE THIS RULE").total, 1);
+  assert.equal(lineOf("TRANSACTIONS", "METER DISCONNECTION").total, 1);
+  assert.equal(block("TRANSACTIONS").total.total, 5, "the payable total counts every transaction");
+  assert.equal(lineOf("DISCONNECTIONS", "COMPLETED").total, 1);
+  assert.equal(lineOf("OUTSIDE_BATCHES", "METER DISCONNECTION").total, 1);
 });
 
-test("None is for Meter Ok only, and workers are told apart by user, not by name", () => {
+test("the extra counts tell workers apart by user, not by name", () => {
   const rows = [
     row({ trnId: "A", fieldWorkerUid: "U1", fieldWorkerName: "Sipho Dlamini" }),
     row({ trnId: "B", fieldWorkerUid: "U2", fieldWorkerName: "Sipho Dlamini" }),
-    row({
-      trnId: "C",
-      meterType: "WATER",
-      primaryFinding: "Illegally Connected",
-      findingGroup: "Illegally Connected",
-      normalisationActions: ["NONE"],
-      onVendingList: null,
-    }),
   ];
   const model = buildGmrFieldStatsModel(makeDataset(rows));
-  const none = model.groups.find((group) => group.name === "Normalisation").rows.find((item) => item.label === "None");
-  assert.equal(none.total, 2, "a water finding with NONE is not a Meter Ok None");
-  assert.equal(model.workers.length, 2, "two people with the same name stay two columns");
+  assert.equal(model.workers.length, 2);
   const labels = model.workers.map((key) => model.workerLabels.get(key));
   assert.equal(new Set(labels).size, 2);
-  assert.ok(labels.every((label) => label.startsWith("Sipho Dlamini")));
 });
 
 test("the control lines count unplaced work, meters off the vending list, and stale visibility once per meter", () => {
@@ -231,12 +264,12 @@ test("the control lines count unplaced work, meters off the vending list, and st
   const model = buildGmrFieldStatsModel(makeDataset(rows, { unplaced: [{ trnId: "X", reason: "The submission time cannot be read." }] }));
   const control = Object.fromEntries(model.controlLines.map((line) => [line.label, line.count]));
 
-  assert.equal(control["Submitted this month but not on Field Data (must be 0)"], 1);
-  assert.equal(control["Meters found that are not on the vending list"], 1);
-  assert.equal(control["Visibility mark that disagrees with Sales"], 1);
-  assert.equal(control["Transactions with no Sales Category"], 2, "water is never on the vending list");
-  assert.equal(control["Missing GPS, photograph or normalisation answer"], 1);
-  assert.equal(control["Workers whose team could not be resolved"], 1);
+  assert.equal(control["SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)"], 1);
+  assert.equal(control["METERS FOUND THAT ARE NOT ON THE VENDING LIST"], 1);
+  assert.equal(control["VISIBILITY MARK THAT DISAGREES WITH SALES"], 1);
+  assert.equal(control["TRANSACTIONS WITH NO SALES CATEGORY"], 2, "water is never on the vending list");
+  assert.equal(control["MISSING GPS, PHOTOGRAPH OR NORMALISATION ANSWER"], 1);
+  assert.equal(control["WORKERS WHOSE TEAM COULD NOT BE RESOLVED"], 1);
 });
 
 test("the Field Stats sheet lists the work not placed on Field Data", () => {

@@ -1,9 +1,9 @@
-// General Monthly Report workbook (GMR 1.1.0, schema 1.0.1): exactly two
+// General Monthly Report workbook (GMR 1.2.0, schema 1.1.0): exactly two
 // worksheets, Field Data and Field Stats (GMR-R001), written compressed
 // (GMR-R002).
 import * as XLSX from "xlsx";
 
-import { GMR_NAV, buildGmrFieldStatsModel } from "./gmrFieldStatsModel.js";
+import { GMR_NAV, buildGmrFieldStatsModel, buildZamoFieldStats } from "./gmrFieldStatsModel.js";
 
 export const GMR_SHEET_NAMES = Object.freeze(["Field Data", "Field Stats"]);
 
@@ -13,15 +13,14 @@ function column(key, header, type = "text") {
   return { key, header, type };
 }
 
-// Schema section 4, in order.
-export const GMR_FIELD_DATA_COLUMNS = Object.freeze([
-  column("captureDate", "Capture Date", "datetime"),
-  column("trnId", "Transaction Number"),
-  column("trnTypeLabel", "Transaction Type"),
-  column("channel", "Channel"),
-  column("fieldWorkerName", "Field Worker"),
-  column("team", "Team"),
-  column("batchId", "Batch ID"),
+// Schema 1.1.0 section 4. Zamo's Field Data columns come first, exactly as he
+// uses them: same names, same order, Photo 1 to Photo 6. The columns the rules
+// add follow Photo 6, and any seventh or later photograph comes last.
+export const GMR_ZAMO_FIELD_DATA_COLUMNS = Object.freeze([
+  column("captureDate", "Capture Date", "date"),
+  column("fieldWorkerName", "Field Worker Name"),
+  column("salesCategory", "Sales Category"),
+  column("batchId", "Batch ID", "batch"),
   column("streetNo", "Street No"),
   column("streetName", "Street Name"),
   column("streetType", "Street Type"),
@@ -38,26 +37,33 @@ export const GMR_FIELD_DATA_COLUMNS = Object.freeze([
   column("fieldFoundMeterNo", "Field-Found Meter Number"),
   column("sameDifferent", "Same/Different"),
   column("remainingCredit", "Remaining Credit"),
-  column("salesCategory", "Sales Category"),
   column("primaryFinding", "Primary Finding"),
   column("findingDetail", "Finding Explanation"),
   column("normalisation", "Normalisation"),
-  column("noActionReason", "Reason For Not Acting"),
   column("sealNo", "Seal No"),
   column("fieldComment", "Comment"),
-  column("visibility", "Visibility"),
-  column("onVendingList", "On Vending List"),
-  column("startedFrom", "Started From"),
+  ...Array.from({ length: 6 }, (_, index) => column(`photoUrls.${index}`, `Photo ${index + 1}`, "photo")),
+]);
+
+export const GMR_EXTRA_FIELD_DATA_COLUMNS = Object.freeze([
+  column("trnTypeLabel", "Transaction Type"),
+  column("trnId", "Transaction Number"),
+  column("noActionReason", "Reason For Not Acting"),
   column("followUpRequired", "Follow-up Required"),
   column("followUpStatus", "Follow-up Status"),
   column("followUpTrnId", "Follow-up Transaction"),
+  column("startedFrom", "Started From"),
+  column("channel", "Channel"),
+  column("team", "Team"),
+  column("visibility", "Visibility"),
+  column("onVendingList", "On Vending List"),
 ]);
 
 export function getGmrFieldDataColumns(photoColumnCount = 0) {
-  const photos = Array.from({ length: Math.max(0, Number(photoColumnCount) || 0) }, (_, index) =>
-    column(`photoUrls.${index}`, `Photo ${index + 1}`, "photo"),
+  const morePhotos = Array.from({ length: Math.max(0, (Number(photoColumnCount) || 0) - 6) }, (_, index) =>
+    column(`photoUrls.${index + 6}`, `Photo ${index + 7}`, "photo"),
   );
-  return [...GMR_FIELD_DATA_COLUMNS, ...photos];
+  return [...GMR_ZAMO_FIELD_DATA_COLUMNS, ...GMR_EXTRA_FIELD_DATA_COLUMNS, ...morePhotos];
 }
 
 function getPath(row, key) {
@@ -88,46 +94,47 @@ function formatJohannesburg(iso) {
 function cellValue(row, item) {
   const value = getPath(row, item.key);
   if (item.type === "photo") return value ? item.header : "";
-  if (item.type === "datetime") return toJohannesburgExcelSerial(value) ?? GMR_NAV;
+  if (item.type === "date") return toJohannesburgExcelSerial(value) ?? GMR_NAV;
+  if (item.type === "batch") return value === null || value === undefined || value === "" ? "AD HOC" : value;
   if (value === null || value === undefined || value === "") return GMR_NAV;
   return value;
-}
-
-function titleLine(dataset, sheetLabel) {
-  const lmName = dataset?.municipality?.lmName || "Endumeni";
-  const period = dataset?.reportingPeriodLabel || dataset?.reportMonth || GMR_NAV;
-  const incomplete = dataset?.isIncompleteMonth ? " (incomplete month)" : "";
-  return `${lmName} — ${period}${incomplete} — General Monthly Report: ${sheetLabel}`;
 }
 
 function monthStatement(dataset) {
   return `Field transactions counted in the month they reached the server, South African time. Generated ${formatJohannesburg(dataset?.generatedAt)}.`;
 }
 
+function periodLabel(dataset) {
+  const period = String(dataset?.reportingPeriodLabel || dataset?.reportMonth || "GMR").toUpperCase();
+  return dataset?.isIncompleteMonth ? `${period} (INCOMPLETE)` : period;
+}
+
+// Zamo's column widths.
+function zamoWidth(item) {
+  const base = Math.max(String(item.header || "").length + 2, 12);
+  const wide = /Notes|Address|Finding Detail|Reason|Definition/i.test(item.header || "");
+  return { wch: Math.min(wide ? Math.max(base, 28) : base, wide ? 42 : 24) };
+}
+
 function buildFieldDataSheet(dataset) {
   const rows = dataset.fieldRows;
   const columns = getGmrFieldDataColumns(dataset.photoColumnCount);
   const aoa = [
-    [titleLine(dataset, "Field Data")],
-    [monthStatement(dataset)],
     columns.map((item) => item.header),
     ...rows.map((row) => columns.map((item) => cellValue(row, item))),
   ];
-  const headerRow = 2;
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!autofilter"] = {
-    ref: `A${headerRow + 1}:${XLSX.utils.encode_col(columns.length - 1)}${headerRow + 1 + rows.length}`,
+    ref: `A1:${XLSX.utils.encode_col(columns.length - 1)}${Math.max(1, aoa.length)}`,
   };
-  worksheet["!cols"] = columns.map((item) => ({
-    wch: item.type === "photo" ? 10 : /Comment|Explanation|Reason|Normalisation|Name/.test(item.header) ? 32 : Math.max(12, item.header.length + 2),
-  }));
+  worksheet["!cols"] = columns.map(zamoWidth);
 
   rows.forEach((row, rowIndex) => {
     columns.forEach((item, columnIndex) => {
-      const cell = worksheet[XLSX.utils.encode_cell({ r: headerRow + 1 + rowIndex, c: columnIndex })];
+      const cell = worksheet[XLSX.utils.encode_cell({ r: rowIndex + 1, c: columnIndex })];
       if (!cell) return;
-      if (item.type === "datetime" && typeof cell.v === "number") cell.z = "yyyy-mm-dd hh:mm";
+      if (item.type === "date" && typeof cell.v === "number") cell.z = "yyyy-mm-dd";
       if (item.type === "photo") {
         const url = getPath(row, item.key);
         if (url) cell.l = { Target: String(url), Tooltip: `Open ${item.header}` };
@@ -138,35 +145,81 @@ function buildFieldDataSheet(dataset) {
   return worksheet;
 }
 
-function buildStatsBlock(aoa, title, model, columnsKey, mapKey) {
-  const names = model[columnsKey];
-  const labels = columnsKey === "workers" ? names.map((key) => model.workerLabels.get(key) || key) : names;
-  aoa.push([title, "", ...labels, "TOTAL"]);
-  model.groups.forEach((group) => {
-    aoa.push([group.name.toUpperCase()]);
-    group.rows.forEach((item) => {
-      aoa.push(["", item.label, ...names.map((name) => item[mapKey].get(name) || 0), item.total]);
-    });
+function sumOf(counts) {
+  return [...counts.values()].reduce((total, value) => total + value, 0);
+}
+
+// Zamo's Field Stats, exactly as before (GMR-R025).
+function appendZamoFieldStats(aoa, merges, stats, period) {
+  const lastColumnIndex = Math.max(stats.workers.length, stats.teams.length) + 2;
+  const row = (index, label, names, counts, total) =>
+    [index, label, ...names.map((name) => counts.get(name) || 0), total];
+
+  merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
+  aoa.push([`${period} - METER AUDIT`]);
+  aoa.push(["ITEM", "METER STATUS", ...stats.workers, "TOTAL"]);
+  stats.statuses.forEach((status, index) => {
+    const counts = stats.statusByWorker.get(status);
+    aoa.push(row(index + 1, status, stats.workers, counts, sumOf(counts)));
   });
+  aoa.push(row("", "TOTAL: METER DISCOVERY RECORDS", stats.workers, stats.workerTotals, stats.records));
+  const auditEndRow = aoa.length;
   aoa.push([]);
+
+  merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
+  aoa.push([`${period} - NORMALISATION`]);
+  stats.normalisations.forEach((label, index) => {
+    const counts = stats.normalisationByWorker.get(label);
+    aoa.push(row(index + 1, label, stats.workers, counts, sumOf(counts)));
+  });
+  aoa.push(row("", "TOTAL: NORMALISATION", stats.workers, stats.workerTotals, stats.records));
+
+  aoa.push([]);
+  aoa.push([]);
+  aoa.push(["Teams", "METER STATUS", ...stats.teams, "TOTAL"]);
+  stats.statuses.forEach((status, index) => {
+    const counts = stats.statusByTeam.get(status);
+    aoa.push(row(index + 1, status, stats.teams, counts, sumOf(counts)));
+  });
+  aoa.push(row("", "TOTAL: METER DISCOVERY RECORDS", stats.teams, stats.teamTotals, stats.records));
+
+  return { auditEndRow };
+}
+
+// The counts the rules add, below Zamo's Teams block.
+function appendExtraCounts(aoa, model, period) {
+  const workerNames = model.workers.map((key) => model.workerLabels.get(key) || key);
+  const lineRow = (index, item, keys, map) => [index, item.label, ...keys.map((key) => item[map].get(key) || 0), item.total];
+
+  model.blocks.forEach((block) => {
+    aoa.push([]);
+    aoa.push([]);
+    aoa.push([`${period} - ${block.title}`]);
+    aoa.push(["ITEM", block.column, ...workerNames, "TOTAL"]);
+    block.lines.forEach((item, index) => aoa.push(lineRow(index + 1, item, model.workers, "byWorker")));
+    if (block.total) aoa.push(lineRow("", block.total, model.workers, "byWorker"));
+    aoa.push([]);
+    aoa.push(["Teams", block.column, ...model.teams, "TOTAL"]);
+    block.lines.forEach((item, index) => aoa.push(lineRow(index + 1, item, model.teams, "byTeam")));
+    if (block.total) aoa.push(lineRow("", block.total, model.teams, "byTeam"));
+  });
+
+  aoa.push([]);
+  aoa.push([]);
+  aoa.push([`${period} - CONTROL LINES`]);
+  aoa.push(["ITEM", "CONTROL LINE", "COUNT"]);
+  model.controlLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
 }
 
 function buildFieldStatsSheet(dataset) {
+  const period = periodLabel(dataset);
+  const stats = buildZamoFieldStats(dataset);
   const model = buildGmrFieldStatsModel(dataset);
-  const aoa = [
-    [titleLine(dataset, "Field Stats")],
-    [monthStatement(dataset)],
-    [`Payable total: ${model.payableTotal}`],
-    [],
-  ];
+  const aoa = [];
+  const merges = [];
 
-  buildStatsBlock(aoa, "PER FIELD WORKER", model, "workers", "byWorker");
-  buildStatsBlock(aoa, "PER TEAM", model, "teams", "byTeam");
-
-  aoa.push(["CONTROL LINES", "", "COUNT"]);
-  model.controlLines.forEach((line, index) => {
-    aoa.push([index + 1, line.label, line.count]);
-  });
+  const { auditEndRow } = appendZamoFieldStats(aoa, merges, stats, period);
+  appendExtraCounts(aoa, model, period);
 
   if (Array.isArray(dataset.unplaced) && dataset.unplaced.length) {
     aoa.push([]);
@@ -174,10 +227,15 @@ function buildFieldStatsSheet(dataset) {
     dataset.unplaced.forEach((item) => aoa.push(["", item.trnId, item.reason]));
   }
 
+  aoa.push([]);
+  aoa.push([monthStatement(dataset)]);
+
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
-  const width = Math.max(model.workers.length, model.teams.length);
-  worksheet["!cols"] = [{ wch: 30 }, { wch: 48 }, ...Array.from({ length: width }, () => ({ wch: 16 })), { wch: 10 }];
-  return { worksheet, model };
+  worksheet["!merges"] = merges;
+  const width = Math.max(stats.workers.length, stats.teams.length, model.workers.length, model.teams.length);
+  worksheet["!cols"] = [{ wch: 8 }, { wch: 42 }, ...Array.from({ length: width }, () => ({ wch: 18 })), { wch: 12 }];
+  worksheet["!autofilter"] = { ref: `A2:${XLSX.utils.encode_col(stats.workers.length + 2)}${Math.max(2, auditEndRow)}` };
+  return { worksheet, model, stats };
 }
 
 function toUint8Array(value) {

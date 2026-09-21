@@ -1,4 +1,4 @@
-// General Monthly Report (GMR 1.1.0, schema 1.0.2).
+// General Monthly Report (GMR 1.2.0, schema 1.1.0).
 //
 // The report is the month's field transactions: one Field Data row per
 // submitted transaction, read from `trns` (GMR-R005). Premises, Sales, assets
@@ -13,8 +13,8 @@ export const GMR_LM_NAME = "Endumeni";
 export const GMR_GENERATION_MODE = "MONTHLY_GMR";
 export const GMR_REPORT_TYPE = "GENERAL_MONTHLY_REPORT";
 export const GMR_SCHEMA_VERSION = 2;
-export const GMR_RULES_VERSION = "1.1.0";
-export const GMR_REPORT_SCHEMA_VERSION = "1.0.2";
+export const GMR_RULES_VERSION = "1.2.0";
+export const GMR_REPORT_SCHEMA_VERSION = "1.1.0";
 
 const ALLOWED_GMR_ROLES = new Set(["SPU", "ADM", "MNG", "SPV"]);
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;

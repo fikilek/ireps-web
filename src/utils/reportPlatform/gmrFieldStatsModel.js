@@ -1,6 +1,9 @@
-// Field Stats (GMR 1.1.0 section 10, schema 1.0.1 section 5): the same groups
-// per field worker and per team, one payable total, then the control lines.
-// Counts come only from Field Data rows, so both blocks add up to the same total.
+// Field Stats (GMR 1.2.0 section 10, schema 1.1.0 section 5).
+//
+// The top of the sheet is Zamo's Field Stats, unchanged: METER AUDIT and
+// NORMALISATION per field worker, then METER STATUS per team, counting the
+// month's Meter Discovery records. The extra counts the rules add sit below
+// the Teams block. Counts come only from Field Data rows.
 
 export const GMR_NAV = "NAv";
 
@@ -15,44 +18,107 @@ const TRN_TYPE_ORDER = [
   "Meter Commissioning",
 ];
 
-const FINDING_ORDER = [
-  "Meter Ok · Operationally Ok",
-  "Meter Ok · Suspicion",
-  "Meter Faulty",
-  "Meter Damaged",
-  "Illegally Connected",
-  "No Access",
-];
+// MA-R001 section 1: every finding and its details, in the order the field
+// team reads them. Each line is one detail.
+const METER_STATUS_ORDER = [
+  ["Illegally Connected", ["Straight Connection (Meter Bypassed)", "Bridge Wire On The Meter"]],
+  ["Meter Damaged", ["Meter Number Not Clearly Visible", "Meter Burnt", "Meter Button(s) Not Working", "Meter Broken"]],
+  ["Meter Faulty", [
+    "Not Accepting Sgc Tokens",
+    "Meter Display Blank",
+    "Negative Credit Units",
+    "Zero Reading - Conventional Meter",
+    "Meter Wheel Not Moving",
+    "Meter Wheel Running In Reverse",
+  ]],
+  ["Meter Ok", ["Operationally Ok", "Bridge Suspicion", "Bypass Suspicion"]],
+].flatMap(([finding, details]) => details.map((detail) => meterStatusLabel(finding, detail)));
 
-// MN-R001 section 3.
-const ACTION_ORDER = [
-  "Disconnect meter",
-  "Meter replaced",
-  "Tamper removed",
-  "Keypad normalised",
-  "Service point completed",
-  "Meter registered",
-];
+const NO_ACCESS_LABEL = "NO ACCESS";
+const NOT_AVAILABLE = "Not Available";
 
+// Zamo's fixed METER AUDIT lines; anything else recorded follows them.
+const ZAMO_METER_STATUS_ORDER = ["ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY", "METER OK"];
+
+function zamoLabel(value) {
+  const label = upper(value);
+  return label && label !== upper(NOT_AVAILABLE) && label !== upper(GMR_NAV) ? label : upper(NOT_AVAILABLE);
+}
+
+function zamoMeterStatus(row) {
+  const primary = zamoLabel(row?.primaryFinding);
+  return primary !== upper(NOT_AVAILABLE) ? primary : zamoLabel(row?.findingDetail);
+}
+
+// Zamo's Field Stats, exactly as before: the month's Meter Discovery records,
+// field workers by name, teams from team history (GMR-R020).
+export function buildZamoFieldStats(dataset = {}) {
+  const rows = (Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [])
+    .filter((row) => row?.trnType === "METER_DISCOVERY");
+  const workerOfRow = (row) => text(row?.fieldWorkerName) || NOT_AVAILABLE;
+  const teamOfRow = (row) => text(row?.team) || "Unassigned";
+  const workers = [...new Set(rows.map(workerOfRow))].sort((left, right) => left.localeCompare(right));
+  const teams = [...new Set(rows.map(teamOfRow))].sort((left, right) => left.localeCompare(right));
+  const statuses = withExtras(ZAMO_METER_STATUS_ORDER, rows.map(zamoMeterStatus));
+  const normalisations = [...new Set(rows.map((row) => zamoLabel(row?.normalisation)))]
+    .sort((left, right) => left.localeCompare(right));
+
+  const tally = (keys, keyOf, labelOf, labels) => {
+    const table = new Map(labels.map((label) => [label, new Map(keys.map((key) => [key, 0]))]));
+    rows.forEach((row) => {
+      const counts = table.get(labelOf(row));
+      counts.set(keyOf(row), (counts.get(keyOf(row)) || 0) + 1);
+    });
+    return table;
+  };
+  const totals = (keys, keyOf) => {
+    const counts = new Map(keys.map((key) => [key, 0]));
+    rows.forEach((row) => counts.set(keyOf(row), (counts.get(keyOf(row)) || 0) + 1));
+    return counts;
+  };
+
+  return {
+    records: rows.length,
+    workers,
+    teams,
+    statuses,
+    normalisations,
+    statusByWorker: tally(workers, workerOfRow, zamoMeterStatus, statuses),
+    normalisationByWorker: tally(workers, workerOfRow, (row) => zamoLabel(row?.normalisation), normalisations),
+    statusByTeam: tally(teams, teamOfRow, zamoMeterStatus, statuses),
+    workerTotals: totals(workers, workerOfRow),
+    teamTotals: totals(teams, teamOfRow),
+  };
+}
 const FINDING_TRN_TYPES = new Set(["METER_DISCOVERY", "METER_INSPECTION"]);
 
 function text(value) {
   return value === null || value === undefined ? "" : String(value).trim();
 }
 
-function orderedLabels(order, observed) {
-  const extra = [...observed]
+function upper(value) {
+  return text(value).toUpperCase();
+}
+
+function meterStatusLabel(finding, detail) {
+  const findingText = upper(finding) || upper(GMR_NAV);
+  const detailText = upper(detail);
+  return detailText ? `${findingText} - ${detailText}` : findingText;
+}
+
+function withExtras(order, observed) {
+  const extra = [...new Set(observed)]
     .filter((label) => label && !order.includes(label))
     .sort((left, right) => left.localeCompare(right));
   return [...order, ...extra];
 }
 
-function isNoneOnly(actions = []) {
-  return actions.length === 1 && text(actions[0]).toLowerCase() === "none";
+export function gmrMeterStatusLine(row = {}) {
+  if (!row?.hasAccess) return NO_ACCESS_LABEL;
+  return meterStatusLabel(row?.primaryFinding, row?.findingDetail);
 }
 
-// Workers are told apart by user, not by display name: two people with the
-// same name stay apart, and one person is one column.
+// Workers are told apart by user, not by display name.
 function workerOf(row) {
   const uid = text(row?.fieldWorkerUid);
   if (uid) return `uid:${uid}`;
@@ -83,17 +149,16 @@ function teamOf(row) {
   return text(row?.team) || "Unassigned";
 }
 
-function countRow(label, rows, workers, teams, weight) {
+function countLine(label, rows, workers, teams, include) {
   const byWorker = new Map(workers.map((worker) => [worker, 0]));
   const byTeam = new Map(teams.map((team) => [team, 0]));
   let total = 0;
 
   rows.forEach((row) => {
-    const amount = weight(row);
-    if (!amount) return;
-    byWorker.set(workerOf(row), (byWorker.get(workerOf(row)) || 0) + amount);
-    byTeam.set(teamOf(row), (byTeam.get(teamOf(row)) || 0) + amount);
-    total += amount;
+    if (!include(row)) return;
+    byWorker.set(workerOf(row), (byWorker.get(workerOf(row)) || 0) + 1);
+    byTeam.set(teamOf(row), (byTeam.get(teamOf(row)) || 0) + 1);
+    total += 1;
   });
 
   return { label, byWorker, byTeam, total };
@@ -109,73 +174,69 @@ export function buildGmrFieldStatsModel(dataset = {}) {
   );
   const workerLabels = buildWorkerLabels(rows, workers);
   const teams = [...new Set(rows.map(teamOf))].sort((left, right) => left.localeCompare(right));
-  const row = (label, weight) => countRow(label, rows, workers, teams, weight);
+  const line = (label, include) => countLine(label, rows, workers, teams, include);
 
   const findingRows = rows.filter((item) => FINDING_TRN_TYPES.has(item?.trnType));
   const actedRows = findingRows.filter((item) => item?.hasAccess);
 
-  const typeLabels = orderedLabels(TRN_TYPE_ORDER, rows.map((item) => text(item?.trnTypeLabel)));
-  const findingLabels = orderedLabels(FINDING_ORDER, findingRows.map((item) => text(item?.findingGroup)));
-  const actionLabels = orderedLabels(
-    ACTION_ORDER,
-    actedRows.flatMap((item) => item?.normalisationActions || []).filter((action) => text(action).toLowerCase() !== "none"),
+  const statusLabels = withExtras(
+    [...METER_STATUS_ORDER, NO_ACCESS_LABEL],
+    findingRows.map(gmrMeterStatusLine),
   );
-  const reasons = [...new Set(actedRows.map((item) => text(item?.noActionReason)).filter(Boolean))]
+  const reasons = [...new Set(actedRows.map((item) => upper(item?.noActionReason)).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right));
+  const typeLabels = withExtras(TRN_TYPE_ORDER, rows.map((item) => text(item?.trnTypeLabel)));
 
-  const groups = [
+  const blocks = [
     {
-      name: "Transactions",
-      rows: [
-        ...typeLabels.map((label) => row(label, (item) => (text(item?.trnTypeLabel) === label ? 1 : 0))),
-        row("Payable total", () => 1),
+      key: "METER_STATUS_DETAIL",
+      title: "METER STATUS DETAIL",
+      column: "METER STATUS DETAIL",
+      lines: statusLabels.map((label) =>
+        line(label, (item) => FINDING_TRN_TYPES.has(item?.trnType) && gmrMeterStatusLine(item) === label)),
+      total: line("TOTAL: METER DISCOVERY AND INSPECTION RECORDS", (item) => FINDING_TRN_TYPES.has(item?.trnType)),
+    },
+    {
+      // GMR-R031: where the action that follows the finding was not taken, why.
+      key: "NO_ACTION",
+      title: "NO ACTION TAKEN",
+      column: "REASON FOR NOT ACTING",
+      lines: reasons.map((reason) =>
+        line(reason, (item) => FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && upper(item?.noActionReason) === reason)),
+      total: line("TOTAL: NO ACTION TAKEN", (item) =>
+        FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && Boolean(text(item?.noActionReason))),
+    },
+    {
+      key: "TRANSACTIONS",
+      title: "TRANSACTIONS",
+      column: "TRANSACTION TYPE",
+      lines: typeLabels.map((label) => line(upper(label), (item) => text(item?.trnTypeLabel) === label)),
+      total: line("TOTAL: PAYABLE TRANSACTIONS", () => true),
+    },
+    {
+      key: "DISCONNECTIONS",
+      title: "DISCONNECTIONS CALLED FOR",
+      column: "DISCONNECTION",
+      lines: [
+        line("CALLED FOR", (item) => Boolean(text(item?.followUpRequired))),
+        line("COMPLETED", (item) => text(item?.followUpStatus) === "Completed"),
+        line("NOT STARTED", (item) => text(item?.followUpStatus) === "Not Started"),
+        line("NO DISCONNECTION RECORD", (item) => text(item?.followUpStatus) === "No disconnection record"),
       ],
+      total: null,
     },
     {
-      name: "Findings",
-      rows: findingLabels.map((label) =>
-        row(label, (item) => (FINDING_TRN_TYPES.has(item?.trnType) && text(item?.findingGroup) === label ? 1 : 0)),
-      ),
-    },
-    {
-      name: "Normalisation",
-      rows: [
-        ...actionLabels.map((label) =>
-          row(label, (item) =>
-            FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && (item?.normalisationActions || []).includes(label) ? 1 : 0),
-        ),
-        // GMR-R031: None belongs to Meter Ok only.
-        row("None", (item) =>
-          FINDING_TRN_TYPES.has(item?.trnType) &&
-          item?.hasAccess &&
-          text(item?.findingGroup).startsWith("Meter Ok") &&
-          isNoneOnly(item?.normalisationActions) &&
-          !text(item?.noActionReason) ? 1 : 0),
-        ...reasons.map((reason) =>
-          row(`No action taken — ${reason}`, (item) =>
-            FINDING_TRN_TYPES.has(item?.trnType) && item?.hasAccess && text(item?.noActionReason) === reason ? 1 : 0),
-        ),
-      ],
-    },
-    {
-      name: "Disconnections called for",
-      rows: [
-        row("Called for", (item) => (text(item?.followUpRequired) ? 1 : 0)),
-        row("Completed", (item) => (text(item?.followUpStatus) === "Completed" ? 1 : 0)),
-        row("Not Started", (item) => (text(item?.followUpStatus) === "Not Started" ? 1 : 0)),
-        row("No disconnection record", (item) => (text(item?.followUpStatus) === "No disconnection record" ? 1 : 0)),
-      ],
-    },
-    {
-      name: "Outside batches (AD HOC)",
-      rows: typeLabels.map((label) =>
-        row(label, (item) => (text(item?.trnTypeLabel) === label && text(item?.batchId) === "AD HOC" ? 1 : 0)),
-      ),
+      key: "OUTSIDE_BATCHES",
+      title: "OUTSIDE BATCHES (AD HOC)",
+      column: "TRANSACTION TYPE",
+      lines: typeLabels.map((label) =>
+        line(upper(label), (item) => text(item?.trnTypeLabel) === label && text(item?.batchId) === "AD HOC")),
+      total: line("TOTAL: AD HOC TRANSACTIONS", (item) => text(item?.batchId) === "AD HOC"),
     },
   ];
 
-  // Only rows judged against the vending list carry Yes or No (electricity, a
-  // real meter number).
+  // Only rows judged against the vending list carry Yes or No (an electricity
+  // meter with a real meter number).
   const judged = rows.filter((item) => item?.hasAccess && ["Yes", "No"].includes(item?.onVendingList));
   const electricityFound = judged.filter((item) => item?.trnType === "METER_DISCOVERY");
   const distinctMeters = (items) => new Set(items.map((item) => text(item?.fieldFoundMeterNo))).size;
@@ -184,11 +245,11 @@ export function buildGmrFieldStatsModel(dataset = {}) {
   );
 
   const controlLines = [
-    { label: "Submitted this month but not on Field Data (must be 0)", count: unplaced.length },
-    { label: "Transactions without a batch (AD HOC)", count: rows.filter((item) => text(item?.batchId) === "AD HOC").length },
-    { label: "Meters found that are not on the vending list", count: distinctMeters(electricityFound.filter((item) => item?.onVendingList === "No")) },
+    { label: "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)", count: unplaced.length },
+    { label: "TRANSACTIONS WITHOUT A BATCH (AD HOC)", count: rows.filter((item) => text(item?.batchId) === "AD HOC").length },
+    { label: "METERS FOUND THAT ARE NOT ON THE VENDING LIST", count: distinctMeters(electricityFound.filter((item) => item?.onVendingList === "No")) },
     {
-      label: "Visibility mark that disagrees with Sales",
+      label: "VISIBILITY MARK THAT DISAGREES WITH SALES",
       count: distinctMeters(
         judged.filter(
           (item) =>
@@ -198,11 +259,11 @@ export function buildGmrFieldStatsModel(dataset = {}) {
       ),
     },
     {
-      label: "Transactions with no Sales Category",
+      label: "TRANSACTIONS WITH NO SALES CATEGORY",
       count: actedRows.filter((item) => item?.meterType === "ELECTRICITY" && !text(item?.salesCategory)).length,
     },
     {
-      label: "Missing GPS, photograph or normalisation answer",
+      label: "MISSING GPS, PHOTOGRAPH OR NORMALISATION ANSWER",
       count: rows.filter(
         (item) =>
           item?.hasAccess &&
@@ -211,14 +272,14 @@ export function buildGmrFieldStatsModel(dataset = {}) {
             (FINDING_TRN_TYPES.has(item?.trnType) && item?.meterType === "ELECTRICITY" && !(item?.normalisationActions || []).length)),
       ).length,
     },
-    { label: "Workers whose team could not be resolved", count: unresolvedWorkers.size },
+    { label: "WORKERS WHOSE TEAM COULD NOT BE RESOLVED", count: unresolvedWorkers.size },
   ];
 
   return {
     workers,
     workerLabels,
     teams,
-    groups,
+    blocks,
     controlLines,
     payableTotal: rows.length,
   };
