@@ -453,7 +453,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     }
 
-    if (trnType === "METER_INSPECTION" && !isWmsLifecycleExecution) {
+    // MN-R001 1.1.0 section 8: an inspection is office work executed from an
+    // instruction, or field work started on the spot from the meter card.
+    if (
+      trnType === "METER_INSPECTION" &&
+      !isWmsLifecycleExecution &&
+      originChannel !== "FIELD"
+    ) {
       return buildFailureResult(
         "INSPECTION_OFFICE_WMS_ONLY",
         "Meter inspection execution must complete an accepted office-originated instruction TRN",
@@ -1091,9 +1097,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     // MN-R001 section 7: the finding that called for this disconnection now has
     // it. Never fails the submission: the work is saved, and anything that
     // cannot be linked is logged for the office.
+    // Only work that was actually done is linked: not a No Access visit, and
+    // not a resend of a transaction that already existed.
     if (
       (trnType === "METER_DISCONNECTION" || trnType === "METER_REMOVAL") &&
-      responsePayload?.success === true
+      responsePayload?.success === true &&
+      responsePayload?.idempotent !== true &&
+      responsePayload?.executionOutcome?.success === true
     ) {
       try {
         await linkFollowUp({
@@ -1102,6 +1112,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           parentTrnType: data?.origin?.parentTrnType,
           workTrnType: trnType,
           trnId,
+          astId,
         });
       } catch (linkError) {
         logger.error("onMeterLifecycleTrnCallable -- parent follow-up not linked", {

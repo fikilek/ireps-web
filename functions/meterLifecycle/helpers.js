@@ -3303,19 +3303,49 @@ export function buildLifecycleInstructionTrnPayload({
 // MN-R001 section 7: close the loop. The discovery or inspection that called for
 // the work records the number of each piece once it is submitted — the
 // disconnection, or the removal and then the installation. No status word.
+//
+// A link is written only when it is true: the parent really is that finding, on
+// the same meter, it asked for this work, and the slot is still empty. A phone
+// cannot attach work to a finding it does not belong to.
 const FOLLOW_UP_SLOTS = Object.freeze({
   METER_DISCONNECTION: "disconnectionTrnId",
   METER_REMOVAL: "removalTrnId",
   METER_INSTALLATION: "installationTrnId",
 });
 
-function followUpField(parentTrnType) {
-  const parentType = normalizeUpper(parentTrnType || "");
+const FOLLOW_UP_REQUIRED_BY_WORK = Object.freeze({
+  METER_DISCONNECTION: "METER_DISCONNECTION",
+  METER_REMOVAL: "METER_REPLACEMENT",
+  METER_INSTALLATION: "METER_REPLACEMENT",
+});
+
+function readTrnType(trn = {}) {
+  return normalizeUpper(trn?.accessData?.trnType || trn?.trnType || "");
+}
+
+function followUpOf(trn = {}, parentType = "") {
   if (parentType === "METER_INSPECTION") {
-    return "inspection.captured.ast.normalisation.followUp";
+    return {
+      field: "inspection.captured.ast.normalisation.followUp",
+      followUp: trn?.inspection?.captured?.ast?.normalisation?.followUp || null,
+    };
   }
-  if (parentType === "METER_DISCOVERY") return "ast.normalisation.followUp";
-  return "";
+  if (parentType === "METER_DISCOVERY") {
+    return {
+      field: "ast.normalisation.followUp",
+      followUp: trn?.ast?.normalisation?.followUp || null,
+    };
+  }
+  return { field: "", followUp: null };
+}
+
+// The meter a finding is about. A discovery's meter record carries the
+// discovery's own number; an inspection names the meter it inspected.
+function findingMeterId(trn = {}, parentId = "", parentType = "") {
+  if (parentType === "METER_DISCOVERY") return parentId;
+  return String(
+    trn?.sourceAstId || trn?.ast?.astData?.astId || trn?.astId || "",
+  ).trim();
 }
 
 export async function linkFollowUp({
@@ -3324,19 +3354,46 @@ export async function linkFollowUp({
   parentTrnType,
   workTrnType,
   trnId,
+  astId,
 }) {
   const parentId = String(parentTrnId || "").trim();
-  const slot = FOLLOW_UP_SLOTS[normalizeUpper(workTrnType || "")];
-  const field = followUpField(parentTrnType);
+  const parentType = normalizeUpper(parentTrnType || "");
+  const workType = normalizeUpper(workTrnType || "");
+  const slot = FOLLOW_UP_SLOTS[workType];
 
   if (!parentId || !trnId) return { linked: false, reason: "NO_PARENT" };
-  if (!slot || !field) return { linked: false, reason: "UNKNOWN_PARENT_TYPE" };
+  if (!slot) return { linked: false, reason: "UNKNOWN_WORK_TYPE" };
+  if (!["METER_DISCOVERY", "METER_INSPECTION"].includes(parentType)) {
+    return { linked: false, reason: "UNKNOWN_PARENT_TYPE" };
+  }
 
   const parentRef = db.collection("trns").doc(parentId);
   const parentSnap = await parentRef.get();
 
   // A parent that is not there is never invented.
   if (!parentSnap.exists) return { linked: false, reason: "PARENT_NOT_FOUND" };
+
+  const parent = parentSnap.data() || {};
+
+  if (readTrnType(parent) !== parentType) {
+    return { linked: false, reason: "PARENT_TYPE_MISMATCH" };
+  }
+
+  const meterOfFinding = findingMeterId(parent, parentId, parentType);
+  if (astId && meterOfFinding && String(astId).trim() !== meterOfFinding) {
+    return { linked: false, reason: "DIFFERENT_METER" };
+  }
+
+  const { field, followUp } = followUpOf(parent, parentType);
+  if (!field || !followUp) return { linked: false, reason: "NO_FOLLOW_UP_ASKED" };
+
+  if (followUp.required !== FOLLOW_UP_REQUIRED_BY_WORK[workType]) {
+    return { linked: false, reason: "WORK_NOT_ASKED_FOR" };
+  }
+
+  if (String(followUp[slot] || "").trim()) {
+    return { linked: false, reason: "ALREADY_LINKED" };
+  }
 
   await parentRef.update({ [`${field}.${slot}`]: trnId });
 
@@ -3349,6 +3406,7 @@ export async function markParentFollowUpCompleted({
   parentTrnId,
   parentTrnType,
   trnId,
+  astId,
 }) {
   return linkFollowUp({
     db,
@@ -3356,29 +3414,69 @@ export async function markParentFollowUpCompleted({
     parentTrnType,
     workTrnType: "METER_DISCONNECTION",
     trnId,
+    astId,
   });
 }
 
-// MN-R001 section 6.1: the installation that completes a replacement. The
-// phone sends where it came from; only this shape is kept.
-export function sanitizeReplacementOrigin(origin = {}) {
-  if (normalizeUpper(origin?.parentTrnType || "") !== "METER_REMOVAL") return null;
+function removalWasDone(removal = {}) {
+  const outcome = normalizeUpper(removal?.executionOutcome?.outcome || "");
+  const hasAccess = String(removal?.accessData?.access?.hasAccess || "yes")
+    .trim()
+    .toLowerCase();
+  return outcome !== "NO_ACCESS" && hasAccess !== "no";
+}
 
-  const parentTrnId = String(origin?.parentTrnId || "").trim();
-  if (!parentTrnId) return null;
+// MN-R001 section 6.1: the installation that completes a replacement. The phone
+// only says which removal it follows. The server reads that removal and takes
+// everything else from it — the meter it replaces, the premise — and refuses to
+// treat the installation as a replacement when the removal does not bear it out.
+export async function resolveReplacementOrigin({ db, origin = {}, premiseId }) {
+  if (normalizeUpper(origin?.parentTrnType || "") !== "METER_REMOVAL") {
+    return { origin: null, reason: "NOT_A_REPLACEMENT" };
+  }
+
+  const removalTrnId = String(origin?.parentTrnId || "").trim();
+  if (!removalTrnId) return { origin: null, reason: "NO_REMOVAL" };
+
+  const removalSnap = await db.collection("trns").doc(removalTrnId).get();
+  if (!removalSnap.exists) return { origin: null, reason: "REMOVAL_NOT_FOUND" };
+
+  const removal = removalSnap.data() || {};
+
+  if (readTrnType(removal) !== "METER_REMOVAL") {
+    return { origin: null, reason: "NOT_A_REMOVAL" };
+  }
+  if (!removalWasDone(removal)) {
+    return { origin: null, reason: "REMOVAL_NOT_DONE" };
+  }
+  if (String(removal?.replacement?.installationTrnId || "").trim()) {
+    return { origin: null, reason: "REPLACEMENT_ALREADY_INSTALLED" };
+  }
+
+  const removalPremiseId = String(
+    removal?.accessData?.premise?.id || removal?.premiseId || "",
+  ).trim();
+  if (premiseId && removalPremiseId && removalPremiseId !== String(premiseId).trim()) {
+    return { origin: null, reason: "DIFFERENT_PREMISE" };
+  }
 
   return {
-    channel: "FIELD",
-    source: "METER_REMOVAL",
-    parentTrnId,
-    parentTrnType: "METER_REMOVAL",
-    replacesAstId: String(origin?.replacesAstId || "").trim() || null,
-    replacesMeterNo: String(origin?.replacesMeterNo || "").trim() || null,
+    origin: {
+      channel: "FIELD",
+      source: "METER_REMOVAL",
+      parentTrnId: removalTrnId,
+      parentTrnType: "METER_REMOVAL",
+      replacesAstId:
+        String(removal?.sourceAstId || removal?.ast?.astData?.astId || "").trim() ||
+        null,
+      replacesMeterNo: String(removal?.ast?.astData?.astNo || "").trim() || null,
+    },
+    reason: "",
   };
 }
 
-// The removal knows the finding it came from; the finding gets the
-// installation number, and the removal notes which installation completed it.
+// The removal notes which installation completed it; the finding that called
+// for the replacement gets the installation number.
 export async function linkReplacementInstallation({
   db,
   removalTrnId,
@@ -3391,6 +3489,13 @@ export async function linkReplacementInstallation({
 
   const removal = removalSnap.data() || {};
 
+  if (readTrnType(removal) !== "METER_REMOVAL") {
+    return { linked: false, reason: "NOT_A_REMOVAL" };
+  }
+  if (String(removal?.replacement?.installationTrnId || "").trim()) {
+    return { linked: false, reason: "ALREADY_LINKED" };
+  }
+
   await removalRef.update({ "replacement.installationTrnId": installationTrnId });
 
   return linkFollowUp({
@@ -3399,5 +3504,6 @@ export async function linkReplacementInstallation({
     parentTrnType: removal?.origin?.parentTrnType,
     workTrnType: "METER_INSTALLATION",
     trnId: installationTrnId,
+    astId: String(removal?.sourceAstId || removal?.ast?.astData?.astId || "").trim(),
   });
 }

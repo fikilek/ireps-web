@@ -7,8 +7,8 @@ import {
   linkFollowUp,
   linkReplacementInstallation,
   markParentFollowUpCompleted,
+  resolveReplacementOrigin,
   sanitizeOrigin,
-  sanitizeReplacementOrigin,
   validateAssignment,
   validateMeterInspection,
 } from "../meterLifecycle/helpers.js";
@@ -178,63 +178,6 @@ test("a disconnection carries the finding it came from, and nothing else", () =>
   assert.equal(wrongParent.parentTrnId, null);
 });
 
-test("the finding is marked done only when a real disconnection arrives", async () => {
-  const updates = [];
-  const db = {
-    collection: () => ({
-      doc: (id) => ({
-        get: async () => ({ exists: id !== "MISSING" }),
-        update: async (patch) => updates.push({ id, patch }),
-      }),
-    }),
-  };
-
-  const linked = await markParentFollowUpCompleted({
-    db,
-    parentTrnId: "TRN_MDIS_1",
-    parentTrnType: "METER_DISCOVERY",
-    trnId: "TRN_MDCN_1",
-  });
-
-  assert.equal(linked.linked, true);
-  // The number of the work, never a status word (MN-R001 1.1.0 section 7).
-  assert.deepEqual(updates[0].patch, {
-    "ast.normalisation.followUp.disconnectionTrnId": "TRN_MDCN_1",
-  });
-
-  const onInspection = await markParentFollowUpCompleted({
-    db,
-    parentTrnId: "TRN_MINSP_1",
-    parentTrnType: "METER_INSPECTION",
-    trnId: "TRN_MDCN_2",
-  });
-  assert.equal(onInspection.linked, true);
-  assert.equal(
-    Object.keys(updates[1].patch)[0],
-    "inspection.captured.ast.normalisation.followUp.disconnectionTrnId",
-  );
-
-  // A parent that is not there is never invented.
-  const missing = await markParentFollowUpCompleted({
-    db,
-    parentTrnId: "MISSING",
-    parentTrnType: "METER_DISCOVERY",
-    trnId: "TRN_MDCN_3",
-  });
-  assert.equal(missing.linked, false);
-  assert.equal(missing.reason, "PARENT_NOT_FOUND");
-  assert.equal(updates.length, 2);
-
-  // A standalone disconnection links nothing.
-  const none = await markParentFollowUpCompleted({
-    db,
-    parentTrnId: "",
-    parentTrnType: "",
-    trnId: "TRN_MDCN_4",
-  });
-  assert.equal(none.linked, false);
-});
-
 test("a field inspection needs no office instruction at the front door either", () => {
   const assignment = {
     instruction: { code: "METER_INSPECTION", text: "" },
@@ -266,22 +209,141 @@ test("a Meter Ok suspicion on an inspection needs its photo, as on a discovery",
   assert.equal(suspicion.code, "MISSING_INSPECTION_ANOMALY_PHOTO");
 });
 
-test("the replacement chain: removal on the finding, installation on the finding and the removal", async () => {
-  const docs = {
-    TRN_MDIS_9: { ast: { normalisation: { followUp: {} } } },
-    TRN_MREM_9: {
-      origin: { parentTrnId: "TRN_MDIS_9", parentTrnType: "METER_DISCOVERY" },
-    },
-  };
+// A small in-memory Firestore: enough for the link rules.
+function fakeDb(docs) {
   const updates = [];
-  const db = {
+  return {
+    updates,
     collection: () => ({
       doc: (id) => ({
         get: async () => ({ exists: !!docs[id], data: () => docs[id] }),
-        update: async (patch) => updates.push({ id, patch }),
+        update: async (patch) => {
+          updates.push({ id, patch });
+          const doc = docs[id];
+          for (const [path, value] of Object.entries(patch)) {
+            const parts = path.split(".");
+            let node = doc;
+            for (const part of parts.slice(0, -1)) {
+              node[part] = node[part] || {};
+              node = node[part];
+            }
+            node[parts[parts.length - 1]] = value;
+          }
+        },
       }),
     }),
   };
+}
+
+function discovery(followUp) {
+  return {
+    accessData: { trnType: "METER_DISCOVERY" },
+    ast: { normalisation: { followUp } },
+  };
+}
+
+test("a disconnection links to its finding once, with its number and no status word", async () => {
+  const db = fakeDb({
+    TRN_MDIS_1: discovery({ required: "METER_DISCONNECTION", disconnectionTrnId: "" }),
+  });
+
+  const first = await markParentFollowUpCompleted({
+    db,
+    parentTrnId: "TRN_MDIS_1",
+    parentTrnType: "METER_DISCOVERY",
+    trnId: "TRN_MDCN_1",
+    astId: "TRN_MDIS_1",
+  });
+  assert.equal(first.linked, true);
+  assert.deepEqual(db.updates[0].patch, {
+    "ast.normalisation.followUp.disconnectionTrnId": "TRN_MDCN_1",
+  });
+
+  // A second disconnection never overwrites the first.
+  const second = await markParentFollowUpCompleted({
+    db,
+    parentTrnId: "TRN_MDIS_1",
+    parentTrnType: "METER_DISCOVERY",
+    trnId: "TRN_MDCN_2",
+    astId: "TRN_MDIS_1",
+  });
+  assert.equal(second.linked, false);
+  assert.equal(second.reason, "ALREADY_LINKED");
+});
+
+test("a phone cannot attach work to a finding it does not belong to", async () => {
+  const db = fakeDb({
+    TRN_MDIS_A: discovery({ required: "METER_DISCONNECTION", disconnectionTrnId: "" }),
+    TRN_MDIS_R: discovery({
+      required: "METER_REPLACEMENT",
+      removalTrnId: "",
+      installationTrnId: "",
+    }),
+    TRN_MREAD_X: { accessData: { trnType: "METER_READING" } },
+  });
+
+  // Work on another meter.
+  const otherMeter = await linkFollowUp({
+    db,
+    parentTrnId: "TRN_MDIS_A",
+    parentTrnType: "METER_DISCOVERY",
+    workTrnType: "METER_DISCONNECTION",
+    trnId: "TRN_MDCN_B",
+    astId: "TRN_MDIS_B",
+  });
+  assert.equal(otherMeter.reason, "DIFFERENT_METER");
+
+  // Work the finding did not ask for.
+  const notAsked = await linkFollowUp({
+    db,
+    parentTrnId: "TRN_MDIS_A",
+    parentTrnType: "METER_DISCOVERY",
+    workTrnType: "METER_REMOVAL",
+    trnId: "TRN_MREM_A",
+    astId: "TRN_MDIS_A",
+  });
+  assert.equal(notAsked.reason, "WORK_NOT_ASKED_FOR");
+
+  // A parent that says it is a discovery but is not.
+  const wrongType = await linkFollowUp({
+    db,
+    parentTrnId: "TRN_MREAD_X",
+    parentTrnType: "METER_DISCOVERY",
+    workTrnType: "METER_DISCONNECTION",
+    trnId: "TRN_MDCN_X",
+  });
+  assert.equal(wrongType.reason, "PARENT_TYPE_MISMATCH");
+
+  // A parent that is not there is never invented.
+  const missing = await linkFollowUp({
+    db,
+    parentTrnId: "MISSING",
+    parentTrnType: "METER_DISCOVERY",
+    workTrnType: "METER_DISCONNECTION",
+    trnId: "TRN_MDCN_Y",
+  });
+  assert.equal(missing.reason, "PARENT_NOT_FOUND");
+
+  assert.equal(db.updates.length, 0);
+});
+
+test("the replacement chain: the removal, then the installation, each once", async () => {
+  const docs = {
+    TRN_MDIS_9: discovery({
+      required: "METER_REPLACEMENT",
+      removalTrnId: "",
+      installationTrnId: "",
+    }),
+    TRN_MREM_9: {
+      trnType: "METER_REMOVAL",
+      sourceAstId: "TRN_MDIS_9",
+      ast: { astData: { astId: "TRN_MDIS_9", astNo: "0425774532" } },
+      accessData: { premise: { id: "PREM_1" }, access: { hasAccess: "yes" } },
+      executionOutcome: { outcome: "SUCCESS", success: true },
+      origin: { parentTrnId: "TRN_MDIS_9", parentTrnType: "METER_DISCOVERY" },
+    },
+  };
+  const db = fakeDb(docs);
 
   const removal = await linkFollowUp({
     db,
@@ -289,12 +351,22 @@ test("the replacement chain: removal on the finding, installation on the finding
     parentTrnType: "METER_DISCOVERY",
     workTrnType: "METER_REMOVAL",
     trnId: "TRN_MREM_9",
+    astId: "TRN_MDIS_9",
   });
   assert.equal(removal.linked, true);
-  assert.deepEqual(updates[0], {
-    id: "TRN_MDIS_9",
-    patch: { "ast.normalisation.followUp.removalTrnId": "TRN_MREM_9" },
+
+  // The installation takes the replaced meter from the removal, not the phone.
+  const resolved = await resolveReplacementOrigin({
+    db,
+    origin: {
+      parentTrnId: "TRN_MREM_9",
+      parentTrnType: "METER_REMOVAL",
+      replacesMeterNo: "SOMETHING_ELSE",
+    },
+    premiseId: "PREM_1",
   });
+  assert.equal(resolved.origin.replacesMeterNo, "0425774532");
+  assert.equal(resolved.origin.replacesAstId, "TRN_MDIS_9");
 
   const installation = await linkReplacementInstallation({
     db,
@@ -302,39 +374,60 @@ test("the replacement chain: removal on the finding, installation on the finding
     installationTrnId: "TRN_MINST_9",
   });
   assert.equal(installation.linked, true);
-  assert.deepEqual(updates[1], {
-    id: "TRN_MREM_9",
-    patch: { "replacement.installationTrnId": "TRN_MINST_9" },
+  assert.equal(docs.TRN_MREM_9.replacement.installationTrnId, "TRN_MINST_9");
+  assert.equal(
+    docs.TRN_MDIS_9.ast.normalisation.followUp.installationTrnId,
+    "TRN_MINST_9",
+  );
+
+  // A second installation against the same removal is not a replacement.
+  const again = await resolveReplacementOrigin({
+    db,
+    origin: { parentTrnId: "TRN_MREM_9", parentTrnType: "METER_REMOVAL" },
+    premiseId: "PREM_1",
   });
-  assert.deepEqual(updates[2], {
-    id: "TRN_MDIS_9",
-    patch: { "ast.normalisation.followUp.installationTrnId": "TRN_MINST_9" },
-  });
+  assert.equal(again.origin, null);
+  assert.equal(again.reason, "REPLACEMENT_ALREADY_INSTALLED");
 });
 
-test("an installation keeps only a real replacement origin", () => {
-  assert.deepEqual(
-    sanitizeReplacementOrigin({
-      parentTrnId: "TRN_MREM_9",
-      parentTrnType: "METER_REMOVAL",
-      replacesAstId: "AST_OLD",
-      replacesMeterNo: "0425774532",
-      injected: "ignored",
-    }),
-    {
-      channel: "FIELD",
-      source: "METER_REMOVAL",
-      parentTrnId: "TRN_MREM_9",
-      parentTrnType: "METER_REMOVAL",
-      replacesAstId: "AST_OLD",
-      replacesMeterNo: "0425774532",
+test("a No Access removal, another premise, or a non-removal is never a replacement", async () => {
+  const db = fakeDb({
+    TRN_MREM_NA: {
+      trnType: "METER_REMOVAL",
+      accessData: { premise: { id: "PREM_1" }, access: { hasAccess: "no" } },
+      executionOutcome: { outcome: "NO_ACCESS", success: false },
     },
-  );
+    TRN_MREM_OK: {
+      trnType: "METER_REMOVAL",
+      accessData: { premise: { id: "PREM_1" }, access: { hasAccess: "yes" } },
+      executionOutcome: { outcome: "SUCCESS", success: true },
+    },
+    TRN_MDCN_1: { trnType: "METER_DISCONNECTION" },
+  });
 
-  // A new installation on its own, or anything else, carries no replacement.
-  assert.equal(sanitizeReplacementOrigin({}), null);
-  assert.equal(
-    sanitizeReplacementOrigin({ parentTrnId: "X", parentTrnType: "METER_DISCOVERY" }),
-    null,
-  );
+  const noAccess = await resolveReplacementOrigin({
+    db,
+    origin: { parentTrnId: "TRN_MREM_NA", parentTrnType: "METER_REMOVAL" },
+    premiseId: "PREM_1",
+  });
+  assert.equal(noAccess.reason, "REMOVAL_NOT_DONE");
+
+  const otherPremise = await resolveReplacementOrigin({
+    db,
+    origin: { parentTrnId: "TRN_MREM_OK", parentTrnType: "METER_REMOVAL" },
+    premiseId: "PREM_2",
+  });
+  assert.equal(otherPremise.reason, "DIFFERENT_PREMISE");
+
+  const notRemoval = await resolveReplacementOrigin({
+    db,
+    origin: { parentTrnId: "TRN_MDCN_1", parentTrnType: "METER_REMOVAL" },
+    premiseId: "PREM_1",
+  });
+  assert.equal(notRemoval.reason, "NOT_A_REMOVAL");
+
+  const standalone = await resolveReplacementOrigin({ db, origin: {}, premiseId: "PREM_1" });
+  assert.equal(standalone.reason, "NOT_A_REPLACEMENT");
+
+  assert.equal(db.updates.length, 0);
 });

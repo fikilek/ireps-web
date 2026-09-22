@@ -180,7 +180,7 @@ import {
 } from "./meterDiscovery/validation.js";
 import {
   linkReplacementInstallation,
-  sanitizeReplacementOrigin,
+  resolveReplacementOrigin,
 } from "./meterLifecycle/helpers.js";
 import {
   validateMeterInstallationElectricity,
@@ -5099,9 +5099,23 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     };
 
     // MN-R001 section 6.1: an installation that completes a replacement names
-    // the removal it follows and the meter it replaces. Anything else the phone
-    // sent as an origin is not kept.
-    const replacementOrigin = sanitizeReplacementOrigin(safePayload?.origin);
+    // the removal it follows. The server reads that removal and takes the meter
+    // it replaces from it. When the removal does not bear the replacement out,
+    // the installation is kept as an ordinary new installation and the reason is
+    // logged; the worker's installation is never refused for it.
+    const replacement = await resolveReplacementOrigin({
+      db,
+      origin: safePayload?.origin,
+      premiseId: data?.accessData?.premise?.id,
+    });
+    const replacementOrigin = replacement.origin;
+    if (!replacementOrigin && replacement.reason !== "NOT_A_REPLACEMENT") {
+      logger.warn("onMeterInstallationCallable --not treated as a replacement", {
+        trnId,
+        removalTrnId: safePayload?.origin?.parentTrnId || "NAv",
+        reason: replacement.reason,
+      });
+    }
 
     const trnDoc = {
       ...safePayload,
