@@ -1450,12 +1450,19 @@ function sanitizeInspectionCapturedAst(
     normalisation: isElectricityMeter
       ? sanitizeElectricityNormalisation(capturedAst?.normalisation)
       : {
-          // Water keeps what it has until it gets its own rules (MN-R001 s10).
-          actionTaken: normalizeUpper(
-            capturedAst?.normalisation?.actionTaken ||
-              capturedAst?.normalisation?.actionSelect?.code ||
-              "NONE",
-          ),
+          // Water keeps what it has until it gets its own rules (MN-R001 s10),
+          // but the shape is the same as electricity's: a list of actions, so
+          // every reader can treat them alike.
+          actionTaken: (Array.isArray(capturedAst?.normalisation?.actionTaken)
+            ? capturedAst.normalisation.actionTaken
+            : [
+                capturedAst?.normalisation?.actionTaken ||
+                  capturedAst?.normalisation?.actionSelect?.code ||
+                  "NONE",
+              ]
+          )
+            .map((action) => normalizeUpper(action))
+            .filter(Boolean),
           actionText:
             selectValueToText(capturedAst?.normalisation?.actionSelect) ||
             String(capturedAst?.normalisation?.actionText || "None").trim(),
