@@ -701,10 +701,17 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString("en-ZA");
 }
 
+// The users API writes "NAv" for a missing value. It is not a value: it never
+// matches a filter, and it sorts after every real value.
+function realValue(value) {
+  const text = normalize(value);
+  return text.toUpperCase() === "NAV" ? "" : text;
+}
+
 function includesText(value, filterValue) {
   const filterText = normalize(filterValue).toLowerCase();
   if (!filterText) return true;
-  return normalize(value).toLowerCase().includes(filterText);
+  return realValue(value).toLowerCase().includes(filterText);
 }
 
 function compareNatural(a, b) {
@@ -857,9 +864,17 @@ function PaginationControls({
 }
 
 function getSortValue(user, key) {
-  if (key === "teams") return (user.teams || []).join(", ") || NO_TEAM;
+  if (key === "teams") return (user.teams || []).join(", ");
   if (key === "accountStatus") return statusLabel(user.accountStatus);
-  return normalize(user[key]);
+  return realValue(user[key]);
+}
+
+// Empty values last, whichever way the column is sorted.
+function compareForSort(a, b, direction) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return direction * compareNatural(a, b);
 }
 
 export default function UsersPage() {
@@ -879,6 +894,7 @@ export default function UsersPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [serviceProviders, setServiceProviders] = useState(null);
+  const [serviceProvidersFailed, setServiceProvidersFailed] = useState(false);
   const [roleUser, setRoleUser] = useState(null);
   const [statusUser, setStatusUser] = useState(null);
   const [roleFeedbackByUser, setRoleFeedbackByUser] = useState({});
@@ -889,10 +905,15 @@ export default function UsersPage() {
     data: users = [],
     isLoading,
     isFetching,
+    isError: usersFailed,
   } = useGetUsersDirectoryQuery({ limit: 1000 });
 
   // Current team membership: every active team a user is a member of.
-  const { data: teams = [] } = useGetAvailableTeamsQuery({ limit: 500 });
+  const {
+    data: teams = [],
+    isLoading: teamsLoading,
+    isError: teamsFailed,
+  } = useGetAvailableTeamsQuery({ limit: 500 });
 
   // The registered service providers: needed for the lineage and for the
   // Service Providers KPI. Smars, the platform owner, is not one of them.
@@ -909,8 +930,9 @@ export default function UsersPage() {
           })),
         );
       })
-      .catch(() => {
-        if (!cancelled) setServiceProviders([]);
+      .catch((error) => {
+        console.error("UsersPage: service providers could not be read", error);
+        if (!cancelled) setServiceProvidersFailed(true);
       });
 
     return () => {
@@ -921,6 +943,7 @@ export default function UsersPage() {
   const isPlatformViewer = PLATFORM_ROLES.includes(normalizeUpper(actorRole));
   const actorServiceProviderId = normalize(actorServiceProvider?.id);
   const lineageReady = isPlatformViewer || serviceProviders !== null;
+  const lineageFailed = !isPlatformViewer && serviceProvidersFailed;
 
   const lineageServiceProviderIds = useMemo(() => {
     if (isPlatformViewer || serviceProviders === null) return null;
@@ -936,8 +959,9 @@ export default function UsersPage() {
     );
   }, [isPlatformViewer, lineageServiceProviderIds, users]);
 
-  const serviceProviderCount =
-    serviceProviders === null
+  const serviceProviderCount = serviceProvidersFailed
+    ? "NAv"
+    : serviceProviders === null
       ? null
       : isPlatformViewer
         ? serviceProviders.length
@@ -994,10 +1018,21 @@ export default function UsersPage() {
         userRows.map((user) => normalize(user.serviceProviderName)),
       ).map((value) => ({ value, label: value })),
       teams: [
-        ...uniqueSorted(userRows.flatMap((user) => user.teams)).map((value) => ({
-          value,
-          label: value,
-        })),
+        ...uniqueSorted(
+          teams
+            .filter(
+              (team) =>
+                isPlatformViewer ||
+                lineageServiceProviderIds?.has(
+                  normalize(team.mncServiceProviderId),
+                ) ||
+                (team.serviceProviderIds || []).some((id) =>
+                  lineageServiceProviderIds?.has(normalize(id)),
+                ) ||
+                userRows.some((user) => user.teams.includes(team.name)),
+            )
+            .map((team) => team.name),
+        ).map((value) => ({ value, label: value })),
         { value: NO_TEAM, label: NO_TEAM },
       ],
       accountStatus: uniqueSorted(
@@ -1007,15 +1042,16 @@ export default function UsersPage() {
         userRows.map((user) => normalizeUpper(user.onboardingStatus)),
       ).map((value) => ({ value, label: value })),
     }),
-    [userRows],
+    [isPlatformViewer, lineageServiceProviderIds, teams, userRows],
   );
 
   // KPIs describe every user, not only the rows a filter leaves on screen.
   const kpis = useMemo(
     () => ({
       users: userRows.length,
-      enabled: userRows.filter((user) => !isStatusDisabled(user.accountStatus))
-        .length,
+      enabled: userRows.filter(
+        (user) => statusLabel(user.accountStatus) === "Enabled",
+      ).length,
       disabled: userRows.filter((user) => isStatusDisabled(user.accountStatus))
         .length,
       onboardingCompleted: userRows.filter(
@@ -1072,13 +1108,12 @@ export default function UsersPage() {
   const sortedUsers = useMemo(() => {
     const direction = sortConfig.direction === "asc" ? 1 : -1;
 
-    return [...filteredUsers].sort(
-      (a, b) =>
-        direction *
-        compareNatural(
-          getSortValue(a, sortConfig.key),
-          getSortValue(b, sortConfig.key),
-        ),
+    return [...filteredUsers].sort((a, b) =>
+      compareForSort(
+        getSortValue(a, sortConfig.key),
+        getSortValue(b, sortConfig.key),
+        direction,
+      ),
     );
   }, [filteredUsers, sortConfig]);
 
@@ -1103,6 +1138,7 @@ export default function UsersPage() {
   }
 
   function handleSort(key) {
+    setCurrentPage(1);
     setSortConfig((current) =>
       current.key === key
         ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
@@ -1160,6 +1196,15 @@ export default function UsersPage() {
     }
   }
 
+  const kpisPending = isLoading || !lineageReady;
+  const kpisUnknown = usersFailed || lineageFailed;
+
+  function kpiValue(value) {
+    if (kpisUnknown) return "NAv";
+    if (kpisPending) return "…";
+    return formatNumber(value);
+  }
+
   const pagination = (
     <PaginationControls
       currentPage={safeCurrentPage}
@@ -1193,27 +1238,29 @@ export default function UsersPage() {
       <section className="dashboard-grid">
         <div className="stat-card">
           <span>Users</span>
-          <strong>{formatNumber(kpis.users)}</strong>
+          <strong>{kpiValue(kpis.users)}</strong>
         </div>
         <div className="stat-card">
           <span>Service Providers</span>
           <strong>
             {serviceProviderCount === null
               ? "…"
-              : formatNumber(serviceProviderCount)}
+              : serviceProviderCount === "NAv"
+                ? "NAv"
+                : formatNumber(serviceProviderCount)}
           </strong>
         </div>
         <div className="stat-card">
           <span>Enabled</span>
-          <strong>{formatNumber(kpis.enabled)}</strong>
+          <strong>{kpiValue(kpis.enabled)}</strong>
         </div>
         <div className="stat-card">
           <span>Disabled</span>
-          <strong>{formatNumber(kpis.disabled)}</strong>
+          <strong>{kpiValue(kpis.disabled)}</strong>
         </div>
         <div className="stat-card">
           <span>Onboarding Completed</span>
-          <strong>{formatNumber(kpis.onboardingCompleted)}</strong>
+          <strong>{kpiValue(kpis.onboardingCompleted)}</strong>
         </div>
       </section>
 
@@ -1479,7 +1526,11 @@ export default function UsersPage() {
                     <td>{user.serviceProviderName || "NAv"}</td>
 
                     <td>
-                      {user.teams.length ? (
+                      {teamsLoading ? (
+                        <span style={styles.muted}>…</span>
+                      ) : teamsFailed ? (
+                        <span style={styles.muted}>NAv</span>
+                      ) : user.teams.length ? (
                         <div style={tableStyles.teamList}>
                           {user.teams.map((teamName) => (
                             <span key={teamName} style={styles.staticBadge}>
@@ -1515,7 +1566,18 @@ export default function UsersPage() {
           </table>
         </div>
 
-        {isLoading || !lineageReady ? (
+        {usersFailed ? (
+          <div style={styles.empty}>Unable to load users.</div>
+        ) : null}
+
+        {!usersFailed && lineageFailed ? (
+          <div style={styles.empty}>
+            The service providers could not be loaded, so your users cannot be
+            shown. Refresh the page to try again.
+          </div>
+        ) : null}
+
+        {!usersFailed && !lineageFailed && (isLoading || !lineageReady) ? (
           <div style={styles.empty}>Loading Users...</div>
         ) : null}
 
@@ -1528,7 +1590,8 @@ export default function UsersPage() {
           </div>
         ) : null}
 
-        {!isLoading &&
+        {!usersFailed &&
+        !isLoading &&
         lineageReady &&
         (isPlatformViewer || actorServiceProviderId) &&
         lineageUsers.length === 0 ? (
