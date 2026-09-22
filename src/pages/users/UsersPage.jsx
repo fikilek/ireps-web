@@ -1,10 +1,29 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { collection, getCountFromServer } from "firebase/firestore";
 
 import { useAuth } from "../../auth/useAuth";
+import { db } from "../../firebase";
+import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import {
   useGetUsersDirectoryQuery,
   useUpdateUserRoleMutation,
 } from "../../redux/usersApi";
+
+// UI-R002: the Users page is a standard iREPS table (ireps-skills/ireps-standard-table.md,
+// ireps-rules/ui-rules/registry-tables.md), with the Wards registry as its model.
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 5;
+const NO_TEAM = "None";
+
+const EMPTY_COLUMN_FILTERS = Object.freeze({
+  displayName: "",
+  email: "",
+  role: "",
+  serviceProviderName: "",
+  teams: "",
+  accountStatus: "",
+  onboardingStatus: "",
+});
 
 const ROLE_OPTIONS = [
   { value: "SPU", label: "Super User" },
@@ -541,11 +560,275 @@ function EditStatusModal({ user, onClose }) {
   );
 }
 
+
+const tableStyles = {
+  sortButton: {
+    width: "100%",
+    border: 0,
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "0.4rem",
+    padding: 0,
+    fontWeight: 900,
+    textAlign: "left",
+  },
+  headerInput: {
+    width: "100%",
+    minWidth: "7.5rem",
+    marginTop: "0.4rem",
+    border: "1px solid #cbd5e1",
+    borderRadius: "0.45rem",
+    padding: "0.36rem 0.45rem",
+    fontSize: "0.72rem",
+    background: "#ffffff",
+  },
+  paginationBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "0.75rem 0.9rem",
+    flexWrap: "wrap",
+  },
+  paginationLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.75rem",
+    flexWrap: "wrap",
+  },
+  paginationControls: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    flexWrap: "wrap",
+  },
+  pageSizeLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    color: "#64748b",
+    fontSize: "0.82rem",
+    fontWeight: 700,
+  },
+  pageSizeSelect: {
+    border: "1px solid rgba(148, 163, 184, 0.45)",
+    borderRadius: "0.55rem",
+    padding: "0.34rem 0.45rem",
+    fontSize: "0.82rem",
+  },
+  paginationButton: {
+    border: "1px solid rgba(148, 163, 184, 0.42)",
+    background: "#fff",
+    color: "#0f172a",
+    borderRadius: "0.6rem",
+    padding: "0.36rem 0.58rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  clearButton: {
+    border: "1px solid #fecaca",
+    background: "#fef2f2",
+    color: "#b91c1c",
+    borderRadius: "0.6rem",
+    padding: "0.36rem 0.62rem",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  pageCountLabel: {
+    color: "#334155",
+    fontSize: "0.82rem",
+    fontWeight: 800,
+    padding: "0 0.2rem",
+  },
+  teamList: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "0.3rem",
+  },
+};
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-ZA");
+}
+
+function includesText(value, filterValue) {
+  const filterText = normalize(filterValue).toLowerCase();
+  if (!filterText) return true;
+  return normalize(value).toLowerCase().includes(filterText);
+}
+
+function compareNatural(a, b) {
+  return String(a || "").localeCompare(String(b || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values.filter(Boolean))].sort(compareNatural);
+}
+
+function SortButton({ label, sortKey, sortConfig, onSort }) {
+  const isActive = sortConfig.key === sortKey;
+  const direction = isActive
+    ? sortConfig.direction === "asc"
+      ? "↑"
+      : "↓"
+    : "↕";
+
+  return (
+    <button
+      type="button"
+      style={tableStyles.sortButton}
+      onClick={() => onSort(sortKey)}
+    >
+      <span>{label}</span>
+      <span>{direction}</span>
+    </button>
+  );
+}
+
+function FilterInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      style={tableStyles.headerInput}
+    />
+  );
+}
+
+function FilterSelect({ value, onChange, allLabel, options }) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      style={tableStyles.headerInput}
+    >
+      <option value="">{allLabel}</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function PaginationControls({
+  currentPage,
+  pageSize,
+  totalPages,
+  totalRows,
+  onPageChange,
+  onPageSizeChange,
+  hasActiveFilters,
+  onClearFilters,
+}) {
+  if (totalRows === 0) return null;
+
+  const startRow = (currentPage - 1) * pageSize + 1;
+  const endRow = Math.min(currentPage * pageSize, totalRows);
+
+  return (
+    <div style={tableStyles.paginationBar}>
+      <div style={tableStyles.paginationLeft}>
+        <span className="muted">
+          Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
+          {formatNumber(totalRows)} rows
+        </span>
+
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            style={tableStyles.clearButton}
+            onClick={onClearFilters}
+          >
+            Clear All Filters
+          </button>
+        ) : null}
+      </div>
+
+      <div style={tableStyles.paginationControls}>
+        <label style={tableStyles.pageSizeLabel}>
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            style={tableStyles.pageSizeSelect}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          style={tableStyles.paginationButton}
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+        >
+          First
+        </button>
+        <button
+          type="button"
+          style={tableStyles.paginationButton}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage <= 1}
+        >
+          Previous
+        </button>
+        <span style={tableStyles.pageCountLabel}>
+          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
+        </span>
+        <button
+          type="button"
+          style={tableStyles.paginationButton}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          style={tableStyles.paginationButton}
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
+        >
+          Last
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function getSortValue(user, key) {
+  if (key === "teams") return (user.teams || []).join(", ") || NO_TEAM;
+  if (key === "accountStatus") return statusLabel(user.accountStatus);
+  return normalize(user[key]);
+}
+
 export default function UsersPage() {
   const { uid: actorUid, role: actorRole } = useAuth();
   const [searchText, setSearchText] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [columnFilters, setColumnFilters] = useState(EMPTY_COLUMN_FILTERS);
+  const [sortConfig, setSortConfig] = useState({
+    key: "displayName",
+    direction: "asc",
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [serviceProviderCount, setServiceProviderCount] = useState(null);
   const [roleUser, setRoleUser] = useState(null);
   const [statusUser, setStatusUser] = useState(null);
   const [roleFeedbackByUser, setRoleFeedbackByUser] = useState({});
@@ -557,6 +840,52 @@ export default function UsersPage() {
     isLoading,
     isFetching,
   } = useGetUsersDirectoryQuery({ limit: 1000 });
+
+  // Current team membership: every active team a user is a member of.
+  const { data: teams = [] } = useGetAvailableTeamsQuery({ limit: 500 });
+
+  // Service Providers KPI: the companies registered as service providers.
+  // Smars, the platform owner, has a user here but is not one.
+  useEffect(() => {
+    let cancelled = false;
+
+    getCountFromServer(collection(db, "serviceProviders"))
+      .then((snapshot) => {
+        if (!cancelled) setServiceProviderCount(snapshot.data().count);
+      })
+      .catch(() => {
+        if (!cancelled) setServiceProviderCount(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const teamNamesByUid = useMemo(() => {
+    const byUid = new Map();
+
+    for (const team of teams) {
+      for (const memberUid of team.memberUserIds || []) {
+        const names = byUid.get(memberUid) || [];
+        names.push(team.name);
+        byUid.set(memberUid, names);
+      }
+    }
+
+    for (const names of byUid.values()) names.sort(compareNatural);
+
+    return byUid;
+  }, [teams]);
+
+  const userRows = useMemo(
+    () =>
+      users.map((user) => ({
+        ...user,
+        teams: teamNamesByUid.get(normalize(user.uid || user.id)) || [],
+      })),
+    [teamNamesByUid, users],
+  );
 
   const selectedRoleUser = roleUser
     ? users.find((user) => (user.uid || user.id) === (roleUser.uid || roleUser.id)) ||
@@ -573,10 +902,51 @@ export default function UsersPage() {
     ].sort();
   }, [users]);
 
+  const columnOptions = useMemo(
+    () => ({
+      role: uniqueSorted(userRows.map((user) => normalizeUpper(user.role))).map(
+        (value) => ({ value, label: value }),
+      ),
+      serviceProviderName: uniqueSorted(
+        userRows.map((user) => normalize(user.serviceProviderName)),
+      ).map((value) => ({ value, label: value })),
+      teams: [
+        ...uniqueSorted(userRows.flatMap((user) => user.teams)).map((value) => ({
+          value,
+          label: value,
+        })),
+        { value: NO_TEAM, label: NO_TEAM },
+      ],
+      accountStatus: uniqueSorted(
+        userRows.map((user) => normalizeUpper(user.accountStatus)),
+      ).map((value) => ({ value, label: statusLabel(value) })),
+      onboardingStatus: uniqueSorted(
+        userRows.map((user) => normalizeUpper(user.onboardingStatus)),
+      ).map((value) => ({ value, label: value })),
+    }),
+    [userRows],
+  );
+
+  // KPIs describe every user, not only the rows a filter leaves on screen.
+  const kpis = useMemo(
+    () => ({
+      users: userRows.length,
+      enabled: userRows.filter((user) => !isStatusDisabled(user.accountStatus))
+        .length,
+      disabled: userRows.filter((user) => isStatusDisabled(user.accountStatus))
+        .length,
+      onboardingCompleted: userRows.filter(
+        (user) => normalizeUpper(user.onboardingStatus) === "COMPLETED",
+      ).length,
+    }),
+    [userRows],
+  );
+
+  // Standard order: whole population → filter → sort → page.
   const filteredUsers = useMemo(() => {
     const search = normalize(searchText).toLowerCase();
 
-    return users.filter((user) => {
+    return userRows.filter((user) => {
       const matchesSearch =
         !search ||
         normalize(user.displayName).toLowerCase().includes(search) ||
@@ -588,9 +958,78 @@ export default function UsersPage() {
       const matchesStatus =
         !statusFilter || normalizeUpper(user.accountStatus) === statusFilter;
 
-      return matchesSearch && matchesRole && matchesStatus;
+      const matchesTeam =
+        !columnFilters.teams ||
+        (columnFilters.teams === NO_TEAM
+          ? user.teams.length === 0
+          : user.teams.includes(columnFilters.teams));
+
+      return (
+        matchesSearch &&
+        matchesRole &&
+        matchesStatus &&
+        includesText(user.displayName, columnFilters.displayName) &&
+        includesText(user.email, columnFilters.email) &&
+        (!columnFilters.role ||
+          normalizeUpper(user.role) === columnFilters.role) &&
+        (!columnFilters.serviceProviderName ||
+          normalize(user.serviceProviderName) ===
+            columnFilters.serviceProviderName) &&
+        matchesTeam &&
+        (!columnFilters.accountStatus ||
+          normalizeUpper(user.accountStatus) === columnFilters.accountStatus) &&
+        (!columnFilters.onboardingStatus ||
+          normalizeUpper(user.onboardingStatus) ===
+            columnFilters.onboardingStatus)
+      );
     });
-  }, [roleFilter, searchText, statusFilter, users]);
+  }, [columnFilters, roleFilter, searchText, statusFilter, userRows]);
+
+  const sortedUsers = useMemo(() => {
+    const direction = sortConfig.direction === "asc" ? 1 : -1;
+
+    return [...filteredUsers].sort(
+      (a, b) =>
+        direction *
+        compareNatural(
+          getSortValue(a, sortConfig.key),
+          getSortValue(b, sortConfig.key),
+        ),
+    );
+  }, [filteredUsers, sortConfig]);
+
+  const totalRows = sortedUsers.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pagedUsers = sortedUsers.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize,
+  );
+
+  const hasActiveFilters = Object.values(columnFilters).some(Boolean);
+
+  function updateColumnFilter(key, value) {
+    setCurrentPage(1);
+    setColumnFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function clearColumnFilters() {
+    setCurrentPage(1);
+    setColumnFilters(EMPTY_COLUMN_FILTERS);
+  }
+
+  function handleSort(key) {
+    setSortConfig((current) =>
+      current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" },
+    );
+  }
+
+  function handlePageSizeChange(nextSize) {
+    setCurrentPage(1);
+    setPageSize(nextSize);
+  }
 
   async function handleUpdateRole(user, newRole) {
     const userUid = normalize(user?.uid || user?.id);
@@ -637,6 +1076,19 @@ export default function UsersPage() {
     }
   }
 
+  const pagination = (
+    <PaginationControls
+      currentPage={safeCurrentPage}
+      pageSize={pageSize}
+      totalPages={totalPages}
+      totalRows={totalRows}
+      onPageChange={setCurrentPage}
+      onPageSizeChange={handlePageSizeChange}
+      hasActiveFilters={hasActiveFilters}
+      onClearFilters={clearColumnFilters}
+    />
+  );
+
   return (
     <section style={styles.page}>
       <div style={styles.intro}>
@@ -654,20 +1106,53 @@ export default function UsersPage() {
         </span>
       </div>
 
+      <section className="dashboard-grid">
+        <div className="stat-card">
+          <span>Users</span>
+          <strong>{formatNumber(kpis.users)}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Service Providers</span>
+          <strong>
+            {serviceProviderCount === null
+              ? "…"
+              : formatNumber(serviceProviderCount)}
+          </strong>
+        </div>
+        <div className="stat-card">
+          <span>Enabled</span>
+          <strong>{formatNumber(kpis.enabled)}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Disabled</span>
+          <strong>{formatNumber(kpis.disabled)}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Onboarding Completed</span>
+          <strong>{formatNumber(kpis.onboardingCompleted)}</strong>
+        </div>
+      </section>
+
       <div style={styles.filters}>
         <input
           type="search"
           aria-label="Search users"
           placeholder="Search name or email..."
           value={searchText}
-          onChange={(event) => setSearchText(event.target.value)}
+          onChange={(event) => {
+            setCurrentPage(1);
+            setSearchText(event.target.value);
+          }}
           style={styles.control}
         />
 
         <select
           aria-label="Filter users by role"
           value={roleFilter}
-          onChange={(event) => setRoleFilter(event.target.value)}
+          onChange={(event) => {
+            setCurrentPage(1);
+            setRoleFilter(event.target.value);
+          }}
           style={styles.control}
         >
           <option value="">All Roles</option>
@@ -681,7 +1166,10 @@ export default function UsersPage() {
         <select
           aria-label="Filter users by account status"
           value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
+          onChange={(event) => {
+            setCurrentPage(1);
+            setStatusFilter(event.target.value);
+          }}
           style={styles.control}
         >
           <option value="">All Statuses</option>
@@ -693,22 +1181,120 @@ export default function UsersPage() {
         </select>
       </div>
 
-      <div style={styles.card}>
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
+      <section className="table-panel">
+        {pagination}
+
+        <div className="table-wrap">
+          <table className="data-table">
             <thead>
               <tr>
-                <th style={styles.th}>User</th>
-                <th style={styles.th}>Email</th>
-                <th style={styles.th}>Role</th>
-                <th style={styles.th}>Service Provider</th>
-                <th style={styles.th}>Account Status</th>
-                <th style={styles.th}>Onboarding Status</th>
+                <th>
+                  <SortButton
+                    label="User"
+                    sortKey="displayName"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    value={columnFilters.displayName}
+                    onChange={(value) => updateColumnFilter("displayName", value)}
+                    placeholder="User"
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Email"
+                    sortKey="email"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    value={columnFilters.email}
+                    onChange={(value) => updateColumnFilter("email", value)}
+                    placeholder="Email"
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Role"
+                    sortKey="role"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterSelect
+                    value={columnFilters.role}
+                    onChange={(value) => updateColumnFilter("role", value)}
+                    allLabel="All roles"
+                    options={columnOptions.role}
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Service Provider"
+                    sortKey="serviceProviderName"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterSelect
+                    value={columnFilters.serviceProviderName}
+                    onChange={(value) =>
+                      updateColumnFilter("serviceProviderName", value)
+                    }
+                    allLabel="All service providers"
+                    options={columnOptions.serviceProviderName}
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Team"
+                    sortKey="teams"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterSelect
+                    value={columnFilters.teams}
+                    onChange={(value) => updateColumnFilter("teams", value)}
+                    allLabel="All teams"
+                    options={columnOptions.teams}
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Account Status"
+                    sortKey="accountStatus"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterSelect
+                    value={columnFilters.accountStatus}
+                    onChange={(value) =>
+                      updateColumnFilter("accountStatus", value)
+                    }
+                    allLabel="All statuses"
+                    options={columnOptions.accountStatus}
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Onboarding Status"
+                    sortKey="onboardingStatus"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterSelect
+                    value={columnFilters.onboardingStatus}
+                    onChange={(value) =>
+                      updateColumnFilter("onboardingStatus", value)
+                    }
+                    allLabel="All statuses"
+                    options={columnOptions.onboardingStatus}
+                  />
+                </th>
               </tr>
             </thead>
 
             <tbody>
-              {filteredUsers.map((user) => {
+              {pagedUsers.map((user) => {
                 const userUid = normalize(user.uid || user.id);
                 const roleEditable = canManageTargetRole({
                   actorUid,
@@ -747,17 +1333,15 @@ export default function UsersPage() {
 
                 return (
                   <tr key={userUid}>
-                    <td style={styles.td}>
+                    <td>
                       <span style={styles.userName}>
                         {user.displayName || "NAv"}
                       </span>
                     </td>
 
-                    <td style={{ ...styles.td, ...styles.muted }}>
-                      {user.email || "NAv"}
-                    </td>
+                    <td style={styles.muted}>{user.email || "NAv"}</td>
 
-                    <td style={styles.td}>
+                    <td>
                       <div style={styles.roleCell}>
                         <button
                           type="button"
@@ -791,11 +1375,23 @@ export default function UsersPage() {
                       </div>
                     </td>
 
-                    <td style={styles.td}>
-                      {user.serviceProviderName || "NAv"}
+                    <td>{user.serviceProviderName || "NAv"}</td>
+
+                    <td>
+                      {user.teams.length ? (
+                        <div style={tableStyles.teamList}>
+                          {user.teams.map((teamName) => (
+                            <span key={teamName} style={styles.staticBadge}>
+                              {teamName}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={styles.muted}>{NO_TEAM}</span>
+                      )}
                     </td>
 
-                    <td style={styles.td}>
+                    <td>
                       <button
                         type="button"
                         style={styles.editableBadge}
@@ -806,7 +1402,7 @@ export default function UsersPage() {
                       </button>
                     </td>
 
-                    <td style={styles.td}>
+                    <td>
                       <span style={styles.staticBadge}>
                         {normalizeUpper(user.onboardingStatus) || "NAv"}
                       </span>
@@ -829,7 +1425,9 @@ export default function UsersPage() {
             No users match the current search or filters.
           </div>
         ) : null}
-      </div>
+
+        {pagination}
+      </section>
 
       {selectedRoleUser ? (
         <EditRoleModal
