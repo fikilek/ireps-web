@@ -103,6 +103,29 @@ test("a missing CB size or keypad serial number needs the reason it is not avail
   );
 });
 
+test("SAME may copy NAv, and a conventional meter needs no keypad", () => {
+  const data = inspectionPayload();
+  Object.assign(data.inspection.captured.ast.astData.meter, {
+    cb: { size: "NAv", comment: "Circuit Breaker Missing" },
+    keypad: { serialNo: "NAv" },
+  });
+  assert.equal(validateMeterInspection({ data, astDoc: astDoc() }).ok, true);
+
+  const conventional = inspectionPayload();
+  Object.assign(conventional.inspection.captured.ast.astData.meter, {
+    type: "conventional",
+    keypad: { serialNo: "" },
+  });
+  assert.equal(validateMeterInspection({ data: conventional, astDoc: astDoc() }).ok, true);
+
+  const prepaid = inspectionPayload();
+  prepaid.inspection.captured.ast.astData.meter.keypad = { serialNo: "" };
+  assert.equal(
+    validateMeterInspection({ data: prepaid, astDoc: astDoc() }).code,
+    "INSPECTION_SERIAL_NUMBER_REQUIRED",
+  );
+});
+
 test("office work still carries the instruction it was issued with", () => {
   const result = validateMeterInspection({
     data: inspectionPayload({

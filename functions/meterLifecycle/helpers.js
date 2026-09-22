@@ -1763,12 +1763,21 @@ export function validateMeterInspection({ data, astDoc }) {
       };
     }
 
-    // A value, or the reason it is not available (the Meter Discovery reasons).
-    // The phone turns "Other" into the typed words, so a bare "Other" is refused.
-    for (const [part, valueKey, code, label] of [
+    // UI-R003: a value (NAv included, as SAME copies it), or why there is none
+    // (the Meter Discovery reasons). The phone sends Other as the typed words,
+    // so a bare "Other" is refused. As on Discovery, a keypad is asked for on
+    // prepaid meters only.
+    const isPrepaidCapture = ["prepaid", "prepayment", "token"].includes(
+      String(capturedMeter?.type || "").trim().toLowerCase().replace(/[\s_-]/g, ""),
+    );
+    const requiredParts = [
       ["cb", "size", "INSPECTION_CB_SIZE_REQUIRED", "CB size"],
-      ["keypad", "serialNo", "INSPECTION_SERIAL_NUMBER_REQUIRED", "Keypad serial number"],
-    ]) {
+      ...(isPrepaidCapture
+        ? [["keypad", "serialNo", "INSPECTION_SERIAL_NUMBER_REQUIRED", "Keypad serial number"]]
+        : []),
+    ];
+
+    for (const [part, valueKey, code, label] of requiredParts) {
       const hasValue = !!String(capturedMeter?.[part]?.[valueKey] || "").trim();
       const reason = String(capturedMeter?.[part]?.comment || "").trim();
 
@@ -1776,7 +1785,7 @@ export function validateMeterInspection({ data, astDoc }) {
         return {
           ok: false,
           code,
-          message: `${label} is required, or say why it is not available`,
+          message: `${label} is required, or say why there is none`,
         };
       }
     }
