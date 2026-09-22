@@ -67,9 +67,11 @@ const NORMALISATION_ON_SITE_FIXES = Object.freeze([
   "Meter registered",
 ]);
 
+// The two jobs. Each opens its own chain of forms (MN-R001 section 6), so a
+// finding carries one of them, never both.
 const NORMALISATION_JOB_ACTIONS = Object.freeze([
   "Disconnect meter",
-  "Meter replaced",
+  "Replace meter",
 ]);
 
 const NORMALISATION_ACTION_VALUES = new Set([
@@ -81,8 +83,8 @@ const NORMALISATION_ACTION_VALUES = new Set([
 // The action that follows each finding. Not taking it needs a reason.
 const NORMALISATION_EXPECTED_BY_ANOMALY = Object.freeze({
   "Illegally Connected": "Disconnect meter",
-  "Meter Damaged": "Meter replaced",
-  "Meter Faulty": "Meter replaced",
+  "Meter Damaged": "Replace meter",
+  "Meter Faulty": "Replace meter",
 });
 
 const NO_ACTION_REASONS = Object.freeze([
@@ -99,12 +101,29 @@ export function normalisationActionsTaken(actionTaken) {
   return actions.filter((action) => String(action) !== NORMALISATION_NONE);
 }
 
-// A disconnection proves itself in the disconnection form that follows, so the
-// worker is not asked for the same photograph twice.
+// A disconnection or a replacement proves itself in the forms that follow, so
+// the worker is not asked for the same photograph twice.
 export function normalisationPhotoRequired(actionTaken) {
   return normalisationActionsTaken(actionTaken).some(
-    (action) => action !== "Disconnect meter",
+    (action) => !NORMALISATION_JOB_ACTIONS.includes(action),
   );
+}
+
+// What a finding calls for next, and where the numbers of that work are kept
+// (MN-R001 section 7). No status word: an empty number means not yet submitted.
+export function buildNormalisationFollowUp(actionTaken) {
+  const actions = Array.isArray(actionTaken) ? actionTaken : [];
+  if (actions.includes("Disconnect meter")) {
+    return { required: "METER_DISCONNECTION", disconnectionTrnId: "" };
+  }
+  if (actions.includes("Replace meter")) {
+    return {
+      required: "METER_REPLACEMENT",
+      removalTrnId: "",
+      installationTrnId: "",
+    };
+  }
+  return null;
 }
 
 export function expectedNormalisationAction(anomaly) {
@@ -142,6 +161,13 @@ export function validateNormalisation({ anomaly, normalisation }) {
     return {
       code: "NORMALISATION_NONE_NOT_EXCLUSIVE",
       message: "None cannot be used with another action.",
+    };
+  }
+
+  if (NORMALISATION_JOB_ACTIONS.every((job) => actions.includes(job))) {
+    return {
+      code: "NORMALISATION_ONE_JOB_ONLY",
+      message: "Choose one: disconnect or replace.",
     };
   }
 
@@ -283,7 +309,7 @@ function validateGps(gps) {
   );
 }
 
-function validateOtherAnomalies(value) {
+export function validateOtherAnomalies(value) {
   if (value == null) return null;
 
   if (!Array.isArray(value)) {

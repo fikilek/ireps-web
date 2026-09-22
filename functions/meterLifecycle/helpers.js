@@ -1,6 +1,9 @@
 import {
+  anomalyPhotoRequired,
+  buildNormalisationFollowUp,
   normalisationPhotoRequired,
   validateNormalisation,
+  validateOtherAnomalies,
 } from "../meterDiscovery/validation.js";
 
 const NOW_FALLBACK_USER = "SYSTEM";
@@ -403,6 +406,7 @@ export function validateAssignment(
       "METER_DISCONNECTION",
       "METER_RECONNECTION",
       "METER_REMOVAL",
+      "METER_INSPECTION",
     ].includes(normalizedTrnType);
 
   if (!instruction?.code) {
@@ -1331,15 +1335,10 @@ function sanitizeElectricityNormalisation(normalisation = {}) {
     noActionReason: String(normalisation?.noActionReason || "").trim(),
   };
 
-  // What the finding calls for next, so the office can see it is outstanding
-  // until the disconnection itself is submitted.
-  if (actionTaken.includes("Disconnect meter")) {
-    sanitized.followUp = {
-      required: "METER_DISCONNECTION",
-      status: "Not Started",
-      trnId: "",
-    };
-  }
+  // What the finding calls for next, and where the numbers of that work will
+  // be kept (MN-R001 section 7). No status word.
+  const followUp = buildNormalisationFollowUp(actionTaken);
+  if (followUp) sanitized.followUp = followUp;
 
   return sanitized;
 }
@@ -1447,6 +1446,10 @@ function sanitizeInspectionCapturedAst(
     anomalies: {
       anomaly: String(capturedAst?.anomalies?.anomaly || "").trim(),
       anomalyDetail: String(capturedAst?.anomalies?.anomalyDetail || "").trim(),
+      // MA-R001 1.2.0: the same Other Anomalies as Meter Discovery.
+      otherAnomalies: Array.isArray(capturedAst?.anomalies?.otherAnomalies)
+        ? capturedAst.anomalies.otherAnomalies.map((a) => String(a))
+        : [],
     },
 
     location: {
@@ -1840,6 +1843,17 @@ export function validateMeterInspection({ data, astDoc }) {
         message: normalisationError.message,
       };
     }
+
+    const otherAnomaliesError = validateOtherAnomalies(
+      capturedAst?.anomalies?.otherAnomalies ?? [],
+    );
+    if (otherAnomaliesError) {
+      return {
+        ok: false,
+        code: otherAnomaliesError.code,
+        message: otherAnomaliesError.message,
+      };
+    }
   } else if (!getInspectionNormalisationAction(data)) {
     return {
       ok: false,
@@ -1862,8 +1876,17 @@ export function validateMeterInspection({ data, astDoc }) {
 
   const anomalyCode = getInspectionAnomalyCode(data);
 
+  // MA-R001: the same photo rule as Meter Discovery — every detail except
+  // Operationally Ok needs an anomaly photo, a Meter Ok suspicion included.
+  const anomalyNeedsPhoto = isElectricityMeter
+    ? anomalyPhotoRequired(
+        capturedAnomalies?.anomaly,
+        capturedAnomalies?.anomalyDetail,
+      )
+    : !["METER_OK", "METER OK", "OK"].includes(anomalyCode);
+
   if (
-    !["METER_OK", "METER OK", "OK"].includes(anomalyCode) &&
+    anomalyNeedsPhoto &&
     !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.anomalyPhoto, {
       requireUrl: true,
     })
@@ -1871,7 +1894,7 @@ export function validateMeterInspection({ data, astDoc }) {
     return {
       ok: false,
       code: "MISSING_INSPECTION_ANOMALY_PHOTO",
-      message: "Anomaly photo is required when anomaly is not Meter Ok",
+      message: "Anomaly photo is required for this anomaly",
     };
   }
 
@@ -3278,27 +3301,36 @@ export function buildLifecycleInstructionTrnPayload({
 }
 
 // MN-R001 section 7: close the loop. The discovery or inspection that called for
-// a disconnection carries it as outstanding until the disconnection is
-// submitted; this marks it done and names the transaction that did it.
-export async function markParentFollowUpCompleted({
+// the work records the number of each piece once it is submitted — the
+// disconnection, or the removal and then the installation. No status word.
+const FOLLOW_UP_SLOTS = Object.freeze({
+  METER_DISCONNECTION: "disconnectionTrnId",
+  METER_REMOVAL: "removalTrnId",
+  METER_INSTALLATION: "installationTrnId",
+});
+
+function followUpField(parentTrnType) {
+  const parentType = normalizeUpper(parentTrnType || "");
+  if (parentType === "METER_INSPECTION") {
+    return "inspection.captured.ast.normalisation.followUp";
+  }
+  if (parentType === "METER_DISCOVERY") return "ast.normalisation.followUp";
+  return "";
+}
+
+export async function linkFollowUp({
   db,
   parentTrnId,
   parentTrnType,
+  workTrnType,
   trnId,
 }) {
   const parentId = String(parentTrnId || "").trim();
-  const parentType = normalizeUpper(parentTrnType || "");
+  const slot = FOLLOW_UP_SLOTS[normalizeUpper(workTrnType || "")];
+  const field = followUpField(parentTrnType);
 
   if (!parentId || !trnId) return { linked: false, reason: "NO_PARENT" };
-
-  const field =
-    parentType === "METER_INSPECTION"
-      ? "inspection.captured.ast.normalisation.followUp"
-      : parentType === "METER_DISCOVERY"
-        ? "ast.normalisation.followUp"
-        : "";
-
-  if (!field) return { linked: false, reason: "UNKNOWN_PARENT_TYPE" };
+  if (!slot || !field) return { linked: false, reason: "UNKNOWN_PARENT_TYPE" };
 
   const parentRef = db.collection("trns").doc(parentId);
   const parentSnap = await parentRef.get();
@@ -3306,11 +3338,66 @@ export async function markParentFollowUpCompleted({
   // A parent that is not there is never invented.
   if (!parentSnap.exists) return { linked: false, reason: "PARENT_NOT_FOUND" };
 
-  await parentRef.update({
-    [`${field}.required`]: "METER_DISCONNECTION",
-    [`${field}.status`]: "Completed",
-    [`${field}.trnId`]: trnId,
-  });
+  await parentRef.update({ [`${field}.${slot}`]: trnId });
 
-  return { linked: true, parentTrnId: parentId, trnId };
+  return { linked: true, parentTrnId: parentId, slot, trnId };
+}
+
+// Kept for the disconnection callers and tests written before 1.1.0.
+export async function markParentFollowUpCompleted({
+  db,
+  parentTrnId,
+  parentTrnType,
+  trnId,
+}) {
+  return linkFollowUp({
+    db,
+    parentTrnId,
+    parentTrnType,
+    workTrnType: "METER_DISCONNECTION",
+    trnId,
+  });
+}
+
+// MN-R001 section 6.1: the installation that completes a replacement. The
+// phone sends where it came from; only this shape is kept.
+export function sanitizeReplacementOrigin(origin = {}) {
+  if (normalizeUpper(origin?.parentTrnType || "") !== "METER_REMOVAL") return null;
+
+  const parentTrnId = String(origin?.parentTrnId || "").trim();
+  if (!parentTrnId) return null;
+
+  return {
+    channel: "FIELD",
+    source: "METER_REMOVAL",
+    parentTrnId,
+    parentTrnType: "METER_REMOVAL",
+    replacesAstId: String(origin?.replacesAstId || "").trim() || null,
+    replacesMeterNo: String(origin?.replacesMeterNo || "").trim() || null,
+  };
+}
+
+// The removal knows the finding it came from; the finding gets the
+// installation number, and the removal notes which installation completed it.
+export async function linkReplacementInstallation({
+  db,
+  removalTrnId,
+  installationTrnId,
+}) {
+  const removalRef = db.collection("trns").doc(String(removalTrnId || "").trim());
+  const removalSnap = await removalRef.get();
+
+  if (!removalSnap.exists) return { linked: false, reason: "REMOVAL_NOT_FOUND" };
+
+  const removal = removalSnap.data() || {};
+
+  await removalRef.update({ "replacement.installationTrnId": installationTrnId });
+
+  return linkFollowUp({
+    db,
+    parentTrnId: removal?.origin?.parentTrnId,
+    parentTrnType: removal?.origin?.parentTrnType,
+    workTrnType: "METER_INSTALLATION",
+    trnId: installationTrnId,
+  });
 }

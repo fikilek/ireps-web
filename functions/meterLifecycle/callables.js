@@ -8,7 +8,7 @@ import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatche
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
-  markParentFollowUpCompleted,
+  linkFollowUp,
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
   buildFailureResult,
   buildLifecycleTrnPayload,
@@ -39,10 +39,13 @@ function readTrnType(trnData = {}) {
 
 const INSTRUCTION_MEDIA_TAG = "instructionMedia";
 
+// Work a field worker or supervisor may start on the spot. METER_INSPECTION
+// joined in MN-R001 1.1.0: the re-offender is inspected from the meter card.
 const DIRECT_FIELD_DUAL_ORIGIN_TRN_TYPES = [
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
   "METER_REMOVAL",
+  "METER_INSPECTION",
 ];
 
 function readFirstString(...values) {
@@ -1089,14 +1092,15 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     // it. Never fails the submission: the work is saved, and anything that
     // cannot be linked is logged for the office.
     if (
-      trnType === "METER_DISCONNECTION" &&
+      (trnType === "METER_DISCONNECTION" || trnType === "METER_REMOVAL") &&
       responsePayload?.success === true
     ) {
       try {
-        await markParentFollowUpCompleted({
+        await linkFollowUp({
           db,
           parentTrnId: data?.origin?.parentTrnId,
           parentTrnType: data?.origin?.parentTrnType,
+          workTrnType: trnType,
           trnId,
         });
       } catch (linkError) {

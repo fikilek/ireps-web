@@ -481,7 +481,21 @@ test("normalisation: a damaged or faulty meter must be replaced, or say why not"
       "NORMALISATION_REASON_REQUIRED",
     );
 
+    // Replace meter asks for no photo here: the removal and the installation
+    // carry the proof (MN-R001 1.1.0).
     expectPass(
+      deepMerge(baseElectricity(), {
+        ...finding,
+        ast: {
+          ...finding.ast,
+          normalisation: { actionTaken: ["Replace meter"] },
+        },
+        media: media(...ELEC_MEDIA, "anomalyPhoto"),
+      }),
+    );
+
+    // The old wording is refused.
+    expectCode(
       deepMerge(baseElectricity(), {
         ...finding,
         ast: {
@@ -490,6 +504,20 @@ test("normalisation: a damaged or faulty meter must be replaced, or say why not"
         },
         media: media(...ELEC_MEDIA, "anomalyPhoto", "normalisationPhoto"),
       }),
+      "INVALID_NORMALISATION_ACTION",
+    );
+
+    // One job per finding.
+    expectCode(
+      deepMerge(baseElectricity(), {
+        ...finding,
+        ast: {
+          ...finding.ast,
+          normalisation: { actionTaken: ["Replace meter", "Disconnect meter"] },
+        },
+        media: media(...ELEC_MEDIA, "anomalyPhoto"),
+      }),
+      "NORMALISATION_ONE_JOB_ONLY",
     );
 
     expectPass(
@@ -587,7 +615,7 @@ test("normalisation metadata exposes the canonical values and the reasons", () =
       "Disconnect meter",
       "Keypad normalised",
       "Meter registered",
-      "Meter replaced",
+      "Replace meter",
       "Service point completed",
       "Tamper removed",
       "none",

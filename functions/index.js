@@ -174,9 +174,14 @@ import {
 
 import { projectMeterDiscoveryAstMedia } from "./meterDiscovery/astMedia.js";
 import {
+  buildNormalisationFollowUp,
   anomalyPhotoRequired,
   validateMeterDiscoveryPayload,
 } from "./meterDiscovery/validation.js";
+import {
+  linkReplacementInstallation,
+  sanitizeReplacementOrigin,
+} from "./meterLifecycle/helpers.js";
 import {
   validateMeterInstallationElectricity,
 } from "./meterInstallation/validation.js";
@@ -3298,15 +3303,11 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     // MN-R001 section 7: the worker said this meter must be disconnected. The
     // disconnection is its own transaction, so until it arrives this discovery
     // carries the work as outstanding and the office can see it.
-    if (
-      Array.isArray(finalPayload?.ast?.normalisation?.actionTaken) &&
-      finalPayload.ast.normalisation.actionTaken.includes("Disconnect meter")
-    ) {
-      finalPayload.ast.normalisation.followUp = {
-        required: "METER_DISCONNECTION",
-        status: "Not Started",
-        trnId: "",
-      };
+    const normalisationFollowUp = buildNormalisationFollowUp(
+      finalPayload?.ast?.normalisation?.actionTaken,
+    );
+    if (normalisationFollowUp) {
+      finalPayload.ast.normalisation.followUp = normalisationFollowUp;
     }
 
     await trnRef.set(finalPayload, { merge: true });
@@ -5097,12 +5098,21 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       },
     };
 
+    // MN-R001 section 6.1: an installation that completes a replacement names
+    // the removal it follows and the meter it replaces. Anything else the phone
+    // sent as an origin is not kept.
+    const replacementOrigin = sanitizeReplacementOrigin(safePayload?.origin);
+
     const trnDoc = {
       ...safePayload,
       accessData: finalAccessData,
       ast: finalAstPayload,
       meterType,
       metadata,
+      origin: replacementOrigin || {
+        channel: "FIELD",
+        source: "NEW_INSTALLATION",
+      },
     };
 
     const serviceProvider = safePayload?.serviceProvider || {
@@ -5131,6 +5141,15 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       trnId,
       status: finalMeterStatus,
       serviceProvider,
+      ...(replacementOrigin
+        ? {
+            replaces: {
+              astId: replacementOrigin.replacesAstId,
+              meterNo: replacementOrigin.replacesMeterNo,
+              removalTrnId: replacementOrigin.parentTrnId,
+            },
+          }
+        : {}),
     };
 
     const astRef = db.collection("asts").doc(trnId);
@@ -5320,6 +5339,25 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       foundAt: now,
       log: logger,
     });
+
+    // The finding that called for the replacement now has its installation.
+    // Never fails the installation: it is saved, and a link that cannot be made
+    // is logged for the office.
+    if (replacementOrigin?.parentTrnId) {
+      try {
+        await linkReplacementInstallation({
+          db,
+          removalTrnId: replacementOrigin.parentTrnId,
+          installationTrnId: trnId,
+        });
+      } catch (linkError) {
+        logger.error("onMeterInstallationCallable --replacement not linked", {
+          trnId,
+          removalTrnId: replacementOrigin.parentTrnId,
+          message: linkError?.message || String(linkError),
+        });
+      }
+    }
 
     return {
       success: true,

@@ -4,8 +4,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  linkFollowUp,
+  linkReplacementInstallation,
   markParentFollowUpCompleted,
   sanitizeOrigin,
+  sanitizeReplacementOrigin,
+  validateAssignment,
   validateMeterInspection,
 } from "../meterLifecycle/helpers.js";
 
@@ -193,10 +197,9 @@ test("the finding is marked done only when a real disconnection arrives", async 
   });
 
   assert.equal(linked.linked, true);
+  // The number of the work, never a status word (MN-R001 1.1.0 section 7).
   assert.deepEqual(updates[0].patch, {
-    "ast.normalisation.followUp.required": "METER_DISCONNECTION",
-    "ast.normalisation.followUp.status": "Completed",
-    "ast.normalisation.followUp.trnId": "TRN_MDCN_1",
+    "ast.normalisation.followUp.disconnectionTrnId": "TRN_MDCN_1",
   });
 
   const onInspection = await markParentFollowUpCompleted({
@@ -208,7 +211,7 @@ test("the finding is marked done only when a real disconnection arrives", async 
   assert.equal(onInspection.linked, true);
   assert.equal(
     Object.keys(updates[1].patch)[0],
-    "inspection.captured.ast.normalisation.followUp.required",
+    "inspection.captured.ast.normalisation.followUp.disconnectionTrnId",
   );
 
   // A parent that is not there is never invented.
@@ -230,4 +233,108 @@ test("the finding is marked done only when a real disconnection arrives", async 
     trnId: "TRN_MDCN_4",
   });
   assert.equal(none.linked, false);
+});
+
+test("a field inspection needs no office instruction at the front door either", () => {
+  const assignment = {
+    instruction: { code: "METER_INSPECTION", text: "" },
+    targets: [{ type: "USER", id: "FWR_1", name: "Peter" }],
+  };
+
+  assert.equal(
+    validateAssignment(assignment, "METER_INSPECTION", { originChannel: "FIELD" }).ok,
+    true,
+  );
+
+  // Office work still needs the words of the instruction.
+  assert.equal(
+    validateAssignment(assignment, "METER_INSPECTION", { originChannel: "OFFICE" }).ok,
+    false,
+  );
+});
+
+test("a Meter Ok suspicion on an inspection needs its photo, as on a discovery", () => {
+  const suspicion = validateMeterInspection({
+    data: inspectionPayload({
+      anomaly: "Meter Ok",
+      anomalyDetail: "Bypass Suspicion",
+    }),
+    astDoc: astDoc(),
+  });
+
+  assert.equal(suspicion.ok, false);
+  assert.equal(suspicion.code, "MISSING_INSPECTION_ANOMALY_PHOTO");
+});
+
+test("the replacement chain: removal on the finding, installation on the finding and the removal", async () => {
+  const docs = {
+    TRN_MDIS_9: { ast: { normalisation: { followUp: {} } } },
+    TRN_MREM_9: {
+      origin: { parentTrnId: "TRN_MDIS_9", parentTrnType: "METER_DISCOVERY" },
+    },
+  };
+  const updates = [];
+  const db = {
+    collection: () => ({
+      doc: (id) => ({
+        get: async () => ({ exists: !!docs[id], data: () => docs[id] }),
+        update: async (patch) => updates.push({ id, patch }),
+      }),
+    }),
+  };
+
+  const removal = await linkFollowUp({
+    db,
+    parentTrnId: "TRN_MDIS_9",
+    parentTrnType: "METER_DISCOVERY",
+    workTrnType: "METER_REMOVAL",
+    trnId: "TRN_MREM_9",
+  });
+  assert.equal(removal.linked, true);
+  assert.deepEqual(updates[0], {
+    id: "TRN_MDIS_9",
+    patch: { "ast.normalisation.followUp.removalTrnId": "TRN_MREM_9" },
+  });
+
+  const installation = await linkReplacementInstallation({
+    db,
+    removalTrnId: "TRN_MREM_9",
+    installationTrnId: "TRN_MINST_9",
+  });
+  assert.equal(installation.linked, true);
+  assert.deepEqual(updates[1], {
+    id: "TRN_MREM_9",
+    patch: { "replacement.installationTrnId": "TRN_MINST_9" },
+  });
+  assert.deepEqual(updates[2], {
+    id: "TRN_MDIS_9",
+    patch: { "ast.normalisation.followUp.installationTrnId": "TRN_MINST_9" },
+  });
+});
+
+test("an installation keeps only a real replacement origin", () => {
+  assert.deepEqual(
+    sanitizeReplacementOrigin({
+      parentTrnId: "TRN_MREM_9",
+      parentTrnType: "METER_REMOVAL",
+      replacesAstId: "AST_OLD",
+      replacesMeterNo: "0425774532",
+      injected: "ignored",
+    }),
+    {
+      channel: "FIELD",
+      source: "METER_REMOVAL",
+      parentTrnId: "TRN_MREM_9",
+      parentTrnType: "METER_REMOVAL",
+      replacesAstId: "AST_OLD",
+      replacesMeterNo: "0425774532",
+    },
+  );
+
+  // A new installation on its own, or anything else, carries no replacement.
+  assert.equal(sanitizeReplacementOrigin({}), null);
+  assert.equal(
+    sanitizeReplacementOrigin({ parentTrnId: "X", parentTrnType: "METER_DISCOVERY" }),
+    null,
+  );
 });
