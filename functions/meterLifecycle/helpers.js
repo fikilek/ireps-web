@@ -401,12 +401,9 @@ export function validateAssignment(
   const normalizedOriginChannel = normalizeUpper(originChannel);
   const fieldInstructionOptional =
     normalizedOriginChannel === "FIELD" &&
-    // MN-R001 1.3.0: a disconnection always carries its instruction.
-    [
-      "METER_RECONNECTION",
-      "METER_REMOVAL",
-      "METER_INSPECTION",
-    ].includes(normalizedTrnType);
+    // MN-R001 1.3.0 / 6.1: a disconnection and a removal always carry their
+    // instruction.
+    ["METER_RECONNECTION", "METER_INSPECTION"].includes(normalizedTrnType);
 
   if (!instruction?.code) {
     return {
@@ -2061,10 +2058,8 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (
-    !instructionText &&
-    normalizeUpper(data?.origin?.channel) !== "FIELD"
-  ) {
+  // MN-R001 6.1: every removal says why, the field channel included.
+  if (!instructionText) {
     return {
       ok: false,
       code: "REMOVAL_INSTRUCTION_REQUIRED",

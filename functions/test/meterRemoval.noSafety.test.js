@@ -37,6 +37,15 @@ test("a removal needs no safety answer or safety photo", () => {
   assert.equal(result.ok, true, result.message);
 });
 
+test("every removal says why", () => {
+  const data = removal();
+  data.assignment = { instruction: { code: "METER_REMOVAL", text: "" } };
+  assert.equal(
+    validateMeterRemoval({ data, astDoc }).code,
+    "REMOVAL_INSTRUCTION_REQUIRED",
+  );
+});
+
 test("a prepaid removal needs the remaining credit, or why it could not be captured", () => {
   const none = validateMeterRemoval({
     data: removal({ tokenReading: "", media: [photo("removalEvidence")] }),
