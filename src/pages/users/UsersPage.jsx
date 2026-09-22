@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getCountFromServer } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 
 import { useAuth } from "../../auth/useAuth";
 import { db } from "../../firebase";
@@ -14,6 +14,51 @@ import {
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
 const NO_TEAM = "None";
+
+// UI-R002 section 2: platform roles see every user; everyone else sees only their
+// own lineage — their company and every subcontractor below it.
+const PLATFORM_ROLES = ["SPU", "ADM"];
+
+function getParentServiceProviderIds(serviceProvider = {}) {
+  return (Array.isArray(serviceProvider.clients) ? serviceProvider.clients : [])
+    .filter(
+      (client) =>
+        normalizeUpper(client?.clientType) === "SP" &&
+        normalizeUpper(client?.relationshipType) === "SUBC",
+    )
+    .map((client) => normalize(client?.id))
+    .filter(Boolean);
+}
+
+// The viewer's company, then every company that is a subcontractor of it, all
+// the way down.
+function getLineageServiceProviderIds(rootId, serviceProviders = []) {
+  const root = normalize(rootId);
+  if (!root) return new Set();
+
+  const childrenByParent = new Map();
+  for (const serviceProvider of serviceProviders) {
+    for (const parentId of getParentServiceProviderIds(serviceProvider)) {
+      const children = childrenByParent.get(parentId) || [];
+      children.push(serviceProvider.id);
+      childrenByParent.set(parentId, children);
+    }
+  }
+
+  const lineage = new Set([root]);
+  const queue = [root];
+  while (queue.length) {
+    const current = queue.shift();
+    for (const childId of childrenByParent.get(current) || []) {
+      if (!lineage.has(childId)) {
+        lineage.add(childId);
+        queue.push(childId);
+      }
+    }
+  }
+
+  return lineage;
+}
 
 const EMPTY_COLUMN_FILTERS = Object.freeze({
   surname: "",
@@ -818,7 +863,11 @@ function getSortValue(user, key) {
 }
 
 export default function UsersPage() {
-  const { uid: actorUid, role: actorRole } = useAuth();
+  const {
+    uid: actorUid,
+    role: actorRole,
+    serviceProvider: actorServiceProvider,
+  } = useAuth();
   const [searchText, setSearchText] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -829,7 +878,7 @@ export default function UsersPage() {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [serviceProviderCount, setServiceProviderCount] = useState(null);
+  const [serviceProviders, setServiceProviders] = useState(null);
   const [roleUser, setRoleUser] = useState(null);
   const [statusUser, setStatusUser] = useState(null);
   const [roleFeedbackByUser, setRoleFeedbackByUser] = useState({});
@@ -845,23 +894,56 @@ export default function UsersPage() {
   // Current team membership: every active team a user is a member of.
   const { data: teams = [] } = useGetAvailableTeamsQuery({ limit: 500 });
 
-  // Service Providers KPI: the companies registered as service providers.
-  // Smars, the platform owner, has a user here but is not one.
+  // The registered service providers: needed for the lineage and for the
+  // Service Providers KPI. Smars, the platform owner, is not one of them.
   useEffect(() => {
     let cancelled = false;
 
-    getCountFromServer(collection(db, "serviceProviders"))
+    getDocs(collection(db, "serviceProviders"))
       .then((snapshot) => {
-        if (!cancelled) setServiceProviderCount(snapshot.data().count);
+        if (cancelled) return;
+        setServiceProviders(
+          snapshot.docs.map((docSnapshot) => ({
+            id: docSnapshot.id,
+            clients: docSnapshot.data()?.clients || [],
+          })),
+        );
       })
       .catch(() => {
-        if (!cancelled) setServiceProviderCount(null);
+        if (!cancelled) setServiceProviders([]);
       });
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const isPlatformViewer = PLATFORM_ROLES.includes(normalizeUpper(actorRole));
+  const actorServiceProviderId = normalize(actorServiceProvider?.id);
+  const lineageReady = isPlatformViewer || serviceProviders !== null;
+
+  const lineageServiceProviderIds = useMemo(() => {
+    if (isPlatformViewer || serviceProviders === null) return null;
+    return getLineageServiceProviderIds(actorServiceProviderId, serviceProviders);
+  }, [actorServiceProviderId, isPlatformViewer, serviceProviders]);
+
+  // Everything below — KPIs, filters, the table — works on this population only.
+  const lineageUsers = useMemo(() => {
+    if (isPlatformViewer) return users;
+    if (!lineageServiceProviderIds) return [];
+    return users.filter((user) =>
+      lineageServiceProviderIds.has(normalize(user.serviceProviderId)),
+    );
+  }, [isPlatformViewer, lineageServiceProviderIds, users]);
+
+  const serviceProviderCount =
+    serviceProviders === null
+      ? null
+      : isPlatformViewer
+        ? serviceProviders.length
+        : serviceProviders.filter((serviceProvider) =>
+            lineageServiceProviderIds?.has(serviceProvider.id),
+          ).length;
 
   const teamNamesByUid = useMemo(() => {
     const byUid = new Map();
@@ -881,11 +963,11 @@ export default function UsersPage() {
 
   const userRows = useMemo(
     () =>
-      users.map((user) => ({
+      lineageUsers.map((user) => ({
         ...user,
         teams: teamNamesByUid.get(normalize(user.uid || user.id)) || [],
       })),
-    [teamNamesByUid, users],
+    [lineageUsers, teamNamesByUid],
   );
 
   const selectedRoleUser = roleUser
@@ -896,12 +978,12 @@ export default function UsersPage() {
   const statusOptions = useMemo(() => {
     return [
       ...new Set(
-        users
+        lineageUsers
           .map((user) => normalizeUpper(user.accountStatus))
           .filter(Boolean),
       ),
     ].sort();
-  }, [users]);
+  }, [lineageUsers]);
 
   const columnOptions = useMemo(
     () => ({
@@ -1103,7 +1185,7 @@ export default function UsersPage() {
         </div>
 
         <span style={styles.count}>
-          {filteredUsers.length} of {users.length} Users
+          {filteredUsers.length} of {lineageUsers.length} Users
           {isFetching && users.length > 0 ? " · Live update…" : ""}
         </span>
       </div>
@@ -1433,13 +1515,27 @@ export default function UsersPage() {
           </table>
         </div>
 
-        {isLoading ? <div style={styles.empty}>Loading Users...</div> : null}
+        {isLoading || !lineageReady ? (
+          <div style={styles.empty}>Loading Users...</div>
+        ) : null}
 
-        {!isLoading && users.length === 0 ? (
+        {!isLoading &&
+        lineageReady &&
+        !isPlatformViewer &&
+        !actorServiceProviderId ? (
+          <div style={styles.empty}>
+            Your profile has no service provider, so no users can be shown.
+          </div>
+        ) : null}
+
+        {!isLoading &&
+        lineageReady &&
+        (isPlatformViewer || actorServiceProviderId) &&
+        lineageUsers.length === 0 ? (
           <div style={styles.empty}>No users found.</div>
         ) : null}
 
-        {!isLoading && users.length > 0 && filteredUsers.length === 0 ? (
+        {!isLoading && lineageUsers.length > 0 && filteredUsers.length === 0 ? (
           <div style={styles.empty}>
             No users match the current search or filters.
           </div>

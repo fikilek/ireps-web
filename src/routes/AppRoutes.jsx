@@ -645,7 +645,8 @@ export default function AppRoutes() {
           <Route
             path="/admin/users"
             element={
-              <RoleRoute allowedRoles={ADMIN_ROLES}>
+              // UI-R002: managers and supervisors of every company; never field workers.
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <UsersPage />
               </RoleRoute>
             }
