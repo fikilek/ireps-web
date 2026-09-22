@@ -401,8 +401,8 @@ export function validateAssignment(
   const normalizedOriginChannel = normalizeUpper(originChannel);
   const fieldInstructionOptional =
     normalizedOriginChannel === "FIELD" &&
+    // MN-R001 1.3.0: a disconnection always carries its instruction.
     [
-      "METER_DISCONNECTION",
       "METER_RECONNECTION",
       "METER_REMOVAL",
       "METER_INSPECTION",
@@ -1912,7 +1912,7 @@ export function validateMeterInspection({ data, astDoc }) {
     return {
       ok: false,
       code: "MISSING_INSPECTION_NORMALISATION_PHOTO",
-      message: "Normalisation photo is required when normalisation is not None",
+      message: "Photo proof of the normalisation is required.",
     };
   }
 
@@ -2665,7 +2665,19 @@ export function validateMeterDisconnection({ data, astDoc }) {
   const levelConfig = DISCONNECTION_LEVELS[level.code];
 
 
-  if (currentState !== "CONNECTED") {
+  // MN-R001 1.3.0, the bypass: an illegal connection can be found while the
+  // meter itself is off, so a disconnection that follows a finding may be done
+  // on a meter recorded as Disconnected.
+  const followsFinding =
+    Boolean(String(data?.origin?.parentTrnId || "").trim()) &&
+    ["METER_INSPECTION", "METER_DISCOVERY"].includes(
+      normalizeUpper(data?.origin?.parentTrnType || ""),
+    );
+  const stateAllowsDisconnection =
+    currentState === "CONNECTED" ||
+    (followsFinding && currentState === "DISCONNECTED");
+
+  if (!stateAllowsDisconnection) {
     return {
       ok: false,
       code: "INVALID_AST_STATE",
@@ -2681,10 +2693,8 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (
-    !instructionText &&
-    normalizeUpper(data?.origin?.channel) !== "FIELD"
-  ) {
+  // MN-R001 1.3.0: every disconnection says why, the field channel included.
+  if (!instructionText) {
     return {
       ok: false,
       code: "DISCONNECTION_INSTRUCTION_REQUIRED",
