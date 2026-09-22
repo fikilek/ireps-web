@@ -16,7 +16,8 @@ const DEFAULT_PAGE_SIZE = 5;
 const NO_TEAM = "None";
 
 const EMPTY_COLUMN_FILTERS = Object.freeze({
-  displayName: "",
+  surname: "",
+  name: "",
   email: "",
   role: "",
   serviceProviderName: "",
@@ -823,7 +824,7 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState(EMPTY_COLUMN_FILTERS);
   const [sortConfig, setSortConfig] = useState({
-    key: "displayName",
+    key: "surname",
     direction: "asc",
   });
   const [currentPage, setCurrentPage] = useState(1);
@@ -968,7 +969,8 @@ export default function UsersPage() {
         matchesSearch &&
         matchesRole &&
         matchesStatus &&
-        includesText(user.displayName, columnFilters.displayName) &&
+        includesText(user.surname, columnFilters.surname) &&
+        includesText(user.name, columnFilters.name) &&
         includesText(user.email, columnFilters.email) &&
         (!columnFilters.role ||
           normalizeUpper(user.role) === columnFilters.role) &&
@@ -1190,15 +1192,28 @@ export default function UsersPage() {
               <tr>
                 <th>
                   <SortButton
-                    label="User"
-                    sortKey="displayName"
+                    label="Surname"
+                    sortKey="surname"
                     sortConfig={sortConfig}
                     onSort={handleSort}
                   />
                   <FilterInput
-                    value={columnFilters.displayName}
-                    onChange={(value) => updateColumnFilter("displayName", value)}
-                    placeholder="User"
+                    value={columnFilters.surname}
+                    onChange={(value) => updateColumnFilter("surname", value)}
+                    placeholder="Surname"
+                  />
+                </th>
+                <th>
+                  <SortButton
+                    label="Name"
+                    sortKey="name"
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                  <FilterInput
+                    value={columnFilters.name}
+                    onChange={(value) => updateColumnFilter("name", value)}
+                    placeholder="Name"
                   />
                 </th>
                 <th>
@@ -1335,8 +1350,12 @@ export default function UsersPage() {
                   <tr key={userUid}>
                     <td>
                       <span style={styles.userName}>
-                        {user.displayName || "NAv"}
+                        {user.surname || "NAv"}
                       </span>
+                    </td>
+
+                    <td>
+                      <span style={styles.userName}>{user.name || "NAv"}</span>
                     </td>
 
                     <td style={styles.muted}>{user.email || "NAv"}</td>
