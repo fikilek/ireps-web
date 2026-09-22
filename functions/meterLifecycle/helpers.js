@@ -63,7 +63,6 @@ export const REMOVAL_MEDIA_TAGS = {
   removalEvidence: "removalEvidence",
   meterReadingEvidence: "removalMeterReadingEvidence",
   tokenReadingPhoto: "tokenReadingPhoto",
-  safetyEvidence: "safetyEvidence",
   noAccessPhoto: "noAccessPhoto",
 };
 
@@ -748,11 +747,6 @@ export function sanitizeRemoval(
       meterReading: "",
       tokenReading: "",
       noReadingReason: "",
-
-      safetyConfirmed: {
-        answer: null,
-        notes: "",
-      },
     };
   }
 
@@ -769,11 +763,6 @@ export function sanitizeRemoval(
     tokenReading: isPrepaidMeter ? String(removal?.tokenReading || "") : "",
 
     noReadingReason: selectValueToText(removal?.noReadingReason),
-
-    safetyConfirmed: {
-      answer: normalizeYesNo(removal?.safetyConfirmed?.answer),
-      notes: String(removal?.safetyConfirmed?.notes || ""),
-    },
   };
 }
 
@@ -2045,11 +2034,6 @@ export function validateMeterRemoval({ data, astDoc }) {
   const meterRemoved = normalizeYesNo(removal?.meterRemoved?.answer);
   const meterRemovedNotes = String(removal?.meterRemoved?.notes || "").trim();
 
-  const safetyConfirmed = normalizeYesNo(removal?.safetyConfirmed?.answer);
-  const safetyConfirmedNotes = String(
-    removal?.safetyConfirmed?.notes || "",
-  ).trim();
-
   const meterReading = getRemovalMeterReading(data);
   const tokenReading = getRemovalTokenReading(data);
   const noReadingReason = getRemovalNoReadingReason(data);
@@ -2135,35 +2119,11 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!safetyConfirmed) {
-    return {
-      ok: false,
-      code: "INVALID_REMOVAL_SAFETY_ANSWER",
-      message: "Safety confirmed answer must be yes or no",
-    };
-  }
-
-  if (safetyConfirmed !== "yes") {
-    return {
-      ok: false,
-      code: "REMOVAL_SAFETY_NOT_CONFIRMED",
-      message: "Safety must be confirmed before submit",
-    };
-  }
-
   if (meterRemoved === "no" && !meterRemovedNotes) {
     return {
       ok: false,
       code: "REMOVAL_NOTES_REQUIRED",
       message: "Notes are required when meter removed is no",
-    };
-  }
-
-  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
-    return {
-      ok: false,
-      code: "REMOVAL_SAFETY_NOTES_REQUIRED",
-      message: "Notes are required when safety confirmed is no",
     };
   }
 
@@ -2187,7 +2147,7 @@ export function validateMeterRemoval({ data, astDoc }) {
     return {
       ok: false,
       code: "TOKEN_READING_OR_REASON_REQUIRED",
-      message: "Token reading or no-reading reason is required",
+      message: "Remaining credit, or why it could not be captured, is required",
     };
   }
 
@@ -2237,7 +2197,7 @@ export function validateMeterRemoval({ data, astDoc }) {
     return {
       ok: false,
       code: "MISSING_TOKEN_READING_EVIDENCE",
-      message: "Token reading photo is required",
+      message: "Remaining credit photo is required",
     };
   }
 
@@ -2250,18 +2210,6 @@ export function validateMeterRemoval({ data, astDoc }) {
       ok: false,
       code: "MISSING_REMOVAL_EVIDENCE",
       message: "Removal evidence media is required",
-    };
-  }
-
-  if (
-    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.safetyEvidence, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_REMOVAL_SAFETY_EVIDENCE",
-      message: "Safety evidence media is required",
     };
   }
 
