@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocsFromServer } from "firebase/firestore";
 
 import { useAuth } from "../../auth/useAuth";
 import { db } from "../../firebase";
@@ -865,7 +865,7 @@ function PaginationControls({
 
 function getSortValue(user, key) {
   if (key === "teams") return (user.teams || []).join(", ");
-  if (key === "accountStatus") return statusLabel(user.accountStatus);
+  if (key === "accountStatus") return realValue(statusLabel(user.accountStatus));
   return realValue(user[key]);
 }
 
@@ -920,7 +920,7 @@ export default function UsersPage() {
   useEffect(() => {
     let cancelled = false;
 
-    getDocs(collection(db, "serviceProviders"))
+    getDocsFromServer(collection(db, "serviceProviders"))
       .then((snapshot) => {
         if (cancelled) return;
         setServiceProviders(
@@ -1033,7 +1033,7 @@ export default function UsersPage() {
             )
             .map((team) => team.name),
         ).map((value) => ({ value, label: value })),
-        { value: NO_TEAM, label: NO_TEAM },
+        ...(teamsLoading || teamsFailed ? [] : [{ value: NO_TEAM, label: NO_TEAM }]),
       ],
       accountStatus: uniqueSorted(
         userRows.map((user) => normalizeUpper(user.accountStatus)),
@@ -1042,7 +1042,14 @@ export default function UsersPage() {
         userRows.map((user) => normalizeUpper(user.onboardingStatus)),
       ).map((value) => ({ value, label: value })),
     }),
-    [isPlatformViewer, lineageServiceProviderIds, teams, userRows],
+    [
+      isPlatformViewer,
+      lineageServiceProviderIds,
+      teams,
+      teamsFailed,
+      teamsLoading,
+      userRows,
+    ],
   );
 
   // KPIs describe every user, not only the rows a filter leaves on screen.
@@ -1079,6 +1086,8 @@ export default function UsersPage() {
 
       const matchesTeam =
         !columnFilters.teams ||
+        teamsLoading ||
+        teamsFailed ||
         (columnFilters.teams === NO_TEAM
           ? user.teams.length === 0
           : user.teams.includes(columnFilters.teams));
@@ -1103,7 +1112,15 @@ export default function UsersPage() {
             columnFilters.onboardingStatus)
       );
     });
-  }, [columnFilters, roleFilter, searchText, statusFilter, userRows]);
+  }, [
+    columnFilters,
+    roleFilter,
+    searchText,
+    statusFilter,
+    teamsFailed,
+    teamsLoading,
+    userRows,
+  ]);
 
   const sortedUsers = useMemo(() => {
     const direction = sortConfig.direction === "asc" ? 1 : -1;
@@ -1568,6 +1585,13 @@ export default function UsersPage() {
 
         {usersFailed ? (
           <div style={styles.empty}>Unable to load users.</div>
+        ) : null}
+
+        {isPlatformViewer && serviceProvidersFailed ? (
+          <div style={styles.empty}>
+            The service providers could not be loaded, so the Service Providers
+            count is not shown. Refresh the page to try again.
+          </div>
         ) : null}
 
         {!usersFailed && lineageFailed ? (
