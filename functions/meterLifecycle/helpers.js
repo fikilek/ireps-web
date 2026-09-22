@@ -1763,20 +1763,22 @@ export function validateMeterInspection({ data, astDoc }) {
       };
     }
 
-    if (!String(capturedMeter?.cb?.size || "").trim()) {
-      return {
-        ok: false,
-        code: "INSPECTION_CB_SIZE_REQUIRED",
-        message: "CB size is required",
-      };
-    }
+    // A value, or the reason it is not available (the Meter Discovery reasons).
+    // The phone turns "Other" into the typed words, so a bare "Other" is refused.
+    for (const [part, valueKey, code, label] of [
+      ["cb", "size", "INSPECTION_CB_SIZE_REQUIRED", "CB size"],
+      ["keypad", "serialNo", "INSPECTION_SERIAL_NUMBER_REQUIRED", "Keypad serial number"],
+    ]) {
+      const hasValue = !!String(capturedMeter?.[part]?.[valueKey] || "").trim();
+      const reason = String(capturedMeter?.[part]?.comment || "").trim();
 
-    if (!String(capturedMeter?.keypad?.serialNo || "").trim()) {
-      return {
-        ok: false,
-        code: "INSPECTION_SERIAL_NUMBER_REQUIRED",
-        message: "Serial number is required",
-      };
+      if (!hasValue && (!reason || reason === "Other")) {
+        return {
+          ok: false,
+          code,
+          message: `${label} is required, or say why it is not available`,
+        };
+      }
     }
 
     if (!String(capturedLocation?.placement || "").trim()) {

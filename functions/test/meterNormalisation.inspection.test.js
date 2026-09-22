@@ -77,6 +77,32 @@ test("a field worker may inspect without an office instruction", () => {
   assert.equal(result.ok, true, result.message);
 });
 
+test("a missing CB size or keypad serial number needs the reason it is not available", () => {
+  const withMeter = (cb, keypad) => {
+    const data = inspectionPayload();
+    Object.assign(data.inspection.captured.ast.astData.meter, { cb, keypad });
+    return validateMeterInspection({ data, astDoc: astDoc() });
+  };
+
+  assert.equal(withMeter({ size: "" }, { serialNo: "K-1" }).code, "INSPECTION_CB_SIZE_REQUIRED");
+  assert.equal(
+    withMeter({ size: "", comment: "Circuit Breaker Size Not Visible" }, { serialNo: "K-1" }).ok,
+    true,
+  );
+  assert.equal(
+    withMeter({ size: "60A" }, { serialNo: "", comment: "Keypad Missing" }).ok,
+    true,
+  );
+  assert.equal(
+    withMeter({ size: "60A" }, { serialNo: "", comment: "Other" }).code,
+    "INSPECTION_SERIAL_NUMBER_REQUIRED",
+  );
+  assert.equal(
+    withMeter({ size: "60A" }, { serialNo: "", comment: "Worn off by the sun" }).ok,
+    true,
+  );
+});
+
 test("office work still carries the instruction it was issued with", () => {
   const result = validateMeterInspection({
     data: inspectionPayload({
