@@ -23,7 +23,7 @@ function inspection(overrides = {}) {
     trnType: "METER_INSPECTION",
     origin: { channel: "FIELD" },
     status: { state: "CONNECTED" },
-    media: [photo("astNoPhoto")],
+    media: [photo("astNoPhoto"), photo("astCbPhoto"), photo("keypadPhoto")],
     inspection: {
       comparison: { hasDifferences: false },
       captured: {
@@ -83,7 +83,11 @@ test("a field the worker was not asked for does not wipe what the record holds",
   data.inspection.captured.ast.astData.meter.type = "conventional";
   data.inspection.captured.ast.astData.meter.keypad = { serialNo: "", comment: "" };
   data.inspection.captured.mreading = { reading: "1234", readingAt: "2026-09-23T00:00:00.000Z" };
-  data.media = [photo("astNoPhoto"), photo("meterReadingPhoto")];
+  data.media = [
+    photo("astNoPhoto"),
+    photo("astCbPhoto"),
+    photo("meterReadingPhoto"),
+  ];
 
   const result = validateMeterInspection({
     data,
@@ -96,4 +100,26 @@ test("a field the worker was not asked for does not wipe what the record holds",
   assert.equal(result.ok, true, result.message);
   assert.equal("ast.astData.meter.keypad" in result.astPatch, false);
   assert.equal(result.astPatch["ast.astData.meter.type"], "conventional");
+});
+
+test("what is there is photographed; what is not there is not", () => {
+  // A seal number with no seal photo is refused.
+  const withSeal = inspection();
+  withSeal.inspection.captured.ast.astData.meter.seal = { sealNo: "S-9", comment: "" };
+  assert.equal(
+    validateMeterInspection({ data: withSeal, astDoc }).code,
+    "MISSING_INSPECTION_PART_PHOTO",
+  );
+
+  withSeal.media = [...withSeal.media, photo("sealPhoto")];
+  assert.equal(validateMeterInspection({ data: withSeal, astDoc }).ok, true);
+
+  // NAv is nothing to photograph.
+  const nothingThere = inspection();
+  Object.assign(nothingThere.inspection.captured.ast.astData.meter, {
+    cb: { size: "NAv", comment: "" },
+    keypad: { serialNo: "NAv", comment: "" },
+  });
+  nothingThere.media = [photo("astNoPhoto")];
+  assert.equal(validateMeterInspection({ data: nothingThere, astDoc }).ok, true);
 });

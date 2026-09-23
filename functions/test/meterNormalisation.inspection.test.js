@@ -29,7 +29,7 @@ function inspectionPayload({
   anomalyDetail = "Operationally Ok",
   normalisation = { actionTaken: ["none"] },
   statusState = "CONNECTED",
-  media = [photo("astNoPhoto")],
+  media = [photo("astNoPhoto"), photo("astCbPhoto"), photo("keypadPhoto")],
   origin = { channel: "FIELD" },
   instructionTrnId = "",
 } = {}) {
@@ -66,7 +66,12 @@ function inspectionPayload({
   };
 }
 
-const mediaFor = (...tags) => [photo("astNoPhoto"), ...tags.map(photo)];
+const mediaFor = (...tags) => [
+  photo("astNoPhoto"),
+  photo("astCbPhoto"),
+  photo("keypadPhoto"),
+  ...tags.map(photo),
+];
 
 test("a field worker may inspect without an office instruction", () => {
   const result = validateMeterInspection({

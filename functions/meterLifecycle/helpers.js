@@ -1783,6 +1783,28 @@ export function validateMeterInspection({ data, astDoc }) {
       }
     }
 
+    // Owner, 23 Sep 2026: what is there is photographed. A missing circuit
+    // breaker, seal or keypad has nothing to photograph, and NAv is nothing.
+    for (const [part, valueKey, label, tag] of [
+      ["cb", "size", "CB size", "astCbPhoto"],
+      ["seal", "sealNo", "seal number", "sealPhoto"],
+      ["keypad", "serialNo", "keypad serial number", "keypadPhoto"],
+    ]) {
+      const value = String(capturedMeter?.[part]?.[valueKey] || "").trim();
+
+      if (
+        value &&
+        value !== "NAv" &&
+        !hasMediaTag(data?.media, tag, { requireUrl: true })
+      ) {
+        return {
+          ok: false,
+          code: "MISSING_INSPECTION_PART_PHOTO",
+          message: `A photo of the ${label} is required`,
+        };
+      }
+    }
+
     if (!String(capturedLocation?.placement || "").trim()) {
       return {
         ok: false,
