@@ -108,6 +108,7 @@ import {
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
+import { recordReplacedMeter } from "./targetedBatches/replacedMeter.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -5353,6 +5354,24 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       foundAt: now,
       log: logger,
     });
+
+    // Targeted Batch rule TB-R066 (1.3.71): the meter this one replaces may be
+    // on a batch row. The row and the Sales record's field work now point at
+    // the new meter, so My Work Orders opens what is actually there and shows
+    // the number found under the number the batch was sent for. Never fails
+    // the submission: the installation is already written.
+    if (replacementOrigin?.replacesAstId) {
+      await recordReplacedMeter({
+        db,
+        replacedAstId: replacementOrigin.replacesAstId,
+        replacedMeterNo: replacementOrigin.replacesMeterNo || "",
+        newAstId: trnId,
+        newMeterNo: meterNoNormalized,
+        installationTrnId: trnId,
+        at: now,
+        log: logger,
+      });
+    }
 
     // The finding that called for the replacement now has its installation.
     // Never fails the installation: it is saved, and a link that cannot be made
