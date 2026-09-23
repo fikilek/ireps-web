@@ -396,9 +396,16 @@ export async function settleDifferentMeterForSales({ db, salesId, find, finder, 
 // ---------------------------------------------------------------- what a callable calls
 // Runs after the work is committed. The work is already written, so nothing here is ever allowed to fail
 // the worker's submission: every failure is caught and logged for the office instead.
+// TB-R063 (1.3.72, owner 2026-09-23): a capture made from a batch row belongs to THAT row and that Sales
+// meter, and to nothing else. Before this, one meter captured at an ERF that carries many Sales meters — a
+// complex, a block of flats, a business park — closed every other Sales meter there as "a different meter
+// was found here": the owner captured one meter at ERF 689 and all thirteen rows of his batch closed. When
+// the worker came from a batch row, the server knows the row, the Sales record and the number expected, so
+// there is nothing to work out: only that Sales meter may be settled, and when the number matches the one
+// the row was sent for, nothing is settled at all.
 export async function recordDifferentMeterAtErf({
   db, Timestamp, FieldValue, meterNo, erfId = "", premiseId = "", trnId, trnType = "",
-  astId = "", uid, foundAt = new Date().toISOString(), log = null,
+  astId = "", uid, foundAt = new Date().toISOString(), log = null, targetedBatchContext = null,
 }) {
   const results = [];
   try {
@@ -410,7 +417,13 @@ export async function recordDifferentMeterAtErf({
     if (!erf) return results;
     const findAtMs = millis(foundAt) ?? Date.parse(text(foundAt));
     const find = { meterNo: meter, erfId: erf, premiseId: text(premiseId), trnId: text(trnId), trnType: text(trnType), astId: text(astId), findAtMs: Number.isFinite(findAtMs) ? findAtMs : Date.now() };
-    const { salesIds } = await findSalesMetersAtErf({ db, erfId: erf, log });
+    // The Sales meter the worker was sent for, when the capture came from a batch row.
+    const rowSalesId = normalizeMeterNo(targetedBatchContext?.salesDocId || targetedBatchContext?.meterNo || "");
+
+    const { salesIds } = rowSalesId
+      ? { salesIds: [rowSalesId] }
+      : await findSalesMetersAtErf({ db, erfId: erf, log });
+
     const expected = salesIds.filter(id => normalizeMeterNo(id) !== meter);
     if (!expected.length) return results;
     const finder = await readFinder({ db, uid, atMs: find.findAtMs });

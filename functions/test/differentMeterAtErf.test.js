@@ -362,3 +362,38 @@ test("the whole capture settles every expected meter at the ERF and never fails 
   assert.equal(logs.at(-1).level, "error");
   assert.match(logs.at(-1).message, /TB-R063/);
 });
+
+// TB-R063 1.3.72 (owner, 23 Sep 2026): a capture made from a batch row belongs to
+// that row alone. One meter captured at ERF 689 had closed all thirteen rows of
+// his batch, because thirteen Sales meters share that ERF.
+test("a capture from a batch row settles that row's Sales meter and no other", async () => {
+  const db = world();
+  const context = { tbId: TB, rowId: "TBR_1", salesDocId: EXPECTED, meterNo: EXPECTED };
+
+  // the worker captured a different number on that row
+  const results = await recordDifferentMeterAtErf({
+    db, Timestamp, FieldValue, meterNo: FOUND, erfId: ERF, premiseId: "PRM_1",
+    trnId: "TRN_MDIS_1", trnType: "METER_DISCOVERY", astId: "TRN_MDIS_1", uid: "FWR1",
+    foundAt: new Date(FIND_MS).toISOString(), targetedBatchContext: context,
+  });
+
+  assert.deepEqual(results.map(result => result.salesId), [EXPECTED],
+    "only the row's own Sales meter is settled");
+  assert.equal(db.store.get(`sales-all-meters/${GPS_METER}`).differentMeterFound, undefined,
+    "another Sales meter on the same ERF is untouched");
+});
+
+test("a capture from a batch row of the very number it was sent for settles nothing", async () => {
+  const db = world();
+
+  const results = await recordDifferentMeterAtErf({
+    db, Timestamp, FieldValue, meterNo: EXPECTED, erfId: ERF, premiseId: "PRM_1",
+    trnId: "TRN_MDIS_1", trnType: "METER_DISCOVERY", astId: "TRN_MDIS_1", uid: "FWR1",
+    foundAt: new Date(FIND_MS).toISOString(),
+    targetedBatchContext: { tbId: TB, rowId: "TBR_1", salesDocId: EXPECTED, meterNo: EXPECTED },
+  });
+
+  assert.deepEqual(results, [], "nothing to settle: the meter is the one expected");
+  assert.equal(db.store.get(`sales-all-meters/${GPS_METER}`).differentMeterFound, undefined);
+  assert.equal(db.store.get(`sales-all-meters/${EXPECTED}`).differentMeterFound, undefined);
+});

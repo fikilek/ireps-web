@@ -3342,6 +3342,8 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       astId: data.id,
       uid: caller.uid,
       foundAt: now,
+      // The row the worker opened, so only its own Sales meter can be settled.
+      targetedBatchContext: data?.targetedBatchContext || null,
       log: logger,
     });
 
@@ -5352,6 +5354,7 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       astId: trnId,
       uid: caller.uid,
       foundAt: now,
+      targetedBatchContext: data?.targetedBatchContext || null,
       log: logger,
     });
 
