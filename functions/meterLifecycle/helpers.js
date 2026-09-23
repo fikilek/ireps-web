@@ -1974,6 +1974,57 @@ export function validateMeterInspection({ data, astDoc }) {
 
   const astPatch = {};
 
+  // MN-R001 8.2: an inspection is how the meter record is corrected. What the
+  // worker confirmed on the form — the finding and the meter's own details —
+  // becomes the record. The meter number and the GPS are not touched here: a
+  // wrong meter number is a supervisor's correction, and the position belongs
+  // to the discovery.
+  const clean = (value) => String(value ?? "").trim();
+  const setIfGiven = (path, value) => {
+    const text = clean(value);
+    if (text) astPatch[path] = text;
+  };
+
+  setIfGiven("ast.anomalies.anomaly", capturedAnomalies?.anomaly);
+  setIfGiven("ast.anomalies.anomalyDetail", capturedAnomalies?.anomalyDetail);
+  if (Array.isArray(capturedAnomalies?.otherAnomalies)) {
+    astPatch["ast.anomalies.otherAnomalies"] =
+      capturedAnomalies.otherAnomalies.map(clean).filter(Boolean);
+  }
+
+  setIfGiven("ast.astData.astManufacturer", capturedAstData?.astManufacturer);
+  setIfGiven("ast.astData.astName", capturedAstData?.astName);
+  setIfGiven("ast.astData.meter.type", capturedMeter?.type);
+  setIfGiven("ast.astData.meter.category", capturedMeter?.category);
+  setIfGiven("ast.astData.meter.phase", capturedMeter?.phase);
+  setIfGiven("ast.location.placement", capturedLocation?.placement);
+  setIfGiven("ast.ogs.hasOffGridSupply", capturedOgs?.hasOffGridSupply);
+
+  // A value and the reason there is none travel together, so a seal that has
+  // gone clears the old number instead of leaving it behind.
+  for (const [part, valueKey] of [
+    ["cb", "size"],
+    ["seal", "sealNo"],
+    ["keypad", "serialNo"],
+  ]) {
+    const value = clean(capturedMeter?.[part]?.[valueKey]);
+    const comment = clean(capturedMeter?.[part]?.comment);
+    if (value || comment) {
+      astPatch[`ast.astData.meter.${part}`] = {
+        [valueKey]: value,
+        comment,
+      };
+    }
+  }
+
+  // MN-R001 10: water keeps its own normalisation, so only electricity's is
+  // written back.
+  if (isElectricityMeter) {
+    astPatch["ast.normalisation"] = sanitizeElectricityNormalisation(
+      capturedAst?.normalisation,
+    );
+  }
+
   if (isConventionalMeter && reading) {
     astPatch.mreadings = buildLatestMreadingsCache({
       astDoc,
