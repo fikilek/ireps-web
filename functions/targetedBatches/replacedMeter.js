@@ -60,7 +60,11 @@ async function settleRowForReplacement({
     : null;
 
   return db.runTransaction(async (tx) => {
+    // Firestore wants every read before any write, so both documents are read
+    // first and written afterwards.
     const rowSnap = await tx.get(rowRef);
+    const salesSnap = salesRef ? await tx.get(salesRef) : null;
+
     if (!rowSnap.exists) return { rowId, decision: "SKIP", code: "ROW_MISSING" };
 
     const row = rowSnap.data() || {};
@@ -78,10 +82,7 @@ async function settleRowForReplacement({
       "metadata.updatedAt": at,
     });
 
-    if (!salesRef) return { rowId, decision: "RECORD", code: "ROW_ONLY" };
-
-    const salesSnap = await tx.get(salesRef);
-    if (!salesSnap.exists) return { rowId, decision: "RECORD", code: "ROW_ONLY" };
+    if (!salesSnap?.exists) return { rowId, decision: "RECORD", code: "ROW_ONLY" };
 
     const sales = salesSnap.data() || {};
     const tbRefs = Array.isArray(sales?.tbRefs) ? sales.tbRefs : [];

@@ -72,10 +72,20 @@ function world({ rowRefsMeterId = OLD_AST } = {}) {
       doc: (id) => doc(`${name}/${id}`),
       where: (field, _op, value) => query(`${name}|${field}=${value}`),
     }),
-    runTransaction: async (run) =>
-      run({
-        get: (ref) => ref.get(),
+    runTransaction: async (run) => {
+      // Firestore refuses a read after a write inside a transaction; so does this.
+      let written = false;
+      return run({
+        get: (ref) => {
+          if (written) {
+            throw new Error(
+              "Firestore transactions require all reads to be executed before all writes.",
+            );
+          }
+          return ref.get();
+        },
         update: (ref, data) => {
+          written = true;
           const next = copy(store.get(ref.path) || {});
           for (const [key, value] of Object.entries(data)) {
             const parts = key.split(".");
@@ -85,7 +95,8 @@ function world({ rowRefsMeterId = OLD_AST } = {}) {
           }
           store.set(ref.path, next);
         },
-      }),
+      });
+    },
   };
 }
 
