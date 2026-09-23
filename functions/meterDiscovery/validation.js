@@ -111,6 +111,51 @@ export function normalisationPhotoRequired(actionTaken) {
 
 // What a finding calls for next, and where the numbers of that work are kept
 // (MN-R001 section 7). No status word: an empty number means not yet submitted.
+// MN-R001 8.3: a fix on the spot ends the problem it addresses, so the meter
+// record shows what the worker LEFT while the transaction keeps what they
+// FOUND. One fix, one thing it clears.
+const FIX_CLEARS_ANOMALY = Object.freeze({
+  "Tamper removed": "Illegally Connected",
+  "Meter registered": "Meter Not On Portal",
+});
+
+const FIX_CLEARS_OTHER_ANOMALY = Object.freeze({
+  "Keypad normalised": "Keypad Faulty",
+  "Service point completed": "Incomplete Service Points",
+  "Meter registered": "Meter Not Registered",
+});
+
+// What the meter record should show after the visit.
+export function applyFixesToFinding({
+  anomaly,
+  anomalyDetail,
+  otherAnomalies = [],
+  actionTaken = [],
+}) {
+  const actions = (Array.isArray(actionTaken) ? actionTaken : []).map((action) =>
+    String(action || "").trim(),
+  );
+  const found = String(anomaly || "").trim();
+
+  const mainCleared = actions.some(
+    (action) => FIX_CLEARS_ANOMALY[action] === found,
+  );
+
+  const clearedOthers = new Set(
+    actions.map((action) => FIX_CLEARS_OTHER_ANOMALY[action]).filter(Boolean),
+  );
+
+  return {
+    anomaly: mainCleared ? "Meter Ok" : found,
+    anomalyDetail: mainCleared
+      ? "Operationally Ok"
+      : String(anomalyDetail || "").trim(),
+    otherAnomalies: (Array.isArray(otherAnomalies) ? otherAnomalies : [])
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry && !clearedOthers.has(entry)),
+  };
+}
+
 export function buildNormalisationFollowUp(actionTaken) {
   const actions = Array.isArray(actionTaken) ? actionTaken : [];
   if (actions.includes("Disconnect meter")) {

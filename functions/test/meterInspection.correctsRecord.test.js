@@ -123,3 +123,51 @@ test("what is there is photographed; what is not there is not", () => {
   nothingThere.media = [photo("astNoPhoto")];
   assert.equal(validateMeterInspection({ data: nothingThere, astDoc }).ok, true);
 });
+
+test("a tamper removed on the spot leaves the meter Ok, and the finding stands", () => {
+  const data = inspection();
+  data.inspection.captured.ast.anomalies = {
+    anomaly: "Illegally Connected",
+    anomalyDetail: "Bridge Wire On the Meter",
+    otherAnomalies: ["Keypad Faulty", "Meter Blocked (By Munic)"],
+  };
+  // MN-R001 4: an illegal connection is disconnected (or a reason given); the
+  // tamper coming out is a fix on the spot alongside it.
+  data.inspection.captured.ast.normalisation = {
+    actionTaken: ["Disconnect meter", "Tamper removed", "Keypad normalised"],
+  };
+  data.media = [...data.media, photo("anomalyPhoto"), photo("normalisationPhoto")];
+
+  const result = validateMeterInspection({ data, astDoc });
+  assert.equal(result.ok, true, result.message);
+
+  // what the worker left: the meter is fine, and the keypad fault is gone
+  assert.equal(result.astPatch["ast.anomalies.anomaly"], "Meter Ok");
+  assert.equal(result.astPatch["ast.anomalies.anomalyDetail"], "Operationally Ok");
+  assert.deepEqual(result.astPatch["ast.anomalies.otherAnomalies"], [
+    "Meter Blocked (By Munic)",
+  ]);
+
+  // what the worker found is untouched on the transaction itself
+  assert.equal(
+    data.inspection.captured.ast.anomalies.anomaly,
+    "Illegally Connected",
+  );
+});
+
+test("a fix that does not address the finding leaves it standing", () => {
+  const data = inspection();
+  data.inspection.captured.ast.anomalies = {
+    anomaly: "Meter Faulty",
+    anomalyDetail: "Meter Display Blank",
+    otherAnomalies: [],
+  };
+  data.inspection.captured.ast.normalisation = {
+    actionTaken: ["Replace meter", "Keypad normalised"],
+  };
+  data.media = [...data.media, photo("anomalyPhoto"), photo("normalisationPhoto")];
+
+  const patch = validateMeterInspection({ data, astDoc }).astPatch;
+  assert.equal(patch["ast.anomalies.anomaly"], "Meter Faulty");
+  assert.equal(patch["ast.anomalies.anomalyDetail"], "Meter Display Blank");
+});

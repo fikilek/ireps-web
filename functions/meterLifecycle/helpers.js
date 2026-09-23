@@ -1,5 +1,6 @@
 import {
   anomalyPhotoRequired,
+  applyFixesToFinding,
   buildNormalisationFollowUp,
   normalisationPhotoRequired,
   validateNormalisation,
@@ -2007,11 +2008,20 @@ export function validateMeterInspection({ data, astDoc }) {
     if (text) astPatch[path] = text;
   };
 
-  setIfGiven("ast.anomalies.anomaly", capturedAnomalies?.anomaly);
-  setIfGiven("ast.anomalies.anomalyDetail", capturedAnomalies?.anomalyDetail);
+  // MN-R001 8.3: the worker records what they FOUND; where a fix on the spot
+  // ended the problem, the record shows what they LEFT. The transaction keeps
+  // the finding as found, so the reports still count it.
+  const findingAfterVisit = applyFixesToFinding({
+    anomaly: capturedAnomalies?.anomaly,
+    anomalyDetail: capturedAnomalies?.anomalyDetail,
+    otherAnomalies: capturedAnomalies?.otherAnomalies,
+    actionTaken: capturedAst?.normalisation?.actionTaken,
+  });
+
+  setIfGiven("ast.anomalies.anomaly", findingAfterVisit.anomaly);
+  setIfGiven("ast.anomalies.anomalyDetail", findingAfterVisit.anomalyDetail);
   if (Array.isArray(capturedAnomalies?.otherAnomalies)) {
-    astPatch["ast.anomalies.otherAnomalies"] =
-      capturedAnomalies.otherAnomalies.map(clean).filter(Boolean);
+    astPatch["ast.anomalies.otherAnomalies"] = findingAfterVisit.otherAnomalies;
   }
 
   setIfGiven("ast.astData.astManufacturer", capturedAstData?.astManufacturer);
