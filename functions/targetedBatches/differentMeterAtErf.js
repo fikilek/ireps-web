@@ -34,7 +34,7 @@ import {
 } from "../salesAllMeters/sales-batch-policy.js";
 import { buildSalesAllMetersOperationalMetadataPatch } from "../salesAllMeters/helpers.js";
 import { TARGETED_BATCH_COLLECTIONS, normalizeMeterNo } from "./helpers.js";
-import { batchAllocation, explicitlyUnallocated, profileName, profileRole, profileServiceProviderId, readWorkErfId, workerInside } from "./batch-work-guard.js";
+import { batchAllocation, explicitlyUnallocated, PREMISES, profileName, profileRole, profileServiceProviderId, readWorkErfId, workerInside } from "./batch-work-guard.js";
 import { teamOnDate } from "../teams/field-work-summary.js";
 import { TEAM_MEMBER_HISTORY } from "../teams/member-history.js";
 import {
@@ -403,6 +403,25 @@ export async function settleDifferentMeterForSales({ db, salesId, find, finder, 
 // the worker came from a batch row, the server knows the row, the Sales record and the number expected, so
 // there is nothing to work out: only that Sales meter may be settled, and when the number matches the one
 // the row was sent for, nothing is settled at all.
+// The Sales meter of the premise the work was done on. A premise made or picked from a batch row carries
+// that row (TB-R067), so the premise answers for every form that follows, whatever opened it. A premise
+// with no row of its own answers nothing, and the ERF is asked instead.
+async function readPremiseSalesId({ db, premiseId, log = null }) {
+  const id = text(premiseId);
+  if (!id) return "";
+
+  try {
+    const snapshot = await db.collection(PREMISES).doc(id).get();
+    if (!snapshot.exists) return "";
+    const context = snapshot.data()?.targetedBatchContext;
+    return normalizeMeterNo(context?.salesDocId || context?.meterNo || "");
+  } catch (error) {
+    // Never fails the worker's submission: without this the ERF is asked, as before.
+    log?.error?.(`${RULE}: the premise's own batch row could not be read, for the office`, { rule: RULE, code: "TB_R063_PREMISE_UNREADABLE", premiseId: id, detail: error?.message || String(error) });
+    return "";
+  }
+}
+
 export async function recordDifferentMeterAtErf({
   db, Timestamp, FieldValue, meterNo, erfId = "", premiseId = "", trnId, trnType = "",
   astId = "", uid, foundAt = new Date().toISOString(), log = null, targetedBatchContext = null,
@@ -417,8 +436,19 @@ export async function recordDifferentMeterAtErf({
     if (!erf) return results;
     const findAtMs = millis(foundAt) ?? Date.parse(text(foundAt));
     const find = { meterNo: meter, erfId: erf, premiseId: text(premiseId), trnId: text(trnId), trnType: text(trnType), astId: text(astId), findAtMs: Number.isFinite(findAtMs) ? findAtMs : Date.now() };
-    // The Sales meter the worker was sent for, when the capture came from a batch row.
-    const rowSalesId = normalizeMeterNo(targetedBatchContext?.salesDocId || targetedBatchContext?.meterNo || "");
+    // Which Sales meter this find belongs to. Asked in the order iREPS is built - ERF, premise, meter -
+    // and answered by the first step that knows (1.3.75):
+    //   1. the batch row, when the form was opened from one;
+    //   2. the premise, which carries its row (TB-R067) - every form has a premise, so this holds for the
+    //      disconnection, removal, inspection and commissioning that follow a discovery, none of which
+    //      carry the row themselves;
+    //   3. the ERF, which is all there is when nothing else says.
+    // The owner's DEV test of 2026-09-24: meter 04297700561 was discovered on Ndlovu Vedge and found
+    // illegally connected, and the disconnection that followed closed eleven other shops on ERF 689,
+    // because only the discovery had been taught to carry the row.
+    const rowSalesId =
+      normalizeMeterNo(targetedBatchContext?.salesDocId || targetedBatchContext?.meterNo || "") ||
+      (await readPremiseSalesId({ db, premiseId, log }));
 
     const { salesIds } = rowSalesId
       ? { salesIds: [rowSalesId] }

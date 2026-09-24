@@ -397,3 +397,65 @@ test("a capture from a batch row of the very number it was sent for settles noth
   assert.equal(db.store.get(`sales-all-meters/${GPS_METER}`).differentMeterFound, undefined);
   assert.equal(db.store.get(`sales-all-meters/${EXPECTED}`).differentMeterFound, undefined);
 });
+
+// TB-R063 1.3.75 (owner's DEV test, 24 Sep 2026): meter 04297700561 was discovered on Ndlovu Vedge at
+// ERF 689 and found illegally connected. The disconnection that followed closed eleven other shops on the
+// same ERF, because only Meter Discovery had been taught to carry the batch row. Every form has a premise,
+// and a premise made or picked from a row carries that row (TB-R067), so the premise is asked next.
+test("a form with no row of its own asks the premise, so a disconnection settles only its own shop", async () => {
+  const db = world();
+  db.store.set("premises/PRM_NDLOVU", {
+    id: "PRM_NDLOVU",
+    erfId: ERF,
+    propertyType: { type: "Commercial", name: "Ndlovu Vedge", unitNo: "5" },
+    targetedBatchContext: { tbId: TB, rowId: "TBR_1", salesDocId: EXPECTED, meterNo: EXPECTED },
+  });
+
+  // The disconnection carries no batch row: it was opened from the finding, not from My Work Orders.
+  const results = await recordDifferentMeterAtErf({
+    db, Timestamp, FieldValue, meterNo: FOUND, erfId: ERF, premiseId: "PRM_NDLOVU",
+    trnId: "TRN_MDCN_1", trnType: "METER_DISCONNECTION", astId: "TRN_MDCN_1", uid: "FWR1",
+    foundAt: new Date(FIND_MS).toISOString(),
+  });
+
+  assert.deepEqual(
+    results.map((result) => result.salesId),
+    [EXPECTED],
+    "only the Sales meter of the premise worked on, never the others sharing the ERF",
+  );
+  assert.equal(
+    db.store.get(`sales-all-meters/${GPS_METER}`).differentMeterFound,
+    undefined,
+    "the shop next door is left exactly as it was",
+  );
+});
+
+test("a disconnection of the very number its premise was sent for settles nothing", async () => {
+  const db = world();
+  db.store.set("premises/PRM_NDLOVU", {
+    id: "PRM_NDLOVU",
+    erfId: ERF,
+    targetedBatchContext: { tbId: TB, rowId: "TBR_1", salesDocId: EXPECTED, meterNo: EXPECTED },
+  });
+
+  const results = await recordDifferentMeterAtErf({
+    db, Timestamp, FieldValue, meterNo: EXPECTED, erfId: ERF, premiseId: "PRM_NDLOVU",
+    trnId: "TRN_MDCN_2", trnType: "METER_DISCONNECTION", astId: "TRN_MDCN_2", uid: "FWR1",
+    foundAt: new Date(FIND_MS).toISOString(),
+  });
+
+  assert.deepEqual(results, [], "the meter that was expected there is not a different meter");
+});
+
+test("a premise with no row of its own leaves the ERF to answer, as before", async () => {
+  const db = world();
+  db.store.set("premises/PRM_PLAIN", { id: "PRM_PLAIN", erfId: ERF });
+
+  const results = await recordDifferentMeterAtErf({
+    db, Timestamp, FieldValue, meterNo: FOUND, erfId: ERF, premiseId: "PRM_PLAIN",
+    trnId: "TRN_MDIS_9", trnType: "METER_DISCOVERY", astId: "TRN_MDIS_9", uid: "FWR1",
+    foundAt: new Date(FIND_MS).toISOString(),
+  });
+
+  assert.deepEqual(results.map((result) => result.salesId).sort(), [EXPECTED, GPS_METER].sort());
+});
