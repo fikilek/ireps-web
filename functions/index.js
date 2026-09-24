@@ -4823,6 +4823,13 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 
     delete safePayload.metadata;
 
+    // TB-R067 (1.3.73) 6: the premise this row is being moved off, when the worker is putting a wrong join
+    // right. It travels beside the premise and is never written onto one.
+    const targetedBatchReplacesPremiseId = String(
+      safePayload?.targetedBatchReplacesPremiseId || "",
+    ).trim();
+    delete safePayload.targetedBatchReplacesPremiseId;
+
     const actorName =
       caller.token?.name ||
       caller.token?.email ||
@@ -4871,6 +4878,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
         actorUid: caller.uid,
         actorName,
         authToken: caller.token || {},
+        replacesPremiseId: targetedBatchReplacesPremiseId,
       });
     } else {
       await premiseRef.set(finalPayload);
