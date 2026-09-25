@@ -174,17 +174,19 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   assert.deepEqual(sheet[3], [2, "METER DAMAGED", 0, 0, 0]);
   assert.deepEqual(sheet[4], [3, "METER FAULTY", 0, 0, 0]);
   assert.deepEqual(sheet[5], [4, "METER OK", 1, 1, 2]);
-  assert.deepEqual(sheet[6], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 3, 4], "no access and a disconnection are not in these blocks");
-  assert.deepEqual(sheet[8], ["SEPTEMBER 2026 - NORMALISATION"]);
-  assert.deepEqual(sheet[9], [1, "NONE", 1, 0, 1], "a healthy meter's row stands alone, and comes first");
-  assert.deepEqual(sheet[10], [2, "ILLEGALLY CONNECTED - DISCONNECT METER", 0, 1, 1]);
-  assert.deepEqual(sheet[11], [3, "ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE", 0, 1, 1]);
-  assert.deepEqual(sheet[12], [4, "TAMPER REMOVED", 0, 1, 1], "a healthy meter's own fix comes last");
-  assert.deepEqual(sheet[13], ["", "TOTAL: NORMALISATION", 1, 3, 4]);
-  assert.deepEqual(sheet[16], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
-  assert.deepEqual(sheet[21], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 3, 4]);
+  assert.deepEqual(sheet[6], [5, "NO ACCESS", 1, 0, 1], "the one line the owner added to his layout");
+  assert.deepEqual(sheet[7], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5], "a disconnection is not in these blocks");
+  assert.deepEqual(sheet[9], ["SEPTEMBER 2026 - NORMALISATION"]);
+  assert.deepEqual(sheet[10], [1, "NONE", 1, 0, 1], "a healthy meter's row stands alone, and comes first");
+  assert.deepEqual(sheet[11], [2, "ILLEGALLY CONNECTED - DISCONNECT METER", 0, 1, 1]);
+  assert.deepEqual(sheet[12], [3, "ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE", 0, 1, 1]);
+  assert.deepEqual(sheet[13], [4, "TAMPER REMOVED", 0, 1, 1], "a healthy meter's own fix");
+  assert.deepEqual(sheet[14], [5, "NO ACCESS", 1, 0, 1], "and NO ACCESS last of all");
+  assert.deepEqual(sheet[15], ["", "TOTAL: NORMALISATION", 2, 3, 5]);
+  assert.deepEqual(sheet[18], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
+  assert.deepEqual(sheet[24], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
 
-  const after = sheet.slice(22).filter((cells) => cells.length);
+  const after = sheet.slice(25).filter((cells) => cells.length);
   assert.deepEqual(after, [], "nothing follows the Teams block");
 });
 
@@ -214,7 +216,7 @@ function septemberRows() {
   return rows;
 }
 
-test("Field Stats reproduces September 2026 on LIVE: 462 records where a meter was captured", () => {
+test("Field Stats reproduces September 2026 on LIVE: 462 with a meter, 137 no access, 599 in each section", () => {
   const { workbook } = readWorkbook(makeDataset(septemberRows(), { isIncompleteMonth: false }));
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })
     .map((line) => {
@@ -229,9 +231,9 @@ test("Field Stats reproduces September 2026 on LIVE: 462 records where a meter w
   assert.equal(totalOf("METER DAMAGED"), 5);
   assert.equal(totalOf("METER FAULTY"), 2);
   assert.equal(totalOf("METER OK"), 388);
-  assert.equal(lineOf("NO ACCESS"), undefined, "the 137 no-access visits are on Field Data, not in these blocks");
-  assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 462);
-  assert.equal(totalOf("TOTAL: NORMALISATION"), 462);
+  assert.equal(totalOf("NO ACCESS"), 137, "the line the owner added to his layout");
+  assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 599);
+  assert.equal(totalOf("TOTAL: NORMALISATION"), 599);
 
   const start = sheet.findIndex((cells) => cells[0] === "SEPTEMBER 2026 - NORMALISATION");
   const labels = sheet.slice(start + 1).map((cells) => cells[1]);
@@ -247,6 +249,7 @@ test("Field Stats reproduces September 2026 on LIVE: 462 records where a meter w
     "METER DAMAGED - NOT RECORDED, CAPTURED BEFORE THIS RULE",
     "METER FAULTY - NOT RECORDED, CAPTURED BEFORE THIS RULE",
     "METER FAULTY - NONE",
+    "NO ACCESS",
     "TOTAL: NORMALISATION",
   ]);
   assert.equal(totalOf("ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE"), 40, "never asked");

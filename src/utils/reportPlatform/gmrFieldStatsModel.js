@@ -54,8 +54,11 @@ function normalisationRank(label, rows) {
   const [finding] = String(label).split(" - ");
   const findingRank = NORMALISATION_FINDING_ORDER.indexOf(finding);
 
-  // 0 NONE, 1-3 the findings that called for work, 4 a healthy meter's fix.
-  const group = healthy ? (didWork ? 4 : 0) : findingRank === -1 ? 3.5 : findingRank + 1;
+  // 0 NONE, 1-3 the findings that called for work, 4 a healthy meter's fix,
+  // 5 NO ACCESS last.
+  const group = label === "NO ACCESS"
+    ? 5
+    : healthy ? (didWork ? 4 : 0) : findingRank === -1 ? 3.5 : findingRank + 1;
   // Within a finding: the work done first, then a recorded reason, then NONE.
   const kind = didWork ? 0 : text(first.noActionReason) ? 1 : 2;
   return [group, kind, label];
@@ -74,11 +77,11 @@ function zamoMeterStatus(row) {
 // Zamo's Field Stats, exactly as before: the month's Meter Discovery records,
 // field workers by name, teams from team history (GMR-R020).
 export function buildZamoFieldStats(dataset = {}) {
-  // The owner's layout, 25 September 2026: the blocks count the month's Meter
-  // Discovery records where a meter was captured. A no-access visit is on
-  // Field Data and in the counts below the Teams block, not in these three.
+  // The owner's layout, 25 September 2026, plus the one thing he added to it:
+  // a NO ACCESS line. The blocks count every Meter Discovery record of the
+  // period, whether or not a meter was captured.
   const rows = (Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [])
-    .filter((row) => row?.trnType === "METER_DISCOVERY" && row?.hasAccess);
+    .filter((row) => row?.trnType === "METER_DISCOVERY");
   const workerOfRow = (row) => text(row?.fieldWorkerName) || NOT_AVAILABLE;
   const teamOfRow = (row) => text(row?.team) || "Unassigned";
   const workers = [...new Set(rows.map(workerOfRow))].sort((left, right) => left.localeCompare(right));
