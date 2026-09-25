@@ -5,7 +5,7 @@ import { useDispatch } from "react-redux";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { SALES_LOAD_TIMEOUT_ERROR, useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
+import { SALES_LOAD_TIMEOUT_ERROR, salesReadStartedAtMs, useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
 import { salesLoadStatus } from "./models/salesLoadStatusModel.js";
 import { prepareTargetedBatchDraft, removeSalesDraftMeter, saveSalesDraftFence } from "../../redux/targetedBatchDraftSlice";
 import { doc, getDoc } from "firebase/firestore";
@@ -33,16 +33,18 @@ const EMPTY_SALES_ROWS = [];
 
 // Web Data Copy rules WD-R001.6 (1.2.0): the wait is never silent. The seconds count up, so a slow
 // first load — or a tab the browser has slowed down in the background — never looks stuck.
-function SalesLoadingState({ place = "" }) {
-  const [elapsedMs, setElapsedMs] = useState(0);
+function SalesLoadingState({ place = "", startedAtMs = 0 }) {
+  const [mountedAtMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const startedAt = Date.now();
-    const tick = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(tick);
   }, []);
+  const elapsedMs = Math.max(0, nowMs - (startedAtMs || mountedAtMs));
   const status = salesLoadStatus({ elapsedMs, place });
   return (
-    <section style={styles.loadingPanel} aria-live="polite" aria-busy="true">
+    // The seconds change every second, so they are not announced; the panel only says it is busy.
+    <section style={styles.loadingPanel} aria-busy="true">
       <style>
         {`
           @keyframes irepsSalesSpinner {
@@ -561,7 +563,7 @@ export default function PrepaidSales() {
       ) : null}
 
       {activeLmPcode && !salesWorkStatusError && !salesWorkStatusReady ? (
-        <SalesLoadingState place={activeWorkbaseName} />
+        <SalesLoadingState place={activeWorkbaseName} startedAtMs={salesReadStartedAtMs(salesReadScope)} />
       ) : null}
 
       {salesWorkStatusReady && activeLmPcode && salesRows.length === 0 ? (

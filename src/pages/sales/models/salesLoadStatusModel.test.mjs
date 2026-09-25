@@ -42,7 +42,10 @@ test("both Sales pages show the line, and the read waits 10 minutes but stops at
   for (const path of ["../PrepaidSales.jsx", "../NonGpsBatchPlanningPage.jsx"]) {
     const page = await read(path);
     assert.match(page, /salesLoadStatus\(\{ elapsedMs, place \}\)/, path);
-    assert.match(page, /setInterval\(\(\) => setElapsedMs\(Date\.now\(\) - startedAt\), 1000\)/, `${path}: the seconds tick`);
+    assert.match(page, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/, `${path}: the seconds tick`);
+    assert.match(page, /const elapsedMs = Math\.max\(0, nowMs - \(startedAtMs \|\| mountedAtMs\)\);/, `${path}: the time is counted from when the read started`);
+    assert.match(page, /startedAtMs=\{salesReadStartedAtMs\(/, `${path}: the read's own start time`);
+    assert.doesNotMatch(page, /aria-live="polite" aria-busy="true"/, `${path}: the ticking seconds are not read out every second`);
     assert.match(page, /return \(\) => clearInterval\(tick\);/, `${path}: the timer stops with the panel`);
     assert.match(page, /\{status\.slowHint \? <p style=\{styles\.loadingNote\}>\{status\.slowHint\}<\/p> : null\}/, path);
     assert.match(page, /rror\.error \|\| SALES_LOAD_TIMEOUT_ERROR\.error/, `${path}: the read's own words are shown`);

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { SALES_LOAD_TIMEOUT_ERROR, useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
+import { SALES_LOAD_TIMEOUT_ERROR, salesReadStartedAtMs, useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
 import { salesLoadStatus } from "./models/salesLoadStatusModel.js";
 import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
@@ -79,16 +79,17 @@ function SummaryCard({
 }
 
 // Web Data Copy rules WD-R001.6 (1.2.0): the same waiting line as the GPS Sales Table.
-function NonGpsLoadingState({ place = "" }) {
-  const [elapsedMs, setElapsedMs] = useState(0);
+function NonGpsLoadingState({ place = "", startedAtMs = 0 }) {
+  const [mountedAtMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const startedAt = Date.now();
-    const tick = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(tick);
   }, []);
+  const elapsedMs = Math.max(0, nowMs - (startedAtMs || mountedAtMs));
   const status = salesLoadStatus({ elapsedMs, place });
   return (
-    <section style={styles.statePanel} aria-live="polite" aria-busy="true">
+    <section style={styles.statePanel} aria-busy="true">
       <h2>{status.title}</h2>
       <p>{status.line}</p>
       <p style={styles.loadingNote}>{status.note}</p>
@@ -422,7 +423,7 @@ export default function NonGpsBatchPlanningPage() {
         </section>
       ) : null}
 
-      {isLoading ? <NonGpsLoadingState place={activeLmPcode} /> : null}
+      {isLoading ? <NonGpsLoadingState place={activeWorkbaseName} startedAtMs={salesReadStartedAtMs(readScope)} /> : null}
 
       {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
         <section style={styles.statePanel}>

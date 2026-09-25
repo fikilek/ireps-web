@@ -9,9 +9,9 @@ import * as refs from "../pages/sales/models/salesTbRefsIntegrityModel.js";
 import { salesMapFenceMeters } from "../../functions/targetedBatches/sales-map-fence.js";
 import { polygonFromPoints } from "../../functions/geofences/sales-batch-geometry.js";
 
-async function fixture({ timers = { setTimeout, clearTimeout } } = {}) {
+async function fixture({ timers = { setTimeout, clearTimeout }, navigator = undefined } = {}) {
   const state = { uid: "A", governanceCalls: 0, listeners: [], raw: {}, args: [] };
-  const context = createContext({ console: { info() {}, error() {} }, ...timers, Date, AbortController });
+  const context = createContext({ console: { info() {}, error() {} }, ...timers, Date, AbortController, ...(navigator ? { navigator } : {}) });
   const mocks = {
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
@@ -238,6 +238,16 @@ test("after the server's confirmation, metadata-only events change nothing; real
   state.listeners[0].rows({ ...listed(false, ["A1"]), docChanges: () => [{ type: "added", doc: { id: "A2", data: () => ({ lmPcode: "ZA5241" }) } }] });
   assert.equal(updates.length, before + 1);
   assert.deepEqual([...updates.at(-1).rows.map(row => row.id)].sort(), ["A1", "A2"]);
+  api.setSalesReadSession(null);
+});
+
+// WD-R001.7 (1.2.0): with no connection the read stops at once, and answers with its own words.
+test("a Sales read with no internet connection answers straight away, and says so", async () => {
+  const { api, state, scope } = await fixture({ navigator: { onLine: false } });
+  const result = await api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), { signal: new AbortController().signal });
+  assert.equal(result.error.status, "SALES_LOAD_TIMEOUT");
+  assert.match(result.error.error, /no internet connection.*Try again/);
+  assert.equal(state.listeners.length, 0, "nothing is downloaded while the computer is offline; Try again starts it when the connection is back");
   api.setSalesReadSession(null);
 });
 

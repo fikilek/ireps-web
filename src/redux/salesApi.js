@@ -667,8 +667,16 @@ function createSalesStream(scope) {
     },
   );
 
+  stream.startedAtMs = Date.now();
   salesStreams.set(stream.key, stream);
   return stream;
+}
+
+// WD-R001.6 (1.2.0): when a page started reading these Sales, so a page opened later in the same
+// read shows the true time, not its own.
+export function salesReadStartedAtMs(scope) {
+  if (!scope || typeof scope !== "object") return 0;
+  return salesStreams.get(salesStreamKey(scope))?.startedAtMs || 0;
 }
 
 function getOrCreateSalesStream(scope) {
@@ -763,12 +771,6 @@ function readInitialSalesStream(scope, signal) {
       () => finish({ error: SALES_LOAD_TIMEOUT_ERROR }),
       SALES_LOAD_TIME_LIMIT_MS,
     );
-    const offline = typeof navigator === "object" && navigator?.onLine === false;
-    if (offline) {
-      finish({ error: SALES_LOAD_OFFLINE_ERROR });
-      return;
-    }
-
     const handleAbort = () => {
       finish({
         error: {
@@ -784,6 +786,12 @@ function readInitialSalesStream(scope, signal) {
     }
 
     signal?.addEventListener("abort", handleAbort, { once: true });
+
+    // WD-R001.7: with no connection there is nothing to wait for; say so at once.
+    if (typeof navigator === "object" && navigator?.onLine === false) {
+      finish({ error: SALES_LOAD_OFFLINE_ERROR });
+      return;
+    }
 
     const streamUnsubscribe = subscribeToSalesStream(
       scope,
