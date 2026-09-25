@@ -63,7 +63,9 @@ const OTHER_ANOMALY_VALUES = new Set([
 // The stored data was converted in the same window as this deploy, because the validator
 // also runs when an existing transaction is derived — so a strict server over unconverted
 // data, or converted data under the old server, refuses that derivation. They ship together.
-const NORMALISATION_NONE = "None";
+// Exported so meterLifecycle/helpers.js uses this one word rather than writing its own
+// copy of it, which is how the third spelling got there in the first place.
+export const NORMALISATION_NONE = "None";
 
 // The one spelling this used to be. Kept for the refusal message only, never accepted:
 // a capture carrying it comes from an app that predates 1.9.0, and the worker is told to
