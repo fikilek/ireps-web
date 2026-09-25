@@ -198,6 +198,79 @@ test("a no-access discovery adds its own NO ACCESS line to Zamo's METER AUDIT", 
   assert.ok(sheet.some((line) => line[1] === "NOT AVAILABLE"), "its normalisation line reads NOT AVAILABLE, as Zamo's sheet does");
 });
 
+
+// GMR-R036, against September 2026 as it was measured on LIVE on 25 September:
+// 599 Meter Discovery transactions, 462 with a meter and 137 no access.
+function septemberRows() {
+  const rows = [];
+  const add = (count, overrides) => {
+    for (let index = 0; index < count; index += 1) {
+      rows.push(row({ trnId: `TRN_${rows.length}`, ...overrides }));
+    }
+  };
+  const marker = "Not recorded - captured before this rule";
+
+  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "Meter Ok - None", normalisationActions: ["none"] });
+  add(10, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] });
+  add(5, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Disconnect meter, Tamper removed", normalisationActions: ["Disconnect meter", "Tamper removed"] });
+  add(1, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Disconnect meter, Tamper removed, Replace meter", normalisationActions: ["Disconnect meter", "Tamper removed", "Replace meter"] });
+  add(1, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Tamper removed", normalisationActions: ["Tamper removed"] });
+  add(40, { primaryFinding: "Illegally Connected", normalisation: `Illegally Connected - Not recorded, captured before this rule`, normalisationActions: ["none"], noActionReason: marker });
+  add(10, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - None", normalisationActions: ["none"] });
+  add(1, { primaryFinding: "Meter Damaged", normalisation: "Meter Damaged - Replace meter", normalisationActions: ["Replace meter"] });
+  add(4, { primaryFinding: "Meter Damaged", normalisation: `Meter Damaged - Not recorded, captured before this rule`, normalisationActions: ["none"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", normalisation: `Meter Faulty - Not recorded, captured before this rule`, normalisationActions: ["none"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", normalisation: "Meter Faulty - None", normalisationActions: ["none"] });
+  add(137, { hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] });
+
+  return rows;
+}
+
+test("Field Stats reproduces September 2026: 462 with a meter, 137 no access, 599 in each block", () => {
+  const { workbook } = readWorkbook(makeDataset(septemberRows(), { isIncompleteMonth: false }));
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })
+    .map((line) => {
+      const cells = [...line];
+      while (cells.length && cells.at(-1) === "") cells.pop();
+      return cells;
+    });
+  const lineOf = (label) => sheet.find((cells) => cells[1] === label);
+  const totalOf = (label) => lineOf(label)?.at(-1);
+
+  assert.equal(sheet[0][0], "SEPTEMBER 2026 - METER AUDIT");
+  assert.equal(totalOf("ILLEGALLY CONNECTED"), 67);
+  assert.equal(totalOf("METER DAMAGED"), 5);
+  assert.equal(totalOf("METER FAULTY"), 2);
+  assert.equal(totalOf("METER OK"), 388);
+  assert.equal(totalOf("NO ACCESS"), 137);
+  assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 599);
+  assert.equal(totalOf("TOTAL: NORMALISATION"), 599, "block 2 counts the same month again");
+
+  // The normalisation rows, in the order the owner drew: grouped by finding,
+  // Meter Ok first, the work done before the rows where nothing was done.
+  const start = sheet.findIndex((cells) => cells[0] === "SEPTEMBER 2026 - NORMALISATION");
+  const labels = sheet.slice(start + 1).map((cells) => cells[1]);
+  const shown = labels.slice(0, labels.indexOf("TOTAL: NORMALISATION") + 1);
+  assert.deepEqual(shown, [
+    "METER OK - NONE",
+    "ILLEGALLY CONNECTED - DISCONNECT METER",
+    "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED",
+    "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED, REPLACE METER",
+    "ILLEGALLY CONNECTED - TAMPER REMOVED",
+    "ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE",
+    "ILLEGALLY CONNECTED - NONE",
+    "METER DAMAGED - REPLACE METER",
+    "METER DAMAGED - NOT RECORDED, CAPTURED BEFORE THIS RULE",
+    "METER FAULTY - NOT RECORDED, CAPTURED BEFORE THIS RULE",
+    "METER FAULTY - NONE",
+    "NO ACCESS",
+    "TOTAL: NORMALISATION",
+  ]);
+  assert.equal(totalOf("ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE"), 40, "never asked");
+  assert.equal(totalOf("ILLEGALLY CONNECTED - NONE"), 10, "asked, and nothing chosen");
+});
+
+
 test("the extra counts sit below Zamo's Teams block", () => {
   const rows = [
     row({ trnId: "A", fieldWorkerName: "Lefu Motlou" }),
@@ -278,6 +351,38 @@ test("the Field Stats sheet lists the work not placed on Field Data", () => {
   const headerIndex = rows.findIndex((item) => item[0] === "NOT ON FIELD DATA");
   assert.ok(headerIndex > 0);
   assert.deepEqual(rows[headerIndex + 1].slice(1, 3), ["TRN_X", "The submission time cannot be read."]);
+});
+
+// GMR-R037
+test("a General Report declares itself on its file name and its first sheet", () => {
+  const dataset = makeDataset([row()], {
+    reportKind: "GR",
+    reportType: "GENERAL_REPORT",
+    isPaymentRecord: false,
+    notForPaymentNotice: "General Report — for looking only. Overlapping ranges can hold the same work twice, so this is never the record the municipality pays on. The General Monthly Report is.",
+    reportMonth: null,
+    startDate: "2026-08-01",
+    endDate: "2026-09-15",
+    periodLabel: "1 Aug 2026 to 15 Sep 2026",
+    reportingPeriodLabel: "1 Aug 2026 to 15 Sep 2026",
+    isIncompleteMonth: false,
+  });
+
+  const managed = buildGeneralMonthlyManagedReport({ dataset, generatedAt: new Date("2026-09-25T10:05:00.000Z") });
+  assert.match(managed.metadata.fileName, /^general_report_not_for_payment_endumeni_2026-08-01_to_2026-09-15_\d{12}\.xlsx$/);
+  assert.equal(managed.metadata.reportType, "GENERAL_REPORT");
+  assert.equal(managed.metadata.reportName, "General Report");
+  assert.equal(managed.metadata.sourceScope.isPaymentRecord, false);
+
+  const workbook = XLSX.read(managed.artifact.bytes, { type: "array" });
+  const fieldData = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
+  assert.match(fieldData[0][0], /^1 AUG 2026 TO 15 SEP 2026 — General Report/);
+  assert.equal(fieldData[1][0], "Capture Date", "Zamo's headings still follow, unchanged");
+  assert.equal(fieldData[2][1], "Lefu Worker", "and the rows follow the headings");
+
+  const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
+  assert.match(stats[0][0], /never the record the municipality pays on/);
+  assert.ok(stats.some((line) => line[0] === "1 AUG 2026 TO 15 SEP 2026 - METER AUDIT"), "the period is named on every block");
 });
 
 test("the saved report names the month and counts its transactions", () => {

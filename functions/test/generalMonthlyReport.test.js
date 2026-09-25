@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   buildGeneralMonthlyReportDataset,
+  resolveGmrPeriod,
+  validateGrDateRange,
+  buildGmrNormalisationText,
   buildGmrFieldRow,
   getGmrReportMonthWindow,
   getGmrSalesCategory,
@@ -88,6 +91,84 @@ test("work counts when it reached the server: creation with no workflow, complet
   assert.equal(isGmrTransactionInMonth(disconnection(), SEPTEMBER), true);
 });
 
+function fakeDb(collections) {
+  return {
+    collection(name) {
+      if (name === "registry_meters") throw new Error("The Meter Registry must never be read.");
+      const store = collections[name] || {};
+      return {
+        doc: (id) => ({ collectionName: name, id }),
+        where: (field, op, values) => ({
+          get: async () => ({
+            docs: Object.entries(store)
+              .filter(([, data]) => op === "in" && values.includes(data[field]))
+              .map(([id, data]) => ({ id, data: () => data })),
+          }),
+        }),
+      };
+    },
+    async getAll(...refs) {
+      return refs.map((ref) => {
+        const data = (collections[ref.collectionName] || {})[ref.id];
+        return { id: ref.id, exists: Boolean(data), data: () => data };
+      });
+    },
+  };
+}
+
+test("a bad meter number does not stop the report, and completed work with no readable time is listed", async () => {
+  const slashed = discovery();
+  slashed.ast.astData.astNo = "12/34";
+  const noTime = disconnection({ workflow: { state: "COMPLETED", completedAt: "", completedByUid: "U2" }, metadata: { createdAt: "2026-09-02T08:00:00.000Z" } });
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db: fakeDb({}),
+    reportMonth: "2026-09",
+    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
+    loadTransactions: async () => new Map([["TRN_SLASH", slashed], ["TRN_NO_TIME", noTime]]),
+  });
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_SLASH"]);
+  assert.equal(dataset.fieldRows[0].onVendingList, null);
+  assert.equal(dataset.unplaced.length, 1);
+  assert.equal(dataset.unplaced[0].trnId, "TRN_NO_TIME");
+  assert.match(dataset.unplaced[0].reason, /completion time cannot be read/);
+});
+
+// GMR-R037
+test("a General Report takes any range, in South African time, and never the future", () => {
+  const now = new Date("2026-09-25T10:00:00Z");
+  const window = validateGrDateRange({ startDate: "2026-08-01", endDate: "2026-09-15" }, now);
+  assert.equal(window.reportKind, "GR");
+  assert.equal(window.periodLabel, "1 Aug 2026 to 15 Sep 2026");
+  assert.equal(window.startIso, "2026-07-31T22:00:00.000Z");
+  assert.equal(window.endIso, "2026-09-15T22:00:00.000Z", "the end includes the whole of that day");
+  assert.throws(() => validateGrDateRange({ startDate: "2026-09-15", endDate: "2026-08-01" }, now), /on or before/);
+  assert.throws(() => validateGrDateRange({ startDate: "2026-09-01", endDate: "2026-09-30" }, now), /future/);
+  assert.throws(() => validateGrDateRange({ startDate: "", endDate: "2026-09-15" }, now), /start date and an end date/);
+
+  const month = resolveGmrPeriod({ mode: "MONTHLY_GMR", reportMonth: "2026-08" }, now);
+  assert.equal(month.reportKind, "GMR");
+  assert.equal(month.periodLabel, "August 2026");
+});
+
+test("a General Report says it is not the payment record, and keeps the same rows", async () => {
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db: fakeDb({}),
+    mode: "GENERAL_REPORT",
+    startDate: "2026-09-09",
+    endDate: "2026-09-10",
+    generatedAt: new Date("2026-09-25T10:00:00.000Z"),
+    loadTransactions: async () => new Map([["TRN_MD_1", discovery()], ["TRN_DCN_1", disconnection()]]),
+  });
+
+  assert.equal(dataset.reportKind, "GR");
+  assert.equal(dataset.reportType, "GENERAL_REPORT");
+  assert.equal(dataset.isPaymentRecord, false);
+  assert.match(dataset.notForPaymentNotice, /never the record the municipality pays on/);
+  assert.equal(dataset.periodLabel, "9 Sep 2026 to 10 Sep 2026");
+  assert.equal(dataset.reportMonth, null);
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_MD_1", "TRN_DCN_1"]);
+});
+
 test("a discovery row carries the schema columns from the transaction and its enrichment", () => {
   const row = buildGmrFieldRow({
     trnId: "TRN_MD_1",
@@ -115,7 +196,7 @@ test("a discovery row carries the schema columns from the transaction and its en
   assert.equal(row.salesCategory, "CAT4 - Long Gap");
   assert.equal(row.primaryFinding, "Meter Ok");
   assert.equal(row.findingGroup, "Meter Ok · Operationally Ok");
-  assert.equal(row.normalisation, "none");
+  assert.equal(row.normalisation, "Meter Ok - None");
   assert.equal(row.noActionReason, null);
   assert.equal(row.visibility, "Visible");
   assert.equal(row.onVendingList, "Yes");
@@ -197,7 +278,7 @@ test("an inspection is read from what it captured, like a discovery", () => {
   assert.equal(row.fieldWorkerName, "Sipho Worker");
   assert.equal(row.primaryFinding, "Meter Faulty");
   assert.equal(row.findingGroup, "Meter Faulty");
-  assert.equal(row.normalisation, "Meter replaced");
+  assert.equal(row.normalisation, "Meter Faulty - Meter replaced");
   assert.equal(row.meterPhase, "Three Phase");
 });
 
@@ -237,54 +318,34 @@ test("the Sales category is the reporting month's only, and a malformed month is
   assert.equal(getGmrSalesCategory(sales, "2026-07"), null);
 });
 
+// GMR-R035
+test("the normalisation column carries the finding that caused it", () => {
+  const read = (options) => buildGmrNormalisationText(options);
+  assert.equal(read({ finding: "Illegally Connected", actions: ["Disconnect meter"] }), "Illegally Connected - Disconnect meter");
+  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "Meter Ok - None");
+  assert.equal(read({ finding: "Meter Ok", actions: ["Tamper removed"] }), "Meter Ok - Tamper removed");
+  assert.equal(
+    read({ finding: "Illegally Connected", actions: ["Disconnect meter", "Tamper removed"] }),
+    "Illegally Connected - Disconnect meter, Tamper removed",
+    "more than one thing done, in the order recorded",
+  );
+  assert.equal(
+    read({ finding: "Illegally Connected", actions: ["none"], noActionReason: "Not recorded - captured before this rule" }),
+    "Illegally Connected - Not recorded, captured before this rule",
+    "the reason's own hyphen becomes a comma, so the separator stays unique",
+  );
+  assert.equal(read({ finding: "Illegally Connected", actions: [], noActionReason: "Customer refused" }), "Illegally Connected - Customer refused");
+  assert.equal(read({ finding: "Meter Ok", actions: ["none"], hasAccess: false }), "No Access", "no meter, so nothing to join");
+  assert.equal(read({ finding: "Meter Ok", actions: [], isWater: true }), "Meter Ok", "water carries no normalisation");
+  assert.equal(read({ finding: null, actions: ["Disconnect meter"] }), "NAv - Disconnect meter", "a missing side reads NAv, never a dropped dash");
+});
+
 test("a meter number that is not a real number is shown but never looked up on Sales", () => {
   const trn = discovery();
   trn.ast.astData.astNo = "N/AV";
   const row = buildGmrFieldRow({ trnId: "T", trn, reportMonth: "2026-09" });
   assert.equal(row.fieldFoundMeterNo, "N/AV");
   assert.equal(row.onVendingList, null);
-});
-
-function fakeDb(collections) {
-  return {
-    collection(name) {
-      if (name === "registry_meters") throw new Error("The Meter Registry must never be read.");
-      const store = collections[name] || {};
-      return {
-        doc: (id) => ({ collectionName: name, id }),
-        where: (field, op, values) => ({
-          get: async () => ({
-            docs: Object.entries(store)
-              .filter(([, data]) => op === "in" && values.includes(data[field]))
-              .map(([id, data]) => ({ id, data: () => data })),
-          }),
-        }),
-      };
-    },
-    async getAll(...refs) {
-      return refs.map((ref) => {
-        const data = (collections[ref.collectionName] || {})[ref.id];
-        return { id: ref.id, exists: Boolean(data), data: () => data };
-      });
-    },
-  };
-}
-
-test("a bad meter number does not stop the report, and completed work with no readable time is listed", async () => {
-  const slashed = discovery();
-  slashed.ast.astData.astNo = "12/34";
-  const noTime = disconnection({ workflow: { state: "COMPLETED", completedAt: "", completedByUid: "U2" }, metadata: { createdAt: "2026-09-02T08:00:00.000Z" } });
-  const dataset = await buildGeneralMonthlyReportDataset({
-    db: fakeDb({}),
-    reportMonth: "2026-09",
-    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
-    loadTransactions: async () => new Map([["TRN_SLASH", slashed], ["TRN_NO_TIME", noTime]]),
-  });
-  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_SLASH"]);
-  assert.equal(dataset.fieldRows[0].onVendingList, null);
-  assert.equal(dataset.unplaced.length, 1);
-  assert.equal(dataset.unplaced[0].trnId, "TRN_NO_TIME");
-  assert.match(dataset.unplaced[0].reason, /completion time cannot be read/);
 });
 
 test("the dataset is the month's submitted transactions, in time order, never read from the registry", async () => {

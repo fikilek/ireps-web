@@ -1,4 +1,4 @@
-// General Monthly Report (GMR 1.2.0, schema 1.1.0).
+// General Monthly Report and General Report (GMR 1.5.0, schema 1.2.0).
 //
 // The report is the month's field transactions: one Field Data row per
 // submitted transaction, read from `trns` (GMR-R005). Premises, Sales, assets
@@ -11,14 +11,21 @@ import { getFirestore } from "firebase-admin/firestore";
 export const GMR_LM_PCODE = "ZA5241";
 export const GMR_LM_NAME = "Endumeni";
 export const GMR_GENERATION_MODE = "MONTHLY_GMR";
+// GMR-R037: the second report. Any start and end date, for looking, never for
+// paying, because two ranges may overlap and hold the same work twice.
+export const GR_GENERATION_MODE = "GENERAL_REPORT";
+export const GR_REPORT_TYPE = "GENERAL_REPORT";
+export const GR_NOT_FOR_PAYMENT =
+  "General Report — for looking only. Overlapping ranges can hold the same work twice, so this is never the record the municipality pays on. The General Monthly Report is.";
 export const GMR_REPORT_TYPE = "GENERAL_MONTHLY_REPORT";
 export const GMR_SCHEMA_VERSION = 2;
-export const GMR_RULES_VERSION = "1.2.0";
-export const GMR_REPORT_SCHEMA_VERSION = "1.1.0";
+export const GMR_RULES_VERSION = "1.5.0";
+export const GMR_REPORT_SCHEMA_VERSION = "1.2.0";
 
 const ALLOWED_GMR_ROLES = new Set(["SPU", "ADM", "MNG", "SPV"]);
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
 const NO_DISCONNECTION_RECORD = "No disconnection record";
+const NORMALISATION_NONE = "none";
 const DISCONNECT_METER = "Disconnect meter";
 
 export const GMR_TRN_TYPE_LABELS = Object.freeze({
@@ -147,6 +154,60 @@ export function getGmrReportMonthWindow(reportMonth) {
   };
 }
 
+function isValidDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+}
+
+// Three letters, fixed, so the period reads the same everywhere (GMR-R037).
+const MONTH_ABBREVIATIONS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dayLabel(date) {
+  const [year, month, day] = String(date).split("-").map(Number);
+  return `${day} ${MONTH_ABBREVIATIONS[month - 1]} ${year}`;
+}
+
+// GMR-R037: both dates are read in South African time, the start is on or
+// before the end, the end includes the whole of that day, and neither may be
+// in the future.
+export function getGrDateRangeWindow({ startDate, endDate }) {
+  if (!isValidDate(startDate) || !isValidDate(endDate)) {
+    throw new RangeError("A General Report needs a start date and an end date.");
+  }
+  if (startDate > endDate) {
+    throw new RangeError("The start date must be on or before the end date.");
+  }
+
+  const startMs = Date.parse(`${startDate}T00:00:00Z`) - JOHANNESBURG_OFFSET_MS;
+  const endMs = Date.parse(`${endDate}T00:00:00Z`) - JOHANNESBURG_OFFSET_MS + 24 * 60 * 60 * 1000;
+
+  return {
+    reportKind: "GR",
+    startDate,
+    endDate,
+    periodLabel: `${dayLabel(startDate)} to ${dayLabel(endDate)}`,
+    startIso: new Date(startMs).toISOString(),
+    endIso: new Date(endMs).toISOString(),
+    startMs,
+    endMs,
+  };
+}
+
+export function validateGrDateRange({ startDate, endDate }, now = new Date()) {
+  const window = getGrDateRangeWindow({ startDate, endDate });
+  const today = johannesburgDayKey(now);
+  if (!today || window.endDate > today || window.startDate > today) {
+    throw new RangeError("A General Report cannot cover a date in the future.");
+  }
+  return window;
+}
+
+function johannesburgDayKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const shifted = new Date(date.getTime() + JOHANNESBURG_OFFSET_MS);
+  return shifted.toISOString().slice(0, 10);
+}
+
 // GMR-R011: no future month; the current month may be generated and is
 // labelled incomplete.
 export function validateGmrReportMonth(reportMonth, now = new Date()) {
@@ -155,7 +216,12 @@ export function validateGmrReportMonth(reportMonth, now = new Date()) {
   if (!currentMonth || reportMonth > currentMonth) {
     throw new RangeError("GMR reporting month cannot be in the future.");
   }
-  return { ...window, isIncompleteMonth: reportMonth === currentMonth };
+  return {
+    ...window,
+    reportKind: "GMR",
+    periodLabel: window.reportingPeriodLabel,
+    isIncompleteMonth: reportMonth === currentMonth,
+  };
 }
 
 function isInWindow(iso, window) {
@@ -166,6 +232,15 @@ function isInWindow(iso, window) {
     milliseconds >= window.startMs &&
     milliseconds < window.endMs
   );
+}
+
+// One period for both reports (GMR-R037): a month for the GMR, a range for
+// the GR. Everything after this point is shared.
+export function resolveGmrPeriod({ mode, reportMonth, startDate, endDate }, now = new Date()) {
+  if (normalizeUpper(mode) === GR_GENERATION_MODE) {
+    return validateGrDateRange({ startDate, endDate }, now);
+  }
+  return validateGmrReportMonth(reportMonth, now);
 }
 
 export function getGmrTrnType(trn = {}) {
@@ -253,6 +328,35 @@ export function getGmrNormalisationActions(trn = {}) {
   const raw = getNormalisation(trn)?.actionTaken;
   const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
   return values.map((value) => cleanText(value)).filter(Boolean);
+}
+
+// GMR-R035: the normalisation never stands alone. The cell reads the finding
+// and what was done about it, joined by one space, one hyphen, one space, so a
+// finding with nothing done reads "Illegally Connected - None" and the gap is
+// visible in one cell.
+export function buildGmrNormalisationText({
+  finding,
+  actions = [],
+  noActionReason = null,
+  hasAccess: accessible = true,
+  isWater = false,
+}) {
+  const findingText = cleanText(finding) || "NAv";
+  // No meter, so there is no finding and nothing to join.
+  if (!accessible) return "No Access";
+  // Water carries no normalisation (MN-R001 section 10); a joined "- None"
+  // would claim a decision nobody was asked to make.
+  if (isWater) return findingText;
+
+  const done = actions
+    .map((action) => cleanText(action))
+    .filter((action) => action && action.toLowerCase() !== NORMALISATION_NONE);
+  if (done.length) return `${findingText} - ${done.join(", ")}`;
+
+  // Nothing was done: the recorded reason where there is one, otherwise None.
+  // The reason's own hyphen becomes a comma so the separator stays unique.
+  const reason = cleanText(noActionReason).replace(/\s+-\s+/g, ", ");
+  return `${findingText} - ${reason || "None"}`;
 }
 
 function getGpsCoordinates(trn = {}) {
@@ -449,7 +553,13 @@ export function buildGmrFieldRow({
     salesCategory: sales ? getGmrSalesCategory(sales, reportMonth) : null,
     primaryFinding: anomaly,
     findingDetail: anomalyDetail,
-    normalisation: actions.length ? actions.join(" • ") : null,
+    normalisation: buildGmrNormalisationText({
+      finding: anomaly,
+      actions,
+      noActionReason: normalisation?.noActionReason,
+      hasAccess: accessible,
+      isWater: meterType === "WATER",
+    }),
     noActionReason: nullableText(normalisation?.noActionReason),
     sealNo: nullableText(astData?.meter?.seal?.sealNo),
     fieldComment: nullableText(trn?.fieldComment?.text),
@@ -595,15 +705,18 @@ async function selectMonthTransactions(db, lmPcode, window) {
 export async function buildGeneralMonthlyReportDataset({
   db,
   lmPcode = GMR_LM_PCODE,
+  mode = GMR_GENERATION_MODE,
   reportMonth,
+  startDate,
+  endDate,
   generatedAt = new Date(),
   loadTransactions = selectMonthTransactions,
 }) {
   if (!db) throw new TypeError("Firestore db is required.");
   if (lmPcode !== GMR_LM_PCODE) {
-    throw new RangeError(`The General Monthly Report is available for ${GMR_LM_NAME} only.`);
+    throw new RangeError(`This report is available for ${GMR_LM_NAME} only.`);
   }
-  const window = validateGmrReportMonth(reportMonth, generatedAt);
+  const window = resolveGmrPeriod({ mode, reportMonth, startDate, endDate }, generatedAt);
   const selected = await loadTransactions(db, lmPcode, window);
 
   const entries = [];
@@ -688,16 +801,24 @@ export async function buildGeneralMonthlyReportDataset({
     0,
   );
 
+  const isGeneralReport = window.reportKind === "GR";
+
   return {
     schemaVersion: GMR_SCHEMA_VERSION,
     rulesVersion: GMR_RULES_VERSION,
     reportSchemaVersion: GMR_REPORT_SCHEMA_VERSION,
-    reportType: GMR_REPORT_TYPE,
-    generationMode: GMR_GENERATION_MODE,
+    reportKind: window.reportKind,
+    reportType: isGeneralReport ? GR_REPORT_TYPE : GMR_REPORT_TYPE,
+    generationMode: isGeneralReport ? GR_GENERATION_MODE : GMR_GENERATION_MODE,
+    isPaymentRecord: !isGeneralReport,
+    notForPaymentNotice: isGeneralReport ? GR_NOT_FOR_PAYMENT : null,
     generatedAt: generatedAt.toISOString(),
-    reportMonth: window.reportMonth,
-    reportingPeriodLabel: window.reportingPeriodLabel,
-    isIncompleteMonth: window.isIncompleteMonth,
+    reportMonth: window.reportMonth || null,
+    startDate: window.startDate || null,
+    endDate: window.endDate || null,
+    periodLabel: window.periodLabel,
+    reportingPeriodLabel: window.periodLabel,
+    isIncompleteMonth: Boolean(window.isIncompleteMonth),
     municipality: { lmPcode: GMR_LM_PCODE, lmName: GMR_LM_NAME },
     photoColumnCount,
     fieldRows,
@@ -718,14 +839,16 @@ export const generateGeneralMonthlyReportCallable = onCall(
     const lmPcode = cleanText(request?.data?.lmPcode || GMR_LM_PCODE);
     const mode = normalizeUpper(request?.data?.mode);
     const reportMonth = cleanText(request?.data?.reportMonth);
+    const startDate = cleanText(request?.data?.startDate);
+    const endDate = cleanText(request?.data?.endDate);
 
     if (lmPcode !== GMR_LM_PCODE) {
       throw new HttpsError(
         "invalid-argument",
-        `The General Monthly Report is available for ${GMR_LM_NAME} only.`,
+        `This report is available for ${GMR_LM_NAME} only.`,
       );
     }
-    if (mode !== GMR_GENERATION_MODE) {
+    if (![GMR_GENERATION_MODE, GR_GENERATION_MODE].includes(mode)) {
       throw new HttpsError(
         "invalid-argument",
         "This page is out of date. Reload it and try again.",
@@ -735,7 +858,7 @@ export const generateGeneralMonthlyReportCallable = onCall(
     const generatedAt = new Date();
     let window;
     try {
-      window = validateGmrReportMonth(reportMonth, generatedAt);
+      window = resolveGmrPeriod({ mode, reportMonth, startDate, endDate }, generatedAt);
     } catch (error) {
       throw new HttpsError("invalid-argument", error.message);
     }
@@ -747,21 +870,26 @@ export const generateGeneralMonthlyReportCallable = onCall(
       actorUid: actor.uid,
       actorRole: actor.role,
       lmPcode,
-      reportMonth: window.reportMonth,
+      reportKind: window.reportKind,
+      period: window.periodLabel,
     });
 
     try {
       const dataset = await buildGeneralMonthlyReportDataset({
         db,
         lmPcode,
+        mode,
         reportMonth: window.reportMonth,
+        startDate: window.startDate,
+        endDate: window.endDate,
         generatedAt,
       });
 
       logger.info("generateGeneralMonthlyReportCallable -- SUCCESS", {
         actorUid: actor.uid,
         lmPcode,
-        reportMonth: dataset.reportMonth,
+        reportKind: dataset.reportKind,
+        period: dataset.periodLabel,
         payableTotal: dataset.summary.payableTotal,
         unplacedCount: dataset.summary.unplacedCount,
         photoColumnCount: dataset.photoColumnCount,
@@ -772,7 +900,7 @@ export const generateGeneralMonthlyReportCallable = onCall(
       logger.error("generateGeneralMonthlyReportCallable -- ERROR", {
         actorUid: actor.uid,
         lmPcode,
-        reportMonth: window.reportMonth,
+        period: window.periodLabel,
         message: error?.message || String(error),
         code: error?.code || null,
         stack: error?.stack || "",

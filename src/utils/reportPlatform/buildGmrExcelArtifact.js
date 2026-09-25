@@ -104,9 +104,17 @@ function monthStatement(dataset) {
   return `Field transactions counted in the month they reached the server, South African time. Generated ${formatJohannesburg(dataset?.generatedAt)}.`;
 }
 
+// GMR-R037: the period is named wherever the report is named.
 function periodLabel(dataset) {
-  const period = String(dataset?.reportingPeriodLabel || dataset?.reportMonth || "GMR").toUpperCase();
+  const period = String(dataset?.periodLabel || dataset?.reportingPeriodLabel || dataset?.reportMonth || "GMR").toUpperCase();
   return dataset?.isIncompleteMonth ? `${period} (INCOMPLETE)` : period;
+}
+
+function notForPaymentNotice(dataset) {
+  return dataset?.isPaymentRecord === false
+    ? dataset?.notForPaymentNotice ||
+      "General Report — for looking only, never the record the municipality pays on."
+    : null;
 }
 
 // Zamo's column widths.
@@ -119,20 +127,25 @@ function zamoWidth(item) {
 function buildFieldDataSheet(dataset) {
   const rows = dataset.fieldRows;
   const columns = getGmrFieldDataColumns(dataset.photoColumnCount);
+  // A General Report says so on its own first sheet, above the headings, so a
+  // workbook that travels by email cannot be mistaken for the payment record.
+  const notice = notForPaymentNotice(dataset);
   const aoa = [
+    ...(notice ? [[`${periodLabel(dataset)} — ${notice}`]] : []),
     columns.map((item) => item.header),
     ...rows.map((row) => columns.map((item) => cellValue(row, item))),
   ];
+  const headerRow = notice ? 1 : 0;
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!autofilter"] = {
-    ref: `A1:${XLSX.utils.encode_col(columns.length - 1)}${Math.max(1, aoa.length)}`,
+    ref: `A${headerRow + 1}:${XLSX.utils.encode_col(columns.length - 1)}${Math.max(headerRow + 1, aoa.length)}`,
   };
   worksheet["!cols"] = columns.map(zamoWidth);
 
   rows.forEach((row, rowIndex) => {
     columns.forEach((item, columnIndex) => {
-      const cell = worksheet[XLSX.utils.encode_cell({ r: rowIndex + 1, c: columnIndex })];
+      const cell = worksheet[XLSX.utils.encode_cell({ r: headerRow + 1 + rowIndex, c: columnIndex })];
       if (!cell) return;
       if (item.type === "date" && typeof cell.v === "number") cell.z = "yyyy-mm-dd";
       if (item.type === "photo") {
@@ -217,6 +230,26 @@ function buildFieldStatsSheet(dataset) {
   const model = buildGmrFieldStatsModel(dataset);
   const aoa = [];
   const merges = [];
+  const notice = notForPaymentNotice(dataset);
+  if (notice) {
+    aoa.push([notice]);
+    aoa.push([]);
+  }
+
+  // GMR-R036: block 1, block 2 and the Teams block count the same month's
+  // discoveries three ways. If they disagree the report is wrong and says so
+  // rather than printing.
+  const auditTotal = stats.statuses.reduce((total, status) => total + sumOf(stats.statusByWorker.get(status)), 0);
+  const normalisationTotal = stats.normalisations.reduce(
+    (total, label) => total + sumOf(stats.normalisationByWorker.get(label)), 0);
+  const teamsTotal = stats.statuses.reduce((total, status) => total + sumOf(stats.statusByTeam.get(status)), 0);
+  if (auditTotal !== stats.records || normalisationTotal !== stats.records || teamsTotal !== stats.records) {
+    throw new Error(
+      `Field Stats does not balance: ${stats.records} discovery records, ` +
+      `Meter Audit ${auditTotal}, Normalisation ${normalisationTotal}, Teams ${teamsTotal}. ` +
+      "The report was not produced.",
+    );
+  }
 
   const { auditEndRow } = appendZamoFieldStats(aoa, merges, stats, period);
   appendExtraCounts(aoa, model, period);

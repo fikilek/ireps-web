@@ -37,8 +37,29 @@ const METER_STATUS_ORDER = [
 const NO_ACCESS_LABEL = "NO ACCESS";
 const NOT_AVAILABLE = "Not Available";
 
-// Zamo's fixed METER AUDIT lines; anything else recorded follows them.
+// Zamo's fixed METER AUDIT lines; anything else recorded follows them, which
+// is where NO ACCESS appears (owner, 25 September 2026).
 const ZAMO_METER_STATUS_ORDER = ["ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY", "METER OK"];
+
+// GMR-R036: the NORMALISATION block is grouped by finding, Meter Ok first,
+// then the findings in block 1's order; within a finding the work done comes
+// first and the "- NONE" row last.
+const NORMALISATION_FINDING_ORDER = ["METER OK", "ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY"];
+
+function normalisationRank(label, rows) {
+  const [finding] = String(label).split(" - ");
+  const findingRank = NORMALISATION_FINDING_ORDER.indexOf(finding);
+  const first = rows.find((row) => zamoLabel(row?.normalisation) === label) || {};
+  const didWork = (first.normalisationActions || []).some(
+    (action) => text(action) && text(action).toLowerCase() !== "none",
+  );
+  const kind = didWork ? 0 : text(first.noActionReason) ? 1 : 2;
+  return [
+    label === "NO ACCESS" ? 99 : findingRank === -1 ? 50 : findingRank,
+    label === "NO ACCESS" ? 0 : kind,
+    label,
+  ];
+}
 
 function zamoLabel(value) {
   const label = upper(value);
@@ -61,7 +82,10 @@ export function buildZamoFieldStats(dataset = {}) {
   const teams = [...new Set(rows.map(teamOfRow))].sort((left, right) => left.localeCompare(right));
   const statuses = withExtras(ZAMO_METER_STATUS_ORDER, rows.map(zamoMeterStatus));
   const normalisations = [...new Set(rows.map((row) => zamoLabel(row?.normalisation)))]
-    .sort((left, right) => left.localeCompare(right));
+    .map((label) => ({ label, rank: normalisationRank(label, rows) }))
+    .sort((left, right) =>
+      left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || left.rank[2].localeCompare(right.rank[2]))
+    .map((item) => item.label);
 
   const tally = (keys, keyOf, labelOf, labels) => {
     const table = new Map(labels.map((label) => [label, new Map(keys.map((key) => [key, 0]))]));

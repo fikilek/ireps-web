@@ -15,6 +15,7 @@ import { getDefaultReportMonth } from "./generalMonthlyReportMonthModel.js";
 
 const GMR_LM_PCODE = "ZA5241";
 const GMR_GENERATION_MODE = "MONTHLY_GMR";
+const GR_GENERATION_MODE = "GENERAL_REPORT";
 
 const STEP_ORDER = ["READ", "BUILD", "SAVE", "DOWNLOAD"];
 
@@ -30,6 +31,30 @@ function formatReportMonth(value) {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+function johannesburgParts() {
+  return new Intl.DateTimeFormat("en-ZA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+}
+
+function currentJohannesburgDay() {
+  const parts = johannesburgParts();
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  return get("year") && get("month") && get("day") ? `${get("year")}-${get("month")}-${get("day")}` : "";
+}
+
+const MONTH_ABBREVIATIONS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatDay(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const [, year, month, day] = match;
+  return `${Number(day)} ${MONTH_ABBREVIATIONS[Number(month) - 1]} ${year}`;
 }
 
 function currentJohannesburgMonthKey() {
@@ -73,7 +98,11 @@ function failureLines(step, error) {
 
 export default function GeneralMonthlyReportPage() {
   const navigate = useNavigate();
+  // GMR-R037: one choice first, then only what that choice needs.
+  const [reportKind, setReportKind] = useState("GMR");
   const [reportMonth, setReportMonth] = useState(() => getDefaultReportMonth());
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [phase, setPhase] = useState("idle");
   const [step, setStep] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -81,8 +110,15 @@ export default function GeneralMonthlyReportPage() {
   const [failure, setFailure] = useState(null);
   const startedAtRef = useRef(null);
   const maxReportMonth = currentJohannesburgMonthKey();
+  const today = currentJohannesburgDay();
+  const isGeneralReport = reportKind === "GR";
   const monthLabel = formatReportMonth(reportMonth);
-  const isCurrentMonth = reportMonth && reportMonth === maxReportMonth;
+  const rangeLabel = startDate && endDate ? `${formatDay(startDate)} to ${formatDay(endDate)}` : "";
+  const periodLabel = isGeneralReport ? rangeLabel : monthLabel;
+  const isCurrentMonth = !isGeneralReport && reportMonth && reportMonth === maxReportMonth;
+  const rangeBackwards = isGeneralReport && startDate && endDate && startDate > endDate;
+  const canGenerate = isGeneralReport ? Boolean(startDate && endDate && !rangeBackwards) : Boolean(reportMonth);
+  const reportName = isGeneralReport ? "General Report" : "General Monthly Report";
 
   useEffect(() => {
     if (phase !== "working") return undefined;
@@ -107,8 +143,8 @@ export default function GeneralMonthlyReportPage() {
     try {
       const response = await requestGmrDataset({
         lmPcode: GMR_LM_PCODE,
-        mode: GMR_GENERATION_MODE,
-        reportMonth,
+        mode: isGeneralReport ? GR_GENERATION_MODE : GMR_GENERATION_MODE,
+        ...(isGeneralReport ? { startDate, endDate } : { reportMonth }),
       });
       const dataset = response?.data;
 
@@ -131,7 +167,7 @@ export default function GeneralMonthlyReportPage() {
     }
   }
 
-  const labels = stepLabels(monthLabel || "the month");
+  const labels = stepLabels(periodLabel || "the period");
   const steps = STEP_ORDER.map((key) => ({
     key,
     label: labels[key],
@@ -141,17 +177,19 @@ export default function GeneralMonthlyReportPage() {
 
   const summary = result?.dataset?.summary || null;
   const unplacedCount = summary?.unplacedCount || 0;
-  const resultMonthLabel = result?.dataset?.reportingPeriodLabel || monthLabel;
+  const resultMonthLabel = result?.dataset?.periodLabel || result?.dataset?.reportingPeriodLabel || periodLabel;
+  const resultIsGeneral = result?.dataset?.isPaymentRecord === false;
 
   return (
     <>
       <header className="console-header">
         <div>
           <p className="eyebrow">Reports</p>
-          <h1>General Monthly Report</h1>
+          <h1>{reportName}</h1>
           <p className="muted">
-            Every field transaction for one month, one row each, with the counts per
-            field worker and per team.
+            {isGeneralReport
+              ? "Every field transaction between two dates, one row each, with the counts per field worker and per team. For looking only — never the record the municipality pays on."
+              : "Every field transaction for one month, one row each, with the counts per field worker and per team. This is the record the municipality pays on."}
           </p>
           <Link className="text-link" to="/reports">
             ← Back to Reports
@@ -172,24 +210,70 @@ export default function GeneralMonthlyReportPage() {
             <strong>Endumeni</strong>
           </div>
           <div>
-            <label className="muted" htmlFor="gmr-report-month">Reporting month</label>
-            <input
-              id="gmr-report-month"
-              type="month"
-              value={reportMonth}
-              max={maxReportMonth || undefined}
-              onChange={(event) => setReportMonth(event.target.value)}
+            <label className="muted" htmlFor="gmr-report-kind">Report</label>
+            <select
+              id="gmr-report-kind"
+              value={reportKind}
+              onChange={(event) => setReportKind(event.target.value)}
               disabled={phase === "working"}
               style={styles.monthInput}
-            />
+            >
+              <option value="GMR">General Monthly Report — one month, the payment record</option>
+              <option value="GR">General Report — any dates, for looking</option>
+            </select>
           </div>
+
+          {isGeneralReport ? (
+            <>
+              <div>
+                <label className="muted" htmlFor="gr-start-date">Start date</label>
+                <input
+                  id="gr-start-date"
+                  type="date"
+                  value={startDate}
+                  max={today || undefined}
+                  onChange={(event) => setStartDate(event.target.value)}
+                  disabled={phase === "working"}
+                  style={styles.monthInput}
+                />
+              </div>
+              <div>
+                <label className="muted" htmlFor="gr-end-date">End date</label>
+                <input
+                  id="gr-end-date"
+                  type="date"
+                  value={endDate}
+                  max={today || undefined}
+                  onChange={(event) => setEndDate(event.target.value)}
+                  disabled={phase === "working"}
+                  style={styles.monthInput}
+                />
+                {rangeBackwards ? (
+                  <p style={styles.warnValue}>The start date must be on or before the end date.</p>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="muted" htmlFor="gmr-report-month">Reporting month</label>
+              <input
+                id="gmr-report-month"
+                type="month"
+                value={reportMonth}
+                max={maxReportMonth || undefined}
+                onChange={(event) => setReportMonth(event.target.value)}
+                disabled={phase === "working"}
+                style={styles.monthInput}
+              />
+            </div>
+          )}
           <div>
             <div className="muted">Workbook</div>
             <strong>Field Data and Field Stats</strong>
           </div>
           <div>
             <div className="muted">Which transactions</div>
-            <strong>All types, including no access, counted in the month they reached the server</strong>
+            <strong>All types, including no access, counted when they reached the server</strong>
           </div>
         </div>
 
@@ -198,9 +282,11 @@ export default function GeneralMonthlyReportPage() {
             type="button"
             className="secondary-button"
             onClick={() => setPhase("confirm")}
-            disabled={phase === "working" || !reportMonth}
+            disabled={phase === "working" || !canGenerate}
           >
-            {reportMonth ? `Generate ${monthLabel} report` : "Choose a reporting month"}
+            {canGenerate
+              ? `Generate ${periodLabel} report`
+              : isGeneralReport ? "Choose a start and end date" : "Choose a reporting month"}
           </button>
         </div>
       </section>
@@ -222,10 +308,11 @@ export default function GeneralMonthlyReportPage() {
 
       {phase === "confirm" ? (
         <BatchCreationModal
-          title={`Generate the ${monthLabel} General Monthly Report?`}
+          title={`Generate the ${periodLabel} ${reportName}?`}
           lines={[
-            `Endumeni. Every field transaction that reached the server in ${monthLabel}, one row each, with Field Stats per field worker and per team.`,
+            `Endumeni. Every field transaction that reached the server ${isGeneralReport ? `between ${periodLabel}` : `in ${periodLabel}`}, one row each, with Field Stats per field worker and per team.`,
             ...(isCurrentMonth ? [`${monthLabel} is not over yet, so the report will say it is incomplete.`] : []),
+            ...(isGeneralReport ? ["A General Report is for looking. Two ranges can hold the same work twice, so it says on its own face that it is not the payment record."] : []),
             "The workbook is saved to Generated Reports and then downloaded.",
           ]}
           actions={[
@@ -238,7 +325,7 @@ export default function GeneralMonthlyReportPage() {
 
       {phase === "working" ? (
         <BatchCreationModal
-          title={`Generating the ${monthLabel} report`}
+          title={`Generating the ${periodLabel} report`}
           steps={steps}
           lines={[`Elapsed ${formatElapsed(elapsedSeconds)}`]}
           working
@@ -254,6 +341,7 @@ export default function GeneralMonthlyReportPage() {
             ...(unplacedCount > 0
               ? [`${unplacedCount} submitted transaction${unplacedCount === 1 ? "" : "s"} could not be placed on Field Data. They are listed at the bottom of Field Stats; report them before issuing this report.`]
               : []),
+            ...(resultIsGeneral ? ["This is a General Report: for looking, never for payment."] : []),
             `Saved to Generated Reports as ${result.managed?.artifact?.fileName}.`,
             result.managed?.downloaded
               ? "The download has started."
