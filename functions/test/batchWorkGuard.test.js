@@ -337,7 +337,7 @@ test("the phone's own words for an illegal connection are matched, and nothing e
     { ast: { anomalies: { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter" } } },
     { ast: { anomalies: { anomaly: "illegally connected" } } },
     { ast: { anomalies: { anomaly: " ILLEGALLY-CONNECTED " } } },
-    { ast: { normalisation: { actionTaken: ["none", "Illegal connection - meter disconnected"] } } },
+    { ast: { normalisation: { actionTaken: ["None", "Illegal connection - meter disconnected"] } } },
     { ast: { normalisation: { actionTaken: ["Illegal Connection - Meter Reconnected"] } } },
     { inspection: { captured: { ast: { anomalies: { anomaly: "Illegally Connected" } } } } },
     [{ ast: { anomalies: { anomaly: "Meter Ok" } } }, { anomalies: { anomaly: "Illegally Connected" } }],
@@ -345,15 +345,15 @@ test("the phone's own words for an illegal connection are matched, and nothing e
 
   for (const report of [
     {}, null, { ast: { anomalies: { anomaly: "Meter Ok", anomalyDetail: "Bypass Suspicion" } } },
-    { ast: { anomalies: { anomaly: "Meter Damaged" }, normalisation: { actionTaken: ["Tamper Removed", "none"] } } },
+    { ast: { anomalies: { anomaly: "Meter Damaged" }, normalisation: { actionTaken: ["Tamper Removed", "None"] } } },
     { ast: { anomalies: { anomaly: "Illegal" } } },
     { ast: { anomalies: { anomaly: "Meter Ok", otherAnomalies: ["Meter Bridged (By Munic)"] } } },
   ]) assert.equal(isIllegallyConnected(report), false, JSON.stringify(report));
 
-  assert.equal(illegalConnectionWords({ ast: { anomalies: { anomaly: "Illegally Connected" }, normalisation: { actionTaken: ["Illegal connection - meter disconnected", "none"] } } }),
+  assert.equal(illegalConnectionWords({ ast: { anomalies: { anomaly: "Illegally Connected" }, normalisation: { actionTaken: ["Illegal connection - meter disconnected", "None"] } } }),
     "Illegally Connected; Illegal connection - meter disconnected");
-  assert.deepEqual(anomalyReport({ ast: { anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: ["Keypad Faulty"] }, normalisation: { actionTaken: ["none"] } } }),
-    { anomalies: ["Meter Ok", "Operationally Ok", "Keypad Faulty"], actions: ["none"] });
+  assert.deepEqual(anomalyReport({ ast: { anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: ["Keypad Faulty"] }, normalisation: { actionTaken: ["None"] } } }),
+    { anomalies: ["Meter Ok", "Operationally Ok", "Keypad Faulty"], actions: ["None"] });
 });
 
 test("an illegally connected meter goes through on another team's ERF, and the use is recorded", () => {

@@ -1314,7 +1314,7 @@ function sanitizeElectricityNormalisation(normalisation = {}) {
     ? normalisation.actionTaken
     : normalisation?.actionTaken
       ? [normalisation.actionTaken]
-      : ["none"];
+      : ["None"]; // MN-R001 1.9.0: the word itself is the value.
 
   const actionTaken = rawActions.map((action) => String(action).trim());
   const sanitized = {

@@ -43,7 +43,7 @@ function inspection(overrides = {}) {
             },
           },
           anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: [] },
-          normalisation: { actionTaken: ["none"] },
+          normalisation: { actionTaken: ["None"] },
           location: { placement: "Pole Top", gps: { lat: -28.1, lng: 30.2 } },
           ogs: { hasOffGridSupply: "no" },
         },
@@ -58,7 +58,7 @@ test("the finding the worker recorded becomes the meter's finding", () => {
   assert.equal(result.astPatch["ast.anomalies.anomaly"], "Meter Ok");
   assert.equal(result.astPatch["ast.anomalies.anomalyDetail"], "Operationally Ok");
   assert.deepEqual(result.astPatch["ast.anomalies.otherAnomalies"], []);
-  assert.deepEqual(result.astPatch["ast.normalisation"].actionTaken, ["none"]);
+  assert.deepEqual(result.astPatch["ast.normalisation"].actionTaken, ["None"]);
   assert.equal(result.astDataChanged, true);
 });
 

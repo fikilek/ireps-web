@@ -15,7 +15,7 @@ function waterInspection(normalisation) {
 
 test("a water inspection records its normalisation as a list", () => {
   for (const normalisation of [
-    { actionTaken: ["none"] },
+    { actionTaken: ["None"] },
     { actionTaken: "NONE" },
     undefined,
   ]) {

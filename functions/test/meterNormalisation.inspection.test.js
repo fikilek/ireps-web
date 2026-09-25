@@ -27,7 +27,7 @@ function astDoc(state = "CONNECTED") {
 function inspectionPayload({
   anomaly = "Meter Ok",
   anomalyDetail = "Operationally Ok",
-  normalisation = { actionTaken: ["none"] },
+  normalisation = { actionTaken: ["None"] },
   statusState = "CONNECTED",
   media = [photo("astNoPhoto"), photo("astCbPhoto"), photo("keypadPhoto")],
   origin = { channel: "FIELD" },
@@ -156,7 +156,7 @@ test("an illegal connection found on inspection must be disconnected, or say why
       astDoc: astDoc(),
     });
 
-  const nothingDone = illegal({ actionTaken: ["none"] });
+  const nothingDone = illegal({ actionTaken: ["None"] });
   assert.equal(nothingDone.ok, false);
   assert.equal(nothingDone.code, "NORMALISATION_REASON_REQUIRED");
 
@@ -164,7 +164,7 @@ test("an illegal connection found on inspection must be disconnected, or say why
 
   assert.equal(
     illegal({
-      actionTaken: ["none"],
+      actionTaken: ["None"],
       noActionReason: "Threatened or chased away",
     }).ok,
     true,
