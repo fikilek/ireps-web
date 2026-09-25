@@ -228,6 +228,14 @@ function buildFieldStatsSheet(dataset) {
 
   appendZamoFieldStats(aoa, merges, stats, period);
 
+  // The extra counts the owner agreed to: one block of control lines under his
+  // three sections, and nothing else on the sheet.
+  aoa.push([]);
+  aoa.push([]);
+  aoa.push([`${period} - CONTROL LINES`]);
+  aoa.push(["ITEM", "CONTROL LINE", "COUNT"]);
+  model.controlLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
+
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!merges"] = merges;
   const width = Math.max(stats.workers.length, stats.teams.length);

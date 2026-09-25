@@ -186,8 +186,13 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   assert.deepEqual(sheet[18], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
   assert.deepEqual(sheet[24], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
 
+  // The only thing under the three sections: the control lines.
   const after = sheet.slice(25).filter((cells) => cells.length);
-  assert.deepEqual(after, [], "nothing follows the Teams block");
+  assert.deepEqual(after[0], ["SEPTEMBER 2026 - CONTROL LINES"]);
+  assert.deepEqual(after[1], ["ITEM", "CONTROL LINE", "COUNT"]);
+  assert.equal(after.length, 2 + 7, "seven control lines, and nothing else");
+  assert.equal(after[2][1], "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)");
+  assert.equal(after.at(-1)[1], "WORKERS WHOSE TEAM COULD NOT BE RESOLVED");
 });
 
 // September 2026 as it was measured on LIVE on 25 September: 599 Meter
