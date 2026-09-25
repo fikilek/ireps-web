@@ -196,7 +196,7 @@ test("a discovery row carries the schema columns from the transaction and its en
   assert.equal(row.salesCategory, "CAT4 - Long Gap");
   assert.equal(row.primaryFinding, "Meter Ok");
   assert.equal(row.findingGroup, "Meter Ok · Operationally Ok");
-  assert.equal(row.normalisation, "None", "a healthy meter's row stands alone");
+  assert.equal(row.normalisation, "Meter Ok - None", "every row carries its finding");
   assert.equal(row.noActionReason, null);
   assert.equal(row.visibility, "Visible");
   assert.equal(row.onVendingList, "Yes");
@@ -322,9 +322,9 @@ test("the Sales category is the reporting month's only, and a malformed month is
 test("the normalisation column carries the finding that caused it", () => {
   const read = (options) => buildGmrNormalisationText(options);
   assert.equal(read({ finding: "Illegally Connected", actions: ["Disconnect meter"] }), "Illegally Connected - Disconnect meter");
-  assert.equal(read({ finding: "Meter Ok", actions: ["None"] }), "None", "a healthy meter's row stands alone");
-  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "none", "the old lowercase word is not treated as None: uncleaned data shows itself");
-  assert.equal(read({ finding: "Meter Ok", actions: ["Tamper removed"] }), "Tamper removed", "and so does its own fix");
+  assert.equal(read({ finding: "Meter Ok", actions: ["None"] }), "Meter Ok - None", "every row carries its finding");
+  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "Meter Ok - none", "the old lowercase word is not treated as None: uncleaned data shows itself");
+  assert.equal(read({ finding: "Meter Ok", actions: ["Tamper removed"] }), "Meter Ok - Tamper removed", "a fix on the spot, too");
   assert.equal(
     read({ finding: "Illegally Connected", actions: ["Disconnect meter", "Tamper removed"] }),
     "Illegally Connected - Disconnect meter, Tamper removed",

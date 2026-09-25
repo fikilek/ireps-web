@@ -351,10 +351,10 @@ export function buildGmrNormalisationText({
   // would claim a decision nobody was asked to make.
   if (isWater) return findingText;
 
-  // A healthy meter's row stands alone (owner's layout, 25 September 2026):
-  // only a finding that called for work is joined to what was done.
-  const healthy = normalizeUpper(findingText) === "METER OK";
-  const join = (work) => (healthy ? work : `${findingText} - ${work}`);
+  // Every row carries the finding that it belongs to, the healthy meter
+  // included, so the link between finding and normalisation is on every line
+  // (owner, 25 September 2026).
+  const join = (work) => `${findingText} - ${work}`;
 
   const done = actions
     .map((action) => cleanText(action))

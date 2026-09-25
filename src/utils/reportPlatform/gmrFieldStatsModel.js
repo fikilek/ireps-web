@@ -34,44 +34,47 @@ const METER_STATUS_ORDER = [
   ["Meter Ok", ["Operationally Ok", "Bridge Suspicion", "Bypass Suspicion"]],
 ].flatMap(([finding, details]) => details.map((detail) => meterStatusLabel(finding, detail)));
 
-const NO_ACCESS_LABEL = "NO ACCESS";
+const NO_ACCESS_LABEL = "No Access";
 const NOT_AVAILABLE = "Not Available";
 
-// Zamo's fixed METER AUDIT lines; anything else recorded follows them, which
-// is where NO ACCESS appears (owner, 25 September 2026).
-const ZAMO_METER_STATUS_ORDER = ["ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY", "METER OK"];
+// Zamo's fixed METER AUDIT lines, written as the field records them; anything
+// else recorded follows them, which is where No Access appears.
+const ZAMO_METER_STATUS_ORDER = ["Illegally Connected", "Meter Damaged", "Meter Faulty", "Meter Ok"];
 
 // The owner's layout: NONE first, then each finding that called for work with
 // what was done, and a healthy meter's own fix last.
-const NORMALISATION_FINDING_ORDER = ["ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY"];
+const NORMALISATION_FINDING_ORDER = ["Meter Ok", "Illegally Connected", "Meter Damaged", "Meter Faulty"];
 
 function normalisationRank(label, rows) {
   const first = rows.find((row) => zamoLabel(row?.normalisation) === label) || {};
-  const healthy = upper(first.primaryFinding) === "METER OK";
   const didWork = (first.normalisationActions || []).some(
     (action) => text(action) && text(action) !== "None",
   );
   const [finding] = String(label).split(" - ");
   const findingRank = NORMALISATION_FINDING_ORDER.indexOf(finding);
 
-  // 0 NONE, 1-3 the findings that called for work, 4 a healthy meter's fix,
-  // 5 NO ACCESS last.
-  const group = label === "NO ACCESS"
-    ? 5
-    : healthy ? (didWork ? 4 : 0) : findingRank === -1 ? 3.5 : findingRank + 1;
-  // Within a finding: the work done first, then a recorded reason, then NONE.
+  // The owner's order: the healthy meters first, then each finding that called
+  // for work, then a healthy meter's own fix, and No Access last of all.
+  const healthy = findingRank === 0;
+  const group = label === NO_ACCESS_LABEL
+    ? 9
+    : healthy ? (didWork ? 5 : 0) : findingRank === -1 ? 4 : findingRank;
+  // Within a finding: the work done, then nothing done with a reason, then
+  // nothing done and nothing said.
   const kind = didWork ? 0 : text(first.noActionReason) ? 1 : 2;
   return [group, kind, label];
 }
 
+// The value exactly as the field recorded it. The report never rewrites what
+// was submitted (owner, 25 September 2026).
 function zamoLabel(value) {
-  const label = upper(value);
-  return label && label !== upper(NOT_AVAILABLE) && label !== upper(GMR_NAV) ? label : upper(NOT_AVAILABLE);
+  const label = text(value);
+  return label && label !== NOT_AVAILABLE && label !== GMR_NAV ? label : NOT_AVAILABLE;
 }
 
 function zamoMeterStatus(row) {
   const primary = zamoLabel(row?.primaryFinding);
-  return primary !== upper(NOT_AVAILABLE) ? primary : zamoLabel(row?.findingDetail);
+  return primary !== NOT_AVAILABLE ? primary : zamoLabel(row?.findingDetail);
 }
 
 // Zamo's Field Stats, exactly as before: the month's Meter Discovery records,

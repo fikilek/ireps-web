@@ -44,7 +44,7 @@ function row(overrides = {}) {
     salesCategory: "CAT4 - Long Gap",
     primaryFinding: "Meter Ok",
     findingDetail: "Operationally Ok",
-    normalisation: "none",
+    normalisation: "Meter Ok - None",
     noActionReason: null,
     sealNo: "S1",
     fieldComment: null,
@@ -153,10 +153,10 @@ test("a month with no field work still makes a report", () => {
 
 test("Field Stats is Zamo's three blocks and nothing else", () => {
   const rows = [
-    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", normalisation: "None" }),
+    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" }),
     row({ trnId: "B", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter", normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] }),
     row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: 'Illegally Connected - None, reason "Not recorded - captured before this rule"', normalisationActions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
-    row({ trnId: "D", fieldWorkerName: "Peter Peter", team: "Peter Team", normalisation: "Tamper removed", normalisationActions: ["Tamper removed"] }),
+    row({ trnId: "D", fieldWorkerName: "Peter Peter", team: "Peter Team", normalisation: "Meter Ok - Tamper removed", normalisationActions: ["Tamper removed"] }),
     row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
     row({ trnId: "F", hasAccess: false, fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] }),
   ];
@@ -170,18 +170,18 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
 
   assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER AUDIT"]);
   assert.deepEqual(sheet[1], ["ITEM", "METER STATUS", "Lefu Motlou", "Peter Peter", "TOTAL"]);
-  assert.deepEqual(sheet[2], [1, "ILLEGALLY CONNECTED", 0, 2, 2]);
-  assert.deepEqual(sheet[3], [2, "METER DAMAGED", 0, 0, 0]);
-  assert.deepEqual(sheet[4], [3, "METER FAULTY", 0, 0, 0]);
-  assert.deepEqual(sheet[5], [4, "METER OK", 1, 1, 2]);
-  assert.deepEqual(sheet[6], [5, "NO ACCESS", 1, 0, 1], "the one line the owner added to his layout");
+  assert.deepEqual(sheet[2], [1, "Illegally Connected", 0, 2, 2]);
+  assert.deepEqual(sheet[3], [2, "Meter Damaged", 0, 0, 0]);
+  assert.deepEqual(sheet[4], [3, "Meter Faulty", 0, 0, 0]);
+  assert.deepEqual(sheet[5], [4, "Meter Ok", 1, 1, 2]);
+  assert.deepEqual(sheet[6], [5, "No Access", 1, 0, 1], "the one line the owner added to his layout");
   assert.deepEqual(sheet[7], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5], "a disconnection is not in these blocks");
   assert.deepEqual(sheet[9], ["SEPTEMBER 2026 - NORMALISATION"]);
-  assert.deepEqual(sheet[10], [1, "NONE", 1, 0, 1], "a healthy meter's row stands alone, and comes first");
-  assert.deepEqual(sheet[11], [2, "ILLEGALLY CONNECTED - DISCONNECT METER", 0, 1, 1]);
-  assert.deepEqual(sheet[12], [3, 'ILLEGALLY CONNECTED - NONE, REASON "NOT RECORDED - CAPTURED BEFORE THIS RULE"', 0, 1, 1]);
-  assert.deepEqual(sheet[13], [4, "TAMPER REMOVED", 0, 1, 1], "a healthy meter's own fix");
-  assert.deepEqual(sheet[14], [5, "NO ACCESS", 1, 0, 1], "and NO ACCESS last of all");
+  assert.deepEqual(sheet[10], [1, "Meter Ok - None", 1, 0, 1], "every row carries its finding, the healthy one included");
+  assert.deepEqual(sheet[11], [2, "Illegally Connected - Disconnect meter", 0, 1, 1]);
+  assert.deepEqual(sheet[12], [3, 'Illegally Connected - None, reason "Not recorded - captured before this rule"', 0, 1, 1]);
+  assert.deepEqual(sheet[13], [4, "Meter Ok - Tamper removed", 0, 1, 1], "a healthy meter's own fix");
+  assert.deepEqual(sheet[14], [5, "No Access", 1, 0, 1], "and No Access last of all");
   assert.deepEqual(sheet[15], ["", "TOTAL: NORMALISATION", 2, 3, 5]);
   assert.deepEqual(sheet[18], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
   assert.deepEqual(sheet[24], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
@@ -205,7 +205,7 @@ function septemberRows() {
   const marker = "Not recorded - captured before this rule";
   const ic = { primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter" };
 
-  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "None", normalisationActions: ["None"] });
+  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "Meter Ok - None", normalisationActions: ["None"] });
   add(10, { ...ic, normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] });
   add(5, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed", normalisationActions: ["Disconnect meter", "Tamper removed"] });
   add(1, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed, Replace meter", normalisationActions: ["Disconnect meter", "Tamper removed", "Replace meter"] });
@@ -232,33 +232,33 @@ test("Field Stats reproduces September 2026 on LIVE: 462 with a meter, 137 no ac
   const lineOf = (label) => sheet.find((cells) => cells[1] === label);
   const totalOf = (label) => lineOf(label)?.at(-1);
 
-  assert.equal(totalOf("ILLEGALLY CONNECTED"), 67);
-  assert.equal(totalOf("METER DAMAGED"), 5);
-  assert.equal(totalOf("METER FAULTY"), 2);
-  assert.equal(totalOf("METER OK"), 388);
-  assert.equal(totalOf("NO ACCESS"), 137, "the line the owner added to his layout");
+  assert.equal(totalOf("Illegally Connected"), 67);
+  assert.equal(totalOf("Meter Damaged"), 5);
+  assert.equal(totalOf("Meter Faulty"), 2);
+  assert.equal(totalOf("Meter Ok"), 388);
+  assert.equal(totalOf("No Access"), 137, "the line the owner added to his layout");
   assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 599);
   assert.equal(totalOf("TOTAL: NORMALISATION"), 599);
 
   const start = sheet.findIndex((cells) => cells[0] === "SEPTEMBER 2026 - NORMALISATION");
   const labels = sheet.slice(start + 1).map((cells) => cells[1]);
   assert.deepEqual(labels.slice(0, labels.indexOf("TOTAL: NORMALISATION") + 1), [
-    "NONE",
-    "ILLEGALLY CONNECTED - DISCONNECT METER",
-    "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED",
-    "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED, REPLACE METER",
-    "ILLEGALLY CONNECTED - TAMPER REMOVED",
-    'ILLEGALLY CONNECTED - NONE, REASON "NOT RECORDED - CAPTURED BEFORE THIS RULE"',
-    "ILLEGALLY CONNECTED - NONE",
-    "METER DAMAGED - REPLACE METER",
-    'METER DAMAGED - NONE, REASON "NOT RECORDED, CAPTURED BEFORE THIS RULE"',
-    'METER FAULTY - NONE, REASON "NOT RECORDED, CAPTURED BEFORE THIS RULE"',
-    "METER FAULTY - NONE",
-    "NO ACCESS",
+    "Meter Ok - None",
+    "Illegally Connected - Disconnect meter",
+    "Illegally Connected - Disconnect meter, Tamper removed",
+    "Illegally Connected - Disconnect meter, Tamper removed, Replace meter",
+    "Illegally Connected - Tamper removed",
+    'Illegally Connected - None, reason "Not recorded - captured before this rule"',
+    "Illegally Connected - None",
+    "Meter Damaged - Replace meter",
+    'Meter Damaged - None, reason "Not recorded, captured before this rule"',
+    'Meter Faulty - None, reason "Not recorded, captured before this rule"',
+    "Meter Faulty - None",
+    "No Access",
     "TOTAL: NORMALISATION",
   ]);
-  assert.equal(totalOf('ILLEGALLY CONNECTED - NONE, REASON "NOT RECORDED - CAPTURED BEFORE THIS RULE"'), 40, "never asked");
-  assert.equal(totalOf("ILLEGALLY CONNECTED - NONE"), 10, "asked, and nothing chosen");
+  assert.equal(totalOf('Illegally Connected - None, reason "Not recorded - captured before this rule"'), 40, "never asked");
+  assert.equal(totalOf("Illegally Connected - None"), 10, "asked, and nothing chosen");
 });
 
 test("the extra counts tell workers apart by user, not by name", () => {
