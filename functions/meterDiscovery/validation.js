@@ -210,10 +210,16 @@ export function validateNormalisation({ anomaly, normalisation }) {
         action.trim().toLowerCase() === NORMALISATION_NONE_OUTDATED,
     )
   ) {
+    // The wording matters as much as the refusal. It must not say "reinstall": the phone's
+    // unsent queue lives in app storage, so reinstalling throws away every capture waiting
+    // to be sent, not just this one. And it must not say "capture this meter again": opening
+    // the saved form on the new app rewrites the old word by itself (the form keeps only
+    // actions that are on the offered list and falls back to None), so the work is not lost
+    // and nobody has to drive back to the meter.
     return {
       code: "OUTDATED_APP_NORMALISATION",
       message:
-        "This app is out of date and cannot save work. Close it twice to update, or reinstall it, then capture this meter again.",
+        "This capture was made by an older version of the app. Close the app twice to update it, then open this form under Admin, Offline Submission Forms, and send it again. Do not reinstall the app - that would delete work waiting to be sent.",
     };
   }
 
