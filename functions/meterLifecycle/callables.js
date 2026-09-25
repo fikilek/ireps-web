@@ -8,6 +8,7 @@ import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatche
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
+  linkFollowUp,
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
   buildFailureResult,
   buildLifecycleTrnPayload,
@@ -38,10 +39,13 @@ function readTrnType(trnData = {}) {
 
 const INSTRUCTION_MEDIA_TAG = "instructionMedia";
 
+// Work a field worker or supervisor may start on the spot. METER_INSPECTION
+// joined in MN-R001 1.1.0: the re-offender is inspected from the meter card.
 const DIRECT_FIELD_DUAL_ORIGIN_TRN_TYPES = [
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
   "METER_REMOVAL",
+  "METER_INSPECTION",
 ];
 
 function readFirstString(...values) {
@@ -449,7 +453,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     }
 
-    if (trnType === "METER_INSPECTION" && !isWmsLifecycleExecution) {
+    // MN-R001 1.1.0 section 8: an inspection is office work executed from an
+    // instruction, or field work started on the spot from the meter card.
+    if (
+      trnType === "METER_INSPECTION" &&
+      !isWmsLifecycleExecution &&
+      originChannel !== "FIELD"
+    ) {
       return buildFailureResult(
         "INSPECTION_OFFICE_WMS_ONLY",
         "Meter inspection execution must complete an accepted office-originated instruction TRN",
@@ -1082,6 +1092,35 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       // It has been replaced, so it reads Completed and its batch row closes. Never fails the submission.
       await recordDifferentMeterAtErf({ db, Timestamp, FieldValue, meterNo: workMeterNo, erfId: workErfId, premiseId,
         trnId, trnType, astId, uid: actorUid, log: logger });
+    }
+
+    // MN-R001 section 7: the finding that called for this disconnection now has
+    // it. Never fails the submission: the work is saved, and anything that
+    // cannot be linked is logged for the office.
+    // Only work that was actually done is linked: not a No Access visit, and
+    // not a resend of a transaction that already existed.
+    if (
+      (trnType === "METER_DISCONNECTION" || trnType === "METER_REMOVAL") &&
+      responsePayload?.success === true &&
+      responsePayload?.idempotent !== true &&
+      responsePayload?.executionOutcome?.success === true
+    ) {
+      try {
+        await linkFollowUp({
+          db,
+          parentTrnId: data?.origin?.parentTrnId,
+          parentTrnType: data?.origin?.parentTrnType,
+          workTrnType: trnType,
+          trnId,
+          astId,
+        });
+      } catch (linkError) {
+        logger.error("onMeterLifecycleTrnCallable -- parent follow-up not linked", {
+          trnId,
+          parentTrnId: data?.origin?.parentTrnId || "NAv",
+          message: linkError?.message || String(linkError),
+        });
+      }
     }
 
     if (trnType === "METER_READING" && responsePayload?.success === true) {

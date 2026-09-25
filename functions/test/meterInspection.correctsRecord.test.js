@@ -1,0 +1,173 @@
+// MN-R001 8.2: an accepted inspection corrects the meter record — the finding
+// and the meter's own details. The meter number and the GPS are not touched.
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { validateMeterInspection } from "../meterLifecycle/helpers.js";
+
+const photo = (tag) => ({ tag, url: `https://example.test/${tag}.jpg` });
+
+const astDoc = {
+  id: "AST_1",
+  meterType: "electricity",
+  status: { state: "CONNECTED" },
+  ast: {
+    astData: { astNo: "04297700454", meter: { type: "prepaid" } },
+    anomalies: { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On the Meter" },
+  },
+};
+
+function inspection(overrides = {}) {
+  return {
+    id: "TRN_MINSP_1",
+    trnType: "METER_INSPECTION",
+    origin: { channel: "FIELD" },
+    status: { state: "CONNECTED" },
+    media: [photo("astNoPhoto"), photo("astCbPhoto"), photo("keypadPhoto")],
+    inspection: {
+      comparison: { hasDifferences: false },
+      captured: {
+        ast: {
+          astData: {
+            astNo: "04297700454",
+            astManufacturer: "Conlog",
+            astName: "Model X",
+            meter: {
+              type: "prepaid",
+              category: "Normal",
+              phase: "single",
+              cb: { size: "60", comment: "" },
+              seal: { sealNo: "", comment: "Seal Missing" },
+              keypad: { serialNo: "K-1", comment: "" },
+              ...overrides.meter,
+            },
+          },
+          anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: [] },
+          normalisation: { actionTaken: ["none"] },
+          location: { placement: "Pole Top", gps: { lat: -28.1, lng: 30.2 } },
+          ogs: { hasOffGridSupply: "no" },
+        },
+      },
+    },
+  };
+}
+
+test("the finding the worker recorded becomes the meter's finding", () => {
+  const result = validateMeterInspection({ data: inspection(), astDoc });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.astPatch["ast.anomalies.anomaly"], "Meter Ok");
+  assert.equal(result.astPatch["ast.anomalies.anomalyDetail"], "Operationally Ok");
+  assert.deepEqual(result.astPatch["ast.anomalies.otherAnomalies"], []);
+  assert.deepEqual(result.astPatch["ast.normalisation"].actionTaken, ["none"]);
+  assert.equal(result.astDataChanged, true);
+});
+
+test("the meter's own details are corrected, the meter number and GPS are not", () => {
+  const patch = validateMeterInspection({ data: inspection(), astDoc }).astPatch;
+  assert.equal(patch["ast.astData.astManufacturer"], "Conlog");
+  assert.equal(patch["ast.astData.meter.phase"], "single");
+  assert.equal(patch["ast.location.placement"], "Pole Top");
+  assert.equal(patch["ast.ogs.hasOffGridSupply"], "no");
+  assert.deepEqual(patch["ast.astData.meter.cb"], { size: "60", comment: "" });
+  // a seal that has gone clears the old number and keeps the reason
+  assert.deepEqual(patch["ast.astData.meter.seal"], { sealNo: "", comment: "Seal Missing" });
+  for (const key of Object.keys(patch)) {
+    assert.notEqual(key, "ast.astData.astNo");
+    assert.ok(!key.includes("gps"), key);
+  }
+});
+
+test("a field the worker was not asked for does not wipe what the record holds", () => {
+  // A conventional meter has no keypad question, so nothing is written for it.
+  const data = inspection();
+  data.inspection.captured.ast.astData.meter.type = "conventional";
+  data.inspection.captured.ast.astData.meter.keypad = { serialNo: "", comment: "" };
+  data.inspection.captured.mreading = { reading: "1234", readingAt: "2026-09-23T00:00:00.000Z" };
+  data.media = [
+    photo("astNoPhoto"),
+    photo("astCbPhoto"),
+    photo("meterReadingPhoto"),
+  ];
+
+  const result = validateMeterInspection({
+    data,
+    astDoc: {
+      ...astDoc,
+      ast: { ...astDoc.ast, astData: { ...astDoc.ast.astData, meter: { type: "conventional" } } },
+    },
+  });
+
+  assert.equal(result.ok, true, result.message);
+  assert.equal("ast.astData.meter.keypad" in result.astPatch, false);
+  assert.equal(result.astPatch["ast.astData.meter.type"], "conventional");
+});
+
+test("what is there is photographed; what is not there is not", () => {
+  // A seal number with no seal photo is refused.
+  const withSeal = inspection();
+  withSeal.inspection.captured.ast.astData.meter.seal = { sealNo: "S-9", comment: "" };
+  assert.equal(
+    validateMeterInspection({ data: withSeal, astDoc }).code,
+    "MISSING_INSPECTION_PART_PHOTO",
+  );
+
+  withSeal.media = [...withSeal.media, photo("sealPhoto")];
+  assert.equal(validateMeterInspection({ data: withSeal, astDoc }).ok, true);
+
+  // NAv is nothing to photograph.
+  const nothingThere = inspection();
+  Object.assign(nothingThere.inspection.captured.ast.astData.meter, {
+    cb: { size: "NAv", comment: "" },
+    keypad: { serialNo: "NAv", comment: "" },
+  });
+  nothingThere.media = [photo("astNoPhoto")];
+  assert.equal(validateMeterInspection({ data: nothingThere, astDoc }).ok, true);
+});
+
+test("a tamper removed on the spot leaves the meter Ok, and the finding stands", () => {
+  const data = inspection();
+  data.inspection.captured.ast.anomalies = {
+    anomaly: "Illegally Connected",
+    anomalyDetail: "Bridge Wire On the Meter",
+    otherAnomalies: ["Keypad Faulty", "Meter Blocked (By Munic)"],
+  };
+  // MN-R001 4: an illegal connection is disconnected (or a reason given); the
+  // tamper coming out is a fix on the spot alongside it.
+  data.inspection.captured.ast.normalisation = {
+    actionTaken: ["Disconnect meter", "Tamper removed", "Keypad normalised"],
+  };
+  data.media = [...data.media, photo("anomalyPhoto"), photo("normalisationPhoto")];
+
+  const result = validateMeterInspection({ data, astDoc });
+  assert.equal(result.ok, true, result.message);
+
+  // what the worker left: the meter is fine, and the keypad fault is gone
+  assert.equal(result.astPatch["ast.anomalies.anomaly"], "Meter Ok");
+  assert.equal(result.astPatch["ast.anomalies.anomalyDetail"], "Operationally Ok");
+  assert.deepEqual(result.astPatch["ast.anomalies.otherAnomalies"], [
+    "Meter Blocked (By Munic)",
+  ]);
+
+  // what the worker found is untouched on the transaction itself
+  assert.equal(
+    data.inspection.captured.ast.anomalies.anomaly,
+    "Illegally Connected",
+  );
+});
+
+test("a fix that does not address the finding leaves it standing", () => {
+  const data = inspection();
+  data.inspection.captured.ast.anomalies = {
+    anomaly: "Meter Faulty",
+    anomalyDetail: "Meter Display Blank",
+    otherAnomalies: [],
+  };
+  data.inspection.captured.ast.normalisation = {
+    actionTaken: ["Replace meter", "Keypad normalised"],
+  };
+  data.media = [...data.media, photo("anomalyPhoto"), photo("normalisationPhoto")];
+
+  const patch = validateMeterInspection({ data, astDoc }).astPatch;
+  assert.equal(patch["ast.anomalies.anomaly"], "Meter Faulty");
+  assert.equal(patch["ast.anomalies.anomalyDetail"], "Meter Display Blank");
+});

@@ -108,6 +108,7 @@ import {
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
+import { recordReplacedMeter } from "./targetedBatches/replacedMeter.js";
 
 import {
   onIrepsSelectOptionsCallable,
@@ -174,9 +175,14 @@ import {
 
 import { projectMeterDiscoveryAstMedia } from "./meterDiscovery/astMedia.js";
 import {
+  buildNormalisationFollowUp,
   anomalyPhotoRequired,
   validateMeterDiscoveryPayload,
 } from "./meterDiscovery/validation.js";
+import {
+  linkReplacementInstallation,
+  resolveReplacementOrigin,
+} from "./meterLifecycle/helpers.js";
 import {
   validateMeterInstallationElectricity,
 } from "./meterInstallation/validation.js";
@@ -3295,6 +3301,16 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       },
     };
 
+    // MN-R001 section 7: the worker said this meter must be disconnected. The
+    // disconnection is its own transaction, so until it arrives this discovery
+    // carries the work as outstanding and the office can see it.
+    const normalisationFollowUp = buildNormalisationFollowUp(
+      finalPayload?.ast?.normalisation?.actionTaken,
+    );
+    if (normalisationFollowUp) {
+      finalPayload.ast.normalisation.followUp = normalisationFollowUp;
+    }
+
     await trnRef.set(finalPayload, { merge: true });
 
     // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's ERF.
@@ -3326,6 +3342,8 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       astId: data.id,
       uid: caller.uid,
       foundAt: now,
+      // The row the worker opened, so only its own Sales meter can be settled.
+      targetedBatchContext: data?.targetedBatchContext || null,
       log: logger,
     });
 
@@ -4805,6 +4823,13 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 
     delete safePayload.metadata;
 
+    // TB-R067 (1.3.73) 6: the premise this row is being moved off, when the worker is putting a wrong join
+    // right. It travels beside the premise and is never written onto one.
+    const targetedBatchReplacesPremiseId = String(
+      safePayload?.targetedBatchReplacesPremiseId || "",
+    ).trim();
+    delete safePayload.targetedBatchReplacesPremiseId;
+
     const actorName =
       caller.token?.name ||
       caller.token?.email ||
@@ -4853,6 +4878,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
         actorUid: caller.uid,
         actorName,
         authToken: caller.token || {},
+        replacesPremiseId: targetedBatchReplacesPremiseId,
       });
     } else {
       await premiseRef.set(finalPayload);
@@ -5083,12 +5109,35 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       },
     };
 
+    // MN-R001 section 6.1: an installation that completes a replacement names
+    // the removal it follows. The server reads that removal and takes the meter
+    // it replaces from it. When the removal does not bear the replacement out,
+    // the installation is kept as an ordinary new installation and the reason is
+    // logged; the worker's installation is never refused for it.
+    const replacement = await resolveReplacementOrigin({
+      db,
+      origin: safePayload?.origin,
+      premiseId: data?.accessData?.premise?.id,
+    });
+    const replacementOrigin = replacement.origin;
+    if (!replacementOrigin && replacement.reason !== "NOT_A_REPLACEMENT") {
+      logger.warn("onMeterInstallationCallable --not treated as a replacement", {
+        trnId,
+        removalTrnId: safePayload?.origin?.parentTrnId || "NAv",
+        reason: replacement.reason,
+      });
+    }
+
     const trnDoc = {
       ...safePayload,
       accessData: finalAccessData,
       ast: finalAstPayload,
       meterType,
       metadata,
+      origin: replacementOrigin || {
+        channel: "FIELD",
+        source: "NEW_INSTALLATION",
+      },
     };
 
     const serviceProvider = safePayload?.serviceProvider || {
@@ -5117,6 +5166,15 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       trnId,
       status: finalMeterStatus,
       serviceProvider,
+      ...(replacementOrigin
+        ? {
+            replaces: {
+              astId: replacementOrigin.replacesAstId,
+              meterNo: replacementOrigin.replacesMeterNo,
+              removalTrnId: replacementOrigin.parentTrnId,
+            },
+          }
+        : {}),
     };
 
     const astRef = db.collection("asts").doc(trnId);
@@ -5304,8 +5362,46 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       astId: trnId,
       uid: caller.uid,
       foundAt: now,
+      targetedBatchContext: data?.targetedBatchContext || null,
       log: logger,
     });
+
+    // Targeted Batch rule TB-R066 (1.3.71): the meter this one replaces may be
+    // on a batch row. The row and the Sales record's field work now point at
+    // the new meter, so My Work Orders opens what is actually there and shows
+    // the number found under the number the batch was sent for. Never fails
+    // the submission: the installation is already written.
+    if (replacementOrigin?.replacesAstId) {
+      await recordReplacedMeter({
+        db,
+        replacedAstId: replacementOrigin.replacesAstId,
+        replacedMeterNo: replacementOrigin.replacesMeterNo || "",
+        newAstId: trnId,
+        newMeterNo: meterNoNormalized,
+        installationTrnId: trnId,
+        at: now,
+        log: logger,
+      });
+    }
+
+    // The finding that called for the replacement now has its installation.
+    // Never fails the installation: it is saved, and a link that cannot be made
+    // is logged for the office.
+    if (replacementOrigin?.parentTrnId) {
+      try {
+        await linkReplacementInstallation({
+          db,
+          removalTrnId: replacementOrigin.parentTrnId,
+          installationTrnId: trnId,
+        });
+      } catch (linkError) {
+        logger.error("onMeterInstallationCallable --replacement not linked", {
+          trnId,
+          removalTrnId: replacementOrigin.parentTrnId,
+          message: linkError?.message || String(linkError),
+        });
+      }
+    }
 
     return {
       success: true,
