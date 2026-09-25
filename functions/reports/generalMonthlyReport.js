@@ -25,7 +25,10 @@ export const GMR_REPORT_SCHEMA_VERSION = "1.2.0";
 const ALLOWED_GMR_ROLES = new Set(["SPU", "ADM", "MNG", "SPV"]);
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
 const NO_DISCONNECTION_RECORD = "No disconnection record";
-const NORMALISATION_NONE = "none";
+// MN-R001: the value is None, with a capital. The report matches it exactly;
+// a record still holding the old lowercase word reads as recorded, so
+// uncleaned data is visible rather than tidied away.
+const NORMALISATION_NONE = "None";
 const DISCONNECT_METER = "Disconnect meter";
 
 export const GMR_TRN_TYPE_LABELS = Object.freeze({
@@ -355,7 +358,7 @@ export function buildGmrNormalisationText({
 
   const done = actions
     .map((action) => cleanText(action))
-    .filter((action) => action && action.toLowerCase() !== NORMALISATION_NONE);
+    .filter((action) => action && action !== NORMALISATION_NONE);
   if (done.length) return join(done.join(", "));
 
   // Nothing was done: the recorded reason where there is one, otherwise None.

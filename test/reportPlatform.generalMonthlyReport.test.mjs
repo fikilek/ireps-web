@@ -58,7 +58,7 @@ function row(overrides = {}) {
     hasAccess: true,
     meterType: "ELECTRICITY",
     findingGroup: "Meter Ok · Operationally Ok",
-    normalisationActions: ["none"],
+    normalisationActions: ["None"],
     ...overrides,
   };
 }
@@ -155,7 +155,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   const rows = [
     row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", normalisation: "None" }),
     row({ trnId: "B", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter", normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] }),
-    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: "Not recorded - captured before this rule" }),
+    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
     row({ trnId: "D", fieldWorkerName: "Peter Peter", team: "Peter Team", normalisation: "Tamper removed", normalisationActions: ["Tamper removed"] }),
     row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
     row({ trnId: "F", hasAccess: false, fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] }),
@@ -205,17 +205,17 @@ function septemberRows() {
   const marker = "Not recorded - captured before this rule";
   const ic = { primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter" };
 
-  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "None", normalisationActions: ["none"] });
+  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "None", normalisationActions: ["None"] });
   add(10, { ...ic, normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] });
   add(5, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed", normalisationActions: ["Disconnect meter", "Tamper removed"] });
   add(1, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed, Replace meter", normalisationActions: ["Disconnect meter", "Tamper removed", "Replace meter"] });
   add(1, { ...ic, normalisation: "Illegally Connected - Tamper removed", normalisationActions: ["Tamper removed"] });
-  add(40, { ...ic, normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: marker });
-  add(10, { ...ic, normalisation: "Illegally Connected - None", normalisationActions: ["none"] });
+  add(40, { ...ic, normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: marker });
+  add(10, { ...ic, normalisation: "Illegally Connected - None", normalisationActions: ["None"] });
   add(1, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Replace meter", normalisationActions: ["Replace meter"] });
-  add(4, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: marker });
-  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: marker });
-  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - None", normalisationActions: ["none"] });
+  add(4, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - None", normalisationActions: ["None"] });
   add(137, { hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] });
 
   return rows;

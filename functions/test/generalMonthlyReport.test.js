@@ -29,7 +29,7 @@ function discovery(overrides = {}) {
     ast: {
       astData: { astNo: "0714 1234567", meter: { type: "prepaid", phase: "single", seal: { sealNo: "S1" }, remainingCredit: "12.5" } },
       anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok" },
-      normalisation: { actionTaken: ["none"], noActionReason: "" },
+      normalisation: { actionTaken: ["None"], noActionReason: "" },
       location: { gps: { lat: -28.1, lng: 30.2 }, placement: "Outside" },
     },
     metadata: {
@@ -226,7 +226,7 @@ test("no access is its own row with the recorded reason", () => {
 test("a finding left with no action shows the reason, and a suspicion is not a healthy meter", () => {
   const trn = discovery();
   trn.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter" };
-  trn.ast.normalisation = { actionTaken: ["none"], noActionReason: "Not recorded - captured before this rule" };
+  trn.ast.normalisation = { actionTaken: ["None"], noActionReason: "Not recorded - captured before this rule" };
   const row = buildGmrFieldRow({ trnId: "T", trn, reportMonth: "2026-09" });
   assert.equal(row.noActionReason, "Not recorded - captured before this rule");
   assert.equal(row.findingGroup, "Illegally Connected");
@@ -322,7 +322,8 @@ test("the Sales category is the reporting month's only, and a malformed month is
 test("the normalisation column carries the finding that caused it", () => {
   const read = (options) => buildGmrNormalisationText(options);
   assert.equal(read({ finding: "Illegally Connected", actions: ["Disconnect meter"] }), "Illegally Connected - Disconnect meter");
-  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "None", "a healthy meter's row stands alone");
+  assert.equal(read({ finding: "Meter Ok", actions: ["None"] }), "None", "a healthy meter's row stands alone");
+  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "none", "the old lowercase word is not treated as None: uncleaned data shows itself");
   assert.equal(read({ finding: "Meter Ok", actions: ["Tamper removed"] }), "Tamper removed", "and so does its own fix");
   assert.equal(
     read({ finding: "Illegally Connected", actions: ["Disconnect meter", "Tamper removed"] }),
@@ -330,12 +331,12 @@ test("the normalisation column carries the finding that caused it", () => {
     "more than one thing done, in the order recorded",
   );
   assert.equal(
-    read({ finding: "Illegally Connected", actions: ["none"], noActionReason: "Not recorded - captured before this rule" }),
+    read({ finding: "Illegally Connected", actions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
     "Illegally Connected - Not recorded, captured before this rule",
     "the reason's own hyphen becomes a comma, so the separator stays unique",
   );
   assert.equal(read({ finding: "Illegally Connected", actions: [], noActionReason: "Customer refused" }), "Illegally Connected - Customer refused");
-  assert.equal(read({ finding: "Meter Ok", actions: ["none"], hasAccess: false }), "No Access", "no meter, so nothing to join");
+  assert.equal(read({ finding: "Meter Ok", actions: ["None"], hasAccess: false }), "No Access", "no meter, so nothing to join");
   assert.equal(read({ finding: "Meter Faulty", actions: [], noActionReason: "No meter available to replace" }), "Meter Faulty - No meter available to replace");
   assert.equal(read({ finding: "Meter Ok", actions: [], isWater: true }), "Meter Ok", "water carries no normalisation");
   assert.equal(read({ finding: null, actions: ["Disconnect meter"] }), "NAv - Disconnect meter", "a missing side reads NAv, never a dropped dash");

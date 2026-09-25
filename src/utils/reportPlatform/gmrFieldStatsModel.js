@@ -49,7 +49,7 @@ function normalisationRank(label, rows) {
   const first = rows.find((row) => zamoLabel(row?.normalisation) === label) || {};
   const healthy = upper(first.primaryFinding) === "METER OK";
   const didWork = (first.normalisationActions || []).some(
-    (action) => text(action) && text(action).toLowerCase() !== "none",
+    (action) => text(action) && text(action) !== "None",
   );
   const [finding] = String(label).split(" - ");
   const findingRank = NORMALISATION_FINDING_ORDER.indexOf(finding);
