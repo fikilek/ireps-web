@@ -6,6 +6,7 @@ import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { SALES_LOAD_TIMEOUT_ERROR, useGetSalesCategoryViewQuery, useSalesReadScope } from "../../redux/salesApi";
+import { salesLoadStatus } from "./models/salesLoadStatusModel.js";
 import { prepareTargetedBatchDraft, removeSalesDraftMeter, saveSalesDraftFence } from "../../redux/targetedBatchDraftSlice";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -30,7 +31,16 @@ import {
 
 const EMPTY_SALES_ROWS = [];
 
-function SalesLoadingState() {
+// Web Data Copy rules WD-R001.6 (1.2.0): the wait is never silent. The seconds count up, so a slow
+// first load — or a tab the browser has slowed down in the background — never looks stuck.
+function SalesLoadingState({ place = "" }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const startedAt = Date.now();
+    const tick = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    return () => clearInterval(tick);
+  }, []);
+  const status = salesLoadStatus({ elapsedMs, place });
   return (
     <section style={styles.loadingPanel} aria-live="polite" aria-busy="true">
       <style>
@@ -45,8 +55,10 @@ function SalesLoadingState() {
       <div style={styles.loadingSpinner} aria-hidden="true" />
 
       <div>
-        <h2 style={styles.loadingTitle}>Loading prepaid sales...</h2>
-        <p style={styles.loadingText}>Loading live Sales meters.</p>
+        <h2 style={styles.loadingTitle}>{status.title}</h2>
+        <p style={styles.loadingText}>{status.line}</p>
+        <p style={styles.loadingNote}>{status.note}</p>
+        {status.slowHint ? <p style={styles.loadingNote}>{status.slowHint}</p> : null}
       </div>
     </section>
   );
@@ -539,7 +551,7 @@ export default function PrepaidSales() {
           <h2>Sales could not be loaded</h2>
           <p>
             {salesWorkStatusError.status === SALES_LOAD_TIMEOUT_ERROR.status
-              ? SALES_LOAD_TIMEOUT_ERROR.error
+              ? salesWorkStatusError.error || SALES_LOAD_TIMEOUT_ERROR.error
               : "Live Sales meters could not be loaded."}
           </p>
           <button type="button" style={styles.primaryButton} onClick={() => refetch()} disabled={isFetching}>
@@ -549,7 +561,7 @@ export default function PrepaidSales() {
       ) : null}
 
       {activeLmPcode && !salesWorkStatusError && !salesWorkStatusReady ? (
-        <SalesLoadingState />
+        <SalesLoadingState place={activeWorkbaseName} />
       ) : null}
 
       {salesWorkStatusReady && activeLmPcode && salesRows.length === 0 ? (
@@ -760,6 +772,12 @@ const styles = {
     margin: "0.3rem 0 0",
     color: "#64748b",
     fontSize: "0.88rem",
+  },
+  // WD-R001.6 (1.2.0): the quieter lines under the one that counts the seconds.
+  loadingNote: {
+    margin: "0.35rem 0 0",
+    color: "#94a3b8",
+    fontSize: "0.8rem",
   },
   statePanel: {
     padding: "1.25rem",
