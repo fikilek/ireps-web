@@ -348,15 +348,20 @@ export function buildGmrNormalisationText({
   // would claim a decision nobody was asked to make.
   if (isWater) return findingText;
 
+  // A healthy meter's row stands alone (owner's layout, 25 September 2026):
+  // only a finding that called for work is joined to what was done.
+  const healthy = normalizeUpper(findingText) === "METER OK";
+  const join = (work) => (healthy ? work : `${findingText} - ${work}`);
+
   const done = actions
     .map((action) => cleanText(action))
     .filter((action) => action && action.toLowerCase() !== NORMALISATION_NONE);
-  if (done.length) return `${findingText} - ${done.join(", ")}`;
+  if (done.length) return join(done.join(", "));
 
   // Nothing was done: the recorded reason where there is one, otherwise None.
   // The reason's own hyphen becomes a comma so the separator stays unique.
   const reason = cleanText(noActionReason).replace(/\s+-\s+/g, ", ");
-  return `${findingText} - ${reason || "None"}`;
+  return join(reason || "None");
 }
 
 function getGpsCoordinates(trn = {}) {

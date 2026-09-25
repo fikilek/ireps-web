@@ -196,7 +196,7 @@ test("a discovery row carries the schema columns from the transaction and its en
   assert.equal(row.salesCategory, "CAT4 - Long Gap");
   assert.equal(row.primaryFinding, "Meter Ok");
   assert.equal(row.findingGroup, "Meter Ok · Operationally Ok");
-  assert.equal(row.normalisation, "Meter Ok - None");
+  assert.equal(row.normalisation, "None", "a healthy meter's row stands alone");
   assert.equal(row.noActionReason, null);
   assert.equal(row.visibility, "Visible");
   assert.equal(row.onVendingList, "Yes");
@@ -322,8 +322,8 @@ test("the Sales category is the reporting month's only, and a malformed month is
 test("the normalisation column carries the finding that caused it", () => {
   const read = (options) => buildGmrNormalisationText(options);
   assert.equal(read({ finding: "Illegally Connected", actions: ["Disconnect meter"] }), "Illegally Connected - Disconnect meter");
-  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "Meter Ok - None");
-  assert.equal(read({ finding: "Meter Ok", actions: ["Tamper removed"] }), "Meter Ok - Tamper removed");
+  assert.equal(read({ finding: "Meter Ok", actions: ["none"] }), "None", "a healthy meter's row stands alone");
+  assert.equal(read({ finding: "Meter Ok", actions: ["Tamper removed"] }), "Tamper removed", "and so does its own fix");
   assert.equal(
     read({ finding: "Illegally Connected", actions: ["Disconnect meter", "Tamper removed"] }),
     "Illegally Connected - Disconnect meter, Tamper removed",
@@ -336,6 +336,7 @@ test("the normalisation column carries the finding that caused it", () => {
   );
   assert.equal(read({ finding: "Illegally Connected", actions: [], noActionReason: "Customer refused" }), "Illegally Connected - Customer refused");
   assert.equal(read({ finding: "Meter Ok", actions: ["none"], hasAccess: false }), "No Access", "no meter, so nothing to join");
+  assert.equal(read({ finding: "Meter Faulty", actions: [], noActionReason: "No meter available to replace" }), "Meter Faulty - No meter available to replace");
   assert.equal(read({ finding: "Meter Ok", actions: [], isWater: true }), "Meter Ok", "water carries no normalisation");
   assert.equal(read({ finding: null, actions: ["Disconnect meter"] }), "NAv - Disconnect meter", "a missing side reads NAv, never a dropped dash");
   assert.equal(read({ finding: null, actions: [] }), "NAv - None", "an inspection that recorded no finding keeps the column's shape");

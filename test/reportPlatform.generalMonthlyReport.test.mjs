@@ -151,15 +151,16 @@ test("a month with no field work still makes a report", () => {
   assert.equal(managed.metadata.itemCount, 0);
 });
 
-test("Field Stats starts with Zamo's three blocks exactly as before", () => {
+test("Field Stats is Zamo's three blocks and nothing else", () => {
   const rows = [
-    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" }),
-    row({ trnId: "B", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter", normalisation: "Disconnect meter" }),
-    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: "none", noActionReason: "Not recorded - captured before this rule" }),
-    row({ trnId: "D", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
+    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", normalisation: "None" }),
+    row({ trnId: "B", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter", normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] }),
+    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: "Not recorded - captured before this rule" }),
+    row({ trnId: "D", fieldWorkerName: "Peter Peter", team: "Peter Team", normalisation: "Tamper removed", normalisationActions: ["Tamper removed"] }),
+    row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
+    row({ trnId: "F", hasAccess: false, fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] }),
   ];
   const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
-  // The extra counts below are wider, so drop the empty cells that pad each line.
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })
     .map((line) => {
       const cells = [...line];
@@ -168,65 +169,52 @@ test("Field Stats starts with Zamo's three blocks exactly as before", () => {
     });
 
   assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER AUDIT"]);
-  assert.deepEqual(sheet[1], ["ITEM", "METER STATUS", "Lefu Motlou", "Peter Peter", "TOTAL"], "discovery workers only, by name");
+  assert.deepEqual(sheet[1], ["ITEM", "METER STATUS", "Lefu Motlou", "Peter Peter", "TOTAL"]);
   assert.deepEqual(sheet[2], [1, "ILLEGALLY CONNECTED", 0, 2, 2]);
   assert.deepEqual(sheet[3], [2, "METER DAMAGED", 0, 0, 0]);
   assert.deepEqual(sheet[4], [3, "METER FAULTY", 0, 0, 0]);
-  assert.deepEqual(sheet[5], [4, "METER OK", 1, 0, 1]);
-  assert.deepEqual(sheet[6], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 2, 3]);
+  assert.deepEqual(sheet[5], [4, "METER OK", 1, 1, 2]);
+  assert.deepEqual(sheet[6], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 3, 4], "no access and a disconnection are not in these blocks");
   assert.deepEqual(sheet[8], ["SEPTEMBER 2026 - NORMALISATION"]);
-  assert.deepEqual(sheet[9], [1, "DISCONNECT METER", 0, 1, 1]);
-  assert.deepEqual(sheet[10], [2, "NONE", 1, 1, 2]);
-  assert.deepEqual(sheet[11], ["", "TOTAL: NORMALISATION", 1, 2, 3]);
-  assert.deepEqual(sheet[14], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
-  assert.deepEqual(sheet[15], [1, "ILLEGALLY CONNECTED", 0, 2, 2]);
-  assert.deepEqual(sheet[19], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 2, 3]);
+  assert.deepEqual(sheet[9], [1, "NONE", 1, 0, 1], "a healthy meter's row stands alone, and comes first");
+  assert.deepEqual(sheet[10], [2, "ILLEGALLY CONNECTED - DISCONNECT METER", 0, 1, 1]);
+  assert.deepEqual(sheet[11], [3, "ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE", 0, 1, 1]);
+  assert.deepEqual(sheet[12], [4, "TAMPER REMOVED", 0, 1, 1], "a healthy meter's own fix comes last");
+  assert.deepEqual(sheet[13], ["", "TOTAL: NORMALISATION", 1, 3, 4]);
+  assert.deepEqual(sheet[16], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
+  assert.deepEqual(sheet[21], ["", "TOTAL: METER DISCOVERY RECORDS", 1, 3, 4]);
 
-  const merges = workbook.Sheets["Field Stats"]["!merges"];
-  assert.deepEqual(merges.slice(0, 2).map((merge) => merge.s.r), [0, 8], "the two titles span the sheet, as before");
+  const after = sheet.slice(22).filter((cells) => cells.length);
+  assert.deepEqual(after, [], "nothing follows the Teams block");
 });
 
-test("a no-access discovery adds its own NO ACCESS line to Zamo's METER AUDIT", () => {
-  const rows = [
-    row({ trnId: "A" }),
-    row({ trnId: "G", hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: null, normalisationActions: [], photoUrls: [] }),
-  ];
-  const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
-  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
-  const labels = sheet.slice(2, 8).map((line) => line[1]);
-  assert.deepEqual(labels, ["ILLEGALLY CONNECTED", "METER DAMAGED", "METER FAULTY", "METER OK", "NO ACCESS", "TOTAL: METER DISCOVERY RECORDS"]);
-  assert.ok(sheet.some((line) => line[1] === "NOT AVAILABLE"), "its normalisation line reads NOT AVAILABLE, as Zamo's sheet does");
-});
-
-
-// GMR-R036, against September 2026 as it was measured on LIVE on 25 September:
-// 599 Meter Discovery transactions, 462 with a meter and 137 no access.
+// September 2026 as it was measured on LIVE on 25 September: 599 Meter
+// Discovery transactions, 462 with a meter and 137 no access.
 function septemberRows() {
   const rows = [];
   const add = (count, overrides) => {
-    for (let index = 0; index < count; index += 1) {
-      rows.push(row({ trnId: `TRN_${rows.length}`, ...overrides }));
-    }
+    for (let index = 0; index < count; index += 1) rows.push(row({ trnId: `TRN_${rows.length}`, ...overrides }));
   };
   const marker = "Not recorded - captured before this rule";
+  const ic = { primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter" };
 
-  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "Meter Ok - None", normalisationActions: ["none"] });
-  add(10, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] });
-  add(5, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Disconnect meter, Tamper removed", normalisationActions: ["Disconnect meter", "Tamper removed"] });
-  add(1, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Disconnect meter, Tamper removed, Replace meter", normalisationActions: ["Disconnect meter", "Tamper removed", "Replace meter"] });
-  add(1, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - Tamper removed", normalisationActions: ["Tamper removed"] });
-  add(40, { primaryFinding: "Illegally Connected", normalisation: `Illegally Connected - Not recorded, captured before this rule`, normalisationActions: ["none"], noActionReason: marker });
-  add(10, { primaryFinding: "Illegally Connected", normalisation: "Illegally Connected - None", normalisationActions: ["none"] });
-  add(1, { primaryFinding: "Meter Damaged", normalisation: "Meter Damaged - Replace meter", normalisationActions: ["Replace meter"] });
-  add(4, { primaryFinding: "Meter Damaged", normalisation: `Meter Damaged - Not recorded, captured before this rule`, normalisationActions: ["none"], noActionReason: marker });
-  add(1, { primaryFinding: "Meter Faulty", normalisation: `Meter Faulty - Not recorded, captured before this rule`, normalisationActions: ["none"], noActionReason: marker });
-  add(1, { primaryFinding: "Meter Faulty", normalisation: "Meter Faulty - None", normalisationActions: ["none"] });
+  add(388, { primaryFinding: "Meter Ok", findingDetail: "Operationally Ok", normalisation: "None", normalisationActions: ["none"] });
+  add(10, { ...ic, normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] });
+  add(5, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed", normalisationActions: ["Disconnect meter", "Tamper removed"] });
+  add(1, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed, Replace meter", normalisationActions: ["Disconnect meter", "Tamper removed", "Replace meter"] });
+  add(1, { ...ic, normalisation: "Illegally Connected - Tamper removed", normalisationActions: ["Tamper removed"] });
+  add(40, { ...ic, normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: marker });
+  add(10, { ...ic, normalisation: "Illegally Connected - None", normalisationActions: ["none"] });
+  add(1, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Replace meter", normalisationActions: ["Replace meter"] });
+  add(4, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - Not recorded, captured before this rule", normalisationActions: ["none"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - None", normalisationActions: ["none"] });
   add(137, { hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] });
 
   return rows;
 }
 
-test("Field Stats reproduces September 2026: 462 with a meter, 137 no access, 599 in each block", () => {
+test("Field Stats reproduces September 2026 on LIVE: 462 records where a meter was captured", () => {
   const { workbook } = readWorkbook(makeDataset(septemberRows(), { isIncompleteMonth: false }));
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })
     .map((line) => {
@@ -237,22 +225,18 @@ test("Field Stats reproduces September 2026: 462 with a meter, 137 no access, 59
   const lineOf = (label) => sheet.find((cells) => cells[1] === label);
   const totalOf = (label) => lineOf(label)?.at(-1);
 
-  assert.equal(sheet[0][0], "SEPTEMBER 2026 - METER AUDIT");
   assert.equal(totalOf("ILLEGALLY CONNECTED"), 67);
   assert.equal(totalOf("METER DAMAGED"), 5);
   assert.equal(totalOf("METER FAULTY"), 2);
   assert.equal(totalOf("METER OK"), 388);
-  assert.equal(totalOf("NO ACCESS"), 137);
-  assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 599);
-  assert.equal(totalOf("TOTAL: NORMALISATION"), 599, "block 2 counts the same month again");
+  assert.equal(lineOf("NO ACCESS"), undefined, "the 137 no-access visits are on Field Data, not in these blocks");
+  assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 462);
+  assert.equal(totalOf("TOTAL: NORMALISATION"), 462);
 
-  // The normalisation rows, in the order the owner drew: grouped by finding,
-  // Meter Ok first, the work done before the rows where nothing was done.
   const start = sheet.findIndex((cells) => cells[0] === "SEPTEMBER 2026 - NORMALISATION");
   const labels = sheet.slice(start + 1).map((cells) => cells[1]);
-  const shown = labels.slice(0, labels.indexOf("TOTAL: NORMALISATION") + 1);
-  assert.deepEqual(shown, [
-    "METER OK - NONE",
+  assert.deepEqual(labels.slice(0, labels.indexOf("TOTAL: NORMALISATION") + 1), [
+    "NONE",
     "ILLEGALLY CONNECTED - DISCONNECT METER",
     "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED",
     "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED, REPLACE METER",
@@ -263,56 +247,10 @@ test("Field Stats reproduces September 2026: 462 with a meter, 137 no access, 59
     "METER DAMAGED - NOT RECORDED, CAPTURED BEFORE THIS RULE",
     "METER FAULTY - NOT RECORDED, CAPTURED BEFORE THIS RULE",
     "METER FAULTY - NONE",
-    "NO ACCESS",
     "TOTAL: NORMALISATION",
   ]);
   assert.equal(totalOf("ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE"), 40, "never asked");
   assert.equal(totalOf("ILLEGALLY CONNECTED - NONE"), 10, "asked, and nothing chosen");
-});
-
-
-test("the extra counts sit below Zamo's Teams block", () => {
-  const rows = [
-    row({ trnId: "A", fieldWorkerName: "Lefu Motlou" }),
-    row({ trnId: "B", findingGroup: "Meter Ok · Suspicion", findingDetail: "Bypass Suspicion" }),
-    row({
-      trnId: "C",
-      primaryFinding: "Illegally Connected",
-      findingDetail: "Bridge Wire On The Meter",
-      findingGroup: "Illegally Connected",
-      normalisationActions: ["none"],
-      noActionReason: "Not recorded - captured before this rule",
-    }),
-    row({
-      trnId: "D",
-      primaryFinding: "Illegally Connected",
-      findingDetail: "Straight Connection (Meter Bypassed)",
-      findingGroup: "Illegally Connected",
-      normalisationActions: ["Disconnect meter"],
-      followUpRequired: "Meter Disconnection",
-      followUpStatus: "Completed",
-    }),
-    row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", batchId: "AD HOC", findingGroup: null, normalisationActions: [] }),
-  ];
-  const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
-  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
-  const titleRow = (title) => sheet.findIndex((line) => line[0] === `SEPTEMBER 2026 - ${title}`);
-  const teamsRow = sheet.findIndex((line) => line[0] === "Teams");
-
-  ["METER STATUS DETAIL", "NO ACTION TAKEN", "TRANSACTIONS", "DISCONNECTIONS CALLED FOR", "OUTSIDE BATCHES (AD HOC)", "CONTROL LINES"]
-    .forEach((title) => assert.ok(titleRow(title) > teamsRow, `${title} comes after Zamo's Teams block`));
-
-  const model = buildGmrFieldStatsModel(makeDataset(rows));
-  const block = (key) => model.blocks.find((item) => item.key === key);
-  const lineOf = (key, label) => block(key).lines.find((item) => item.label === label);
-
-  assert.equal(lineOf("METER_STATUS_DETAIL", "METER OK - BYPASS SUSPICION").total, 1);
-  assert.equal(lineOf("METER_STATUS_DETAIL", "ILLEGALLY CONNECTED - BRIDGE WIRE ON THE METER").total, 1);
-  assert.equal(lineOf("NO_ACTION", "NOT RECORDED - CAPTURED BEFORE THIS RULE").total, 1);
-  assert.equal(lineOf("TRANSACTIONS", "METER DISCONNECTION").total, 1);
-  assert.equal(block("TRANSACTIONS").total.total, 5, "the payable total counts every transaction");
-  assert.equal(lineOf("DISCONNECTIONS", "COMPLETED").total, 1);
-  assert.equal(lineOf("OUTSIDE_BATCHES", "METER DISCONNECTION").total, 1);
 });
 
 test("the extra counts tell workers apart by user, not by name", () => {
@@ -343,46 +281,6 @@ test("the control lines count unplaced work, meters off the vending list, and st
   assert.equal(control["TRANSACTIONS WITH NO SALES CATEGORY"], 2, "water is never on the vending list");
   assert.equal(control["MISSING GPS, PHOTOGRAPH OR NORMALISATION ANSWER"], 1);
   assert.equal(control["WORKERS WHOSE TEAM COULD NOT BE RESOLVED"], 1);
-});
-
-test("the Field Stats sheet lists the work not placed on Field Data", () => {
-  const { workbook } = readWorkbook(makeDataset([row()], { unplaced: [{ trnId: "TRN_X", reason: "The submission time cannot be read." }] }));
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
-  const headerIndex = rows.findIndex((item) => item[0] === "NOT ON FIELD DATA");
-  assert.ok(headerIndex > 0);
-  assert.deepEqual(rows[headerIndex + 1].slice(1, 3), ["TRN_X", "The submission time cannot be read."]);
-});
-
-// GMR-R037
-test("a General Report declares itself on its file name and its first sheet", () => {
-  const dataset = makeDataset([row()], {
-    reportKind: "GR",
-    reportType: "GENERAL_REPORT",
-    isPaymentRecord: false,
-    notForPaymentNotice: "General Report — for looking only. Overlapping ranges can hold the same work twice, so this is never the record the municipality pays on. The General Monthly Report is.",
-    reportMonth: null,
-    startDate: "2026-08-01",
-    endDate: "2026-09-15",
-    periodLabel: "1 Aug 2026 to 15 Sep 2026",
-    reportingPeriodLabel: "1 Aug 2026 to 15 Sep 2026",
-    isIncompleteMonth: false,
-  });
-
-  const managed = buildGeneralMonthlyManagedReport({ dataset, generatedAt: new Date("2026-09-25T10:05:00.000Z") });
-  assert.match(managed.metadata.fileName, /^general_report_not_for_payment_endumeni_2026-08-01_to_2026-09-15_\d{12}\.xlsx$/);
-  assert.equal(managed.metadata.reportType, "GENERAL_REPORT");
-  assert.equal(managed.metadata.reportName, "General Report");
-  assert.equal(managed.metadata.sourceScope.isPaymentRecord, false);
-
-  const workbook = XLSX.read(managed.artifact.bytes, { type: "array" });
-  const fieldData = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
-  assert.match(fieldData[0][0], /^1 AUG 2026 TO 15 SEP 2026 — General Report/);
-  assert.equal(fieldData[1][0], "Capture Date", "Zamo's headings still follow, unchanged");
-  assert.equal(fieldData[2][1], "Lefu Worker", "and the rows follow the headings");
-
-  const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
-  assert.match(stats[0][0], /never the record the municipality pays on/);
-  assert.ok(stats.some((line) => line[0] === "1 AUG 2026 TO 15 SEP 2026 - METER AUDIT"), "the period is named on every block");
 });
 
 test("the saved report names the month and counts its transactions", () => {

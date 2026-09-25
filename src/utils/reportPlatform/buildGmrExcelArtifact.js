@@ -162,7 +162,8 @@ function sumOf(counts) {
   return [...counts.values()].reduce((total, value) => total + value, 0);
 }
 
-// Zamo's Field Stats, exactly as before (GMR-R025).
+// Zamo's Field Stats, exactly as he uses them: METER AUDIT, NORMALISATION and
+// Teams, and nothing else on the sheet (owner, 25 September 2026).
 function appendZamoFieldStats(aoa, merges, stats, period) {
   const lastColumnIndex = Math.max(stats.workers.length, stats.teams.length) + 2;
   const row = (index, label, names, counts, total) =>
@@ -196,32 +197,7 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
   });
   aoa.push(row("", "TOTAL: METER DISCOVERY RECORDS", stats.teams, stats.teamTotals, stats.records));
 
-  return { auditEndRow };
-}
-
-// The counts the rules add, below Zamo's Teams block.
-function appendExtraCounts(aoa, model, period) {
-  const workerNames = model.workers.map((key) => model.workerLabels.get(key) || key);
-  const lineRow = (index, item, keys, map) => [index, item.label, ...keys.map((key) => item[map].get(key) || 0), item.total];
-
-  model.blocks.forEach((block) => {
-    aoa.push([]);
-    aoa.push([]);
-    aoa.push([`${period} - ${block.title}`]);
-    aoa.push(["ITEM", block.column, ...workerNames, "TOTAL"]);
-    block.lines.forEach((item, index) => aoa.push(lineRow(index + 1, item, model.workers, "byWorker")));
-    if (block.total) aoa.push(lineRow("", block.total, model.workers, "byWorker"));
-    aoa.push([]);
-    aoa.push(["Teams", block.column, ...model.teams, "TOTAL"]);
-    block.lines.forEach((item, index) => aoa.push(lineRow(index + 1, item, model.teams, "byTeam")));
-    if (block.total) aoa.push(lineRow("", block.total, model.teams, "byTeam"));
-  });
-
-  aoa.push([]);
-  aoa.push([]);
-  aoa.push([`${period} - CONTROL LINES`]);
-  aoa.push(["ITEM", "CONTROL LINE", "COUNT"]);
-  model.controlLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
+  stats.auditEndRow = auditEndRow;
 }
 
 function buildFieldStatsSheet(dataset) {
@@ -236,9 +212,8 @@ function buildFieldStatsSheet(dataset) {
     aoa.push([]);
   }
 
-  // GMR-R036: block 1, block 2 and the Teams block count the same month's
-  // discoveries three ways. If they disagree the report is wrong and says so
-  // rather than printing.
+  // GMR-R036: the three blocks count the same records three ways. If they
+  // disagree the report is wrong and says so rather than printing.
   const auditTotal = stats.statuses.reduce((total, status) => total + sumOf(stats.statusByWorker.get(status)), 0);
   const normalisationTotal = stats.normalisations.reduce(
     (total, label) => total + sumOf(stats.normalisationByWorker.get(label)), 0);
@@ -251,23 +226,15 @@ function buildFieldStatsSheet(dataset) {
     );
   }
 
-  const { auditEndRow } = appendZamoFieldStats(aoa, merges, stats, period);
-  appendExtraCounts(aoa, model, period);
-
-  if (Array.isArray(dataset.unplaced) && dataset.unplaced.length) {
-    aoa.push([]);
-    aoa.push(["NOT ON FIELD DATA", "Transaction Number", "Reason"]);
-    dataset.unplaced.forEach((item) => aoa.push(["", item.trnId, item.reason]));
-  }
-
-  aoa.push([]);
-  aoa.push([monthStatement(dataset)]);
+  appendZamoFieldStats(aoa, merges, stats, period);
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!merges"] = merges;
-  const width = Math.max(stats.workers.length, stats.teams.length, model.workers.length, model.teams.length);
+  const width = Math.max(stats.workers.length, stats.teams.length);
   worksheet["!cols"] = [{ wch: 8 }, { wch: 42 }, ...Array.from({ length: width }, () => ({ wch: 18 })), { wch: 12 }];
-  worksheet["!autofilter"] = { ref: `A2:${XLSX.utils.encode_col(stats.workers.length + 2)}${Math.max(2, auditEndRow)}` };
+  worksheet["!autofilter"] = {
+    ref: `A${notice ? 4 : 2}:${XLSX.utils.encode_col(stats.workers.length + 2)}${stats.auditEndRow + (notice ? 2 : 0)}`,
+  };
   return { worksheet, model, stats };
 }
 
