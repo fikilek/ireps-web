@@ -71,6 +71,7 @@ function makeAtomicDb({
   rowCount = 2,
   parentOverrides = {},
   rowSnapshots = null,
+  history = [],
 } = {}) {
   const parent = {
     id: tbId,
@@ -106,6 +107,10 @@ function makeAtomicDb({
       if (refOrQuery?.kind === "rowsQuery") {
         return { docs: rows };
       }
+      // Rules TB-R056 option A: the rows TB-R053 or TB-R056 took out, from the batch's history.
+      if (refOrQuery?.kind === "historyQuery") {
+        return { docs: history.map((entry) => ({ id: entry.id, data: () => entry })) };
+      }
       if (refOrQuery?.kind === "teamRef") {
         return {
           exists: true,
@@ -133,6 +138,24 @@ function makeAtomicDb({
             assert.equal(operator, "==");
             assert.equal(value, tbId);
             return { kind: "rowsQuery", tbId: value };
+          },
+        };
+      }
+      if (name === "tb_uploads") {
+        return {
+          doc(id) {
+            assert.equal(id, tbId);
+            return {
+              collection(sub) {
+                assert.equal(sub, "history");
+                return {
+                  where(field, operator, value) {
+                    assert.deepEqual([field, operator, value], ["event", "==", "TARGETED_BATCH_ROW_REMOVED"]);
+                    return { kind: "historyQuery", tbId: id };
+                  },
+                };
+              },
+            };
           },
         };
       }
@@ -401,4 +424,23 @@ test("atomic NGTB allocation fails closed when parent row-count fields conflict"
   );
 
   assert.equal(fixture.writes.length, 0);
+});
+
+// Rules TB-R056 (1.3.52): a row taken out of an old Non-GPS batch (no geofence) by TB-R053 or TB-R056 is counted from the
+// batch's history, so the batch can still be allocated; without that history entry the counts conflict, as before.
+test("atomic NGTB allocation of an old batch counts the rows TB-R053 or TB-R056 took out", async () => {
+  const tbId = "TGB_20260816_060948_U7E2";
+  const allocateWith = (history) => {
+    const fixture = makeAtomicDb({
+      rowCount: 2,
+      rowSnapshots: [makeRowSnapshot("ROW_1", tbId)],
+      parentOverrides: { counts: { totalRows: 1, allocatedRows: 0, unallocatedRows: 1 } },
+      history,
+    });
+    return allocateNonGpsBatchAtomically({ db: fixture.db, parentRef: fixture.parentRef, tbId, targetType: "TEAM", targetId: "TEAM_A", actorMncId: "MNC_1", actorUid: "ALLOCATOR", actorName: "Allocator", startedAtMs: Date.now() });
+  };
+  const allocated = await allocateWith([{ id: "ROW_REMOVED__ROW_2", event: "TARGETED_BATCH_ROW_REMOVED", rowId: "ROW_2", rule: "TB-R056", runId: "TB-R056:TRN_1" }]);
+  assert.equal(allocated.success, true, JSON.stringify(allocated));
+  assert.equal(allocated.totalRows, 1);
+  await assert.rejects(() => allocateWith([]), { code: "NGP_ALLOCATION_EXPECTED_ROW_COUNT_CONFLICT" });
 });

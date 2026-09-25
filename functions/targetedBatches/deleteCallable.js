@@ -5,6 +5,7 @@ import { batchError, readBatchActor, snapshotReader, salesMetadataUpdate, callab
 import { buildSalesBatchHistory, inspectSalesRemoval } from "./sales-batch-history.js";
 import { assertMutationSizes } from "./sales-batch-creation.js";
 import { assertNoLinkedExecution, assertUnexecuted } from "./execution-evidence.js";
+import { readRowsTakenOut } from "./rowFollowsSales.js";
 
 async function prepareUnlinks({ db, read, parent, snapshots, actor, at, reason }) {
   const plans = [], ids = new Set();
@@ -50,7 +51,10 @@ export async function deleteSalesBatch({ db, request, now = () => Timestamp.now(
       const actor = await readBatchActor({ db, request, lmPcode: parent.scope?.lmPcode, read });
       const rows = await read(db.collection("tb_rows").where("tbId", "==", tbId).limit(modern ? 31 : 1001));
       if (rows.docs.length > (modern ? 30 : 1000)) throw batchError("DELETE_SCOPE_TOO_LARGE", "The batch exceeds the governed deletion bounds");
-      if (modern && (rows.docs.length !== parent.counts?.totalRows || rows.docs.length !== parent.creation?.createdRows)) throw batchError("BATCH_COUNT_MISMATCH", "Permanent row and parent counts do not reconcile");
+      // Rules TB-R056 option A (1.3.52): a batch with a geofence counts its rows as created minus the rows TB-R053 or TB-R056
+      // took out, read live from its own history.
+      const rowsTakenOut = modern ? await readRowsTakenOut({ db, read, tbId }) : 0;
+      if (modern && (rows.docs.length !== parent.counts?.totalRows || rows.docs.length !== parent.creation?.createdRows - rowsTakenOut)) throw batchError("BATCH_COUNT_MISMATCH", "Permanent row and parent counts do not reconcile");
       assertUnexecuted(parent, rows.docs.map(row => row.data()));
       if (modern) {
         if (!validDocumentId(parent.geofenceId)) throw batchError("FENCE_LINKAGE_INVALID", "The canonical geofence identity is missing");

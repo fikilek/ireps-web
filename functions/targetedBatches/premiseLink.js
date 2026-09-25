@@ -12,6 +12,8 @@ import {
 import {
   buildSalesAllMetersOperationalMetadataPatch,
 } from "../salesAllMeters/helpers.js";
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { checkBatchWork } from "./batch-work-guard.js";
 
 export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 export const TARGETED_BATCH_PREMISE_OPERATION_TYPE = "METER_DISCOVERY";
@@ -369,6 +371,21 @@ function assertExistingPremiseCompatible({
   }
 }
 
+// TB-R067 (1.3.73): where a premise lives, for the one case this file has to reach another premise - the
+// one a row is being moved off.
+const TARGETED_BATCH_PREMISES_COLLECTION = "premises";
+
+// TB-R067 (1.3.73): what the premise form owns and may write back onto a premise that already exists.
+// Everything else on a premise is captured on other screens and is never touched from here.
+const EDITABLE_PREMISE_FIELDS = Object.freeze([
+  "context",
+  "propertyType",
+  "address",
+  "occupancy",
+  "geometry",
+  "media",
+]);
+
 export function isSalesTargetedBatchContext(value = {}) {
   return (
     normalizeUpper(value?.sourceModule) ===
@@ -608,6 +625,9 @@ export async function createOrLinkTargetedBatchPremise({
   actorUid,
   actorName,
   authToken = {},
+  // TB-R067 (1.3.73) 6: the premise this row is being moved off, named by the worker who is fixing a join
+  // they made by mistake. Nothing is moved unless the worker names the very premise the row holds now.
+  replacesPremiseId = "",
 }) {
   const context = normalizeTargetedBatchPremiseContext(
     premisePayload?.targetedBatchContext,
@@ -729,9 +749,32 @@ export async function createOrLinkTargetedBatchPremise({
 
     const existingRowPremiseId = readFirstText(row?.refs?.premiseId);
 
+    // TB-R067 (1.3.73) 6: one wrong tap must never be permanent, so a row can be moved to another premise -
+    // but only while nothing hangs on the old one. Once a meter has been captured there the premise is part
+    // of that work and the move is refused; the worker is moved off nothing they have not asked to leave.
+    const movingPremise =
+      Boolean(existingRowPremiseId) &&
+      existingRowPremiseId !== premiseRef.id &&
+      normalizeText(replacesPremiseId) === existingRowPremiseId;
+
+    if (movingPremise && readFirstText(row?.refs?.meterId)) {
+      throw controlledError(
+        "TARGETED_BATCH_PREMISE_HAS_METER",
+        `${context.rowId} already has a meter on its premise.`,
+        { existingPremiseId: existingRowPremiseId, expectedPremiseId: premiseRef.id },
+      );
+    }
+
+    // Read before any write, like everything else in this transaction.
+    const movedFromRef = movingPremise
+      ? db.collection(TARGETED_BATCH_PREMISES_COLLECTION).doc(existingRowPremiseId)
+      : null;
+    const movedFromSnapshot = movedFromRef ? await transaction.get(movedFromRef) : null;
+
     if (
       existingRowPremiseId &&
-      existingRowPremiseId !== premiseRef.id
+      existingRowPremiseId !== premiseRef.id &&
+      !movingPremise
     ) {
       throw controlledError(
         "TARGETED_BATCH_PREMISE_CONFLICT",
@@ -820,6 +863,19 @@ export async function createOrLinkTargetedBatchPremise({
       );
     }
 
+    // Targeted Batch rules TB-R059 (1.3.60): the same refusal in the same plain words as every other form,
+    // naming the batch, its geofence, the team and the date. The TB-R048 guard below is unchanged.
+    const batchWork = await checkBatchWork({
+      db,
+      read: (refOrQuery) => transaction.get(refOrQuery),
+      meterNo: context.salesDocId,
+      uid: actorUid,
+    });
+
+    if (!batchWork.allowed) {
+      throw controlledError(batchWork.code, batchWork.message, batchWork.details);
+    }
+
     assertTargetedBatchExecutionAuthority({
       parent,
       actor: {
@@ -835,9 +891,33 @@ export async function createOrLinkTargetedBatchPremise({
         ...premisePayload,
         targetedBatchContext: canonicalContext,
       });
-    } else if (premiseNeedsWrite) {
-      transaction.update(premiseRef, {
-        targetedBatchContext: canonicalContext,
+    } else {
+      // TB-R067 (1.3.73): the worker picked a premise that was already standing there, and the form opened
+      // so they could check and finish it - the business name most of all, which is why the rule exists. So
+      // what they typed is written, not only the link. Only the fields this form owns are written: account
+      // data, the premise's meters, its No Access history and anything else captured elsewhere are left
+      // exactly as they are. Before this, picking a premise saved the link and threw the typing away, and
+      // any photo taken went to Storage and was never referenced (reviewer, 2026-09-24).
+      const premisePatch = {
+        "metadata.updatedAt": now.toDate().toISOString(),
+        "metadata.updatedByUid": actorUid,
+        "metadata.updatedByUser": actorName,
+      };
+
+      if (premiseNeedsWrite) premisePatch.targetedBatchContext = canonicalContext;
+
+      for (const field of EDITABLE_PREMISE_FIELDS) {
+        if (premisePayload?.[field] !== undefined) premisePatch[field] = premisePayload[field];
+      }
+
+      transaction.update(premiseRef, premisePatch);
+    }
+
+    // TB-R067 (1.3.73) 6: the premise the row is leaving goes back to Not joined, so it can be picked by
+    // the row it really belongs to. Nothing else about it changes.
+    if (movedFromSnapshot?.exists) {
+      transaction.update(movedFromRef, {
+        targetedBatchContext: null,
         "metadata.updatedAt": now.toDate().toISOString(),
         "metadata.updatedByUid": actorUid,
         "metadata.updatedByUser": actorName,
@@ -1680,6 +1760,10 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     "execution.startedAt": row?.execution?.startedAt || now,
     "execution.completedAt": now,
     "execution.outcome": "METER_DISCOVERED",
+    // Targeted Batch rules TB-R064 (1.3.67): when the worker captured a different number from the one the
+    // row was sent for, the row records what was found, so TB Register says so instead of showing the row's
+    // own meter as matched and waiting to be inspected.
+    "execution.foundMeterNo": salesCompletion.meterMatch === false ? normalizeMeterNo(discoveredMeterNo) || null : null,
     "refs.premiseId": premiseId,
     "refs.meterId": astId,
     "refs.trnId": trnId,

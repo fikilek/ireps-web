@@ -21,6 +21,16 @@ test("ERF labels use sg.erfNo verbatim; invalid geometry explicitly contributes 
  for(const number of ["4230","3/826","RE/799"]){const result=nearbyLayerRecords("erfs",[{...f.erf,id:"SG-CODE",sg:{erfNo:number,parcelNo:"WRONG"}}],args);assert.equal(result.records[0].erfNo,number);}
  assert.equal(nearbyLayerRecords("erfs",[{...f.erf,id:"BAD",geometry:"bad"}],args).invalid,1);
 });
+// 18.7 / TB-R055.7 (1.3.49): a layer draws the area on screen. The read asks for ERFs whose bbox
+// overlaps that area, and the fixture ERF's own bbox is 20km across, so bbox overlap alone would
+// draw ERFs nowhere near the screen — the same area test Sales, Premises and Assets use.
+test("the ERF layer draws only ERFs whose centroid is in the area and the Ward, not every ERF the bbox read returns",()=>{
+ const far={...f.erf,id:"FAR",centroid:{lat:-28.2,lng:30.23}};
+ const result=nearbyLayerRecords("erfs",[{...f.erf,id:"IN"},far],args);
+ assert.deepEqual(result.records.map(row=>row.id),["IN"],"an ERF outside the area on screen is not drawn");
+ assert.ok(far.bbox.minLat<=args.bounds.maxLat&&far.bbox.maxLat>=args.bounds.minLat,"and it is one the bbox read really does return");
+ assert.equal(nearbyLayerRecords("erfs",[{...f.erf,id:"OUT-OF-WARD"}],{...args,wardGeometry:{type:"Polygon",coordinates:[[[31,-29],[32,-29],[32,-28],[31,-28],[31,-29]]]}}).records.length,0,"the Ward test still applies");
+});
 test("Sales use their Sales GPS point; a Non-GPS meter with a saved ERF decision uses its saved position (18.7, 1.3.17)",()=>{
  const sales={...f.sales,id:"S1",erfResolution:{geocode:{latitude:-28.5,longitude:30.5}}};
  assert.equal(nearbyLayerRecords("sales",[sales],args).records.length,0,"a partial saved position is not a saved decision");

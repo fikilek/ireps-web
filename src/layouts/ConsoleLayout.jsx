@@ -288,7 +288,8 @@ const navSections = [
           {
             label: "Users",
             path: "/admin/users",
-            allowedRoles: ADMIN_ROLES,
+            // UI-R002: managers and supervisors of every company; never field workers.
+            allowedRoles: MANAGEMENT_ROLES,
           },
           {
             label: "FWR Monitoring",

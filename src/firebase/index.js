@@ -2,6 +2,8 @@ import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import {
   clearIndexedDbPersistence,
+  enablePersistentCacheIndexAutoCreation,
+  getPersistentCacheIndexManager,
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
@@ -55,6 +57,16 @@ export const db = initializeFirestore(app, {
     cacheSizeBytes: SAVED_COPY_MAX_BYTES,
   }),
 });
+
+// WD-R001: the saved copy answers a question about one small area by reading the whole saved
+// collection, unless the browser keeps a lookup for it. Firestore does not keep one unless asked,
+// so a map layer asking for one street had to read every Sales record ever saved (Endumeni: about
+// 10,273) before it could draw. Let the browser build its own lookups: it does so the first time a
+// read is worth one, and every later read of the same shape uses it. Without this, the saved copy
+// WD-R001 added makes every bounded read (the map layers of 18.7 and TB-R055.7) slower than before.
+// Returns null if the saved copy is not in use, so nothing is assumed.
+export const savedCopyIndexes = getPersistentCacheIndexManager(db);
+if (savedCopyIndexes) enablePersistentCacheIndexAutoCreation(savedCopyIndexes);
 
 // WD-R001.4: signing out, from any tab or page, deletes the saved copy and
 // returns the tab to the sign-in page. Every tab of the browser sees the

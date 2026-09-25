@@ -93,12 +93,68 @@ export function inspectSalesTbRefsIntegrity(value) {
   }
   return { valid: issues.length === 0, issues: [...new Set(issues)], entries, entriesByKey };
 }
+// Targeted Batch rules TB-R063 (1.3.66): a different meter was captured at this meter's ERF, so the meter
+// on the Sales list has been replaced and is not there any more. One bounded map, written once by the server
+// (differentMeterAtErf.js); the first find wins, so a repeat changes nothing. Exact keys, like erfLocated
+// (TB10): a malformed value is an integrity defect and never quietly completes a meter.
+export const DIFFERENT_METER_FOUND_KEYS = Object.freeze(["version", "meterNo", "erfId", "trnId", "trnType", "astId", "foundAt", "finder", "tbId", "rowId", "creditedToBatch", "rule", "rulesVersion"]);
+export const DIFFERENT_METER_FINDER_KEYS = Object.freeze(["uid", "user", "role", "teamId", "teamName", "serviceProviderId", "serviceProviderName"]);
+const nullableText = value => value === null || nonblank(value);
+export function inspectDifferentMeterFound(row = {}) {
+  if (!Object.hasOwn(row, "differentMeterFound")) return { valid: true, found: false, record: null };
+  const record = row.differentMeterFound;
+  const finder = record?.finder;
+  const valid = exactKeys(record, DIFFERENT_METER_FOUND_KEYS) && record.version === 1
+    && nonblank(record.meterNo) && nonblank(record.erfId) && nonblank(record.trnId) && nonblank(record.trnType)
+    && nullableText(record.astId) && isTimestamp(record.foundAt)
+    && exactKeys(finder, DIFFERENT_METER_FINDER_KEYS) && [finder?.uid, finder?.user, finder?.role].every(nonblank)
+    && [finder?.teamId, finder?.teamName, finder?.serviceProviderId, finder?.serviceProviderName].every(nullableText)
+    && (record.tbId === null || SALES_BATCH_ID.test(record.tbId || "")) && nullableText(record.rowId)
+    && typeof record.creditedToBatch === "boolean" && nonblank(record.rule) && nonblank(record.rulesVersion);
+  return { valid: Boolean(valid), found: Boolean(valid), record: valid ? record : null };
+}
 export function classifySalesWorkStatus(row = {}) {
   const visibility = Object.hasOwn(row, "master") ? row.master?.visibility : row.masterVisibility;
   if (visibility === "VISIBLE") return "COMPLETED";
+  // Rules TB-R063: the meter that was there has been replaced. Completed, without claiming this number was
+  // found: the meter master is untouched and the Sales record stays INVISIBLE.
+  if (inspectDifferentMeterFound(row).found) return "COMPLETED";
   const integrity = inspectSalesTbRefsIntegrity(row.tbRefs);
   return integrity.entries.some(entry => entry.classifiable && row.tbRefs[entry.index].fieldWork?.status === "IN_PROGRESS") ? "IN_PROGRESS" : "NOT_STARTED";
 }
+// Targeted Batch rules TB-R065 (1.3.69): the meter recorded on site, and whether it is the meter on the
+// Sales list. Worked out from the Sales record as it stands; nothing new is stored. In order: the different
+// meter found at this meter's ERF (TB-R063), then the number the batch's own field work recorded, then the
+// meter's own number once it is visible in the master data, because a visible meter was found as itself.
+// No evidence at all is NAv on screen, never a guess.
+export const SAME_METER = Object.freeze({ YES: "YES", NO: "NO", NAV: "NAV" });
+export function salesSiteMeter(row = {}, salesId = null) {
+  const identity = nonblank(salesId) ? salesId : nonblank(row.meterNoNormalized) ? row.meterNoNormalized : nonblank(row.id) ? row.id : "";
+  const own = identity.trim().toUpperCase().replace(/\s+/g, "");
+  // The same cleaning the writers use when they decide meterMatch: trimmed, upper case, no spaces.
+  const clean = value => value.trim().toUpperCase().replace(/\s+/g, "");
+  const found = (meterNo, source) => {
+    const site = clean(meterNo);
+    return { meterNo: site, sameMeter: own && site === own ? SAME_METER.YES : SAME_METER.NO, source };
+  };
+  const different = inspectDifferentMeterFound(row);
+  if (different.found) return found(different.record.meterNo, "DIFFERENT_METER_FOUND");
+  // Legacy records carry TbRefs, as membership and integrity already read it. The newest finished field
+  // work wins: a meter worked in an old batch and again later shows the meter found last, not first.
+  const refs = Array.isArray(row.tbRefs) ? row.tbRefs : Array.isArray(row.TbRefs) ? row.TbRefs : [];
+  let newest = null;
+  for (const entry of inspectSalesTbRefsIntegrity(refs).entries) {
+    const fieldWork = refs[entry.index]?.fieldWork;
+    if (!entry.classifiable || fieldWork?.status !== "COMPLETED" || !nonblank(fieldWork.discoveredMeterNo)) continue;
+    const at = timestampMillis(fieldWork.updatedAt) ?? timestampMillis(fieldWork.submittedAt) ?? 0;
+    if (!newest || at >= newest.at) newest = { at, meterNo: fieldWork.discoveredMeterNo };
+  }
+  if (newest) return found(newest.meterNo, "FIELD_WORK");
+  const visibility = Object.hasOwn(row, "master") ? row.master?.visibility : row.masterVisibility;
+  if (visibility === "VISIBLE" && own) return { meterNo: own, sameMeter: SAME_METER.YES, source: "VISIBLE" };
+  return { meterNo: null, sameMeter: SAME_METER.NAV, source: "NONE" };
+}
+
 export const classifySalesTableWorkStatus = classifySalesWorkStatus;
 export function buildSalesTableWorkStatusRows({ salesRows = [] } = {}) {
   return (Array.isArray(salesRows) ? salesRows : []).map(row => ({ ...row, salesWorkStatus: classifySalesWorkStatus(row) }));
@@ -245,6 +301,9 @@ export function evaluateSalesBatchability(row = {}, { salesId = row.id, lmPcode 
   const membership = resolveSalesTargetedBatchMembership(row);
   if (membership.state !== "NONE") return fail(membership.state === "MEMBER" ? "CURRENT_TARGETED_BATCH" : "TARGETED_BATCH_MEMBERSHIP_UNRESOLVED", membership.reason);
   if (!inspectSalesTbRefsIntegrity(row.tbRefs).valid || row.tbRefsIntegrity?.valid === false) return fail("TB_REFERENCE_INTEGRITY_INVALID", "Targeted Batch reference data is invalid");
+  // Rules TB-R063 (1.3.66): a malformed record of a different meter found at the ERF is an integrity defect.
+  // It must never let a meter that has been replaced be batched again because its record could not be read.
+  if (!inspectDifferentMeterFound(row).valid) return fail("DIFFERENT_METER_FOUND_INVALID", "The record of a different meter found at this ERF is malformed");
   const saved = inspectSavedErfDecision(row);
   if (!saved.valid) return fail("ERF_RESOLUTION_INVALID", "Saved ERF and coordinates are incomplete or malformed");
   const lookup = inspectErfLookup(row);

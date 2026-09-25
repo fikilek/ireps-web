@@ -74,7 +74,10 @@ export function nearbyLayerRecords(layer, documents, { lmPcode, wardPcode, bound
       try {
         const geometry = normalizeBatchGeometry(row.geometry);
         if (!point || row.admin?.ward?.pcode !== wardPcode) { invalid++; continue; }
-        if (strictlyInside(point, ward)) result.push({ id: row.id, erfNo: String(row.sg?.erfNo || "Unavailable"), point, paths: geoJsonGeometryToPlanningPaths(geometry), raw: row });
+        // An ERF is kept on its centroid, in the area and the Ward, exactly as Sales, Premises and
+        // Assets are (18.7, 1.3.49): a read asks for ERFs whose bbox overlaps the area, and a long
+        // farm portion (or a bad imported bbox) overlaps an area it is nowhere near.
+        if (insideArea(point)) result.push({ id: row.id, erfNo: String(row.sg?.erfNo || "Unavailable"), point, paths: geoJsonGeometryToPlanningPaths(geometry), raw: row });
       } catch { invalid++; }
     } else if (layer === "sales") {
       // Sales GPS points first; a Non-GPS meter with a saved ERF decision uses the position saved

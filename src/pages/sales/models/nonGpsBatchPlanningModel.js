@@ -1,4 +1,4 @@
-import { SALES_BATCH_MAX, SALES_CATEGORY_CODES, evaluateSalesBatchability, newestSalesCategoryMonth, salesCategoryKind } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
+import { SALES_BATCH_MAX, SALES_CATEGORY_CODES, SAME_METER, evaluateSalesBatchability, newestSalesCategoryMonth, salesCategoryKind } from "../../../../functions/salesAllMeters/sales-batch-policy.js";
 import {
   hasUsableSalesGps,
   isSalesWithoutUsableGps,
@@ -108,6 +108,9 @@ function buildTarget(row, categoryMonth) {
     row,
     id: String(row?.id || ""),
     meterNo: String(row?.meterNo || ""),
+    // Targeted Batch rules TB-R065 (1.3.69): the meter recorded on site, and whether it is this meter.
+    siteMeterNo: row?.siteMeterNo || null,
+    sameMeter: row?.sameMeter || SAME_METER.NAV,
     accountNumber: String(row?.accountNumber || ""),
     town: String(row?.town || ""),
     townKey,

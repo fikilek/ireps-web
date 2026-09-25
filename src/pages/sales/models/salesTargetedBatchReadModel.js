@@ -33,7 +33,22 @@ export function normalizePermanentSalesBatchRow(data, id = data.id, parent = nul
     allocationStatus: modern ? canonicalState(data.allocation?.status, ["UNALLOCATED", "ALLOCATED"]) : data.allocation?.status ?? data.allocationStatus,
     completionStatus: integrityIssues.length ? "INTEGRITY_ERROR" : data.execution?.status ?? (modern ? "UNAVAILABLE" : data.completionStatus),
     fieldAcceptanceStatus: modern ? canonicalState(parent?.acceptance?.status, ["NOT_READY", "WAITING", "ACCEPTED", "REJECTED"]) : parent?.acceptance?.status ?? data.fieldAcceptanceStatus,
-    proposedTrnType: data.refs?.meterId ? "METER_INSPECTION" : "METER_DISCOVERY", astMatchStatus: data.refs?.meterId ? "MATCHED" : "NOT_MATCHED" };
+    // Targeted Batch rules TB-R064 (1.3.67): AST Match answers one question — was the row's OWN meter
+    // found at the place? A different meter found there (TB-R063) is Not matched, whatever meter record
+    // the row now points at, and the row proposes a discovery, never an inspection of a meter nobody found.
+    executionOutcome: cleanText(data.execution?.outcome) || null,
+    foundMeterNo: cleanText(data.execution?.foundMeterNo) || null,
+    proposedTrnType: ownRowMeterFound(data) ? "METER_INSPECTION" : "METER_DISCOVERY",
+    astMatchStatus: ownRowMeterFound(data) ? "MATCHED" : "NOT_MATCHED" };
+}
+
+// TB-R064 (1.3.67): the row's own meter is on site only when field work recorded that same number.
+export const DIFFERENT_METER_OUTCOME = "DIFFERENT_METER_FOUND_AT_ERF";
+export function differentMeterFoundOnRow(data = {}) {
+  return cleanText(data?.execution?.outcome) === DIFFERENT_METER_OUTCOME || cleanText(data?.execution?.foundMeterNo) !== "";
+}
+function ownRowMeterFound(data = {}) {
+  return Boolean(data?.refs?.meterId) && !differentMeterFoundOnRow(data);
 }
 
 export function cleanText(value) {

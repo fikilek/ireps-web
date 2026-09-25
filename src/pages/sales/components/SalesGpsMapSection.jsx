@@ -5,11 +5,14 @@ import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 
 import { useWarehouse } from "@/context/WarehouseContext";
 import { useGetGeoFencesByWardQuery } from "../../../redux/geofencesApi";
+import { useGeofencePolygonDraft } from "../../../features/maps/use-geofence-polygon-draft";
 import { useSalesMapFence } from "./use-sales-map-fence.jsx";
 import { useSalesMapLayers } from "./sales-map-layers.jsx";
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
+// TB-R055.7 (1.3.63): a fixed empty list, so "nothing is being drawn" is the same value every render.
+const NO_POINTS = Object.freeze([]);
 const DEFAULT_MARKER_SCALE = 7;
 const HOVERED_MARKER_SCALE = 10;
 const FOCUSED_MARKER_SCALE = 11;
@@ -589,6 +592,9 @@ export default function SalesGpsMapSection({
   hoveredMeterId = "",
   focusedMeterId = "",
   focusRequest = 0,
+  // Targeted Batch rules TB-R055.7 (1.3.63): the meters ticked in the table. The map layers load
+  // only near them, or near the geofence being drawn; until there is one or the other, nothing loads.
+  selectedMeterIds,
   // Targeted Batch rules TB-R055: drawing a GPS batch geofence on this map.
   canDrawFence = false,
   fenceRows = [],
@@ -655,25 +661,6 @@ export default function SalesGpsMapSection({
     );
   }, [onWardGeofencesChange, selectedWardNo, wardGeofences]);
 
-  // Targeted Batch rules TB-R055.7: TB Draft's Map Layers for the area on screen.
-  const layers = useSalesMapLayers({ lmPcode: selectedLmPcode, wardPcode: selectedWardNo ? selectedWardPcode : "", wardGeofences });
-  const fence = useSalesMapFence({
-    planning: layers.planning,
-    canDraw: canDrawFence && Boolean(selectedWardNo),
-    lmPcode: selectedLmPcode,
-    wardPcode: selectedWardPcode,
-    wardLabel: selectedWardNo ? `Ward ${selectedWardNo}` : "",
-    rows: fenceRows,
-    categoryMonth: fenceCategoryMonth,
-    wardGeofences,
-    onSaved: onSalesMapFenceSaved,
-  });
-  // While a geofence is being drawn or saved, the Ward stays as it is (TB-R055).
-  useEffect(() => {
-    onFenceBusyChange?.(fence.busy);
-    return () => onFenceBusyChange?.(false);
-  }, [fence.busy, onFenceBusyChange]);
-
   const hasNoGeofenceSelected = selectedGeofenceId === "NONE";
   const activeSelectedGeofenceId = selectedGeofenceId || "";
 
@@ -707,6 +694,50 @@ export default function SalesGpsMapSection({
     () => points.map((point) => ({ lat: point.latitude, lng: point.longitude })),
     [points],
   );
+
+  // TB-R055.7 (1.3.63): the pins of the ticked meters, as text so the same area never starts a new
+  // read. They are the work the layers stay near while no geofence is being drawn.
+  const tickedPointsKey = useMemo(() => {
+    const ticked = new Set(
+      [...(selectedMeterIds || [])].map(normalizeMeterId).filter(Boolean),
+    );
+
+    return JSON.stringify(
+      points
+        .filter((point) => ticked.has(normalizeMeterId(point.meterId)))
+        .map((point) => ({ lat: point.latitude, lng: point.longitude })),
+    );
+  }, [points, selectedMeterIds]);
+  const tickedPoints = useMemo(() => JSON.parse(tickedPointsKey), [tickedPointsKey]);
+
+  // Targeted Batch rules TB-R055.7 (1.3.63): TB Draft's Map Layers, near the work only — the shape
+  // being drawn, else the ticked meters. The drawing lives here, so both hooks see the same points.
+  const drawing = useGeofencePolygonDraft();
+  const drawingPoints = drawing.drawing ? drawing.points : NO_POINTS;
+  const layers = useSalesMapLayers({
+    lmPcode: selectedLmPcode,
+    wardPcode: selectedWardNo ? selectedWardPcode : "",
+    wardGeofences,
+    drawingPoints,
+    tickedPoints,
+  });
+  const fence = useSalesMapFence({
+    drawing,
+    planning: layers.planning,
+    canDraw: canDrawFence && Boolean(selectedWardNo),
+    lmPcode: selectedLmPcode,
+    wardPcode: selectedWardPcode,
+    wardLabel: selectedWardNo ? `Ward ${selectedWardNo}` : "",
+    rows: fenceRows,
+    categoryMonth: fenceCategoryMonth,
+    wardGeofences,
+    onSaved: onSalesMapFenceSaved,
+  });
+  // While a geofence is being drawn or saved, the Ward stays as it is (TB-R055).
+  useEffect(() => {
+    onFenceBusyChange?.(fence.busy);
+    return () => onFenceBusyChange?.(false);
+  }, [fence.busy, onFenceBusyChange]);
 
   const gpsMeterCount = useMemo(
     () => new Set(points.map((point) => point.meterId)).size,

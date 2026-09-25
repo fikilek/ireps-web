@@ -368,24 +368,24 @@ test("off-grid status is required and yes requires evidence", () => {
   expectPass(deepMerge(baseElectricity(), { ast: { ogs: { hasOffGridSupply: "unknown" } } }));
 });
 
-test("normalisation accepts canonical and legacy non-empty actions and preserves photo rules", () => {
-  const canonicalActions = [
-    "New Meter Installed",
-    "Meter Removed",
-    "Illegal connection - meter disconnected",
-    "Illegal connection - meter reconnected",
-    "Meter faulty - meter replaced",
-    "Meter damaged - meter replaced",
-    "Tamper Removed",
-    "Keypad Normalised",
-    "Service Point Completed / Cable Installed",
-    "Meter Registered",
-  ];
-  const legacyActions = [
-    "Meter Disconnected",
-    "Meter Reconnected",
-  ];
+// ── MN-R001: the anomaly decides what follows ─────────────────────────────────
 
+const ELEC_MEDIA = ["astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto"];
+
+function illegallyConnected(normalisation, extraMedia = ["anomalyPhoto"]) {
+  return deepMerge(baseElectricity(), {
+    ast: {
+      anomalies: {
+        anomaly: "Illegally Connected",
+        anomalyDetail: "Straight Connection (Meter Bypassed)",
+      },
+      normalisation,
+    },
+    media: media(...ELEC_MEDIA, ...extraMedia),
+  });
+}
+
+test("normalisation: a shapeless or empty action list is refused", () => {
   expectCode(
     deepMerge(baseElectricity(), { ast: { normalisation: { actionTaken: null } } }),
     "NORMALISATION_ACTIONS_REQUIRED",
@@ -398,151 +398,238 @@ test("normalisation accepts canonical and legacy non-empty actions and preserves
     deepMerge(baseElectricity(), { ast: { normalisation: { actionTaken: [] } } }),
     "NORMALISATION_ACTIONS_REQUIRED",
   );
+});
 
-  expectPass(
-    deepMerge(baseElectricity(), { ast: { normalisation: { actionTaken: ["none"] } } }),
-  );
+test("normalisation: Meter Ok keeps none, and none stands alone", () => {
+  expectPass(baseElectricity());
+
   expectPass(
     deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["none"] } },
-      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
+      ast: { normalisation: { actionTaken: ["Tamper removed"] } },
+      media: media(...ELEC_MEDIA, "normalisationPhoto"),
     }),
   );
-
-  for (const action of [...canonicalActions, ...legacyActions]) {
-    const withoutPhoto = deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: [action] } },
-    });
-    expectCode(withoutPhoto, "NORMALISATION_PHOTO_REQUIRED");
-
-    expectPass(deepMerge(withoutPhoto, {
-      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
-    }));
-  }
 
   expectCode(
     deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["Meter Removed", "Tamper Removed"] } },
+      ast: { normalisation: { actionTaken: ["none", "Tamper removed"] } },
+      media: media(...ELEC_MEDIA, "normalisationPhoto"),
     }),
-    "NORMALISATION_PHOTO_REQUIRED",
-  );
-  expectPass(
-    deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["Meter Removed", "Tamper Removed"] } },
-      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
-    }),
+    "NORMALISATION_NONE_NOT_EXCLUSIVE",
   );
 
-  const v3MultiAction = [
-    "Illegal connection - meter disconnected",
-    "Meter faulty - meter replaced",
-  ];
+  // Meter Ok asks for nothing, so it can carry no reason for not acting.
   expectCode(
     deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: v3MultiAction } },
+      ast: { normalisation: { noActionReason: "Customer refused" } },
     }),
-    "NORMALISATION_PHOTO_REQUIRED",
-  );
-  expectPass(
-    deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: v3MultiAction } },
-      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
-    }),
+    "NORMALISATION_REASON_NOT_EXPECTED",
   );
 });
 
-test("legacy pre-v3 queued normalisation actions remain accepted by backend", () => {
-  for (const action of ["Meter Disconnected", "Meter Reconnected"]) {
+test("normalisation: an illegal connection must be disconnected, or say why not", () => {
+  expectCode(
+    illegallyConnected({ actionTaken: ["none"] }),
+    "NORMALISATION_REASON_REQUIRED",
+  );
+
+  // An extra on its own is still not the action that follows.
+  expectCode(
+    illegallyConnected(
+      { actionTaken: ["Tamper removed"] },
+      ["anomalyPhoto", "normalisationPhoto"],
+    ),
+    "NORMALISATION_REASON_REQUIRED",
+  );
+
+  expectPass(illegallyConnected({ actionTaken: ["Disconnect meter"] }));
+
+  expectPass(
+    illegallyConnected({
+      actionTaken: ["none"],
+      noActionReason: "Threatened or chased away",
+    }),
+  );
+
+  // The work was done, so there is nothing to explain.
+  expectCode(
+    illegallyConnected({
+      actionTaken: ["Disconnect meter"],
+      noActionReason: "Customer refused",
+    }),
+    "NORMALISATION_REASON_NOT_EXPECTED",
+  );
+});
+
+test("normalisation: a damaged or faulty meter must be replaced, or say why not", () => {
+  for (const anomaly of ["Meter Damaged", "Meter Faulty"]) {
+    const finding = {
+      ast: {
+        anomalies: {
+          anomaly,
+          anomalyDetail:
+            anomaly === "Meter Damaged" ? "Meter Broken" : "Meter Display Blank",
+        },
+      },
+    };
+
+    expectCode(
+      deepMerge(baseElectricity(), {
+        ...finding,
+        media: media(...ELEC_MEDIA, "anomalyPhoto"),
+      }),
+      "NORMALISATION_REASON_REQUIRED",
+    );
+
+    // Replace meter asks for no photo here: the removal and the installation
+    // carry the proof (MN-R001 1.1.0).
     expectPass(
       deepMerge(baseElectricity(), {
-        ast: { normalisation: { actionTaken: [action] } },
-        media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
+        ...finding,
+        ast: {
+          ...finding.ast,
+          normalisation: { actionTaken: ["Replace meter"] },
+        },
+        media: media(...ELEC_MEDIA, "anomalyPhoto"),
+      }),
+    );
+
+    // The old wording is refused.
+    expectCode(
+      deepMerge(baseElectricity(), {
+        ...finding,
+        ast: {
+          ...finding.ast,
+          normalisation: { actionTaken: ["Meter replaced"] },
+        },
+        media: media(...ELEC_MEDIA, "anomalyPhoto", "normalisationPhoto"),
+      }),
+      "INVALID_NORMALISATION_ACTION",
+    );
+
+    // One job per finding.
+    expectCode(
+      deepMerge(baseElectricity(), {
+        ...finding,
+        ast: {
+          ...finding.ast,
+          normalisation: { actionTaken: ["Replace meter", "Disconnect meter"] },
+        },
+        media: media(...ELEC_MEDIA, "anomalyPhoto"),
+      }),
+      "NORMALISATION_ONE_JOB_ONLY",
+    );
+
+    expectPass(
+      deepMerge(baseElectricity(), {
+        ...finding,
+        ast: {
+          ...finding.ast,
+          normalisation: {
+            actionTaken: ["none"],
+            noActionReason: "No meter available to replace",
+          },
+        },
+        media: media(...ELEC_MEDIA, "anomalyPhoto"),
       }),
     );
   }
 });
 
-test("normalisation rejects unsupported, malformed, duplicate and mixed-none actions", () => {
-  const invalidActions = [
-    [null],
-    [123],
-    [{}],
-    [""],
-    [" Meter Removed"],
-    ["Meter Removed "],
-    ["meter removed"],
-    ["Issue Fine"],
-    ["Meter Removal"],
-    ["Meter Disconnection"],
-    ["Meter Reconnection"],
-    ["Meter Damaged - New Meter Installed"],
-    ["Meter Faulty - New Meter Installed"],
-    ["Meter Illegal Connected - Tamper Removed"],
-    ["Meter Illegal Connected - New Meter Installed"],
-    ["Meter Bridged (By Munic) - New Meter Installed"],
-    ["Meter Blocked (By Munic) - New Meter Installed"],
-    ["Keypad - Normalised"],
-    ["Completed Service Points (Cable Installed)"],
-    ["Meter Missing Installed"],
-    ["Custom Intervention"],
-  ];
+test("normalisation: the reason must be one of ours, and Other must be typed out", () => {
+  expectCode(
+    illegallyConnected({ actionTaken: ["none"], noActionReason: "Other" }),
+    "NON_CANONICAL_NO_ACTION_REASON_OTHER",
+  );
 
-  for (const actionTaken of invalidActions) {
+  // Other is replaced by the worker's own words before it is sent.
+  expectPass(
+    illegallyConnected({
+      actionTaken: ["none"],
+      noActionReason: "The dog would not let me near the box",
+    }),
+  );
+});
+
+test("normalisation: a photo for work that leaves a mark, never twice for a disconnection", () => {
+  // A disconnection proves itself in the disconnection form that follows.
+  expectPass(illegallyConnected({ actionTaken: ["Disconnect meter"] }));
+
+  expectCode(
+    illegallyConnected({ actionTaken: ["Disconnect meter", "Tamper removed"] }),
+    "NORMALISATION_PHOTO_REQUIRED",
+  );
+
+  expectPass(
+    illegallyConnected(
+      { actionTaken: ["Disconnect meter", "Tamper removed"] },
+      ["anomalyPhoto", "normalisationPhoto"],
+    ),
+  );
+});
+
+test("normalisation: retired values are refused", () => {
+  for (const retired of [
+    "Issue Fine",
+    "New Meter Installed",
+    "Meter Removed",
+    "Illegal connection - meter disconnected",
+    "Meter Disconnected",
+    "Meter Disconnection",
+    "Tamper Removed",
+    "OTHER",
+  ]) {
     expectCode(
-      deepMerge(baseElectricity(), {
-        ast: { normalisation: { actionTaken } },
-        media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
-      }),
+      illegallyConnected(
+        { actionTaken: [retired] },
+        ["anomalyPhoto", "normalisationPhoto"],
+      ),
+      "INVALID_NORMALISATION_ACTION",
+    );
+  }
+});
+
+test("normalisation rejects malformed, duplicate and mixed-none actions", () => {
+  for (const invalid of [[null], [123], [{}], [""], ["Disconnect"]]) {
+    expectCode(
+      illegallyConnected({ actionTaken: invalid }, ["anomalyPhoto", "normalisationPhoto"]),
       "INVALID_NORMALISATION_ACTION",
     );
   }
 
   expectCode(
-    deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["Meter Removed", "Meter Removed"] } },
-      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
-    }),
+    illegallyConnected(
+      { actionTaken: ["Disconnect meter", "Disconnect meter"] },
+      ["anomalyPhoto", "normalisationPhoto"],
+    ),
     "DUPLICATE_NORMALISATION_ACTION",
-  );
-  expectCode(
-    deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["none", "none"] } },
-    }),
-    "DUPLICATE_NORMALISATION_ACTION",
-  );
-  expectCode(
-    deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["none", "Meter Removed"] } },
-      media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "normalisationPhoto"),
-    }),
-    "NORMALISATION_NONE_NOT_EXCLUSIVE",
   );
 });
 
-test("normalisation metadata exposes canonical and legacy accepted values", () => {
-  assert.deepEqual(METER_DISCOVERY_VALIDATION_METADATA.normalisationActionValues, [
-    "none",
-    "New Meter Installed",
-    "Meter Removed",
-    "Illegal connection - meter disconnected",
-    "Illegal connection - meter reconnected",
-    "Meter faulty - meter replaced",
-    "Meter damaged - meter replaced",
-    "Tamper Removed",
-    "Keypad Normalised",
-    "Service Point Completed / Cable Installed",
-    "Meter Registered",
-    "Meter Disconnected",
-    "Meter Reconnected",
-  ]);
-  assert.deepEqual(METER_DISCOVERY_VALIDATION_METADATA.otherAnomalyValues, [
-    "Meter Blocked (By Munic)",
-    "Meter Bridged (By Munic)",
-    "Incomplete Service Points",
-    "Meter Not Registered",
-    "Keypad Faulty",
-  ]);
+test("normalisation metadata exposes the canonical values and the reasons", () => {
+  const values = METER_DISCOVERY_VALIDATION_METADATA.normalisationActionValues;
+
+  assert.deepEqual(
+    [...values].sort(),
+    [
+      "Disconnect meter",
+      "Keypad normalised",
+      "Meter registered",
+      "Replace meter",
+      "Service point completed",
+      "Tamper removed",
+      "none",
+    ].sort(),
+  );
+
+  assert.equal(
+    METER_DISCOVERY_VALIDATION_METADATA.noActionReasons.includes(
+      "Threatened or chased away",
+    ),
+    true,
+  );
 });
+
 
 test("other anomalies allow only configured unique values", () => {
   const withoutOtherAnomalies = baseElectricity();
@@ -578,10 +665,16 @@ test("Meter Missing is rejected from accessible discovery Other Anomalies", () =
 test("anomaly photo is conditional exactly as the mobile form", () => {
   expectPass(baseElectricity());
   expectCode(deepMerge(baseElectricity(), {
-    ast: { anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" } },
+    ast: {
+      anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" },
+      normalisation: { actionTaken: ["none"], noActionReason: "Customer refused" },
+    },
   }), "ANOMALY_PHOTO_REQUIRED");
   expectPass(deepMerge(baseElectricity(), {
-    ast: { anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" } },
+    ast: {
+      anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" },
+      normalisation: { actionTaken: ["none"], noActionReason: "Customer refused" },
+    },
     media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "anomalyPhoto"),
   }));
 });
@@ -800,6 +893,10 @@ test("a submission with no anomaly detail keeps the old rule (queued or legacy p
   const faulty = baseElectricity();
   faulty.ast.anomalies.anomaly = "Meter Faulty";
   faulty.ast.anomalies.anomalyDetail = "Meter Burnt";
+  faulty.ast.normalisation = {
+    actionTaken: ["none"],
+    noActionReason: "No meter available to replace",
+  };
   faulty.media.push(...media("anomalyPhoto"));
   expectPass(faulty);
 });

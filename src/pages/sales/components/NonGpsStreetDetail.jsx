@@ -10,9 +10,10 @@ import {
   getSalesTargetedBatchMembershipLabel,
   getSalesTargetedBatchMembershipFilterKey,
 } from "../models/salesTargetedBatchMembershipModel";
-import { SALES_STATUSES } from "../models/salesStatusModel";
+import { SALES_STATUSES, SALES_STATUS_LABELS, getSalesStatusLabel } from "../models/salesStatusModel";
 import { NGP_SELECTION_MAX } from "../models/nonGpsBatchPlanningModel";
 import { REASONS_SHOWN_IN_COLUMNS } from "../models/sales-table-meter-note";
+import { SAME_METER_FILTER_OPTIONS, sameMeterSortRank, sameMeterText } from "../models/site-meter-model.js";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -20,6 +21,9 @@ const DEFAULT_PAGE_SIZE = 5;
 const EMPTY_FILTERS = Object.freeze({
   address: "",
   meterNo: "",
+  // Targeted Batch rules TB-R065 (1.3.69): "ALL" until a value is picked; NAv is one of the three.
+  siteMeterNo: "",
+  sameMeter: "ALL",
   salesStatus: "",
   batchId: "",
 });
@@ -111,9 +115,9 @@ function SalesStatusFilter({ value, onChange }) {
       aria-label="Filter Sales Meter Status"
     >
       <option value="">All statuses</option>
-      <option value={SALES_STATUSES.NOT_STARTED}>NOT_STARTED</option>
-      <option value={SALES_STATUSES.IN_PROGRESS}>IN_PROGRESS</option>
-      <option value={SALES_STATUSES.COMPLETED}>COMPLETED</option>
+      <option value={SALES_STATUSES.NOT_STARTED}>{SALES_STATUS_LABELS[SALES_STATUSES.NOT_STARTED]}</option>
+      <option value={SALES_STATUSES.IN_PROGRESS}>{SALES_STATUS_LABELS[SALES_STATUSES.IN_PROGRESS]}</option>
+      <option value={SALES_STATUSES.COMPLETED}>{SALES_STATUS_LABELS[SALES_STATUSES.COMPLETED]}</option>
     </select>
   );
 }
@@ -197,6 +201,8 @@ function PaginationControls({
 function getSortValue(target, key) {
   if (key === "address") return target?.canonicalAddress || "";
   if (key === "meterNo") return target?.meterNo || "";
+  if (key === "siteMeter") return target?.siteMeterNo || "";
+  if (key === "sameMeter") return sameMeterSortRank(target?.sameMeter);
   if (key === "salesStatus") return target?.salesWorkStatus || "";
   if (key === "batchId") return getSalesTargetedBatchMembershipLabel(target?.membership);
   return target?.canonicalAddress || "";
@@ -208,6 +214,8 @@ function filterTargets(targets, filters, searchText) {
       includesSearch(target, searchText) &&
       includesFilter(target.canonicalAddress, filters.address) &&
       includesFilter(target.meterNo, filters.meterNo) &&
+      includesFilter(target.siteMeterNo, filters.siteMeterNo) &&
+      (!filters.sameMeter || filters.sameMeter === "ALL" || target.sameMeter === filters.sameMeter) &&
       (!filters.salesStatus || target.salesWorkStatus === filters.salesStatus) &&
       (!filters.batchId || getSalesTargetedBatchMembershipFilterKey(target.membership) === filters.batchId),
   );
@@ -411,6 +419,23 @@ export default function NonGpsStreetDetail({
                   onSort={updateSort}
                 />
               </th>
+              {/* Targeted Batch rules TB-R065 (1.3.69): the meter recorded on site, beside the meter number. */}
+              <th style={styles.headerCell}>
+                <SortButton
+                  label="Site Meter"
+                  sortKey="siteMeter"
+                  sortConfig={sortConfig}
+                  onSort={updateSort}
+                />
+              </th>
+              <th style={styles.headerCell}>
+                <SortButton
+                  label="Same Meter"
+                  sortKey="sameMeter"
+                  sortConfig={sortConfig}
+                  onSort={updateSort}
+                />
+              </th>
               <th style={styles.headerCell}>
                 <SortButton
                   label="Sales Meter Status"
@@ -445,6 +470,26 @@ export default function NonGpsStreetDetail({
                 />
               </th>
               <th style={styles.filterCell}>
+                <ColumnFilter
+                  value={filters.siteMeterNo}
+                  onChange={(value) => updateFilter("siteMeterNo", value)}
+                  placeholder="Filter site meter"
+                />
+              </th>
+              <th style={styles.filterCell}>
+                <select
+                  style={styles.headerInput}
+                  value={filters.sameMeter}
+                  onChange={(event) => updateFilter("sameMeter", event.target.value)}
+                  aria-label="Filter by whether the meter on site is the same meter"
+                >
+                  <option value="ALL">All meters</option>
+                  {SAME_METER_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </th>
+              <th style={styles.filterCell}>
                 <SalesStatusFilter
                   value={filters.salesStatus}
                   onChange={(value) => updateFilter("salesStatus", value)}
@@ -464,7 +509,7 @@ export default function NonGpsStreetDetail({
           <tbody>
             {pagedTargets.length === 0 ? (
               <tr>
-                <td colSpan={5} style={styles.emptyCell}>
+                <td colSpan={7} style={styles.emptyCell}>
                   No street targets match the current filters.
                 </td>
               </tr>
@@ -509,6 +554,8 @@ export default function NonGpsStreetDetail({
                         ? <div>{target.batchabilityReason}</div> : null}
                     </td>
                     <td style={styles.bodyCell}>{target.meterNo || "NAv"}</td>
+                    <td style={styles.bodyCell}>{target.siteMeterNo || "NAv"}</td>
+                    <td style={styles.bodyCell}>{sameMeterText(target.sameMeter)}</td>
                     <td style={styles.bodyCell}>
                       <span
                         style={{
@@ -516,7 +563,7 @@ export default function NonGpsStreetDetail({
                           ...salesStatusStyle(target.salesWorkStatus),
                         }}
                       >
-                        {target.salesWorkStatus}
+                        {getSalesStatusLabel(target.salesWorkStatus)}
                       </span>
                     </td>
                     <td style={styles.bodyCell}>

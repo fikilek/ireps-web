@@ -1,3 +1,12 @@
+import {
+  anomalyPhotoRequired,
+  applyFixesToFinding,
+  buildNormalisationFollowUp,
+  normalisationPhotoRequired,
+  validateNormalisation,
+  validateOtherAnomalies,
+} from "../meterDiscovery/validation.js";
+
 const NOW_FALLBACK_USER = "SYSTEM";
 
 // All meter lifecycle-family TRN types known to the platform.
@@ -55,7 +64,6 @@ export const REMOVAL_MEDIA_TAGS = {
   removalEvidence: "removalEvidence",
   meterReadingEvidence: "removalMeterReadingEvidence",
   tokenReadingPhoto: "tokenReadingPhoto",
-  safetyEvidence: "safetyEvidence",
   noAccessPhoto: "noAccessPhoto",
 };
 
@@ -394,11 +402,9 @@ export function validateAssignment(
   const normalizedOriginChannel = normalizeUpper(originChannel);
   const fieldInstructionOptional =
     normalizedOriginChannel === "FIELD" &&
-    [
-      "METER_DISCONNECTION",
-      "METER_RECONNECTION",
-      "METER_REMOVAL",
-    ].includes(normalizedTrnType);
+    // MN-R001 1.3.0 / 6.1: a disconnection and a removal always carry their
+    // instruction.
+    ["METER_RECONNECTION", "METER_INSPECTION"].includes(normalizedTrnType);
 
   if (!instruction?.code) {
     return {
@@ -739,11 +745,6 @@ export function sanitizeRemoval(
       meterReading: "",
       tokenReading: "",
       noReadingReason: "",
-
-      safetyConfirmed: {
-        answer: null,
-        notes: "",
-      },
     };
   }
 
@@ -760,11 +761,6 @@ export function sanitizeRemoval(
     tokenReading: isPrepaidMeter ? String(removal?.tokenReading || "") : "",
 
     noReadingReason: selectValueToText(removal?.noReadingReason),
-
-    safetyConfirmed: {
-      answer: normalizeYesNo(removal?.safetyConfirmed?.answer),
-      notes: String(removal?.safetyConfirmed?.notes || ""),
-    },
   };
 }
 
@@ -1311,6 +1307,29 @@ function getInspectionCapturedMreading(data = {}) {
   return getInspectionPayload(data)?.captured?.mreading || {};
 }
 
+// MN-R001: an inspection records normalisation exactly as a discovery does, so
+// one report can read both without knowing which form it came from.
+function sanitizeElectricityNormalisation(normalisation = {}) {
+  const rawActions = Array.isArray(normalisation?.actionTaken)
+    ? normalisation.actionTaken
+    : normalisation?.actionTaken
+      ? [normalisation.actionTaken]
+      : ["none"];
+
+  const actionTaken = rawActions.map((action) => String(action).trim());
+  const sanitized = {
+    actionTaken,
+    noActionReason: String(normalisation?.noActionReason || "").trim(),
+  };
+
+  // What the finding calls for next, and where the numbers of that work will
+  // be kept (MN-R001 section 7). No status word.
+  const followUp = buildNormalisationFollowUp(actionTaken);
+  if (followUp) sanitized.followUp = followUp;
+
+  return sanitized;
+}
+
 function getInspectionNormalisationAction(data = {}) {
   const normalisation = getInspectionCapturedAst(data)?.normalisation || {};
   const selectCode = normalizeUpper(normalisation?.actionSelect?.code || "");
@@ -1414,6 +1433,10 @@ function sanitizeInspectionCapturedAst(
     anomalies: {
       anomaly: String(capturedAst?.anomalies?.anomaly || "").trim(),
       anomalyDetail: String(capturedAst?.anomalies?.anomalyDetail || "").trim(),
+      // MA-R001 1.2.0: the same Other Anomalies as Meter Discovery.
+      otherAnomalies: Array.isArray(capturedAst?.anomalies?.otherAnomalies)
+        ? capturedAst.anomalies.otherAnomalies.map((a) => String(a))
+        : [],
     },
 
     location: {
@@ -1422,25 +1445,26 @@ function sanitizeInspectionCapturedAst(
 
     meterReading: String(capturedAst?.meterReading || "").trim(),
 
-    normalisation: {
-      actionTaken: normalizeUpper(
-        capturedAst?.normalisation?.actionTaken ||
-          capturedAst?.normalisation?.actionSelect?.code ||
-          "NONE",
-      ),
-      actionText:
-        selectValueToText(capturedAst?.normalisation?.actionSelect) ||
-        String(capturedAst?.normalisation?.actionText || "None").trim(),
-      childTrnId: String(
-        capturedAst?.normalisation?.childTrnId || "NAv",
-      ).trim(),
-      childTrnType: normalizeUpper(
-        capturedAst?.normalisation?.childTrnType || "NAv",
-      ),
-      childTrnStatus: normalizeUpper(
-        capturedAst?.normalisation?.childTrnStatus || "NOT_REQUIRED",
-      ),
-    },
+    normalisation: isElectricityMeter
+      ? sanitizeElectricityNormalisation(capturedAst?.normalisation)
+      : {
+          // Water keeps what it has until it gets its own rules (MN-R001 s10),
+          // but the shape is the same as electricity's: a list of actions, so
+          // every reader can treat them alike.
+          actionTaken: (Array.isArray(capturedAst?.normalisation?.actionTaken)
+            ? capturedAst.normalisation.actionTaken
+            : [
+                capturedAst?.normalisation?.actionTaken ||
+                  capturedAst?.normalisation?.actionSelect?.code ||
+                  "NONE",
+              ]
+          )
+            .map((action) => normalizeUpper(action))
+            .filter(Boolean),
+          actionText:
+            selectValueToText(capturedAst?.normalisation?.actionSelect) ||
+            String(capturedAst?.normalisation?.actionText || "None").trim(),
+        },
   };
 
   if (isElectricityMeter) {
@@ -1623,7 +1647,14 @@ export function validateMeterInspection({ data, astDoc }) {
     };
   }
 
-  if (!instructionText) {
+  // MN-R001 section 9: office work carries the instruction it was issued with.
+  // A field worker who walks up to a meter and inspects it on the spot has no
+  // instruction to carry, and must not be stopped for want of one.
+  const isOfficeInspection =
+    !!String(data?.instructionTrnId || "").trim() ||
+    normalizeUpper(data?.origin?.channel || "") === "OFFICE";
+
+  if (isOfficeInspection && !instructionText) {
     return {
       ok: false,
       code: "INSPECTION_INSTRUCTION_REQUIRED",
@@ -1726,20 +1757,53 @@ export function validateMeterInspection({ data, astDoc }) {
       };
     }
 
-    if (!String(capturedMeter?.cb?.size || "").trim()) {
-      return {
-        ok: false,
-        code: "INSPECTION_CB_SIZE_REQUIRED",
-        message: "CB size is required",
-      };
+    // UI-R003: a value (NAv included, as SAME copies it), or why there is none
+    // (the Meter Discovery reasons). The phone sends Other as the typed words,
+    // so a bare "Other" is refused. As on Discovery, a keypad is asked for on
+    // prepaid meters only.
+    const isPrepaidCapture = ["prepaid", "prepayment", "token"].includes(
+      String(capturedMeter?.type || "").trim().toLowerCase().replace(/[\s_-]/g, ""),
+    );
+    const requiredParts = [
+      ["cb", "size", "INSPECTION_CB_SIZE_REQUIRED", "CB size"],
+      ...(isPrepaidCapture
+        ? [["keypad", "serialNo", "INSPECTION_SERIAL_NUMBER_REQUIRED", "Keypad serial number"]]
+        : []),
+    ];
+
+    for (const [part, valueKey, code, label] of requiredParts) {
+      const hasValue = !!String(capturedMeter?.[part]?.[valueKey] || "").trim();
+      const reason = String(capturedMeter?.[part]?.comment || "").trim();
+
+      if (!hasValue && (!reason || reason === "Other")) {
+        return {
+          ok: false,
+          code,
+          message: `${label} is required, or say why there is none`,
+        };
+      }
     }
 
-    if (!String(capturedMeter?.keypad?.serialNo || "").trim()) {
-      return {
-        ok: false,
-        code: "INSPECTION_SERIAL_NUMBER_REQUIRED",
-        message: "Serial number is required",
-      };
+    // Owner, 23 Sep 2026: what is there is photographed. A missing circuit
+    // breaker, seal or keypad has nothing to photograph, and NAv is nothing.
+    for (const [part, valueKey, label, tag] of [
+      ["cb", "size", "CB size", "astCbPhoto"],
+      ["seal", "sealNo", "seal number", "sealPhoto"],
+      ["keypad", "serialNo", "keypad serial number", "keypadPhoto"],
+    ]) {
+      const value = String(capturedMeter?.[part]?.[valueKey] || "").trim();
+
+      if (
+        value &&
+        value !== "NAv" &&
+        !hasMediaTag(data?.media, tag, { requireUrl: true })
+      ) {
+        return {
+          ok: false,
+          code: "MISSING_INSPECTION_PART_PHOTO",
+          message: `A photo of the ${label} is required`,
+        };
+      }
     }
 
     if (!String(capturedLocation?.placement || "").trim()) {
@@ -1791,7 +1855,33 @@ export function validateMeterInspection({ data, astDoc }) {
     };
   }
 
-  if (!getInspectionNormalisationAction(data)) {
+  if (isElectricityMeter) {
+    // MN-R001: the anomaly decides what must follow, on this form exactly as on
+    // Meter Discovery.
+    const normalisationError = validateNormalisation({
+      anomaly: capturedAnomalies?.anomaly,
+      normalisation: capturedAst?.normalisation,
+    });
+
+    if (normalisationError) {
+      return {
+        ok: false,
+        code: normalisationError.code,
+        message: normalisationError.message,
+      };
+    }
+
+    const otherAnomaliesError = validateOtherAnomalies(
+      capturedAst?.anomalies?.otherAnomalies ?? [],
+    );
+    if (otherAnomaliesError) {
+      return {
+        ok: false,
+        code: otherAnomaliesError.code,
+        message: otherAnomaliesError.message,
+      };
+    }
+  } else if (!getInspectionNormalisationAction(data)) {
     return {
       ok: false,
       code: "INSPECTION_NORMALISATION_REQUIRED",
@@ -1813,8 +1903,17 @@ export function validateMeterInspection({ data, astDoc }) {
 
   const anomalyCode = getInspectionAnomalyCode(data);
 
+  // MA-R001: the same photo rule as Meter Discovery — every detail except
+  // Operationally Ok needs an anomaly photo, a Meter Ok suspicion included.
+  const anomalyNeedsPhoto = isElectricityMeter
+    ? anomalyPhotoRequired(
+        capturedAnomalies?.anomaly,
+        capturedAnomalies?.anomalyDetail,
+      )
+    : !["METER_OK", "METER OK", "OK"].includes(anomalyCode);
+
   if (
-    !["METER_OK", "METER OK", "OK"].includes(anomalyCode) &&
+    anomalyNeedsPhoto &&
     !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.anomalyPhoto, {
       requireUrl: true,
     })
@@ -1822,14 +1921,17 @@ export function validateMeterInspection({ data, astDoc }) {
     return {
       ok: false,
       code: "MISSING_INSPECTION_ANOMALY_PHOTO",
-      message: "Anomaly photo is required when anomaly is not Meter Ok",
+      message: "Anomaly photo is required for this anomaly",
     };
   }
 
   const normalisationAction = getInspectionNormalisationAction(data);
+  const wantsNormalisationPhoto = isElectricityMeter
+    ? normalisationPhotoRequired(capturedAst?.normalisation?.actionTaken)
+    : normalisationAction !== "NONE";
 
   if (
-    normalisationAction !== "NONE" &&
+    wantsNormalisationPhoto &&
     !hasMediaTag(data?.media, INSPECTION_MEDIA_TAGS.normalisationPhoto, {
       requireUrl: true,
     })
@@ -1837,7 +1939,7 @@ export function validateMeterInspection({ data, astDoc }) {
     return {
       ok: false,
       code: "MISSING_INSPECTION_NORMALISATION_PHOTO",
-      message: "Normalisation photo is required when normalisation is not None",
+      message: "Photo proof of the normalisation is required.",
     };
   }
 
@@ -1895,6 +1997,66 @@ export function validateMeterInspection({ data, astDoc }) {
 
   const astPatch = {};
 
+  // MN-R001 8.2: an inspection is how the meter record is corrected. What the
+  // worker confirmed on the form — the finding and the meter's own details —
+  // becomes the record. The meter number and the GPS are not touched here: a
+  // wrong meter number is a supervisor's correction, and the position belongs
+  // to the discovery.
+  const clean = (value) => String(value ?? "").trim();
+  const setIfGiven = (path, value) => {
+    const text = clean(value);
+    if (text) astPatch[path] = text;
+  };
+
+  // MN-R001 8.3: the worker records what they FOUND; where a fix on the spot
+  // ended the problem, the record shows what they LEFT. The transaction keeps
+  // the finding as found, so the reports still count it.
+  const findingAfterVisit = applyFixesToFinding({
+    anomaly: capturedAnomalies?.anomaly,
+    anomalyDetail: capturedAnomalies?.anomalyDetail,
+    otherAnomalies: capturedAnomalies?.otherAnomalies,
+    actionTaken: capturedAst?.normalisation?.actionTaken,
+  });
+
+  setIfGiven("ast.anomalies.anomaly", findingAfterVisit.anomaly);
+  setIfGiven("ast.anomalies.anomalyDetail", findingAfterVisit.anomalyDetail);
+  if (Array.isArray(capturedAnomalies?.otherAnomalies)) {
+    astPatch["ast.anomalies.otherAnomalies"] = findingAfterVisit.otherAnomalies;
+  }
+
+  setIfGiven("ast.astData.astManufacturer", capturedAstData?.astManufacturer);
+  setIfGiven("ast.astData.astName", capturedAstData?.astName);
+  setIfGiven("ast.astData.meter.type", capturedMeter?.type);
+  setIfGiven("ast.astData.meter.category", capturedMeter?.category);
+  setIfGiven("ast.astData.meter.phase", capturedMeter?.phase);
+  setIfGiven("ast.location.placement", capturedLocation?.placement);
+  setIfGiven("ast.ogs.hasOffGridSupply", capturedOgs?.hasOffGridSupply);
+
+  // A value and the reason there is none travel together, so a seal that has
+  // gone clears the old number instead of leaving it behind.
+  for (const [part, valueKey] of [
+    ["cb", "size"],
+    ["seal", "sealNo"],
+    ["keypad", "serialNo"],
+  ]) {
+    const value = clean(capturedMeter?.[part]?.[valueKey]);
+    const comment = clean(capturedMeter?.[part]?.comment);
+    if (value || comment) {
+      astPatch[`ast.astData.meter.${part}`] = {
+        [valueKey]: value,
+        comment,
+      };
+    }
+  }
+
+  // MN-R001 10: water keeps its own normalisation, so only electricity's is
+  // written back.
+  if (isElectricityMeter) {
+    astPatch["ast.normalisation"] = sanitizeElectricityNormalisation(
+      capturedAst?.normalisation,
+    );
+  }
+
   if (isConventionalMeter && reading) {
     astPatch.mreadings = buildLatestMreadingsCache({
       astDoc,
@@ -1904,6 +2066,26 @@ export function validateMeterInspection({ data, astDoc }) {
       source: "INSPECTION",
     });
   }
+
+  // MN-R001 section 8: an inspection records the status it found, and the meter
+  // takes it. Only Connected and Disconnected: Field, Removed and Decommissioned
+  // belong to their own transactions. This is how a meter that was disconnected
+  // and has been illegally reconnected can be disconnected again.
+  const foundState = normalizeUpper(data?.status?.state || "");
+  const foundStateIsUsable =
+    foundState === "CONNECTED" || foundState === "DISCONNECTED";
+
+  if (foundState && !foundStateIsUsable) {
+    return {
+      ok: false,
+      code: "INSPECTION_STATUS_NOT_ALLOWED",
+      message:
+        "An inspection records the meter as Connected or Disconnected only",
+    };
+  }
+
+  const nextAstState = foundStateIsUsable ? foundState : currentState;
+  const astStatusChanged = nextAstState !== currentState;
 
   return {
     ok: true,
@@ -1915,9 +2097,9 @@ export function validateMeterInspection({ data, astDoc }) {
       outcome: "SUCCESS",
       success: true,
     },
-    nextAstState: currentState,
+    nextAstState,
     astPatch,
-    astStatusChanged: false,
+    astStatusChanged,
     astDataChanged: Object.keys(astPatch).length > 0,
   };
 }
@@ -1939,11 +2121,6 @@ export function validateMeterRemoval({ data, astDoc }) {
   const meterRemoved = normalizeYesNo(removal?.meterRemoved?.answer);
   const meterRemovedNotes = String(removal?.meterRemoved?.notes || "").trim();
 
-  const safetyConfirmed = normalizeYesNo(removal?.safetyConfirmed?.answer);
-  const safetyConfirmedNotes = String(
-    removal?.safetyConfirmed?.notes || "",
-  ).trim();
-
   const meterReading = getRemovalMeterReading(data);
   const tokenReading = getRemovalTokenReading(data);
   const noReadingReason = getRemovalNoReadingReason(data);
@@ -1964,10 +2141,8 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (
-    !instructionText &&
-    normalizeUpper(data?.origin?.channel) !== "FIELD"
-  ) {
+  // MN-R001 6.1: every removal says why, the field channel included.
+  if (!instructionText) {
     return {
       ok: false,
       code: "REMOVAL_INSTRUCTION_REQUIRED",
@@ -2029,35 +2204,11 @@ export function validateMeterRemoval({ data, astDoc }) {
     };
   }
 
-  if (!safetyConfirmed) {
-    return {
-      ok: false,
-      code: "INVALID_REMOVAL_SAFETY_ANSWER",
-      message: "Safety confirmed answer must be yes or no",
-    };
-  }
-
-  if (safetyConfirmed !== "yes") {
-    return {
-      ok: false,
-      code: "REMOVAL_SAFETY_NOT_CONFIRMED",
-      message: "Safety must be confirmed before submit",
-    };
-  }
-
   if (meterRemoved === "no" && !meterRemovedNotes) {
     return {
       ok: false,
       code: "REMOVAL_NOTES_REQUIRED",
       message: "Notes are required when meter removed is no",
-    };
-  }
-
-  if (safetyConfirmed === "no" && !safetyConfirmedNotes) {
-    return {
-      ok: false,
-      code: "REMOVAL_SAFETY_NOTES_REQUIRED",
-      message: "Notes are required when safety confirmed is no",
     };
   }
 
@@ -2081,7 +2232,7 @@ export function validateMeterRemoval({ data, astDoc }) {
     return {
       ok: false,
       code: "TOKEN_READING_OR_REASON_REQUIRED",
-      message: "Token reading or no-reading reason is required",
+      message: "Remaining credit, or why it could not be captured, is required",
     };
   }
 
@@ -2131,7 +2282,7 @@ export function validateMeterRemoval({ data, astDoc }) {
     return {
       ok: false,
       code: "MISSING_TOKEN_READING_EVIDENCE",
-      message: "Token reading photo is required",
+      message: "Remaining credit photo is required",
     };
   }
 
@@ -2144,18 +2295,6 @@ export function validateMeterRemoval({ data, astDoc }) {
       ok: false,
       code: "MISSING_REMOVAL_EVIDENCE",
       message: "Removal evidence media is required",
-    };
-  }
-
-  if (
-    !hasMediaTag(data?.media, REMOVAL_MEDIA_TAGS.safetyEvidence, {
-      requireUrl: true,
-    })
-  ) {
-    return {
-      ok: false,
-      code: "MISSING_REMOVAL_SAFETY_EVIDENCE",
-      message: "Safety evidence media is required",
     };
   }
 
@@ -2221,6 +2360,8 @@ export function buildLifecycleTrnPayload({
     channel: data?.instructionTrnId ? "OFFICE" : "FIELD",
     source: data?.instructionTrnId ? "WMS" : "FIELD_EXECUTION",
     parentInspectionTrnId: null,
+    parentTrnId: null,
+    parentTrnType: null,
   });
 
   return removeUndefinedDeep({
@@ -2609,7 +2750,19 @@ export function validateMeterDisconnection({ data, astDoc }) {
   const levelConfig = DISCONNECTION_LEVELS[level.code];
 
 
-  if (currentState !== "CONNECTED") {
+  // MN-R001 1.3.0, the bypass: an illegal connection can be found while the
+  // meter itself is off, so a disconnection that follows a finding may be done
+  // on a meter recorded as Disconnected.
+  const followsFinding =
+    Boolean(String(data?.origin?.parentTrnId || "").trim()) &&
+    ["METER_INSPECTION", "METER_DISCOVERY"].includes(
+      normalizeUpper(data?.origin?.parentTrnType || ""),
+    );
+  const stateAllowsDisconnection =
+    currentState === "CONNECTED" ||
+    (followsFinding && currentState === "DISCONNECTED");
+
+  if (!stateAllowsDisconnection) {
     return {
       ok: false,
       code: "INVALID_AST_STATE",
@@ -2625,10 +2778,8 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  if (
-    !instructionText &&
-    normalizeUpper(data?.origin?.channel) !== "FIELD"
-  ) {
+  // MN-R001 1.3.0: every disconnection says why, the field channel included.
+  if (!instructionText) {
     return {
       ok: false,
       code: "DISCONNECTION_INSTRUCTION_REQUIRED",
@@ -3029,11 +3180,25 @@ export function sanitizeOrigin(origin = {}, fallback = {}) {
 
   const allowedChannels = ["OFFICE", "FIELD", "API", "AMI", "INTEGRATION"];
 
+  // MN-R001 section 7: where this work came from. A disconnection that follows a
+  // finding carries the transaction that called for it; one started on its own
+  // carries nothing, and that is the difference the office needs to see.
+  const parentTrnId = String(
+    origin?.parentTrnId || fallback?.parentTrnId || "",
+  ).trim();
+  const parentTrnType = normalizeUpper(
+    origin?.parentTrnType || fallback?.parentTrnType || "",
+  );
+  const allowedParents = ["METER_DISCOVERY", "METER_INSPECTION"];
+
   return {
     channel: allowedChannels.includes(channel) ? channel : "OFFICE",
     source: source || "TRN_ORIGIN",
     parentInspectionTrnId:
       origin?.parentInspectionTrnId || fallback?.parentInspectionTrnId || null,
+    parentTrnId: parentTrnId && allowedParents.includes(parentTrnType) ? parentTrnId : null,
+    parentTrnType:
+      parentTrnId && allowedParents.includes(parentTrnType) ? parentTrnType : null,
   };
 }
 
@@ -3186,5 +3351,213 @@ export function buildLifecycleInstructionTrnPayload({
       actorUid,
       actorName,
     }),
+  });
+}
+
+// MN-R001 section 7: close the loop. The discovery or inspection that called for
+// the work records the number of each piece once it is submitted — the
+// disconnection, or the removal and then the installation. No status word.
+//
+// A link is written only when it is true: the parent really is that finding, on
+// the same meter, it asked for this work, and the slot is still empty. A phone
+// cannot attach work to a finding it does not belong to.
+const FOLLOW_UP_SLOTS = Object.freeze({
+  METER_DISCONNECTION: "disconnectionTrnId",
+  METER_REMOVAL: "removalTrnId",
+  METER_INSTALLATION: "installationTrnId",
+});
+
+const FOLLOW_UP_REQUIRED_BY_WORK = Object.freeze({
+  METER_DISCONNECTION: "METER_DISCONNECTION",
+  METER_REMOVAL: "METER_REPLACEMENT",
+  METER_INSTALLATION: "METER_REPLACEMENT",
+});
+
+function readTrnType(trn = {}) {
+  return normalizeUpper(trn?.accessData?.trnType || trn?.trnType || "");
+}
+
+function followUpOf(trn = {}, parentType = "") {
+  if (parentType === "METER_INSPECTION") {
+    return {
+      field: "inspection.captured.ast.normalisation.followUp",
+      followUp: trn?.inspection?.captured?.ast?.normalisation?.followUp || null,
+    };
+  }
+  if (parentType === "METER_DISCOVERY") {
+    return {
+      field: "ast.normalisation.followUp",
+      followUp: trn?.ast?.normalisation?.followUp || null,
+    };
+  }
+  return { field: "", followUp: null };
+}
+
+// The meter a finding is about. A discovery's meter record carries the
+// discovery's own number; an inspection names the meter it inspected.
+function findingMeterId(trn = {}, parentId = "", parentType = "") {
+  if (parentType === "METER_DISCOVERY") return parentId;
+  return String(
+    trn?.sourceAstId || trn?.ast?.astData?.astId || trn?.astId || "",
+  ).trim();
+}
+
+export async function linkFollowUp({
+  db,
+  parentTrnId,
+  parentTrnType,
+  workTrnType,
+  trnId,
+  astId,
+}) {
+  const parentId = String(parentTrnId || "").trim();
+  const parentType = normalizeUpper(parentTrnType || "");
+  const workType = normalizeUpper(workTrnType || "");
+  const slot = FOLLOW_UP_SLOTS[workType];
+
+  if (!parentId || !trnId) return { linked: false, reason: "NO_PARENT" };
+  if (!slot) return { linked: false, reason: "UNKNOWN_WORK_TYPE" };
+  if (!["METER_DISCOVERY", "METER_INSPECTION"].includes(parentType)) {
+    return { linked: false, reason: "UNKNOWN_PARENT_TYPE" };
+  }
+
+  const parentRef = db.collection("trns").doc(parentId);
+  const parentSnap = await parentRef.get();
+
+  // A parent that is not there is never invented.
+  if (!parentSnap.exists) return { linked: false, reason: "PARENT_NOT_FOUND" };
+
+  const parent = parentSnap.data() || {};
+
+  if (readTrnType(parent) !== parentType) {
+    return { linked: false, reason: "PARENT_TYPE_MISMATCH" };
+  }
+
+  const meterOfFinding = findingMeterId(parent, parentId, parentType);
+  if (astId && meterOfFinding && String(astId).trim() !== meterOfFinding) {
+    return { linked: false, reason: "DIFFERENT_METER" };
+  }
+
+  const { field, followUp } = followUpOf(parent, parentType);
+  if (!field || !followUp) return { linked: false, reason: "NO_FOLLOW_UP_ASKED" };
+
+  if (followUp.required !== FOLLOW_UP_REQUIRED_BY_WORK[workType]) {
+    return { linked: false, reason: "WORK_NOT_ASKED_FOR" };
+  }
+
+  if (String(followUp[slot] || "").trim()) {
+    return { linked: false, reason: "ALREADY_LINKED" };
+  }
+
+  await parentRef.update({ [`${field}.${slot}`]: trnId });
+
+  return { linked: true, parentTrnId: parentId, slot, trnId };
+}
+
+// Kept for the disconnection callers and tests written before 1.1.0.
+export async function markParentFollowUpCompleted({
+  db,
+  parentTrnId,
+  parentTrnType,
+  trnId,
+  astId,
+}) {
+  return linkFollowUp({
+    db,
+    parentTrnId,
+    parentTrnType,
+    workTrnType: "METER_DISCONNECTION",
+    trnId,
+    astId,
+  });
+}
+
+function removalWasDone(removal = {}) {
+  const outcome = normalizeUpper(removal?.executionOutcome?.outcome || "");
+  const hasAccess = String(removal?.accessData?.access?.hasAccess || "yes")
+    .trim()
+    .toLowerCase();
+  return outcome !== "NO_ACCESS" && hasAccess !== "no";
+}
+
+// MN-R001 section 6.1: the installation that completes a replacement. The phone
+// only says which removal it follows. The server reads that removal and takes
+// everything else from it — the meter it replaces, the premise — and refuses to
+// treat the installation as a replacement when the removal does not bear it out.
+export async function resolveReplacementOrigin({ db, origin = {}, premiseId }) {
+  if (normalizeUpper(origin?.parentTrnType || "") !== "METER_REMOVAL") {
+    return { origin: null, reason: "NOT_A_REPLACEMENT" };
+  }
+
+  const removalTrnId = String(origin?.parentTrnId || "").trim();
+  if (!removalTrnId) return { origin: null, reason: "NO_REMOVAL" };
+
+  const removalSnap = await db.collection("trns").doc(removalTrnId).get();
+  if (!removalSnap.exists) return { origin: null, reason: "REMOVAL_NOT_FOUND" };
+
+  const removal = removalSnap.data() || {};
+
+  if (readTrnType(removal) !== "METER_REMOVAL") {
+    return { origin: null, reason: "NOT_A_REMOVAL" };
+  }
+  if (!removalWasDone(removal)) {
+    return { origin: null, reason: "REMOVAL_NOT_DONE" };
+  }
+  if (String(removal?.replacement?.installationTrnId || "").trim()) {
+    return { origin: null, reason: "REPLACEMENT_ALREADY_INSTALLED" };
+  }
+
+  const removalPremiseId = String(
+    removal?.accessData?.premise?.id || removal?.premiseId || "",
+  ).trim();
+  if (premiseId && removalPremiseId && removalPremiseId !== String(premiseId).trim()) {
+    return { origin: null, reason: "DIFFERENT_PREMISE" };
+  }
+
+  return {
+    origin: {
+      channel: "FIELD",
+      source: "METER_REMOVAL",
+      parentTrnId: removalTrnId,
+      parentTrnType: "METER_REMOVAL",
+      replacesAstId:
+        String(removal?.sourceAstId || removal?.ast?.astData?.astId || "").trim() ||
+        null,
+      replacesMeterNo: String(removal?.ast?.astData?.astNo || "").trim() || null,
+    },
+    reason: "",
+  };
+}
+
+// The removal notes which installation completed it; the finding that called
+// for the replacement gets the installation number.
+export async function linkReplacementInstallation({
+  db,
+  removalTrnId,
+  installationTrnId,
+}) {
+  const removalRef = db.collection("trns").doc(String(removalTrnId || "").trim());
+  const removalSnap = await removalRef.get();
+
+  if (!removalSnap.exists) return { linked: false, reason: "REMOVAL_NOT_FOUND" };
+
+  const removal = removalSnap.data() || {};
+
+  if (readTrnType(removal) !== "METER_REMOVAL") {
+    return { linked: false, reason: "NOT_A_REMOVAL" };
+  }
+  if (String(removal?.replacement?.installationTrnId || "").trim()) {
+    return { linked: false, reason: "ALREADY_LINKED" };
+  }
+
+  await removalRef.update({ "replacement.installationTrnId": installationTrnId });
+
+  return linkFollowUp({
+    db,
+    parentTrnId: removal?.origin?.parentTrnId,
+    parentTrnType: removal?.origin?.parentTrnType,
+    workTrnType: "METER_INSTALLATION",
+    trnId: installationTrnId,
+    astId: String(removal?.sourceAstId || removal?.ast?.astData?.astId || "").trim(),
   });
 }

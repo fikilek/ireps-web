@@ -312,6 +312,31 @@ class FakeDocumentReference {
   }
 }
 
+// A collection query, enough for the reads the batch-work guard makes (TB-R059): equality filters on a
+// collection, read through the same transaction as the documents.
+class FakeQuery {
+  constructor(store, collectionName, filters = []) {
+    this.store = store;
+    this.collectionName = collectionName;
+    this.filters = filters;
+  }
+
+  where(field, op, value) {
+    return new FakeQuery(this.store, this.collectionName, [
+      ...this.filters,
+      [field, value],
+    ]);
+  }
+
+  limit() {
+    return this;
+  }
+
+  async get() {
+    return this.store.runQuery(this);
+  }
+}
+
 class FakeDocumentSnapshot {
   constructor(ref, value) {
     this.ref = ref;
@@ -359,6 +384,8 @@ class FakeFirestore {
     return {
       doc: (id) =>
         new FakeDocumentReference(this, collectionName, id),
+      where: (field, op, value) =>
+        new FakeQuery(this, collectionName, [[field, value]]),
     };
   }
 
@@ -366,15 +393,44 @@ class FakeFirestore {
     return cloneValue(this.documents.get(path));
   }
 
+  runQuery(query) {
+    const at = (value, path) =>
+      path
+        .split(".")
+        .reduce(
+          (cursor, key) =>
+            cursor === undefined || cursor === null ? undefined : cursor[key],
+          value,
+        );
+    const docs = [...this.documents.entries()]
+      .filter(
+        ([path]) =>
+          path.startsWith(`${query.collectionName}/`) &&
+          path.split("/").length === 2,
+      )
+      .filter(([, value]) =>
+        query.filters.every(([field, wanted]) => at(value, field) === wanted),
+      )
+      .map(([path, value]) => ({
+        id: path.split("/").at(-1),
+        ref: new FakeDocumentReference(this, query.collectionName, path.split("/").at(-1)),
+        data: () => cloneValue(value),
+      }));
+
+    return { docs, empty: docs.length === 0 };
+  }
+
   async runTransaction(callback) {
     const writes = [];
 
     const transaction = {
       get: async (ref) =>
-        new FakeDocumentSnapshot(
-          ref,
-          cloneValue(this.documents.get(ref.path)),
-        ),
+        ref instanceof FakeQuery
+          ? this.runQuery(ref)
+          : new FakeDocumentSnapshot(
+            ref,
+            cloneValue(this.documents.get(ref.path)),
+          ),
       create: (ref, value) => {
         writes.push({ type: "create", ref, value: cloneValue(value) });
       },
@@ -811,7 +867,7 @@ test("linked helper failure creates no premise or partial linkage", async () => 
 });
 
 // Rules section 14: the batch stays In Progress until every row is complete, then Completed.
-async function linkThenDiscover(totalRows) {
+async function linkThenDiscover(totalRows, capturedMeterNo = null) {
   const fixture = buildLinkedFixture();
   fixture.documents[`tb_uploads/${TB_ID}`].counts.totalRows = totalRows;
   const db = new FakeFirestore(fixture.documents);
@@ -823,14 +879,27 @@ async function linkThenDiscover(totalRows) {
     id: "TRN_MDIS_TEST_1",
     targetedBatchContext: { ...premise.targetedBatchContext, premiseId: fixture.premiseId },
     accessData: { premise: { id: fixture.premiseId } },
-    ast: { astData: { astNo: fixture.salesDocId } },
+    ast: { astData: { astNo: capturedMeterNo || fixture.salesDocId } },
     metadata: { createdByUid: "USER_1", createdByUser: "Field Worker" },
   };
   const result = await db.runTransaction((transaction) => completeTargetedBatchMeterDiscoveryInTransaction({
-    transaction, db, trnData, astId: "TRN_MDIS_TEST_1", normalizedMeterNo: fixture.salesDocId,
+    transaction, db, trnData, astId: "TRN_MDIS_TEST_1", normalizedMeterNo: capturedMeterNo || fixture.salesDocId,
   }));
   return { db, result };
 }
+
+// Targeted Batch rules TB-R064 (1.3.67): a worker who captures a different number through the batch's own
+// form records what was found on the row, so TB Register never shows the row's own meter as matched.
+test("the batch form records the number found when it is not the row's own meter", async () => {
+  const same = await linkThenDiscover(2);
+  assert.equal(same.result.meterMatch, true);
+  assert.equal(same.db.read(`tb_rows/${ROW_ID}`).execution.foundMeterNo, null);
+
+  const different = await linkThenDiscover(2, "04298085599");
+  assert.equal(different.result.meterMatch, false);
+  assert.equal(different.db.read(`tb_rows/${ROW_ID}`).execution.foundMeterNo, "04298085599");
+  assert.equal(different.db.read(`tb_rows/${ROW_ID}`).execution.status, "COMPLETED");
+});
 
 test("meter discovery completes the batch only when every row is complete", async () => {
   const single = await linkThenDiscover(1);
@@ -846,9 +915,29 @@ test("meter discovery completes the batch only when every row is complete", asyn
 
 // Targeted Batch rules TB-R048 field-work guard (1.3.33): only an FWR or SPV of the allocated TEAM or SP
 // may start a row, so a premise captured before an unallocation cannot start a row after reallocation.
+// Work on a batched meter belongs to the batch's team (TB-R059), so an outsider is turned away by that
+// rule first, in the sentence naming the batch, its geofence, the team and the date.
 test("a worker outside the allocated TEAM cannot start a row, and nothing is written", async () => {
   const fixture = buildLinkedFixture();
   fixture.documents["users/OUTSIDER"] = { profile: { displayName: "Outsider", employment: { role: "FWR" } } };
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({ db, premiseRef, premisePayload: buildPremisePayload(fixture), actorUid: "OUTSIDER", actorName: "Outsider" }),
+    { code: "METER_IN_ANOTHER_TEAMS_BATCH" },
+  );
+  assert.equal(db.transactionWrites.length, 0);
+  assert.equal(db.read(`tb_rows/${ROW_ID}`).execution.status, "NOT_STARTED");
+});
+
+// TB-R059 lets the worker through on their open team membership (TM-R001); the TB-R048 field-work guard
+// still has the last word, because the allocated TEAM does not list them.
+test("the field-work guard still refuses a worker the allocated TEAM does not list", async () => {
+  const fixture = buildLinkedFixture();
+  fixture.documents["users/OUTSIDER"] = { profile: { displayName: "Outsider", employment: { role: "FWR" } } };
+  fixture.documents["team_member_history/TEAM_1__OUTSIDER__1"] = {
+    id: "TEAM_1__OUTSIDER__1", teamId: "TEAM_1", userUid: "OUTSIDER", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null,
+  };
   const db = new FakeFirestore(fixture.documents);
   const premiseRef = db.collection("premises").doc(fixture.premiseId);
   await assert.rejects(
@@ -874,4 +963,203 @@ test("a manager is not a field worker and cannot start a row either", async () =
 test("the premise callable passes the caller's token to the guard", async () => {
   const indexSource = await readFile(new URL("../index.js", import.meta.url), "utf8");
   assert.match(indexSource, /actorUid: caller\.uid,\s*actorName,\s*authToken: caller\.token \|\| \{\},/);
+});
+
+// TB-R067 (1.3.73): at ERF 689 thirteen businesses share one address. The worker presses Premise on a row,
+// picks the shop that was already captured there, types its real business name, and submits. The premise
+// must be joined to that row AND must keep what was typed - and nothing captured on another screen may move.
+test("a premise that was already there is joined and keeps what the worker typed", async () => {
+  const fixture = buildLinkedFixture();
+
+  fixture.documents[`premises/${fixture.premiseId}`] = {
+    id: fixture.premiseId,
+    erfId: fixture.erfId,
+    erfNo: "1018",
+    address: { strNo: "26", strName: "Old Acre", strType: "Street" },
+    propertyType: { type: "Commercial", name: "Shop", unitNo: "2" },
+    occupancy: { status: "Occupied" },
+    parents: { lmPcode: "ZA5241", wardPcode: "ZA524100005" },
+    // Captured on other screens. TB-R067 never touches these.
+    accountData: { account: { accountNo: "0002139405" } },
+    services: { electricityMeters: [{ id: "AST_1" }] },
+    noAccessTrnIds: ["TRN_NA_1"],
+    metadata: { createdByUid: "USER_0" },
+  };
+
+  const db = new FakeFirestore(fixture.documents);
+  const premiseRef = db.collection("premises").doc(fixture.premiseId);
+
+  const result = await createOrLinkTargetedBatchPremise({
+    db,
+    premiseRef,
+    premisePayload: {
+      id: fixture.premiseId,
+      erfId: fixture.erfId,
+      erfNo: "1018",
+      address: { strNo: "26", strName: "Old Acre", strType: "Street" },
+      propertyType: { type: "Commercial", name: "TFS Wholesalers", unitNo: "7" },
+      occupancy: { status: "Occupied" },
+      media: [{ tag: "premisePhoto", url: "https://example/premise.jpg" }],
+      parents: { lmPcode: "ZA5241", wardPcode: "ZA524100005" },
+      metadata: {},
+      targetedBatchContext: {
+        sourceModule: "SALES_TARGETED_BATCH",
+        operationType: "METER_DISCOVERY",
+        tbId: TB_ID,
+        rowId: ROW_ID,
+        rowNo: 1,
+        salesDocId: fixture.salesDocId,
+        erfId: fixture.erfId,
+      },
+    },
+    actorUid: "USER_1",
+    actorName: "Field Worker",
+  });
+
+  assert.equal(result.linked, true);
+  assert.equal(result.premiseCreated, false, "the premise was already standing there");
+
+  const row = db.read(`tb_rows/${ROW_ID}`);
+  const premise = db.read(`premises/${fixture.premiseId}`);
+
+  assert.equal(row.refs.premiseId, fixture.premiseId, "the row is joined to it");
+  assert.equal(premise.targetedBatchContext.rowId, ROW_ID, "and it carries its row");
+
+  assert.equal(premise.propertyType.name, "TFS Wholesalers", "the business name the worker typed is saved");
+  assert.equal(premise.propertyType.unitNo, "7");
+  assert.equal(premise.media.length, 1, "the photo taken on the form is on the premise, not orphaned");
+
+  assert.equal(premise.accountData.account.accountNo, "0002139405", "account data is untouched");
+  assert.deepEqual(premise.services.electricityMeters, [{ id: "AST_1" }], "its meters are untouched");
+  assert.deepEqual(premise.noAccessTrnIds, ["TRN_NA_1"], "its No Access history is untouched");
+  assert.equal(premise.metadata.updatedByUid, "USER_1");
+});
+
+// TB-R067 (1.3.73) 6: a wrong join can be put right, but only while nothing hangs on the premise being left.
+test("a row can be moved to another premise, and the one it leaves goes back to Not joined", async () => {
+  const fixture = buildLinkedFixture();
+  const wrongPremiseId = "PRM_WRONG";
+  const rightPremiseId = fixture.premiseId;
+
+  fixture.documents[`premises/${wrongPremiseId}`] = {
+    id: wrongPremiseId,
+    erfId: fixture.erfId,
+    parents: { lmPcode: "ZA5241", wardPcode: "ZA524100005" },
+    propertyType: { type: "Commercial", name: "Kwik Fit", unitNo: "1" },
+    targetedBatchContext: {
+      sourceModule: "SALES_TARGETED_BATCH",
+      operationType: "METER_DISCOVERY",
+      tbId: TB_ID,
+      rowId: ROW_ID,
+      salesDocId: fixture.salesDocId,
+      erfId: fixture.erfId,
+    },
+    metadata: {},
+  };
+  fixture.documents[`tb_rows/${ROW_ID}`].refs = {
+    ...fixture.documents[`tb_rows/${ROW_ID}`].refs,
+    premiseId: wrongPremiseId,
+  };
+
+  const db = new FakeFirestore(fixture.documents);
+  const payload = {
+    id: rightPremiseId,
+    erfId: fixture.erfId,
+    erfNo: "1018",
+    address: { strNo: "26", strName: "Old Acre", strType: "Street" },
+    propertyType: { type: "Commercial", name: "TFS Wholesalers", unitNo: "2" },
+    parents: { lmPcode: "ZA5241", wardPcode: "ZA524100005" },
+    metadata: {},
+    targetedBatchContext: {
+      sourceModule: "SALES_TARGETED_BATCH",
+      operationType: "METER_DISCOVERY",
+      tbId: TB_ID,
+      rowId: ROW_ID,
+      rowNo: 1,
+      salesDocId: fixture.salesDocId,
+      erfId: fixture.erfId,
+    },
+  };
+
+  // Without naming the premise it is leaving, nothing moves.
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({
+      db,
+      premiseRef: db.collection("premises").doc(rightPremiseId),
+      premisePayload: payload,
+      actorUid: "USER_1",
+      actorName: "Field Worker",
+    }),
+    (error) => error.code === "TARGETED_BATCH_PREMISE_CONFLICT" || /another premise/.test(error.message),
+  );
+
+  const moved = await createOrLinkTargetedBatchPremise({
+    db,
+    premiseRef: db.collection("premises").doc(rightPremiseId),
+    premisePayload: payload,
+    actorUid: "USER_1",
+    actorName: "Field Worker",
+    replacesPremiseId: wrongPremiseId,
+  });
+
+  assert.equal(moved.linked, true);
+  assert.equal(db.read(`tb_rows/${ROW_ID}`).refs.premiseId, rightPremiseId, "the row moved");
+  assert.equal(
+    db.read(`premises/${wrongPremiseId}`).targetedBatchContext,
+    null,
+    "the premise it left is free for the row it really belongs to",
+  );
+  assert.equal(
+    db.read(`premises/${wrongPremiseId}`).propertyType.name,
+    "Kwik Fit",
+    "and nothing else about it changed",
+  );
+});
+
+test("a row whose premise already has a meter cannot be moved", async () => {
+  const fixture = buildLinkedFixture();
+  const wrongPremiseId = "PRM_WRONG";
+
+  fixture.documents[`premises/${wrongPremiseId}`] = {
+    id: wrongPremiseId,
+    erfId: fixture.erfId,
+    parents: { lmPcode: "ZA5241", wardPcode: "ZA524100005" },
+    propertyType: { type: "Commercial", name: "Kwik Fit", unitNo: "1" },
+    metadata: {},
+  };
+  fixture.documents[`tb_rows/${ROW_ID}`].refs = {
+    ...fixture.documents[`tb_rows/${ROW_ID}`].refs,
+    premiseId: wrongPremiseId,
+    meterId: "AST_1",
+  };
+
+  const db = new FakeFirestore(fixture.documents);
+
+  await assert.rejects(
+    createOrLinkTargetedBatchPremise({
+      db,
+      premiseRef: db.collection("premises").doc(fixture.premiseId),
+      premisePayload: {
+        id: fixture.premiseId,
+        erfId: fixture.erfId,
+        parents: { lmPcode: "ZA5241", wardPcode: "ZA524100005" },
+        propertyType: { type: "Commercial", name: "TFS Wholesalers", unitNo: "2" },
+        metadata: {},
+        targetedBatchContext: {
+          sourceModule: "SALES_TARGETED_BATCH",
+          operationType: "METER_DISCOVERY",
+          tbId: TB_ID,
+          rowId: ROW_ID,
+          salesDocId: fixture.salesDocId,
+          erfId: fixture.erfId,
+        },
+      },
+      actorUid: "USER_1",
+      actorName: "Field Worker",
+      replacesPremiseId: wrongPremiseId,
+    }),
+    (error) => error.code === "TARGETED_BATCH_PREMISE_HAS_METER",
+  );
+
+  assert.equal(db.read(`tb_rows/${ROW_ID}`).refs.premiseId, wrongPremiseId, "nothing moved");
 });

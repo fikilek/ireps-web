@@ -55,30 +55,212 @@ const OTHER_ANOMALY_VALUES = new Set([
   "Keypad Faulty",
 ]);
 
-const NORMALISATION_CANONICAL_ACTION_VALUES = Object.freeze([
-  "none",
-  "New Meter Installed",
-  "Meter Removed",
-  "Illegal connection - meter disconnected",
-  "Illegal connection - meter reconnected",
-  "Meter faulty - meter replaced",
-  "Meter damaged - meter replaced",
-  "Tamper Removed",
-  "Keypad Normalised",
-  "Service Point Completed / Cable Installed",
-  "Meter Registered",
+// MN-R001: one list for Meter Discovery and Meter Inspection. The phone keeps the
+// same rules in ireps-mobile/src/features/meters/formOptions.js; the two must
+// agree, or a capture that passes on the phone is refused on arrival.
+const NORMALISATION_NONE = "none";
+
+const NORMALISATION_ON_SITE_FIXES = Object.freeze([
+  "Tamper removed",
+  "Keypad normalised",
+  "Service point completed",
+  "Meter registered",
 ]);
 
-// Retained for compatibility with Mobile versions released before Normalisation v3.
-const NORMALISATION_LEGACY_ACTION_VALUES = Object.freeze([
-  "Meter Disconnected",
-  "Meter Reconnected",
+// The two jobs. Each opens its own chain of forms (MN-R001 section 6), so a
+// finding carries one of them, never both.
+const NORMALISATION_JOB_ACTIONS = Object.freeze([
+  "Disconnect meter",
+  "Replace meter",
 ]);
 
 const NORMALISATION_ACTION_VALUES = new Set([
-  ...NORMALISATION_CANONICAL_ACTION_VALUES,
-  ...NORMALISATION_LEGACY_ACTION_VALUES,
+  NORMALISATION_NONE,
+  ...NORMALISATION_JOB_ACTIONS,
+  ...NORMALISATION_ON_SITE_FIXES,
 ]);
+
+// The action that follows each finding. Not taking it needs a reason.
+const NORMALISATION_EXPECTED_BY_ANOMALY = Object.freeze({
+  "Illegally Connected": "Disconnect meter",
+  "Meter Damaged": "Replace meter",
+  "Meter Faulty": "Replace meter",
+});
+
+const NO_ACTION_REASONS = Object.freeze([
+  "Threatened or chased away",
+  "Customer refused",
+  "Unsafe to work on",
+  "Meter could not be reached",
+  "No meter available to replace",
+  "Office said to leave it",
+]);
+
+export function normalisationActionsTaken(actionTaken) {
+  const actions = Array.isArray(actionTaken) ? actionTaken : [];
+  return actions.filter((action) => String(action) !== NORMALISATION_NONE);
+}
+
+// A disconnection or a replacement proves itself in the forms that follow, so
+// the worker is not asked for the same photograph twice.
+export function normalisationPhotoRequired(actionTaken) {
+  return normalisationActionsTaken(actionTaken).some(
+    (action) => !NORMALISATION_JOB_ACTIONS.includes(action),
+  );
+}
+
+// What a finding calls for next, and where the numbers of that work are kept
+// (MN-R001 section 7). No status word: an empty number means not yet submitted.
+// MN-R001 8.3: a fix on the spot ends the problem it addresses, so the meter
+// record shows what the worker LEFT while the transaction keeps what they
+// FOUND. One fix, one thing it clears.
+const FIX_CLEARS_ANOMALY = Object.freeze({
+  "Tamper removed": "Illegally Connected",
+  "Meter registered": "Meter Not On Portal",
+});
+
+const FIX_CLEARS_OTHER_ANOMALY = Object.freeze({
+  "Keypad normalised": "Keypad Faulty",
+  "Service point completed": "Incomplete Service Points",
+  "Meter registered": "Meter Not Registered",
+});
+
+// What the meter record should show after the visit.
+export function applyFixesToFinding({
+  anomaly,
+  anomalyDetail,
+  otherAnomalies = [],
+  actionTaken = [],
+}) {
+  const actions = (Array.isArray(actionTaken) ? actionTaken : []).map((action) =>
+    String(action || "").trim(),
+  );
+  const found = String(anomaly || "").trim();
+
+  const mainCleared = actions.some(
+    (action) => FIX_CLEARS_ANOMALY[action] === found,
+  );
+
+  const clearedOthers = new Set(
+    actions.map((action) => FIX_CLEARS_OTHER_ANOMALY[action]).filter(Boolean),
+  );
+
+  return {
+    anomaly: mainCleared ? "Meter Ok" : found,
+    anomalyDetail: mainCleared
+      ? "Operationally Ok"
+      : String(anomalyDetail || "").trim(),
+    otherAnomalies: (Array.isArray(otherAnomalies) ? otherAnomalies : [])
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry && !clearedOthers.has(entry)),
+  };
+}
+
+export function buildNormalisationFollowUp(actionTaken) {
+  const actions = Array.isArray(actionTaken) ? actionTaken : [];
+  if (actions.includes("Disconnect meter")) {
+    return { required: "METER_DISCONNECTION", disconnectionTrnId: "" };
+  }
+  if (actions.includes("Replace meter")) {
+    return {
+      required: "METER_REPLACEMENT",
+      removalTrnId: "",
+      installationTrnId: "",
+    };
+  }
+  return null;
+}
+
+export function expectedNormalisationAction(anomaly) {
+  return NORMALISATION_EXPECTED_BY_ANOMALY[String(anomaly || "").trim()] || "";
+}
+
+// The whole rule, in one place, used by discovery and by inspection.
+export function validateNormalisation({ anomaly, normalisation }) {
+  const actions = Array.isArray(normalisation?.actionTaken)
+    ? normalisation.actionTaken.map(String)
+    : null;
+
+  if (!actions || actions.length === 0) {
+    return {
+      code: "NORMALISATION_ACTIONS_REQUIRED",
+      message: "Say what was done about this finding.",
+    };
+  }
+
+  if (actions.some((action) => !NORMALISATION_ACTION_VALUES.has(action))) {
+    return {
+      code: "INVALID_NORMALISATION_ACTION",
+      message: "This action is not on the list.",
+    };
+  }
+
+  if (new Set(actions).size !== actions.length) {
+    return {
+      code: "DUPLICATE_NORMALISATION_ACTION",
+      message: "The same action cannot be chosen twice.",
+    };
+  }
+
+  if (actions.includes(NORMALISATION_NONE) && actions.length !== 1) {
+    return {
+      code: "NORMALISATION_NONE_NOT_EXCLUSIVE",
+      message: "None cannot be used with another action.",
+    };
+  }
+
+  if (NORMALISATION_JOB_ACTIONS.every((job) => actions.includes(job))) {
+    return {
+      code: "NORMALISATION_ONE_JOB_ONLY",
+      message: "Choose one: disconnect or replace.",
+    };
+  }
+
+  const finding = String(anomaly || "").trim();
+  const expected = expectedNormalisationAction(finding);
+  const reason = String(normalisation?.noActionReason || "").trim();
+
+  // Meter Ok asks for nothing, and must not carry a reason for not acting.
+  if (!expected) {
+    if (reason) {
+      return {
+        code: "NORMALISATION_REASON_NOT_EXPECTED",
+        message: "A reason for not acting belongs to a finding that needs action.",
+      };
+    }
+    return null;
+  }
+
+  if (normalisationActionsTaken(actions).includes(expected)) {
+    if (reason) {
+      return {
+        code: "NORMALISATION_REASON_NOT_EXPECTED",
+        message: "The work was done, so there is no reason for not acting.",
+      };
+    }
+    return null;
+  }
+
+  if (!reason) {
+    return {
+      code: "NORMALISATION_REASON_REQUIRED",
+      message:
+        expected === "Disconnect meter"
+          ? "Say why the meter was not disconnected."
+          : "Say why the meter was not replaced.",
+    };
+  }
+
+  // Other is replaced by the words the worker typed before it is sent.
+  if (reason === "Other") {
+    return {
+      code: "NON_CANONICAL_NO_ACTION_REASON_OTHER",
+      message: "Type the reason.",
+    };
+  }
+
+  return null;
+}
 
 const SEAL_COMMENT_EVIDENCE = Object.freeze({
   "Seal Missing": false,
@@ -172,7 +354,7 @@ function validateGps(gps) {
   );
 }
 
-function validateOtherAnomalies(value) {
+export function validateOtherAnomalies(value) {
   if (value == null) return null;
 
   if (!Array.isArray(value)) {
@@ -574,42 +756,14 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
     );
   }
 
-  const normalisationActions = ast?.normalisation?.actionTaken;
-  if (!Array.isArray(normalisationActions) || normalisationActions.length === 0) {
+  const normalisationError = validateNormalisation({
+    anomaly: ast?.anomalies?.anomaly,
+    normalisation: ast?.normalisation,
+  });
+  if (normalisationError) {
     return buildFailureResult(
-      "NORMALISATION_ACTIONS_REQUIRED",
-      "ast.normalisation.actionTaken must be a non-empty array",
-    );
-  }
-
-  if (
-    normalisationActions.some(
-      (action) =>
-        typeof action !== "string" ||
-        !NORMALISATION_ACTION_VALUES.has(action),
-    )
-  ) {
-    return buildFailureResult(
-      "INVALID_NORMALISATION_ACTION",
-      "ast.normalisation.actionTaken contains an unsupported action",
-    );
-  }
-
-  const uniqueNormalisationActions = new Set(normalisationActions);
-  if (uniqueNormalisationActions.size !== normalisationActions.length) {
-    return buildFailureResult(
-      "DUPLICATE_NORMALISATION_ACTION",
-      "ast.normalisation.actionTaken cannot contain duplicates",
-    );
-  }
-
-  if (
-    normalisationActions.includes("none") &&
-    normalisationActions.length !== 1
-  ) {
-    return buildFailureResult(
-      "NORMALISATION_NONE_NOT_EXCLUSIVE",
-      "Normalisation action none cannot be combined with another action",
+      normalisationError.code,
+      normalisationError.message,
     );
   }
 
@@ -675,11 +829,8 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
     );
   }
 
-  const hasNormalisationIntervention = normalisationActions.some(
-    (action) => action !== "none",
-  );
   if (
-    hasNormalisationIntervention &&
+    normalisationPhotoRequired(ast?.normalisation?.actionTaken) &&
     !hasTaggedMedia(media, "normalisationPhoto")
   ) {
     return buildFailureResult(
@@ -695,6 +846,7 @@ export const METER_DISCOVERY_VALIDATION_METADATA = Object.freeze({
   anomalyDetailsWithoutPhoto: ANOMALY_DETAILS_WITHOUT_PHOTO,
   otherAnomalyValues: Object.freeze([...OTHER_ANOMALY_VALUES]),
   normalisationActionValues: Object.freeze([...NORMALISATION_ACTION_VALUES]),
+  noActionReasons: NO_ACTION_REASONS,
   sealCommentEvidence: SEAL_COMMENT_EVIDENCE,
   keypadCommentEvidence: KEYPAD_COMMENT_EVIDENCE,
   cbCommentEvidence: CB_COMMENT_EVIDENCE,

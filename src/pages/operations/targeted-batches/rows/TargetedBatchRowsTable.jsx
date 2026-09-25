@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { formatCurrencyFromCents, formatNumber } from "../targetedBatchUtils";
 import { tbRowsStyles as styles } from "./targetedBatchRowsStyles";
+import { rowOutcomeText } from "./targetedBatchRowsModel";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -112,6 +113,7 @@ export default function TargetedBatchRowsTable({
   totalPages,
   onPageChange,
   onPageSizeChange,
+  takeOut = null,
 }) {
   return (
     <>
@@ -119,6 +121,8 @@ export default function TargetedBatchRowsTable({
         <table style={styles.table}>
           <thead>
             <tr>
+              {/* Targeted Batch rules TB-R060 (1.3.60): a supervisor or manager ticks the meters to take out. */}
+              {takeOut ? <th style={styles.th} scope="col">Take out</th> : null}
               <th style={styles.th}>Row</th>
               <th style={styles.th}>Outcome</th>
               <th style={styles.th}>Rejection Reason</th>
@@ -142,17 +146,35 @@ export default function TargetedBatchRowsTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={18} style={styles.td}>
+                <td colSpan={takeOut ? 19 : 18} style={styles.td}>
                   No TB rows match the current filters.
                 </td>
               </tr>
             ) : (
               rows.map((row) => (
                 <tr key={row.rowKey}>
+                  {takeOut ? (
+                    <td style={styles.td}>
+                      <input
+                        type="checkbox"
+                        checked={takeOut.selectedKeys.includes(row.rowKey)}
+                        disabled={Boolean(takeOut.blockedReason(row))}
+                        onChange={() => takeOut.onToggle(row.rowKey)}
+                        aria-label={`Take meter ${row.meterNo || row.rowNo} out of the batch`}
+                        title={takeOut.blockedReason(row) || "Take this meter out of the batch"}
+                      />
+                    </td>
+                  ) : null}
                   <td style={styles.td}>{row.rowNo}</td>
                   <td style={styles.td}><StatusBadge value={row.outcome} /></td>
                   <td style={styles.td}>{row.rejectionReason || "—"}</td>
-                  <td style={{ ...styles.td, ...styles.strongCell }}>{row.meterNo || "NAv"}</td>
+                  <td style={{ ...styles.td, ...styles.strongCell }}>
+                    {row.meterNo || "NAv"}
+                    {/* TB-R064 (1.3.67): the number found, beside the number expected. */}
+                    {row.foundMeterNo ? (
+                      <div style={styles.referenceLine}>Found {row.foundMeterNo}</div>
+                    ) : null}
+                  </td>
                   <td style={styles.td}>{row.accountNumber || "NAv"}</td>
                   <td style={styles.td}>{row.customerName || "NAv"}</td>
                   <td style={styles.td}>{row.address || "NAv"}</td>
@@ -169,7 +191,13 @@ export default function TargetedBatchRowsTable({
                   <td style={styles.td}><StatusBadge value={row.fieldAcceptanceStatus} /></td>
                   <td style={styles.td}><StatusBadge value={row.premiseStatus} /></td>
                   <td style={styles.td}><StatusBadge value={row.meterDiscoveryStatus} /></td>
-                  <td style={styles.td}><StatusBadge value={row.completionStatus} /></td>
+                  <td style={styles.td}>
+                    <StatusBadge value={row.completionStatus} />
+                    {/* TB-R064 (1.3.67): what the field work found, in plain words. */}
+                    {rowOutcomeText(row) ? (
+                      <div style={styles.referenceLine}>{rowOutcomeText(row)}</div>
+                    ) : null}
+                  </td>
                   <td style={{ ...styles.td, ...styles.strongCell }}>{row.tbRowId || "NAv"}</td>
                   <td style={styles.td}>
                     {row.totalSalesC === null

@@ -1,10 +1,14 @@
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 
 import { writeRegistryMreadFromTrn } from "../registry/mread/writeRegistryMreadFromTrn.js";
+// Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
+import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
+import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
+  linkFollowUp,
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
   buildFailureResult,
   buildLifecycleTrnPayload,
@@ -35,10 +39,13 @@ function readTrnType(trnData = {}) {
 
 const INSTRUCTION_MEDIA_TAG = "instructionMedia";
 
+// Work a field worker or supervisor may start on the spot. METER_INSPECTION
+// joined in MN-R001 1.1.0: the re-offender is inspected from the meter card.
 const DIRECT_FIELD_DUAL_ORIGIN_TRN_TYPES = [
   "METER_DISCONNECTION",
   "METER_RECONNECTION",
   "METER_REMOVAL",
+  "METER_INSPECTION",
 ];
 
 function readFirstString(...values) {
@@ -446,7 +453,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     }
 
-    if (trnType === "METER_INSPECTION" && !isWmsLifecycleExecution) {
+    // MN-R001 1.1.0 section 8: an inspection is office work executed from an
+    // instruction, or field work started on the spot from the meter card.
+    if (
+      trnType === "METER_INSPECTION" &&
+      !isWmsLifecycleExecution &&
+      originChannel !== "FIELD"
+    ) {
       return buildFailureResult(
         "INSPECTION_OFFICE_WMS_ONLY",
         "Meter inspection execution must complete an accepted office-originated instruction TRN",
@@ -503,6 +516,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     const premiseRef = db.collection("premises").doc(premiseId);
 
     let responsePayload = null;
+    // Targeted Batch rules TB-R062 (1.3.65): kept for after the transaction, so a use of the
+    // illegally-connected gate is recorded only when the work itself went through.
+    let batchWorkDecision = null;
+    // Targeted Batch rules TB-R063 (1.3.66): the meter and the ERF this work recorded, kept for after the
+    // transaction, so a Sales meter replaced at that ERF is settled only once the work itself is committed.
+    let workMeterNo = "";
+    let workErfId = "";
 
     await db.runTransaction(async (tx) => {
       // ------------------------------------------------------------
@@ -544,6 +564,43 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
       const astDoc = astSnap.data() || {};
       const premiseData = premiseSnap.data() || {};
+
+      // Targeted Batch rules TB-R059 (1.3.60): a DCN, RCN, Removal, Inspection or Reading on a meter that
+      // sits in another team's allocated batch is refused, and nothing is written. This path names only the
+      // AST, so the meter number comes from the AST already read here. Read inside the transaction, before
+      // any write, so the facts and the refusal are one picture.
+      //
+      // Rules TB-R062 (1.3.65): the ERF too — the AST's own ERF, or the premise this work is using. The
+      // anomaly is read from what this form captured, falling back to what the AST already holds.
+      const batchWorkCheck = await checkBatchWork({
+        db,
+        read: (refOrQuery) => tx.get(refOrQuery),
+        meterNo: astMeterNo(astDoc),
+        uid: actorUid,
+        erfId: astDoc?.accessData?.erfId || data?.accessData?.erfId || "",
+        premiseId,
+        anomaly: [data, astDoc?.ast],
+        log: logger,
+      });
+
+      batchWorkDecision = batchWorkCheck;
+      workMeterNo = astMeterNo(astDoc);
+      workErfId = astDoc?.accessData?.erfId || data?.accessData?.erfId || "";
+
+      if (!batchWorkCheck.allowed) {
+        responsePayload = buildFailureResult(
+          batchWorkCheck.code,
+          batchWorkCheck.message,
+          {
+            trnId,
+            trnType,
+            astId,
+            batch: batchWorkCheck.details,
+          },
+        );
+
+        return;
+      }
 
       // ------------------------------------------------------------
       // WMS DCN EXECUTION PATH
@@ -1027,6 +1084,45 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     });
 
+    // Targeted Batch rules TB-R062 (1.3.65): one document per use of the illegally-connected gate, written
+    // once the work itself is committed, so the office can count them per worker and per team.
+    if (responsePayload?.success === true) {
+      await recordErfOverride({ db, decision: batchWorkDecision, trnId, trnType, log: logger });
+      // Targeted Batch rules TB-R063 (1.3.66): a Sales meter was expected at this ERF under another number.
+      // It has been replaced, so it reads Completed and its batch row closes. Never fails the submission.
+      await recordDifferentMeterAtErf({ db, Timestamp, FieldValue, meterNo: workMeterNo, erfId: workErfId, premiseId,
+        trnId, trnType, astId, uid: actorUid, log: logger });
+    }
+
+    // MN-R001 section 7: the finding that called for this disconnection now has
+    // it. Never fails the submission: the work is saved, and anything that
+    // cannot be linked is logged for the office.
+    // Only work that was actually done is linked: not a No Access visit, and
+    // not a resend of a transaction that already existed.
+    if (
+      (trnType === "METER_DISCONNECTION" || trnType === "METER_REMOVAL") &&
+      responsePayload?.success === true &&
+      responsePayload?.idempotent !== true &&
+      responsePayload?.executionOutcome?.success === true
+    ) {
+      try {
+        await linkFollowUp({
+          db,
+          parentTrnId: data?.origin?.parentTrnId,
+          parentTrnType: data?.origin?.parentTrnType,
+          workTrnType: trnType,
+          trnId,
+          astId,
+        });
+      } catch (linkError) {
+        logger.error("onMeterLifecycleTrnCallable -- parent follow-up not linked", {
+          trnId,
+          parentTrnId: data?.origin?.parentTrnId || "NAv",
+          message: linkError?.message || String(linkError),
+        });
+      }
+    }
+
     if (trnType === "METER_READING" && responsePayload?.success === true) {
       try {
         await writeRegistryMreadFromTrn({
@@ -1059,8 +1155,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       stack: error?.stack || "NAv",
     });
 
+    // An error that already carries an iREPS code keeps it, so the phone can tell a refusal iREPS
+    // decided on (TB-R059, 1.3.62) from an unknown failure.
     return buildFailureResult(
-      "UNKNOWN_ERROR",
+      error?.irepsCode || "UNKNOWN_ERROR",
       error?.message || "Failed to submit lifecycle transaction",
     );
   }

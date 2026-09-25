@@ -585,6 +585,9 @@ export const salesTargetedBatchApi = createApi({
     deleteSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onDeleteTargetedBatchCallable")),
     // Targeted Batch rules TB-R048 (1.3.33): take an allocated batch back before field work starts.
     unallocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onUnallocateTargetedBatchCallable")),
+    // Targeted Batch rules TB-R060 (1.3.60): a supervisor or manager takes one or more meters out of a batch,
+    // each meter settled on its own, so the meters are free again.
+    takeMeterOutOfBatch: rtkBuilder.mutation(callSalesBatch("onTakeMeterOutOfBatchCallable")),
     allocateSalesTargetedBatch: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchCallable")),
     // Targeted Batch rules TB-R047: the Allocation Map allocates up to 15 batches to one TEAM or SP together.
     allocateSalesTargetedBatchesTogether: rtkBuilder.mutation(callSalesBatch("onAllocateTargetedBatchesTogetherCallable")),
@@ -598,10 +601,10 @@ export const salesTargetedBatchApi = createApi({
     // a loaded layer is not read again while its Ward and area stay the same. The entry reads the
     // Ward itself, so it never restarts because the draft snapshot is briefly waiting.
     // Rules 18.7 (1.3.30): a layer switched off stays loaded for 10 minutes.
+    // Rules 18.7: a layer switched off stays loaded 10 minutes. Since TB-R055.7 (1.3.63) the GPS
+    // Sales map loads near the work exactly as TB Draft does, so both maps read through this one
+    // endpoint; the area-on-screen endpoint of 1.3.49, let go after 20 seconds, is retired.
     getSalesBatchNearbyLayer: builder.query(nearbyLayerEndpoint(600)),
-    // Targeted Batch rules TB-R055.7 (1.3.49): the GPS Sales map's area follows the screen, so an
-    // area it has left is let go after 20 seconds, not 10 minutes (no pile of live listeners).
-    getSalesMapNearbyLayer: builder.query(nearbyLayerEndpoint(20)),
     getSalesBatchDraftSnapshot: builder.query({
       keepUnusedDataFor: 0,
       queryFn: () => ({ data: { ready: false, sales: {}, erfs: {}, wards: {}, fence: null, parent: null, error: null } }),
@@ -2907,7 +2910,7 @@ function callSalesBatch(name) {
 }
 export function useGetSalesBatchDraftSnapshotQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchDraftSnapshotQuery", arg, options); }
 export function useGetPermanentSalesBatchesQuery(arg, options) { return useScopedTargetedBatchRead("useGetPermanentSalesBatchesQuery", arg, options); }
-export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useUnallocateSalesTargetedBatchMutation, useAllocateSalesTargetedBatchMutation, useAllocateSalesTargetedBatchesTogetherMutation, useGetFieldWorkSummaryByLmQuery, useGetBatchStatsByLmQuery } = salesTargetedBatchApi;
+export const { useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation, useDeleteSalesTargetedBatchMutation, useUnallocateSalesTargetedBatchMutation, useTakeMeterOutOfBatchMutation, useAllocateSalesTargetedBatchMutation, useAllocateSalesTargetedBatchesTogetherMutation, useGetFieldWorkSummaryByLmQuery, useGetBatchStatsByLmQuery } = salesTargetedBatchApi;
 export function useGetSalesOperationalStatsByLmQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesOperationalStatsByLmQuery", arg, options); }
 export function useGetTargetedBatchAllocationContextByIdQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationContextByIdQuery", arg, options); }
 export function useGetTargetedBatchAllocationDirectoryQuery(arg, options) { return useScopedTargetedBatchRead("useGetTargetedBatchAllocationDirectoryQuery", arg, options); }
@@ -2924,4 +2927,3 @@ export function useGetTargetedBatchDetailsByIdQuery(arg, options) {
 }
 
 export function useGetSalesBatchNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesBatchNearbyLayerQuery", arg, options); }
-export function useGetSalesMapNearbyLayerQuery(arg, options) { return useScopedTargetedBatchRead("useGetSalesMapNearbyLayerQuery", arg, options); }
