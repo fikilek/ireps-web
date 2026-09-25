@@ -361,10 +361,11 @@ export function buildGmrNormalisationText({
     .filter((action) => action && action !== NORMALISATION_NONE);
   if (done.length) return join(done.join(", "));
 
-  // Nothing was done: the recorded reason where there is one, otherwise None.
-  // The reason's own hyphen becomes a comma so the separator stays unique.
-  const reason = cleanText(noActionReason).replace(/\s+-\s+/g, ", ");
-  return join(reason || "None");
+  // Nothing was done. The cell says None, and the recorded reason stands beside
+  // it rather than replacing it, so the form's answer is never hidden
+  // (owner, 25 September 2026).
+  const reason = cleanText(noActionReason);
+  return join(reason ? `None, reason "${reason}"` : "None");
 }
 
 function getGpsCoordinates(trn = {}) {

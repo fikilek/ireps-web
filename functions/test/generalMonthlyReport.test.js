@@ -330,14 +330,22 @@ test("the normalisation column carries the finding that caused it", () => {
     "Illegally Connected - Disconnect meter, Tamper removed",
     "more than one thing done, in the order recorded",
   );
+  // The reason stands beside None, never in place of it: the form's answer is
+  // never hidden (owner, 25 September 2026).
   assert.equal(
     read({ finding: "Illegally Connected", actions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
-    "Illegally Connected - Not recorded, captured before this rule",
-    "the reason's own hyphen becomes a comma, so the separator stays unique",
+    'Illegally Connected - None, reason "Not recorded - captured before this rule"',
   );
-  assert.equal(read({ finding: "Illegally Connected", actions: [], noActionReason: "Customer refused" }), "Illegally Connected - Customer refused");
+  assert.equal(
+    read({ finding: "Illegally Connected", actions: [], noActionReason: "Threatened or chased away" }),
+    'Illegally Connected - None, reason "Threatened or chased away"',
+  );
+  assert.equal(
+    read({ finding: "Meter Faulty", actions: ["None"], noActionReason: "No meter available to replace" }),
+    'Meter Faulty - None, reason "No meter available to replace"',
+  );
+  assert.equal(read({ finding: "Illegally Connected", actions: ["None"] }), "Illegally Connected - None", "nothing done, nothing said");
   assert.equal(read({ finding: "Meter Ok", actions: ["None"], hasAccess: false }), "No Access", "no meter, so nothing to join");
-  assert.equal(read({ finding: "Meter Faulty", actions: [], noActionReason: "No meter available to replace" }), "Meter Faulty - No meter available to replace");
   assert.equal(read({ finding: "Meter Ok", actions: [], isWater: true }), "Meter Ok", "water carries no normalisation");
   assert.equal(read({ finding: null, actions: ["Disconnect meter"] }), "NAv - Disconnect meter", "a missing side reads NAv, never a dropped dash");
   assert.equal(read({ finding: null, actions: [] }), "NAv - None", "an inspection that recorded no finding keeps the column's shape");

@@ -155,7 +155,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   const rows = [
     row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", normalisation: "None" }),
     row({ trnId: "B", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Bridge Wire On The Meter", normalisation: "Illegally Connected - Disconnect meter", normalisationActions: ["Disconnect meter"] }),
-    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
+    row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: 'Illegally Connected - None, reason "Not recorded - captured before this rule"', normalisationActions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
     row({ trnId: "D", fieldWorkerName: "Peter Peter", team: "Peter Team", normalisation: "Tamper removed", normalisationActions: ["Tamper removed"] }),
     row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
     row({ trnId: "F", hasAccess: false, fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] }),
@@ -179,7 +179,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   assert.deepEqual(sheet[9], ["SEPTEMBER 2026 - NORMALISATION"]);
   assert.deepEqual(sheet[10], [1, "NONE", 1, 0, 1], "a healthy meter's row stands alone, and comes first");
   assert.deepEqual(sheet[11], [2, "ILLEGALLY CONNECTED - DISCONNECT METER", 0, 1, 1]);
-  assert.deepEqual(sheet[12], [3, "ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE", 0, 1, 1]);
+  assert.deepEqual(sheet[12], [3, 'ILLEGALLY CONNECTED - NONE, REASON "NOT RECORDED - CAPTURED BEFORE THIS RULE"', 0, 1, 1]);
   assert.deepEqual(sheet[13], [4, "TAMPER REMOVED", 0, 1, 1], "a healthy meter's own fix");
   assert.deepEqual(sheet[14], [5, "NO ACCESS", 1, 0, 1], "and NO ACCESS last of all");
   assert.deepEqual(sheet[15], ["", "TOTAL: NORMALISATION", 2, 3, 5]);
@@ -210,11 +210,11 @@ function septemberRows() {
   add(5, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed", normalisationActions: ["Disconnect meter", "Tamper removed"] });
   add(1, { ...ic, normalisation: "Illegally Connected - Disconnect meter, Tamper removed, Replace meter", normalisationActions: ["Disconnect meter", "Tamper removed", "Replace meter"] });
   add(1, { ...ic, normalisation: "Illegally Connected - Tamper removed", normalisationActions: ["Tamper removed"] });
-  add(40, { ...ic, normalisation: "Illegally Connected - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: marker });
+  add(40, { ...ic, normalisation: 'Illegally Connected - None, reason "Not recorded - captured before this rule"', normalisationActions: ["None"], noActionReason: marker });
   add(10, { ...ic, normalisation: "Illegally Connected - None", normalisationActions: ["None"] });
   add(1, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Replace meter", normalisationActions: ["Replace meter"] });
-  add(4, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: "Meter Damaged - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: marker });
-  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - Not recorded, captured before this rule", normalisationActions: ["None"], noActionReason: marker });
+  add(4, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: 'Meter Damaged - None, reason "Not recorded, captured before this rule"', normalisationActions: ["None"], noActionReason: marker });
+  add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: 'Meter Faulty - None, reason "Not recorded, captured before this rule"', normalisationActions: ["None"], noActionReason: marker });
   add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - None", normalisationActions: ["None"] });
   add(137, { hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] });
 
@@ -248,16 +248,16 @@ test("Field Stats reproduces September 2026 on LIVE: 462 with a meter, 137 no ac
     "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED",
     "ILLEGALLY CONNECTED - DISCONNECT METER, TAMPER REMOVED, REPLACE METER",
     "ILLEGALLY CONNECTED - TAMPER REMOVED",
-    "ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE",
+    'ILLEGALLY CONNECTED - NONE, REASON "NOT RECORDED - CAPTURED BEFORE THIS RULE"',
     "ILLEGALLY CONNECTED - NONE",
     "METER DAMAGED - REPLACE METER",
-    "METER DAMAGED - NOT RECORDED, CAPTURED BEFORE THIS RULE",
-    "METER FAULTY - NOT RECORDED, CAPTURED BEFORE THIS RULE",
+    'METER DAMAGED - NONE, REASON "NOT RECORDED, CAPTURED BEFORE THIS RULE"',
+    'METER FAULTY - NONE, REASON "NOT RECORDED, CAPTURED BEFORE THIS RULE"',
     "METER FAULTY - NONE",
     "NO ACCESS",
     "TOTAL: NORMALISATION",
   ]);
-  assert.equal(totalOf("ILLEGALLY CONNECTED - NOT RECORDED, CAPTURED BEFORE THIS RULE"), 40, "never asked");
+  assert.equal(totalOf('ILLEGALLY CONNECTED - NONE, REASON "NOT RECORDED - CAPTURED BEFORE THIS RULE"'), 40, "never asked");
   assert.equal(totalOf("ILLEGALLY CONNECTED - NONE"), 10, "asked, and nothing chosen");
 });
 
