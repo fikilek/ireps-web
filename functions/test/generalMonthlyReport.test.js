@@ -338,6 +338,7 @@ test("the normalisation column carries the finding that caused it", () => {
   assert.equal(read({ finding: "Meter Ok", actions: ["none"], hasAccess: false }), "No Access", "no meter, so nothing to join");
   assert.equal(read({ finding: "Meter Ok", actions: [], isWater: true }), "Meter Ok", "water carries no normalisation");
   assert.equal(read({ finding: null, actions: ["Disconnect meter"] }), "NAv - Disconnect meter", "a missing side reads NAv, never a dropped dash");
+  assert.equal(read({ finding: null, actions: [] }), "NAv - None", "an inspection that recorded no finding keeps the column's shape");
 });
 
 test("a meter number that is not a real number is shown but never looked up on Sales", () => {
