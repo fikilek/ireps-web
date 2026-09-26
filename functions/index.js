@@ -3279,6 +3279,31 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     if (targetedBatchValidation?.isTargetedBatch) {
       safePayload.targetedBatchContext =
         targetedBatchValidation.targetedBatchContext;
+    } else {
+      // GMR-R038 (1.6.0): the worker did not come from the batch row, but the premise belongs to a batch
+      // and the guard has just recognised which one. The work carries that batch, so it is not counted as
+      // done outside any batch and the row is not left blind to the meter found on it.
+      //
+      // Marked as recognised by iREPS, never dressed up as the batch path the worker did not take, and
+      // carrying no salesDocId: on an ERF where a different meter was found, the row's Sales meter is not
+      // the meter being captured, and naming it would point the report at the wrong record.
+      const recognised = batchWorkCheck?.details?.ownRow || batchWorkCheck?.details || null;
+      const recognisedTbId =
+        typeof recognised?.tbId === "string" ? recognised.tbId.trim() : "";
+
+      if (recognisedTbId) {
+        safePayload.targetedBatchContext = {
+          tbId: recognisedTbId,
+          rowId:
+            typeof recognised?.rowId === "string" && recognised.rowId.trim()
+              ? recognised.rowId.trim()
+              : null,
+          erfId: data?.accessData?.erfId || null,
+          premiseId: premiseId || null,
+          recognisedBy: "IREPS",
+          rule: "GMR-R038",
+        };
+      }
     }
 
     const now = new Date().toISOString();

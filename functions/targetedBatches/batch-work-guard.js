@@ -223,7 +223,7 @@ export function decideMeterBatchWork({ sales, parent, row, allocatedTeam = null,
   const allocation = batchAllocation(parent);
   // Only a batch nobody has been given the work of is free; anything else is tested against the worker.
   if (explicitlyUnallocated(allocation)) {
-    return allow(ALLOWED.NOT_ALLOCATED, { tbId: batchId, targetType: allocation.type || null, targetId: allocation.id || null });
+    return allow(ALLOWED.NOT_ALLOCATED, { tbId: batchId, rowId: text(row?.id) || null, targetType: allocation.type || null, targetId: allocation.id || null });
   }
   // Owner decision 2026-09-19: once the batch's work on the meter is done its row is Completed, and later
   // work (a reading, an inspection, a disconnection) is ordinary work that anyone may do.
@@ -231,8 +231,11 @@ export function decideMeterBatchWork({ sales, parent, row, allocatedTeam = null,
   // Rules TB-R059: the team the worker belongs to now, from their profile and the team list. Either the
   // membership period that is still open (TM-R001) or the team's own member list places the worker in it.
   const inside = workerInside({ allocation, allocatedTeam, finderUid, finderTeamId, finderSpId });
-  if (inside === "TEAM_HISTORY" || inside === "TEAM_MEMBER_LIST") return allow(ALLOWED.OWN_TEAM, { tbId: batchId, targetId: allocation.id, matchedBy: inside });
-  if (inside === "SP") return allow(ALLOWED.OWN_SP, { tbId: batchId, targetId: allocation.id });
+  // GMR-R038 (1.6.0): the row is carried on the allowed paths too, not only when work is refused. The
+  // work belongs to this batch row, and a transaction that does not say so reads as done outside any
+  // batch and leaves the row blind to the meter found on it.
+  if (inside === "TEAM_HISTORY" || inside === "TEAM_MEMBER_LIST") return allow(ALLOWED.OWN_TEAM, { tbId: batchId, rowId: text(row?.id) || null, targetId: allocation.id, matchedBy: inside });
+  if (inside === "SP") return allow(ALLOWED.OWN_SP, { tbId: batchId, rowId: text(row?.id) || null, targetId: allocation.id });
   const details = {
     rule: RULE, rulesVersion: RULES_VERSION, meterNo: text(meterNo) || null, tbId: batchId,
     rowId: text(row?.id) || null, geofenceId: text(parent?.geofenceId) || null, geofenceName: text(geofenceName) || null,
@@ -269,6 +272,10 @@ export function decideErfBatchWork({ erfId = "", erfRows = null, erfUnreadable =
   // No ERF was worked out, or the ERF carries no batch rows at all: there is nothing this rule can hold.
   if (!text(erfId) || !Array.isArray(erfRows) || erfRows.length === 0) return free(ALLOWED.ERF_FREE);
   const worked = normalizeMeterNo(meterNo);
+  // GMR-R038 (1.6.0): the rows on this ERF that are the worker's own batch work, collected as the walk
+  // passes over them. One of them means this capture belongs to that batch row; several mean the ERF
+  // carries more than one open row of theirs (flats), and naming one would credit work to the wrong row.
+  const ownRows = [];
   for (const entry of erfRows) {
     const row = entry?.row || {};
     if (sameId(normalizeMeterNo(row?.salesAllMeterId), worked)) continue;
@@ -276,8 +283,14 @@ export function decideErfBatchWork({ erfId = "", erfRows = null, erfUnreadable =
     if (upper(entry?.visibility) === "VISIBLE") continue;
     if (!entry?.parent) return cannotCheck(UNREADABLE.ERF_BATCH, { tbId: text(row?.tbId) || null, rowId: text(row?.id) || null });
     const allocation = batchAllocation(entry.parent);
-    if (explicitlyUnallocated(allocation)) continue;
-    if (workerInside({ allocation, allocatedTeam: entry.allocatedTeam, finderUid, finderTeamId, finderSpId })) continue;
+    if (explicitlyUnallocated(allocation)) {
+      ownRows.push({ tbId: text(row?.tbId) || null, rowId: text(row?.id) || null, erfId: text(erfId) || null });
+      continue;
+    }
+    if (workerInside({ allocation, allocatedTeam: entry.allocatedTeam, finderUid, finderTeamId, finderSpId })) {
+      ownRows.push({ tbId: text(row?.tbId) || null, rowId: text(row?.id) || null, erfId: text(erfId) || null });
+      continue;
+    }
     return {
       allowed: false,
       code: METER_IN_ANOTHER_TEAMS_BATCH,
@@ -294,7 +307,10 @@ export function decideErfBatchWork({ erfId = "", erfRows = null, erfUnreadable =
       },
     };
   }
-  return free(ALLOWED.ERF_FREE);
+  // GMR-R038: exactly one of the worker's own rows on this ERF, so the capture can say which batch row it
+  // belongs to. More than one is ambiguous and nothing is named: see TB-R067 and the flats case.
+  const ownRow = ownRows.length === 1 ? ownRows[0] : null;
+  return free(ALLOWED.ERF_FREE, ownRow ? { ownRow, ownRowCount: 1 } : { ownRowCount: ownRows.length });
 }
 
 // Rules TB-R062 (1.3.65): what the office is given for every use of the gate, so a worker who keeps using

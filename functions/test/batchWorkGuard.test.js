@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   ALLOWED, BATCH_CHECK_UNAVAILABLE, METER_IN_ANOTHER_TEAMS_BATCH, UNREADABLE, UNREADABLE_MESSAGE,
   allocationDateWords, anomalyReport, assertBatchWorkAllowed, checkBatchWork, decideBatchWork,
-  decideErfBatchWork, explicitlyUnallocated, illegalConnectionWords, isIllegallyConnected, readAstMeterNo,
+  decideErfBatchWork, decideMeterBatchWork, explicitlyUnallocated, illegalConnectionWords, isIllegallyConnected, readAstMeterNo,
   readBatchWorkFacts, readWorkErfId, recordErfOverride, refusalMessage, teamMemberIds,
 } from "../targetedBatches/batch-work-guard.js";
 
@@ -468,4 +468,52 @@ test("the gate is logged at warning level, and the ERF refusal says which rule r
   const gated = await checkBatchWork({ db: fakeDb(documents, rows), meterNo: OTHER_METER, uid: "FWR2", erfId: ERF, anomaly: { ast: { anomalies: { anomaly: "Illegally Connected" } } }, log });
   assert.equal(gated.code, ALLOWED.ILLEGAL_CONNECTION);
   assert.match(logs[1].message, /TB-R062: an illegally connected meter was allowed on another team's ERF/);
+});
+
+// ---------------------------------------------------------------- GMR-R038: the work carries its batch
+// A capture on a premise that belongs to a batch must say so, or the report counts work outside batches
+// that never happened and the batch row never learns the meter was found on it.
+
+test("GMR-R038 the worker's own batch row is carried when the work is allowed, not only when refused", () => {
+  // The worker is in the team the batch is allocated to, so the work goes ahead — and it belongs to the row.
+  const own = decideMeterBatchWork(facts({ finderUid: "FWR1", finderTeamId: "TEAM1", allocatedTeam: { memberUids: ["FWR1"] } }));
+  assert.equal(own.allowed, true);
+  assert.equal(own.code, ALLOWED.OWN_TEAM);
+  assert.equal(own.details.tbId, TB);
+  assert.equal(own.details.rowId, `${TB}__R001`, "the row, or the report cannot see which work this was");
+
+  // A batch nobody has been given still names its row: the premise belongs to it either way.
+  const free = decideMeterBatchWork(facts({ parent: parent({ status: "NOT_STARTED", targetId: "", targetName: "" }) }));
+  assert.equal(free.code, ALLOWED.NOT_ALLOCATED);
+  assert.equal(free.details.rowId, `${TB}__R001`);
+});
+
+test("GMR-R038 a different meter at the worker's own batched ERF carries that ERF's row", () => {
+  // The batch expected METER at this ERF; the worker captures OTHER_METER there. TB-R063's case, and the
+  // row is exactly what the report and the row itself need to see.
+  const mine = decideErfBatchWork(atErf({ finderUid: "FWR1", erfRows: [erfRow({ allocatedTeam: { memberUids: ["FWR1"] } })] }));
+  assert.equal(mine.allowed, true);
+  assert.equal(mine.code, ALLOWED.ERF_FREE);
+  assert.deepEqual(mine.details.ownRow, { tbId: TB, rowId: `${TB}__R001`, erfId: ERF });
+});
+
+test("GMR-R038 two of the worker's own rows on one ERF name none of them", () => {
+  // Flats: several Sales meters on one ERF. Naming one would credit the work to the wrong row, so the
+  // capture carries nothing and m06-flats settles it properly.
+  const both = decideErfBatchWork(atErf({
+    finderUid: "FWR1",
+    erfRows: [
+      erfRow({ allocatedTeam: { memberUids: ["FWR1"] } }),
+      erfRow({ row: { id: `${TB}__R002`, tbId: TB, salesAllMeterId: "07034605309", refs: { erfId: ERF }, execution: { status: "NOT_STARTED" } }, allocatedTeam: { memberUids: ["FWR1"] } }),
+    ],
+  }));
+  assert.equal(both.allowed, true);
+  assert.equal(both.details.ownRow, undefined, "nothing is named when it is ambiguous");
+  assert.equal(both.details.ownRowCount, 2);
+});
+
+test("GMR-R038 an ERF with no batch on it carries nothing", () => {
+  const none = decideErfBatchWork(atErf({ erfRows: [] }));
+  assert.equal(none.code, ALLOWED.ERF_FREE);
+  assert.equal(none.details.ownRow, undefined);
 });
