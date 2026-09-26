@@ -230,8 +230,8 @@ export default function GeneralMonthlyReportPage() {
               disabled={phase === "working"}
               style={styles.monthInput}
             >
-              <option value="GMR">General Monthly Report — one month, the payment record</option>
-              <option value="GR">General Report — any dates, for looking</option>
+              <option value="GMR">General Monthly Report</option>
+              <option value="GR">General Report</option>
             </select>
           </div>
 
