@@ -120,6 +120,7 @@ export default function GeneralMonthlyReportPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [result, setResult] = useState(null);
   const [failure, setFailure] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const startedAtRef = useRef(null);
   const maxReportMonth = currentJohannesburgMonthKey();
   const today = currentJohannesburgDay();
@@ -131,6 +132,15 @@ export default function GeneralMonthlyReportPage() {
   const rangeBackwards = isGeneralReport && startDate && endDate && startDate > endDate;
   const canGenerate = isGeneralReport ? Boolean(startDate && endDate && !rangeBackwards) : Boolean(reportMonth);
   const reportName = isGeneralReport ? "General Report" : "General Monthly Report";
+
+  useEffect(() => {
+    if (!helpOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setHelpOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [helpOpen]);
 
   useEffect(() => {
     if (phase !== "working") return undefined;
@@ -283,10 +293,6 @@ export default function GeneralMonthlyReportPage() {
             <div className="muted">Workbook</div>
             <strong>Field Data and Field Stats</strong>
           </div>
-          <div>
-            <div className="muted">Which transactions</div>
-            <strong>All types, including no access, counted when they reached the server</strong>
-          </div>
         </div>
 
         <div>
@@ -383,6 +389,80 @@ export default function GeneralMonthlyReportPage() {
           escapeAction={() => setPhase("idle")}
         />
       ) : null}
+      <button
+        type="button"
+        style={styles.helpButton}
+        onClick={() => setHelpOpen(true)}
+        onMouseEnter={() => setHelpOpen(true)}
+        aria-label="What these two reports are"
+        title="What these two reports are"
+      >
+        ?
+      </button>
+
+      {helpOpen ? (
+        <div
+          style={styles.helpOverlay}
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setHelpOpen(false);
+          }}
+        >
+          <div className="panel" style={styles.helpPanel} role="dialog" aria-modal="true" aria-label="About these reports">
+            <div style={styles.helpHeader}>
+              <h2 style={styles.helpTitle}>The two reports</h2>
+              <button type="button" className="ghost-button" onClick={() => setHelpOpen(false)} autoFocus>
+                Close
+              </button>
+            </div>
+
+            <h3 style={styles.helpHeading}>General Monthly Report</h3>
+            <p>
+              One calendar month of Endumeni field work. <strong>This is the record the municipality pays on</strong>, so it
+              is complete, and a month does not change once it has been reported.
+            </p>
+
+            <h3 style={styles.helpHeading}>General Report</h3>
+            <p>
+              The same report over <strong>any start and end date</strong> — a week, a campaign, a fortnight across two
+              months. It is for looking. Two ranges can overlap and hold the same work twice, so it is never used for
+              payment, and it says so on its own face: in the file name, above the Field Data headings and at the top of
+              Field Stats.
+            </p>
+
+            <h3 style={styles.helpHeading}>What is in the workbook</h3>
+            <p>
+              Two worksheets, and nothing else. <strong>Field Data</strong> — one row per transaction, Zamo&apos;s columns
+              first and in his order, then the columns the rules added, then any seventh or later photograph.{" "}
+              <strong>Field Stats</strong> — METER AUDIT, NORMALISATION and Teams, each per field worker and then per team,
+              with the control lines underneath. The three sections count the same records three ways; if they disagree the
+              workbook is not produced.
+            </p>
+
+            <h3 style={styles.helpHeading}>Which transactions are counted</h3>
+            <p>
+              All types, <strong>including no access</strong> — the municipality pays per transaction, and a visit where
+              nobody could get in is an attempt that was made and recorded. A transaction is counted in the period it
+              reached the server, read in South African time.
+            </p>
+
+            <h3 style={styles.helpHeading}>Findings and normalisation</h3>
+            <p>
+              The Normalisation column reads the finding and what was done about it, joined by a dash:{" "}
+              <strong>Meter Ok - None</strong>, <strong>Illegally Connected - Disconnect meter</strong>, and where nothing
+              was done, <strong>Illegally Connected - None, reason &quot;Threatened or chased away&quot;</strong> — the
+              reason stands beside None, never in place of it. The words are exactly as the field recorded them; the report
+              interprets nothing.
+            </p>
+
+            <h3 style={styles.helpHeading}>After it is made</h3>
+            <p>
+              The workbook downloads to this browser and is kept in <strong>Generated Reports</strong> until someone deletes
+              it. Only the person who generated a report can list or open it.
+            </p>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -399,6 +479,51 @@ function Fact({ label, value, warn = false }) {
 }
 
 const styles = {
+  // The page explains itself behind a "?" rather than on the panel, so the
+  // panel holds only what a manager has to choose (owner, 26 September 2026).
+  helpButton: {
+    position: "fixed",
+    right: "24px",
+    bottom: "24px",
+    width: "44px",
+    height: "44px",
+    borderRadius: "50%",
+    border: "1px solid rgba(148, 163, 184, 0.5)",
+    background: "#ffffff",
+    color: "#1e293b",
+    fontSize: "20px",
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 6px 18px rgba(15, 23, 42, 0.18)",
+    zIndex: 40,
+  },
+  helpOverlay: {
+    position: "fixed",
+    inset: 0,
+    display: "grid",
+    placeItems: "center",
+    padding: "24px",
+    background: "rgba(15, 23, 42, 0.45)",
+    zIndex: 50,
+  },
+  helpPanel: {
+    width: "min(720px, 100%)",
+    maxHeight: "80vh",
+    overflowY: "auto",
+    padding: "24px",
+  },
+  helpHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "16px",
+  },
+  helpTitle: {
+    margin: 0,
+  },
+  helpHeading: {
+    margin: "18px 0 6px",
+  },
   configPanel: {
     display: "grid",
     gap: "20px",
