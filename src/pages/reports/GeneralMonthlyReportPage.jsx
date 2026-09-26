@@ -411,6 +411,7 @@ export default function GeneralMonthlyReportPage() {
               </button>
             </div>
 
+            <div style={styles.helpBody}>
             <h3 style={styles.helpHeading}>General Monthly Report</h3>
             <p>
               One calendar month of Endumeni field work. <strong>This is the record the municipality pays on</strong>, so it
@@ -455,6 +456,7 @@ export default function GeneralMonthlyReportPage() {
               The workbook downloads to this browser and is kept in <strong>Generated Reports</strong> until someone deletes
               it. Only the person who generated a report can list or open it.
             </p>
+            </div>
           </div>
         </div>
       ) : null}
@@ -504,14 +506,28 @@ const styles = {
   helpPanel: {
     width: "min(720px, 100%)",
     maxHeight: "80vh",
-    overflowY: "auto",
-    padding: "24px",
+    // The panel itself does not scroll: its title and Close would go with it, and a reader who had
+    // scrolled down had no way out of the window (owner, 26 September).
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    padding: 0,
   },
   helpHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: "16px",
+    flex: "0 0 auto",
+    padding: "20px 24px",
+    borderBottom: "1px solid var(--border, #e2e8f0)",
+    background: "var(--surface, #ffffff)",
+  },
+  // Only the words move.
+  helpBody: {
+    flex: "1 1 auto",
+    overflowY: "auto",
+    padding: "4px 24px 24px",
   },
   helpTitle: {
     margin: 0,
