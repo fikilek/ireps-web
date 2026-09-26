@@ -4,7 +4,7 @@ import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 
 import { writeRegistryMreadFromTrn } from "../registry/mread/writeRegistryMreadFromTrn.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
+import { astMeterNo, checkBatchWork, recognisedBatchContext, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
@@ -799,7 +799,20 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           executionMedia: cleanExecution?.media || [],
         });
 
+        // GMR-R038 (1.6.0): this work happened on a premise that belongs to a batch, so the transaction
+        // says so. An inspection, disconnection, reconnection or removal started from the meter card
+        // carried no batch and read as work outside batches that never happened. What the transaction
+        // already carries is left alone; this only fills the gap.
+        const recognisedBatch = existingTrn?.targetedBatchContext
+          ? null
+          : recognisedBatchContext({
+              decision: batchWorkDecision,
+              erfId: workErfId,
+              premiseId,
+            });
+
         const trnUpdatePatch = {
+          ...(recognisedBatch ? { targetedBatchContext: recognisedBatch } : {}),
           "workflow.state": "COMPLETED",
           "workflow.completedAt": now,
           "workflow.completedByUid": actorUid,

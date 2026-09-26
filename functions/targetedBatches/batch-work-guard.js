@@ -313,6 +313,46 @@ export function decideErfBatchWork({ erfId = "", erfRows = null, erfUnreadable =
   return free(ALLOWED.ERF_FREE, ownRow ? { ownRow, ownRowCount: 1 } : { ownRowCount: ownRows.length });
 }
 
+// GMR-R038 (1.6.0): the batch a capture belongs to, ready to be written onto the transaction, or null.
+//
+// The owner's rule, 2026-09-26: all work is done through batches EXCEPT where there is an illegal
+// connection. So the batch is carried only on the codes that mean the work is that batch's own, named
+// one by one, and never when the TB-R062 gate let an illegally connected meter through at another
+// team's ERF — that find belongs to whoever made it (TB-R063), and naming the other team's batch would
+// hand them work they did not do.
+//
+// The record says iREPS recognised it, so nothing reads it as the worker having taken the batch path
+// when they did not, and it carries no salesDocId: where a different meter was found, the row's Sales
+// meter is not the meter being captured, and the report looks that id up.
+const CARRIES_ITS_BATCH = new Set([
+  ALLOWED.OWN_TEAM, ALLOWED.OWN_SP, ALLOWED.NOT_ALLOCATED, ALLOWED.ERF_FREE,
+  ALLOWED.ROW_COMPLETED, ALLOWED.VISIBLE,
+]);
+// A row whose work is finished, or whose meter is already found, is named as the batch but not as the
+// row: there is no open work on it for this capture to belong to.
+const CARRIES_ITS_ROW = new Set([
+  ALLOWED.OWN_TEAM, ALLOWED.OWN_SP, ALLOWED.NOT_ALLOCATED, ALLOWED.ERF_FREE,
+]);
+
+export function recognisedBatchContext({ decision = null, erfId = "", premiseId = "" } = {}) {
+  if (!decision?.allowed || !CARRIES_ITS_BATCH.has(decision.code)) return null;
+
+  const found = decision.details?.ownRow || decision.details || null;
+  const tbId = text(found?.tbId);
+  if (!tbId) return null;
+
+  const rowId = CARRIES_ITS_ROW.has(decision.code) ? text(found?.rowId) : "";
+
+  return {
+    tbId,
+    rowId: rowId || null,
+    erfId: text(erfId) || text(found?.erfId) || null,
+    premiseId: text(premiseId) || null,
+    recognisedBy: "IREPS",
+    rule: "GMR-R038",
+  };
+}
+
 // Rules TB-R062 (1.3.65): what the office is given for every use of the gate, so a worker who keeps using
 // it — or a team that does — is seen and not guessed at. Counted per worker by `worker.uid` and per team by
 // `worker.teamId`, both plain equality reads that need no new index.

@@ -9,7 +9,7 @@ import {
 } from "../meterLifecycle/helpers.js";
 
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { astMeterNo, checkBatchWork, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
+import { astMeterNo, checkBatchWork, recognisedBatchContext, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
 
 import {
@@ -201,6 +201,18 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
         actorUid,
         actorName,
       });
+
+      // GMR-R038 (1.6.0): commissioning on a premise that belongs to a batch carries that batch, the
+      // same as a discovery. What the worker sent still wins; this only fills the gap.
+      if (!cleanTrn.targetedBatchContext) {
+        const recognised = recognisedBatchContext({
+          decision: batchWorkDecision,
+          erfId: workErfId,
+          premiseId,
+        });
+
+        if (recognised) cleanTrn.targetedBatchContext = recognised;
+      }
 
       tx.create(trnRef, cleanTrn);
 
