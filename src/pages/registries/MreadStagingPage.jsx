@@ -25,6 +25,7 @@ import { useGeo } from "../../context/GeoContext";
 import DownloadButtons from "../../components/DownloadButtons";
 import RegistryIdText from "../../components/RegistryIdText";
 import SharedMeterHistoryModal from "../../components/mread/MeterHistoryModal";
+import { FORM_TEXT } from "../../theme/formColors";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
@@ -2162,7 +2163,7 @@ export default function MreadStagingPage() {
                   style={{
                     display: "block",
                     marginBottom: "0.5rem",
-                    color: "#475569",
+                    color: FORM_TEXT,
                     fontWeight: 700,
                   }}
                 >
@@ -2216,7 +2217,7 @@ export default function MreadStagingPage() {
                   style={{
                     display: "block",
                     marginBottom: "0.5rem",
-                    color: "#475569",
+                    color: FORM_TEXT,
                     fontWeight: 700,
                   }}
                 >

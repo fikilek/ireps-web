@@ -2371,6 +2371,38 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "trns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accessData.parents.lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "metadata.createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "trns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accessData.parents.lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "workflow.state",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "workflow.completedAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

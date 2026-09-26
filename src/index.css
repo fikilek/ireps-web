@@ -111,3 +111,30 @@ a {
   pointer-events: none;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
+
+/* UI-R004 - on a form, every word a worker reads is black.
+   Every box in the web app takes its text colour from here, so no screen
+   has to set it. The colours match ireps-mobile/src/theme/formColors.js. */
+input,
+textarea,
+select {
+  color: #000000;
+}
+
+label {
+  color: #000000;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #000000;
+  opacity: 1; /* Firefox fades a placeholder to 54% unless told not to. */
+}
+
+/* A box the worker cannot type in stays faint on purpose: that is a signal
+   that it is not available, not a word to read. */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  color: #64748b;
+}

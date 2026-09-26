@@ -5,8 +5,9 @@ import { useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { SALES_LOAD_TIMEOUT_ERROR, useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
+import { SALES_LOAD_TIMEOUT_ERROR, salesReadStartedAtMs, useGetSalesByLmPcodeQuery, useSalesReadScope } from "../../redux/salesApi";
 import { prepareTargetedBatchDraft } from "../../redux/targetedBatchDraftSlice";
+import { salesLoadStatus } from "./models/salesLoadStatusModel.js";
 import { buildTargetedBatchDraftId } from "../../redux/targetedBatchDraftModel";
 import { quickDownloadExcel } from "../../utils/downloads/quickDownloadExcel";
 import NonGpsExceptions from "./components/NonGpsExceptions";
@@ -74,6 +75,26 @@ function SummaryCard({
     >
       {content}
     </button>
+  );
+}
+
+// Web Data Copy rules WD-R001.6 (1.2.0): the same waiting line as the GPS Sales Table.
+function NonGpsLoadingState({ place = "", startedAtMs = 0 }) {
+  const [mountedAtMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+  const elapsedMs = Math.max(0, nowMs - (startedAtMs || mountedAtMs));
+  const status = salesLoadStatus({ elapsedMs, place });
+  return (
+    <section style={styles.statePanel} aria-busy="true">
+      <h2>{status.title}</h2>
+      <p>{status.line}</p>
+      <p style={styles.loadingNote}>{status.note}</p>
+      {status.slowHint ? <p style={styles.loadingNote}>{status.slowHint}</p> : null}
+    </section>
   );
 }
 
@@ -393,7 +414,7 @@ export default function NonGpsBatchPlanningPage() {
           <h2>Sales could not be loaded</h2>
           <p>
             {error.status === SALES_LOAD_TIMEOUT_ERROR.status
-              ? SALES_LOAD_TIMEOUT_ERROR.error
+              ? error.error || SALES_LOAD_TIMEOUT_ERROR.error
               : `Check Firestore access to sales-all-meters and confirm that records exist for ${activeLmPcode}.`}
           </p>
           <button type="button" style={styles.primaryButton} onClick={() => refetch()} disabled={isFetching}>
@@ -402,12 +423,7 @@ export default function NonGpsBatchPlanningPage() {
         </section>
       ) : null}
 
-      {isLoading ? (
-        <section style={styles.statePanel} aria-live="polite" aria-busy="true">
-          <h2>Loading Non GPS planning data...</h2>
-          <p>Preparing the live No-GPS Sales population and street groups.</p>
-        </section>
-      ) : null}
+      {isLoading ? <NonGpsLoadingState place={activeWorkbaseName} startedAtMs={salesReadStartedAtMs(readScope)} /> : null}
 
       {!isLoading && activeLmPcode && !error && salesRows.length === 0 ? (
         <section style={styles.statePanel}>
@@ -686,6 +702,8 @@ const styles = {
     color: "#334155",
   },
   errorPanel: { borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b" },
+  // WD-R001.6 (1.2.0): the quieter lines under the one that counts the seconds.
+  loadingNote: { margin: "0.35rem 0 0", color: "#94a3b8", fontSize: "0.8rem" },
   reconciliationError: {
     padding: "0.8rem 0.9rem",
     border: "1px solid #fecaca",

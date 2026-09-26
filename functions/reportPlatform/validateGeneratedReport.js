@@ -175,7 +175,7 @@ function decodeManifest(encoded) {
   }
 }
 
-function assertLifecycleMatches(manifestLifecycle, lifecycle) {
+function assertLifecycleMatches(manifestLifecycle, lifecycle, keptUntilDeleted = false) {
   if (!manifestLifecycle || typeof manifestLifecycle !== "object" || Array.isArray(manifestLifecycle)) {
     failInvalidFinalization("Generated report lifecycle manifest is invalid.");
   }
@@ -193,6 +193,9 @@ function assertLifecycleMatches(manifestLifecycle, lifecycle) {
   ];
 
   for (const field of fields) {
+    // A report finalized while it still had an expiry date keeps that date in
+    // its manifest; once its type is kept until deleted, the date no longer applies.
+    if (field === "expiresAt" && keptUntilDeleted) continue;
     if (manifestLifecycle[field] !== lifecycle[field]) {
       failInvalidFinalization("Generated report lifecycle manifest does not match Storage truth.", {
         field,
@@ -201,7 +204,7 @@ function assertLifecycleMatches(manifestLifecycle, lifecycle) {
   }
 }
 
-function readFinalization(metadata, lifecycle, parsedPath, requireFinalized) {
+function readFinalization(metadata, lifecycle, parsedPath, requireFinalized, keptUntilDeleted = false) {
   const customMetadata = metadata?.metadata && typeof metadata.metadata === "object"
     ? metadata.metadata
     : {};
@@ -259,7 +262,7 @@ function readFinalization(metadata, lifecycle, parsedPath, requireFinalized) {
     failInvalidFinalization("Generated report manifest identity does not match its Storage path.");
   }
 
-  assertLifecycleMatches(manifest.lifecycle, lifecycle);
+  assertLifecycleMatches(manifest.lifecycle, lifecycle, keptUntilDeleted);
 
   return {
     isFinalized: true,
@@ -314,11 +317,12 @@ export async function validateGeneratedReport({
   }
 
   const retentionDays = getReportRetentionDays(parsedPath.reportType);
-  const expiresAt = new Date(
-    createdAt.getTime() + retentionDays * MILLISECONDS_PER_DAY,
-  );
+  const keptUntilDeleted = retentionDays === null;
+  const expiresAt = keptUntilDeleted
+    ? null
+    : new Date(createdAt.getTime() + retentionDays * MILLISECONDS_PER_DAY);
 
-  if (serverNow.getTime() >= expiresAt.getTime()) {
+  if (expiresAt && serverNow.getTime() >= expiresAt.getTime()) {
     fail("failed-precondition", "Generated report has expired.", {
       businessCode: "GENERATED_REPORT_EXPIRED",
       status: "EXPIRED",
@@ -333,7 +337,7 @@ export async function validateGeneratedReport({
     actualContentType,
     actualSize,
     createdAt: createdAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
+    expiresAt: expiresAt ? expiresAt.toISOString() : null,
     environment,
     status: REPORT_READY_STATUS,
   };
@@ -343,6 +347,7 @@ export async function validateGeneratedReport({
     lifecycle,
     parsedPath,
     requireFinalized,
+    keptUntilDeleted,
   );
 
   return {

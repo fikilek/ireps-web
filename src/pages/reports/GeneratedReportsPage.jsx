@@ -204,8 +204,8 @@ export default function GeneratedReportsPage() {
           <p className="eyebrow">Reports</p>
           <h1>Generated Reports</h1>
           <p className="muted">
-            Your managed report artifacts. Reports remain available for up to 3 days,
-            then expire automatically.
+            Your saved reports. The General Monthly Report is kept until you delete
+            it; other reports expire automatically after 3 days.
           </p>
           <Link className="text-link" to="/reports">
             ← Back to Reports
@@ -312,7 +312,7 @@ export default function GeneratedReportsPage() {
                         {formatDateTime(lifecycle.createdAt)}
                       </td>
                       <td style={styles.cell}>
-                        {formatDateTime(lifecycle.expiresAt)}
+                        {lifecycle.expiresAt ? formatDateTime(lifecycle.expiresAt) : "Kept until deleted"}
                       </td>
                       <td style={styles.cell}>
                         <span style={styles.statusBadge}>

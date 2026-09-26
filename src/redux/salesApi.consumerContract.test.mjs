@@ -9,9 +9,9 @@ import * as refs from "../pages/sales/models/salesTbRefsIntegrityModel.js";
 import { salesMapFenceMeters } from "../../functions/targetedBatches/sales-map-fence.js";
 import { polygonFromPoints } from "../../functions/geofences/sales-batch-geometry.js";
 
-async function fixture({ timers = { setTimeout, clearTimeout } } = {}) {
+async function fixture({ timers = { setTimeout, clearTimeout }, navigator = undefined } = {}) {
   const state = { uid: "A", governanceCalls: 0, listeners: [], raw: {}, args: [] };
-  const context = createContext({ console: { info() {}, error() {} }, ...timers, Date, AbortController });
+  const context = createContext({ console: { info() {}, error() {} }, ...timers, Date, AbortController, ...(navigator ? { navigator } : {}) });
   const mocks = {
     "../../functions/salesAllMeters/sales-batch-policy.js": policy,
     "@reduxjs/toolkit/query/react": {
@@ -241,33 +241,43 @@ test("after the server's confirmation, metadata-only events change nothing; real
   api.setSalesReadSession(null);
 });
 
-// WD-R001.6: never an endless spinner. The page's cache entry keeps its own subscription,
-// which keeps the download running, so Try again picks it up.
-test("a Sales read stops waiting after 3 minutes and Try again picks up the running download", async () => {
+// WD-R001.7 (1.2.0): with no connection the read stops at once, and answers with its own words.
+test("a Sales read with no internet connection answers straight away, and says so", async () => {
+  const { api, state, scope } = await fixture({ navigator: { onLine: false } });
+  const result = await api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), { signal: new AbortController().signal });
+  assert.equal(result.error.status, "SALES_LOAD_TIMEOUT");
+  assert.match(result.error.error, /no internet connection.*Try again/);
+  assert.equal(state.listeners.length, 0, "nothing is downloaded while the computer is offline; Try again starts it when the connection is back");
+  api.setSalesReadSession(null);
+});
+
+// WD-R001.7 (1.2.0): the page waits 10 minutes, not 3, and never an endless spinner. The page's cache
+// entry keeps its own subscription, which keeps the download running, so Try again picks it up.
+test("a Sales read waits 10 minutes and Try again picks up the running download", async () => {
   const pendingTimers = [];
   const timers = {
     setTimeout: (run, ms) => { pendingTimers.push({ run, ms, cleared: false }); return pendingTimers.length; },
     clearTimeout: id => { if (pendingTimers[id - 1]) pendingTimers[id - 1].cleared = true; },
   };
-  const runDue = () => { for (const timer of pendingTimers) if (!timer.cleared && !timer.ran && timer.ms !== 180_000) { timer.ran = true; timer.run(); } };
+  const runDue = () => { for (const timer of pendingTimers) if (!timer.cleared && !timer.ran && timer.ms !== 600_000) { timer.ran = true; timer.run(); } };
   const { api, state, scope, snapshot } = await fixture({ timers });
   const endpoint = api.salesApi.definitions.getSalesByLmPcode;
-  assert.equal(api.SALES_LOAD_TIME_LIMIT_MS, 180_000);
+  assert.equal(api.SALES_LOAD_TIME_LIMIT_MS, 600_000);
   endpoint.onCacheEntryAdded(scope("ZA5241"), { updateCachedData() {}, cacheDataLoaded: new Promise(() => {}), cacheEntryRemoved: new Promise(() => {}) });
   const first = endpoint.queryFn(scope("ZA5241"), {});
-  const limit = pendingTimers.find(timer => timer.ms === 180_000 && !timer.cleared);
-  assert.ok(limit, "a 3-minute limit is set");
+  const limit = pendingTimers.find(timer => timer.ms === 600_000 && !timer.cleared);
+  assert.ok(limit, "a 10-minute limit is set");
   limit.run();
   const timedOut = await first;
   assert.equal(timedOut.error.status, "SALES_LOAD_TIMEOUT");
-  assert.match(timedOut.error.error, /did not arrive within 3 minutes.*Try again/);
+  assert.match(timedOut.error.error, /have not arrived after 10 minutes.*Try again/);
   runDue();
   assert.equal(state.listeners[0].stopped, false, "the cache entry's subscription keeps the download going");
   const retry = endpoint.queryFn(scope("ZA5241"), {});
   assert.equal(state.listeners.length, 1, "Try again does not start a second download");
   state.listeners[0].rows(snapshot("LATE", "ZA5241"));
   assert.equal((await retry).data.rows[0].id, "LATE");
-  assert.ok(pendingTimers.filter(timer => timer.ms === 180_000).every(timer => timer.cleared || timer === limit), "a finished read clears its limit");
+  assert.ok(pendingTimers.filter(timer => timer.ms === 600_000).every(timer => timer.cleared || timer === limit), "a finished read clears its limit");
   api.setSalesReadSession(null);
 });
 
@@ -279,9 +289,9 @@ test("without any page holding the Sales, a timed-out download is let go", async
   };
   const { api, state, scope } = await fixture({ timers });
   const first = api.salesApi.definitions.getSalesByLmPcode.queryFn(scope("ZA5241"), {});
-  pendingTimers.find(timer => timer.ms === 180_000).run();
+  pendingTimers.find(timer => timer.ms === 600_000).run();
   await first;
-  for (const timer of pendingTimers) if (!timer.cleared && timer.ms !== 180_000) timer.run();
+  for (const timer of pendingTimers) if (!timer.cleared && timer.ms !== 600_000) timer.run();
   assert.equal(state.listeners[0].stopped, true);
   api.setSalesReadSession(null);
 });

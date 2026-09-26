@@ -447,3 +447,34 @@ test("cleanup fails closed on repeated pagination tokens", async () => {
     "REPORT_RETENTION_PAGE_TOKEN_LOOP",
   );
 });
+
+test("a finished General Monthly Report is kept until someone deletes it (GMR-R003)", async () => {
+  const gmrPath = `generated-reports/user-1/GENERAL_MONTHLY_REPORT/${REPORT_ID}/general_monthly_report_endumeni_2026-08_202609011000.xlsx`;
+  const bucket = new FakeBucket({
+    objects: {
+      [gmrPath]: objectMetadata({
+        timeCreated: "2026-01-01T00:00:00.000Z",
+        metadata: { irepsReportState: "FINALIZED" },
+      }),
+    },
+  });
+
+  const result = await cleanupGeneratedReports({ bucket, projectId: "ireps2", now: NOW });
+
+  assert.equal(result.retained, 1);
+  assert.equal(result.deleted, 0);
+});
+
+test("an unfinished General Monthly Report upload still expires after three days", async () => {
+  const gmrPath = `generated-reports/user-1/GENERAL_MONTHLY_REPORT/${REPORT_ID}/general_monthly_report_endumeni_2026-08_202609011000.xlsx`;
+  const bucket = new FakeBucket({
+    objects: {
+      [gmrPath]: objectMetadata({ metadata: {} }),
+    },
+  });
+
+  const result = await cleanupGeneratedReports({ bucket, projectId: "ireps2", now: NOW });
+
+  assert.equal(result.deleted, 1);
+  assert.equal(bucket.deleted[0], gmrPath);
+});
