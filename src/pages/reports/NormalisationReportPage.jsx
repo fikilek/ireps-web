@@ -274,7 +274,10 @@ export default function NormalisationReportPage() {
         </div>
 
         <div className="stat-card">
-          <span>Top Action</span>
+          {/* "Top Action: None" read as "there is no top action". The value is never
+              translated - it is what the record holds - so the heading carries the
+              meaning instead. Same wording on the anomaly and no-access reports. */}
+          <span>Most common outcome</span>
           <strong>{topAction}</strong>
         </div>
 
@@ -321,7 +324,6 @@ export default function NormalisationReportPage() {
                     <th>Actions</th>
                     <th>Action Count</th>
                     <th>TRNs</th>
-                    <th>Combination Key</th>
                     <th>Updated</th>
                   </tr>
                 ) : (
@@ -331,7 +333,6 @@ export default function NormalisationReportPage() {
                     <th>Total TRNs</th>
                     <th>First Date</th>
                     <th>Last Date</th>
-                    <th>Combination Key</th>
                   </tr>
                 )}
               </thead>
@@ -344,7 +345,6 @@ export default function NormalisationReportPage() {
                         <td>{row.actionsText}</td>
                         <td>{formatNumber(row.actionCount)}</td>
                         <td>{formatNumber(row.trnCount)}</td>
-                        <td>{row.combinationKey}</td>
                         <td>{formatUpdatedAt(row.updatedAt)}</td>
                       </tr>
                     ))
@@ -355,7 +355,6 @@ export default function NormalisationReportPage() {
                         <td>{formatNumber(row.trnCount)}</td>
                         <td>{row.firstDate}</td>
                         <td>{row.lastDate}</td>
-                        <td>{row.combinationKey}</td>
                       </tr>
                     ))}
               </tbody>

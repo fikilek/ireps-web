@@ -315,7 +315,7 @@ export default function AnomalyReportPage() {
         </div>
 
         <div className="stat-card">
-          <span>Top Anomaly</span>
+          <span>Most common anomaly</span>
           <strong>{topAnomalyLabel}</strong>
         </div>
 
