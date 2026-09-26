@@ -58,7 +58,19 @@ const OTHER_ANOMALY_VALUES = new Set([
 // MN-R001: one list for Meter Discovery and Meter Inspection. The phone keeps the
 // same rules in ireps-mobile/src/features/meters/formOptions.js; the two must
 // agree, or a capture that passes on the phone is refused on arrival.
-const NORMALISATION_NONE = "none";
+// MN-R001 1.9.0 (owner, 25 September 2026): the word itself is the value. 1.8.0 kept a
+// lower-case code behind the label and said it would never be migrated; that is reversed.
+// The stored data was converted in the same window as this deploy, because the validator
+// also runs when an existing transaction is derived — so a strict server over unconverted
+// data, or converted data under the old server, refuses that derivation. They ship together.
+// Exported so meterLifecycle/helpers.js uses this one word rather than writing its own
+// copy of it, which is how the third spelling got there in the first place.
+export const NORMALISATION_NONE = "None";
+
+// The one spelling this used to be. Kept for the refusal message only, never accepted:
+// a capture carrying it comes from an app that predates 1.9.0, and the worker is told to
+// update rather than left holding "This action is not on the list".
+const NORMALISATION_NONE_OUTDATED = "none";
 
 const NORMALISATION_ON_SITE_FIXES = Object.freeze([
   "Tamper removed",
@@ -185,6 +197,29 @@ export function validateNormalisation({ anomaly, normalisation }) {
     return {
       code: "NORMALISATION_ACTIONS_REQUIRED",
       message: "Say what was done about this finding.",
+    };
+  }
+
+  // MN-R001 1.9.0: an app that predates the change sends the old spelling of None. It is
+  // refused like anything else off the list, but the worker is told why and what to do —
+  // a refusal a worker cannot act on is a defect even when the refusal itself is right.
+  if (
+    actions.some(
+      (action) =>
+        action !== NORMALISATION_NONE &&
+        action.trim().toLowerCase() === NORMALISATION_NONE_OUTDATED,
+    )
+  ) {
+    // The wording matters as much as the refusal. It must not say "reinstall": the phone's
+    // unsent queue lives in app storage, so reinstalling throws away every capture waiting
+    // to be sent, not just this one. And it must not say "capture this meter again": opening
+    // the saved form on the new app rewrites the old word by itself (the form keeps only
+    // actions that are on the offered list and falls back to None), so the work is not lost
+    // and nobody has to drive back to the meter.
+    return {
+      code: "OUTDATED_APP_NORMALISATION",
+      message:
+        "This capture was made by an older version of the app. Close the app twice to update it, then open this form under Admin, Offline Submission Forms, and send it again. Do not reinstall the app - that would delete work waiting to be sent.",
     };
   }
 

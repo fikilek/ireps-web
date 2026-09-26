@@ -127,7 +127,7 @@ const PARENTS = { countryPcode: "ZA", provincePcode: "ZA5", dmPcode: "ZA524", lm
 const meterWork = (meterNo, trnType, id, erfId = "ERF1") => ({
   id, accessData: { trnType, erfId, erfNo: "100", parents: PARENTS, premise: { id: `PREM_${meterNo}`, address: "1 TEST STREET", propertyType: "ERF RESIDENTIAL" }, access: { hasAccess: "yes", reason: "NAv" } },
   ast: { astData: { astNo: meterNo, astManufacturer: "Conlog", astName: "Model X", meter: { phase: "single", type: "prepaid", category: "Normal", seal: { sealNo: "S-1", comment: "" }, keypad: { serialNo: "K-1", comment: "" }, cb: { size: "60A", comment: "" } } },
-    anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: [] }, ogs: { hasOffGridSupply: "no" }, normalisation: { actionTaken: ["none"] },
+    anomalies: { anomaly: "Meter Ok", anomalyDetail: "Operationally Ok", otherAnomalies: [] }, ogs: { hasOffGridSupply: "no" }, normalisation: { actionTaken: ["None"] },
     location: { placement: "Boundary Wall", gps: { lat: -28.16, lng: 30.23 } } },
   meterType: "electricity", media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto"),
   status: { state: "CONNECTED" }, serviceProvider: { id: "SP1", name: "Test SP" },

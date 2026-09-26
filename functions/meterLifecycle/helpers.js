@@ -2,6 +2,7 @@ import {
   anomalyPhotoRequired,
   applyFixesToFinding,
   buildNormalisationFollowUp,
+  NORMALISATION_NONE,
   normalisationPhotoRequired,
   validateNormalisation,
   validateOtherAnomalies,
@@ -1314,7 +1315,7 @@ function sanitizeElectricityNormalisation(normalisation = {}) {
     ? normalisation.actionTaken
     : normalisation?.actionTaken
       ? [normalisation.actionTaken]
-      : ["none"];
+      : ["None"]; // MN-R001 1.9.0: the word itself is the value.
 
   const actionTaken = rawActions.map((action) => String(action).trim());
   const sanitized = {
@@ -1330,12 +1331,16 @@ function sanitizeElectricityNormalisation(normalisation = {}) {
   return sanitized;
 }
 
+// MN-R001 1.9.0: the word is not upper-cased on the way through. This used to return
+// NONE in capitals - a third spelling of the same thing, which happened to keep working
+// only because it upper-cased the stored value before comparing it. One word means the
+// case-folding goes with it. actionSelect.code stays as it is: that is a code, not a word.
 function getInspectionNormalisationAction(data = {}) {
   const normalisation = getInspectionCapturedAst(data)?.normalisation || {};
   const selectCode = normalizeUpper(normalisation?.actionSelect?.code || "");
-  const actionTaken = normalizeUpper(normalisation?.actionTaken || "");
+  const actionTaken = String(normalisation?.actionTaken || "").trim();
 
-  return selectCode || actionTaken || "NONE";
+  return selectCode || actionTaken || NORMALISATION_NONE;
 }
 
 function getInspectionAnomalyCode(data = {}) {
@@ -1451,15 +1456,19 @@ function sanitizeInspectionCapturedAst(
           // Water keeps what it has until it gets its own rules (MN-R001 s10),
           // but the shape is the same as electricity's: a list of actions, so
           // every reader can treat them alike.
+          // MN-R001 1.9.0: water stores the words as written, exactly as electricity does.
+          // This used to upper-case the whole list, so a water inspection stored NONE and
+          // TAMPER REMOVED while an electricity one stored None and Tamper removed - the
+          // same meaning in two spellings, which no reader could filter with one rule.
           actionTaken: (Array.isArray(capturedAst?.normalisation?.actionTaken)
             ? capturedAst.normalisation.actionTaken
             : [
                 capturedAst?.normalisation?.actionTaken ||
                   capturedAst?.normalisation?.actionSelect?.code ||
-                  "NONE",
+                  NORMALISATION_NONE,
               ]
           )
-            .map((action) => normalizeUpper(action))
+            .map((action) => String(action || "").trim())
             .filter(Boolean),
           actionText:
             selectValueToText(capturedAst?.normalisation?.actionSelect) ||
@@ -1928,7 +1937,7 @@ export function validateMeterInspection({ data, astDoc }) {
   const normalisationAction = getInspectionNormalisationAction(data);
   const wantsNormalisationPhoto = isElectricityMeter
     ? normalisationPhotoRequired(capturedAst?.normalisation?.actionTaken)
-    : normalisationAction !== "NONE";
+    : normalisationAction !== NORMALISATION_NONE;
 
   if (
     wantsNormalisationPhoto &&

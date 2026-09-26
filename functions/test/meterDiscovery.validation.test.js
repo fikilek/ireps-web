@@ -60,7 +60,7 @@ function baseElectricity(overrides = {}) {
         otherAnomalies: [],
       },
       ogs: { hasOffGridSupply: "no" },
-      normalisation: { actionTaken: ["none"] },
+      normalisation: { actionTaken: ["None"] },
       location: {
         placement: "Boundary Wall",
         gps: { lat: -28.16, lng: 30.23 },
@@ -391,7 +391,7 @@ test("normalisation: a shapeless or empty action list is refused", () => {
     "NORMALISATION_ACTIONS_REQUIRED",
   );
   expectCode(
-    deepMerge(baseElectricity(), { ast: { normalisation: { actionTaken: "none" } } }),
+    deepMerge(baseElectricity(), { ast: { normalisation: { actionTaken: "None" } } }),
     "NORMALISATION_ACTIONS_REQUIRED",
   );
   expectCode(
@@ -412,11 +412,23 @@ test("normalisation: Meter Ok keeps none, and none stands alone", () => {
 
   expectCode(
     deepMerge(baseElectricity(), {
-      ast: { normalisation: { actionTaken: ["none", "Tamper removed"] } },
+      ast: { normalisation: { actionTaken: ["None", "Tamper removed"] } },
       media: media(...ELEC_MEDIA, "normalisationPhoto"),
     }),
     "NORMALISATION_NONE_NOT_EXCLUSIVE",
   );
+
+  // MN-R001 1.9.0: the old lower-case spelling is refused, and the worker is told to
+  // update rather than being told the action is not on the list. Any casing that is not
+  // the word itself means the same thing — an app older than the change.
+  for (const outdated of ["none", "NONE", "None "]) {
+    expectCode(
+      deepMerge(baseElectricity(), {
+        ast: { normalisation: { actionTaken: [outdated] } },
+      }),
+      "OUTDATED_APP_NORMALISATION",
+    );
+  }
 
   // Meter Ok asks for nothing, so it can carry no reason for not acting.
   expectCode(
@@ -429,7 +441,7 @@ test("normalisation: Meter Ok keeps none, and none stands alone", () => {
 
 test("normalisation: an illegal connection must be disconnected, or say why not", () => {
   expectCode(
-    illegallyConnected({ actionTaken: ["none"] }),
+    illegallyConnected({ actionTaken: ["None"] }),
     "NORMALISATION_REASON_REQUIRED",
   );
 
@@ -446,7 +458,7 @@ test("normalisation: an illegal connection must be disconnected, or say why not"
 
   expectPass(
     illegallyConnected({
-      actionTaken: ["none"],
+      actionTaken: ["None"],
       noActionReason: "Threatened or chased away",
     }),
   );
@@ -526,7 +538,7 @@ test("normalisation: a damaged or faulty meter must be replaced, or say why not"
         ast: {
           ...finding.ast,
           normalisation: {
-            actionTaken: ["none"],
+            actionTaken: ["None"],
             noActionReason: "No meter available to replace",
           },
         },
@@ -538,14 +550,14 @@ test("normalisation: a damaged or faulty meter must be replaced, or say why not"
 
 test("normalisation: the reason must be one of ours, and Other must be typed out", () => {
   expectCode(
-    illegallyConnected({ actionTaken: ["none"], noActionReason: "Other" }),
+    illegallyConnected({ actionTaken: ["None"], noActionReason: "Other" }),
     "NON_CANONICAL_NO_ACTION_REASON_OTHER",
   );
 
   // Other is replaced by the worker's own words before it is sent.
   expectPass(
     illegallyConnected({
-      actionTaken: ["none"],
+      actionTaken: ["None"],
       noActionReason: "The dog would not let me near the box",
     }),
   );
@@ -618,7 +630,7 @@ test("normalisation metadata exposes the canonical values and the reasons", () =
       "Replace meter",
       "Service point completed",
       "Tamper removed",
-      "none",
+      "None",
     ].sort(),
   );
 
@@ -667,13 +679,13 @@ test("anomaly photo is conditional exactly as the mobile form", () => {
   expectCode(deepMerge(baseElectricity(), {
     ast: {
       anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" },
-      normalisation: { actionTaken: ["none"], noActionReason: "Customer refused" },
+      normalisation: { actionTaken: ["None"], noActionReason: "Customer refused" },
     },
   }), "ANOMALY_PHOTO_REQUIRED");
   expectPass(deepMerge(baseElectricity(), {
     ast: {
       anomalies: { anomaly: "Meter Faulty", anomalyDetail: "Meter Display Blank" },
-      normalisation: { actionTaken: ["none"], noActionReason: "Customer refused" },
+      normalisation: { actionTaken: ["None"], noActionReason: "Customer refused" },
     },
     media: media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "anomalyPhoto"),
   }));
@@ -894,7 +906,7 @@ test("a submission with no anomaly detail keeps the old rule (queued or legacy p
   faulty.ast.anomalies.anomaly = "Meter Faulty";
   faulty.ast.anomalies.anomalyDetail = "Meter Burnt";
   faulty.ast.normalisation = {
-    actionTaken: ["none"],
+    actionTaken: ["None"],
     noActionReason: "No meter available to replace",
   };
   faulty.media.push(...media("anomalyPhoto"));

@@ -213,7 +213,7 @@ export default function NoAccessReportPage() {
         </div>
 
         <div className="stat-card">
-          <span>Top Reason</span>
+          <span>Most common reason</span>
           <strong>{topReason}</strong>
         </div>
 

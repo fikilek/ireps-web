@@ -11,12 +11,12 @@ function safeNumber(value) {
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
 
+// MN-R001 1.9.0 and section 12: no reader translates a value on the way out. This used to
+// map a lower-case none to None, which meant the page showed the right word over the wrong
+// data - so an unconverted record looked converted, and the phone's own report (which does
+// not translate) disagreed with this one about the same bucket.
 function normalizeActionName(action) {
   if (!action || action === "NAv") return "NAv";
-
-  if (String(action).toLowerCase() === "none") {
-    return "None";
-  }
 
   return action;
 }
