@@ -78,8 +78,18 @@ const isOld = (v) =>
 const getIn = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// A document id like ZA5241__2026-08-09__none carries a slug, not a word a person reads.
-// Slugs are lower-cased keys by construction and are left alone, as actionSelect.code is.
+// KEYS ARE NOT WORDS, and these ones stay lower case on purpose. A slug is built by
+// lower-casing and joining, so "none" is its correct form, and code matches on it:
+// src/pages/reports/NormalisationReportPage.jsx:140 tests `combinationKey === "none"`.
+// Converting these would break the report rather than clean it. The completeness walk below
+// finds them - it cannot tell a key from a word - so they are excluded here, by name, with
+// the reason attached. An unexplained exclusion in a data conversion is how a real residual
+// value gets waved through as "expected".
+const KEY_PATHS_LEFT_ALONE = Object.freeze([
+  "report_trn_normalisation.normalisation.combinationKey",
+]);
+
+// A document id like ZA5241__2026-08-09__none carries the same slug, and is likewise left.
 function planFor(data, paths) {
   const update = {};
   for (const p of paths) {
@@ -233,11 +243,20 @@ try {
       }
     }
     console.log(`  ${scanned} documents scanned across ${ORDER.join(", ")}`);
-    if (!residual.size) {
-      console.log(`\nVERIFY PASS — no old value left anywhere in those collections.`);
+
+    const excluded = [...residual].filter(([p]) => KEY_PATHS_LEFT_ALONE.includes(p));
+    const real = [...residual].filter(([p]) => !KEY_PATHS_LEFT_ALONE.includes(p));
+
+    if (excluded.length) {
+      console.log(`\n  keys left lower case on purpose (see KEY_PATHS_LEFT_ALONE):`);
+      for (const [p, n] of excluded) console.log(`  ${String(n).padStart(5)}  ${p}`);
+    }
+
+    if (!real.length) {
+      console.log(`\nVERIFY PASS — no stored WORD left holding the old spelling.`);
     } else {
       console.log(`\nVERIFY FAIL — still holding the old word:`);
-      for (const [p, n] of [...residual].sort((a, b) => b[1] - a[1])) {
+      for (const [p, n] of real.sort((a, b) => b[1] - a[1])) {
         console.log(`  ${String(n).padStart(5)}  ${p}`);
       }
       console.log("\nRe-run the script: a trigger may have re-stamped a bucket.");
