@@ -106,7 +106,7 @@ import {
   validateTargetedBatchMeterDiscoverySubmission,
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { checkBatchWork, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+import { ALLOWED, checkBatchWork, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
 import { recordReplacedMeter } from "./targetedBatches/replacedMeter.js";
 
@@ -3287,7 +3287,33 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       // Marked as recognised by iREPS, never dressed up as the batch path the worker did not take, and
       // carrying no salesDocId: on an ERF where a different meter was found, the row's Sales meter is not
       // the meter being captured, and naming it would point the report at the wrong record.
-      const recognised = batchWorkCheck?.details?.ownRow || batchWorkCheck?.details || null;
+      //
+      // The owner's rule, 26 September: all work is done through batches EXCEPT where there is an illegal
+      // connection. So the batch is carried only when the work really is that batch's own, named code by
+      // code. Never when the gate let an illegally connected meter through at another team's ERF: that
+      // find belongs to whoever made it (TB-R062, TB-R063), and stamping the other team's batch on it
+      // would hand them work they did not do. An illegal-connection find carries no batch, and that is
+      // the one kind of work that is rightly outside them.
+      const carriesItsBatch = new Set([
+        ALLOWED.OWN_TEAM,
+        ALLOWED.OWN_SP,
+        ALLOWED.NOT_ALLOCATED,
+        ALLOWED.ERF_FREE,
+        ALLOWED.ROW_COMPLETED,
+        ALLOWED.VISIBLE,
+      ]);
+      // A row whose work is finished, or whose meter is already found, is named as the batch but not as
+      // the row: there is no open work on it for this capture to belong to.
+      const carriesItsRow = new Set([
+        ALLOWED.OWN_TEAM,
+        ALLOWED.OWN_SP,
+        ALLOWED.NOT_ALLOCATED,
+        ALLOWED.ERF_FREE,
+      ]);
+
+      const recognised = carriesItsBatch.has(batchWorkCheck?.code)
+        ? batchWorkCheck?.details?.ownRow || batchWorkCheck?.details || null
+        : null;
       const recognisedTbId =
         typeof recognised?.tbId === "string" ? recognised.tbId.trim() : "";
 
@@ -3295,7 +3321,9 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         safePayload.targetedBatchContext = {
           tbId: recognisedTbId,
           rowId:
-            typeof recognised?.rowId === "string" && recognised.rowId.trim()
+            carriesItsRow.has(batchWorkCheck?.code) &&
+            typeof recognised?.rowId === "string" &&
+            recognised.rowId.trim()
               ? recognised.rowId.trim()
               : null,
           erfId: data?.accessData?.erfId || null,

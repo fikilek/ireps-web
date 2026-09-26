@@ -35,6 +35,28 @@ test("the batch the guard recognised is carried when the phone sent none", () =>
   assert.match(capture, /if \(recognisedTbId\) \{/);
 });
 
+test("an illegal connection carries no batch — the one work rightly outside them", () => {
+  // The owner, 26 September: all work is done through batches EXCEPT where there is an illegal
+  // connection. A worker on batch work who stumbles across one records it, and that find belongs to
+  // them (TB-R062, TB-R063) — not to the team whose ERF it sits on. Stamping that team's batch on it
+  // would hand them work they did not do, and would hide the one honest reason for work with no batch.
+  assert.match(capture, /const carriesItsBatch = new Set\(\[/);
+  const named = capture.slice(capture.indexOf("const carriesItsBatch"), capture.indexOf("const carriesItsRow"));
+  for (const code of ["OWN_TEAM", "OWN_SP", "NOT_ALLOCATED", "ERF_FREE", "ROW_COMPLETED", "VISIBLE"]) {
+    assert.match(named, new RegExp(`ALLOWED\.${code},`), `${code} is this batch's own work`);
+  }
+  assert.doesNotMatch(named, /ILLEGAL_CONNECTION/, "an illegal connection never carries a batch");
+  // And it is read from the code, not merely from whatever the details happen to hold.
+  assert.match(capture, /carriesItsBatch\.has\(batchWorkCheck\?\.code\)/);
+});
+
+test("a finished row is named as the batch but not as the row", () => {
+  // There is no open work on it for this capture to belong to.
+  const forRow = capture.slice(capture.indexOf("const carriesItsRow"), capture.indexOf("const recognised ="));
+  assert.doesNotMatch(forRow, /ROW_COMPLETED|VISIBLE/);
+  assert.match(capture, /carriesItsRow\.has\(batchWorkCheck\?\.code\) &&/);
+});
+
 test("a recognised batch is never dressed up as the batch path the worker did not take", () => {
   assert.match(capture, /recognisedBy: "IREPS"/);
   assert.match(capture, /rule: "GMR-R038"/);
