@@ -289,10 +289,6 @@ export default function GeneralMonthlyReportPage() {
               />
             </div>
           )}
-          <div>
-            <div className="muted">Workbook</div>
-            <strong>Field Data and Field Stats</strong>
-          </div>
         </div>
 
         <div>
