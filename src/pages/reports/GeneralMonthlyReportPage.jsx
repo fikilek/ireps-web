@@ -307,6 +307,17 @@ export default function GeneralMonthlyReportPage() {
               : isGeneralReport ? "Choose a start and end date" : "Choose a reporting month"}
           </button>
         </div>
+
+        <button
+          type="button"
+          style={styles.helpButton}
+          onClick={() => setHelpOpen(true)}
+          onMouseEnter={() => setHelpOpen(true)}
+          aria-label="What these two reports are"
+          title="What these two reports are"
+        >
+          ?
+        </button>
       </section>
 
       {result ? (
@@ -389,17 +400,6 @@ export default function GeneralMonthlyReportPage() {
           escapeAction={() => setPhase("idle")}
         />
       ) : null}
-      <button
-        type="button"
-        style={styles.helpButton}
-        onClick={() => setHelpOpen(true)}
-        onMouseEnter={() => setHelpOpen(true)}
-        aria-label="What these two reports are"
-        title="What these two reports are"
-      >
-        ?
-      </button>
-
       {helpOpen ? (
         <div
           style={styles.helpOverlay}
@@ -482,9 +482,9 @@ const styles = {
   // The page explains itself behind a "?" rather than on the panel, so the
   // panel holds only what a manager has to choose (owner, 26 September 2026).
   helpButton: {
-    position: "fixed",
-    right: "24px",
-    bottom: "24px",
+    position: "absolute",
+    right: "16px",
+    bottom: "16px",
     width: "44px",
     height: "44px",
     borderRadius: "50%",
@@ -525,6 +525,7 @@ const styles = {
     margin: "18px 0 6px",
   },
   configPanel: {
+    position: "relative",
     display: "grid",
     gap: "20px",
   },
