@@ -190,7 +190,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   const after = sheet.slice(25).filter((cells) => cells.length);
   assert.deepEqual(after[0], ["SEPTEMBER 2026 - CONTROL LINES"]);
   assert.deepEqual(after[1], ["ITEM", "CONTROL LINE", "COUNT"]);
-  assert.equal(after.length, 2 + 7, "seven control lines, and nothing else");
+  assert.equal(after.length, 2 + 8, "eight control lines since GMR-R019 1.7.0 split the work without a batch, and nothing else");
   assert.equal(after[2][1], "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)");
   assert.equal(after.at(-1)[1], "WORKERS WHOSE TEAM COULD NOT BE RESOLVED");
 });
@@ -289,6 +289,24 @@ test("the control lines count unplaced work, meters off the vending list, and st
   assert.equal(control["TRANSACTIONS WITH NO SALES CATEGORY"], 2, "water is never on the vending list");
   assert.equal(control["MISSING GPS, PHOTOGRAPH OR NORMALISATION ANSWER"], 1);
   assert.equal(control["WORKERS WHOSE TEAM COULD NOT BE RESOLVED"], 1);
+});
+
+test("an illegal connection found without a batch is allowed, and the rest is the number to question", () => {
+  // GMR-R019 1.7.0: the owner allows a worker who stumbles across an illegal
+  // connection to capture it there and then, so that find carries no batch.
+  const rows = [
+    row({ trnId: "A", batchId: "AD HOC", primaryFinding: "Illegally Connected", findingDetail: "Bypassed" }),
+    row({ trnId: "B", batchId: "AD HOC", primaryFinding: "Illegally Connected", findingDetail: "Direct connection" }),
+    row({ trnId: "C", batchId: "AD HOC" }),
+    row({ trnId: "D", batchId: "TB_9", primaryFinding: "Illegally Connected", findingDetail: "Bypassed" }),
+  ];
+  const control = Object.fromEntries(
+    buildGmrFieldStatsModel(makeDataset(rows)).controlLines.map((line) => [line.label, line.count]),
+  );
+
+  assert.equal(control["ILLEGAL CONNECTIONS FOUND WITHOUT A BATCH (ALLOWED)"], 2);
+  assert.equal(control["OTHER TRANSACTIONS WITHOUT A BATCH (EXPECTED 0)"], 1, "the healthy meter captured off a batch is the one to question");
+  assert.equal(control["ILLEGAL CONNECTIONS FOUND WITHOUT A BATCH (ALLOWED)"] + control["OTHER TRANSACTIONS WITHOUT A BATCH (EXPECTED 0)"], 3);
 });
 
 test("the saved report names the month and counts its transactions", () => {

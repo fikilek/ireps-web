@@ -41,6 +41,8 @@ const NOT_AVAILABLE = "Not Available";
 // else recorded follows them, which is where No Access appears.
 const ZAMO_METER_STATUS_ORDER = ["Illegally Connected", "Meter Damaged", "Meter Faulty", "Meter Ok"];
 
+const ILLEGAL_CONNECTION = "Illegally Connected";
+
 // The owner's layout: NONE first, then each finding that called for work with
 // what was done, and a healthy meter's own fix last.
 const NORMALISATION_FINDING_ORDER = ["Meter Ok", "Illegally Connected", "Meter Damaged", "Meter Faulty"];
@@ -277,9 +279,18 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     rows.filter((item) => ["Unassigned", "Multiple"].includes(teamOf(item))).map(workerOf),
   );
 
+  // GMR-R019 (1.7.0): all work is done through batches except where there is an
+  // illegal connection. A worker who finds one while working a batch may
+  // capture it there and then, and that capture carries no batch — so it is
+  // counted on its own line and never against the work that has no business
+  // being outside a batch (owner, 26 September 2026).
+  const withoutBatch = rows.filter((item) => text(item?.batchId) === "AD HOC");
+  const illegalWithoutBatch = withoutBatch.filter((item) => zamoMeterStatus(item) === ILLEGAL_CONNECTION);
+
   const controlLines = [
     { label: "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)", count: unplaced.length },
-    { label: "TRANSACTIONS WITHOUT A BATCH (AD HOC)", count: rows.filter((item) => text(item?.batchId) === "AD HOC").length },
+    { label: "ILLEGAL CONNECTIONS FOUND WITHOUT A BATCH (ALLOWED)", count: illegalWithoutBatch.length },
+    { label: "OTHER TRANSACTIONS WITHOUT A BATCH (EXPECTED 0)", count: withoutBatch.length - illegalWithoutBatch.length },
     { label: "METERS FOUND THAT ARE NOT ON THE VENDING LIST", count: distinctMeters(electricityFound.filter((item) => item?.onVendingList === "No")) },
     {
       label: "VISIBILITY MARK THAT DISAGREES WITH SALES",
