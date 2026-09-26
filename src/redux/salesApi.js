@@ -17,11 +17,16 @@ import {
 
 const SALES_COLLECTION = "sales-all-meters";
 const STREAM_RELEASE_DELAY_MS = 1_000;
-// Web Data Copy rules WD-R001.6: a page that shows Sales stops waiting after 3 minutes.
-export const SALES_LOAD_TIME_LIMIT_MS = 180_000;
+// Web Data Copy rules WD-R001.7 (1.2.0): a page that shows Sales keeps waiting while the computer is
+// online, and stops only when there is no internet connection, or after 10 minutes.
+export const SALES_LOAD_TIME_LIMIT_MS = 600_000;
 export const SALES_LOAD_TIMEOUT_ERROR = Object.freeze({
   status: "SALES_LOAD_TIMEOUT",
-  error: "The Sales records did not arrive within 3 minutes. Check the internet connection, then press Try again.",
+  error: "The Sales records have not arrived after 10 minutes. Check the internet connection, then press Try again.",
+});
+export const SALES_LOAD_OFFLINE_ERROR = Object.freeze({
+  status: "SALES_LOAD_TIMEOUT",
+  error: "This computer has no internet connection, so the Sales records cannot be read. Reconnect, then press Try again.",
 });
 const MAX_UPDATE_DIAGNOSTIC_LOGS = 10;
 
@@ -662,8 +667,16 @@ function createSalesStream(scope) {
     },
   );
 
+  stream.startedAtMs = Date.now();
   salesStreams.set(stream.key, stream);
   return stream;
+}
+
+// WD-R001.6 (1.2.0): when a page started reading these Sales, so a page opened later in the same
+// read shows the true time, not its own.
+export function salesReadStartedAtMs(scope) {
+  if (!scope || typeof scope !== "object") return 0;
+  return salesStreams.get(salesStreamKey(scope))?.startedAtMs || 0;
 }
 
 function getOrCreateSalesStream(scope) {
@@ -751,13 +764,13 @@ function readInitialSalesStream(scope, signal) {
       resolve(result);
     };
 
-    // WD-R001.6: never an endless spinner. The cache entry's own subscription
-    // keeps the download going, so Try again shows the rows once they arrive.
+    // WD-R001.7: never an endless spinner, and never a failure while the records are still coming.
+    // The cache entry's own subscription keeps the download going, so Try again shows the rows once
+    // they arrive. Losing the connection stops the wait at once; otherwise it runs for 10 minutes.
     const timeLimit = setTimeout(
       () => finish({ error: SALES_LOAD_TIMEOUT_ERROR }),
       SALES_LOAD_TIME_LIMIT_MS,
     );
-
     const handleAbort = () => {
       finish({
         error: {
@@ -773,6 +786,12 @@ function readInitialSalesStream(scope, signal) {
     }
 
     signal?.addEventListener("abort", handleAbort, { once: true });
+
+    // WD-R001.7: with no connection there is nothing to wait for; say so at once.
+    if (typeof navigator === "object" && navigator?.onLine === false) {
+      finish({ error: SALES_LOAD_OFFLINE_ERROR });
+      return;
+    }
 
     const streamUnsubscribe = subscribeToSalesStream(
       scope,

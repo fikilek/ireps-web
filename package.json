@@ -20,7 +20,8 @@
     "test:storage-rules": "firebase emulators:exec --config firebase.storage-rules-test.json --project demo-ireps-report-platform --only storage \"node --test test/storage.rules.test.mjs\"",
     "check:functions": "node --check functions/index.js && node --check functions/meterLifecycle/helpers.js && node --check functions/meterLifecycle/callables.js && node --check functions/meterLifecycle/instructionCallable.js && node --check functions/meterLifecycle/acceptRejectCallable.js && node --check functions/meterLifecycle/manageInstructionCallable.js",
     "ci:verify-web-env": "node scripts/ci/verify-web-env.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "ci:verify-form-colours": "node scripts/ci/verify-form-colours.mjs"
   },
   "dependencies": {
     "@googlemaps/markerclusterer": "^2.6.2",
