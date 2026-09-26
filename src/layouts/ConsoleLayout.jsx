@@ -221,6 +221,11 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            label: "General Report",
+            path: "/reports/general-report",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "Generated Reports",
             path: "/reports/generated",
             allowedRoles: MANAGEMENT_ROLES,

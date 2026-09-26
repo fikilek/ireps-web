@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 
 import { functions } from "../../firebase";
@@ -16,6 +16,13 @@ import { getDefaultReportMonth } from "./generalMonthlyReportMonthModel.js";
 const GMR_LM_PCODE = "ZA5241";
 const GMR_GENERATION_MODE = "MONTHLY_GMR";
 const GR_GENERATION_MODE = "GENERAL_REPORT";
+
+// GMR-R037: one page carries both reports, and the Reports menu has an entry
+// for each of them, so which report it is stands in the address (owner, 26
+// September 2026). Zamo asked for the free date range and would never have
+// looked for it inside a page whose name says Monthly.
+const GMR_PAGE_PATH = "/reports/general-monthly";
+const GR_PAGE_PATH = "/reports/general-report";
 
 const STEP_ORDER = ["READ", "BUILD", "SAVE", "DOWNLOAD"];
 
@@ -98,8 +105,13 @@ function failureLines(step, error) {
 
 export default function GeneralMonthlyReportPage() {
   const navigate = useNavigate();
-  // GMR-R037: one choice first, then only what that choice needs.
-  const [reportKind, setReportKind] = useState("GMR");
+  const location = useLocation();
+  // GMR-R037: one choice first, then only what that choice needs. The address
+  // holds the choice, so the menu entry, the heading and this selector can
+  // never disagree, and either report can be linked to directly.
+  const reportKind = location.pathname.startsWith(GR_PAGE_PATH) ? "GR" : "GMR";
+  const chooseReportKind = (value) =>
+    navigate(value === "GR" ? GR_PAGE_PATH : GMR_PAGE_PATH, { replace: true });
   const [reportMonth, setReportMonth] = useState(() => getDefaultReportMonth());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -214,7 +226,7 @@ export default function GeneralMonthlyReportPage() {
             <select
               id="gmr-report-kind"
               value={reportKind}
-              onChange={(event) => setReportKind(event.target.value)}
+              onChange={(event) => chooseReportKind(event.target.value)}
               disabled={phase === "working"}
               style={styles.monthInput}
             >

@@ -380,6 +380,16 @@ export default function AppRoutes() {
             }
           />
 
+          {/* GMR-R037: the same page with the General Report already chosen. */}
+          <Route
+            path="/reports/general-report"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <GeneralMonthlyReportPage />
+              </RoleRoute>
+            }
+          />
+
           <Route
             path="/reports/anomaly"
             element={
