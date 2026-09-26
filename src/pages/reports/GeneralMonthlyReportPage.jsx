@@ -308,7 +308,6 @@ export default function GeneralMonthlyReportPage() {
           type="button"
           style={styles.helpButton}
           onClick={() => setHelpOpen(true)}
-          onMouseEnter={() => setHelpOpen(true)}
           aria-label="What these two reports are"
           title="What these two reports are"
         >
