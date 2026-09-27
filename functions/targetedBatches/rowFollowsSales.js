@@ -10,6 +10,7 @@
 // exactly what to write; timestamps are compared as milliseconds and turned back into the caller's Timestamps.
 // The close/remove writes are copied from the one-off LIVE tool functions/scripts/tb-old-batch-cleanup (planner.js,
 // cleanup.mjs), which production code must not import, and from the production batch completion (premiseLink.js).
+import { LAST_ACTIVITY_KINDS, laterActivityPatch } from "./lastActivity.js";
 import { resolveSalesTargetedBatchMembership, exactSalesTbRef, inspectSalesTbRefsIntegrity, classifySalesWorkStatus, timestampMillis, nonblank } from "../salesAllMeters/sales-batch-policy.js";
 import { buildSalesAllMetersOperationalMetadataPatch } from "../salesAllMeters/helpers.js";
 import { teamOnDate, isBatchTrn } from "../teams/field-work-summary.js";
@@ -356,7 +357,8 @@ export function buildRowFollowsSalesWrites(plan, facts, { ts, now, serverTime })
       { op: "update", path: salesPath, data: { tbRefs: tbRefsAfter, ...salesMeta } },
       // Only derived.targetedBatch: the find then counts once in the Allocation Matrix, under Completed (batches) (TB-R045).
       { op: "update", path: `trns/${plan.trnId}`, data: { "derived.targetedBatch": trnMark(plan, after.status === "COMPLETED") } },
-      { op: "update", path: parentPath, data: patch },
+      // TB-R069 (1.3.87): a meter that completes a row is batch activity; a row going out of the batch is not.
+      { op: "update", path: parentPath, data: { ...patch, ...laterActivityPatch(parent, LAST_ACTIVITY_KINDS.METER, plan.completedAtMs, ts(plan.completedAtMs), finder) } },
       { op: "create", path: `${parentPath}/history/ROW_CLOSED__${plan.rowId}`, data: { event: ROW_CLOSED_EVENT, ...common, rowBefore: plainRow(row), rowAfter: fields,
         findType: plan.findType ?? "METER_DISCOVERY", premiseKept: plan.premiseKept, foundBeforeRowStart: plan.foundBeforeRowStart ?? false, findPremiseId: plan.findPremiseId, rowErfId: plan.rowErfId, findErfId: plan.findErfId, foundOnOtherErf: plan.foundOnOtherErf, warnings: after.warnings || [],
         note: `Meter ${plan.salesId} became Visible, found by ${ownFindText} for ${matchedText}, which the batch is allocated to; the row is closed as Completed${plan.findType === "METER_INSTALLATION" ? " (found by a Meter Installation)" : ""}${plan.foundOnOtherErf ? ", found on another ERF" : ""}${plan.foundBeforeRowStart ? `, at the row's start ${new Date(plan.completedAtMs).toISOString()} because the row was started after the find` : ""} (rules ${RULES_VERSION}, ${RULE})` } },

@@ -1,3 +1,4 @@
+import { LAST_ACTIVITY_KINDS, lastActivityPatch } from "./lastActivity.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -305,6 +306,8 @@ function buildAcceptanceDecisionPatch({
     "metadata.updatedAt": now,
     "metadata.updatedByUid": actor.uid,
     "metadata.updatedByUser": actor.name,
+    // TB-R069 (1.3.87): accepting is batch activity; rejecting is not.
+    ...(isAccept ? lastActivityPatch(LAST_ACTIVITY_KINDS.ACCEPTED, now, actor) : {}),
   };
 }
 

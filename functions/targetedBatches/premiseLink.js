@@ -1,3 +1,4 @@
+import { LAST_ACTIVITY_KINDS, lastActivityPatch } from "./lastActivity.js";
 import { assertSalesBatchExecutionMembership, readTbRefBatchId, exactSalesTbRef } from "../salesAllMeters/sales-batch-policy.js";
 import { Timestamp } from "firebase-admin/firestore";
 
@@ -953,7 +954,19 @@ export async function createOrLinkTargetedBatchPremise({
           readNonNegativeInteger(parent?.counts?.executionStartedRows) + 1;
       }
 
-      transaction.update(parentRef, parentPatch);
+      transaction.update(parentRef, {
+        ...parentPatch,
+        ...lastActivityPatch(LAST_ACTIVITY_KINDS.PREMISE, now, { uid: actorUid, user: actorName }),
+      });
+    } else {
+      // TB-R069 (1.3.87): a premise joined to a row (made, picked or swapped) is batch activity even when the
+      // batch and the row are already In Progress (before 1.3.87 such a save did not touch the batch).
+      transaction.update(parentRef, {
+        "metadata.updatedAt": now,
+        "metadata.updatedByUid": actorUid,
+        "metadata.updatedByUser": actorName,
+        ...lastActivityPatch(LAST_ACTIVITY_KINDS.PREMISE, now, { uid: actorUid, user: actorName }),
+      });
     }
 
     if (!salesTbRefResult.alreadyLinked) {
@@ -1794,6 +1807,8 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     "metadata.updatedAt": now,
     "metadata.updatedByUid": actorUid,
     "metadata.updatedByUser": actorName,
+    // TB-R069 (1.3.87): a meter that completes a row on the Sales Path.
+    ...lastActivityPatch(LAST_ACTIVITY_KINDS.METER, now, { uid: actorUid, user: actorName }),
   };
 
   if (rowStatus === "NOT_STARTED") {

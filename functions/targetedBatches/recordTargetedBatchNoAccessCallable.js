@@ -1,3 +1,4 @@
+import { LAST_ACTIVITY_KINDS, lastActivityPatch } from "./lastActivity.js";
 import { assertSalesBatchExecutionMembership, exactSalesTbRef } from "../salesAllMeters/sales-batch-policy.js";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { onCall } from "firebase-functions/v2/https";
@@ -404,6 +405,8 @@ export async function recordTargetedBatchNoAccess({db, request, now = Timestamp.
       "metadata.updatedAt": now,
       "metadata.updatedByUid": actor.uid,
       "metadata.updatedByUser": actor.name,
+      // TB-R069 (1.3.87)
+      ...lastActivityPatch(LAST_ACTIVITY_KINDS.NO_ACCESS, now, actor),
     };
     if (parentStatus === "NOT_STARTED" || rowStatus === "NOT_STARTED") {
       // Rules section 14: the batch is In Progress once field work starts on any row.

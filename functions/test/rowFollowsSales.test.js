@@ -405,3 +405,18 @@ test("a policy error is logged, never thrown", () => {
   assert.deepEqual([r.decision, r.code, r.detail], [DECISIONS.LOG, "POLICY_ERROR", "boom"]);
   assert.deepEqual(buildRowFollowsSalesWrites({ decision: DECISIONS.NONE }, facts(), options), []);
 });
+
+test("TB-R069: a Normal Path close is batch activity (Meter); a row going out of the batch is not", () => {
+  const f = facts();
+  const close = buildRowFollowsSalesWrites(decideRowFollowsSales(f), f, options).find(w => w.path === `tb_uploads/${TB}`).data;
+  assert.equal(close.lastActivity.kind, "METER");
+  assert.equal(close.lastActivity.at.toMillis(), FIND_MS, "at the find, not the moment the rule ran");
+  assert.deepEqual([close.lastActivity.byUid, close.lastActivity.byUser], ["FWR1", "Field Worker"]);
+  // A close decided when the batch is accepted after the find never hides the later Accepted.
+  const accepted = facts({ parent: { ...f.parent, lastActivity: { at: ts(FIND_MS + 60000), kind: "ACCEPTED" } } });
+  const later = buildRowFollowsSalesWrites(decideRowFollowsSales(accepted), accepted, options).find(w => w.path === `tb_uploads/${TB}`).data;
+  assert.equal(Object.hasOwn(later, "lastActivity"), false);
+  const other = facts({ finderProfile: { ...f.finderProfile, employment: { role: "FWR", serviceProvider: { id: "SP9", name: "Other SP" } } }, memberHistory: [] });
+  const removal = buildRowFollowsSalesWrites(decideRowFollowsSales(other), other, options).find(w => w.op === "update" && w.path === `tb_uploads/${TB}`);
+  if (removal) assert.equal(Object.hasOwn(removal.data, "lastActivity"), false);
+});

@@ -32,7 +32,8 @@ const ALL_FILTER = "ALL";
 const ALLOCATION_STATES = ["Allocated", "Unallocated"];
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 5;
-const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
+// Targeted Batch rules TB-R069 (1.3.87): the batch last worked on is on top.
+const DEFAULT_SORT = { key: "lastActivity", direction: "desc" };
 
 const EMPTY_FILTERS = {
   batchId: "",
@@ -594,6 +595,11 @@ export default function SalesReportingPage() {
     const rows = [...filteredBatches];
 
     rows.sort((left, right) => {
+      // TB-R069 (1.3.87): a batch with no activity yet is always last, whichever way the column is sorted.
+      if (sortConfig.key === "lastActivity") {
+        const missing = Number(!left?.lastActivityAtMs) - Number(!right?.lastActivityAtMs);
+        if (missing !== 0) return missing;
+      }
       const comparison = compareNatural(
         getSortValue(left, sortConfig.key),
         getSortValue(right, sortConfig.key),
@@ -638,7 +644,8 @@ export default function SalesReportingPage() {
       if (current.direction === "asc") {
         return { key: sortKey, direction: "desc" };
       }
-      return DEFAULT_SORT;
+      // The default column itself would otherwise be stuck on newest first.
+      return sortKey === DEFAULT_SORT.key ? { key: sortKey, direction: "asc" } : DEFAULT_SORT;
     });
   }
 
@@ -1098,7 +1105,11 @@ export default function SalesReportingPage() {
                           Open Report
                         </Link>
                       </td>
-                      <td>{formatDateTime(batch?.lastActivityAtMs)}</td>
+                      <td>
+                        {batch?.lastActivityAtMs
+                          ? `${formatDateTime(batch.lastActivityAtMs)} · ${batch.lastActivityLabel || "NAv"}`
+                          : "NAv"}
+                      </td>
                     </tr>
                   );
                 })}

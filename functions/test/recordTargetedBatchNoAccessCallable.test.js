@@ -374,3 +374,12 @@ test("reason, photo, timestamp, location, and source validation reject early", a
 test("No Access rejects null, blank, boolean and nonnumeric field GPS with no writes",async()=>{
  for(const lat of [null,"",false,"-28.5",NaN]){const db=new FakeDb(fixture());await assert.rejects(record(db,request({location:{gps:{lat,lng:30.5}}})));assert.equal(db.writes.length,0);}
 });
+
+test("TB-R069: a no access is batch activity, written with the batch", async () => {
+  const db = new FakeDb(fixture());
+  await record(db);
+  const lastActivity = db.read(`tb_uploads/${TB}`).lastActivity;
+  assert.equal(lastActivity.kind, "NO_ACCESS");
+  assert.equal(lastActivity.byUid, "U1");
+  assert.ok(lastActivity.at, "the time is written");
+});

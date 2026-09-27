@@ -134,20 +134,22 @@ function getProgress(counts = {}) {
   };
 }
 
+// Targeted Batch rules TB-R069 (1.3.87): the batch's own lastActivity, written only by the five events
+// (allocated, accepted, premise, no access, meter). No guess from other dates: a batch without it has none.
+const LAST_ACTIVITY_LABELS = Object.freeze({
+  ALLOCATED: "Allocated",
+  ACCEPTED: "Accepted",
+  PREMISE: "Premise",
+  NO_ACCESS: "No Access",
+  METER: "Meter",
+});
+
 function getBatchLastActivityAtMs(batch = {}) {
-  return [
-    batch?.metadata?.updatedAt,
-    batch?.execution?.completedAt,
-    batch?.execution?.startedAt,
-    batch?.acceptance?.acceptedAt,
-    batch?.acceptance?.rejectedAt,
-    batch?.allocation?.completedAt,
-    batch?.metadata?.createdAt,
-  ].reduce(
-    (latestMilliseconds, value) =>
-      Math.max(latestMilliseconds, toMillis(value)),
-    0,
-  );
+  return toMillis(batch?.lastActivity?.at) || null;
+}
+
+function getBatchLastActivityLabel(batch = {}) {
+  return LAST_ACTIVITY_LABELS[normalizeUpper(batch?.lastActivity?.kind)] || null;
 }
 
 export function normalizeTargetedBatchHeader(id, batch = {}) {
@@ -225,6 +227,7 @@ export function normalizeTargetedBatchHeader(id, batch = {}) {
     createdAtMs: toMillis(batch?.metadata?.createdAt),
     updatedAtMs: toMillis(batch?.metadata?.updatedAt),
     lastActivityAtMs: getBatchLastActivityAtMs(batch),
+    lastActivityLabel: getBatchLastActivityLabel(batch),
   };
 }
 

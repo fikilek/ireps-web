@@ -28,6 +28,7 @@
 // Everything is one transaction per Sales meter, reads before writes, with deterministic history IDs, so a
 // repeat writes nothing (as TB-R056 does). The work itself is already committed when this runs, so a
 // failure here is never allowed to fail the worker's submission: it is logged for the office instead.
+import { LAST_ACTIVITY_KINDS, laterActivityPatch } from "./lastActivity.js";
 import {
   classifySalesWorkStatus, exactSalesTbRef, inspectDifferentMeterFound, inspectSalesTbRefsIntegrity,
   inspectSavedErfDecision, nonblank, resolveSalesTargetedBatchMembership, singlePipelineErf,
@@ -329,7 +330,8 @@ export function buildDifferentMeterAtErfWrites(plan, facts, { ts, now, serverTim
   if (plan.creditedToBatch === true && !facts.trnAlreadyLinked) {
     writes.push({ op: "update", path: `trns/${find.trnId}`, data: { "derived.targetedBatch": trnMark({ ...plan, salesId: plan.salesId, premiseId: plan.premiseId, astId: plan.astId, trnId: find.trnId }, plan.after.status === "COMPLETED") } });
   }
-  writes.push({ op: "update", path: `${TARGETED_BATCH_COLLECTIONS.uploads}/${plan.tbId}`, data: patch });
+  // TB-R069 (1.3.87): the different meter completes the row, so it is batch activity.
+  writes.push({ op: "update", path: `${TARGETED_BATCH_COLLECTIONS.uploads}/${plan.tbId}`, data: { ...patch, ...laterActivityPatch(parent, LAST_ACTIVITY_KINDS.METER, plan.completedAtMs ?? find.findAtMs, ts(plan.completedAtMs ?? find.findAtMs), finder) } });
   writes.push({ op: "create", path: `${TARGETED_BATCH_COLLECTIONS.uploads}/${plan.tbId}/history/ROW_CLOSED__${plan.rowId}`, data: {
     event: ROW_CLOSED_EVENT, rule: RULE, rulesVersion: RULES_VERSION, runId: `${RULE}:${find.trnId}`,
     tbId: plan.tbId, rowId: plan.rowId, rowNo: plan.rowNo ?? null, salesId: plan.salesId,

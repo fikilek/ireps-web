@@ -1,3 +1,4 @@
+import { LAST_ACTIVITY_KINDS, lastActivityPatch } from "./lastActivity.js";
 import { readBatchActor, snapshotReader } from "./sales-batch-resolution.js";
 import { readRowsTakenOut } from "./rowFollowsSales.js";
 import { onCall } from "firebase-functions/v2/https";
@@ -670,6 +671,8 @@ function applyNonGpsBatchAllocation({ transaction, parentRef, plan, actorUid, co
     "metadata.updatedAt": completedAt,
     "metadata.updatedByUid": actorUid,
     "metadata.updatedByUser": actorName,
+    // TB-R069 (1.3.87)
+    ...lastActivityPatch(LAST_ACTIVITY_KINDS.ALLOCATED, completedAt, { uid: actorUid, user: actorName }),
   });
 
   return updatedRows;
@@ -1212,6 +1215,8 @@ export const onAllocateTargetedBatchCallable = onCall(
         "metadata.updatedAt": completedAt,
         "metadata.updatedByUid": actorUid,
         "metadata.updatedByUser": actorName,
+        // TB-R069 (1.3.87)
+        ...lastActivityPatch(LAST_ACTIVITY_KINDS.ALLOCATED, completedAt, { uid: actorUid, user: actorName }),
       });
 
       logger.info("onAllocateTargetedBatchCallable -- COMPLETED", {

@@ -459,3 +459,10 @@ test("a premise with no row of its own leaves the ERF to answer, as before", asy
 
   assert.deepEqual(results.map((result) => result.salesId).sort(), [EXPECTED, GPS_METER].sort());
 });
+
+test("TB-R069: a different meter that closes the row is batch activity (Meter)", () => {
+  const writes = writesOf(decideDifferentMeterAtErf(facts()));
+  const parent = writes.find(write => write.op === "update" && write.path.startsWith("tb_uploads/")).data;
+  assert.equal(parent.lastActivity.kind, "METER");
+  assert.equal(parent.lastActivity.at.toMillis(), FIND_MS, "at the find");
+});
