@@ -420,3 +420,44 @@ test("TB-R069: a Normal Path close is batch activity (Meter); a row going out of
   const removal = buildRowFollowsSalesWrites(decideRowFollowsSales(other), other, options).find(w => w.op === "update" && w.path === `tb_uploads/${TB}`);
   if (removal) assert.equal(Object.hasOwn(removal.data, "lastActivity"), false);
 });
+
+// Rules 1.3.88: a batch the server recognised is not a capture made from a batch row.
+//
+// Since 1.3.86 every capture on a batched ERF is stamped with the batch the server recognised. This rule
+// then stood down on the very finds it exists to close, logging TB_R056_TRN_ALREADY_BATCH, so a meter found
+// on the Normal Path went VISIBLE while its row stayed Not Started. Proved on DEV three times by the owner
+// on 2026-09-28: ERF 292 in batch S1E5, ERFs 5278 and 5276 in batch OXIN. No test at any level covered a
+// capture through to its row, before or after 1.3.86. These are those tests.
+const recognised = { tbId: TB, rowId: "TBR_20260913_120000_AB12_000001", erfId: "ERF1", premiseId: "PREM1", recognisedBy: "IREPS", rule: "GMR-R038" };
+
+test("a find the server merely recognised still closes its row", () => {
+  const f = facts();
+  const r = decideRowFollowsSales({ ...f, trn: { ...f.trn, targetedBatchContext: recognised } });
+
+  assert.equal(r.decision, DECISIONS.CLOSE, "a Normal Path find on a batched ERF must close its row");
+  assert.equal(r.outcome, OUTCOME.DISCOVERED);
+  assert.equal(r.rowId, "TBR_20260913_120000_AB12_000001");
+});
+
+test("a find made from the batch row is still left alone", () => {
+  const f = facts();
+  const salesPath = { tbId: TB, rowId: "TBR_20260913_120000_AB12_000001", sourceModule: "SALES_TARGETED_BATCH", operationType: "METER_DISCOVERY", salesDocId: SALES };
+  const r = decideRowFollowsSales({ ...f, trn: { ...f.trn, sourceModule: "SALES_TARGETED_BATCH", targetedBatchContext: salesPath } });
+
+  assert.equal(r.code, "TRN_ALREADY_BATCH", "the Sales Path closes its own row inside the discovery");
+});
+
+test("a find the Sales Path already closed is left alone", () => {
+  const f = facts();
+  const r = decideRowFollowsSales({ ...f, trn: { ...f.trn, derived: { targetedBatch: { tbId: TB, rowId: "TBR_20260913_120000_AB12_000001" } } } });
+
+  assert.equal(r.code, "TRN_ALREADY_BATCH");
+});
+
+test("a recognised stamp naming another team's batch does not stop the row being taken out", () => {
+  // Another team found it: the row leaves the batch (TB-R053). The stamp must not block that either.
+  const f = facts({ memberHistory: [{ id: "TEAM9__FWR1__1", teamId: "TEAM9", teamName: "Another Team", userUid: "FWR1", joinedAt: "2026-09-01T00:00:00.000Z", leftAt: null }] });
+  const r = decideRowFollowsSales({ ...f, trn: { ...f.trn, targetedBatchContext: { ...recognised, tbId: TB } } });
+
+  assert.equal(r.decision, DECISIONS.REMOVE, "another team's find takes the row out of the batch");
+});

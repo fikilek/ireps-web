@@ -428,3 +428,80 @@ test("every meter master refusal reads as one thing to a worker", () => {
     "This meter number is already registered on another meter.",
   );
 });
+
+// ---------------------------------------------------------------------------
+// Rules 1.3.88: a batch the server recognised is not a capture made from a batch row.
+//
+// The same line that stopped TB-R056 closing rows also counted a Normal Path find on a batched ERF as
+// batch work in the team's field work summary, and left it out of the tally it belongs in. One meaning,
+// asked in one place, so the two cannot drift apart again.
+// ---------------------------------------------------------------------------
+const { isBatchTrn, summarizeFieldWork } = await import("../teams/field-work-summary.js");
+
+const RECOGNISED = {
+  tbId: "TGB_20260919_065232_OXIN",
+  rowId: "TBR_20260919_065232_OXIN_000005",
+  erfId: "ERF-1",
+  premiseId: "PRM-1",
+  recognisedBy: "IREPS",
+  rule: "GMR-R038",
+};
+
+test("a batch the server recognised is not sales-path work", () => {
+  assert.equal(isBatchTrn({ targetedBatchContext: RECOGNISED }), false);
+});
+
+test("a capture made from a batch row is", () => {
+  assert.equal(
+    isBatchTrn({
+      sourceModule: "SALES_TARGETED_BATCH",
+      targetedBatchContext: { tbId: "TGB_1", rowId: "TBR_1" },
+    }),
+    true,
+  );
+  assert.equal(isBatchTrn({ targetedBatchContext: { tbId: "TGB_1" } }), true);
+});
+
+test("a find the Sales Path completed stays sales-path work, stamp or no stamp", () => {
+  assert.equal(
+    isBatchTrn({
+      targetedBatchContext: RECOGNISED,
+      derived: { targetedBatch: { tbId: "TGB_1", rowId: "TBR_1" } },
+    }),
+    true,
+  );
+});
+
+test("the team's summary counts a recognised find as the normal-path work it is", () => {
+  const trn = {
+    id: "TRN_MDIS_1790601908827_ELC_ZA5241006_5276",
+    targetedBatchContext: RECOGNISED,
+    accessData: {
+      trnType: "METER_DISCOVERY",
+      access: { hasAccess: "yes" },
+    },
+    metadata: {
+      createdAt: "2026-09-28T13:28:22.734Z",
+      createdByUid: "uid-simo",
+      createdByUser: "Simo Phemba",
+    },
+  };
+
+  const summary = summarizeFieldWork({
+    trns: [trn],
+    periods: [
+      {
+        id: "TEAM1__uid-simo__1",
+        teamId: "TEAM1",
+        teamName: "Simo Team",
+        userUid: "uid-simo",
+        joinedAt: "2026-09-01T00:00:00.000Z",
+        leftAt: null,
+      },
+    ],
+    usersSp: { "uid-simo": { id: "SP1", name: "RSTE" } },
+  });
+
+  assert.equal(summary.totals.batchTrns, 0, "it was counted as batch work");
+  assert.equal(summary.totals.normalTrns, 1, "and left out of the normal-path tally");
+});

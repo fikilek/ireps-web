@@ -1,10 +1,22 @@
 // Targeted Batch rules TB-R045 (1.3.27) and Teams rules TM-R001: field work done outside batches
 // (the normal path), credited to the team the worker belonged to on the date of the work.
+import { isServerRecognisedBatchContext } from "../targetedBatches/recognisedContext.js";
+
 const text = value => String(value ?? "").trim();
 
 // Batch (sales path) work carries its batch; everything else is normal-path work.
+//
+// Rules 1.3.88: a batch the server recognised is NOT a capture made from a batch row. Since 1.3.86 every
+// capture on a batched ERF is stamped with the batch the server recognised, so without this a Normal Path
+// find read as sales-path work everywhere this is asked — TB-R056 stood down on the finds it exists to
+// close, and this summary counted such a find as batch work and left it out of the tally it belongs in.
+// A find the Sales Path really did complete carries `derived.targetedBatch`, which still counts.
 export function isBatchTrn(trn = {}) {
-  return trn.sourceModule === "SALES_TARGETED_BATCH" || Boolean(text(trn.targetedBatchContext?.tbId) || text(trn.derived?.targetedBatch?.tbId) || text(trn.accessData?.tbId));
+  if (text(trn.derived?.targetedBatch?.tbId)) return true;
+  if (trn.sourceModule === "SALES_TARGETED_BATCH") return true;
+  if (isServerRecognisedBatchContext(trn.targetedBatchContext)) return false;
+
+  return Boolean(text(trn.targetedBatchContext?.tbId) || text(trn.accessData?.tbId));
 }
 
 function millisOf(value) {

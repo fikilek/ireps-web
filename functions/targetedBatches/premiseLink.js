@@ -21,17 +21,16 @@ export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 // GMR-R038 stamps this on work the server recognised as belonging to a batch, to tell the General
 // Monthly Report whose batch it is. It is deliberately narrow - a batch, a row and where the work
 // happened - and is never the Sales Path context a worker sends from a batch row.
-export const RECOGNISED_BATCH_CONTEXT_RULE = "GMR-R038";
-export const RECOGNISED_BATCH_CONTEXT_BY = "IREPS";
-
-export function isServerRecognisedBatchContext(context = {}) {
-  return (
-    String(context?.recognisedBy || "").trim().toUpperCase() ===
-      RECOGNISED_BATCH_CONTEXT_BY &&
-    String(context?.rule || "").trim().toUpperCase() ===
-      RECOGNISED_BATCH_CONTEXT_RULE
-  );
-}
+//
+// Rules 1.3.88: the question now lives in one module, because two other readers ask it - TB-R056 and the
+// team's field work summary - and they sit on the other side of the import graph. Re-exported here so
+// everything that already asks premiseLink keeps working.
+export {
+  RECOGNISED_BATCH_CONTEXT_BY,
+  RECOGNISED_BATCH_CONTEXT_RULE,
+  isServerRecognisedBatchContext,
+} from "./recognisedContext.js";
+import { isServerRecognisedBatchContext } from "./recognisedContext.js";
 export const TARGETED_BATCH_PREMISE_OPERATION_TYPE = "METER_DISCOVERY";
 
 function controlledError(code, message, details = {}) {
