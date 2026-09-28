@@ -17,6 +17,21 @@ import {
 import { checkBatchWork } from "./batch-work-guard.js";
 
 export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
+
+// GMR-R038 stamps this on work the server recognised as belonging to a batch, to tell the General
+// Monthly Report whose batch it is. It is deliberately narrow - a batch, a row and where the work
+// happened - and is never the Sales Path context a worker sends from a batch row.
+export const RECOGNISED_BATCH_CONTEXT_RULE = "GMR-R038";
+export const RECOGNISED_BATCH_CONTEXT_BY = "IREPS";
+
+export function isServerRecognisedBatchContext(context = {}) {
+  return (
+    String(context?.recognisedBy || "").trim().toUpperCase() ===
+      RECOGNISED_BATCH_CONTEXT_BY &&
+    String(context?.rule || "").trim().toUpperCase() ===
+      RECOGNISED_BATCH_CONTEXT_RULE
+  );
+}
 export const TARGETED_BATCH_PREMISE_OPERATION_TYPE = "METER_DISCOVERY";
 
 function controlledError(code, message, details = {}) {
@@ -1594,6 +1609,27 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     return {
       applied: false,
       alreadyCompleted: false,
+    };
+  }
+
+  // GMR-R038 (1.6.0): a context the SERVER recognised is not a capture made from a batch row.
+  //
+  // The worker came in on the Normal Path - ERF, premise, meter - on a premise that happens to
+  // belong to a batch. GMR-R038 stamps the batch on the transaction so the report knows whose
+  // work it is. That is all it means. It is not the Sales Path hand-over this function completes,
+  // it carries none of that shape (no rowNo, no salesDocId, no meterNo), and treating it as one
+  // threw TARGETED_BATCH_CONTEXT_INVALID out of a trigger that had already written the
+  // transaction: no meter, no meter master, the Sales record left INVISIBLE and the batch row
+  // left NOT_STARTED, with the worker told nothing (owner, on TEST, 2026-09-28).
+  //
+  // So it takes the road it took before GMR-R038 existed, which worked: the meter is created, the
+  // Sales record goes VISIBLE, and TB-R056 closes the row from there as METER_DISCOVERED_OUTSIDE
+  // _BATCH. Nothing here has to know about it.
+  if (isServerRecognisedBatchContext(rawContext)) {
+    return {
+      applied: false,
+      alreadyCompleted: false,
+      recognisedOnly: true,
     };
   }
 

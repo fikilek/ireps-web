@@ -11,6 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { ALLOWED, recognisedBatchContext } from "../targetedBatches/batch-work-guard.js";
 
 const TB = "TGB_20260926_051829_DXRI";
@@ -144,4 +145,52 @@ test("the report still decides AD HOC by what the transaction holds", () => {
   // Nothing in the report changes for any of this: it reads the context and shows AD HOC when there is
   // none — which, after the owner's rule, an illegal-connection find rightly is.
   assert.match(reportSource, /targetedBatchContext \|\| \{\}/);
+});
+
+// ------------------------------------------------- the two halves must agree about what they made
+// Found on TEST by the owner, 2026-09-28. GMR-R038 stamped a context, and the step that completes a
+// capture made FROM a batch row rejected it as invalid - out of a trigger that had already written
+// the transaction. The capture existed and nothing else did: no meter, no meter master, the Sales
+// record left INVISIBLE, the batch row left NOT_STARTED, and the worker told nothing. The meter
+// would have been sent to somebody all over again.
+//
+// Neither half was wrong on its own. Nothing checked that they agreed, so this does.
+import { isServerRecognisedBatchContext } from "../targetedBatches/premiseLink.js";
+
+test("what the server stamps, the completion step recognises as its own", () => {
+  const carried = recognisedBatchContext({
+    decision: allowed(ALLOWED.OWN_TEAM, { tbId: TB, rowId: ROW }),
+    erfId: ERF,
+    premiseId: PREMISE,
+  });
+
+  assert.ok(
+    isServerRecognisedBatchContext(carried),
+    "the completion step would treat this as a capture made from a batch row and throw on it",
+  );
+});
+
+test("a capture made from a batch row is never mistaken for a recognised one", () => {
+  // The Sales Path context a worker's phone sends. It must still take the completion it has always
+  // taken, and a malformed one must still fail loudly rather than be waved through as recognised.
+  for (const salesPathContext of [
+    { sourceModule: "SALES_TARGETED_BATCH", tbId: TB, rowId: ROW, rowNo: 6, salesDocId: "04297704464", erfId: ERF, meterNo: "04297704464" },
+    { sourceModule: "SALES_TARGETED_BATCH", tbId: TB },
+    { tbId: TB, rowId: ROW },
+    {},
+  ]) {
+    assert.equal(isServerRecognisedBatchContext(salesPathContext), false);
+  }
+});
+
+test("a recognised capture takes the road it took before GMR-R038", () => {
+  // It is not completed here. The meter is created, the Sales record goes VISIBLE, and TB-R056
+  // closes the row from there - which is what happened before GMR-R038 existed, and worked.
+  const linkSource = readFileSync(new URL("../targetedBatches/premiseLink.js", import.meta.url), "utf8");
+
+  assert.match(
+    linkSource,
+    /if \(isServerRecognisedBatchContext\(rawContext\)\) \{\s*\r?\n\s*return \{\s*\r?\n\s*applied: false,/,
+    "a recognised context is completed as though the worker had come from a batch row",
+  );
 });
