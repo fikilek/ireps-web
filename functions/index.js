@@ -112,6 +112,7 @@ import {
   recordCaptureFailure,
 } from "./meterDiscovery/captureOutcome.js";
 import { registerMeterInTransaction } from "./registration/registerMeter.js";
+import { repairRegistration } from "./registration/repairRegistration.js";
 import { recordRefusedSubmission } from "./registration/refusedSubmissions.js";
 import { buildRegistrationMetadata } from "./registration/registrationMetadata.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
@@ -3147,6 +3148,94 @@ const buildSuccessResult = (trnId, message = "TRN created successfully") => ({
   trnId: trnId || "NAv",
 });
 
+// RG-R001 section 8: the office repairs a transaction whose meter was never made. Never a field
+// worker, never the phone. A dry run is the default: it says what it would write and writes nothing.
+const REPAIR_ROLES = new Set(["MNG", "ADM", "SPU"]);
+
+export const repairRegistrationCallable = onCall(async (request) => {
+  const caller = request.auth;
+
+  if (!caller) {
+    throw new HttpsError("unauthenticated", "Sign in first.");
+  }
+
+  const userSnap = await db.collection("users").doc(caller.uid).get();
+  const userData = userSnap.exists ? userSnap.data() || {} : {};
+  const role = String(userData?.employment?.role || userData?.role || "")
+    .trim()
+    .toUpperCase();
+
+  if (!REPAIR_ROLES.has(role)) {
+    throw new HttpsError(
+      "permission-denied",
+      "Only a manager, an administrator or the platform owner may repair a registration.",
+    );
+  }
+
+  const trnId = String(request?.data?.trnId || "").trim();
+  const dryRun = request?.data?.dryRun !== false;
+  const reason = String(request?.data?.reason || "").trim();
+
+  const actorName =
+    caller.token?.name ||
+    caller.token?.email ||
+    userData?.names?.fullName ||
+    caller.uid;
+
+  try {
+    const outcome = await repairRegistration({
+      db,
+      Timestamp,
+      trnId,
+      actorUid: caller.uid,
+      actorName,
+      reason,
+      dryRun,
+      deps: { ...REGISTRATION_DEPS, registerMeterInTransaction, normalizeMeterNo, validateMeterDiscoveryPayload },
+    });
+
+    // The counts and the flat registry rows are rebuilt from the meter, outside the repair, exactly as
+    // they are for a fresh registration — and they never change its answer (RG-R001 section 3).
+    if (outcome?.repaired) {
+      try {
+        const premiseId = outcome?.premiseId || null;
+        const erfId = outcome?.erfId || null;
+
+        if (erfId && erfId !== "NAv") {
+          await rebuildErfMeterCounts(erfId);
+          await rebuildErfTrnCount(erfId);
+        }
+
+        if (premiseId && premiseId !== "NAv") {
+          await rebuildPremiseRegistryRow(premiseId);
+        }
+      } catch (afterError) {
+        logger.error("repairRegistrationCallable --after the repair", {
+          trnId,
+          message: afterError?.message || String(afterError),
+        });
+      }
+    }
+
+    return outcome;
+  } catch (error) {
+    logger.error("repairRegistrationCallable --error", {
+      trnId,
+      message: error?.message,
+      code: error?.irepsCode || error?.code,
+    });
+
+    return {
+      success: false,
+      repaired: false,
+      dryRun,
+      trnId: trnId || "NAv",
+      code: error?.irepsCode || error?.code || "REPAIR_FAILED",
+      message: error?.message || "The repair could not be completed.",
+    };
+  }
+});
+
 // RG-R001 section 9: one creator. registerMeter.js writes every registration, and its collaborators
 // are handed to it rather than imported, because half of them still live in this file.
 const REGISTRATION_DEPS = {
@@ -3231,7 +3320,14 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     const validationError = validateMeterDiscoveryPayload({
       data,
     });
-    if (validationError) return validationError;
+
+    // RG-R001 1.1.0 sections 6 and 7: these are the refusals the rule was written for — a premise with
+    // no ERF, a user with no service provider, an app too old for what it sent. They used to return the
+    // validator's own object, so the worker read "accessData.erfId is required" and the office learnt
+    // nothing at all (independent review, 2026-09-28).
+    if (validationError) {
+      return refuse(validationError.code, validationError.message);
+    }
 
     // ------------------------------------------------------------
     // 0. PREMISE EXISTENCE GATEKEEPER
@@ -3492,64 +3588,94 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       }
     } else {
       // No Access: the transaction is the whole record and there is no meter to make. RG-R001 s.1.
-      await trnRef.create(finalPayload);
-    }
+      try {
+        await trnRef.create(finalPayload);
+      } catch (error) {
+        // Two senders can reach here with the same work — the background one and the worker tapping
+        // Sync. The second must not be told its saved work was refused (RG-R001 section 5).
+        if (error?.code !== 6 && error?.code !== "already-exists") throw error;
 
-    // Everything below is rebuilt from what has just been committed, so it sits outside the
-    // transaction and is safe to run twice (RG-R001 section 3). The counts used to be rebuilt by
-    // onMeterDiscoveryCreated, which now stands down for anything written under this rule.
-    if (hasAccess === "yes") {
-      const registeredErfId = data?.accessData?.erfId || "";
-
-      if (registeredErfId && registeredErfId !== "NAv") {
-        await rebuildErfMeterCounts(registeredErfId);
-        await rebuildErfTrnCount(registeredErfId);
-      }
-
-      if (premiseId && premiseId !== "NAv") {
-        await rebuildPremiseMeterCounts(premiseId);
-        await rebuildPremiseRegistryRow(premiseId);
+        logger.info("onMeterDiscoveryCallable --no access trn already there", {
+          trnId: data.id,
+        });
       }
     }
 
-    // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's ERF.
-    // Recorded once the work itself is saved, one document per use, so the office can list it and count it
-    // per worker and per team. The find stays an ordinary normal-path find: the batch's row is untouched.
-    await recordErfOverride({
-      db,
-      decision: batchWorkCheck,
-      trnId: data.id,
-      trnType: data?.accessData?.trnType || "METER_DISCOVERY",
-      now,
-      log: logger,
-    });
+    // ------------------------------------------------------------
+    // THE WORK IS SAVED. Nothing below may change that answer.
+    //
+    // Everything from here is rebuilt or recorded from what has just been committed, so it sits
+    // outside the transaction and is safe to run again (RG-R001 section 3). It is also all fallible:
+    // a registry row that a background step has not created yet, an ERF that has moved on. Before
+    // this guard those failures fell into the callable's own catch, which told the worker nothing was
+    // saved and had the phone delete the photographs of a meter that exists — the very fault this
+    // rule was written to end, with the polarity reversed (independent review, 2026-09-28).
+    // ------------------------------------------------------------
+    try {
+      if (hasAccess === "yes") {
+        const registeredErfId = data?.accessData?.erfId || "";
 
-    // Targeted Batch rules TB-R063 (1.3.66): a different meter at the ERF completes the Sales meter. The
-    // discovery is written, so the server now checks whether a Sales meter was expected at this ERF under
-    // another number. If it was, that meter has been replaced: it is recorded as such, reads Completed and
-    // its batch row closes, so nobody is sent back and it is never batched again. Never fails the
-    // submission: the work is already saved, and anything it cannot settle is logged for the office.
-    await recordDifferentMeterAtErf({
-      db,
-      Timestamp,
-      FieldValue,
-      meterNo: meterNoNormalized,
-      erfId: data?.accessData?.erfId || "",
-      premiseId,
-      trnId: data.id,
-      trnType: data?.accessData?.trnType || "METER_DISCOVERY",
-      astId: data.id,
-      uid: caller.uid,
-      foundAt: now,
-      // The row the worker opened, so only its own Sales meter can be settled.
-      targetedBatchContext: data?.targetedBatchContext || null,
-      log: logger,
-    });
+        if (registeredErfId && registeredErfId !== "NAv") {
+          await rebuildErfMeterCounts(registeredErfId);
+          await rebuildErfTrnCount(registeredErfId);
+        }
+
+        if (premiseId && premiseId !== "NAv") {
+          // The registry row first: it creates the document the counts then update, and it rebuilds
+          // the counts itself, so this is one pass rather than two.
+          await rebuildPremiseRegistryRow(premiseId);
+        }
+      }
+
+      // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's
+      // ERF. Recorded once the work itself is saved, one document per use, so the office can list it and
+      // count it per worker and per team. The find stays an ordinary normal-path find: the batch's row
+      // is untouched.
+      await recordErfOverride({
+        db,
+        decision: batchWorkCheck,
+        trnId: data.id,
+        trnType: data?.accessData?.trnType || "METER_DISCOVERY",
+        now,
+        log: logger,
+      });
+
+      // Targeted Batch rules TB-R063 (1.3.66): a different meter at the ERF completes the Sales meter.
+      // The discovery is written, so the server now checks whether a Sales meter was expected at this
+      // ERF under another number. If it was, that meter has been replaced: it is recorded as such,
+      // reads Completed and its batch row closes, so nobody is sent back and it is never batched again.
+      await recordDifferentMeterAtErf({
+        db,
+        Timestamp,
+        FieldValue,
+        meterNo: meterNoNormalized,
+        erfId: data?.accessData?.erfId || "",
+        premiseId,
+        trnId: data.id,
+        trnType: data?.accessData?.trnType || "METER_DISCOVERY",
+        astId: data.id,
+        uid: caller.uid,
+        foundAt: now,
+        // The row the worker opened, so only its own Sales meter can be settled.
+        targetedBatchContext: data?.targetedBatchContext || null,
+        log: logger,
+      });
+    } catch (afterError) {
+      // The office needs to know a count or a record is behind. The worker does not: their work is in.
+      logger.error("onMeterDiscoveryCallable --after the work was saved", {
+        trnId: data.id,
+        message: afterError?.message || String(afterError),
+        code: afterError?.code,
+      });
+    }
 
     logger.info("onMeterDiscoveryCallable --trn saved", {
       trnId: data.id,
+      astId: hasAccess === "yes" ? data.id : "NAv",
+      meterNoNormalized,
       meterType,
       hasAccess,
+      salesAllMeters: registration?.salesSync?.outcome || "NAv",
     });
 
     return buildSuccessResult(data.id);
