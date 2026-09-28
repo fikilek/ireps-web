@@ -107,7 +107,13 @@ import {
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
-import { recordCaptureFailure } from "./meterDiscovery/captureOutcome.js";
+import {
+  plainReasonFor,
+  recordCaptureFailure,
+} from "./meterDiscovery/captureOutcome.js";
+import { registerMeterInTransaction } from "./registration/registerMeter.js";
+import { recordRefusedSubmission } from "./registration/refusedSubmissions.js";
+import { buildRegistrationMetadata } from "./registration/registrationMetadata.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
 import { recordReplacedMeter } from "./targetedBatches/replacedMeter.js";
 
@@ -1187,12 +1193,14 @@ function hasTaggedMedia(media = [], tag) {
   );
 }
 
-function buildFailureResult(code, message) {
+function buildFailureResult(code, message, extra = null) {
   return {
     success: false,
     code: code || "UNKNOWN_ERROR",
     message: message || "Unknown error",
     trnId: "NAv",
+    // RG-R001 1.1.0 section 4: the sentence the worker reads. Our own message stays beside it, for us.
+    ...(extra || {}),
   };
 }
 
@@ -1595,6 +1603,17 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
 
     if (accessData?.trnType !== "METER_DISCOVERY") return null;
     if (accessData?.access?.hasAccess !== "yes") return null;
+
+    // RG-R001 section 9: one creator. A transaction written under the rule already carries its meter,
+    // written in the same commit, so this step stands down. It stays for transactions written before
+    // the rule and for repairs, which are the only work left for it.
+    if (trnData?.derived?.astId) {
+      logger.log(
+        "onMeterDiscoveryCreated ---- the meter came with the transaction (RG-R001). Standing down.",
+        { trnId },
+      );
+      return null;
+    }
     if (!ast) {
       await recordCaptureFailure({ db, trnId, code: "MISSING_METER_DETAILS" });
       return null;
@@ -3128,6 +3147,25 @@ const buildSuccessResult = (trnId, message = "TRN created successfully") => ({
   trnId: trnId || "NAv",
 });
 
+// RG-R001 section 9: one creator. registerMeter.js writes every registration, and its collaborators
+// are handed to it rather than imported, because half of them still live in this file.
+const REGISTRATION_DEPS = {
+  classifyOperationalAstChange,
+  METER_MASTER_CLASSIFICATIONS,
+  MeterMasterConflictError,
+  buildCanonicalFieldOnlyMeterMaster,
+  buildOperationalAstUpdate,
+  deriveMasterVisibility,
+  syncSalesAllMetersFromMaster,
+  completeTargetedBatchMeterDiscoveryInTransaction,
+  normalizeCreationReadings,
+  projectMeterDiscoveryAstMedia,
+  buildPremiseUpdateMetadata,
+  getServiceBucketFromMeterType,
+  normalizePremiseServiceSnapshotItem,
+  logger,
+};
+
 export const onMeterDiscoveryCallable = onCall(async (request) => {
   try {
     const data = request?.data || {};
@@ -3136,6 +3174,35 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     if (!caller) {
       throw new HttpsError("unauthenticated", "User must be signed in.");
     }
+
+    const nowIso = new Date().toISOString();
+    const actorName =
+      caller.token?.name ||
+      caller.token?.email ||
+      caller.displayName ||
+      caller.uid ||
+      "SYSTEM";
+
+    // RG-R001 section 7: a refusal writes nothing to `trns` — under section 1 there is no transaction
+    // to write on — so the reason goes to the office's own list, and the sentence a person reads goes
+    // back to the phone beside our own message. Recording a refusal never blocks the answer.
+    const refuse = async (code, message, details = null) => {
+      await recordRefusedSubmission({
+        db,
+        trnId: data?.id,
+        code,
+        message,
+        data,
+        actorUid: caller.uid,
+        actorName,
+        now: nowIso,
+        details,
+      });
+
+      return buildFailureResult(code, message, {
+        plain: plainReasonFor({ code, message }),
+      });
+    };
 
     const trnId = data?.id || "NAv";
     const meterType = data?.meterType || "NAv";
@@ -3146,7 +3213,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       meterNoNormalized = normalizeMeterNo(meterNoRaw);
     } catch {
       if (hasAccess === "yes") {
-        return buildFailureResult(
+        return refuse(
           "INVALID_METER_NUMBER",
           "Meter number must contain a non-whitespace value",
         );
@@ -3178,7 +3245,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         premiseId,
       });
 
-      return buildFailureResult(
+      return refuse(
         "INVALID_PREMISE_ID",
         "A valid saved premise id is required before meter discovery can be submitted",
       );
@@ -3193,7 +3260,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         premiseId,
       });
 
-      return buildFailureResult(
+      return refuse(
         "PREMISE_NOT_FOUND",
         "Parent premise does not exist in premises collection",
       );
@@ -3202,14 +3269,32 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     const trnRef = db.collection("trns").doc(data.id);
     const trnSnap = await trnRef.get();
 
+    // RG-R001 section 5: one submission keeps one TRN ID for its whole life, so the phone asking again
+    // after a lost answer is normal. But a repeat is a success ONLY when the meter exists too. The
+    // transaction existing on its own proves nothing, and reading it as success is exactly how a phone
+    // that timed out walked away from a meter that was never made.
     if (trnSnap.exists) {
+      const registeredAstSnap =
+        hasAccess === "yes" ? await db.collection("asts").doc(data.id).get() : null;
+      const registered = hasAccess !== "yes" || registeredAstSnap?.exists;
+
       logger.info("onMeterDiscoveryCallable --trn already exists", {
         trnId: data.id,
+        registered,
       });
 
-      return buildSuccessResult(
-        data.id,
-        "TRN already exists and is treated as successful",
+      if (registered) {
+        return buildSuccessResult(
+          data.id,
+          "TRN already exists and is treated as successful",
+        );
+      }
+
+      // An older transaction with no meter behind it. Not a success, and not something to submit
+      // again: it is repaired under its own id by the office (RG-R001 section 8).
+      return refuse(
+        "REGISTRATION_INCOMPLETE",
+        "This work reached iREPS before but its meter was never created. The office must repair it.",
       );
     }
 
@@ -3232,7 +3317,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     });
 
     if (!batchWorkCheck.allowed) {
-      return buildFailureResult(batchWorkCheck.code, batchWorkCheck.message);
+      return refuse(batchWorkCheck.code, batchWorkCheck.message);
     }
 
     const targetedBatchValidation =
@@ -3280,7 +3365,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
             message: masterDecision.conflict.message,
           });
 
-          return buildFailureResult(
+          return refuse(
             masterDecision.conflict.conflictCode,
             masterDecision.conflict.message,
           );
@@ -3317,24 +3402,19 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       if (recognised) safePayload.targetedBatchContext = recognised;
     }
 
-    const now = new Date().toISOString();
-    const actorName =
-      caller.token?.name ||
-      caller.token?.email ||
-      caller.displayName ||
-      caller.uid ||
-      "SYSTEM";
+    const now = nowIso;
 
     const finalPayload = {
       ...safePayload,
-      metadata: {
-        createdAt: now,
-        createdByUid: caller.uid,
-        createdByUser: actorName,
-        updatedAt: now,
-        updatedByUid: caller.uid,
-        updatedByUser: actorName,
-      },
+      // RG-R001 1.1.0 section 2: both times are kept. createdOnDevice is when the worker finished the
+      // form, createdOnServer is now. Field work is counted by the device time, so a submission that
+      // waited days on a phone belongs to the day it was done.
+      metadata: buildRegistrationMetadata({
+        phoneMetadata: data?.metadata,
+        actorUid: caller.uid,
+        actorName,
+        nowIso,
+      }),
     };
 
     // MN-R001 section 7: the worker said this meter must be disconnected. The
@@ -3347,7 +3427,90 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       finalPayload.ast.normalisation.followUp = normalisationFollowUp;
     }
 
-    await trnRef.set(finalPayload, { merge: true });
+    // RG-R001 sections 1 and 2: the transaction, the meter, the meter master's field link and the
+    // premise's own list of meters go in together, in ONE Firestore transaction, or not at all. Until
+    // this rule the transaction was written here and the meter was made afterwards by a trigger, so a
+    // transaction could stand with no meter behind it and the phone still said MISSION SUCCESS.
+    let registration = null;
+
+    if (hasAccess === "yes") {
+      try {
+        registration = await db.runTransaction(async (tx) => {
+          const liveTrnSnap = await tx.get(trnRef);
+          if (liveTrnSnap.exists) return { alreadyExists: true };
+
+          const result = await registerMeterInTransaction({
+            tx,
+            db,
+            Timestamp,
+            trnData: finalPayload,
+            trnId: data.id,
+            rawMeterNo: meterNoRaw,
+            normalizedMeterNo: meterNoNormalized,
+            meterType,
+            lmPcode: data?.accessData?.parents?.lmPcode || null,
+            premiseId,
+            erfId: data?.accessData?.erfId || "",
+            metadata: finalPayload.metadata,
+            deps: REGISTRATION_DEPS,
+          });
+
+          // The transaction itself, in the same commit, already carrying what came of it.
+          tx.create(trnRef, { ...finalPayload, derived: result.derived });
+
+          return result;
+        });
+      } catch (error) {
+        // Nothing was written: the whole commit is gone. So the worker is told to submit again, and
+        // the office gets the reason — never a transaction with no meter behind it.
+        const governed = error?.conflict || null;
+        const code =
+          governed?.conflictCode ||
+          governed?.code ||
+          error?.irepsCode ||
+          error?.code ||
+          "REGISTRATION_FAILED";
+        const message =
+          governed?.message ||
+          error?.message ||
+          "The meter could not be registered, so nothing was saved.";
+
+        logger.error("onMeterDiscoveryCallable --registration refused", {
+          trnId: data.id,
+          code,
+          message,
+        });
+
+        return refuse(code, message);
+      }
+
+      if (registration?.alreadyExists) {
+        return buildSuccessResult(
+          data.id,
+          "TRN already exists and is treated as successful",
+        );
+      }
+    } else {
+      // No Access: the transaction is the whole record and there is no meter to make. RG-R001 s.1.
+      await trnRef.create(finalPayload);
+    }
+
+    // Everything below is rebuilt from what has just been committed, so it sits outside the
+    // transaction and is safe to run twice (RG-R001 section 3). The counts used to be rebuilt by
+    // onMeterDiscoveryCreated, which now stands down for anything written under this rule.
+    if (hasAccess === "yes") {
+      const registeredErfId = data?.accessData?.erfId || "";
+
+      if (registeredErfId && registeredErfId !== "NAv") {
+        await rebuildErfMeterCounts(registeredErfId);
+        await rebuildErfTrnCount(registeredErfId);
+      }
+
+      if (premiseId && premiseId !== "NAv") {
+        await rebuildPremiseMeterCounts(premiseId);
+        await rebuildPremiseRegistryRow(premiseId);
+      }
+    }
 
     // Targeted Batch rules TB-R062 (1.3.65): the illegally-connected gate was used on another team's ERF.
     // Recorded once the work itself is saved, one document per use, so the office can list it and count it
@@ -3396,10 +3559,24 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       stack: error?.stack,
     });
 
-    return buildFailureResult(
-      error?.irepsCode || error?.code || "UNKNOWN_ERROR",
-      error?.message || "Failed to submit meter discovery transaction",
-    );
+    const code = error?.irepsCode || error?.code || "UNKNOWN_ERROR";
+    const message =
+      error?.message || "Failed to submit meter discovery transaction";
+
+    // RG-R001 section 7. `refuse` belongs to the try block, so this does the same job by hand.
+    await recordRefusedSubmission({
+      db,
+      trnId: request?.data?.id,
+      code,
+      message,
+      data: request?.data || {},
+      actorUid: request?.auth?.uid,
+      actorName: request?.auth?.token?.name || request?.auth?.uid,
+    });
+
+    return buildFailureResult(code, message, {
+      plain: plainReasonFor({ code, message }),
+    });
   }
 });
 
@@ -5203,9 +5380,9 @@ export const onMeterInstallationCallable = onCall(async (request) => {
         ? { treadings: creationData.treadings }
         : {}),
 
+      // The visibility is derived inside the transaction, where the meter master has been read.
       master: {
         id: meterNoNormalized,
-        visibility: "VISIBLE",
       },
 
       media: safePayload?.media || [],
@@ -5290,22 +5467,35 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       }
 
       const masterOperationTimestamp = Timestamp.now();
-      if (
+      const canonicalFieldOnlyMaster =
         masterDecision.classification ===
         METER_MASTER_CLASSIFICATIONS.CREATE_FIELD_ONLY
-      ) {
-        tx.create(
-          masterRef,
-          buildCanonicalFieldOnlyMeterMaster({
-            lmPcode: finalAccessData?.parents?.lmPcode,
-            meterNoRaw,
-            meterType,
-            astId: trnId,
-            actorUid: caller.uid,
-            actorUser: actorName,
-            operationTimestamp: masterOperationTimestamp,
-          }),
-        );
+          ? buildCanonicalFieldOnlyMeterMaster({
+              lmPcode: finalAccessData?.parents?.lmPcode,
+              meterNoRaw,
+              meterType,
+              astId: trnId,
+              actorUid: caller.uid,
+              actorUser: actorName,
+              operationTimestamp: masterOperationTimestamp,
+            })
+          : null;
+
+      // MV-R001, and RG-R001 1.1.0 section 2: visibility is derived from the meter master's two links,
+      // never assumed. Installation used to stamp every meter VISIBLE, so a meter Sales had never
+      // heard of read as matched (owner, 2026-09-28).
+      const nextMasterData =
+        canonicalFieldOnlyMaster || {
+          ...(masterBefore || {}),
+          refs: {
+            ...(masterBefore?.refs || {}),
+            asts: { ...(masterBefore?.refs?.asts || {}), id: trnId },
+          },
+        };
+      const visibility = deriveMasterVisibility(nextMasterData);
+
+      if (canonicalFieldOnlyMaster) {
+        tx.create(masterRef, canonicalFieldOnlyMaster);
       } else if (
         masterDecision.classification ===
         METER_MASTER_CLASSIFICATIONS.UPDATE_AST_LINK
@@ -5355,7 +5545,10 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       }
 
       tx.create(trnRef, trnDoc);
-      tx.create(astRef, astDoc);
+      tx.create(astRef, {
+        ...astDoc,
+        master: { id: meterNoNormalized, visibility },
+      });
       tx.update(premiseRef, {
         [`services.${serviceMeterBucket}`]: nextServiceItems,
         "metadata.updatedAt": now,

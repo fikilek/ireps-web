@@ -26,10 +26,47 @@ const PLAIN_REASONS = Object.freeze({
   INVALID_METER_TYPE: "The capture is neither a water nor an electricity meter.",
   MISSING_METER_DETAILS: "The capture arrived without any meter details.",
   METER_MASTER_CONFLICT: "This meter number is already registered on another meter.",
+  MM_AST_REFERENCE_CONFLICT:
+    "This meter number is already registered on another meter.",
+  MM_LM_CONFLICT:
+    "This meter number is already registered in another municipality.",
+  MM_METER_TYPE_CONFLICT:
+    "This meter number is already registered as the other kind of meter.",
   SALES_CONFLICT: "The Sales record for this meter could not be matched.",
   TARGETED_BATCH_CONTEXT_INVALID:
     "The batch this work was filed under could not be read.",
+  // RG-R001 1.1.0 section 6: three refusals the server is right to make, and was making in silence.
+  // The owner, 2026-09-28: "this is ok, it must just give feedback to the FWR."
+  OUTDATED_APP_NORMALISATION:
+    "This version of iREPS cannot send this work. Update the app and submit it again — the work is safe on the phone.",
+  INVALID_SERVICE_BUCKET:
+    "iREPS could not tell whether this is a water or an electricity meter. Nothing was saved. Tell the office.",
+  METER_IN_ANOTHER_TEAMS_BATCH:
+    "This meter is in another team's batch, so only that team can work on it. Nothing was saved.",
+  BATCH_CHECK_UNAVAILABLE:
+    "iREPS could not check which batch this meter is in. Nothing was saved. Please try again.",
 });
+
+// The same refusal code can mean two different things to a worker, so the field that is missing
+// decides the sentence. RG-R001 1.1.0 section 6.
+const MISSING_FIELD_REASONS = Object.freeze([
+  [
+    /accessData\.erf(Id|No)/i,
+    "This premise has no ERF number, so the meter cannot be registered on it. Tell the office the premise and the address.",
+  ],
+  [
+    /serviceProvider/i,
+    "Your user is not linked to a service provider yet, so work cannot be submitted. Ask the office to fix your user.",
+  ],
+  [
+    /accessData\.parents/i,
+    "This premise is missing its ward or municipality, so the meter cannot be registered on it. Tell the office the premise and the address.",
+  ],
+  [
+    /accessData\.premise\.(address|propertyType)/i,
+    "This premise has no address recorded, so the meter cannot be registered on it. Tell the office the premise and the ERF number.",
+  ],
+]);
 
 export function plainReason(code, fallback = "") {
   return (
@@ -37,6 +74,30 @@ export function plainReason(code, fallback = "") {
     fallback ||
     "This capture could not be completed."
   );
+}
+
+/**
+ * The sentence for a worker, given the code AND the message it came with. Use this wherever a worker
+ * or an office clerk reads the refusal; `plainReason` alone cannot tell two missing fields apart.
+ */
+export function plainReasonFor({ code, message = "" } = {}) {
+  const safeCode = String(code || "").trim().toUpperCase();
+  const safeMessage = String(message || "");
+
+  if (safeCode === "MISSING_REQUIRED_FIELD" || safeCode === "MISSING_REQUIRED_PARENT") {
+    const hit = MISSING_FIELD_REASONS.find(([pattern]) =>
+      pattern.test(safeMessage),
+    );
+    if (hit) return hit[1];
+  }
+
+  // Every meter master refusal is about one thing to a worker: this number belongs to another meter.
+  // Without this, the database's own wording reached the phone.
+  if (safeCode.startsWith("MM_") && !PLAIN_REASONS[safeCode]) {
+    return PLAIN_REASONS.METER_MASTER_CONFLICT;
+  }
+
+  return plainReason(safeCode, safeMessage);
 }
 
 /**
