@@ -107,6 +107,7 @@ import {
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+import { recordCaptureFailure } from "./meterDiscovery/captureOutcome.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
 import { recordReplacedMeter } from "./targetedBatches/replacedMeter.js";
 
@@ -1594,7 +1595,10 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
 
     if (accessData?.trnType !== "METER_DISCOVERY") return null;
     if (accessData?.access?.hasAccess !== "yes") return null;
-    if (!ast) return null;
+    if (!ast) {
+      await recordCaptureFailure({ db, trnId, code: "MISSING_METER_DETAILS" });
+      return null;
+    }
 
     const rawMeterNo = ast?.astData?.astNo || "";
     let normalizedMeterNo = "";
@@ -1604,6 +1608,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
       logger.warn("onMeterDiscoveryCreated ---- missing meter number", {
         trnId,
       });
+      await recordCaptureFailure({ db, trnId, code: "MISSING_METER_NUMBER" });
       return null;
     }
 
@@ -1615,6 +1620,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
       logger.warn("onMeterDiscoveryCreated ---- missing premiseId", {
         trnId,
       });
+      await recordCaptureFailure({ db, trnId, code: "MISSING_PREMISE" });
       return null;
     }
 
@@ -1626,6 +1632,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         trnId,
         premiseId,
       });
+      await recordCaptureFailure({ db, trnId, code: "PREMISE_NOT_FOUND", details: { premiseId } });
       return null;
     }
 
@@ -1656,6 +1663,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         code: validationError.code,
         message: validationError.message,
       });
+      await recordCaptureFailure({ db, trnId, code: "INVALID_PAYLOAD", message: validationError.message, details: { code: validationError.code } });
       return null;
     }
 
@@ -1677,6 +1685,7 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
         trnId,
         meterType,
       });
+      await recordCaptureFailure({ db, trnId, code: "INVALID_METER_TYPE", details: { meterType } });
       return null;
     }
 
@@ -1919,9 +1928,25 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
           sourceWriter: governed.sourceWriter,
           message: governed.message,
         });
+        await recordCaptureFailure({
+          db,
+          trnId,
+          code: governed.conflictCode || governed.code || "METER_MASTER_CONFLICT",
+          message: governed.message,
+        });
+
         return { success: false, outcome: "CONFLICT", conflict: governed };
       }
       logger.error("onMeterDiscoveryCreated ---- FATAL ERROR:", error);
+
+      // f01: this trigger does not retry, so the capture is dead. It says why before it goes.
+      await recordCaptureFailure({
+        db,
+        trnId,
+        code: error?.irepsCode || error?.code || "UNKNOWN",
+        message: error?.message,
+      });
+
       throw error;
     }
   },
