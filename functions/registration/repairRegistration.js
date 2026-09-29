@@ -61,6 +61,7 @@ export const NOT_REPAIRABLE = Object.freeze({
   INVALID_METER_TYPE: "INVALID_METER_TYPE",
   INVALID_PAYLOAD: "INVALID_PAYLOAD",
   METER_NUMBER_TAKEN: "METER_NUMBER_TAKEN",
+  MASTER_NOT_WRITABLE: "MASTER_NOT_WRITABLE",
 });
 
 const WHY_NOT = Object.freeze({
@@ -84,6 +85,8 @@ const WHY_NOT = Object.freeze({
     "That transaction does not pass today's checks, so repairing it would store work we would refuse now.",
   [NOT_REPAIRABLE.METER_NUMBER_TAKEN]:
     "That meter number now belongs to another meter. This needs a person, not a repair.",
+  [NOT_REPAIRABLE.MASTER_NOT_WRITABLE]:
+    "The meter master record for that meter number is not in a shape this can safely write to. It needs a person.",
 });
 
 export function whyNot(code) {
@@ -96,7 +99,13 @@ export function whyNot(code) {
  * Reads only. This is the dry run: it changes nothing and says exactly what it found.
  */
 export async function inspectRegistration({ db, trnId, deps }) {
-  const { normalizeMeterNo, validateMeterDiscoveryPayload, getServiceBucketFromMeterType } = deps;
+  const {
+    normalizeMeterNo,
+    validateMeterDiscoveryPayload,
+    getServiceBucketFromMeterType,
+    classifyOperationalAstChange,
+    METER_MASTER_CLASSIFICATIONS,
+  } = deps;
   const safeTrnId = String(trnId || "").trim();
 
   if (!safeTrnId) {
@@ -168,6 +177,31 @@ export async function inspectRegistration({ db, trnId, deps }) {
       ...no(NOT_REPAIRABLE.METER_NUMBER_TAKEN),
       detail: `meter_master/${normalizedMeterNo} points at ${masterAstId}`,
     };
+  }
+
+  // A dry run is what the owner reads before saying go, so it must not promise a repair the write would
+  // refuse. The meter master guards its own shape, and it does so inside the transaction - so ask it the
+  // same question here, where nothing is written (measured on DEV: 22 old masters answer no).
+  if (masterSnap.exists && classifyOperationalAstChange) {
+    const decision = classifyOperationalAstChange({
+      masterId: normalizedMeterNo,
+      existing: masterSnap.data(),
+      incomingAstId: safeTrnId,
+      incomingLmPcode: trnData?.accessData?.parents?.lmPcode || null,
+      incomingMeterType: meterType,
+      sourceWriter: "inspectRegistration",
+    });
+    if (
+      METER_MASTER_CLASSIFICATIONS &&
+      decision?.classification === METER_MASTER_CLASSIFICATIONS.CONFLICT
+    ) {
+      return {
+        ...no(NOT_REPAIRABLE.MASTER_NOT_WRITABLE),
+        detail: `${decision?.conflict?.conflictCode || "CONFLICT"}: ${
+          decision?.conflict?.message || "the meter master refused"
+        }`,
+      };
+    }
   }
 
   // RG-R001 section 2: a meter is not registered because `asts` holds a document. It is registered when

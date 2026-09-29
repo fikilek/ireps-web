@@ -510,3 +510,31 @@ test("filling the links leaves the meter itself untouched", async () => {
   assert.match(outcome.message, /was left as it is/);
   assert.deepEqual(docs[`asts/${TRN_ID}`].normalisation.actionTaken, ["Meter replaced"]);
 });
+
+
+// A dry run is what the owner reads before saying go. On DEV it promised 28 repairs and the write made 4,
+// because the meter master guards its own shape inside the transaction. The dry run now asks the same
+// question, so what it promises is what happens.
+test("a meter master in a shape we cannot safely write to is refused by the dry run, not at the write", async () => {
+  const docs = base();
+  docs["meter_master/04297698369"] = { the: "old shape" };
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps({
+      classifyOperationalAstChange: () => ({
+        classification: "CONFLICT",
+        conflict: { conflictCode: "DOCUMENT_SHAPE_UNSAFE", message: "Meter Master canonical shape is unsafe" },
+      }),
+      METER_MASTER_CLASSIFICATIONS: { CONFLICT: "CONFLICT" },
+    }),
+  });
+
+  assert.equal(outcome.success, false);
+  assert.equal(outcome.code, NOT_REPAIRABLE.MASTER_NOT_WRITABLE);
+  assert.match(outcome.detail, /DOCUMENT_SHAPE_UNSAFE/);
+});
