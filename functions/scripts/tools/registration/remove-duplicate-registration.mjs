@@ -85,7 +85,8 @@ async function survivorOf(orphanId, orphan) {
     return { why: `meter ${meterNo} does not exist, so this is not a duplicate — repair it instead` };
   }
 
-  const survivorId = master.data()?.trnId || master.data()?.astId || "";
+  // The field link is the only place a meter number points back at its meter (registerMeter.js step 2).
+  const survivorId = master.data()?.refs?.asts?.id || "";
   if (!survivorId) return { why: `meter_master/${meterNo} names no transaction` };
   if (survivorId === orphanId) return { why: "the meter master already points at this transaction" };
 

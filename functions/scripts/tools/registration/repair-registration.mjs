@@ -7,6 +7,7 @@
 //   node scripts/tools/registration/repair-registration.mjs --project ireps2 --all
 //   node scripts/tools/registration/repair-registration.mjs --project ireps2 --all --apply --reason "..."
 //   node scripts/tools/registration/repair-registration.mjs --project ireps-test --trn TRN_MDIS_...
+//   node scripts/tools/registration/repair-registration.mjs --project ireps2 --unlinked
 import { readFileSync } from "node:fs";
 
 const KEYS = {
@@ -27,6 +28,9 @@ const project = one("project", "ireps2");
 const apply = args.includes("--apply");
 const reason = one("reason", "");
 const everyOrphan = args.includes("--all");
+// RG-R001 section 2: a meter that exists but is not linked everywhere is not a finished registration.
+// --unlinked walks the meters instead of the transactions and picks the ones whose links are missing.
+const everyUnlinked = args.includes("--unlinked");
 
 if (!KEYS[project]) {
   console.error(`Unknown project "${project}".`);
@@ -63,7 +67,12 @@ const deps = {
 async function orphanTrnIds() {
   const named = many("trn").filter(Boolean);
   if (named.length) return named;
-  if (!everyOrphan) throw new Error("Give me --trn <TRN_MDIS_...> or --all");
+  if (everyUnlinked) {
+    const asts = await db.collection("asts").get();
+    return asts.docs.map((doc) => doc.id);
+  }
+
+  if (!everyOrphan) throw new Error("Give me --trn <TRN_MDIS_...>, --all or --unlinked");
 
   const trns = await db
     .collection("trns")
@@ -90,8 +99,8 @@ async function main() {
   );
 
   const done = [];
-
   const stopped = [];
+  let alreadyWhole = 0;
 
   for (const trnId of ids) {
     // One transaction that cannot be repaired must not stop the others. A repair is all-or-nothing for
@@ -111,6 +120,12 @@ async function main() {
     } catch (error) {
       stopped.push({ trnId, message: error?.message || String(error) });
       console.log(`${trnId}\n  NOT REPAIRED — ${error?.message || error}\n`);
+      continue;
+    }
+
+    // In --unlinked mode most meters are whole, and saying so 1,800 times helps nobody.
+    if (everyUnlinked && outcome.code === "ALREADY_HAS_ITS_METER") {
+      alreadyWhole += 1;
       continue;
     }
 
@@ -142,6 +157,7 @@ async function main() {
       ? `${done.length} of ${ids.length} repaired.`
       : `Nothing written. ${ids.length} inspected.`,
   );
+  if (alreadyWhole) console.log(`${alreadyWhole} were already linked everywhere.`);
 
   if (stopped.length) {
     console.log(`\n${stopped.length} could not be repaired, and nothing was written for them:`);

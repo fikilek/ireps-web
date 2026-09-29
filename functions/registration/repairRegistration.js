@@ -13,7 +13,41 @@ import { REFUSED_SUBMISSIONS } from "./refusedSubmissions.js";
 
 export const REPAIRABLE = Object.freeze({
   READY: "READY",
+  // The meter is there but not linked everywhere. The same creator fills only what is missing, because it
+  // keeps an asset it finds (registerMeter.js step 1) — a meter already normalised is never rewritten.
+  LINKS_ONLY: "LINKS_ONLY",
 });
+
+/**
+ * Which of a registered meter's links are not there. RG-R001 section 2: the meter master's field link and
+ * the premise's own meter list are part of the registration, not decorations on it.
+ */
+export function missingLinks({
+  trnId,
+  meterType,
+  masterSnap,
+  premiseSnap,
+  getServiceBucketFromMeterType,
+}) {
+  const missing = [];
+
+  if (!masterSnap?.exists) {
+    missing.push("the meter master has no document for this meter number");
+  } else if (!(masterSnap.data()?.refs?.asts?.id || "")) {
+    missing.push("the meter master carries no field link, so the meter can never be VISIBLE");
+  }
+
+  const bucket = getServiceBucketFromMeterType
+    ? getServiceBucketFromMeterType({ meterType, trnId })
+    : "";
+  if (bucket && premiseSnap?.exists) {
+    const list = premiseSnap.data()?.services?.[bucket];
+    const listed = Array.isArray(list) && list.some((item) => item?.trnId === trnId);
+    if (!listed) missing.push("the premise does not carry the meter on its own list");
+  }
+
+  return missing;
+}
 
 export const NOT_REPAIRABLE = Object.freeze({
   TRN_NOT_FOUND: "TRN_NOT_FOUND",
@@ -62,7 +96,7 @@ export function whyNot(code) {
  * Reads only. This is the dry run: it changes nothing and says exactly what it found.
  */
 export async function inspectRegistration({ db, trnId, deps }) {
-  const { normalizeMeterNo, validateMeterDiscoveryPayload } = deps;
+  const { normalizeMeterNo, validateMeterDiscoveryPayload, getServiceBucketFromMeterType } = deps;
   const safeTrnId = String(trnId || "").trim();
 
   if (!safeTrnId) {
@@ -122,7 +156,6 @@ export async function inspectRegistration({ db, trnId, deps }) {
     db.collection("premises").doc(premiseId).get(),
   ]);
 
-  if (astSnap.exists) return no(NOT_REPAIRABLE.ALREADY_HAS_ITS_METER);
   if (!premiseSnap.exists) return no(NOT_REPAIRABLE.PREMISE_NOT_FOUND);
 
   // The meter number may have been captured again since, under its own transaction. That is a person's
@@ -137,14 +170,31 @@ export async function inspectRegistration({ db, trnId, deps }) {
     };
   }
 
+  // RG-R001 section 2: a meter is not registered because `asts` holds a document. It is registered when
+  // all of its records stand together. A master with no field link can never be VISIBLE (MV-R001), and a
+  // meter missing from its premise list does not show on the premise card — yet both read as finished
+  // everywhere that counts the asset alone. So asking only "does the asset exist" is not the question.
+  const missing = missingLinks({
+    trnId: safeTrnId,
+    meterType,
+    masterSnap,
+    premiseSnap,
+    getServiceBucketFromMeterType,
+  });
+
+  if (astSnap.exists && !missing.length) {
+    return no(NOT_REPAIRABLE.ALREADY_HAS_ITS_METER);
+  }
+
   return {
     repairable: true,
-    code: REPAIRABLE.READY,
+    code: astSnap.exists ? REPAIRABLE.LINKS_ONLY : REPAIRABLE.READY,
     trnId: safeTrnId,
     trnData,
+    ...(astSnap.exists ? { missingLinks: missing } : {}),
     // What the repair would write, so a dry run can be read before it is run.
     willWrite: {
-      ast: `asts/${safeTrnId}`,
+      ast: astSnap.exists ? "already there, and left as it is" : `asts/${safeTrnId}`,
       master: `meter_master/${normalizedMeterNo}`,
       premise: `premises/${premiseId}`,
       meterNo: normalizedMeterNo,
@@ -196,8 +246,14 @@ export async function repairRegistration({
       dryRun: true,
       trnId: inspection.trnId,
       code: "WOULD_REPAIR",
-      message: "This transaction can be repaired. Nothing has been written.",
+      message:
+        inspection.code === REPAIRABLE.LINKS_ONLY
+          ? `The meter is there but not linked everywhere: ${inspection.missingLinks.join(
+              "; ",
+            )}. The links can be filled in. Nothing has been written.`
+          : "This transaction can be repaired. Nothing has been written.",
       willWrite: inspection.willWrite,
+      ...(inspection.missingLinks ? { missingLinks: inspection.missingLinks } : {}),
     };
   }
 
@@ -324,8 +380,16 @@ export async function repairRegistration({
     erfId: trnData?.accessData?.erfId || "NAv",
     code: "REPAIRED",
     ...(batchGone ? { batchGone: batchGone.code } : {}),
-    message: batchGone
-      ? "The meter now exists, under the same TRN ID as the original visit. The batch it was filed under no longer exists, and that is recorded on the repair."
-      : "The meter now exists, under the same TRN ID as the original visit.",
+    ...(inspection.missingLinks ? { missingLinks: inspection.missingLinks } : {}),
+    message: [
+      inspection.code === REPAIRABLE.LINKS_ONLY
+        ? "The meter was already there and was left as it is. It is now linked everywhere: the meter master carries its field link, and the premise carries it on its own list."
+        : "The meter now exists, under the same TRN ID as the original visit.",
+      batchGone
+        ? "The batch it was filed under no longer exists, and that is recorded on the repair."
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }

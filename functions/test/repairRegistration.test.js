@@ -92,6 +92,8 @@ function deps(overrides = {}) {
       return normalized;
     },
     validateMeterDiscoveryPayload: () => null,
+    getServiceBucketFromMeterType: ({ meterType }) =>
+      meterType === "water" ? "waterMeters" : "electricityMeters",
     registerMeterInTransaction: async ({ tx, db, trnId, metadata }) => {
       tx.create(db.collection("asts").doc(trnId), { trnId, metadata });
       return {
@@ -247,9 +249,11 @@ test("a repair without a reason is refused, because it is recorded in the person
 // What it refuses to repair
 // ---------------------------------------------------------------------------
 
-test("a transaction that already has its meter is left alone", async () => {
+test("a transaction that already has its meter, linked everywhere, is left alone", async () => {
   const docs = base();
   docs[`asts/${TRN_ID}`] = { trnId: TRN_ID };
+  docs["meter_master/04297698369"] = { refs: { asts: { id: TRN_ID } } };
+  docs["premises/PRM-1"] = { services: { electricityMeters: [{ trnId: TRN_ID }] } };
 
   const outcome = await repairRegistration({
     db: fakeDb(docs),
@@ -431,4 +435,78 @@ test("anything else still stops the repair, so it never writes half a registrati
     }),
     (error) => error.irepsCode === "TARGETED_BATCH_MEMBERSHIP_CONFLICT",
   );
+});
+
+// RG-R001 section 2 (owner, 2026-09-29): a meter is registered when its records stand together, so the
+// repeat check asks for all of them. Measured when this was written: 126 meters on DEV and 11 on TEST
+// exist with no field link on the meter master, every one of them registered before 19 July 2026.
+test("a meter with no field link on the master is not finished, and the links can be filled in", async () => {
+  const docs = base();
+  docs[`asts/${TRN_ID}`] = { trnId: TRN_ID };
+  docs["meter_master/04297698369"] = { refs: { asts: {} } };
+  docs["premises/PRM-1"] = { services: { electricityMeters: [{ trnId: TRN_ID }] } };
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps(),
+  });
+
+  assert.equal(outcome.dryRun, true);
+  assert.equal(outcome.code, "WOULD_REPAIR");
+  assert.match(outcome.message, /can never be VISIBLE/);
+  assert.equal(outcome.willWrite.ast, "already there, and left as it is");
+});
+
+test("a meter missing from its premise list is not finished either", async () => {
+  const docs = base();
+  docs[`asts/${TRN_ID}`] = { trnId: TRN_ID };
+  docs["meter_master/04297698369"] = { refs: { asts: { id: TRN_ID } } };
+  docs["premises/PRM-1"] = { services: { electricityMeters: [] } };
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps(),
+  });
+
+  assert.equal(outcome.code, "WOULD_REPAIR");
+  assert.match(outcome.message, /premise does not carry the meter on its own list/);
+});
+
+// The creator keeps an asset it finds (registerMeter.js step 1), so a meter normalised since registration
+// is never rewritten by the repair that fills its links.
+test("filling the links leaves the meter itself untouched", async () => {
+  const docs = base();
+  docs[`asts/${TRN_ID}`] = { trnId: TRN_ID, normalisation: { actionTaken: ["Meter replaced"] } };
+  docs["meter_master/04297698369"] = { refs: { asts: {} } };
+  docs["premises/PRM-1"] = { services: { electricityMeters: [{ trnId: TRN_ID }] } };
+  const db = fakeDb(docs);
+
+  const outcome = await repairRegistration({
+    db,
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    reason: "the master never got its field link",
+    dryRun: false,
+    deps: deps({
+      registerMeterInTransaction: async ({ tx, db: database, trnId, metadata }) => {
+        const existing = await tx.get(database.collection("asts").doc(trnId));
+        assert.equal(existing.exists, true, "the creator saw the meter already there");
+        return { astId: trnId, visibility: "VISIBLE", derived: { astId: trnId } };
+      },
+    }),
+  });
+
+  assert.equal(outcome.repaired, true);
+  assert.match(outcome.message, /was left as it is/);
+  assert.deepEqual(docs[`asts/${TRN_ID}`].normalisation.actionTaken, ["Meter replaced"]);
 });
