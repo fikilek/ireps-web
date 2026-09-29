@@ -61,6 +61,10 @@ function fakeDb(docs) {
               deleted.push(path);
               delete docs[path];
             },
+            set: async (value, options) => {
+              docs[path] = options?.merge ? { ...(docs[path] || {}), ...value } : value;
+              return { path, value };
+            },
           };
         },
       };
@@ -209,7 +213,9 @@ test("the worker keeps the credit, and the repair is recorded beside it", async 
   assert.equal(trnWrite.value.derived.astId, TRN_ID);
 });
 
-test("the refusal record is cleared, because the work is no longer refused", async () => {
+// RG-R001 1.3.0 section 7: a refusal is marked resolved, NEVER deleted. The attempts beneath it are the
+// only place iREPS can show that the app refused this worker, and how many times.
+test("the refusal is marked resolved, not deleted, because the work is no longer refused", async () => {
   const docs = base();
   docs[`refused_submissions/${TRN_ID}`] = { trnId: TRN_ID };
   const db = fakeDb(docs);
@@ -225,7 +231,12 @@ test("the refusal record is cleared, because the work is no longer refused", asy
     deps: deps(),
   });
 
-  assert.deepEqual(db.deleted, [`refused_submissions/${TRN_ID}`]);
+  assert.deepEqual(db.deleted, [], "nothing was deleted");
+  const record = docs[`refused_submissions/${TRN_ID}`];
+  assert.equal(record.open, false);
+  assert.equal(record.resolved.how, "the office repaired it");
+  assert.equal(record.resolved.standingTrnId, TRN_ID);
+  assert.equal(record.resolved.byUser, "Fikile");
 });
 
 test("a repair without a reason is refused, because it is recorded in the person's own words", async () => {

@@ -7,7 +7,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { registerMeterInTransaction } from "../registration/registerMeter.js";
-import { recordRefusedSubmission } from "../registration/refusedSubmissions.js";
+import {
+  recordRefusedSubmission,
+  resolveRefusalsForMeter,
+  resolveRefusedSubmission,
+} from "../registration/refusedSubmissions.js";
 import {
   DEVICE_TIME_MISSING,
   buildRegistrationMetadata,
@@ -18,10 +22,41 @@ import { plainReasonFor } from "../meterDiscovery/captureOutcome.js";
 // Fakes: just enough Firestore to watch what a registration writes.
 // ---------------------------------------------------------------------------
 
+function this_collection(docs, name) {
+  return {
+    doc(id) {
+      const path = name + "/" + id;
+      return {
+        path,
+        id,
+        get: async () => ({ exists: Boolean(docs[path]), id, data: () => docs[path] || null }),
+        set: async (value, options) => {
+          docs[path] = options?.merge ? { ...(docs[path] || {}), ...value } : value;
+          return { path, value };
+        },
+      };
+    },
+  };
+}
+
+// Enough of a query for the one the resolver makes: two equality filters on one collection.
+function fakeQuery(docs, name, tests = []) {
+  return {
+    where: (field, op, value) => fakeQuery(docs, name, [...tests, { field, op, value }]),
+    get: async () => ({
+      docs: Object.keys(docs)
+        .filter((path) => path.startsWith(name + "/") && !path.slice(name.length + 1).includes("/"))
+        .filter((path) => tests.every(({ field, value }) => docs[path]?.[field] === value))
+        .map((path) => ({ id: path.slice(name.length + 1), data: () => docs[path] })),
+    }),
+  };
+}
+
 function fakeDb(docs = {}) {
   return {
     collection(name) {
       return {
+        where: (field, op, value) => fakeQuery(docs, name, [{ field, op, value }]),
         doc(id) {
           const path = `${name}/${id}`;
           return {
@@ -38,6 +73,8 @@ function fakeDb(docs = {}) {
                 : value;
               return { path, value };
             },
+            // RG-R001 1.3.0: a refusal keeps its attempts beneath it, so a document has collections.
+            collection: (child) => this_collection(docs, path + "/" + child),
           };
         },
       };
@@ -343,7 +380,8 @@ test("a refusal is recorded where the office can read it, and never as a transac
   });
 
   assert.equal(result.recorded, true);
-  assert.equal(Object.keys(docs).length, 1);
+  // The submission, and the attempt beneath it. RG-R001 1.3.0: no attempt overwrites another.
+  assert.equal(Object.keys(docs).length, 2);
   const record = docs[`refused_submissions/${TRN_ID}`];
   assert.ok(record, "the refusal is in refused_submissions");
   assert.equal(record.meterNo, "04297698369");
@@ -504,4 +542,125 @@ test("the team's summary counts a recognised find as the normal-path work it is"
 
   assert.equal(summary.totals.batchTrns, 0, "it was counted as batch work");
   assert.equal(summary.totals.normalTrns, 1, "and left out of the normal-path tally");
+});
+
+// RG-R001 1.3.0 section 7 (owner, 2026-09-29): every attempt is kept. One document per TRN ID meant each
+// attempt overwrote the one before it, so a worker refused four times on one meter looked like a worker
+// refused once - and that number is the signal that a rule or a form is wrong.
+test("a second refusal does not overwrite the first, and the count climbs", async () => {
+  const docs = {};
+  const db = fakeDb(docs);
+  const when = (n) => `2026-09-28T09:0${n}:00.000Z`;
+
+  const first = await recordRefusedSubmission({
+    db,
+    trnId: TRN_ID,
+    code: "MM_AST_REFERENCE_CONFLICT",
+    message: "Meter Master is already linked to a different AST",
+    data: TRN_DATA,
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    now: when(0),
+  });
+
+  const second = await recordRefusedSubmission({
+    db,
+    trnId: TRN_ID,
+    code: "METER_IN_ANOTHER_TEAMS_BATCH",
+    message: "That meter belongs to another team's batch",
+    data: TRN_DATA,
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    now: when(5),
+  });
+
+  assert.equal(first.attempts, 1);
+  assert.equal(second.attempts, 2);
+
+  const record = docs[`refused_submissions/${TRN_ID}`];
+  assert.equal(record.attempts, 2);
+  assert.equal(record.firstRefusedAt, when(0), "the first refusal keeps its own time");
+  assert.equal(record.lastRefusedAt, when(5));
+  assert.equal(record.open, true);
+  assert.equal(record.refusal.code, "METER_IN_ANOTHER_TEAMS_BATCH", "the latest reason is on top");
+
+  // Both attempts survive, each under its own name.
+  const attempts = Object.keys(docs).filter((path) => path.includes("/attempts/"));
+  assert.equal(attempts.length, 2, "no attempt overwrote another");
+  const older = docs[attempts.find((path) => path.includes("09-00-00"))];
+  assert.equal(older.attempt, 1);
+  assert.equal(older.refusal.code, "MM_AST_REFERENCE_CONFLICT", "the first reason is still readable");
+});
+
+test("a refusal is resolved, never deleted, and says which transaction stands", async () => {
+  const docs = {};
+  const db = fakeDb(docs);
+
+  await recordRefusedSubmission({
+    db,
+    trnId: TRN_ID,
+    code: "MM_AST_REFERENCE_CONFLICT",
+    message: "Meter Master is already linked to a different AST",
+    data: TRN_DATA,
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    now: "2026-09-28T09:00:00.000Z",
+  });
+
+  const outcome = await resolveRefusedSubmission({
+    db,
+    trnId: TRN_ID,
+    how: "the worker submitted again",
+    standingTrnId: "TRN_MDIS_LATER_ELC_ZA5241006_1755",
+    byUid: "uid-fwr",
+    byUser: "Kaiser",
+    now: "2026-09-28T09:30:00.000Z",
+  });
+
+  assert.equal(outcome.resolved, true);
+  assert.equal(outcome.attempts, 1);
+
+  const record = docs[`refused_submissions/${TRN_ID}`];
+  assert.equal(record.open, false);
+  assert.equal(record.resolved.standingTrnId, "TRN_MDIS_LATER_ELC_ZA5241006_1755");
+  assert.equal(record.resolved.how, "the worker submitted again");
+  assert.ok(record.refusal, "the reason it was refused is still there");
+  assert.equal(
+    Object.keys(docs).filter((path) => path.includes("/attempts/")).length,
+    1,
+    "the attempt was not deleted either",
+  );
+});
+
+// The phone never reuses a refused TRN ID - a Submit after a refusal is a new attempt with a new id. So
+// the record that must be closed is almost never the one that succeeded, and it is found by the meter.
+test("a registration that lands closes the open refusals for that meter, under whatever id they carry", async () => {
+  const docs = {};
+  const db = fakeDb(docs);
+
+  await recordRefusedSubmission({
+    db,
+    trnId: TRN_ID,
+    code: "METER_IN_ANOTHER_TEAMS_BATCH",
+    message: "That meter belongs to another team's batch",
+    data: TRN_DATA,
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    now: "2026-09-28T09:00:00.000Z",
+  });
+
+  const outcome = await resolveRefusalsForMeter({
+    db,
+    meterNo: "04297698369",
+    standingTrnId: "TRN_MDIS_LATER_ELC_ZA5241006_1755",
+    byUid: "uid-fwr",
+    byUser: "Kaiser",
+    now: "2026-09-28T10:00:00.000Z",
+  });
+
+  assert.equal(outcome.resolved, 1);
+  const record = docs[`refused_submissions/${TRN_ID}`];
+  assert.equal(record.open, false);
+  assert.equal(record.resolved.how, "the worker submitted again");
+  assert.equal(record.resolved.standingTrnId, "TRN_MDIS_LATER_ELC_ZA5241006_1755");
 });

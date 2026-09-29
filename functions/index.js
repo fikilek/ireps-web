@@ -113,7 +113,10 @@ import {
 } from "./meterDiscovery/captureOutcome.js";
 import { registerMeterInTransaction } from "./registration/registerMeter.js";
 import { repairRegistration } from "./registration/repairRegistration.js";
-import { recordRefusedSubmission } from "./registration/refusedSubmissions.js";
+import {
+  recordRefusedSubmission,
+  resolveRefusalsForMeter,
+} from "./registration/refusedSubmissions.js";
 import { buildRegistrationMetadata } from "./registration/registrationMetadata.js";
 import { recordDifferentMeterAtErf } from "./targetedBatches/differentMeterAtErf.js";
 import { recordReplacedMeter } from "./targetedBatches/replacedMeter.js";
@@ -3659,6 +3662,19 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         // The row the worker opened, so only its own Sales meter can be settled.
         targetedBatchContext: data?.targetedBatchContext || null,
         log: logger,
+      });
+
+      // RG-R001 1.3.0 section 7: the work landed, so whatever it put right is marked resolved. A worker
+      // who was refused starts a NEW attempt with its own TRN ID, so the open record is found by the
+      // meter number, not by the id. It is never deleted: the attempts beneath it are the only place
+      // iREPS can show that this worker was refused, and how many times.
+      await resolveRefusalsForMeter({
+        db,
+        meterNo: data?.ast?.astData?.astNo || "",
+        standingTrnId: data.id,
+        byUid: caller.uid,
+        byUser: caller?.token?.name || caller.uid,
+        now,
       });
     } catch (afterError) {
       // The office needs to know a count or a record is behind. The worker does not: their work is in.

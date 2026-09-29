@@ -9,7 +9,7 @@
 // is identical to one registered today. It keeps the original capture's own attribution — the worker
 // who did the work and the day they did it — and records the repair beside it, never in place of it.
 import { registrationError } from "./registerMeter.js";
-import { REFUSED_SUBMISSIONS } from "./refusedSubmissions.js";
+import { resolveRefusedSubmission } from "./refusedSubmissions.js";
 
 export const REPAIRABLE = Object.freeze({
   READY: "READY",
@@ -383,15 +383,17 @@ export async function repairRegistration({
     return registration;
   });
 
-  // The work is no longer refused, so the office's list must not keep saying it is (RG-R001 s.8).
-  try {
-    await db.collection(REFUSED_SUBMISSIONS).doc(inspection.trnId).delete();
-  } catch (error) {
-    logger?.warn?.("repairRegistration ---- refusal record left behind", {
-      trnId: inspection.trnId,
-      message: error?.message || String(error),
-    });
-  }
+  // The work is no longer refused (RG-R001 1.3.0 section 7). It is marked resolved, never deleted: the
+  // attempts beneath it are the only record that the app refused this worker, and how many times.
+  await resolveRefusedSubmission({
+    db,
+    trnId: inspection.trnId,
+    how: "the office repaired it",
+    standingTrnId: inspection.trnId,
+    byUid: actorUid,
+    byUser: actorName,
+    now,
+  });
 
   logger?.info?.("repairRegistration ---- repaired", {
     trnId: inspection.trnId,
