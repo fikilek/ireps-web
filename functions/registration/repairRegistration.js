@@ -125,7 +125,12 @@ export async function inspectRegistration({ db, trnId, deps }) {
   const trnData = trnSnap.data() || {};
   const no = (code) => ({ repairable: false, code, trnId: safeTrnId, trnData });
 
-  if (trnData?.accessData?.trnType !== "METER_DISCOVERY") {
+  // RG-R001 covers BOTH registration functions. A meter that exists but is not linked everywhere is
+  // repaired whichever one registered it: filling a link reads nothing from the submission, so none of
+  // what separates the two (mi01) comes into it. MAKING a meter from a submission is Discovery only,
+  // because that is the submission this validates, and it is checked further down.
+  const trnType = trnData?.accessData?.trnType;
+  if (trnType !== "METER_DISCOVERY" && trnType !== "METER_INSTALLATION") {
     return no(NOT_REPAIRABLE.NOT_A_REGISTRATION);
   }
 
@@ -150,14 +155,6 @@ export async function inspectRegistration({ db, trnId, deps }) {
 
   const premiseId = trnData?.accessData?.premise?.id || "";
   if (!premiseId || premiseId === "NAv") return no(NOT_REPAIRABLE.MISSING_PREMISE);
-
-  const validationError = validateMeterDiscoveryPayload({ data: trnData });
-  if (validationError) {
-    return {
-      ...no(NOT_REPAIRABLE.INVALID_PAYLOAD),
-      detail: `${validationError.code}: ${validationError.message}`,
-    };
-  }
 
   const [astSnap, masterSnap, premiseSnap] = await Promise.all([
     db.collection("asts").doc(safeTrnId).get(),
@@ -216,8 +213,20 @@ export async function inspectRegistration({ db, trnId, deps }) {
     getServiceBucketFromMeterType,
   });
 
-  if (astSnap.exists && !missing.length) {
-    return no(NOT_REPAIRABLE.ALREADY_HAS_ITS_METER);
+  if (astSnap.exists) {
+    if (!missing.length) return no(NOT_REPAIRABLE.ALREADY_HAS_ITS_METER);
+  } else {
+    // From here the meter has to be MADE from the submission, so the submission must pass today's
+    // checks - repairing it otherwise would store work we would refuse now.
+    if (trnType !== "METER_DISCOVERY") return no(NOT_REPAIRABLE.NOT_A_REGISTRATION);
+
+    const validationError = validateMeterDiscoveryPayload({ data: trnData });
+    if (validationError) {
+      return {
+        ...no(NOT_REPAIRABLE.INVALID_PAYLOAD),
+        detail: `${validationError.code}: ${validationError.message}`,
+      };
+    }
   }
 
   return {

@@ -549,3 +549,91 @@ test("a meter master in a shape we cannot safely write to is refused by the dry 
   assert.equal(outcome.code, NOT_REPAIRABLE.MASTER_NOT_WRITABLE);
   assert.match(outcome.detail, /DOCUMENT_SHAPE_UNSAFE/);
 });
+
+// Owner, 2026-09-29: "why are we repairing only MD? we should repair all data." Filling a link reads
+// nothing from the submission, so it does not matter which registration function wrote it. Making a meter
+// FROM a submission is Discovery only, because that is the submission this validates (mi01).
+test("a Meter Installation whose meter is not linked can have its links filled", async () => {
+  const docs = base();
+  docs[`trns/${TRN_ID}`] = {
+    ...ORPHAN,
+    accessData: { ...ORPHAN.accessData, trnType: "METER_INSTALLATION" },
+  };
+  docs[`asts/${TRN_ID}`] = { trnId: TRN_ID };
+  docs["premises/PRM-1"] = { services: { electricityMeters: [{ trnId: TRN_ID }] } };
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps(),
+  });
+
+  assert.equal(outcome.code, "WOULD_REPAIR");
+  assert.match(outcome.message, /meter master has no document/);
+});
+
+test("a Meter Installation with no meter at all is still left to mi01", async () => {
+  const docs = base();
+  docs[`trns/${TRN_ID}`] = {
+    ...ORPHAN,
+    accessData: { ...ORPHAN.accessData, trnType: "METER_INSTALLATION" },
+  };
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps(),
+  });
+
+  assert.equal(outcome.code, NOT_REPAIRABLE.NOT_A_REGISTRATION);
+});
+
+// The payload check used to run before anything had been read, so a links-only repair was refused over a
+// submission it never writes. That is why 27 records on DEV looked unrepairable when they were not.
+test("a links-only repair is not refused over a submission it does not write", async () => {
+  const docs = base();
+  docs[`asts/${TRN_ID}`] = { trnId: TRN_ID };
+  docs["premises/PRM-1"] = { services: { electricityMeters: [{ trnId: TRN_ID }] } };
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps({
+      validateMeterDiscoveryPayload: () => ({
+        code: "INVALID_METER_PLACEMENT",
+        message: "Electricity meter placement must use an approved Meter Placement option",
+      }),
+    }),
+  });
+
+  assert.equal(outcome.code, "WOULD_REPAIR", "the links are filled although the old submission would fail today");
+});
+
+test("making the meter from a submission still checks the submission", async () => {
+  const docs = base();
+
+  const outcome = await repairRegistration({
+    db: fakeDb(docs),
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    deps: deps({
+      validateMeterDiscoveryPayload: () => ({
+        code: "INVALID_METER_PLACEMENT",
+        message: "Electricity meter placement must use an approved Meter Placement option",
+      }),
+    }),
+  });
+
+  assert.equal(outcome.code, NOT_REPAIRABLE.INVALID_PAYLOAD);
+});
