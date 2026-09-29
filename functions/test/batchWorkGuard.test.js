@@ -24,15 +24,26 @@ test("a meter in no batch is free", () => {
   assert.equal(decision.code, ALLOWED.NO_BATCH);
 });
 
-test("a batch nobody has been given the work of is free", () => {
-  // Plainly unallocated: no status, an empty one or NOT_STARTED, and no TEAM or SP named.
+// Rules 1.3.89 (owner, 2026-09-28): batching IS the claim. Until then a batch nobody had been given was
+// treated as free ground; the owner settled it the other way - "the moment they batch work, they claim it".
+test("a batch nobody has been given the work of is refused, not free", () => {
   for (const status of ["", "NOT_STARTED", "not_started"]) {
-    const free = { status, targetId: "", targetName: "", targetType: "" };
-    const decision = decideBatchWork(facts({ parent: parent(free) }));
-    assert.equal(decision.allowed, true, JSON.stringify(free));
-    assert.equal(decision.code, ALLOWED.NOT_ALLOCATED);
+    const unallocated = { status, targetId: "", targetName: "", targetType: "" };
+    const decision = decideBatchWork(facts({ parent: parent(unallocated) }));
+    assert.equal(decision.allowed, false, JSON.stringify(unallocated));
+    assert.equal(decision.code, "METER_IN_AN_UNALLOCATED_BATCH");
+    assert.match(decision.message, /has not been given to a team yet, so nobody may work it/);
+    assert.match(decision.message, /Ask your supervisor/);
   }
-  assert.equal(decideBatchWork(facts({ parent: { id: TB, geofenceId: "FENCE1" } })).code, ALLOWED.NOT_ALLOCATED, "a batch with no allocation at all");
+  const none = decideBatchWork(facts({ parent: { id: TB, geofenceId: "FENCE1" } }));
+  assert.equal(none.code, "METER_IN_AN_UNALLOCATED_BATCH", "a batch with no allocation at all");
+});
+
+test("the unallocated refusal names the batch and its geofence, because it has no team or date to name", () => {
+  const decision = decideBatchWork(facts({ parent: parent({ status: "NOT_STARTED", targetId: "", targetName: "", targetType: "" }) }));
+  assert.match(decision.message, new RegExp(TB));
+  assert.equal(decision.details.rule, "TB-R059");
+  assert.equal(decision.details.tbId, TB);
 });
 
 // Rules 1.3.62: a batch being allocated, or whose allocation failed, already names a team, so it is not free.
@@ -302,8 +313,12 @@ test("the ERF is free when the batch's rows on it are done, or nobody has been g
   assert.equal(decideBatchWork(atErf({ erfRows: [completed] })).allowed, true, "a Completed row frees the ERF");
   // A VISIBLE Sales meter IS completed (the owner's settled definition), so its batch holds no work on it.
   assert.equal(decideBatchWork(atErf({ erfRows: [erfRow({ visibility: "VISIBLE" })] })).allowed, true);
-  const free = erfRow({ parent: parent({ status: "NOT_STARTED", targetId: "", targetType: "", targetName: "" }) });
-  assert.equal(decideBatchWork(atErf({ erfRows: [free] })).allowed, true, "an unallocated batch never held the ERF");
+  // Rules 1.3.89: an unallocated batch holds its ERF too - batching is the claim.
+  const unallocated = erfRow({ parent: parent({ status: "NOT_STARTED", targetId: "", targetType: "", targetName: "" }) });
+  const held = decideBatchWork(atErf({ erfRows: [unallocated] }));
+  assert.equal(held.allowed, false, "an unallocated batch still holds the ERF");
+  assert.equal(held.code, "METER_IN_AN_UNALLOCATED_BATCH");
+  assert.match(held.message, /^This ERF is in batch/);
   // Rules TB-R060 deletes the row, so a meter taken out of a batch stops matching by itself.
   assert.equal(decideBatchWork(atErf({ erfRows: [] })).allowed, true);
   assert.equal(decideBatchWork(atErf({ erfRows: null, erfId: "" })).allowed, true, "no ERF was worked out");
@@ -482,10 +497,11 @@ test("GMR-R038 the worker's own batch row is carried when the work is allowed, n
   assert.equal(own.details.tbId, TB);
   assert.equal(own.details.rowId, `${TB}__R001`, "the row, or the report cannot see which work this was");
 
-  // A batch nobody has been given still names its row: the premise belongs to it either way.
-  const free = decideMeterBatchWork(facts({ parent: parent({ status: "NOT_STARTED", targetId: "", targetName: "" }) }));
-  assert.equal(free.code, ALLOWED.NOT_ALLOCATED);
-  assert.equal(free.details.rowId, `${TB}__R001`);
+  // Rules 1.3.89: a batch nobody has been given refuses the work, and still names its row for the office.
+  const unallocated = decideMeterBatchWork(facts({ parent: parent({ status: "NOT_STARTED", targetId: "", targetName: "" }) }));
+  assert.equal(unallocated.allowed, false);
+  assert.equal(unallocated.code, "METER_IN_AN_UNALLOCATED_BATCH");
+  assert.equal(unallocated.details.rowId, `${TB}__R001`);
 });
 
 test("GMR-R038 a different meter at the worker's own batched ERF carries that ERF's row", () => {

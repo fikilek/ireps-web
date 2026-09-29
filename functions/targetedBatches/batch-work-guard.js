@@ -37,6 +37,9 @@ export const RULE = "TB-R059";
 export const ERF_RULE = "TB-R062";
 export const RULES_VERSION = "1.3.65";
 export const METER_IN_ANOTHER_TEAMS_BATCH = "METER_IN_ANOTHER_TEAMS_BATCH";
+// Rules TB-R059 (1.3.89): batching is the claim. A batch that has not been given to a team yet belongs to
+// nobody, so nobody may work it — its own code, because the sentence has no team and no date to name.
+export const METER_IN_AN_UNALLOCATED_BATCH = "METER_IN_AN_UNALLOCATED_BATCH";
 // Rules TB-R059 (1.3.62): the work is refused because iREPS could not check, not because the meter belongs
 // to somebody else. Its own code, so the phone can tell the two refusals apart.
 export const BATCH_CHECK_UNAVAILABLE = "BATCH_CHECK_UNAVAILABLE";
@@ -175,6 +178,14 @@ export function refusalMessage({ tbId, geofenceName, targetType, targetName, all
   return `${what} ${text(tbId)}, ${fence}, allocated to ${who}${when ? ` on ${when}` : ""}. Only that ${isSp ? "service provider" : "team"} can work on it.`;
 }
 
+// Rules TB-R059 (1.3.89): the batch exists but has been given to nobody. There is no team and no date to
+// name, so the sentence says what is true and who can change it.
+export function unallocatedRefusalMessage({ tbId, geofenceName, about = "meter" }) {
+  const fence = text(geofenceName) ? `geofence ${text(geofenceName)}` : "no geofence";
+  const what = about === "erf" ? "This ERF is in batch" : "This meter is in batch";
+  return `${what} ${text(tbId)}, ${fence}. It has not been given to a team yet, so nobody may work it. Ask your supervisor.`;
+}
+
 export function batchAllocation(parent = {}) {
   const allocation = parent?.allocation || {}, target = allocation?.target || {};
   return {
@@ -221,13 +232,27 @@ export function decideMeterBatchWork({ sales, parent, row, allocatedTeam = null,
   if (upper(sales?.master?.visibility) === "VISIBLE") return allow(ALLOWED.VISIBLE, { tbId: batchId });
   if (!parent) return cannotCheck(UNREADABLE.BATCH, { tbId: batchId });
   const allocation = batchAllocation(parent);
-  // Only a batch nobody has been given the work of is free; anything else is tested against the worker.
-  if (explicitlyUnallocated(allocation)) {
-    return allow(ALLOWED.NOT_ALLOCATED, { tbId: batchId, rowId: text(row?.id) || null, targetType: allocation.type || null, targetId: allocation.id || null });
-  }
   // Owner decision 2026-09-19: once the batch's work on the meter is done its row is Completed, and later
-  // work (a reading, an inspection, a disconnection) is ordinary work that anyone may do.
+  // work (a reading, an inspection, a disconnection) is ordinary work that anyone may do. Registration ends
+  // at Completed; after that the meter belongs to its lifecycle, not to the batch (owner, 2026-09-28).
   if (rowExecutionStatus(row) === "COMPLETED") return allow(ALLOWED.ROW_COMPLETED, { tbId: batchId, rowId: text(row?.id) || null });
+  // Rules TB-R059 (1.3.89): batching IS the claim. Until 1.3.88 a batch nobody had been given was treated as
+  // free; the owner settled it the other way on 2026-09-28 — "the moment they batch work, they claim it",
+  // and the field is out of it until a team is given that batch. There is no team on it, so nobody is inside
+  // it, and the refusal says so in its own words.
+  if (explicitlyUnallocated(allocation)) {
+    return {
+      allowed: false,
+      code: METER_IN_AN_UNALLOCATED_BATCH,
+      message: unallocatedRefusalMessage({ tbId: batchId, geofenceName }),
+      details: {
+        rule: RULE, rulesVersion: RULES_VERSION, meterNo: text(meterNo) || null, tbId: batchId,
+        rowId: text(row?.id) || null, geofenceId: text(parent?.geofenceId) || null, geofenceName: text(geofenceName) || null,
+        reason: ALLOWED.NOT_ALLOCATED,
+        workerTeamId: text(finderTeamId) || null, workerServiceProviderId: text(finderSpId) || null,
+      },
+    };
+  }
   // Rules TB-R059: the team the worker belongs to now, from their profile and the team list. Either the
   // membership period that is still open (TM-R001) or the team's own member list places the worker in it.
   const inside = workerInside({ allocation, allocatedTeam, finderUid, finderTeamId, finderSpId });
@@ -283,9 +308,21 @@ export function decideErfBatchWork({ erfId = "", erfRows = null, erfUnreadable =
     if (upper(entry?.visibility) === "VISIBLE") continue;
     if (!entry?.parent) return cannotCheck(UNREADABLE.ERF_BATCH, { tbId: text(row?.tbId) || null, rowId: text(row?.id) || null });
     const allocation = batchAllocation(entry.parent);
+    // Rules TB-R059 (1.3.89): a batch given to nobody is not free ground — batching is the claim. The ERF
+    // it sits on is out of the field's hands until a team is given that batch.
     if (explicitlyUnallocated(allocation)) {
-      ownRows.push({ tbId: text(row?.tbId) || null, rowId: text(row?.id) || null, erfId: text(erfId) || null });
-      continue;
+      return {
+        allowed: false,
+        code: METER_IN_AN_UNALLOCATED_BATCH,
+        message: unallocatedRefusalMessage({ about: "erf", tbId: row?.tbId, geofenceName: entry.geofenceName }),
+        details: {
+          rule: ERF_RULE, rulesVersion: RULES_VERSION, matchedOn: "ERF", reason: ALLOWED.NOT_ALLOCATED,
+          meterNo: text(meterNo) || null, erfId: text(erfId),
+          tbId: text(row?.tbId) || null, rowId: text(row?.id) || null, rowMeterNo: text(row?.salesAllMeterId) || null,
+          geofenceName: text(entry.geofenceName) || null,
+          workerTeamId: text(finderTeamId) || null, workerServiceProviderId: text(finderSpId) || null,
+        },
+      };
     }
     if (workerInside({ allocation, allocatedTeam: entry.allocatedTeam, finderUid, finderTeamId, finderSpId })) {
       ownRows.push({ tbId: text(row?.tbId) || null, rowId: text(row?.id) || null, erfId: text(erfId) || null });

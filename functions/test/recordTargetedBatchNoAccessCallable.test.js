@@ -176,11 +176,12 @@ test("TEAM and SP authority succeed; unrelated actors and direct allocation fail
       docs[`teams/TEAM_1`].memberUids = ["OTHER"];
       docs["team_member_history/TEAM_1__U1__1"] = {id: "TEAM_1__U1__1", teamId: "TEAM_1", userUid: "U1", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null};
     }, "TARGETED_BATCH_NOT_ASSIGNED_TO_ACTOR"],
-    // Nobody has been given the work of this batch, so TB-R059 has nothing to say; the batch's own
-    // authority refuses because it names no TEAM or SP to be assigned to.
+    // Rules 1.3.89 (owner, 2026-09-28): batching is the claim, so a batch nobody has been given is refused
+    // by TB-R059 first - it used to fall through to the batch's own authority, which said the same thing in
+    // words no field worker could act on.
     ["TEAM", (docs) => {
       docs[`tb_uploads/${TB}`].allocation = {status: "NOT_STARTED", targetType: "", targetId: ""};
-    }, "TARGETED_BATCH_ALLOCATION_TARGET_INVALID"],
+    }, "METER_IN_AN_UNALLOCATED_BATCH"],
   ]) {
     const docs = fixture({targetType});
     mutate(docs);

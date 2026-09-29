@@ -41,11 +41,12 @@ const PLAIN_REASONS = Object.freeze({
     "This version of iREPS cannot send this work. Update the app and submit it again — the work is safe on the phone.",
   INVALID_SERVICE_BUCKET:
     "iREPS could not tell whether this is a water or an electricity meter. Nothing was saved. Tell the office.",
-  METER_IN_ANOTHER_TEAMS_BATCH:
-    "This meter is in another team's batch, so only that team can work on it. Nothing was saved.",
-  BATCH_CHECK_UNAVAILABLE:
-    "iREPS could not check which batch this meter is in. Nothing was saved. Please try again.",
 });
+
+// The batch refusals already arrive as plain sentences that name the batch, its geofence, the team and the
+// date it was allocated (TB-R059), or say that nobody has been given the batch yet (1.3.89). Mapping them
+// here would replace those names with something vaguer, so they are deliberately absent: the fallback in
+// plainReason keeps the message the guard wrote.
 
 // The same refusal code can mean two different things to a worker, so the field that is missing
 // decides the sentence. RG-R001 1.1.0 section 6.
