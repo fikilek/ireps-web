@@ -664,3 +664,79 @@ test("a registration that lands closes the open refusals for that meter, under w
   assert.equal(record.resolved.how, "the worker submitted again");
   assert.equal(record.resolved.standingTrnId, "TRN_MDIS_LATER_ELC_ZA5241006_1755");
 });
+
+// The number the owner asked for: a worker refused four times on ONE METER must be visible as that. The
+// phone never reuses a refused TRN ID, so those four refusals are four submissions, each refused once.
+test("four refusals on one meter read as four, not as four separate ones", async () => {
+  const docs = {};
+  const db = fakeDb(docs);
+  const outcomes = [];
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    outcomes.push(
+      await recordRefusedSubmission({
+        db,
+        // A new TRN ID every time, exactly as the phone does it.
+        trnId: `TRN_MDIS_179000000000${attempt}_ELC_ZA5241006_1755`,
+        code: "METER_IN_ANOTHER_TEAMS_BATCH",
+        message: "That meter belongs to another team's batch",
+        data: TRN_DATA,
+        actorUid: "uid-fwr",
+        actorName: "Kaiser",
+        now: `2026-09-28T09:0${attempt}:00.000Z`,
+      }),
+    );
+  }
+
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.attempts),
+    [1, 1, 1, 1],
+    "each submission was refused once",
+  );
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.timesThisMeterHasBeenRefused),
+    [1, 2, 3, 4],
+    "the meter has been refused four times, and the newest record says so",
+  );
+
+  const newest = docs["refused_submissions/TRN_MDIS_1790000000004_ELC_ZA5241006_1755"];
+  assert.equal(newest.timesThisMeterHasBeenRefused, 4);
+  assert.equal(newest.firstRefusedThisMeterAt, "2026-09-28T09:01:00.000Z", "it points back at the first time");
+});
+
+test("a meter put right stops counting: the closed refusals are not added to a later one", async () => {
+  const docs = {};
+  const db = fakeDb(docs);
+
+  await recordRefusedSubmission({
+    db,
+    trnId: "TRN_MDIS_1790000000001_ELC_ZA5241006_1755",
+    code: "METER_IN_ANOTHER_TEAMS_BATCH",
+    message: "That meter belongs to another team's batch",
+    data: TRN_DATA,
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    now: "2026-09-28T09:01:00.000Z",
+  });
+
+  await resolveRefusalsForMeter({
+    db,
+    meterNo: "04297698369",
+    standingTrnId: "TRN_MDIS_1790000000002_ELC_ZA5241006_1755",
+    now: "2026-09-28T09:10:00.000Z",
+  });
+
+  // Months later, the same meter is refused again for something else entirely.
+  const later = await recordRefusedSubmission({
+    db,
+    trnId: "TRN_MDIS_1790000000009_ELC_ZA5241006_1755",
+    code: "MM_AST_REFERENCE_CONFLICT",
+    message: "Meter Master is already linked to a different AST",
+    data: TRN_DATA,
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    now: "2026-11-01T09:00:00.000Z",
+  });
+
+  assert.equal(later.timesThisMeterHasBeenRefused, 1, "an old, settled refusal is not counted again");
+});

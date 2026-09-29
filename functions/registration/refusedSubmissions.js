@@ -92,12 +92,41 @@ export async function recordRefusedSubmission({
 
     const attempts = Number(before?.attempts || 0) + 1;
 
+    // The number the owner asked to see: how many times this WORKER HAS BEEN TURNED AWAY FROM THIS METER.
+    // It is not the same as . The phone never reuses a refused TRN ID - a Submit after a refusal
+    // is a new attempt with a new id - so four refusals on one meter are four submissions, each of which
+    // has been refused once. Counted across the open submissions for the same meter, it is one number on
+    // the newest record, and nobody has to add up four documents to see that a rule is not working.
+    let timesThisMeterHasBeenRefused = attempts;
+    let firstRefusedThisMeterAt = before?.firstRefusedAt || now;
+    try {
+      const meterNo = record.meterNo;
+      if (meterNo && meterNo !== "NAv") {
+        const others = await db
+          .collection(REFUSED_SUBMISSIONS)
+          .where("open", "==", true)
+          .where("meterNo", "==", meterNo)
+          .get();
+        for (const doc of others.docs) {
+          if (doc.id === safeTrnId) continue;
+          const other = doc.data() || {};
+          timesThisMeterHasBeenRefused += Number(other.attempts || 1);
+          const otherFirst = other.firstRefusedAt || "";
+          if (otherFirst && otherFirst < firstRefusedThisMeterAt) firstRefusedThisMeterAt = otherFirst;
+        }
+      }
+    } catch {
+      // A count that could not be worked out is left as this submission's own. Never block the record.
+    }
+
     await ref.set(
       {
         ...record,
         firstRefusedAt: before?.firstRefusedAt || now,
         lastRefusedAt: now,
         attempts,
+        timesThisMeterHasBeenRefused,
+        firstRefusedThisMeterAt,
         // It is refused until something puts it right (resolveRefusedSubmission).
         resolved: null,
         open: true,
@@ -123,10 +152,11 @@ export async function recordRefusedSubmission({
       trnId: safeTrnId,
       code: safeCode,
       attempts,
+      timesThisMeterHasBeenRefused,
       reason: refusal.reason,
     });
 
-    return { recorded: true, record, attempts };
+    return { recorded: true, record, attempts, timesThisMeterHasBeenRefused };
   } catch (error) {
     logger.error("refusedSubmissions ---- could not record the refusal", {
       trnId: safeTrnId,
