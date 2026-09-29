@@ -3238,7 +3238,7 @@ export const repairRegistrationCallable = onCall(async (request) => {
 
 // RG-R001 section 9: one creator. registerMeter.js writes every registration, and its collaborators
 // are handed to it rather than imported, because half of them still live in this file.
-const REGISTRATION_DEPS = {
+export const REGISTRATION_DEPS = {
   classifyOperationalAstChange,
   METER_MASTER_CLASSIFICATIONS,
   MeterMasterConflictError,

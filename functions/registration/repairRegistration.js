@@ -211,6 +211,31 @@ export async function repairRegistration({
   const { trnData, facts } = inspection;
   const trnRef = db.collection("trns").doc(inspection.trnId);
 
+  // RG-R001 section 8 (owner, 2026-09-29): a batch that has since been deleted must not keep a meter out
+  // of iREPS. The visit happened and the worker was there, so the meter is made and the missing batch is
+  // recorded on the repair. Only the batch's own records may be missing — anything else still refuses,
+  // because the repair may never write half a registration.
+  const MISSING_BATCH_CODES = new Set([
+    "TARGETED_BATCH_NOT_FOUND",
+    "TARGETED_BATCH_ROW_NOT_FOUND",
+    "SALES_DOCUMENT_NOT_FOUND",
+  ]);
+  let batchGone = null;
+  const repairDeps = {
+    ...deps,
+    completeTargetedBatchMeterDiscoveryInTransaction: async (args) => {
+      try {
+        return await deps.completeTargetedBatchMeterDiscoveryInTransaction(args);
+      } catch (error) {
+        const code = error?.irepsCode || error?.code || "";
+        if (!MISSING_BATCH_CODES.has(code)) throw error;
+
+        batchGone = { code, detail: error?.message || String(error) };
+        return { applied: false, batchGone: true };
+      }
+    },
+  };
+
   // RG-R001 section 8: the original capture keeps its own attribution. The repair's own time and the
   // person who ran it are recorded beside it, never in place of it.
   const metadata = {
@@ -235,7 +260,7 @@ export async function repairRegistration({
       premiseId: facts.premiseId,
       erfId: trnData?.accessData?.erfId || "",
       metadata,
-      deps,
+      deps: repairDeps,
     });
 
     tx.set(
@@ -249,6 +274,17 @@ export async function repairRegistration({
           byUser: actorName,
           reason: String(reason).trim(),
           rule: "RG-R001",
+          // The batch this work was filed under no longer exists. The meter is still made; the office
+          // can see why its row was never closed (owner, 2026-09-29).
+          ...(batchGone
+            ? {
+                batchGone: {
+                  tbId: trnData?.targetedBatchContext?.tbId || "NAv",
+                  code: batchGone.code,
+                  detail: batchGone.detail,
+                },
+              }
+            : {}),
         },
       },
       { merge: true },
@@ -287,6 +323,9 @@ export async function repairRegistration({
     premiseId: facts.premiseId,
     erfId: trnData?.accessData?.erfId || "NAv",
     code: "REPAIRED",
-    message: "The meter now exists, under the same TRN ID as the original visit.",
+    ...(batchGone ? { batchGone: batchGone.code } : {}),
+    message: batchGone
+      ? "The meter now exists, under the same TRN ID as the original visit. The batch it was filed under no longer exists, and that is recorded on the repair."
+      : "The meter now exists, under the same TRN ID as the original visit.",
   };
 }

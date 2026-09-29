@@ -365,3 +365,70 @@ test("inspecting never writes, whatever it finds", async () => {
   assert.equal(db.written.length, 0);
   assert.equal(db.deleted.length, 0);
 });
+
+// RG-R001 section 8 (owner, 2026-09-29): a batch that has since been deleted must not keep a meter out of
+// iREPS. Found on TEST: Kaiser's capture of 7 August named batch TGB_20260807_051319_KYJL, which no longer
+// exists, so the repair refused the whole thing. The visit happened and the worker was there.
+test("a batch that no longer exists does not stop the repair, and is recorded", async () => {
+  const db = fakeDb(base());
+  const gone = Object.assign(new Error("Targeted Batch TGB_GONE was not found."), {
+    irepsCode: "TARGETED_BATCH_NOT_FOUND",
+  });
+
+  const outcome = await repairRegistration({
+    db,
+    Timestamp: { now: () => "TS" },
+    trnId: TRN_ID,
+    actorUid: "uid-mng",
+    actorName: "Fikile",
+    reason: "the batch was deleted, the meter was not",
+    dryRun: false,
+    deps: deps({
+      registerMeterInTransaction: async ({ tx, db: database, trnId, metadata, deps: inner }) => {
+        // The creator calls the batch completion; here it finds the batch gone.
+        const completion = await inner.completeTargetedBatchMeterDiscoveryInTransaction({});
+        assert.equal(completion.batchGone, true, "the repair swallowed the missing batch");
+        tx.create(database.collection("asts").doc(trnId), { trnId, metadata });
+        return { astId: trnId, visibility: "INVISIBLE", derived: { astId: trnId } };
+      },
+      completeTargetedBatchMeterDiscoveryInTransaction: async () => {
+        throw gone;
+      },
+    }),
+    now: "2026-09-29T12:00:00.000Z",
+  });
+
+  assert.equal(outcome.repaired, true);
+  assert.equal(outcome.batchGone, "TARGETED_BATCH_NOT_FOUND");
+  assert.match(outcome.message, /batch it was filed under no longer exists/);
+
+  const trnWrite = db.written.find((write) => write.path === `trns/${TRN_ID}`);
+  assert.equal(trnWrite.value.repair.batchGone.code, "TARGETED_BATCH_NOT_FOUND");
+});
+
+test("anything else still stops the repair, so it never writes half a registration", async () => {
+  const db = fakeDb(base());
+  const other = Object.assign(new Error("Sales membership does not match"), {
+    irepsCode: "TARGETED_BATCH_MEMBERSHIP_CONFLICT",
+  });
+
+  await assert.rejects(
+    repairRegistration({
+      db,
+      Timestamp: { now: () => "TS" },
+      trnId: TRN_ID,
+      actorUid: "uid-mng",
+      actorName: "Fikile",
+      reason: "should not get through",
+      dryRun: false,
+      deps: deps({
+        registerMeterInTransaction: async ({ deps: inner }) =>
+          inner.completeTargetedBatchMeterDiscoveryInTransaction({}),
+        completeTargetedBatchMeterDiscoveryInTransaction: async () => {
+          throw other;
+        },
+      }),
+    }),
+    (error) => error.irepsCode === "TARGETED_BATCH_MEMBERSHIP_CONFLICT",
+  );
+});

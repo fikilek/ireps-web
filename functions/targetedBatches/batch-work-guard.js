@@ -39,7 +39,7 @@ export const RULE = "TB-R059";
 // Rules TB-R062 (1.3.65): the ERF test and its one gate. The refusal the worker is told is TB-R059's
 // sentence, word for word, so the phone needs nothing new; the rule that refused it travels in the details.
 export const ERF_RULE = "TB-R062";
-export const RULES_VERSION = "1.3.65";
+export const RULES_VERSION = "1.3.90";
 export const METER_IN_ANOTHER_TEAMS_BATCH = "METER_IN_ANOTHER_TEAMS_BATCH";
 // Rules TB-R059 (1.3.89): batching is the claim. A batch that has not been given to a team yet belongs to
 // nobody, so nobody may work it — its own code, because the sentence has no team and no date to name.
