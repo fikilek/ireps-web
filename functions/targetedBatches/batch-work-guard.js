@@ -19,10 +19,14 @@
 //
 // The one gate is a meter reported as ILLEGALLY CONNECTED: that work goes through, because stopping it would
 // cost the municipality revenue and leave something dangerous in the ground. It stays an ordinary normal-path
-// find — the batch's row is untouched, so the allocated team keeps its work and its count, and the finder and
-// the team they belong to keep the credit (Teams rules TM-R001). Every use is recorded in
-// `batch_erf_overrides`, one document per use, so the office can count them per worker AND per team.
-// The gate never applies to the batch's own meter number: that stays TB-R059's ownership test.
+// find, and the finder and the team they belong to keep the credit (Teams rules TM-R001). Every use is
+// recorded in `batch_erf_overrides`, one document per use, so the office can count them per worker AND per
+// team.
+//
+// Rules 1.3.90 (owner, 2026-09-29): "any meter that is illegally connected can be done by any one". The gate
+// therefore covers the batch's OWN meter too, which it did not before. What follows from that is TB-R056's
+// existing answer, not a new rule: an outsider's find turns the Sales meter VISIBLE, and a row found by
+// another team leaves the batch, so the finder keeps the work and the credit follows them.
 //
 // Pure decision plus a thin reader. The reader takes a read function, so a caller can gather the facts
 // inside its own transaction or outside one, and every field-work callable calls it before it writes.
@@ -393,7 +397,7 @@ export function recognisedBatchContext({ decision = null, erfId = "", premiseId 
 // Rules TB-R062 (1.3.65): what the office is given for every use of the gate, so a worker who keeps using
 // it — or a team that does — is seen and not guessed at. Counted per worker by `worker.uid` and per team by
 // `worker.teamId`, both plain equality reads that need no new index.
-export function erfOverrideRecord({ refusal, meterNo, finderUid, finderName, finderTeamId, finderTeamName, finderSpId, anomaly }) {
+export function erfOverrideRecord({ refusal, meterNo, finderUid, finderName, finderTeamId, finderTeamName, finderSpId, anomaly, erfId = "" }) {
   const details = refusal?.details || {};
   return {
     rule: ERF_RULE, rulesVersion: RULES_VERSION,
@@ -402,7 +406,8 @@ export function erfOverrideRecord({ refusal, meterNo, finderUid, finderName, fin
       teamId: text(finderTeamId) || null, teamName: text(finderTeamName) || null,
       serviceProviderId: text(finderSpId) || null,
     },
-    erfId: text(details.erfId) || null,
+    // 1.3.90: the meter's own refusal (TB-R059) carries no ERF, so the caller passes it.
+    erfId: text(details.erfId) || text(erfId) || null,
     meterNo: normalizeMeterNo(meterNo) || null,
     batch: {
       tbId: text(details.tbId) || null, rowId: text(details.rowId) || null, rowMeterNo: text(details.rowMeterNo) || null,
@@ -418,31 +423,43 @@ export function erfOverrideRecord({ refusal, meterNo, finderUid, finderName, fin
   };
 }
 
-// The whole decision: TB-R059 on the meter first, then TB-R062 on the ERF, then the one gate.
+// The whole decision: TB-R059 on the meter first, then TB-R062 on the ERF, and the one gate over both.
 export function decideBatchWork(facts = {}) {
-  const meter = decideMeterBatchWork(facts);
-  // The meter's own batch settles it. The gate never applies to the batch's own meter number, and a read
-  // that failed is never gated either (1.3.62).
-  if (!meter.allowed) return meter;
-  const erf = decideErfBatchWork(facts);
-  if (erf.allowed || erf.code === BATCH_CHECK_UNAVAILABLE) return erf.allowed ? meter : erf;
-  // Rules TB-R062: the one gate. A meter reported as illegally connected goes through as an ordinary
-  // normal-path find — the batch's row is untouched — and the use is recorded for the office.
-  if (!isIllegallyConnected(facts.anomaly)) return erf;
-  return {
+  // Rules TB-R062 (1.3.90): the gate. ANY meter reported as illegally connected may be done by anyone —
+  // the owner, 2026-09-29: "any meter that is illegally connected can be done by any one". Until then the
+  // gate covered a different meter at the ERF but never the batch's own meter, on the reasoning that one
+  // dropdown would otherwise unlock any targeted meter. The owner overruled that: finding those meters is
+  // what the work is for, and the control is that every use is recorded and counted, per worker and per
+  // team, so a worker or a team that keeps using it is seen and not guessed at.
+  //
+  // A read that failed is never gated (1.3.62): iREPS refuses what it could not check, illegal or not.
+  const gate = (refusal, rule) => ({
     allowed: true,
     code: ALLOWED.ILLEGAL_CONNECTION,
     details: {
-      meterNo: text(facts.meterNo) || null, erfId: erf.details.erfId, rule: ERF_RULE, rulesVersion: RULES_VERSION,
+      meterNo: text(facts.meterNo) || null, erfId: refusal.details.erfId || text(facts.erfId) || null,
+      rule, rulesVersion: RULES_VERSION,
       anomalyText: illegalConnectionWords(facts.anomaly),
-      refusedBy: erf.details, refusalMessage: erf.message,
+      refusedBy: refusal.details, refusalMessage: refusal.message,
     },
     override: erfOverrideRecord({
-      refusal: erf, meterNo: facts.meterNo, anomaly: facts.anomaly,
+      refusal, meterNo: facts.meterNo, anomaly: facts.anomaly, erfId: facts.erfId,
       finderUid: facts.finderUid, finderName: facts.finderName,
       finderTeamId: facts.finderTeamId, finderTeamName: facts.finderTeamName, finderSpId: facts.finderSpId,
     }),
-  };
+  });
+
+  const meter = decideMeterBatchWork(facts);
+  if (!meter.allowed) {
+    if (meter.code === BATCH_CHECK_UNAVAILABLE || !isIllegallyConnected(facts.anomaly)) return meter;
+    return gate(meter, RULE);
+  }
+
+  const erf = decideErfBatchWork(facts);
+  if (erf.allowed || erf.code === BATCH_CHECK_UNAVAILABLE) return erf.allowed ? meter : erf;
+  if (!isIllegallyConnected(facts.anomaly)) return erf;
+
+  return gate(erf, ERF_RULE);
 }
 
 export function batchWorkRefusalError(decision) {

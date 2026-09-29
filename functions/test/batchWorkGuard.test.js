@@ -393,12 +393,29 @@ test("an illegally connected meter goes through on another team's ERF, and the u
   assert.equal(decision.override.anomaly.text, "Illegally Connected; Illegal connection - meter disconnected");
 });
 
-test("the gate never applies to the batch's own meter number: that stays TB-R059's test", () => {
+// Rules 1.3.90 (owner, 2026-09-29): "any meter that is illegally connected can be done by any one" - the
+// batch's own meter included. Before this the gate covered only a different meter at the ERF.
+test("the gate covers the batch's own meter too, and records the use", () => {
   const anomaly = { ast: { anomalies: { anomaly: "Illegally Connected" } } };
   const own = decideBatchWork(facts({ anomaly, erfId: ERF, erfRows: [erfRow()] }));
-  assert.equal(own.allowed, false, "the batch's own meter is still the batch's team's work");
-  assert.equal(own.code, METER_IN_ANOTHER_TEAMS_BATCH);
-  assert.equal(own.details.rule, "TB-R059");
+  assert.equal(own.allowed, true, "an illegally connected meter may be done by anyone");
+  assert.equal(own.code, ALLOWED.ILLEGAL_CONNECTION);
+  assert.equal(own.details.rule, "TB-R059", "the refusal it went past was the meter's own");
+  assert.equal(own.details.refusedBy.tbId, TB, "the batch it belongs to is kept on the record");
+  assert.ok(own.override, "every use is recorded for the office");
+  assert.equal(own.override.meterNo, METER);
+  assert.equal(own.override.erfId, ERF, "the ERF is on the record even though TB-R059 refused it");
+  assert.equal(own.override.batch.tbId, TB);
+
+  // A read that failed is never gated, illegal or not: iREPS refuses what it could not check.
+  const unreadable = decideBatchWork(facts({ anomaly, parent: null }));
+  assert.equal(unreadable.allowed, false);
+  assert.equal(unreadable.code, "BATCH_CHECK_UNAVAILABLE");
+
+  // An unallocated batch is refused for ordinary work (1.3.89) and gated for an illegal connection.
+  const unallocated = decideBatchWork(facts({ anomaly, parent: parent({ status: "NOT_STARTED", targetId: "", targetName: "", targetType: "" }) }));
+  assert.equal(unallocated.allowed, true);
+  assert.equal(unallocated.code, ALLOWED.ILLEGAL_CONNECTION);
   // And an ERF nobody else holds is an ordinary find: the answer stays the meter's own, and there is
   // nothing to record, because the gate was never needed.
   const ordinary = decideBatchWork(atErf({ anomaly, erfRows: [] }));
