@@ -113,10 +113,10 @@ function monthStatement(dataset) {
   return `Field transactions counted in the month they reached the server, South African time. Generated ${formatJohannesburg(dataset?.generatedAt)}.`;
 }
 
-// GMR-R037: the period is named wherever the report is named.
+// GMR-R037: the period is named wherever the report is named. The owner asked
+// for the period and nothing else - no "(INCOMPLETE)" marker (30 Sep 2026).
 function periodLabel(dataset) {
-  const period = String(dataset?.periodLabel || dataset?.reportingPeriodLabel || dataset?.reportMonth || "GMR").toUpperCase();
-  return dataset?.isIncompleteMonth ? `${period} (INCOMPLETE)` : period;
+  return String(dataset?.periodLabel || dataset?.reportingPeriodLabel || dataset?.reportMonth || "GMR").toUpperCase();
 }
 
 function notForPaymentNotice(dataset) {
@@ -227,7 +227,7 @@ function buildFieldStatsSheet(dataset) {
   ).toUpperCase();
   const heading = dataset?.reportKind === "GR"
     ? `GR - ${rawPeriod}`
-    : `GMR - ${rawPeriod} REPORT${dataset?.isIncompleteMonth ? " (INCOMPLETE)" : ""}`;
+    : `GMR - ${rawPeriod} REPORT`;
   aoa.push([heading]);
   aoa.push([]);
 
