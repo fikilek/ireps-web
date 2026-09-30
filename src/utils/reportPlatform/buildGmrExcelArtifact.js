@@ -180,7 +180,6 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
 
   merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
   aoa.push(["Meter Discovery"]);
-  stats.workerHeaderRow = aoa.length;
   aoa.push(["Individual FWR Report", "METER ANOMALY", ...stats.workers, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByWorker.get(status);
@@ -259,9 +258,6 @@ function buildFieldStatsSheet(dataset) {
   worksheet["!merges"] = merges;
   const width = Math.max(stats.workers.length, stats.teams.length);
   worksheet["!cols"] = [{ wch: 8 }, { wch: 42 }, ...Array.from({ length: width }, () => ({ wch: 18 })), { wch: 12 }];
-  worksheet["!autofilter"] = {
-    ref: `A${stats.workerHeaderRow + 1}:${XLSX.utils.encode_col(stats.workers.length + 2)}${stats.auditEndRow}`,
-  };
   return { worksheet, model, stats };
 }
 
