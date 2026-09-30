@@ -179,8 +179,8 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
     [index, label, ...names.map((name) => counts.get(name) || 0), total];
 
   merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
-  aoa.push([`${period} - METER DISCOVERY`]);
-  aoa.push(["ITEM", "METER ANOMALY", ...stats.workers, "TOTAL"]);
+  aoa.push(["Meter Discovery"]);
+  aoa.push(["Individual FWR Report", "METER ANOMALY", ...stats.workers, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByWorker.get(status);
     aoa.push(row(index + 1, status, stats.workers, counts, sumOf(counts)));
@@ -190,16 +190,16 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
   aoa.push([]);
 
   merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
-  aoa.push([`${period} - NORMALISATION`]);
+  aoa.push(["Normalisation"]);
   stats.normalisations.forEach((label, index) => {
     const counts = stats.normalisationByWorker.get(label);
     aoa.push(row(index + 1, label, stats.workers, counts, sumOf(counts)));
   });
-  aoa.push(row("", "TOTAL: NORMALISATION", stats.workers, stats.workerTotals, stats.records));
+  aoa.push(row("", "TOTAL: METER DISCOVERY NORMALISATION", stats.workers, stats.workerTotals, stats.records));
 
   aoa.push([]);
   aoa.push([]);
-  aoa.push(["Teams", "METER ANOMALY", ...stats.teams, "TOTAL"]);
+  aoa.push(["Teams Report", "METER ANOMALY", ...stats.teams, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByTeam.get(status);
     aoa.push(row(index + 1, status, stats.teams, counts, sumOf(counts)));
@@ -220,6 +220,8 @@ function buildFieldStatsSheet(dataset) {
     aoa.push([notice]);
     aoa.push([]);
   }
+  aoa.push([`${period} REPORT`]);
+  aoa.push([]);
 
   // GMR-R036: the three blocks count the same records three ways. If they
   // disagree the report is wrong and says so rather than printing.
@@ -241,7 +243,7 @@ function buildFieldStatsSheet(dataset) {
   // three sections, and nothing else on the sheet.
   aoa.push([]);
   aoa.push([]);
-  aoa.push([`${period} - SUMMARY STATS`]);
+  aoa.push(["Summary Stats"]);
   aoa.push(["ITEM", "LINE", "COUNT"]);
   model.summaryLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
 

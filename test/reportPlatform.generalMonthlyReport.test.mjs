@@ -284,28 +284,43 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
       return cells;
     });
 
-  assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER DISCOVERY"]);
-  assert.deepEqual(sheet[1], ["ITEM", "METER ANOMALY", "Lefu Motlou", "Peter Peter", "TOTAL"]);
-  assert.deepEqual(sheet[2], [1, "Illegally Connected", 0, 2, 2]);
-  assert.deepEqual(sheet[3], [2, "Meter Damaged", 0, 0, 0]);
-  assert.deepEqual(sheet[4], [3, "Meter Faulty", 0, 0, 0]);
-  assert.deepEqual(sheet[5], [4, "Meter Ok", 1, 1, 2]);
-  assert.deepEqual(sheet[6], [5, "No Access", 1, 0, 1], "the one line the owner added to his layout");
-  assert.deepEqual(sheet[7], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5], "a disconnection is not in these blocks");
-  assert.deepEqual(sheet[9], ["SEPTEMBER 2026 - NORMALISATION"]);
-  assert.deepEqual(sheet[10], [1, "Meter Ok - None", 1, 0, 1], "every row carries its finding, the healthy one included");
-  assert.deepEqual(sheet[11], [2, "Illegally Connected - Disconnect meter", 0, 1, 1]);
-  assert.deepEqual(sheet[12], [3, 'Illegally Connected - None, reason "Not recorded - captured before this rule"', 0, 1, 1]);
-  assert.deepEqual(sheet[13], [4, "Meter Ok - Tamper removed", 0, 1, 1], "a healthy meter's own fix");
-  assert.deepEqual(sheet[14], [5, "No Access", 1, 0, 1], "and No Access last of all");
-  assert.deepEqual(sheet[15], ["", "TOTAL: NORMALISATION", 2, 3, 5]);
-  assert.deepEqual(sheet[18], ["Teams", "METER ANOMALY", "Lesedi Audit", "Peter Team", "TOTAL"]);
-  assert.deepEqual(sheet[24], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
+  // The sections are found by their own names, not by row numbers, so a heading
+  // change does not rewrite the test.
+  const at = (label) => sheet.findIndex((cells) => cells[0] === label);
+  const line = (from, index) => sheet[from + index];
+
+  assert.deepEqual(sheet[0], ["SEPTEMBER 2026 REPORT"], "the period is named once, at the top");
+
+  const discovery = at("Meter Discovery");
+  assert.ok(discovery > 0, "the first section names itself");
+  assert.deepEqual(line(discovery, 1), ["Individual FWR Report", "METER ANOMALY", "Lefu Motlou", "Peter Peter", "TOTAL"]);
+  assert.deepEqual(line(discovery, 2), [1, "Illegally Connected", 0, 2, 2]);
+  assert.deepEqual(line(discovery, 3), [2, "Meter Damaged", 0, 0, 0]);
+  assert.deepEqual(line(discovery, 4), [3, "Meter Faulty", 0, 0, 0]);
+  assert.deepEqual(line(discovery, 5), [4, "Meter Ok", 1, 1, 2]);
+  assert.deepEqual(line(discovery, 6), [5, "No Access", 1, 0, 1], "the one line the owner added to his layout");
+  assert.deepEqual(line(discovery, 7), ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5], "a disconnection is not in these blocks");
+
+  const normalisation = at("Normalisation");
+  assert.ok(normalisation > discovery, "then the normalisation section");
+  assert.deepEqual(line(normalisation, 1), [1, "Meter Ok - None", 1, 0, 1], "every row carries its finding, the healthy one included");
+  assert.deepEqual(line(normalisation, 2), [2, "Illegally Connected - Disconnect meter", 0, 1, 1]);
+  assert.deepEqual(line(normalisation, 3), [3, 'Illegally Connected - None, reason "Not recorded - captured before this rule"', 0, 1, 1]);
+  assert.deepEqual(line(normalisation, 4), [4, "Meter Ok - Tamper removed", 0, 1, 1], "a healthy meter's own fix");
+  assert.deepEqual(line(normalisation, 5), [5, "No Access", 1, 0, 1], "and No Access last of all");
+  assert.deepEqual(line(normalisation, 6), ["", "TOTAL: METER DISCOVERY NORMALISATION", 2, 3, 5]);
+
+  const teams = at("Teams Report");
+  assert.ok(teams > normalisation, "then the teams section");
+  assert.deepEqual(line(teams, 0), ["Teams Report", "METER ANOMALY", "Lesedi Audit", "Peter Team", "TOTAL"]);
+  assert.deepEqual(line(teams, 6), ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
 
   // The only thing under the three sections: Summary Stats. The control lines
   // were withdrawn in 1.11.0 - Zamo never asked for them.
-  const after = sheet.slice(25).filter((cells) => cells.length);
-  assert.deepEqual(after[0], ["SEPTEMBER 2026 - SUMMARY STATS"]);
+  const summary = at("Summary Stats");
+  assert.ok(summary > teams, "and the summary last");
+  const after = sheet.slice(summary).filter((cells) => cells.length);
+  assert.deepEqual(after[0], ["Summary Stats"]);
   assert.deepEqual(after[1], ["ITEM", "LINE", "COUNT"]);
   assert.equal(after[2][1], "TRANSACTIONS WHERE THE METER WAS REACHED, EVERY TYPE");
   assert.equal(after.at(-1)[1], "EXCEPTIONS NOT COUNTED, NO METER CREATED");
@@ -333,7 +348,7 @@ function septemberRows() {
   add(4, { primaryFinding: "Meter Damaged", findingDetail: "Meter Burnt", normalisation: 'Meter Damaged - None, reason "Not recorded, captured before this rule"', normalisationActions: ["None"], noActionReason: marker });
   add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: 'Meter Faulty - None, reason "Not recorded, captured before this rule"', normalisationActions: ["None"], noActionReason: marker });
   add(1, { primaryFinding: "Meter Faulty", findingDetail: "Meter Display Blank", normalisation: "Meter Faulty - None", normalisationActions: ["None"] });
-  add(137, { hasAccess: false, primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] });
+  add(137, { hasAccess: false, primaryFinding: null, findingDetail: null, noAccessReason: "Gate locked", normalisation: "NAv", normalisationActions: [], photoUrls: [] });
 
   return rows;
 }
@@ -361,11 +376,11 @@ test("Field Stats reproduces September 2026 on LIVE: 462 with a meter, 137 no ac
   assert.equal(totalOf("Meter Ok"), 388);
   assert.equal(totalOf("No Access"), 137, "the line the owner added to his layout");
   assert.equal(totalOf("TOTAL: METER DISCOVERY RECORDS"), 599);
-  assert.equal(totalOf("TOTAL: NORMALISATION"), 599);
+  assert.equal(totalOf("TOTAL: METER DISCOVERY NORMALISATION"), 599);
 
-  const start = sheet.findIndex((cells) => cells[0] === "SEPTEMBER 2026 - NORMALISATION");
+  const start = sheet.findIndex((cells) => cells[0] === "Normalisation");
   const labels = sheet.slice(start + 1).map((cells) => cells[1]);
-  assert.deepEqual(labels.slice(0, labels.indexOf("TOTAL: NORMALISATION") + 1), [
+  assert.deepEqual(labels.slice(0, labels.indexOf("TOTAL: METER DISCOVERY NORMALISATION") + 1), [
     "Meter Ok - None",
     "Illegally Connected - Disconnect meter",
     "Illegally Connected - Disconnect meter, Tamper removed",
@@ -378,7 +393,7 @@ test("Field Stats reproduces September 2026 on LIVE: 462 with a meter, 137 no ac
     'Meter Faulty - None, reason "Not recorded, captured before this rule"',
     "Meter Faulty - None",
     "No Access",
-    "TOTAL: NORMALISATION",
+    "TOTAL: METER DISCOVERY NORMALISATION",
   ]);
   assert.equal(totalOf('Illegally Connected - None, reason "Not recorded - captured before this rule"'), 40, "never asked");
   assert.equal(totalOf("Illegally Connected - None"), 10, "asked, and nothing chosen");
@@ -412,7 +427,7 @@ test("Summary Stats says why the numbers are what they are", () => {
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
   const value = (label) => sheet.find((cells) => String(cells[1]).trim() === label)?.[2];
 
-  assert.ok(sheet.some((cells) => String(cells[0]).includes("SUMMARY STATS")), "the section is there");
+  assert.ok(sheet.some((cells) => cells[0] === "Summary Stats"), "the section is there");
   assert.equal(value("TRANSACTIONS WHERE THE METER WAS REACHED, EVERY TYPE"), 3, "no access is counted in its own section, never twice");
   assert.equal(value("METER DISCOVERY"), 2, "the number Field Data - MD holds");
   assert.equal(value("METER DISCONNECTION"), 1);
