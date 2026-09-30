@@ -236,6 +236,23 @@ function buildFieldStatsSheet(dataset) {
   aoa.push(["ITEM", "CONTROL LINE", "COUNT"]);
   model.controlLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
 
+  // GMR-R040: a corrected total is only honest if the corrections can be read.
+  // Every dropped capture is named under its control line.
+  if (model.droppedCaptures.length) {
+    aoa.push([]);
+    aoa.push([`${period} - CAPTURES DROPPED, THE METER WAS NOT CREATED`]);
+    aoa.push(["ITEM", "TRANSACTION NUMBER", "CAPTURE DATE", "FIELD WORKER", "METER NUMBER CLAIMED"]);
+    model.droppedCaptures.forEach((capture, index) =>
+      aoa.push([
+        index + 1,
+        capture.trnId || GMR_NAV,
+        formatJohannesburg(capture.captureDate),
+        capture.fieldWorkerName || GMR_NAV,
+        capture.claimedMeterNo || GMR_NAV,
+      ]),
+    );
+  }
+
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!merges"] = merges;
   const width = Math.max(stats.workers.length, stats.teams.length);

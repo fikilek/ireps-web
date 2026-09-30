@@ -190,9 +190,9 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   const after = sheet.slice(25).filter((cells) => cells.length);
   assert.deepEqual(after[0], ["SEPTEMBER 2026 - CONTROL LINES"]);
   assert.deepEqual(after[1], ["ITEM", "CONTROL LINE", "COUNT"]);
-  assert.equal(after.length, 2 + 8, "eight control lines since GMR-R019 1.7.0 split the work without a batch, and nothing else");
+  assert.equal(after.length, 2 + 10, "ten control lines since GMR-R040 added the dropped captures and the meter master gap");
   assert.equal(after[2][1], "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)");
-  assert.equal(after.at(-1)[1], "WORKERS WHOSE TEAM COULD NOT BE RESOLVED");
+  assert.equal(after.at(-1)[1], "METERS NOT IN METER MASTER", "GMR-R040 added the last two lines");
 });
 
 // September 2026 as it was measured on LIVE on 25 September: 599 Meter

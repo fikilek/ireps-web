@@ -300,6 +300,14 @@ function getLocation(trn = {}) {
   return captured?.location || trn?.ast?.location || {};
 }
 
+// GMR-R040: the two registration functions. With access, each of these is a
+// claim that a meter was created, and the report checks the claim.
+const GMR_REGISTRATION_TYPES = new Set(["METER_DISCOVERY", "METER_INSTALLATION"]);
+
+export function isGmrRegistrationClaim(trn = {}) {
+  return GMR_REGISTRATION_TYPES.has(getGmrTrnType(trn)) && hasAccess(trn);
+}
+
 export function getGmrAstId(trnId, trn = {}) {
   const astId = nullableText(trn?.ast?.astData?.astId || getAstData(trn)?.astId);
   if (astId) return astId;
@@ -751,6 +759,7 @@ export async function buildGeneralMonthlyReportDataset({
   const premiseIds = [];
   const salesIds = [];
   const astIds = [];
+  const masterMeterNos = [];
   const workerUids = [];
   entries.forEach(([trnId, trn]) => {
     premiseIds.push(trn?.accessData?.premise?.id);
@@ -760,22 +769,56 @@ export async function buildGeneralMonthlyReportDataset({
       isGmrLookupMeterNo(fieldFoundMeterNo) ? fieldFoundMeterNo : null,
     );
     astIds.push(getGmrAstId(trnId, trn));
+    // GMR-R040: meter master is read for registrations only, and only for a
+    // number that could be a document id.
+    if (isGmrRegistrationClaim(trn) && isGmrLookupMeterNo(fieldFoundMeterNo)) {
+      masterMeterNos.push(fieldFoundMeterNo);
+    }
     workerUids.push(getFieldWorker(trn).uid);
   });
 
-  const [premisesById, salesById, astsById, teamPeriods] = await Promise.all([
+  const [premisesById, salesById, astsById, masterById, teamPeriods] = await Promise.all([
     getDocsByIds(db, "premises", premiseIds),
     getDocsByIds(db, "sales-all-meters", salesIds),
     getDocsByIds(db, "asts", astIds),
+    getDocsByIds(db, "meter_master", masterMeterNos),
     getTeamHistory(db, workerUids),
   ]);
 
   const fieldRows = [];
+  // GMR-R040: captures that said they made a meter and did not.
+  const droppedCaptures = [];
+  const masterGapMeters = new Set();
 
   entries.forEach(([trnId, trn]) => {
     try {
       const fieldFoundMeterNo = normalizeMeterNo(getAstData(trn)?.astNo);
       const lookupMeterNo = isGmrLookupMeterNo(fieldFoundMeterNo) ? fieldFoundMeterNo : null;
+
+      // The report reads history, and history holds captures written before
+      // the server refused a capture that cannot produce its meter. So the
+      // claim is checked on every generation, never taken on trust.
+      if (isGmrRegistrationClaim(trn)) {
+        const astId = getGmrAstId(trnId, trn);
+        if (!astId || !astsById.has(astId)) {
+          const worker = getFieldWorker(trn);
+          droppedCaptures.push({
+            trnId: cleanText(trnId),
+            trnType: getGmrTrnType(trn) || null,
+            trnTypeLabel: GMR_TRN_TYPE_LABELS[getGmrTrnType(trn)] || null,
+            captureDate: getGmrSubmissionTime(trn) || null,
+            fieldWorkerName: worker.name,
+            claimedMeterNo: fieldFoundMeterNo || "NAv",
+            reason: "The capture says a meter was created, but the meter is not there.",
+          });
+          return;
+        }
+        // The meter is there. A number missing from meter master is a
+        // back-office gap, not the field's fault: the row stays and is counted.
+        if (lookupMeterNo && !masterById.has(lookupMeterNo)) {
+          masterGapMeters.add(lookupMeterNo);
+        }
+      }
       const salesId = cleanText(trn?.targetedBatchContext?.salesDocId) || lookupMeterNo;
       const worker = getFieldWorker(trn);
       fieldRows.push(
@@ -832,9 +875,13 @@ export async function buildGeneralMonthlyReportDataset({
     photoColumnCount,
     fieldRows,
     unplaced,
+    droppedCaptures,
+    meterMasterGapCount: masterGapMeters.size,
     summary: {
       payableTotal: fieldRows.length,
       unplacedCount: unplaced.length,
+      droppedCaptureCount: droppedCaptures.length,
+      meterMasterGapCount: masterGapMeters.size,
     },
   };
 }

@@ -121,7 +121,8 @@ test("a bad meter number does not stop the report, and completed work with no re
   slashed.ast.astData.astNo = "12/34";
   const noTime = disconnection({ workflow: { state: "COMPLETED", completedAt: "", completedByUid: "U2" }, metadata: { createdAt: "2026-09-02T08:00:00.000Z" } });
   const dataset = await buildGeneralMonthlyReportDataset({
-    db: fakeDb({}),
+    // GMR-R040: a discovery's meter lives under its own transaction number.
+    db: fakeDb({ asts: { TRN_SLASH: {} } }),
     reportMonth: "2026-09",
     generatedAt: new Date("2026-09-21T10:00:00.000Z"),
     loadTransactions: async () => new Map([["TRN_SLASH", slashed], ["TRN_NO_TIME", noTime]]),
@@ -152,7 +153,7 @@ test("a General Report takes any range, in South African time, and never the fut
 
 test("a General Report says it is not the payment record, and keeps the same rows", async () => {
   const dataset = await buildGeneralMonthlyReportDataset({
-    db: fakeDb({}),
+    db: fakeDb({ asts: { TRN_MD_1: {} }, meter_master: { "07141234567": {} } }),
     mode: "GENERAL_REPORT",
     startDate: "2026-09-09",
     endDate: "2026-09-10",
@@ -167,6 +168,67 @@ test("a General Report says it is not the payment record, and keeps the same row
   assert.equal(dataset.periodLabel, "9 Sep 2026 to 10 Sep 2026");
   assert.equal(dataset.reportMonth, null);
   assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_MD_1", "TRN_DCN_1"]);
+});
+
+// GMR-R040
+test("a capture that says it made a meter and did not is dropped, and named", async () => {
+  const orphan = discovery({
+    metadata: { createdAt: "2026-09-12T08:00:00.000Z", createdByUid: "U9", createdByUser: "Thabo Worker" },
+  });
+  orphan.ast.astData.astNo = "07149999999";
+
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db: fakeDb({ asts: { TRN_GOOD: {} }, meter_master: { "07141234567": {} } }),
+    reportMonth: "2026-09",
+    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
+    loadTransactions: async () => new Map([["TRN_GOOD", discovery()], ["TRN_ORPHAN", orphan]]),
+  });
+
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_GOOD"], "the orphan leaves Field Data");
+  assert.equal(dataset.summary.payableTotal, 1, "and it is not invoiced");
+  assert.equal(dataset.droppedCaptures.length, 1);
+  assert.equal(dataset.droppedCaptures[0].trnId, "TRN_ORPHAN");
+  assert.equal(dataset.droppedCaptures[0].claimedMeterNo, "07149999999");
+  assert.equal(dataset.droppedCaptures[0].fieldWorkerName, "Thabo Worker");
+  assert.equal(dataset.droppedCaptures[0].captureDate, "2026-09-12T08:00:00.000Z");
+  assert.equal(dataset.meterMasterGapCount, 0);
+});
+
+// GMR-R040: the field did the work; meter master is the office's gap.
+test("a meter that is there but not in meter master keeps its row and is counted apart", async () => {
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db: fakeDb({ asts: { TRN_MD_1: {} } }),
+    reportMonth: "2026-09",
+    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
+    loadTransactions: async () => new Map([["TRN_MD_1", discovery()]]),
+  });
+
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_MD_1"]);
+  assert.equal(dataset.droppedCaptures.length, 0);
+  assert.equal(dataset.meterMasterGapCount, 1);
+});
+
+// GMR-R040: no meter is expected, so nothing is checked.
+test("a no access visit is never dropped", async () => {
+  const noAccess = discovery({
+    accessData: {
+      trnType: "METER_DISCOVERY",
+      access: { hasAccess: "no", reason: "Locked gate" },
+      premise: { id: "PREM_1" },
+      parents: { lmPcode: "ZA5241", wardPcode: "ZA5241006" },
+    },
+    ast: null,
+  });
+
+  const dataset = await buildGeneralMonthlyReportDataset({
+    db: fakeDb({}),
+    reportMonth: "2026-09",
+    generatedAt: new Date("2026-09-21T10:00:00.000Z"),
+    loadTransactions: async () => new Map([["TRN_NA_1", noAccess]]),
+  });
+
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_NA_1"]);
+  assert.equal(dataset.droppedCaptures.length, 0);
 });
 
 test("a discovery row carries the schema columns from the transaction and its enrichment", () => {

@@ -202,6 +202,9 @@ function countLine(label, rows, workers, teams, include) {
 export function buildGmrFieldStatsModel(dataset = {}) {
   const rows = Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [];
   const unplaced = Array.isArray(dataset?.unplaced) ? dataset.unplaced : [];
+  // GMR-R040: captures that claimed a meter and produced none. They are gone
+  // from rows already; the report still has to say so.
+  const droppedCaptures = Array.isArray(dataset?.droppedCaptures) ? dataset.droppedCaptures : [];
   const workerKeys = [...new Set(rows.map(workerOf))];
   const provisional = buildWorkerLabels(rows, workerKeys);
   const workers = workerKeys.sort(
@@ -317,6 +320,8 @@ export function buildGmrFieldStatsModel(dataset = {}) {
       ).length,
     },
     { label: "WORKERS WHOSE TEAM COULD NOT BE RESOLVED", count: unresolvedWorkers.size },
+    { label: "CAPTURES DROPPED (THE METER WAS NOT CREATED)", count: droppedCaptures.length },
+    { label: "METERS NOT IN METER MASTER", count: Number(dataset?.meterMasterGapCount) || 0 },
   ];
 
   return {
@@ -325,6 +330,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     teams,
     blocks,
     controlLines,
+    droppedCaptures,
     payableTotal: rows.length,
   };
 }
