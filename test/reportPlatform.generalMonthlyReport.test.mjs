@@ -110,9 +110,7 @@ const ZAMO_HEADERS = [
 test("Field Data keeps Zamo's 31 columns exactly, in row 1, with the added columns after Photo 6", () => {
   const eightPhotos = row({ photoUrls: Array.from({ length: 8 }, (_, index) => `https://example.test/${index + 1}.jpg`) });
   const { workbook } = readWorkbook(makeDataset([row(), eightPhotos]));
-  const all = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" });
-  assert.match(String(all[0][0]), /FIELD DATA \(METER DISCOVERY\)/, "the sheet names its own scope");
-  const rows = all.slice(1);
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" });
 
   assert.deepEqual(GMR_ZAMO_FIELD_DATA_COLUMNS.map((item) => item.header), ZAMO_HEADERS);
   assert.deepEqual(rows[0].slice(0, 31), ZAMO_HEADERS, "Zamo's columns come first, untouched");
@@ -133,15 +131,14 @@ test("Field Data writes AD HOC, NAv, the South African date and photo links as Z
   // Read the saved bytes back, as Excel would, whatever this machine's time zone.
   const workbook = XLSX.read(artifact.bytes, { type: "array", cellNF: true });
   const sheet = workbook.Sheets["Field Data - MD"];
-  // Row 0 names the sheet's scope; the headings are row 1 and the data starts at row 2.
-  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[1];
-  const cellFor = (name, r = 2) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
+  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
+  const cellFor = (name, r = 1) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
 
   assert.equal(cellFor("Batch ID").v, "AD HOC");
   assert.equal(cellFor("Property Name").v, "NAv");
   assert.equal(cellFor("Reason For Not Acting").v, "NAv");
   assert.equal(cellFor("Capture Date").w, "2026-09-10");
-  assert.equal(cellFor("Capture Date", 3).w, "2026-09-30", "23:30 on the last day stays in the month");
+  assert.equal(cellFor("Capture Date", 2).w, "2026-09-30", "23:30 on the last day stays in the month");
   assert.equal(cellFor("Photo 2").v, "Photo 2");
   assert.equal(cellFor("Photo 2").l.Target, "https://example.test/2.jpg");
   assert.equal(cellFor("Photo 3").v, "", "no photograph, empty cell, as before");
@@ -177,7 +174,7 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
 
   assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access", "Exceptions"]);
 
-  const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" }).slice(1);
+  const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" });
   const numbers = data.slice(1).map((cells) => cells[data[0].indexOf("Transaction Number")]);
   assert.deepEqual(numbers, ["A"], "the no access visit is not on the sheet the municipality pays on");
 

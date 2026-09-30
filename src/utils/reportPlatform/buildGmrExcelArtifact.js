@@ -141,12 +141,10 @@ function buildFieldDataSheet(dataset) {
   const notice = notForPaymentNotice(dataset);
   const aoa = [
     ...(notice ? [[`${periodLabel(dataset)} — ${notice}`]] : []),
-    [`${periodLabel(dataset)} - FIELD DATA (METER DISCOVERY)`],
     columns.map((item) => item.header),
     ...rows.map((row) => columns.map((item) => cellValue(row, item))),
   ];
-  // Row 0 (or row 1 under a General Report's notice) names the sheet's scope.
-  const headerRow = notice ? 2 : 1;
+  const headerRow = notice ? 1 : 0;
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!autofilter"] = {
