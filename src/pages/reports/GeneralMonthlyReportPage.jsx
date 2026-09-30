@@ -335,7 +335,7 @@ export default function GeneralMonthlyReportPage() {
           title={`Generate the ${periodLabel} ${reportName}?`}
           lines={[
             `Endumeni. Every field transaction that reached the server ${isGeneralReport ? `between ${periodLabel}` : `in ${periodLabel}`}, one row each, with Field Stats per field worker and per team.`,
-            ...(isCurrentMonth ? [`${monthLabel} is not over yet, so the report will say it is incomplete.`] : []),
+            ...(isCurrentMonth ? [`${monthLabel} is not over yet, so work submitted later today will not be in it.`] : []),
             ...(isGeneralReport ? ["A General Report is for looking. Two ranges can hold the same work twice, so it says on its own face that it is not the payment record."] : []),
             "The workbook is saved to Generated Reports and then downloaded.",
           ]}
