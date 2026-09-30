@@ -180,6 +180,7 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
 
   merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
   aoa.push(["Meter Discovery"]);
+  stats.workerHeaderRow = aoa.length;
   aoa.push(["Individual FWR Report", "METER ANOMALY", ...stats.workers, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByWorker.get(status);
@@ -229,7 +230,6 @@ function buildFieldStatsSheet(dataset) {
     ? `GR - ${rawPeriod}`
     : `GMR - ${rawPeriod} REPORT`;
   aoa.push([heading]);
-  aoa.push([]);
 
   // GMR-R036: the three blocks count the same records three ways. If they
   // disagree the report is wrong and says so rather than printing.
@@ -260,7 +260,7 @@ function buildFieldStatsSheet(dataset) {
   const width = Math.max(stats.workers.length, stats.teams.length);
   worksheet["!cols"] = [{ wch: 8 }, { wch: 42 }, ...Array.from({ length: width }, () => ({ wch: 18 })), { wch: 12 }];
   worksheet["!autofilter"] = {
-    ref: `A${notice ? 4 : 2}:${XLSX.utils.encode_col(stats.workers.length + 2)}${stats.auditEndRow + (notice ? 2 : 0)}`,
+    ref: `A${stats.workerHeaderRow + 1}:${XLSX.utils.encode_col(stats.workers.length + 2)}${stats.auditEndRow}`,
   };
   return { worksheet, model, stats };
 }
