@@ -310,7 +310,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   const after = sheet.slice(25).filter((cells) => cells.length);
   assert.deepEqual(after[0], ["SEPTEMBER 2026 - SUMMARY STATS"]);
   assert.deepEqual(after[1], ["ITEM", "LINE", "COUNT"]);
-  assert.equal(after[2][1], "TRANSACTIONS THIS PERIOD, EVERY TYPE");
+  assert.equal(after[2][1], "TRANSACTIONS WHERE THE METER WAS REACHED, EVERY TYPE");
   assert.equal(after.at(-1)[1], "EXCEPTIONS NOT COUNTED, NO METER CREATED");
   assert.ok(!after.some((cells) => String(cells[1]).includes("CONTROL LINE")), "no control lines");
 });
@@ -416,14 +416,15 @@ test("Summary Stats says why the numbers are what they are", () => {
   const value = (label) => sheet.find((cells) => String(cells[1]).trim() === label)?.[2];
 
   assert.ok(sheet.some((cells) => String(cells[0]).includes("SUMMARY STATS")), "the section is there");
-  assert.equal(value("TRANSACTIONS THIS PERIOD, EVERY TYPE"), 4);
-  assert.equal(value("METER DISCOVERY"), 3, "generated from the types actually present");
+  assert.equal(value("TRANSACTIONS WHERE THE METER WAS REACHED, EVERY TYPE"), 3, "no access is counted in its own section, never twice");
+  assert.equal(value("METER DISCOVERY"), 2, "the number Field Data - MD holds");
   assert.equal(value("METER DISCONNECTION"), 1);
-  assert.equal(value("NO ACCESS THIS PERIOD, EVERY TYPE - ALL LISTED ON THE NO ACCESS SHEET"), 1);
+  assert.equal(value("NO ACCESS THIS PERIOD, EVERY TYPE - LISTED ON THE NO ACCESS SHEET"), 1);
+  assert.equal(value("ALL TRANSACTIONS THIS PERIOD"), 4, "the two sections add up to the month");
   assert.equal(value("METER DISCOVERY - THE NO ACCESS LINE IN THE BLOCKS ABOVE"), 1, "where the blocks' number comes from");
-  assert.equal(value("ROWS ON FIELD DATA - MD"), 2, "only Meter Discovery is listed");
+  assert.equal(value("ROWS ON FIELD DATA - MD"), 2, "and it matches the Meter Discovery line above");
   assert.equal(value("TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)"), 1);
-  assert.equal(value("METER AUDIT TOTAL"), 3);
+  assert.equal(value("METER AUDIT TOTAL - FIELD DATA - MD PLUS ITS NO ACCESS"), 3);
   assert.equal(value("EXCEPTIONS NOT COUNTED, NO METER CREATED"), 1);
   assert.ok(!sheet.some((cells) => String(cells[0]).includes("CONTROL LINES")), "the control lines are withdrawn");
 });

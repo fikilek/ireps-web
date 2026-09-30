@@ -391,12 +391,14 @@ export function buildGmrFieldStatsModel(dataset = {}) {
   // sheets are built from.
   const payableRows = Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [];
   const noAccessRows = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
-  const typeCounts = Array.isArray(dataset?.transactionTypeCounts)
-    ? dataset.transactionTypeCounts
-    : [...rows.reduce((counts, row) => {
-        const label = text(row?.trnTypeLabel) || text(row?.trnType) || GMR_NAV;
-        return counts.set(label, (counts.get(label) || 0) + 1);
-      }, new Map())].map(([label, count]) => ({ label, count }));
+  const countByType = (list) => [...list.reduce((counts, row) => {
+    const label = text(row?.trnTypeLabel) || text(row?.trnType) || GMR_NAV;
+    return counts.set(label, (counts.get(label) || 0) + 1);
+  }, new Map())]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([label, count]) => ({ label, count }));
+
+  const typeCounts = countByType(payableRows);
 
   // A no access is an outcome on a transaction, not a transaction type, so the
   // period's no-access records are spread across the types. The blocks above
@@ -414,20 +416,21 @@ export function buildGmrFieldStatsModel(dataset = {}) {
       count,
     }));
 
+  const mdPayable = payableRows.filter((item) => item?.trnType === "METER_DISCOVERY").length;
+  const mdNoAccess = noAccessRows.filter((item) => item?.trnType === "METER_DISCOVERY").length;
+
   const summaryLines = [
-    { label: "TRANSACTIONS THIS PERIOD, EVERY TYPE", count: rows.length },
+    { label: "TRANSACTIONS WHERE THE METER WAS REACHED, EVERY TYPE", count: payableRows.length },
     ...typeCounts.map((item) => ({ label: `    ${upper(item.label)}`, count: item.count })),
-    { label: "NO ACCESS THIS PERIOD, EVERY TYPE - ALL LISTED ON THE NO ACCESS SHEET", count: noAccessRows.length },
+    { label: "NO ACCESS THIS PERIOD, EVERY TYPE - LISTED ON THE NO ACCESS SHEET", count: noAccessRows.length },
     ...noAccessByType,
-    {
-      label: "ROWS ON FIELD DATA - MD",
-      count: payableRows.filter((item) => item?.trnType === "METER_DISCOVERY").length,
-    },
+    { label: "ALL TRANSACTIONS THIS PERIOD", count: payableRows.length + noAccessRows.length },
+    { label: "ROWS ON FIELD DATA - MD", count: mdPayable },
+    { label: "METER AUDIT TOTAL - FIELD DATA - MD PLUS ITS NO ACCESS", count: mdPayable + mdNoAccess },
     {
       label: "TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)",
-      count: rows.filter((item) => item?.trnType !== "METER_DISCOVERY").length,
+      count: rows.length - mdPayable - mdNoAccess,
     },
-    { label: "METER AUDIT TOTAL", count: rows.filter((item) => item?.trnType === "METER_DISCOVERY").length },
     { label: "EXCEPTIONS NOT COUNTED, NO METER CREATED", count: droppedCaptures.length },
   ];
 
