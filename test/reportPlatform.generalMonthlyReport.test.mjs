@@ -288,7 +288,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
     });
 
   assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER DISCOVERY"]);
-  assert.deepEqual(sheet[1], ["ITEM", "METER STATUS", "Lefu Motlou", "Peter Peter", "TOTAL"]);
+  assert.deepEqual(sheet[1], ["ITEM", "METER ANOMALY", "Lefu Motlou", "Peter Peter", "TOTAL"]);
   assert.deepEqual(sheet[2], [1, "Illegally Connected", 0, 2, 2]);
   assert.deepEqual(sheet[3], [2, "Meter Damaged", 0, 0, 0]);
   assert.deepEqual(sheet[4], [3, "Meter Faulty", 0, 0, 0]);
@@ -302,7 +302,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   assert.deepEqual(sheet[13], [4, "Meter Ok - Tamper removed", 0, 1, 1], "a healthy meter's own fix");
   assert.deepEqual(sheet[14], [5, "No Access", 1, 0, 1], "and No Access last of all");
   assert.deepEqual(sheet[15], ["", "TOTAL: NORMALISATION", 2, 3, 5]);
-  assert.deepEqual(sheet[18], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
+  assert.deepEqual(sheet[18], ["Teams", "METER ANOMALY", "Lesedi Audit", "Peter Team", "TOTAL"]);
   assert.deepEqual(sheet[24], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
 
   // The only thing under the three sections: Summary Stats. The control lines

@@ -182,7 +182,7 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
 
   merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
   aoa.push([`${period} - METER DISCOVERY`]);
-  aoa.push(["ITEM", "METER STATUS", ...stats.workers, "TOTAL"]);
+  aoa.push(["ITEM", "METER ANOMALY", ...stats.workers, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByWorker.get(status);
     aoa.push(row(index + 1, status, stats.workers, counts, sumOf(counts)));
@@ -201,7 +201,7 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
 
   aoa.push([]);
   aoa.push([]);
-  aoa.push(["Teams", "METER STATUS", ...stats.teams, "TOTAL"]);
+  aoa.push(["Teams", "METER ANOMALY", ...stats.teams, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByTeam.get(status);
     aoa.push(row(index + 1, status, stats.teams, counts, sumOf(counts)));
