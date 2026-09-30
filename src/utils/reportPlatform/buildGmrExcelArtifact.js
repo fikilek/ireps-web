@@ -5,7 +5,16 @@ import * as XLSX from "xlsx";
 
 import { GMR_NAV, buildGmrFieldStatsModel, buildZamoFieldStats } from "./gmrFieldStatsModel.js";
 
-export const GMR_SHEET_NAMES = Object.freeze(["Field Data", "Field Stats", "No Access", "Exceptions"]);
+// The report is about Meter Discovery. The two sheets that list records say so
+// in their name and in their first row, because a tab name is lost the moment
+// someone copies a sheet into an email (owner, 30 September 2026).
+export const GMR_SHEET_NAMES = Object.freeze(["Field Data - MD", "Field Stats", "No Access - MD", "Exceptions"]);
+
+export const GMR_DISCOVERY = "METER_DISCOVERY";
+
+export function gmrDiscoveryRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => row?.trnType === GMR_DISCOVERY);
+}
 
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
 
@@ -125,17 +134,19 @@ function zamoWidth(item) {
 }
 
 function buildFieldDataSheet(dataset) {
-  const rows = dataset.fieldRows;
+  const rows = gmrDiscoveryRows(dataset.fieldRows);
   const columns = getGmrFieldDataColumns(dataset.photoColumnCount);
   // A General Report says so on its own first sheet, above the headings, so a
   // workbook that travels by email cannot be mistaken for the payment record.
   const notice = notForPaymentNotice(dataset);
   const aoa = [
     ...(notice ? [[`${periodLabel(dataset)} — ${notice}`]] : []),
+    [`${periodLabel(dataset)} - FIELD DATA (METER DISCOVERY)`],
     columns.map((item) => item.header),
     ...rows.map((row) => columns.map((item) => cellValue(row, item))),
   ];
-  const headerRow = notice ? 1 : 0;
+  // Row 0 (or row 1 under a General Report's notice) names the sheet's scope.
+  const headerRow = notice ? 2 : 1;
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!autofilter"] = {
@@ -275,7 +286,7 @@ export function buildExceptionsSheet(dataset, model) {
     aoa.push([dataset.notForPaymentNotice]);
     aoa.push([]);
   }
-  aoa.push([`${period} - EXCEPTIONS`]);
+  aoa.push([`${period} - EXCEPTIONS (ALL TRANSACTIONS)`]);
   aoa.push(["Every exception this report found, one row each. The counts are on Field Stats."]);
   aoa.push([]);
   aoa.push([...GMR_EXCEPTION_COLUMNS]);
@@ -337,18 +348,18 @@ function addressText(row) {
 
 export function buildNoAccessSheet(dataset) {
   const period = periodLabel(dataset);
-  const rows = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
+  const rows = gmrDiscoveryRows(dataset?.noAccessRows);
   const aoa = [];
   if (dataset?.notForPaymentNotice) {
     aoa.push([dataset.notForPaymentNotice]);
     aoa.push([]);
   }
-  aoa.push([`${period} - NO ACCESS`]);
-  aoa.push(["Every visit where the worker could not reach the meter. Not payable work, and counted on Field Stats."]);
+  aoa.push([`${period} - NO ACCESS (METER DISCOVERY)`]);
+  aoa.push(["Meter Discovery visits where the worker could not reach the meter. Counted on Field Stats; no access on other transactions is in Summary Stats."]);
   aoa.push([]);
   aoa.push([...GMR_NO_ACCESS_COLUMNS]);
 
-  if (!rows.length) aoa.push(["", "No no-access visits in this period."]);
+  if (!rows.length) aoa.push(["", "No Meter Discovery no-access visits in this period."]);
 
   rows.forEach((row, index) =>
     aoa.push([

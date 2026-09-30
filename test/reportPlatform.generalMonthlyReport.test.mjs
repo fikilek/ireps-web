@@ -110,7 +110,9 @@ const ZAMO_HEADERS = [
 test("Field Data keeps Zamo's 31 columns exactly, in row 1, with the added columns after Photo 6", () => {
   const eightPhotos = row({ photoUrls: Array.from({ length: 8 }, (_, index) => `https://example.test/${index + 1}.jpg`) });
   const { workbook } = readWorkbook(makeDataset([row(), eightPhotos]));
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
+  const all = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" });
+  assert.match(String(all[0][0]), /FIELD DATA \(METER DISCOVERY\)/, "the sheet names its own scope");
+  const rows = all.slice(1);
 
   assert.deepEqual(GMR_ZAMO_FIELD_DATA_COLUMNS.map((item) => item.header), ZAMO_HEADERS);
   assert.deepEqual(rows[0].slice(0, 31), ZAMO_HEADERS, "Zamo's columns come first, untouched");
@@ -130,15 +132,16 @@ test("Field Data writes AD HOC, NAv, the South African date and photo links as Z
   const artifact = buildGmrExcelArtifact({ dataset: makeDataset(rows), fileName: "gmr.xlsx" });
   // Read the saved bytes back, as Excel would, whatever this machine's time zone.
   const workbook = XLSX.read(artifact.bytes, { type: "array", cellNF: true });
-  const sheet = workbook.Sheets["Field Data"];
-  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
-  const cellFor = (name, r = 1) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
+  const sheet = workbook.Sheets["Field Data - MD"];
+  // Row 0 names the sheet's scope; the headings are row 1 and the data starts at row 2.
+  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[1];
+  const cellFor = (name, r = 2) => sheet[XLSX.utils.encode_cell({ r, c: header.indexOf(name) })];
 
   assert.equal(cellFor("Batch ID").v, "AD HOC");
   assert.equal(cellFor("Property Name").v, "NAv");
   assert.equal(cellFor("Reason For Not Acting").v, "NAv");
   assert.equal(cellFor("Capture Date").w, "2026-09-10");
-  assert.equal(cellFor("Capture Date", 2).w, "2026-09-30", "23:30 on the last day stays in the month");
+  assert.equal(cellFor("Capture Date", 3).w, "2026-09-30", "23:30 on the last day stays in the month");
   assert.equal(cellFor("Photo 2").v, "Photo 2");
   assert.equal(cellFor("Photo 2").l.Target, "https://example.test/2.jpg");
   assert.equal(cellFor("Photo 3").v, "", "no photograph, empty cell, as before");
@@ -172,13 +175,13 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
     }),
   );
 
-  assert.deepEqual(workbook.SheetNames, ["Field Data", "Field Stats", "No Access", "Exceptions"]);
+  assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access - MD", "Exceptions"]);
 
-  const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
+  const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" }).slice(1);
   const numbers = data.slice(1).map((cells) => cells[data[0].indexOf("Transaction Number")]);
   assert.deepEqual(numbers, ["A"], "the no access visit is not on the sheet the municipality pays on");
 
-  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["No Access"], { header: 1, defval: "" });
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["No Access - MD"], { header: 1, defval: "" });
   const header = sheet.find((cells) => cells[0] === "ITEM");
   assert.deepEqual(header, [
     "ITEM", "CAPTURE DATE", "FIELD WORKER", "TEAM", "ERF", "ADDRESS",
@@ -222,7 +225,7 @@ test("the Exceptions sheet names every exception, one row each, with its explana
   });
 
   const { workbook } = readWorkbook(dataset);
-  assert.deepEqual(workbook.SheetNames, ["Field Data", "Field Stats", "No Access", "Exceptions"]);
+  assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access - MD", "Exceptions"]);
 
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets.Exceptions, { header: 1, defval: "" });
   const header = sheet.find((cells) => cells[0] === "ITEM");
@@ -416,9 +419,10 @@ test("Summary Stats says why the numbers are what they are", () => {
   assert.equal(value("TRANSACTIONS THIS PERIOD, EVERY TYPE"), 4);
   assert.equal(value("METER DISCOVERY"), 3, "generated from the types actually present");
   assert.equal(value("METER DISCONNECTION"), 1);
-  assert.equal(value("NO ACCESS - LISTED ON THE NO ACCESS SHEET"), 1);
-  assert.equal(value("METER DISCOVERY (COUNTED IN THE BLOCKS ABOVE)"), 1, "where the blocks' number comes from");
-  assert.equal(value("ROWS ON THE FIELD DATA SHEET"), 3);
+  assert.equal(value("NO ACCESS, ALL TRANSACTIONS"), 1);
+  assert.equal(value("ON METER DISCOVERY - THE 'NO ACCESS' LINE ABOVE, LISTED ON NO ACCESS - MD"), 1, "where the blocks' number comes from");
+  assert.equal(value("ROWS ON FIELD DATA - MD"), 2, "only Meter Discovery is listed");
+  assert.equal(value("TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)"), 1);
   assert.equal(value("METER AUDIT TOTAL"), 3);
   assert.equal(value("EXCEPTIONS NOT COUNTED, NO METER CREATED"), 1);
   assert.ok(!sheet.some((cells) => String(cells[0]).includes("CONTROL LINES")), "the control lines are withdrawn");

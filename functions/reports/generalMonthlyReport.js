@@ -903,6 +903,10 @@ export async function buildGeneralMonthlyReportDataset({
       .sort((left, right) => left[0].localeCompare(right[0]))
       .map(([label, count]) => ({ label, count })),
     summary: {
+      // The report lists Meter Discovery; the rest of the period is counted in
+      // Summary Stats and listed nowhere (owner, 30 September 2026).
+      fieldDataRows: fieldRows.filter((row) => row.trnType === "METER_DISCOVERY").length,
+      noAccessMdTotal: noAccessRows.filter((row) => row.trnType === "METER_DISCOVERY").length,
       payableTotal: fieldRows.length,
       noAccessTotal: noAccessRows.length,
       transactionTotal: fieldRows.length + noAccessRows.length,

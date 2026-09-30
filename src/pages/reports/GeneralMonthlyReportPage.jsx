@@ -320,7 +320,7 @@ export default function GeneralMonthlyReportPage() {
           <p className="eyebrow">Last report</p>
           <h2>{resultMonthLabel}</h2>
           <div style={styles.factGrid}>
-            <Fact label="Transactions on Field Data" value={summary?.payableTotal ?? 0} />
+            <Fact label="Meter Discoveries on Field Data - MD" value={summary?.fieldDataRows ?? summary?.payableTotal ?? 0} />
             <Fact label="Not on Field Data" value={unplacedCount} warn={unplacedCount > 0} />
             <Fact label="File" value={result.managed?.artifact?.fileName || ""} />
           </div>
@@ -361,7 +361,7 @@ export default function GeneralMonthlyReportPage() {
           title={`The ${resultMonthLabel} report is ready`}
           tone={unplacedCount > 0 ? "warning" : "info"}
           lines={[
-            `${(summary?.payableTotal ?? 0).toLocaleString()} transactions on Field Data.`,
+            `${(summary?.fieldDataRows ?? summary?.payableTotal ?? 0).toLocaleString()} Meter Discoveries on Field Data - MD, ${(summary?.noAccessMdTotal ?? 0).toLocaleString()} on No Access - MD.`,
             ...(unplacedCount > 0
               ? [`${unplacedCount} submitted transaction${unplacedCount === 1 ? "" : "s"} could not be placed on Field Data. They are listed at the bottom of Field Stats; report them before issuing this report.`]
               : []),

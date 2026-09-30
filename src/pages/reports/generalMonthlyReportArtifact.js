@@ -117,6 +117,8 @@ export function buildGeneralMonthlyManagedReport({
       isPaymentRecord: dataset?.isPaymentRecord !== false,
       isIncompleteMonth: Boolean(dataset?.isIncompleteMonth),
       payableTotal: summary.payableTotal ?? dataset.fieldRows.length,
+      fieldDataRows: summary.fieldDataRows ?? null,
+      noAccessMdTotal: summary.noAccessMdTotal ?? null,
       unplacedCount: summary.unplacedCount ?? 0,
       rulesVersion: dataset?.rulesVersion || null,
       reportSchemaVersion: dataset?.reportSchemaVersion || null,

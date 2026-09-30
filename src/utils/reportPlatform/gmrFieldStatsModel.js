@@ -408,16 +408,25 @@ export function buildGmrFieldStatsModel(dataset = {}) {
   }, new Map())]
     .sort((left, right) => left[0].localeCompare(right[0]))
     .map(([label, count]) => ({
-      label: `    ${upper(label)}${upper(label) === "METER DISCOVERY" ? " (COUNTED IN THE BLOCKS ABOVE)" : ""}`,
+      label: upper(label) === "METER DISCOVERY"
+        ? "    ON METER DISCOVERY - THE 'NO ACCESS' LINE ABOVE, LISTED ON NO ACCESS - MD"
+        : `    ON ${upper(label)} - NOT LISTED IN THIS REPORT`,
       count,
     }));
 
   const summaryLines = [
     { label: "TRANSACTIONS THIS PERIOD, EVERY TYPE", count: rows.length },
     ...typeCounts.map((item) => ({ label: `    ${upper(item.label)}`, count: item.count })),
-    { label: "NO ACCESS - LISTED ON THE NO ACCESS SHEET", count: noAccessRows.length },
+    { label: "NO ACCESS, ALL TRANSACTIONS", count: noAccessRows.length },
     ...noAccessByType,
-    { label: "ROWS ON THE FIELD DATA SHEET", count: payableRows.length },
+    {
+      label: "ROWS ON FIELD DATA - MD",
+      count: payableRows.filter((item) => item?.trnType === "METER_DISCOVERY").length,
+    },
+    {
+      label: "TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)",
+      count: rows.filter((item) => item?.trnType !== "METER_DISCOVERY").length,
+    },
     { label: "METER AUDIT TOTAL", count: rows.filter((item) => item?.trnType === "METER_DISCOVERY").length },
     { label: "EXCEPTIONS NOT COUNTED, NO METER CREATED", count: droppedCaptures.length },
   ];
