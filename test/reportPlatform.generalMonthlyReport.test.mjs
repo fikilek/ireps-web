@@ -289,7 +289,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   const at = (label) => sheet.findIndex((cells) => cells[0] === label);
   const line = (from, index) => sheet[from + index];
 
-  assert.deepEqual(sheet[0], ["SEPTEMBER 2026 GENERAL MONTHLY REPORT"], "the period and the report are named once, at the top");
+  assert.deepEqual(sheet[0], ["GMR - SEPTEMBER 2026 REPORT"], "the report and its period are named once, at the top");
 
   const discovery = at("Meter Discovery");
   assert.ok(discovery > 0, "the first section names itself");

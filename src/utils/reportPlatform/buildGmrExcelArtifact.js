@@ -222,8 +222,13 @@ function buildFieldStatsSheet(dataset) {
   }
   // The heading says which report this is: a General Report and a General
   // Monthly Report must never be mistaken for one another (owner, 30 Sep 2026).
-  const reportName = dataset?.reportKind === "GR" ? "GENERAL REPORT" : "GENERAL MONTHLY REPORT";
-  aoa.push([`${period} ${reportName}`]);
+  const rawPeriod = String(
+    dataset?.periodLabel || dataset?.reportingPeriodLabel || dataset?.reportMonth || "",
+  ).toUpperCase();
+  const heading = dataset?.reportKind === "GR"
+    ? `GR - ${rawPeriod}`
+    : `GMR - ${rawPeriod} REPORT${dataset?.isIncompleteMonth ? " (INCOMPLETE)" : ""}`;
+  aoa.push([heading]);
   aoa.push([]);
 
   // GMR-R036: the three blocks count the same records three ways. If they
