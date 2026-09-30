@@ -789,6 +789,7 @@ export async function buildGeneralMonthlyReportDataset({
   // GMR-R040: captures that said they made a meter and did not.
   const droppedCaptures = [];
   const masterGapMeters = new Set();
+  const meterMasterGapTrnIds = new Set();
 
   entries.forEach(([trnId, trn]) => {
     try {
@@ -817,12 +818,12 @@ export async function buildGeneralMonthlyReportDataset({
         // back-office gap, not the field's fault: the row stays and is counted.
         if (lookupMeterNo && !masterById.has(lookupMeterNo)) {
           masterGapMeters.add(lookupMeterNo);
+          meterMasterGapTrnIds.add(cleanText(trnId));
         }
       }
       const salesId = cleanText(trn?.targetedBatchContext?.salesDocId) || lookupMeterNo;
       const worker = getFieldWorker(trn);
-      fieldRows.push(
-        buildGmrFieldRow({
+      const fieldRow = buildGmrFieldRow({
           trnId,
           trn,
           reportMonth: window.reportMonth,
@@ -830,9 +831,10 @@ export async function buildGeneralMonthlyReportDataset({
           sales: salesId ? salesById.get(salesId) || null : null,
           fieldSalesExists: lookupMeterNo ? salesById.has(lookupMeterNo) : false,
           ast: astsById.get(getGmrAstId(trnId, trn)) || null,
-          team: resolveGmrTeamAt(teamPeriods, worker.uid, getGmrSubmissionTime(trn)),
-        }),
-      );
+        team: resolveGmrTeamAt(teamPeriods, worker.uid, getGmrSubmissionTime(trn)),
+      });
+      fieldRow.meterInMaster = meterMasterGapTrnIds.has(cleanText(trnId)) ? false : null;
+      fieldRows.push(fieldRow);
     } catch (error) {
       unplaced.push({
         trnId,

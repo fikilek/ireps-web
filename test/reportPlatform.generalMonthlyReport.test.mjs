@@ -151,6 +151,74 @@ test("a month with no field work still makes a report", () => {
   assert.equal(managed.metadata.itemCount, 0);
 });
 
+// GMR-R041
+test("the Exceptions sheet names every exception, one row each, with its explanation", () => {
+  const rows = [
+    row({ trnId: "A", fieldWorkerName: "Lefu Motlou" }),
+    row({ trnId: "B", fieldWorkerName: "Peter Peter", batchId: "AD HOC" }),
+    row({ trnId: "C", fieldWorkerName: "Sipho Worker", gpsCoordinates: "", photoUrls: [] }),
+    row({ trnId: "D", fieldWorkerName: "Thandi Worker", meterInMaster: false }),
+  ];
+  const dataset = makeDataset(rows, {
+    droppedCaptures: [
+      {
+        trnId: "E",
+        trnTypeLabel: "Meter Discovery",
+        captureDate: "2026-09-12T08:00:00.000Z",
+        fieldWorkerName: "Thabo Worker",
+        claimedMeterNo: "07149999999",
+        reason: "The capture says a meter was created, but the meter is not there.",
+      },
+    ],
+    meterMasterGapCount: 1,
+  });
+
+  const { workbook } = readWorkbook(dataset);
+  assert.deepEqual(workbook.SheetNames, ["Field Data", "Field Stats", "Exceptions"]);
+
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets.Exceptions, { header: 1, defval: "" });
+  const header = sheet.find((cells) => cells[0] === "ITEM");
+  assert.deepEqual(header, [
+    "ITEM",
+    "EXCEPTION",
+    "COUNTED IN THE REPORT?",
+    "TRANSACTION NUMBER",
+    "TRANSACTION TYPE",
+    "CAPTURE DATE",
+    "FIELD WORKER",
+    "METER NUMBER",
+    "WHY IT IS AN EXCEPTION",
+  ]);
+
+  const listed = sheet.slice(sheet.indexOf(header) + 1).filter((cells) => cells[0]);
+  const byKind = new Map(listed.map((cells) => [cells[1], cells]));
+
+  const claimed = byKind.get("A meter was claimed but not created");
+  assert.ok(claimed, "the capture with no meter is listed");
+  assert.equal(claimed[2], "No", "it is not counted");
+  assert.equal(claimed[3], "E");
+  assert.equal(claimed[6], "Thabo Worker");
+  assert.equal(claimed[7], "07149999999");
+  assert.match(claimed[8], /the meter is not there/);
+
+  const master = byKind.get("Meter not in meter master");
+  assert.ok(master, "the meter master gap is listed");
+  assert.equal(master[2], "Yes", "the field did the work, so the row is counted");
+
+  const evidence = byKind.get("Missing GPS, photograph or normalisation");
+  assert.equal(evidence[2], "Yes");
+  assert.match(evidence[8], /no GPS/);
+
+  assert.ok(byKind.get("Work with no batch"), "work outside a batch is listed");
+  assert.equal(listed.length, 4, "one row per exception, and nothing else");
+});
+
+test("a period with no exceptions says so rather than leaving the sheet empty", () => {
+  const { workbook } = readWorkbook(makeDataset([row({ trnId: "A" })]));
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets.Exceptions, { header: 1, defval: "" });
+  assert.ok(sheet.some((cells) => cells[1] === "No exceptions found for this period."));
+});
+
 test("Field Stats is Zamo's three blocks and nothing else", () => {
   const rows = [
     row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" }),

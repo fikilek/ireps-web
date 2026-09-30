@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 
 import { GMR_NAV, buildGmrFieldStatsModel, buildZamoFieldStats } from "./gmrFieldStatsModel.js";
 
-export const GMR_SHEET_NAMES = Object.freeze(["Field Data", "Field Stats"]);
+export const GMR_SHEET_NAMES = Object.freeze(["Field Data", "Field Stats", "Exceptions"]);
 
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
 
@@ -236,33 +236,6 @@ function buildFieldStatsSheet(dataset) {
   aoa.push(["ITEM", "CONTROL LINE", "COUNT"]);
   model.controlLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
 
-  // GMR-R040: a corrected total is only honest if the corrections can be read.
-  // Every dropped capture is named under its control line.
-  if (model.droppedCaptures.length) {
-    aoa.push([]);
-    aoa.push([`${period} - EXCEPTIONS: A METER WAS CLAIMED BUT NOT CREATED`]);
-    aoa.push([
-      "ITEM",
-      "TRANSACTION NUMBER",
-      "TRANSACTION TYPE",
-      "CAPTURE DATE",
-      "FIELD WORKER",
-      "METER NUMBER CLAIMED",
-      "WHY IT IS AN EXCEPTION",
-    ]);
-    model.droppedCaptures.forEach((capture, index) =>
-      aoa.push([
-        index + 1,
-        capture.trnId || GMR_NAV,
-        capture.trnTypeLabel || GMR_NAV,
-        formatJohannesburg(capture.captureDate),
-        capture.fieldWorkerName || GMR_NAV,
-        capture.claimedMeterNo || GMR_NAV,
-        capture.reason || GMR_NAV,
-      ]),
-    );
-  }
-
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!merges"] = merges;
   const width = Math.max(stats.workers.length, stats.teams.length);
@@ -280,6 +253,66 @@ function toUint8Array(value) {
   return Uint8Array.from(value || []);
 }
 
+// GMR-R041: the third worksheet. The counts stay on Field Stats; every
+// exception behind them is written here, one row each, with its explanation.
+// Zamo's two sheets are left exactly as he uses them.
+export const GMR_EXCEPTION_COLUMNS = Object.freeze([
+  "ITEM",
+  "EXCEPTION",
+  "COUNTED IN THE REPORT?",
+  "TRANSACTION NUMBER",
+  "TRANSACTION TYPE",
+  "CAPTURE DATE",
+  "FIELD WORKER",
+  "METER NUMBER",
+  "WHY IT IS AN EXCEPTION",
+]);
+
+export function buildExceptionsSheet(dataset, model) {
+  const period = periodLabel(dataset);
+  const aoa = [];
+  if (dataset?.notForPaymentNotice) {
+    aoa.push([dataset.notForPaymentNotice]);
+    aoa.push([]);
+  }
+  aoa.push([`${period} - EXCEPTIONS`]);
+  aoa.push(["Every exception this report found, one row each. The counts are on Field Stats."]);
+  aoa.push([]);
+  aoa.push([...GMR_EXCEPTION_COLUMNS]);
+
+  if (!model.exceptions.length) {
+    aoa.push(["", "No exceptions found for this period."]);
+  }
+
+  model.exceptions.forEach((item, index) =>
+    aoa.push([
+      index + 1,
+      item.kind,
+      item.counted,
+      item.trnId,
+      item.trnTypeLabel,
+      formatJohannesburg(item.captureDate),
+      item.fieldWorkerName,
+      item.meterNo,
+      item.explanation,
+    ]),
+  );
+
+  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+  worksheet["!cols"] = [
+    { wch: 6 },
+    { wch: 38 },
+    { wch: 20 },
+    { wch: 26 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 72 },
+  ];
+  return worksheet;
+}
+
 export function buildGmrExcelArtifact({ dataset, fileName }) {
   if (!dataset || typeof dataset !== "object") {
     throw new TypeError("A General Monthly Report dataset is required.");
@@ -295,6 +328,7 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   XLSX.utils.book_append_sheet(workbook, buildFieldDataSheet(dataset), GMR_SHEET_NAMES[0]);
   const stats = buildFieldStatsSheet(dataset);
   XLSX.utils.book_append_sheet(workbook, stats.worksheet, GMR_SHEET_NAMES[1]);
+  XLSX.utils.book_append_sheet(workbook, buildExceptionsSheet(dataset, stats.model), GMR_SHEET_NAMES[2]);
 
   const bytes = toUint8Array(
     XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true }),

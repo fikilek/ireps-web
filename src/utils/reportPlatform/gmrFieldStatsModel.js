@@ -282,6 +282,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     rows.filter((item) => ["Unassigned", "Multiple"].includes(teamOf(item))).map(workerOf),
   );
 
+
   // GMR-R019 (1.7.0): all work is done through batches except where there is an
   // illegal connection. A worker who finds one while working a batch may
   // capture it there and then, and that capture carries no batch — so it is
@@ -289,6 +290,86 @@ export function buildGmrFieldStatsModel(dataset = {}) {
   // being outside a batch (owner, 26 September 2026).
   const withoutBatch = rows.filter((item) => text(item?.batchId) === "AD HOC");
   const illegalWithoutBatch = withoutBatch.filter((item) => zamoMeterStatus(item) === ILLEGAL_CONNECTION);
+
+  // GMR-R041: every exception is named once here, and both the control line and
+  // the Exceptions sheet read from the same list, so the count and the rows
+  // behind it can never disagree.
+  const otherWithoutBatch = withoutBatch.filter((item) => zamoMeterStatus(item) !== ILLEGAL_CONNECTION);
+  const offVendingRows = electricityFound.filter((item) => item?.onVendingList === "No");
+  const visibilityRows = judged.filter(
+    (item) =>
+      (item?.visibility === "Invisible" && item?.onVendingList === "Yes") ||
+      (item?.visibility === "Visible" && item?.onVendingList === "No"),
+  );
+  const noSalesCategoryRows = actedRows.filter(
+    (item) => item?.meterType === "ELECTRICITY" && !text(item?.salesCategory),
+  );
+  const missingEvidenceRows = rows.filter(
+    (item) =>
+      item?.hasAccess &&
+      (!text(item?.gpsCoordinates) ||
+        !(item?.photoUrls || []).length ||
+        (FINDING_TRN_TYPES.has(item?.trnType) && item?.meterType === "ELECTRICITY" && !(item?.normalisationActions || []).length)),
+  );
+  const unresolvedTeamRows = rows.filter((item) => ["Unassigned", "Multiple"].includes(teamOf(item)));
+  const masterGapRows = rows.filter((item) => item?.meterInMaster === false);
+
+  function missingEvidenceText(item) {
+    const missing = [];
+    if (!text(item?.gpsCoordinates)) missing.push("GPS");
+    if (!(item?.photoUrls || []).length) missing.push("a photograph");
+    if (FINDING_TRN_TYPES.has(item?.trnType) && item?.meterType === "ELECTRICITY" && !(item?.normalisationActions || []).length) {
+      missing.push("a normalisation answer");
+    }
+    return `The record has no ${missing.join(", no ")}.`;
+  }
+
+  const exception = (kind, counted, item, explanation, overrides = {}) => ({
+    kind,
+    counted,
+    trnId: text(item?.trnId) || GMR_NAV,
+    trnTypeLabel: text(item?.trnTypeLabel) || GMR_NAV,
+    captureDate: item?.captureDate || null,
+    fieldWorkerName: text(item?.fieldWorkerName) || GMR_NAV,
+    meterNo: text(item?.fieldFoundMeterNo) || GMR_NAV,
+    explanation,
+    ...overrides,
+  });
+
+  // In the order of the control lines, so the sheet and the counts read the
+  // same way down the page.
+  const exceptions = [
+    ...unplaced.map((item) =>
+      exception("Submitted but not on Field Data", "No", item, text(item?.reason) || "It could not be placed in the period.", {
+        trnTypeLabel: text(item?.trnType) || GMR_NAV,
+        meterNo: GMR_NAV,
+      })),
+    ...otherWithoutBatch.map((item) =>
+      exception("Work with no batch", "Yes", item,
+        "The work was not issued through a batch, and it is not an illegal connection found along the way.")),
+    ...offVendingRows.map((item) =>
+      exception("Meter not on the vending list", "Yes", item,
+        "The meter was found in the field but its number is not on the vending provider's list.")),
+    ...visibilityRows.map((item) =>
+      exception("Visibility disagrees with Sales", "Yes", item,
+        `The meter is marked ${text(item?.visibility)} while the vending list says ${text(item?.onVendingList)}.`)),
+    ...noSalesCategoryRows.map((item) =>
+      exception("No Sales Category", "Yes", item,
+        "An electricity record with access and no Sales Category.")),
+    ...missingEvidenceRows.map((item) =>
+      exception("Missing GPS, photograph or normalisation", "Yes", item, missingEvidenceText(item))),
+    ...unresolvedTeamRows.map((item) =>
+      exception("Team could not be resolved", "Yes", item,
+        `The worker's team at the time of the work reads ${teamOf(item)}.`)),
+    ...droppedCaptures.map((item) =>
+      exception("A meter was claimed but not created", "No", item,
+        text(item?.reason) || "The capture says a meter was created, but the meter is not there.", {
+          meterNo: text(item?.claimedMeterNo) || GMR_NAV,
+        })),
+    ...masterGapRows.map((item) =>
+      exception("Meter not in meter master", "Yes", item,
+        "The meter is in the assets collection, but its number is not in meter master.")),
+  ];
 
   const controlLines = [
     { label: "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)", count: unplaced.length },
@@ -331,6 +412,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     blocks,
     controlLines,
     droppedCaptures,
+    exceptions,
     payableTotal: rows.length,
   };
 }
