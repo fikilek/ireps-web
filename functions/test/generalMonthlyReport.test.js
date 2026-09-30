@@ -227,7 +227,14 @@ test("a no access visit is never dropped", async () => {
     loadTransactions: async () => new Map([["TRN_NA_1", noAccess]]),
   });
 
-  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), ["TRN_NA_1"]);
+  // GMR-R013 (1.11.0): it leaves Field Data for its own sheet, and it is still
+  // the period's work.
+  assert.deepEqual(dataset.fieldRows.map((row) => row.trnId), []);
+  assert.deepEqual(dataset.noAccessRows.map((row) => row.trnId), ["TRN_NA_1"]);
+  assert.equal(dataset.noAccessRows[0].noAccessReason, "Locked gate");
+  assert.equal(dataset.summary.noAccessTotal, 1);
+  assert.equal(dataset.summary.payableTotal, 0);
+  assert.equal(dataset.summary.transactionTotal, 1);
   assert.equal(dataset.droppedCaptures.length, 0);
 });
 

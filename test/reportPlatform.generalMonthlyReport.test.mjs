@@ -102,8 +102,8 @@ const ZAMO_HEADERS = [
   "Capture Date", "Field Worker Name", "Sales Category", "Batch ID", "Street No", "Street Name",
   "Street Type", "SuburbName", "GPS Coordinates", "Ward", "Property Type", "Property Name", "Unit No",
   "Meter Mode", "Meter Phase", "Meter Placement", "Original / Project Meter Number",
-  "Field-Found Meter Number", "Same/Different", "Remaining Credit", "Primary Finding",
-  "Finding Explanation", "Normalisation", "Seal No", "Comment",
+  "Field-Found Meter Number", "Same/Different", "Remaining Credit", "Anomaly",
+  "Anomaly Detail", "Normalisation", "Seal No", "Comment",
   "Photo 1", "Photo 2", "Photo 3", "Photo 4", "Photo 5", "Photo 6",
 ];
 
@@ -151,43 +151,52 @@ test("a month with no field work still makes a report", () => {
   assert.equal(managed.metadata.itemCount, 0);
 });
 
-// The owner, 30 September: one word, one meaning, and NAv is the flag.
-test("a no access visit reads NAv in the meter columns and is still counted as No Access", () => {
-  const rows = [
-    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" }),
-    row({
-      trnId: "B",
-      hasAccess: false,
-      fieldWorkerName: "Lefu Motlou",
-      team: "Lesedi Audit",
-      primaryFinding: null,
-      findingDetail: null,
-      noAccessReason: "Gate locked",
-      normalisation: "NAv",
-      normalisationActions: [],
-      photoUrls: [],
+// GMR-R013 (1.11.0) and the owner's NAv rule.
+test("a no access visit is off Field Data, on its own sheet, and still counted", () => {
+  const noAccess = row({
+    trnId: "B",
+    hasAccess: false,
+    fieldWorkerName: "Lefu Motlou",
+    team: "Lesedi Audit",
+    primaryFinding: null,
+    findingDetail: null,
+    noAccessReason: "Gate locked",
+    erfNo: "689",
+    normalisation: "NAv",
+    normalisationActions: [],
+    photoUrls: [],
+  });
+  const { workbook } = readWorkbook(
+    makeDataset([row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" })], {
+      noAccessRows: [noAccess],
     }),
-  ];
-  const { workbook } = readWorkbook(makeDataset(rows));
+  );
+
+  assert.deepEqual(workbook.SheetNames, ["Field Data", "Field Stats", "No Access", "Exceptions"]);
 
   const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
-  const header = data[0];
-  const noAccessRow = data.find((cells) => cells[header.indexOf("Transaction Number")] === "B");
-  const cell = (name) => noAccessRow[header.indexOf(name)];
-  assert.equal(cell("Primary Finding"), "NAv", "nothing was assessed");
-  assert.equal(cell("Finding Explanation"), "NAv");
-  assert.equal(cell("Normalisation"), "NAv", "and nothing was normalised");
-  assert.equal(cell("No Access Reason"), "Gate locked", "the reason keeps its own column");
+  const numbers = data.slice(1).map((cells) => cells[data[0].indexOf("Transaction Number")]);
+  assert.deepEqual(numbers, ["A"], "the no access visit is not on the sheet the municipality pays on");
 
-  // The blocks still count it, because that is what the words mean.
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["No Access"], { header: 1, defval: "" });
+  const header = sheet.find((cells) => cells[0] === "ITEM");
+  assert.deepEqual(header, [
+    "ITEM", "CAPTURE DATE", "FIELD WORKER", "TEAM", "ERF", "ADDRESS",
+    "TRANSACTION TYPE", "TRANSACTION NUMBER", "REASON",
+  ]);
+  const listed = sheet[sheet.indexOf(header) + 1];
+  assert.equal(listed[2], "Lefu Motlou");
+  assert.equal(listed[3], "Lesedi Audit");
+  assert.equal(listed[4], "689");
+  assert.equal(listed[6], "Meter Discovery", "a no access is an outcome, not a transaction type");
+  assert.equal(listed[7], "B");
+  assert.equal(listed[8], "Gate locked", "the reason has a home at last");
+
+  // It is still the period's work, so Field Stats counts it.
   const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
   const auditNoAccess = stats.find((cells) => cells[1] === "No Access");
   assert.ok(auditNoAccess, "METER AUDIT keeps its No Access line");
   assert.equal(auditNoAccess.at(-1), 1);
-  assert.ok(
-    stats.filter((cells) => cells[1] === "No Access").length >= 2,
-    "and so does NORMALISATION",
-  );
 });
 
 // GMR-R041
@@ -213,7 +222,7 @@ test("the Exceptions sheet names every exception, one row each, with its explana
   });
 
   const { workbook } = readWorkbook(dataset);
-  assert.deepEqual(workbook.SheetNames, ["Field Data", "Field Stats", "Exceptions"]);
+  assert.deepEqual(workbook.SheetNames, ["Field Data", "Field Stats", "No Access", "Exceptions"]);
 
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets.Exceptions, { header: 1, defval: "" });
   const header = sheet.find((cells) => cells[0] === "ITEM");
@@ -293,14 +302,14 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   assert.deepEqual(sheet[18], ["Teams", "METER STATUS", "Lesedi Audit", "Peter Team", "TOTAL"]);
   assert.deepEqual(sheet[24], ["", "TOTAL: METER DISCOVERY RECORDS", 2, 3, 5]);
 
-  // The only thing under the three sections: the control lines.
+  // The only thing under the three sections: Summary Stats. The control lines
+  // were withdrawn in 1.11.0 - Zamo never asked for them.
   const after = sheet.slice(25).filter((cells) => cells.length);
-  assert.deepEqual(after[0], ["SEPTEMBER 2026 - CONTROL LINES"]);
-  assert.deepEqual(after[1], ["ITEM", "CONTROL LINE", "COUNT"]);
-  assert.equal(after.length, 2 + 10, "ten control lines since GMR-R040 added the dropped captures and the meter master gap");
-  assert.equal(after[2][1], "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)");
-  assert.equal(after.at(-1)[1], "METERS NOT IN METER MASTER", "GMR-R040 added the last two lines");
-  assert.equal(after.at(-2)[1], "EXCEPTIONS: A METER WAS CLAIMED BUT NOT CREATED (NOT COUNTED)");
+  assert.deepEqual(after[0], ["SEPTEMBER 2026 - SUMMARY STATS"]);
+  assert.deepEqual(after[1], ["ITEM", "LINE", "COUNT"]);
+  assert.equal(after[2][1], "TRANSACTIONS THIS PERIOD, EVERY TYPE");
+  assert.equal(after.at(-1)[1], "EXCEPTIONS NOT COUNTED, NO METER CREATED");
+  assert.ok(!after.some((cells) => String(cells[1]).includes("CONTROL LINE")), "no control lines");
 });
 
 // September 2026 as it was measured on LIVE on 25 September: 599 Meter
@@ -330,7 +339,13 @@ function septemberRows() {
 }
 
 test("Field Stats reproduces September 2026 on LIVE: 462 with a meter, 137 no access, 599 in each section", () => {
-  const { workbook } = readWorkbook(makeDataset(septemberRows(), { isIncompleteMonth: false }));
+  const all = septemberRows();
+  const { workbook } = readWorkbook(
+    makeDataset(all.filter((item) => item.hasAccess !== false), {
+      isIncompleteMonth: false,
+      noAccessRows: all.filter((item) => item.hasAccess === false),
+    }),
+  );
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })
     .map((line) => {
       const cells = [...line];
@@ -380,41 +395,48 @@ test("the extra counts tell workers apart by user, not by name", () => {
   assert.equal(new Set(labels).size, 2);
 });
 
-test("the control lines count unplaced work, meters off the vending list, and stale visibility once per meter", () => {
-  const rows = [
-    row({ trnId: "A", fieldFoundMeterNo: "M1", onVendingList: "No", visibility: "Invisible", salesCategory: null }),
-    row({ trnId: "B", fieldFoundMeterNo: "M1", onVendingList: "No", visibility: "Invisible", salesCategory: null }),
-    row({ trnId: "C", fieldFoundMeterNo: "M2", onVendingList: "Yes", visibility: "Invisible" }),
-    row({ trnId: "D", fieldFoundMeterNo: "W1", meterType: "WATER", onVendingList: null, salesCategory: null }),
-    row({ trnId: "E", team: "Unassigned", fieldWorkerName: "New Worker", gpsCoordinates: null }),
+// GMR-R044
+test("Summary Stats says why the numbers are what they are", () => {
+  const payable = [
+    row({ trnId: "A" }),
+    row({ trnId: "B" }),
+    row({ trnId: "C", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection" }),
   ];
-  const model = buildGmrFieldStatsModel(makeDataset(rows, { unplaced: [{ trnId: "X", reason: "The submission time cannot be read." }] }));
-  const control = Object.fromEntries(model.controlLines.map((line) => [line.label, line.count]));
+  const noAccessRows = [row({ trnId: "D", hasAccess: false, noAccessReason: "Property Locked", photoUrls: [] })];
+  const { workbook } = readWorkbook(
+    makeDataset(payable, {
+      noAccessRows,
+      droppedCaptures: [{ trnId: "E", trnTypeLabel: "Meter Discovery", captureDate: "2026-09-12T08:00:00.000Z", fieldWorkerName: "Thabo Worker", claimedMeterNo: "0714", reason: "The capture says a meter was created, but the meter is not there." }],
+    }),
+  );
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
+  const value = (label) => sheet.find((cells) => String(cells[1]).trim() === label)?.[2];
 
-  assert.equal(control["SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)"], 1);
-  assert.equal(control["METERS FOUND THAT ARE NOT ON THE VENDING LIST"], 1);
-  assert.equal(control["VISIBILITY MARK THAT DISAGREES WITH SALES"], 1);
-  assert.equal(control["TRANSACTIONS WITH NO SALES CATEGORY"], 2, "water is never on the vending list");
-  assert.equal(control["MISSING GPS, PHOTOGRAPH OR NORMALISATION ANSWER"], 1);
-  assert.equal(control["WORKERS WHOSE TEAM COULD NOT BE RESOLVED"], 1);
+  assert.ok(sheet.some((cells) => String(cells[0]).includes("SUMMARY STATS")), "the section is there");
+  assert.equal(value("TRANSACTIONS THIS PERIOD, EVERY TYPE"), 4);
+  assert.equal(value("METER DISCOVERY"), 3, "generated from the types actually present");
+  assert.equal(value("METER DISCONNECTION"), 1);
+  assert.equal(value("NO ACCESS - LISTED ON THE NO ACCESS SHEET"), 1);
+  assert.equal(value("ROWS ON THE FIELD DATA SHEET"), 3);
+  assert.equal(value("METER AUDIT TOTAL"), 3);
+  assert.equal(value("EXCEPTIONS NOT COUNTED, NO METER CREATED"), 1);
+  assert.ok(!sheet.some((cells) => String(cells[0]).includes("CONTROL LINES")), "the control lines are withdrawn");
 });
 
-test("an illegal connection found without a batch is allowed, and the rest is the number to question", () => {
-  // GMR-R019 1.7.0: the owner allows a worker who stumbles across an illegal
-  // connection to capture it there and then, so that find carries no batch.
+// GMR-R019 lives on the Exceptions sheet now that the control lines are gone.
+test("an illegal connection found without a batch is allowed, and the rest is listed", () => {
   const rows = [
     row({ trnId: "A", batchId: "AD HOC", primaryFinding: "Illegally Connected", findingDetail: "Bypassed" }),
-    row({ trnId: "B", batchId: "AD HOC", primaryFinding: "Illegally Connected", findingDetail: "Direct connection" }),
-    row({ trnId: "C", batchId: "AD HOC" }),
-    row({ trnId: "D", batchId: "TB_9", primaryFinding: "Illegally Connected", findingDetail: "Bypassed" }),
+    row({ trnId: "B", batchId: "AD HOC" }),
+    row({ trnId: "C", batchId: "TB_9" }),
   ];
-  const control = Object.fromEntries(
-    buildGmrFieldStatsModel(makeDataset(rows)).controlLines.map((line) => [line.label, line.count]),
-  );
+  const { workbook } = readWorkbook(makeDataset(rows));
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets.Exceptions, { header: 1, defval: "" });
+  const listed = sheet.filter((cells) => cells[1] === "Work with no batch");
 
-  assert.equal(control["ILLEGAL CONNECTIONS FOUND WITHOUT A BATCH (ALLOWED)"], 2);
-  assert.equal(control["OTHER TRANSACTIONS WITHOUT A BATCH (EXPECTED 0)"], 1, "the healthy meter captured off a batch is the one to question");
-  assert.equal(control["ILLEGAL CONNECTIONS FOUND WITHOUT A BATCH (ALLOWED)"] + control["OTHER TRANSACTIONS WITHOUT A BATCH (EXPECTED 0)"], 3);
+  assert.equal(listed.length, 1, "the illegal connection found along the way is allowed, and not listed");
+  assert.equal(listed[0][3], "B");
+  assert.equal(listed[0][2], "Yes", "it is still counted on Field Data");
 });
 
 test("the saved report names the month and counts its transactions", () => {

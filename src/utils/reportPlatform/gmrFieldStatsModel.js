@@ -89,12 +89,19 @@ function zamoMeterStatus(row) {
 
 // Zamo's Field Stats, exactly as before: the month's Meter Discovery records,
 // field workers by name, teams from team history (GMR-R020).
+// GMR-R013 (1.11.0): a no-access record is not on Field Data any more, and it
+// is still the period's work, so every count here reads both lists.
+export function gmrWorkRows(dataset = {}) {
+  const payable = Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [];
+  const noAccess = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
+  return [...payable, ...noAccess];
+}
+
 export function buildZamoFieldStats(dataset = {}) {
   // The owner's layout, 25 September 2026, plus the one thing he added to it:
   // a NO ACCESS line. The blocks count every Meter Discovery record of the
   // period, whether or not a meter was captured.
-  const rows = (Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [])
-    .filter((row) => row?.trnType === "METER_DISCOVERY");
+  const rows = gmrWorkRows(dataset).filter((row) => row?.trnType === "METER_DISCOVERY");
   const workerOfRow = (row) => text(row?.fieldWorkerName) || NOT_AVAILABLE;
   const teamOfRow = (row) => text(row?.team) || "Unassigned";
   const workers = [...new Set(rows.map(workerOfRow))].sort((left, right) => left.localeCompare(right));
@@ -208,7 +215,7 @@ function countLine(label, rows, workers, teams, include) {
 }
 
 export function buildGmrFieldStatsModel(dataset = {}) {
-  const rows = Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [];
+  const rows = gmrWorkRows(dataset);
   const unplaced = Array.isArray(dataset?.unplaced) ? dataset.unplaced : [];
   // GMR-R040: captures that claimed a meter and produced none. They are gone
   // from rows already; the report still has to say so.
@@ -379,38 +386,25 @@ export function buildGmrFieldStatsModel(dataset = {}) {
         "The meter is in the assets collection, but its number is not in meter master.")),
   ];
 
-  const controlLines = [
-    { label: "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)", count: unplaced.length },
-    { label: "ILLEGAL CONNECTIONS FOUND WITHOUT A BATCH (ALLOWED)", count: illegalWithoutBatch.length },
-    { label: "OTHER TRANSACTIONS WITHOUT A BATCH (EXPECTED 0)", count: withoutBatch.length - illegalWithoutBatch.length },
-    { label: "METERS FOUND THAT ARE NOT ON THE VENDING LIST", count: distinctMeters(electricityFound.filter((item) => item?.onVendingList === "No")) },
-    {
-      label: "VISIBILITY MARK THAT DISAGREES WITH SALES",
-      count: distinctMeters(
-        judged.filter(
-          (item) =>
-            (item?.visibility === "Invisible" && item?.onVendingList === "Yes") ||
-            (item?.visibility === "Visible" && item?.onVendingList === "No"),
-        ),
-      ),
-    },
-    {
-      label: "TRANSACTIONS WITH NO SALES CATEGORY",
-      count: actedRows.filter((item) => item?.meterType === "ELECTRICITY" && !text(item?.salesCategory)).length,
-    },
-    {
-      label: "MISSING GPS, PHOTOGRAPH OR NORMALISATION ANSWER",
-      count: rows.filter(
-        (item) =>
-          item?.hasAccess &&
-          (!text(item?.gpsCoordinates) ||
-            !(item?.photoUrls || []).length ||
-            (FINDING_TRN_TYPES.has(item?.trnType) && item?.meterType === "ELECTRICITY" && !(item?.normalisationActions || []).length)),
-      ).length,
-    },
-    { label: "WORKERS WHOSE TEAM COULD NOT BE RESOLVED", count: unresolvedWorkers.size },
-    { label: "EXCEPTIONS: A METER WAS CLAIMED BUT NOT CREATED (NOT COUNTED)", count: droppedCaptures.length },
-    { label: "METERS NOT IN METER MASTER", count: Number(dataset?.meterMasterGapCount) || 0 },
+  // GMR-R044: the summary says why the numbers are what they are, instead of
+  // leaving a reader to work it out. Every line counts the same lists the
+  // sheets are built from.
+  const payableRows = Array.isArray(dataset?.fieldRows) ? dataset.fieldRows : [];
+  const noAccessRows = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
+  const typeCounts = Array.isArray(dataset?.transactionTypeCounts)
+    ? dataset.transactionTypeCounts
+    : [...rows.reduce((counts, row) => {
+        const label = text(row?.trnTypeLabel) || text(row?.trnType) || GMR_NAV;
+        return counts.set(label, (counts.get(label) || 0) + 1);
+      }, new Map())].map(([label, count]) => ({ label, count }));
+
+  const summaryLines = [
+    { label: "TRANSACTIONS THIS PERIOD, EVERY TYPE", count: rows.length },
+    ...typeCounts.map((item) => ({ label: `    ${upper(item.label)}`, count: item.count })),
+    { label: "NO ACCESS - LISTED ON THE NO ACCESS SHEET", count: noAccessRows.length },
+    { label: "ROWS ON THE FIELD DATA SHEET", count: payableRows.length },
+    { label: "METER AUDIT TOTAL", count: rows.filter((item) => item?.trnType === "METER_DISCOVERY").length },
+    { label: "EXCEPTIONS NOT COUNTED, NO METER CREATED", count: droppedCaptures.length },
   ];
 
   return {
@@ -418,7 +412,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     workerLabels,
     teams,
     blocks,
-    controlLines,
+    summaryLines,
     droppedCaptures,
     exceptions,
     payableTotal: rows.length,

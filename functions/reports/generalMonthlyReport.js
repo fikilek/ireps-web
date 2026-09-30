@@ -559,6 +559,9 @@ export function buildGmrFieldRow({
     suburbName: nullableText(premiseAddress?.suburbName),
     gpsCoordinates: getGpsCoordinates(trn),
     ward: wardLabel(trn?.accessData?.parents?.wardPcode),
+    // GMR-R043: the No Access sheet names the ERF. It is not a Field Data
+    // column, so Zamo's columns are untouched.
+    erfNo: nullableText(trn?.accessData?.erfNo),
     propertyType: nullableText(premise?.propertyType?.type),
     propertyName: nullableText(premise?.propertyType?.name),
     propertyUnitNo: nullableText(premise?.propertyType?.unitNo),
@@ -792,6 +795,9 @@ export async function buildGeneralMonthlyReportDataset({
   ]);
 
   const fieldRows = [];
+  // GMR-R013 (1.11.0): a no-access visit is not payable work and never was. It
+  // leaves Field Data for its own sheet, and Field Stats still counts it.
+  const noAccessRows = [];
   // GMR-R040: captures that said they made a meter and did not.
   const droppedCaptures = [];
   const masterGapMeters = new Set();
@@ -840,7 +846,7 @@ export async function buildGeneralMonthlyReportDataset({
         team: resolveGmrTeamAt(teamPeriods, worker.uid, getGmrSubmissionTime(trn)),
       });
       fieldRow.meterInMaster = meterMasterGapTrnIds.has(cleanText(trnId)) ? false : null;
-      fieldRows.push(fieldRow);
+      (fieldRow.hasAccess ? fieldRows : noAccessRows).push(fieldRow);
     } catch (error) {
       unplaced.push({
         trnId,
@@ -850,16 +856,23 @@ export async function buildGeneralMonthlyReportDataset({
     }
   });
 
-  fieldRows.sort(
-    (left, right) =>
-      left.captureDate.localeCompare(right.captureDate) ||
-      left.trnId.localeCompare(right.trnId),
-  );
+  const byCaptureThenNumber = (left, right) =>
+    left.captureDate.localeCompare(right.captureDate) || left.trnId.localeCompare(right.trnId);
+  fieldRows.sort(byCaptureThenNumber);
+  noAccessRows.sort(byCaptureThenNumber);
 
   const photoColumnCount = fieldRows.reduce(
     (max, row) => Math.max(max, row.photoUrls.length),
     0,
   );
+
+  // Every transaction the period holds, whether it is paid or not. Field Stats
+  // counts this; Field Data prints only the payable rows.
+  const transactionTypeCounts = [...fieldRows, ...noAccessRows].reduce((counts, row) => {
+    const label = cleanText(row.trnTypeLabel) || cleanText(row.trnType) || "NAv";
+    counts.set(label, (counts.get(label) || 0) + 1);
+    return counts;
+  }, new Map());
 
   const isGeneralReport = window.reportKind === "GR";
 
@@ -882,11 +895,17 @@ export async function buildGeneralMonthlyReportDataset({
     municipality: { lmPcode: GMR_LM_PCODE, lmName: GMR_LM_NAME },
     photoColumnCount,
     fieldRows,
+    noAccessRows,
     unplaced,
     droppedCaptures,
     meterMasterGapCount: masterGapMeters.size,
+    transactionTypeCounts: [...transactionTypeCounts.entries()]
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(([label, count]) => ({ label, count })),
     summary: {
       payableTotal: fieldRows.length,
+      noAccessTotal: noAccessRows.length,
+      transactionTotal: fieldRows.length + noAccessRows.length,
       unplacedCount: unplaced.length,
       droppedCaptureCount: droppedCaptures.length,
       meterMasterGapCount: masterGapMeters.size,

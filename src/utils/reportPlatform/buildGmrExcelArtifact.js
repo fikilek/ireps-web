@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 
 import { GMR_NAV, buildGmrFieldStatsModel, buildZamoFieldStats } from "./gmrFieldStatsModel.js";
 
-export const GMR_SHEET_NAMES = Object.freeze(["Field Data", "Field Stats", "Exceptions"]);
+export const GMR_SHEET_NAMES = Object.freeze(["Field Data", "Field Stats", "No Access", "Exceptions"]);
 
 const JOHANNESBURG_OFFSET_MS = 2 * 60 * 60 * 1000;
 
@@ -37,8 +37,8 @@ export const GMR_ZAMO_FIELD_DATA_COLUMNS = Object.freeze([
   column("fieldFoundMeterNo", "Field-Found Meter Number"),
   column("sameDifferent", "Same/Different"),
   column("remainingCredit", "Remaining Credit"),
-  column("primaryFinding", "Primary Finding"),
-  column("findingDetail", "Finding Explanation"),
+  column("primaryFinding", "Anomaly"),
+  column("findingDetail", "Anomaly Detail"),
   column("normalisation", "Normalisation"),
   column("sealNo", "Seal No"),
   column("fieldComment", "Comment"),
@@ -49,7 +49,6 @@ export const GMR_EXTRA_FIELD_DATA_COLUMNS = Object.freeze([
   column("trnTypeLabel", "Transaction Type"),
   column("trnId", "Transaction Number"),
   column("noActionReason", "Reason For Not Acting"),
-  column("noAccessReason", "No Access Reason"),
   column("followUpRequired", "Follow-up Required"),
   column("followUpStatus", "Follow-up Status"),
   column("followUpTrnId", "Follow-up Transaction"),
@@ -233,9 +232,9 @@ function buildFieldStatsSheet(dataset) {
   // three sections, and nothing else on the sheet.
   aoa.push([]);
   aoa.push([]);
-  aoa.push([`${period} - CONTROL LINES`]);
-  aoa.push(["ITEM", "CONTROL LINE", "COUNT"]);
-  model.controlLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
+  aoa.push([`${period} - SUMMARY STATS`]);
+  aoa.push(["ITEM", "LINE", "COUNT"]);
+  model.summaryLines.forEach((line, index) => aoa.push([index + 1, line.label, line.count]));
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!merges"] = merges;
@@ -314,6 +313,72 @@ export function buildExceptionsSheet(dataset, model) {
   return worksheet;
 }
 
+// GMR-R043: a no-access visit is not payable work, so it is not on Field Data.
+// It is here, with the reason, and this sheet is where the No Access line on
+// Field Stats is verified.
+export const GMR_NO_ACCESS_COLUMNS = Object.freeze([
+  "ITEM",
+  "CAPTURE DATE",
+  "FIELD WORKER",
+  "TEAM",
+  "ERF",
+  "ADDRESS",
+  "TRANSACTION TYPE",
+  "TRANSACTION NUMBER",
+  "REASON",
+]);
+
+function addressText(row) {
+  const parts = [row?.streetNo, row?.streetName, row?.streetType, row?.suburbName]
+    .map((part) => (part === null || part === undefined ? "" : String(part).trim()))
+    .filter((part) => part && part !== GMR_NAV);
+  return parts.length ? parts.join(" ") : GMR_NAV;
+}
+
+export function buildNoAccessSheet(dataset) {
+  const period = periodLabel(dataset);
+  const rows = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
+  const aoa = [];
+  if (dataset?.notForPaymentNotice) {
+    aoa.push([dataset.notForPaymentNotice]);
+    aoa.push([]);
+  }
+  aoa.push([`${period} - NO ACCESS`]);
+  aoa.push(["Every visit where the worker could not reach the meter. Not payable work, and counted on Field Stats."]);
+  aoa.push([]);
+  aoa.push([...GMR_NO_ACCESS_COLUMNS]);
+
+  if (!rows.length) aoa.push(["", "No no-access visits in this period."]);
+
+  rows.forEach((row, index) =>
+    aoa.push([
+      index + 1,
+      formatJohannesburg(row?.captureDate),
+      row?.fieldWorkerName || GMR_NAV,
+      row?.team || GMR_NAV,
+      row?.erfNo || GMR_NAV,
+      addressText(row),
+      row?.trnTypeLabel || row?.trnType || GMR_NAV,
+      row?.trnId || GMR_NAV,
+      row?.noAccessReason || GMR_NAV,
+    ]),
+  );
+
+  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+  worksheet["!cols"] = [
+    { wch: 6 },
+    { wch: 18 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 12 },
+    { wch: 38 },
+    { wch: 20 },
+    { wch: 26 },
+    { wch: 40 },
+  ];
+  return worksheet;
+}
+
 export function buildGmrExcelArtifact({ dataset, fileName }) {
   if (!dataset || typeof dataset !== "object") {
     throw new TypeError("A General Monthly Report dataset is required.");
@@ -329,7 +394,8 @@ export function buildGmrExcelArtifact({ dataset, fileName }) {
   XLSX.utils.book_append_sheet(workbook, buildFieldDataSheet(dataset), GMR_SHEET_NAMES[0]);
   const stats = buildFieldStatsSheet(dataset);
   XLSX.utils.book_append_sheet(workbook, stats.worksheet, GMR_SHEET_NAMES[1]);
-  XLSX.utils.book_append_sheet(workbook, buildExceptionsSheet(dataset, stats.model), GMR_SHEET_NAMES[2]);
+  XLSX.utils.book_append_sheet(workbook, buildNoAccessSheet(dataset), GMR_SHEET_NAMES[2]);
+  XLSX.utils.book_append_sheet(workbook, buildExceptionsSheet(dataset, stats.model), GMR_SHEET_NAMES[3]);
 
   const bytes = toUint8Array(
     XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true }),
