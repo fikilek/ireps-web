@@ -398,10 +398,25 @@ export function buildGmrFieldStatsModel(dataset = {}) {
         return counts.set(label, (counts.get(label) || 0) + 1);
       }, new Map())].map(([label, count]) => ({ label, count }));
 
+  // A no access is an outcome on a transaction, not a transaction type, so the
+  // period's no-access records are spread across the types. The blocks above
+  // count Meter Discovery records; without this split a reader sees 11 there
+  // and 15 here and has to work out why (owner, 30 September 2026).
+  const noAccessByType = [...noAccessRows.reduce((counts, item) => {
+    const label = text(item?.trnTypeLabel) || text(item?.trnType) || GMR_NAV;
+    return counts.set(label, (counts.get(label) || 0) + 1);
+  }, new Map())]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([label, count]) => ({
+      label: `    ${upper(label)}${upper(label) === "METER DISCOVERY" ? " (COUNTED IN THE BLOCKS ABOVE)" : ""}`,
+      count,
+    }));
+
   const summaryLines = [
     { label: "TRANSACTIONS THIS PERIOD, EVERY TYPE", count: rows.length },
     ...typeCounts.map((item) => ({ label: `    ${upper(item.label)}`, count: item.count })),
     { label: "NO ACCESS - LISTED ON THE NO ACCESS SHEET", count: noAccessRows.length },
+    ...noAccessByType,
     { label: "ROWS ON THE FIELD DATA SHEET", count: payableRows.length },
     { label: "METER AUDIT TOTAL", count: rows.filter((item) => item?.trnType === "METER_DISCOVERY").length },
     { label: "EXCEPTIONS NOT COUNTED, NO METER CREATED", count: droppedCaptures.length },

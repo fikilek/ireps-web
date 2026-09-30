@@ -417,6 +417,7 @@ test("Summary Stats says why the numbers are what they are", () => {
   assert.equal(value("METER DISCOVERY"), 3, "generated from the types actually present");
   assert.equal(value("METER DISCONNECTION"), 1);
   assert.equal(value("NO ACCESS - LISTED ON THE NO ACCESS SHEET"), 1);
+  assert.equal(value("METER DISCOVERY (COUNTED IN THE BLOCKS ABOVE)"), 1, "where the blocks' number comes from");
   assert.equal(value("ROWS ON THE FIELD DATA SHEET"), 3);
   assert.equal(value("METER AUDIT TOTAL"), 3);
   assert.equal(value("EXCEPTIONS NOT COUNTED, NO METER CREATED"), 1);
