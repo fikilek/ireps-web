@@ -220,7 +220,10 @@ function buildFieldStatsSheet(dataset) {
     aoa.push([notice]);
     aoa.push([]);
   }
-  aoa.push([`${period} REPORT`]);
+  // The heading says which report this is: a General Report and a General
+  // Monthly Report must never be mistaken for one another (owner, 30 Sep 2026).
+  const reportName = dataset?.reportKind === "GR" ? "GENERAL REPORT" : "GENERAL MONTHLY REPORT";
+  aoa.push([`${period} ${reportName}`]);
   aoa.push([]);
 
   // GMR-R036: the three blocks count the same records three ways. If they
