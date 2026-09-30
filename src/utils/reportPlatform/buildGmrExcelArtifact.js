@@ -240,15 +240,25 @@ function buildFieldStatsSheet(dataset) {
   // Every dropped capture is named under its control line.
   if (model.droppedCaptures.length) {
     aoa.push([]);
-    aoa.push([`${period} - CAPTURES DROPPED, THE METER WAS NOT CREATED`]);
-    aoa.push(["ITEM", "TRANSACTION NUMBER", "CAPTURE DATE", "FIELD WORKER", "METER NUMBER CLAIMED"]);
+    aoa.push([`${period} - EXCEPTIONS: A METER WAS CLAIMED BUT NOT CREATED`]);
+    aoa.push([
+      "ITEM",
+      "TRANSACTION NUMBER",
+      "TRANSACTION TYPE",
+      "CAPTURE DATE",
+      "FIELD WORKER",
+      "METER NUMBER CLAIMED",
+      "WHY IT IS AN EXCEPTION",
+    ]);
     model.droppedCaptures.forEach((capture, index) =>
       aoa.push([
         index + 1,
         capture.trnId || GMR_NAV,
+        capture.trnTypeLabel || GMR_NAV,
         formatJohannesburg(capture.captureDate),
         capture.fieldWorkerName || GMR_NAV,
         capture.claimedMeterNo || GMR_NAV,
+        capture.reason || GMR_NAV,
       ]),
     );
   }

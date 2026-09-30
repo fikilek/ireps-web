@@ -320,7 +320,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
       ).length,
     },
     { label: "WORKERS WHOSE TEAM COULD NOT BE RESOLVED", count: unresolvedWorkers.size },
-    { label: "CAPTURES DROPPED (THE METER WAS NOT CREATED)", count: droppedCaptures.length },
+    { label: "EXCEPTIONS: A METER WAS CLAIMED BUT NOT CREATED (NOT COUNTED)", count: droppedCaptures.length },
     { label: "METERS NOT IN METER MASTER", count: Number(dataset?.meterMasterGapCount) || 0 },
   ];
 

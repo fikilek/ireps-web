@@ -193,6 +193,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
   assert.equal(after.length, 2 + 10, "ten control lines since GMR-R040 added the dropped captures and the meter master gap");
   assert.equal(after[2][1], "SUBMITTED THIS MONTH BUT NOT ON FIELD DATA (MUST BE 0)");
   assert.equal(after.at(-1)[1], "METERS NOT IN METER MASTER", "GMR-R040 added the last two lines");
+  assert.equal(after.at(-2)[1], "EXCEPTIONS: A METER WAS CLAIMED BUT NOT CREATED (NOT COUNTED)");
 });
 
 // September 2026 as it was measured on LIVE on 25 September: 599 Meter
