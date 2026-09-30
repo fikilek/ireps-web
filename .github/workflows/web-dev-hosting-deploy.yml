@@ -29,7 +29,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          # The web app imports pure geometry helpers from functions/.
+          npm ci --prefix functions --ignore-scripts
 
       - name: Resolve DEV web environment
         run: |
