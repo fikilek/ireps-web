@@ -180,9 +180,10 @@ test("TB Rows shows the action to SPV and MNG only, and uses the three windows",
 
 test("the rows table ticks only the meters that may go, and says why when it cannot", async () => {
   const table = await read("./TargetedBatchRowsTable.jsx");
-  assert.match(table, /takeOut \? <th style=\{styles\.th\} scope="col">Take out<\/th> : null/);
-  assert.match(table, /colSpan=\{takeOut \? 19 : 18\}/, "the empty row still spans every column");
-  assert.match(table, /disabled=\{Boolean\(takeOut\.blockedReason\(row\)\)\}/);
+  assert.match(table, /takeOut \? \[\{\s*key: "takeOut", label: "Take out"/);
+  const sharedTable = await read("../../../../components/table/IrepsTable.jsx");
+  assert.match(sharedTable, /colSpan=\{columns.length\}/, "the empty row still spans every column");
+  assert.match(table, /disabled=\{Boolean\(takeOut\.blockedReason\(row\)\) \|\| takeOut.busy\}/);
   assert.match(table, /title=\{takeOut\.blockedReason\(row\) \|\| "Take this meter out of the batch"\}/);
   assert.match(table, /aria-label=\{`Take meter \$\{row\.meterNo \|\| row\.rowNo\} out of the batch`\}/);
 });
