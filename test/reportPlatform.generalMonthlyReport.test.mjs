@@ -175,13 +175,13 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
     }),
   );
 
-  assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access - MD", "Exceptions"]);
+  assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access", "Exceptions"]);
 
   const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data - MD"], { header: 1, defval: "" }).slice(1);
   const numbers = data.slice(1).map((cells) => cells[data[0].indexOf("Transaction Number")]);
   assert.deepEqual(numbers, ["A"], "the no access visit is not on the sheet the municipality pays on");
 
-  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["No Access - MD"], { header: 1, defval: "" });
+  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["No Access"], { header: 1, defval: "" });
   const header = sheet.find((cells) => cells[0] === "ITEM");
   assert.deepEqual(header, [
     "ITEM", "CAPTURE DATE", "FIELD WORKER", "TEAM", "ERF", "ADDRESS",
@@ -225,7 +225,7 @@ test("the Exceptions sheet names every exception, one row each, with its explana
   });
 
   const { workbook } = readWorkbook(dataset);
-  assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access - MD", "Exceptions"]);
+  assert.deepEqual(workbook.SheetNames, ["Field Data - MD", "Field Stats", "No Access", "Exceptions"]);
 
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets.Exceptions, { header: 1, defval: "" });
   const header = sheet.find((cells) => cells[0] === "ITEM");
@@ -419,8 +419,8 @@ test("Summary Stats says why the numbers are what they are", () => {
   assert.equal(value("TRANSACTIONS THIS PERIOD, EVERY TYPE"), 4);
   assert.equal(value("METER DISCOVERY"), 3, "generated from the types actually present");
   assert.equal(value("METER DISCONNECTION"), 1);
-  assert.equal(value("NO ACCESS, ALL TRANSACTIONS"), 1);
-  assert.equal(value("ON METER DISCOVERY - THE 'NO ACCESS' LINE ABOVE, LISTED ON NO ACCESS - MD"), 1, "where the blocks' number comes from");
+  assert.equal(value("NO ACCESS THIS PERIOD, EVERY TYPE - ALL LISTED ON THE NO ACCESS SHEET"), 1);
+  assert.equal(value("METER DISCOVERY - THE NO ACCESS LINE IN THE BLOCKS ABOVE"), 1, "where the blocks' number comes from");
   assert.equal(value("ROWS ON FIELD DATA - MD"), 2, "only Meter Discovery is listed");
   assert.equal(value("TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)"), 1);
   assert.equal(value("METER AUDIT TOTAL"), 3);

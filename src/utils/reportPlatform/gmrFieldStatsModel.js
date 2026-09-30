@@ -409,15 +409,15 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     .sort((left, right) => left[0].localeCompare(right[0]))
     .map(([label, count]) => ({
       label: upper(label) === "METER DISCOVERY"
-        ? "    ON METER DISCOVERY - THE 'NO ACCESS' LINE ABOVE, LISTED ON NO ACCESS - MD"
-        : `    ON ${upper(label)} - NOT LISTED IN THIS REPORT`,
+        ? "    METER DISCOVERY - THE NO ACCESS LINE IN THE BLOCKS ABOVE"
+        : `    ${upper(label)}`,
       count,
     }));
 
   const summaryLines = [
     { label: "TRANSACTIONS THIS PERIOD, EVERY TYPE", count: rows.length },
     ...typeCounts.map((item) => ({ label: `    ${upper(item.label)}`, count: item.count })),
-    { label: "NO ACCESS, ALL TRANSACTIONS", count: noAccessRows.length },
+    { label: "NO ACCESS THIS PERIOD, EVERY TYPE - ALL LISTED ON THE NO ACCESS SHEET", count: noAccessRows.length },
     ...noAccessByType,
     {
       label: "ROWS ON FIELD DATA - MD",

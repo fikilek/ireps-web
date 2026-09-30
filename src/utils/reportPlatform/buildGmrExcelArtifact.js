@@ -8,7 +8,7 @@ import { GMR_NAV, buildGmrFieldStatsModel, buildZamoFieldStats } from "./gmrFiel
 // The report is about Meter Discovery. The two sheets that list records say so
 // in their name and in their first row, because a tab name is lost the moment
 // someone copies a sheet into an email (owner, 30 September 2026).
-export const GMR_SHEET_NAMES = Object.freeze(["Field Data - MD", "Field Stats", "No Access - MD", "Exceptions"]);
+export const GMR_SHEET_NAMES = Object.freeze(["Field Data - MD", "Field Stats", "No Access", "Exceptions"]);
 
 export const GMR_DISCOVERY = "METER_DISCOVERY";
 
@@ -348,18 +348,18 @@ function addressText(row) {
 
 export function buildNoAccessSheet(dataset) {
   const period = periodLabel(dataset);
-  const rows = gmrDiscoveryRows(dataset?.noAccessRows);
+  const rows = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
   const aoa = [];
   if (dataset?.notForPaymentNotice) {
     aoa.push([dataset.notForPaymentNotice]);
     aoa.push([]);
   }
-  aoa.push([`${period} - NO ACCESS (METER DISCOVERY)`]);
-  aoa.push(["Meter Discovery visits where the worker could not reach the meter. Counted on Field Stats; no access on other transactions is in Summary Stats."]);
+  aoa.push([`${period} - NO ACCESS (ALL TRANSACTIONS)`]);
+  aoa.push(["Every visit where the worker could not reach the meter, whatever transaction it was on. Filter Transaction Type to Meter Discovery for the number Field Stats counts."]);
   aoa.push([]);
   aoa.push([...GMR_NO_ACCESS_COLUMNS]);
 
-  if (!rows.length) aoa.push(["", "No Meter Discovery no-access visits in this period."]);
+  if (!rows.length) aoa.push(["", "No no-access visits in this period."]);
 
   rows.forEach((row, index) =>
     aoa.push([
