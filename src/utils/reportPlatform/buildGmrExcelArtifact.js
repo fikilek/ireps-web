@@ -136,15 +136,11 @@ function zamoWidth(item) {
 function buildFieldDataSheet(dataset) {
   const rows = gmrDiscoveryRows(dataset.fieldRows);
   const columns = getGmrFieldDataColumns(dataset.photoColumnCount);
-  // A General Report says so on its own first sheet, above the headings, so a
-  // workbook that travels by email cannot be mistaken for the payment record.
-  const notice = notForPaymentNotice(dataset);
   const aoa = [
-    ...(notice ? [[`${periodLabel(dataset)} — ${notice}`]] : []),
     columns.map((item) => item.header),
     ...rows.map((row) => columns.map((item) => cellValue(row, item))),
   ];
-  const headerRow = notice ? 1 : 0;
+  const headerRow = 0;
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!autofilter"] = {
@@ -215,13 +211,11 @@ function buildFieldStatsSheet(dataset) {
   const model = buildGmrFieldStatsModel(dataset);
   const aoa = [];
   const merges = [];
-  const notice = notForPaymentNotice(dataset);
-  if (notice) {
-    aoa.push([notice]);
-    aoa.push([]);
-  }
+  // GMR-R046 (1.13.1): nothing stands above the heading, on the GMR and on the
+  // GR alike. What the report is for belongs in the file name and the heading,
+  // not in a paragraph the reader must scroll past (owner, 30 September 2026).
   // The heading says which report this is: a General Report and a General
-  // Monthly Report must never be mistaken for one another (owner, 30 Sep 2026).
+  // Monthly Report must never be mistaken for one another.
   const rawPeriod = String(
     dataset?.periodLabel || dataset?.reportingPeriodLabel || dataset?.reportMonth || "",
   ).toUpperCase();
@@ -286,10 +280,6 @@ export const GMR_EXCEPTION_COLUMNS = Object.freeze([
 export function buildExceptionsSheet(dataset, model) {
   const period = periodLabel(dataset);
   const aoa = [];
-  if (dataset?.notForPaymentNotice) {
-    aoa.push([dataset.notForPaymentNotice]);
-    aoa.push([]);
-  }
   aoa.push([`${period} - EXCEPTIONS (ALL TRANSACTIONS)`]);
   aoa.push(["Every exception this report found, one row each. The counts are on Field Stats."]);
   aoa.push([]);
@@ -354,10 +344,6 @@ export function buildNoAccessSheet(dataset) {
   const period = periodLabel(dataset);
   const rows = Array.isArray(dataset?.noAccessRows) ? dataset.noAccessRows : [];
   const aoa = [];
-  if (dataset?.notForPaymentNotice) {
-    aoa.push([dataset.notForPaymentNotice]);
-    aoa.push([]);
-  }
   aoa.push([`${period} - NO ACCESS (ALL TRANSACTIONS)`]);
   aoa.push(["Every visit where the worker could not reach the meter, whatever transaction it was on. Filter Transaction Type to Meter Discovery for the number Field Stats counts."]);
   aoa.push([]);
