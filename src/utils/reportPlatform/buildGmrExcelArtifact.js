@@ -49,6 +49,7 @@ export const GMR_EXTRA_FIELD_DATA_COLUMNS = Object.freeze([
   column("trnTypeLabel", "Transaction Type"),
   column("trnId", "Transaction Number"),
   column("noActionReason", "Reason For Not Acting"),
+  column("noAccessReason", "No Access Reason"),
   column("followUpRequired", "Follow-up Required"),
   column("followUpStatus", "Follow-up Status"),
   column("followUpTrnId", "Follow-up Transaction"),

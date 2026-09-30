@@ -353,8 +353,11 @@ export function buildGmrNormalisationText({
   isWater = false,
 }) {
   const findingText = cleanText(finding) || "NAv";
-  // No meter, so there is no finding and nothing to join.
-  if (!accessible) return "No Access";
+  // No meter was reached, so nothing was found and nothing was normalised.
+  // "No Access" is the name of a kind of visit, never a value in a column
+  // about a meter (owner, 30 September 2026: one word, one meaning, and NAv
+  // is the flag that says look here).
+  if (!accessible) return "NAv";
   // Water carries no normalisation (MN-R001 section 10); a joined "- None"
   // would claim a decision nobody was asked to make.
   if (isWater) return findingText;
@@ -456,7 +459,8 @@ export function getGmrSalesCategory(sales = {}, reportMonth) {
 // GMR-R033: a suspicion is not a healthy meter.
 export function getGmrFindingGroup({ trnType, hasAccess: accessible, anomaly, anomalyDetail }) {
   if (!FINDING_TRN_TYPES.has(trnType)) return null;
-  if (!accessible) return "No Access";
+  // Nothing was assessed, so there is no finding to group by.
+  if (!accessible) return "NAv";
   const finding = cleanText(anomaly);
   if (!finding) return null;
   if (normalizeUpper(finding) === "METER OK") {
@@ -529,10 +533,11 @@ export function buildGmrFieldRow({
   const normalisation = getNormalisation(trn);
   const actions = getGmrNormalisationActions(trn);
   const followUp = getGmrFollowUp(normalisation, actions);
-  const anomaly = accessible ? nullableText(captured?.anomalies?.anomaly) : "No Access";
-  const anomalyDetail = accessible
-    ? nullableText(captured?.anomalies?.anomalyDetail)
-    : getNoAccessReason(trn);
+  const anomaly = accessible ? nullableText(captured?.anomalies?.anomaly) : null;
+  const anomalyDetail = accessible ? nullableText(captured?.anomalies?.anomalyDetail) : null;
+  // The reason the worker could not get in is real field information. It keeps
+  // its own column instead of being written into a column about the meter.
+  const noAccessReasonText = accessible ? null : getNoAccessReason(trn);
   const originalProjectMeterNo = normalizeMeterNo(targeted?.meterNo);
   const fieldFoundMeterNo = normalizeMeterNo(astData?.astNo);
   const meterType = normalizeUpper(trn?.meterType);
@@ -570,6 +575,7 @@ export function buildGmrFieldRow({
     salesCategory: sales ? getGmrSalesCategory(sales, reportMonth) : null,
     primaryFinding: anomaly,
     findingDetail: anomalyDetail,
+    noAccessReason: noAccessReasonText,
     normalisation: buildGmrNormalisationText({
       finding: anomaly,
       actions,

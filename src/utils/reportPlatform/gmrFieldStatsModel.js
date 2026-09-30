@@ -35,7 +35,7 @@ const METER_STATUS_ORDER = [
 ].flatMap(([finding, details]) => details.map((detail) => meterStatusLabel(finding, detail)));
 
 const NO_ACCESS_LABEL = "No Access";
-const NOT_AVAILABLE = "Not Available";
+const NOT_AVAILABLE = GMR_NAV;
 
 // Zamo's fixed METER AUDIT lines, written as the field records them; anything
 // else recorded follows them, which is where No Access appears.
@@ -47,8 +47,15 @@ const ILLEGAL_CONNECTION = "Illegally Connected";
 // what was done, and a healthy meter's own fix last.
 const NORMALISATION_FINDING_ORDER = ["Meter Ok", "Illegally Connected", "Meter Damaged", "Meter Faulty"];
 
+// A visit with no access has no normalisation to report, so its Field Data
+// column reads NAv. The block still counts it under No Access, which is what
+// the words mean: the worker could not reach the meter.
+function normalisationLine(row = {}) {
+  return row?.hasAccess === false ? NO_ACCESS_LABEL : zamoLabel(row?.normalisation);
+}
+
 function normalisationRank(label, rows) {
-  const first = rows.find((row) => zamoLabel(row?.normalisation) === label) || {};
+  const first = rows.find((row) => normalisationLine(row) === label) || {};
   const didWork = (first.normalisationActions || []).some(
     (action) => text(action) && text(action) !== "None",
   );
@@ -75,6 +82,7 @@ function zamoLabel(value) {
 }
 
 function zamoMeterStatus(row) {
+  if (row?.hasAccess === false) return NO_ACCESS_LABEL;
   const primary = zamoLabel(row?.primaryFinding);
   return primary !== NOT_AVAILABLE ? primary : zamoLabel(row?.findingDetail);
 }
@@ -92,7 +100,7 @@ export function buildZamoFieldStats(dataset = {}) {
   const workers = [...new Set(rows.map(workerOfRow))].sort((left, right) => left.localeCompare(right));
   const teams = [...new Set(rows.map(teamOfRow))].sort((left, right) => left.localeCompare(right));
   const statuses = withExtras(ZAMO_METER_STATUS_ORDER, rows.map(zamoMeterStatus));
-  const normalisations = [...new Set(rows.map((row) => zamoLabel(row?.normalisation)))]
+  const normalisations = [...new Set(rows.map(normalisationLine))]
     .map((label) => ({ label, rank: normalisationRank(label, rows) }))
     .sort((left, right) =>
       left.rank[0] - right.rank[0] || left.rank[1] - right.rank[1] || left.rank[2].localeCompare(right.rank[2]))
@@ -119,7 +127,7 @@ export function buildZamoFieldStats(dataset = {}) {
     statuses,
     normalisations,
     statusByWorker: tally(workers, workerOfRow, zamoMeterStatus, statuses),
-    normalisationByWorker: tally(workers, workerOfRow, (row) => zamoLabel(row?.normalisation), normalisations),
+    normalisationByWorker: tally(workers, workerOfRow, normalisationLine, normalisations),
     statusByTeam: tally(teams, teamOfRow, zamoMeterStatus, statuses),
     workerTotals: totals(workers, workerOfRow),
     teamTotals: totals(teams, teamOfRow),

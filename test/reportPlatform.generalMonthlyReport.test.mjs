@@ -151,6 +151,45 @@ test("a month with no field work still makes a report", () => {
   assert.equal(managed.metadata.itemCount, 0);
 });
 
+// The owner, 30 September: one word, one meaning, and NAv is the flag.
+test("a no access visit reads NAv in the meter columns and is still counted as No Access", () => {
+  const rows = [
+    row({ trnId: "A", fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit" }),
+    row({
+      trnId: "B",
+      hasAccess: false,
+      fieldWorkerName: "Lefu Motlou",
+      team: "Lesedi Audit",
+      primaryFinding: null,
+      findingDetail: null,
+      noAccessReason: "Gate locked",
+      normalisation: "NAv",
+      normalisationActions: [],
+      photoUrls: [],
+    }),
+  ];
+  const { workbook } = readWorkbook(makeDataset(rows));
+
+  const data = XLSX.utils.sheet_to_json(workbook.Sheets["Field Data"], { header: 1, defval: "" });
+  const header = data[0];
+  const noAccessRow = data.find((cells) => cells[header.indexOf("Transaction Number")] === "B");
+  const cell = (name) => noAccessRow[header.indexOf(name)];
+  assert.equal(cell("Primary Finding"), "NAv", "nothing was assessed");
+  assert.equal(cell("Finding Explanation"), "NAv");
+  assert.equal(cell("Normalisation"), "NAv", "and nothing was normalised");
+  assert.equal(cell("No Access Reason"), "Gate locked", "the reason keeps its own column");
+
+  // The blocks still count it, because that is what the words mean.
+  const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
+  const auditNoAccess = stats.find((cells) => cells[1] === "No Access");
+  assert.ok(auditNoAccess, "METER AUDIT keeps its No Access line");
+  assert.equal(auditNoAccess.at(-1), 1);
+  assert.ok(
+    stats.filter((cells) => cells[1] === "No Access").length >= 2,
+    "and so does NORMALISATION",
+  );
+});
+
 // GMR-R041
 test("the Exceptions sheet names every exception, one row each, with its explanation", () => {
   const rows = [
@@ -226,7 +265,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
     row({ trnId: "C", fieldWorkerName: "Peter Peter", team: "Peter Team", primaryFinding: "Illegally Connected", findingDetail: "Straight Connection (Meter Bypassed)", normalisation: 'Illegally Connected - None, reason "Not recorded - captured before this rule"', normalisationActions: ["None"], noActionReason: "Not recorded - captured before this rule" }),
     row({ trnId: "D", fieldWorkerName: "Peter Peter", team: "Peter Team", normalisation: "Meter Ok - Tamper removed", normalisationActions: ["Tamper removed"] }),
     row({ trnId: "E", trnType: "METER_DISCONNECTION", trnTypeLabel: "Meter Disconnection", fieldWorkerName: "Sipho Worker", primaryFinding: null, findingDetail: null, normalisation: null }),
-    row({ trnId: "F", hasAccess: false, fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", primaryFinding: "No Access", findingDetail: "Gate locked", normalisation: "No Access", normalisationActions: [], photoUrls: [] }),
+    row({ trnId: "F", hasAccess: false, fieldWorkerName: "Lefu Motlou", team: "Lesedi Audit", primaryFinding: null, findingDetail: null, noAccessReason: "Gate locked", normalisation: "NAv", normalisationActions: [], photoUrls: [] }),
   ];
   const { workbook } = readWorkbook(makeDataset(rows, { isIncompleteMonth: false }));
   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" })

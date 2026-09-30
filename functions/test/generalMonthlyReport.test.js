@@ -273,15 +273,20 @@ test("work outside a batch is AD HOC and a water meter is never judged against t
   assert.equal(electricity.onVendingList, "No");
 });
 
-test("no access is its own row with the recorded reason", () => {
+// The owner, 30 September: one word, one meaning. "No Access" names a kind of
+// visit; it is never a value in a column about a meter. Nothing assessed reads
+// NAv, and the reason keeps its own column.
+test("no access reads NAv in the meter columns, and its reason has its own", () => {
   const trn = discovery({
     accessData: { ...discovery().accessData, access: { hasAccess: "no", reason: "Gate locked" } },
     ast: {},
   });
   const row = buildGmrFieldRow({ trnId: "T", trn, reportMonth: "2026-09" });
-  assert.equal(row.primaryFinding, "No Access");
-  assert.equal(row.findingDetail, "Gate locked");
-  assert.equal(row.findingGroup, "No Access");
+  assert.equal(row.primaryFinding, null, "nothing was found, so the sheet writes NAv");
+  assert.equal(row.findingDetail, null);
+  assert.equal(row.findingGroup, "NAv");
+  assert.equal(row.noAccessReason, "Gate locked", "the reason is kept, in a column that means it");
+  assert.equal(row.normalisation, "NAv", "nothing was normalised either");
   assert.equal(row.hasAccess, false);
 });
 
@@ -407,7 +412,7 @@ test("the normalisation column carries the finding that caused it", () => {
     'Meter Faulty - None, reason "No meter available to replace"',
   );
   assert.equal(read({ finding: "Illegally Connected", actions: ["None"] }), "Illegally Connected - None", "nothing done, nothing said");
-  assert.equal(read({ finding: "Meter Ok", actions: ["None"], hasAccess: false }), "No Access", "no meter, so nothing to join");
+  assert.equal(read({ finding: "Meter Ok", actions: ["None"], hasAccess: false }), "NAv", "no meter was reached, so there is nothing to report");
   assert.equal(read({ finding: "Meter Ok", actions: [], isWater: true }), "Meter Ok", "water carries no normalisation");
   assert.equal(read({ finding: null, actions: ["Disconnect meter"] }), "NAv - Disconnect meter", "a missing side reads NAv, never a dropped dash");
   assert.equal(read({ finding: null, actions: [] }), "NAv - None", "an inspection that recorded no finding keeps the column's shape");
