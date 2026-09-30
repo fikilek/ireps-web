@@ -2,7 +2,7 @@ import {
   TARGETED_BATCH_ROW_DECISIONS,
   TARGETED_BATCH_SOURCE_TYPES,
 } from "../../../../redux/targetedBatchDraftModel.js";
-import { normalizePermanentSalesBatchRow } from "../../../sales/models/salesTargetedBatchReadModel.js";
+import { getTargetedBatchRowWorkStatus, normalizePermanentSalesBatchRow } from "../../../sales/models/salesTargetedBatchReadModel.js";
 
 export const TB_ROW_NOT_APPLICABLE = "NOT_APPLICABLE";
 export const TB_ROW_NOT_STARTED = "NOT_STARTED";
@@ -240,6 +240,12 @@ export function normalizeTargetedBatchRow({ row = {}, index, batch }) {
     meterDiscoveryStatus,
     meterDiscoveryTrnId: meterDiscoveryTrnId || null,
     completionStatus,
+    // The original completion status still controls take-out eligibility.
+    // KPI buckets use the same execution-status rule as batch reporting.
+    workStatus: getTargetedBatchRowWorkStatus({ row: {
+      ...row,
+      execution: row.execution || { status: completionStatus },
+    } }),
     // TB-R064 (1.3.67): what the field work actually found, in the row's own words.
     executionOutcome: firstText(row?.executionOutcome, row?.execution?.outcome) || null,
     foundMeterNo: firstText(row?.foundMeterNo, row?.execution?.foundMeterNo) || null,
@@ -250,6 +256,20 @@ export function normalizeTargetedBatchRow({ row = {}, index, batch }) {
         ? null
         : Number(row.totalSalesC),
   };
+}
+
+export const TB_ROW_WORK_STATUS_LABELS = Object.freeze({
+  NOT_STARTED: "Not Started", IN_PROGRESS: "In Progress", COMPLETED: "Completed",
+});
+
+export function buildTargetedBatchWorkSummary(rows = []) {
+  const summary = { total: rows.length, notStarted: 0, inProgress: 0, completed: 0 };
+  for (const row of rows) {
+    if (row.workStatus === "COMPLETED") summary.completed += 1;
+    else if (row.workStatus === "IN_PROGRESS") summary.inProgress += 1;
+    else summary.notStarted += 1;
+  }
+  return summary;
 }
 
 export function buildTargetedBatchRows(batch) {
