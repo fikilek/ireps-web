@@ -430,7 +430,7 @@ export default function GeneralMonthlyReportPage() {
             <p>
               Two worksheets, and nothing else. <strong>Field Data</strong> — one row per transaction, Zamo&apos;s columns
               first and in his order, then the columns the rules added, then any seventh or later photograph.{" "}
-              <strong>Field Stats</strong> — METER AUDIT, NORMALISATION and Teams, each per field worker and then per team,
+              <strong>Field Stats</strong> — METER DISCOVERY, NORMALISATION and Teams, each per field worker and then per team,
               with the control lines underneath. The three sections count the same records three ways; if they disagree the
               workbook is not produced.
             </p>

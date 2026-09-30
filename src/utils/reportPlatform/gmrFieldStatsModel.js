@@ -1,6 +1,6 @@
 // Field Stats (GMR 1.2.0 section 10, schema 1.1.0 section 5).
 //
-// The top of the sheet is Zamo's Field Stats, unchanged: METER AUDIT and
+// The top of the sheet is Zamo's Field Stats, unchanged: METER DISCOVERY and
 // NORMALISATION per field worker, then METER STATUS per team, counting the
 // month's Meter Discovery records. The extra counts the rules add sit below
 // the Teams block. Counts come only from Field Data rows.
@@ -37,7 +37,7 @@ const METER_STATUS_ORDER = [
 const NO_ACCESS_LABEL = "No Access";
 const NOT_AVAILABLE = GMR_NAV;
 
-// Zamo's fixed METER AUDIT lines, written as the field records them; anything
+// Zamo's fixed meter status lines, written as the field records them; anything
 // else recorded follows them, which is where No Access appears.
 const ZAMO_METER_STATUS_ORDER = ["Illegally Connected", "Meter Damaged", "Meter Faulty", "Meter Ok"];
 
@@ -426,7 +426,7 @@ export function buildGmrFieldStatsModel(dataset = {}) {
     ...noAccessByType,
     { label: "ALL TRANSACTIONS THIS PERIOD", count: payableRows.length + noAccessRows.length },
     { label: "ROWS ON FIELD DATA - MD", count: mdPayable },
-    { label: "METER AUDIT TOTAL - FIELD DATA - MD PLUS ITS NO ACCESS", count: mdPayable + mdNoAccess },
+    { label: "METER DISCOVERY TOTAL - FIELD DATA - MD PLUS ITS NO ACCESS", count: mdPayable + mdNoAccess },
     {
       label: "TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)",
       count: rows.length - mdPayable - mdNoAccess,

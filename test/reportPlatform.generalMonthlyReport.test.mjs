@@ -198,7 +198,7 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
   // It is still the period's work, so Field Stats counts it.
   const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
   const auditNoAccess = stats.find((cells) => cells[1] === "No Access");
-  assert.ok(auditNoAccess, "METER AUDIT keeps its No Access line");
+  assert.ok(auditNoAccess, "the METER DISCOVERY block keeps its No Access line");
   assert.equal(auditNoAccess.at(-1), 1);
 });
 
@@ -287,7 +287,7 @@ test("Field Stats is Zamo's three blocks and nothing else", () => {
       return cells;
     });
 
-  assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER AUDIT"]);
+  assert.deepEqual(sheet[0], ["SEPTEMBER 2026 - METER DISCOVERY"]);
   assert.deepEqual(sheet[1], ["ITEM", "METER STATUS", "Lefu Motlou", "Peter Peter", "TOTAL"]);
   assert.deepEqual(sheet[2], [1, "Illegally Connected", 0, 2, 2]);
   assert.deepEqual(sheet[3], [2, "Meter Damaged", 0, 0, 0]);
@@ -424,7 +424,7 @@ test("Summary Stats says why the numbers are what they are", () => {
   assert.equal(value("METER DISCOVERY - THE NO ACCESS LINE IN THE BLOCKS ABOVE"), 1, "where the blocks' number comes from");
   assert.equal(value("ROWS ON FIELD DATA - MD"), 2, "and it matches the Meter Discovery line above");
   assert.equal(value("TRANSACTIONS NOT LISTED IN THIS REPORT (EVERY TYPE BUT METER DISCOVERY)"), 1);
-  assert.equal(value("METER AUDIT TOTAL - FIELD DATA - MD PLUS ITS NO ACCESS"), 3);
+  assert.equal(value("METER DISCOVERY TOTAL - FIELD DATA - MD PLUS ITS NO ACCESS"), 3);
   assert.equal(value("EXCEPTIONS NOT COUNTED, NO METER CREATED"), 1);
   assert.ok(!sheet.some((cells) => String(cells[0]).includes("CONTROL LINES")), "the control lines are withdrawn");
 });

@@ -173,7 +173,7 @@ function sumOf(counts) {
   return [...counts.values()].reduce((total, value) => total + value, 0);
 }
 
-// Zamo's Field Stats, exactly as he uses them: METER AUDIT, NORMALISATION and
+// Zamo's Field Stats, exactly as he uses them: METER DISCOVERY, NORMALISATION and
 // Teams, and nothing else on the sheet (owner, 25 September 2026).
 function appendZamoFieldStats(aoa, merges, stats, period) {
   const lastColumnIndex = Math.max(stats.workers.length, stats.teams.length) + 2;
@@ -181,7 +181,7 @@ function appendZamoFieldStats(aoa, merges, stats, period) {
     [index, label, ...names.map((name) => counts.get(name) || 0), total];
 
   merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: lastColumnIndex } });
-  aoa.push([`${period} - METER AUDIT`]);
+  aoa.push([`${period} - METER DISCOVERY`]);
   aoa.push(["ITEM", "METER STATUS", ...stats.workers, "TOTAL"]);
   stats.statuses.forEach((status, index) => {
     const counts = stats.statusByWorker.get(status);
