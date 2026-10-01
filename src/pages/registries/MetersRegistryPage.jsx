@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
 import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
-import IrepsTable from "../../components/table/IrepsTable";
+import IrepsTable, { IrepsTableFilterInput } from "../../components/table/IrepsTable";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -32,21 +32,16 @@ const EMPTY_METER_FILTERS = {
   erfNo: "",
   premiseAddress: "",
   premiseType: "",
-  // DR-R001 3.2 and 3.3: the office asks "never disconnected", "disconnected
-  // more than once", "nobody could get in" — so each count filters on its own.
-  noAccessCount: "ALL",
-  disconnectionCount: "ALL",
-  reconnectionCount: "ALL",
+  // DR-R001 3.2 and 3.3: each count filters on its own. The office types the
+  // number it is looking for — 0 for never, 1, 2 — the way the TRN Registry's
+  // media count is typed.
+  noAccessCount: "",
+  disconnectionCount: "",
+  reconnectionCount: "",
 };
 
 // DR-R001 section 4: a Manager and a supervisor launch this work.
 const CREDIT_CONTROL_ROLES = ["MNG", "SPV"];
-
-const COUNT_FILTER_OPTIONS = [
-  { value: "NONE", label: "None" },
-  { value: "SOME", label: "At least one" },
-  { value: "MANY", label: "More than one" },
-];
 
 function readMeterCount(row, key) {
   const value = Number(row?.counts?.[key]);
@@ -54,12 +49,17 @@ function readMeterCount(row, key) {
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
 
+// Type the number you are looking for: 0 for the meters it never happened to,
+// 2 for the ones it happened to twice. An empty box filters nothing, and
+// anything that is not a number is ignored rather than emptying the register.
 function matchesCountFilter(count, filterValue) {
-  if (filterValue === "NONE") return count === 0;
-  if (filterValue === "SOME") return count > 0;
-  if (filterValue === "MANY") return count > 1;
+  const typed = String(filterValue ?? "").trim();
 
-  return true;
+  if (!typed) return true;
+
+  const wanted = Number(typed);
+
+  return Number.isFinite(wanted) ? count === Math.trunc(wanted) : true;
 }
 
 function getActiveLmPcode(activeWorkbase) {
@@ -597,16 +597,9 @@ ${premiseId}`;
     });
   }
 
-  // The bands over the columns, the way the TRN Registry groups its own.
-  const registryGroups = [
-    { key: "identity", label: "Meter Identity" },
-    { key: "state", label: "Meter State" },
-    { key: "location", label: "Location and Actions" },
-    { key: "record", label: "Record" },
-    { key: "access", label: "Access" },
-    { key: "credit", label: "Credit Control" },
-  ];
-
+  // Owner, 1 October: no band of group headings on this register — the
+  // columns speak for themselves. Each column keeps its `group` so the bands
+  // can come back as one line if that changes.
   const registryColumns = [{
     key: "meterNo",
     label: "Meter No",
@@ -854,12 +847,18 @@ ${premiseId}`;
     key: "noAccessCount",
     label: "No Access",
     group: "access",
-    filter: "select",
+    filter: "text",
+    renderFilter: ({ filters: tableFilters, setFilter }) => (
+      <IrepsTableFilterInput
+        value={tableFilters.noAccessCount || ""}
+        onChange={value => setFilter("noAccessCount", value.replace(/[^0-9]/g, ""))}
+        placeholder="0, 1, 2…"
+        inputMode="numeric"
+      />
+    ),
     sortable: true,
     value: row => readMeterCount(row, "noAccess"),
     sortValue: row => readMeterCount(row, "noAccess"),
-    filterAllValue: "ALL",
-    filterOptions: COUNT_FILTER_OPTIONS,
     render: row => {
       return (
         <button
@@ -884,12 +883,18 @@ ${premiseId}`;
     key: "disconnectionCount",
     label: "Disconnections",
     group: "credit",
-    filter: "select",
+    filter: "text",
+    renderFilter: ({ filters: tableFilters, setFilter }) => (
+      <IrepsTableFilterInput
+        value={tableFilters.disconnectionCount || ""}
+        onChange={value => setFilter("disconnectionCount", value.replace(/[^0-9]/g, ""))}
+        placeholder="0, 1, 2…"
+        inputMode="numeric"
+      />
+    ),
     sortable: true,
     value: row => readMeterCount(row, "disconnections"),
     sortValue: row => readMeterCount(row, "disconnections"),
-    filterAllValue: "ALL",
-    filterOptions: COUNT_FILTER_OPTIONS,
     render: row => {
       return <span style={styles.countValue}>{readMeterCount(row, "disconnections")}</span>;
     }
@@ -921,12 +926,18 @@ ${premiseId}`;
     key: "reconnectionCount",
     label: "Reconnections",
     group: "credit",
-    filter: "select",
+    filter: "text",
+    renderFilter: ({ filters: tableFilters, setFilter }) => (
+      <IrepsTableFilterInput
+        value={tableFilters.reconnectionCount || ""}
+        onChange={value => setFilter("reconnectionCount", value.replace(/[^0-9]/g, ""))}
+        placeholder="0, 1, 2…"
+        inputMode="numeric"
+      />
+    ),
     sortable: true,
     value: row => readMeterCount(row, "reconnections"),
     sortValue: row => readMeterCount(row, "reconnections"),
-    filterAllValue: "ALL",
-    filterOptions: COUNT_FILTER_OPTIONS,
     render: row => {
       return <span style={styles.countValue}>{readMeterCount(row, "reconnections")}</span>;
     }
@@ -1096,7 +1107,6 @@ ${premiseId}`;
                 title="Meters Registry"
                 rows={meterRows}
                 columns={registryColumns}
-                groups={registryGroups}
                 rowKey={row => row.id}
                 filters={filters}
                 onFiltersChange={setFilters}
