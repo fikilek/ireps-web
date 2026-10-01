@@ -968,6 +968,14 @@ ${premiseId}`;
     }
   }] : [])];
 
+  // Owner, 1 October: every cell sits in the middle of its row and reads
+  // from the left, so a tall row (an address over two lines, a pill) does
+  // not leave its neighbours floating at the top.
+  const centredColumns = registryColumns.map((column) => ({
+    ...column,
+    cellStyle: { verticalAlign: "middle", ...column.cellStyle },
+  }));
+
   return (
     <>
       <header className="console-header" style={styles.fixedRegistryHeader}>
@@ -1106,7 +1114,7 @@ ${premiseId}`;
                 key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
                 title="Meters Registry"
                 rows={meterRows}
-                columns={registryColumns}
+                columns={centredColumns}
                 rowKey={row => row.id}
                 filters={filters}
                 onFiltersChange={setFilters}
