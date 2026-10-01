@@ -9,6 +9,7 @@ function formatNumber(value) {
 }
 
 function getScopeLabel(scope = {}) {
+  if (scope.label) return scope.label;
   const lmLabel = scope.lmName || scope.lmPcode || "NAv";
   const wardLabel = scope.wardLabel || scope.wardPcode || "NAv";
   return `${lmLabel} / ${wardLabel}`;
