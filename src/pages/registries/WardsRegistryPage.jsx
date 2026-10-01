@@ -30,6 +30,7 @@ function getActiveLmPcode(activeWorkbase) {
 }
 
 function formatNumber(value) {
+  if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
 }
@@ -74,7 +75,7 @@ function includesText(value, filterValue) {
 }
 
 function getCountText(value) {
-  return String(Number(value) || 0);
+  return String(value ?? "Pending");
 }
 
 function getSortValue(row, key) {
@@ -168,12 +169,12 @@ export default function WardsRegistryPage() {
 
   const totals = filteredWardRows.reduce(
     (accumulator, row) => {
-      accumulator.totalErfs += row.totalErfCount;
-      accumulator.premises += row.premiseCount;
-      accumulator.electricityMeters += row.electricityMeterCount;
-      accumulator.waterMeters += row.waterMeterCount;
-      accumulator.meters += row.meterCount;
-      accumulator.trns += row.trnCount;
+      accumulator.totalErfs = typeof accumulator.totalErfs === "number" && typeof row.totalErfCount === "number" ? accumulator.totalErfs + row.totalErfCount : "Incomplete";
+      accumulator.premises = typeof accumulator.premises === "number" && typeof row.premiseCount === "number" ? accumulator.premises + row.premiseCount : "Incomplete";
+      accumulator.electricityMeters = typeof accumulator.electricityMeters === "number" && typeof row.electricityMeterCount === "number" ? accumulator.electricityMeters + row.electricityMeterCount : "Incomplete";
+      accumulator.waterMeters = typeof accumulator.waterMeters === "number" && typeof row.waterMeterCount === "number" ? accumulator.waterMeters + row.waterMeterCount : "Incomplete";
+      accumulator.meters = typeof accumulator.meters === "number" && typeof row.meterCount === "number" ? accumulator.meters + row.meterCount : "Incomplete";
+      accumulator.trns = typeof accumulator.trns === "number" && typeof row.trnCount === "number" ? accumulator.trns + row.trnCount : "Incomplete";
       return accumulator;
     },
     {

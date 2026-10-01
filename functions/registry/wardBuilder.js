@@ -1,6 +1,7 @@
 // registry/wardBuilder.js
 
-import { getFirestore } from "firebase-admin/firestore";
+import { randomUUID } from "node:crypto";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 
 import {
@@ -20,6 +21,7 @@ const buildWardRegistryRow = async ({
   wardPcode,
   wardData = null,
   existingDoc = null,
+  countLoader = loadWardCounts,
 }) => {
   if (!db) {
     throw new Error("db is required");
@@ -48,12 +50,14 @@ const buildWardRegistryRow = async ({
     };
   }
 
-  const counts = await loadWardCounts({
+  const counts = await countLoader({
     db,
     lmPcode,
     wardPcode,
   });
 
+  const fields = ['formalErfs','informalErfs','totalErfs','premises','electricityMeters','waterMeters','totalMeters','trns'];
+  if (!fields.every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0) || counts.totalErfs !== counts.formalErfs + counts.informalErfs || counts.totalMeters !== counts.electricityMeters + counts.waterMeters) throw new Error('Invalid ward counts');
   const isOperationallyActive = computeWardOperationalStatus({
     totalErfs: counts.totalErfs,
     premises: counts.premises,
@@ -98,145 +102,65 @@ const buildWardRegistryRow = async ({
   };
 };
 
-/**
- * Rebuild Ward Registry for one specific ward only.
- */
+/** Rebuild one ward. A newer request owns publication, so slow older work cannot overwrite it. */
 export const rebuildWardRegistryRow = async ({
-  lmPcode,
-  wardPcode,
-  reason = "WARD_REGISTRY_ROW_REBUILD",
+  lmPcode, wardPcode, reason = 'WARD_REGISTRY_ROW_REBUILD',
+  db = getFirestore(), countLoader = loadWardCounts,
 } = {}) => {
-  const db = getFirestore();
-
-  if (!lmPcode) {
-    throw new Error("lmPcode is required");
-  }
-
-  if (!wardPcode) {
-    throw new Error("wardPcode is required");
-  }
-
-  const id = buildWardRegistryId(lmPcode, wardPcode);
-  const existingSnap = await db.collection("registry_wards").doc(id).get();
-  const existingDoc = existingSnap.exists ? existingSnap.data() : null;
-
-  logger.info("rebuildWardRegistryRow -- START", {
-    lmPcode,
-    wardPcode,
-    reason,
+  if (!lmPcode || !wardPcode) throw new Error('Municipality and ward are required');
+  const ref = db.collection('registry_wards').doc(buildWardRegistryId(lmPcode, wardPcode));
+  const wardRef = db.collection('wards').doc(wardPcode);
+  const requestId = randomUUID();
+  const reservation = await db.runTransaction(async tx => {
+    const [wardSnap, existing] = await Promise.all([tx.get(wardRef), tx.get(ref)]);
+    const ward = wardSnap.exists ? {...wardSnap.data(), id:wardSnap.id} : null;
+    if (!ward || ward.parents?.localMunicipalityId !== lmPcode) {
+      if (existing.exists) tx.delete(ref);
+      return null;
+    }
+    const previous = existing.data() || {};
+    tx.set(ref, {
+      id: ref.id, localMunicipality:{pcode:lmPcode},
+      ward:{pcode:wardPcode, number:ward.code ?? 'NAv', name:ward.name || 'NAv'},
+      calculation:{state:'PENDING', requestId, requestedAt:FieldValue.serverTimestamp(), reason, error:null},
+    }, {merge:true});
+    return {ward, previous};
   });
-
-  const row = await buildWardRegistryRow({
-    db,
-    lmPcode,
-    wardPcode,
-    existingDoc,
-  });
-
-  await db.collection("registry_wards").doc(row.id).set(row, { merge: true });
-
-  logger.info("rebuildWardRegistryRow -- SUCCESS", {
-    id: row.id,
-    lmPcode,
-    wardPcode,
-    reason,
-    counts: row.counts,
-  });
-
-  return row;
-};
-
-/**
- * Rebuild Ward Registry for a single LM
- */
-export const rebuildWardRegistryForLm = async (lmPcode) => {
-  console.log(`Ward Registry rebuild started for LM: ${lmPcode}`);
-
+  if (!reservation) return {skipped:true};
   try {
-    const db = getFirestore();
-
-    if (!lmPcode) {
-      throw new Error("lmPcode is required");
-    }
-
-    logger.info("========================================");
-    logger.info("rebuildWardRegistryForLm -- START", { lmPcode });
-
-    // ===============================
-    // STEP 1: Load light source data only
-    // ===============================
-
-    const wardsSnap = await db
-      .collection("wards")
-      .where("parents.localMunicipalityId", "==", lmPcode)
-      .get();
-
-    const wards = wardsSnap.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    console.log(`Loaded wards: ${wards.length}`);
-
-    const existingSnap = await db
-      .collection("registry_wards")
-      .where("localMunicipality.pcode", "==", lmPcode)
-      .get();
-
-    const existingDocsMap = {};
-
-    for (const doc of existingSnap.docs) {
-      existingDocsMap[doc.id] = doc.data();
-    }
-
-    console.log(`Loaded existing ward registry docs: ${existingSnap.size}`);
-
-    // ===============================
-    // STEP 2: Build ward rows using aggregate count queries
-    // ===============================
-
-    const rows = [];
-
-    for (const ward of wards) {
-      const wardPcode = ward?.id;
-
-      if (!wardPcode) continue;
-
-      console.log(`Building ward row for ward: ${wardPcode}`);
-
-      const id = buildWardRegistryId(lmPcode, wardPcode);
-      const existingDoc = existingDocsMap[id];
-
-      const row = await buildWardRegistryRow({
-        db,
-        lmPcode,
-        wardPcode,
-        wardData: ward,
-        existingDoc,
-      });
-
-      rows.push(row);
-    }
-
-    console.log(`Built ward rows: ${rows.length}`);
-
-    // ===============================
-    // STEP 3: Write to Firestore
-    // ===============================
-
-    const batch = db.batch();
-
-    for (const row of rows) {
-      const docRef = db.collection("registry_wards").doc(row.id);
-      batch.set(docRef, row, { merge: true });
-    }
-
-    await batch.commit();
-
-    console.log(`Ward registry updated: ${rows.length} rows`);
-    console.log(`Ward Registry rebuild completed for LM: ${lmPcode}`);
+    const row = await buildWardRegistryRow({db,lmPcode,wardPcode,wardData:reservation.ward,existingDoc:reservation.previous,countLoader});
+    const published = await db.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      if (current.data()?.calculation?.requestId !== requestId) return false;
+      tx.set(ref, {...row, lastSuccessfulCounts:row.counts,
+        calculation:{state:'READY',requestId,reason,error:null,completedAt:FieldValue.serverTimestamp(),lastSuccessfulAt:FieldValue.serverTimestamp()}}, {merge:true});
+      return true;
+    });
+    return {...row,published};
   } catch (error) {
-    console.error("Ward Registry rebuild failed:", error);
+    await db.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      if (current.data()?.calculation?.requestId !== requestId) return;
+      tx.set(ref,{calculation:{state:'UNAVAILABLE',error:'Count calculation failed',failedAt:FieldValue.serverTimestamp()}},{merge:true});
+    });
+    logger.error('Ward calculation failed',{lmPcode,wardPcode,reason,error:error.message});
     throw error;
   }
+};
+
+/** Independent writes allow healthy wards to finish even if another ward fails. */
+export const rebuildWardRegistryForLm = async (lmPcode, {db=getFirestore(), rebuild=rebuildWardRegistryRow} = {}) => {
+  if (!lmPcode) throw new Error('Municipality is required');
+  const snapshot = await db.collection('wards').where('parents.localMunicipalityId','==',lmPcode).get();
+  const result = {total:snapshot.size,completed:0,failed:[]};
+  for (const ward of snapshot.docs) {
+    try { await rebuild({lmPcode,wardPcode:ward.id,db}); result.completed++; }
+    catch { result.failed.push(ward.id); }
+  }
+  if (result.failed.length) {
+    const error = new Error('Ward rebuild failed: '+result.failed.join(', '));
+    error.result = result;
+    throw error;
+  }
+  return result;
 };

@@ -32,6 +32,7 @@ function getActiveLmPcode(activeWorkbase) {
 }
 
 function formatNumber(value) {
+  if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
 }
