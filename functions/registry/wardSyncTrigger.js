@@ -8,7 +8,7 @@ import { rebuildWardRegistryForLm } from "./wardBuilder.js";
  * Trigger: Process Ward Registry Sync Jobs
  */
 export const onWardRegistryJobCreated = onDocumentCreated(
-  "registry_jobs/{jobId}",
+  {document: "registry_jobs/{jobId}", retry:true, timeoutSeconds:540},
   async (event) => {
     const db = getFirestore();
 
@@ -33,6 +33,7 @@ export const onWardRegistryJobCreated = onDocumentCreated(
 
       const lmPcodes = jobData?.payload?.lmPcodes || [];
       let processed = 0;
+      const failures = [];
 
       for (const lmPcode of lmPcodes) {
         try {
@@ -51,17 +52,20 @@ export const onWardRegistryJobCreated = onDocumentCreated(
 
           console.log(`Progress: ${processed}/${lmPcodes.length}`);
         } catch (lmError) {
+          failures.push(lmPcode);
           console.error(`LM failed: ${lmPcode}`, lmError);
         }
       }
 
       await jobRef.update({
-        status: "COMPLETED",
+        status: failures.length ? "FAILED" : "COMPLETED",
+        failures,
         "metadata.updatedAt": FieldValue.serverTimestamp(),
         "metadata.updatedByUid": "SYSTEM",
         "metadata.updatedByUser": "Ward Sync Trigger",
       });
 
+      if (failures.length) throw new Error("Failed municipalities: " + failures.join(", "));
       console.log(`Ward sync job completed: ${jobId}`);
     } catch (error) {
       console.error("Ward sync trigger failed:", error);
@@ -72,6 +76,7 @@ export const onWardRegistryJobCreated = onDocumentCreated(
         "metadata.updatedByUid": "SYSTEM",
         "metadata.updatedByUser": "Ward Sync Trigger",
       });
+      throw error;
     }
   },
 );

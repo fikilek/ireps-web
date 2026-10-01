@@ -3,10 +3,13 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
 
+import { mergeWardSummaries } from "./wardRegistryModel.js";
+
 const WARD_REGISTRY_COLLECTION = "registry_wards";
 const WARD_REGISTRY_LM_FIELD = "localMunicipality.pcode";
 
 function safeNumber(value) {
+  if (value === "Pending" || value === "Unavailable") return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
@@ -40,6 +43,12 @@ function normalizeWardRegistryRow(id, data) {
 
   return {
     id,
+    calculation: {
+      state: data.calculation?.state || 'PENDING',
+      requestedAt: serializeRegistryDateValue(data.calculation?.requestedAt),
+      completedAt: serializeRegistryDateValue(data.calculation?.completedAt),
+      failedAt: serializeRegistryDateValue(data.calculation?.failedAt),
+    },
 
     lmPcode: data?.localMunicipality?.pcode || "NAv",
     lmName: data?.localMunicipality?.name || "NAv",
@@ -85,16 +94,14 @@ function sortWardRows(a, b) {
 }
 
 function buildRegistryWardRows(snapshot) {
-  return snapshot.docs
-    .map((documentSnapshot) =>
-      normalizeWardRegistryRow(
-        documentSnapshot.id,
-        documentSnapshot.data(),
-      ),
-    )
-    .sort(sortWardRows);
+  return snapshot.docs.map(d => ({...d.data(), id:d.id}));
 }
-
+function completeRows(wards, summaries, failed = false) {
+  return mergeWardSummaries(wards, summaries, failed).map(d => normalizeWardRegistryRow(d.id,d)).sort(sortWardRows);
+}
+function sourceQuery(lm) {
+  return query(collection(db, 'wards'), where('parents.localMunicipalityId', '==', lm));
+}
 function readInitialRegistryWardRows(registryWardsQuery, signal) {
   return new Promise((resolve) => {
     let settled = false;
@@ -163,7 +170,7 @@ export const registryWardsApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getRegistryWardsByLm: builder.query({
-      queryFn: (lmPcode, { signal }) => {
+      queryFn: async (lmPcode, { signal }) => {
         if (!lmPcode) return { data: [] };
 
         const registryWardsQuery = query(
@@ -171,7 +178,12 @@ export const registryWardsApi = createApi({
           where(WARD_REGISTRY_LM_FIELD, "==", lmPcode),
         );
 
-        return readInitialRegistryWardRows(registryWardsQuery, signal);
+        const [wards, summaries] = await Promise.all([
+          readInitialRegistryWardRows(sourceQuery(lmPcode), signal),
+          readInitialRegistryWardRows(registryWardsQuery, signal),
+        ]);
+        if (wards.error) return wards;
+        return {data: completeRows(wards.data, summaries.data || [], Boolean(summaries.error))};
       },
 
       async onCacheEntryAdded(
@@ -192,19 +204,21 @@ export const registryWardsApi = createApi({
             where(WARD_REGISTRY_LM_FIELD, "==", lmPcode),
           );
 
-          unsubscribe = onSnapshot(
-            registryWardsQuery,
-            (snapshot) => {
-              const rows = buildRegistryWardRows(snapshot);
-
-              updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...rows);
-              });
-            },
-            (error) => {
-              console.error("registryWardsApi stream error:", error);
-            },
-          );
+          let wards = null, summaries = null, failed = false;
+          const publish = () => {
+            if (!wards || (!summaries && !failed)) return;
+            const rows = completeRows(wards, summaries || [], failed);
+            updateCachedData(draft => { draft.splice(0, draft.length, ...rows); });
+          };
+          const stopWards = onSnapshot(sourceQuery(lmPcode), {includeMetadataChanges:true}, snapshot => {
+            if (snapshot.metadata.fromCache) return;
+            wards = buildRegistryWardRows(snapshot); publish();
+          }, error => { console.error('Ward source stream failed', error); });
+          const stopSummaries = onSnapshot(registryWardsQuery, {includeMetadataChanges:true}, snapshot => {
+            if (snapshot.metadata.fromCache) return;
+            summaries = buildRegistryWardRows(snapshot); failed = false; publish();
+          }, () => { failed = true; publish(); });
+          unsubscribe = () => { stopWards(); stopSummaries(); };
 
           await cacheEntryRemoved;
         } finally {
