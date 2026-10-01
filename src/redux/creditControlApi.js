@@ -22,6 +22,7 @@ import { db } from "../firebase";
 const TRNS_COLLECTION = "trns";
 const ASTS_COLLECTION = "asts";
 const NO_ACCESS_HISTORY_LIMIT = 100;
+const DOSSIER_TRN_LIMIT = 200;
 
 function readTrnType(data = {}) {
   return data?.accessData?.trnType || data?.trnType || "NAv";
@@ -105,6 +106,54 @@ export const creditControlApi = createApi({
       },
     }),
 
+    // Everything the register's windows need about one meter: the meter
+    // record itself and every transaction it has been through. The pictures
+    // window and the meter report both read this, so the meter is read once.
+    getMeterDossier: builder.query({
+      async queryFn(astId) {
+        const meterId = String(astId || "").trim();
+
+        if (!meterId) return { data: null };
+
+        try {
+          const meterSnapshot = await getDoc(doc(db, ASTS_COLLECTION, meterId));
+
+          if (!meterSnapshot.exists()) return { data: null };
+
+          const transactionsSnapshot = await getDocs(
+            query(
+              collection(db, TRNS_COLLECTION),
+              where("ast.astData.astId", "==", meterId),
+              firestoreLimit(DOSSIER_TRN_LIMIT),
+            ),
+          );
+
+          const transactions = transactionsSnapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+            .sort(
+              (a, b) =>
+                String(b?.metadata?.updatedAt || "").localeCompare(
+                  String(a?.metadata?.updatedAt || ""),
+                ),
+            );
+
+          return {
+            data: {
+              meter: { id: meterSnapshot.id, ...meterSnapshot.data() },
+              transactions,
+            },
+          };
+        } catch (error) {
+          return {
+            error: {
+              status: "METER_DOSSIER_FAILED",
+              error: error?.message || String(error),
+            },
+          };
+        }
+      },
+    }),
+
     // The premise, for its pin on the map beside the meter's own.
     getPremiseById: builder.query({
       async queryFn(premiseId) {
@@ -169,6 +218,7 @@ export const creditControlApi = createApi({
 export const {
   useCheckMeterRegistrationMutation,
   useGetMeterByIdQuery,
+  useGetMeterDossierQuery,
   useGetPremiseByIdQuery,
   useGetMeterNoAccessHistoryQuery,
 } = creditControlApi;

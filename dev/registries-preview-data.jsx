@@ -68,6 +68,7 @@ export const useCheckMeterRegistrationMutation = () => [
 export const useGetMeterByIdQuery = () => result(null);
 export const useGetPremiseByIdQuery = () => result(null);
 export const useGetMeterNoAccessHistoryQuery = () => result(empty);
+export const useGetMeterDossierQuery = () => result(null);
 
 const previewOnly = async () => { throw new Error("Preview: backend reporting is disabled. No backend write was made."); };
 export const functions = {};

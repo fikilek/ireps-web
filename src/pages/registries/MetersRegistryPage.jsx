@@ -17,7 +17,9 @@ import {
 } from "../../redux/creditControlApi";
 import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
+import MeterMediaGalleryModal from "./components/MeterMediaGalleryModal";
 import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
+import MeterReportPreviewModal from "./components/MeterReportPreviewModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
 
 const EMPTY_METER_FILTERS = {
@@ -246,6 +248,26 @@ function ErfActionIcon() {
   );
 }
 
+function MediaActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <rect x="3" y="6.5" width="18" height="13" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8.5 6.5 10 4h4l1.5 2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ReportActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <path d="M6 3h8l4 4v14H6z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M14 3v4h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M9 12h6M9 15.5h6M9 8.5h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PremiseActionIcon() {
   return (
     <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
@@ -379,6 +401,8 @@ export default function MetersRegistryPage() {
   const [meterDetailsId, setMeterDetailsId] = useState(null);
   const [mapView, setMapView] = useState(null);
   const [noAccessMeter, setNoAccessMeter] = useState(null);
+  const [mediaMeter, setMediaMeter] = useState(null);
+  const [reportMeter, setReportMeter] = useState(null);
   const [guardRefusal, setGuardRefusal] = useState(null);
   const [checkingMeterId, setCheckingMeterId] = useState(null);
 
@@ -760,6 +784,50 @@ ${premiseId}`;
       );
     }
   }, {
+    key: "media",
+    label: "Media",
+    group: "location",
+    render: row => {
+      return (
+        <DataActionButton
+          compact
+          onClick={() =>
+            setMediaMeter({
+              id: row.id,
+              meterNo: row.meterNo,
+              premiseAddress: row.premiseAddress,
+            })
+          }
+          title="Every picture of this meter: its registration and all its work"
+          icon={<MediaActionIcon />}
+        >
+          Pictures
+        </DataActionButton>
+      );
+    }
+  }, {
+    key: "meterReport",
+    label: "Meter Report",
+    group: "location",
+    render: row => {
+      return (
+        <DataActionButton
+          compact
+          onClick={() =>
+            setReportMeter({
+              id: row.id,
+              meterNo: row.meterNo,
+              premiseAddress: row.premiseAddress,
+            })
+          }
+          title="The meter's whole record, to read and download"
+          icon={<ReportActionIcon />}
+        >
+          Report
+        </DataActionButton>
+      );
+    }
+  }, {
     key: "premiseType",
     label: "Premise Type",
     group: "location",
@@ -1073,6 +1141,24 @@ ${premiseId}`;
           wardPcode={mapView.wardPcode}
           pins={mapPins}
           onClose={() => setMapView(null)}
+        />
+      ) : null}
+
+      {mediaMeter ? (
+        <MeterMediaGalleryModal
+          meterId={mediaMeter.id}
+          meterNo={mediaMeter.meterNo}
+          premiseAddress={mediaMeter.premiseAddress}
+          onClose={() => setMediaMeter(null)}
+        />
+      ) : null}
+
+      {reportMeter ? (
+        <MeterReportPreviewModal
+          meterId={reportMeter.id}
+          meterNo={reportMeter.meterNo}
+          premiseAddress={reportMeter.premiseAddress}
+          onClose={() => setReportMeter(null)}
         />
       ) : null}
 
