@@ -6,9 +6,12 @@ import { writeRegistryMreadFromTrn } from "../registry/mread/writeRegistryMreadF
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { astMeterNo, checkBatchWork, recognisedBatchContext, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
+// DR-R001 section 4: only the worker the job was sent to may report it.
+import { actorIsAssignee, resolveActorIdentity } from "./assignee.js";
 
 import {
   linkFollowUp,
+  ACTIVE_LCT_WORKFLOW_STATES,
   IMPLEMENTED_LIFECYCLE_TRN_TYPES,
   buildFailureResult,
   buildLifecycleTrnPayload,
@@ -36,6 +39,7 @@ function readWorkflowState(trnData = {}) {
 function readTrnType(trnData = {}) {
   return normalizeUpper(trnData?.accessData?.trnType || trnData?.trnType || "");
 }
+
 
 const INSTRUCTION_MEDIA_TAG = "instructionMedia";
 
@@ -511,6 +515,12 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       });
     }
 
+    // DR-R001 section 4: who is submitting, so the server can check that the
+    // work was sent to them. Read before the transaction opens.
+    const actorIdentity = isWmsLifecycleExecution
+      ? await resolveActorIdentity({ db, request })
+      : null;
+
     const trnRef = db.collection("trns").doc(trnId);
     const astRef = db.collection("asts").doc(astId);
     const premiseRef = db.collection("premises").doc(premiseId);
@@ -681,7 +691,9 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           return;
         }
 
-        if (workflowState !== "ACCEPTED") {
+        // DR-R001 section 5: the worker accepts the job, opens the form
+        // (IN_PROGRESS) and then submits it, so either state can be completed.
+        if (!["ACCEPTED", "IN_PROGRESS"].includes(workflowState)) {
           responsePayload = buildFailureResult(
             "INSTRUCTION_NOT_ACCEPTED",
             "Lifecycle instruction must be accepted before execution can be submitted",
@@ -690,6 +702,51 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
               trnType,
               workflowState,
               astId,
+            },
+          );
+
+          return;
+        }
+
+        // DR-R001 section 4: only the worker the job was sent to may report
+        // it, and only for the meter on the job. The phone shows the work to
+        // nobody else; these two refusals are what make it a rule.
+        const instructionAstId = String(
+          existingTrn?.ast?.astData?.astId || "",
+        ).trim();
+
+        if (instructionAstId && instructionAstId !== astId) {
+          responsePayload = buildFailureResult(
+            "INSTRUCTION_METER_MISMATCH",
+            "This work belongs to another meter",
+            {
+              trnId,
+              trnType,
+              astId,
+              instructionAstId,
+            },
+          );
+
+          return;
+        }
+
+        const actorIsTheAssignee = await actorIsAssignee({
+          reader: tx,
+          db,
+          trnData: existingTrn,
+          actorUid,
+          actorSpId: actorIdentity?.spId || "",
+        });
+
+        if (!actorIsTheAssignee) {
+          responsePayload = buildFailureResult(
+            "TRN_NOT_ASSIGNED_TO_ACTOR",
+            "This work was sent to somebody else",
+            {
+              trnId,
+              trnType,
+              astId,
+              actorUid,
             },
           );
 
@@ -970,6 +1027,36 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         return;
       }
 
+      // DR-R001 section 5: one open job of a kind per meter. The office path
+      // already refuses a second one; the field channel follows the same rule,
+      // so a worker cannot start work the office is still waiting on.
+      const openInstructionSnap = await tx.get(
+        db
+          .collection("trns")
+          .where("ast.astData.astId", "==", astId)
+          .where("accessData.trnType", "==", trnType)
+          .where("workflow.state", "in", ACTIVE_LCT_WORKFLOW_STATES)
+          .limit(1),
+      );
+
+      if (!openInstructionSnap.empty) {
+        const openDoc = openInstructionSnap.docs[0];
+
+        responsePayload = buildFailureResult(
+          "ACTIVE_LCT_ALREADY_EXISTS",
+          "This meter already has work of this kind waiting to be done",
+          {
+            trnId,
+            trnType,
+            astId,
+            existingTrnId: openDoc.id,
+            existingWorkflowState: openDoc.data()?.workflow?.state || "NAv",
+          },
+        );
+
+        return;
+      }
+
       const actionCheck = getActionCheck({
         trnType,
         data,
@@ -1049,7 +1136,14 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
       const astPatch = actionCheck?.astPatch || {};
       const astDataChanged = Object.keys(astPatch).length > 0;
-      const shouldUpdateAst = actionCheck.astStatusChanged || astDataChanged;
+
+      // DR-R001 section 5: work done in the field also clears the open-job
+      // marker, so a marker left behind by cancelled or rejected office work
+      // never outlives the work itself.
+      const hasStaleActiveLifecycle = Boolean(astDoc?.trnActiveLifecycle);
+
+      const shouldUpdateAst =
+        actionCheck.astStatusChanged || astDataChanged || hasStaleActiveLifecycle;
 
       if (shouldUpdateAst) {
         const astUpdatePatch = {
@@ -1060,6 +1154,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             actorName,
           }),
         };
+
+        if (hasStaleActiveLifecycle) {
+          astUpdatePatch.trnActiveLifecycle = FieldValue.delete();
+        }
 
         if (actionCheck.astStatusChanged) {
           astUpdatePatch["status.state"] = statusAfter;
@@ -1078,6 +1176,24 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           }),
         });
       }
+
+      // DR-R001 section 5: a field job leaves the same trail as an office one,
+      // so the office can read both the same way.
+      tx.set(
+        trnRef.collection("history").doc(),
+        buildHistoryEvent({
+          trnId,
+          trnType,
+          astId,
+          event: "COMPLETED",
+          workflowState: "COMPLETED",
+          outcome: actionCheck?.executionOutcome?.outcome || "NAv",
+          actorUid,
+          actorName,
+          now,
+          note: `${trnType} done in the field and recorded at once`,
+        }),
+      );
 
       responsePayload = buildSuccessResult(
         trnId,

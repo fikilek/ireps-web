@@ -111,15 +111,47 @@ async function resolveCreateInstructionAuthority({ db, request }) {
     profile?.employment?.serviceProvider?.isMnc === true ||
     profile?.serviceProvider?.isMnc === true;
 
+  // DR-R001 (1.1.0) section 4: only a Manager and a supervisor allocate or
+  // issue work. The contractor's supervisors do this in the office all day, so
+  // the supervisor is part of the rule and not an exception to it. A super
+  // user and an administrator can see the work but do not send it out.
   const isMng = role === "MNG";
+  const isSpv = role === "SPV";
 
   return {
-    ok: isMng,
+    ok: isMng || isSpv,
     role: role || "UNKNOWN",
     relationshipType: relationshipType || "UNKNOWN",
     clientType: clientType || "UNKNOWN",
     isMnc,
   };
+}
+
+// DR-R001 section 4: office work in the individual lane goes to exactly one
+// field worker. A team or a service provider is the bulk lane, which creates
+// its work elsewhere.
+export function validateIndividualLaneTargets(assignment = {}) {
+  const targets = Array.isArray(assignment?.targets) ? assignment.targets : [];
+
+  if (targets.length !== 1) {
+    return {
+      ok: false,
+      code: "INDIVIDUAL_LANE_ONE_TARGET",
+      message:
+        "An individual disconnection or reconnection is issued to exactly one field worker",
+    };
+  }
+
+  if (normalizeUpper(targets[0]?.type) !== "USER") {
+    return {
+      ok: false,
+      code: "INDIVIDUAL_LANE_USER_ONLY",
+      message:
+        "An individual instruction goes to a field worker, not to a team or a service provider",
+    };
+  }
+
+  return { ok: true };
 }
 
 function buildUpdateMetadataPatch({ now, actorUid, actorName }) {
@@ -265,7 +297,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
       if (!authority.ok) {
         return buildFailureResult(
           "UNAUTHORIZED_LCT_ORIGINATOR",
-          "Only MNG can create lifecycle instructions",
+          "Only a Manager or a supervisor can issue this work",
           {
             actorRole: authority.role,
             actorRelationshipType: authority.relationshipType,
@@ -300,6 +332,22 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         return buildFailureResult(
           assignmentCheck.code,
           assignmentCheck.message,
+          {
+            trnId,
+            trnType,
+            astId,
+          },
+        );
+      }
+
+      const individualTargetCheck = validateIndividualLaneTargets(
+        data?.assignment || {},
+      );
+
+      if (!individualTargetCheck.ok) {
+        return buildFailureResult(
+          individualTargetCheck.code,
+          individualTargetCheck.message,
           {
             trnId,
             trnType,

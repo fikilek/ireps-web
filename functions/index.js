@@ -74,6 +74,8 @@ import { onMeterLifecycleTrnCallable } from "./meterLifecycle/callables.js";
 import { onCreateMeterLifecycleInstructionCallable } from "./meterLifecycle/instructionCallable.js";
 import { onAcceptRejectLifecycleInstructionCallable } from "./meterLifecycle/acceptRejectCallable.js";
 import { onManageLifecycleInstructionCallable } from "./meterLifecycle/manageInstructionCallable.js";
+// DR-R001 section 5: the worker opens the form and the office sees him busy.
+import { onStartLifecycleInstructionCallable } from "./meterLifecycle/startExecutionCallable.js";
 
 import { onCreateBgoCallable } from "./bgo/callables.js";
 import {
@@ -223,6 +225,7 @@ export {
   onCreateMeterLifecycleInstructionCallable,
   onAcceptRejectLifecycleInstructionCallable,
   onManageLifecycleInstructionCallable,
+  onStartLifecycleInstructionCallable,
   onCreateMeterCommissioningCallable,
   onMeterCommissioningTrnCreated,
   onIrepsSelectOptionsCallable,
