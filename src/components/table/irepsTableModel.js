@@ -8,6 +8,9 @@
 //
 // `value` is what the filters and the sort read; `render` is what the worker
 // sees, when that is more than the value itself.
+// Select columns may provide filterValues(row) for multiple memberships and
+// filterOptions as strings or { value, label } objects. filterDisabled suspends
+// filtering while supporting data is unavailable. sortEmptyLast is opt-in.
 
 import { isSalesRangeFilterActive, matchesSalesRangeFilter } from "../../pages/sales/salesUtils.js";
 
@@ -81,12 +84,15 @@ function matchesFilter(column, row, filter, now) {
   }
 
   const shown = shownText(column, row);
-  if (column.filter === "select") return shown === text(filter);
+  if (column.filter === "select") {
+    const values = column.filterValues ? column.filterValues(row) : [shown];
+    return values.some(value => text(value) === text(filter));
+  }
   return shown.toLowerCase().includes(text(filter).toLowerCase());
 }
 
 export function filterIrepsTableRows(rows = [], columns = [], { filters = {}, now = new Date(), searchValue } = {}) {
-  const active = columns.filter((column) => irepsTableFilterActive(column, filters[column.key]));
+  const active = columns.filter((column) => !column.filterDisabled && irepsTableFilterActive(column, filters[column.key]));
   const search = text(filters.$search).toLowerCase();
   if (!active.length && !search) return rows;
 
@@ -104,11 +110,12 @@ export function irepsTableDownloadColumns(columns = []) {
   }));
 }
 
-// A dropdown offers only what the table holds, so no one picks an empty result.
+// Derive dropdown options from rows unless the page supplies scoped options.
 export function irepsTableSelectOptions(rows = [], column) {
   if (!column || column.filter !== "select") return [];
+  if (column.filterOptions) return column.filterOptions;
 
-  return [...new Set(rows.map((row) => shownText(column, row)).filter(Boolean))].sort((left, right) =>
+  return [...new Set(rows.flatMap(row => column.filterValues ? column.filterValues(row).map(text) : [shownText(column, row)]).filter(Boolean))].sort((left, right) =>
     left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
   );
 }
@@ -123,6 +130,12 @@ export function sortIrepsTableRows(rows = [], columns = [], sort = {}) {
   return [...rows].sort((left, right) => {
     const a = read(left);
     const b = read(right);
+
+    if (column.sortEmptyLast) {
+      const aEmpty = a == null || a === "";
+      const bEmpty = b == null || b === "";
+      if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+    }
 
     if (typeof a === "number" && typeof b === "number") return (a - b) * direction;
 

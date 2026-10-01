@@ -48,6 +48,8 @@ export default function IrepsTable({
   filters: controlledFilters,
   onFiltersChange,
   searchValue = null,
+  searchLabel = "Search all row fields",
+  searchPlaceholder = "IDs, meters, addresses, reasons, references…",
   downloads = {},
 }) {
   const [internalFilters, setInternalFilters] = useState({});
@@ -131,9 +133,9 @@ export default function IrepsTable({
 
       {searchValue ? <div style={styles.searchBar}>
         <label style={styles.muted}>
-          Search all row fields
+          {searchLabel}
           <input type="search" style={{ ...styles.filter, marginTop: 4 }} value={filters.$search || ""}
-            placeholder="IDs, meters, addresses, reasons, references…"
+            placeholder={searchPlaceholder}
             onChange={event => setFilter("$search", event.target.value)} />
         </label>
       </div> : null}
@@ -183,12 +185,13 @@ export default function IrepsTable({
                       aria-label={`Filter ${column.label}`}
                       style={styles.filter}
                       value={filters[column.key] || ""}
+                      disabled={column.filterDisabled}
                       onChange={(event) => setFilter(column.key, event.target.value)}
                     >
                       <option value="">All</option>
                       {irepsTableSelectOptions(rows, column).map((option) => (
-                        <option key={option} value={option}>
-                          {option}
+                        <option key={typeof option === "object" ? option.value : option} value={typeof option === "object" ? option.value : option}>
+                          {typeof option === "object" ? option.label : option}
                         </option>
                       ))}
                     </select>
