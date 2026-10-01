@@ -38,6 +38,7 @@ import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 import OperationsLandingPage from "../pages/operations/OperationsLandingPage";
 import OperationalTeamsPage from "../pages/operations/OperationalTeamsPage";
 import TcUploadsPage from "../pages/operations/TcUploadsPage";
+import CreditControlLaunchPage from "../pages/operations/CreditControlLaunchPage";
 import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
 import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
 import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboardPage";
@@ -77,6 +78,9 @@ import GeoFencesPage from "../pages/operations/GeoFencesPage";
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
 const MANAGEMENT_ROLES = ["SPU", "ADM", "MNG", "SPV"];
 const ADMIN_ROLES = ["SPU", "ADM", "MNG"];
+// DR-R001 section 4: allocating or issuing work is a Manager and supervisor
+// job. A super user and an administrator can see the work but do not send it.
+const CREDIT_CONTROL_ROLES = ["MNG", "SPV"];
 const MREAD_STAGING_CONTROLLER_ROLES = ["SPU", "MNG", "SPV"];
 
 export default function AppRoutes() {
@@ -415,6 +419,17 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <OperationsLandingPage />
+              </RoleRoute>
+            }
+          />
+
+          {/* DR-R001 section 4: only a Manager and a supervisor issue this
+              work, so the route carries the same rule as the buttons. */}
+          <Route
+            path="/operations/credit-control/:astId/:work"
+            element={
+              <RoleRoute allowedRoles={CREDIT_CONTROL_ROLES}>
+                <CreditControlLaunchPage />
               </RoleRoute>
             }
           />

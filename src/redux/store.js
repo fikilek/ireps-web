@@ -31,6 +31,7 @@ import { registryMreadApi } from "./registryMreadApi";
 import { mreadStagingCyclesApi } from "./mreadStagingCyclesApi";
 import { mreadStagingApi } from "./mreadStagingApi";
 import { fwrLiveLocationsApi } from "./fwrLiveLocationsApi";
+import { creditControlApi } from "./creditControlApi";
 import targetedBatchDraftReducer, { clearTargetedBatchDraft } from "./targetedBatchDraftSlice";
 import { salesApi, setSalesReadSession } from "./salesApi";
 import { salesTargetedBatchApi } from "./salesTargetedBatchApi";
@@ -67,6 +68,7 @@ export const store = configureStore({
     [usersApi.reducerPath]: usersApi.reducer,
     [geofencesApi.reducerPath]: geofencesApi.reducer,
     [fwrLiveLocationsApi.reducerPath]: fwrLiveLocationsApi.reducer,
+    [creditControlApi.reducerPath]: creditControlApi.reducer,
     [salesApi.reducerPath]: salesApi.reducer,
     [salesTargetedBatchApi.reducerPath]: salesTargetedBatchApi.reducer,
   },
@@ -99,6 +101,7 @@ export const store = configureStore({
       .concat(usersApi.middleware)
       .concat(geofencesApi.middleware)
       .concat(fwrLiveLocationsApi.middleware)
+      .concat(creditControlApi.middleware)
       .concat(salesApi.middleware)
       .concat(salesTargetedBatchApi.middleware),
 });

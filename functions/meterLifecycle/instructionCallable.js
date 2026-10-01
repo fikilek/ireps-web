@@ -15,6 +15,9 @@ import {
   validateLifecycleInstructionEligibility,
 } from "./helpers.js";
 
+// DR-R001 3.1: nothing is issued for a meter iREPS cannot account for.
+import { checkMeterRegistration } from "./registrationGuard.js";
+
 function readFirstString(...values) {
   for (const value of values) {
     const clean = String(value || "").trim();
@@ -375,6 +378,24 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
             trnId,
             trnType,
             astId,
+          },
+        );
+      }
+
+      // DR-R001 3.1: the meter and the registration that created it must both
+      // be there and point at each other. The screen checks this before it
+      // opens; this is the same check, so the screen cannot be gone round.
+      const registrationCheck = await checkMeterRegistration({ db, astId });
+
+      if (!registrationCheck.ok) {
+        return buildFailureResult(
+          registrationCheck.code,
+          registrationCheck.message,
+          {
+            trnId,
+            trnType,
+            astId,
+            checks: registrationCheck.checks,
           },
         );
       }

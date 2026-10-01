@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useGetTrnByIdQuery } from "../../../redux/trnsApi";
+import { useGetMeterByIdQuery } from "../../../redux/creditControlApi";
 
 const NAV = "NAv";
 
@@ -468,14 +469,42 @@ function LoadingState() {
   );
 }
 
-export default function MeterDeepDetailsModal({ trnId, onClose }) {
+// The window opens from two places. From the TRN Registry it is fed a
+// transaction and shows the meter as that transaction captured it. From the
+// Meter Registry (DR-R001 3.2) it is fed the meter itself, so the office reads
+// the meter as it is now. The meter record carries the same shape, so the rest
+// of this window does not care which it was given.
+export default function MeterDeepDetailsModal({ trnId, meterId, onClose }) {
   const [lastKnownOpen, setLastKnownOpen] = useState(false);
+
   const {
-    data: trn,
-    isLoading,
-    isFetching,
-    error,
+    data: trnDoc,
+    isLoading: isTrnLoading,
+    isFetching: isTrnFetching,
+    error: trnError,
   } = useGetTrnByIdQuery(trnId, { skip: !trnId });
+
+  const {
+    data: meterDoc,
+    isLoading: isMeterLoading,
+    isFetching: isMeterFetching,
+    error: meterError,
+  } = useGetMeterByIdQuery(meterId, { skip: !meterId });
+
+  const trn = meterId
+    ? meterDoc
+      ? {
+          raw: meterDoc,
+          astNo: meterDoc?.ast?.astData?.astNo,
+          meterType: meterDoc?.meterType,
+          statusState: meterDoc?.status?.state,
+        }
+      : null
+    : trnDoc;
+
+  const isLoading = meterId ? isMeterLoading : isTrnLoading;
+  const isFetching = meterId ? isMeterFetching : isTrnFetching;
+  const error = meterId ? meterError : trnError;
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -494,7 +523,7 @@ export default function MeterDeepDetailsModal({ trnId, onClose }) {
 
   useEffect(() => {
     setLastKnownOpen(false);
-  }, [trnId]);
+  }, [trnId, meterId]);
 
   const raw = trn?.raw || {};
   const trnType = getTrnType(raw, trn || {});

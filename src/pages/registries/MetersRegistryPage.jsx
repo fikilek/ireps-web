@@ -1,12 +1,22 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
 import { useGetRegistryMetersByWardQuery } from "../../redux/registryMetersApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+// DR-R001 3.1, 3.2 and 3.3: Credit control is launched from this register.
+import {
+  useCheckMeterRegistrationMutation,
+  useGetMeterByIdQuery,
+  useGetPremiseByIdQuery,
+} from "../../redux/creditControlApi";
+import BoundaryMapModal from "./components/BoundaryMapModal";
+import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
+import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
+import RegistrationGuardModal from "./components/RegistrationGuardModal";
 import {
   DatetimeFilterButton,
   DatetimeFilterModal,
@@ -26,7 +36,30 @@ const EMPTY_METER_FILTERS = {
   erfNo: "",
   premiseAddress: "",
   premiseType: "",
+  // DR-R001 3.2 and 3.3: the office asks "never disconnected", "disconnected
+  // more than once", "nobody could get in" — so each count filters on its own.
+  noAccessCount: "ALL",
+  disconnectionCount: "ALL",
+  reconnectionCount: "ALL",
 };
+
+// DR-R001 section 4: a Manager and a supervisor launch this work. Nobody else
+// sees the Credit control columns.
+const CREDIT_CONTROL_ROLES = ["MNG", "SPV"];
+
+function readMeterCount(row, key) {
+  const value = Number(row?.counts?.[key]);
+
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+function matchesCountFilter(count, filterValue) {
+  if (filterValue === "NONE") return count === 0;
+  if (filterValue === "SOME") return count > 0;
+  if (filterValue === "MANY") return count > 1;
+
+  return true;
+}
 
 function getActiveLmPcode(activeWorkbase) {
   return (
@@ -172,6 +205,31 @@ function buildFilterOptions(rows, key) {
   ).sort(compareNatural);
 }
 
+// A cell that opens something. The same look the TRN Registry gives its own.
+function CellButton({ children, onClick, title }) {
+  return (
+    <button type="button" style={styles.cellButton} onClick={onClick} title={title}>
+      {children}
+    </button>
+  );
+}
+
+// Disconnect and Reconnect. A greyed button says why when you hover it, the way
+// Unallocate does on the TB Register (DR-R001 3.2 and section 6).
+function WorkButton({ children, onClick, disabled, busy, title }) {
+  return (
+    <button
+      type="button"
+      style={disabled ? styles.workButtonDisabled : styles.workButton}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      {busy ? "Checking…" : children}
+    </button>
+  );
+}
+
 function getSortValue(row, key) {
   if (key === "meterNo") return row.meterNo || "";
   if (key === "meterType") return getMeterTypeLabel(row.meterType);
@@ -183,6 +241,11 @@ function getSortValue(row, key) {
   if (key === "premiseAddress") return row.premiseAddress || "";
   if (key === "premiseType") return row.premisePropertyType || "";
   if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
+
+  // DR-R001 3.2 and 3.3: the meter's own numbers sort as numbers.
+  if (key === "noAccessCount") return readMeterCount(row, "noAccess");
+  if (key === "disconnectionCount") return readMeterCount(row, "disconnections");
+  if (key === "reconnectionCount") return readMeterCount(row, "reconnections");
 
   return "";
 }
@@ -444,6 +507,95 @@ function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
 export default function MetersRegistryPage() {
   const { activeWorkbase, role } = useAuth();
   const { geoState, updateGeo } = useGeo();
+  const navigate = useNavigate();
+
+  // DR-R001 section 4 and 3.2.
+  const canLaunchCreditControl = CREDIT_CONTROL_ROLES.includes(
+    String(role || "").toUpperCase(),
+  );
+
+  const [meterDetailsId, setMeterDetailsId] = useState(null);
+  const [mapView, setMapView] = useState(null);
+  const [noAccessMeter, setNoAccessMeter] = useState(null);
+  const [guardRefusal, setGuardRefusal] = useState(null);
+  const [checkingMeterId, setCheckingMeterId] = useState(null);
+
+  const [checkMeterRegistration] = useCheckMeterRegistrationMutation();
+
+  // The pins for the map window: the meter's own position, and its premise.
+  const { data: pinMeter } = useGetMeterByIdQuery(mapView?.meterId ?? skipToken);
+  const { data: pinPremise } = useGetPremiseByIdQuery(
+    mapView?.premiseId ?? skipToken,
+  );
+
+  const mapPins = useMemo(() => {
+    const pins = [];
+
+    const premiseLat = Number(
+      pinPremise?.location?.lat ?? pinPremise?.gps?.lat,
+    );
+    const premiseLng = Number(
+      pinPremise?.location?.lng ?? pinPremise?.gps?.lng,
+    );
+
+    if (Number.isFinite(premiseLat) && Number.isFinite(premiseLng)) {
+      pins.push({
+        kind: "PREMISE",
+        lat: premiseLat,
+        lng: premiseLng,
+        label: pinPremise?.address || "Premise",
+      });
+    }
+
+    const meterLat = Number(pinMeter?.ast?.location?.lat);
+    const meterLng = Number(pinMeter?.ast?.location?.lng);
+
+    if (Number.isFinite(meterLat) && Number.isFinite(meterLng)) {
+      pins.push({
+        kind: "METER",
+        lat: meterLat,
+        lng: meterLng,
+        label: pinMeter?.ast?.astData?.astNo || "Meter",
+      });
+    }
+
+    return pins;
+  }, [pinMeter, pinPremise]);
+
+  // DR-R001 3.1: the guard runs before the window opens, so a meter iREPS
+  // cannot account for never reaches a worker. The same check runs again on
+  // the server when the work is issued.
+  async function launchCreditControl(row, work) {
+    if (checkingMeterId) return;
+
+    setCheckingMeterId(row.id);
+
+    try {
+      const outcome = await checkMeterRegistration(row.id).unwrap();
+
+      if (outcome?.success) {
+        navigate(`/operations/credit-control/${row.id}/${work}`);
+        return;
+      }
+
+      setGuardRefusal({
+        meterId: row.id,
+        meterNo: row.meterNo,
+        message: outcome?.message,
+        checks: outcome?.data?.checks || outcome?.checks || [],
+      });
+    } catch (error) {
+      setGuardRefusal({
+        meterId: row.id,
+        meterNo: row.meterNo,
+        message:
+          "This meter could not be checked, so nothing has been sent out. Try again.",
+        checks: [],
+      });
+    } finally {
+      setCheckingMeterId(null);
+    }
+  }
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
   const [sortConfig, setSortConfig] = useState({
@@ -519,6 +671,18 @@ export default function MetersRegistryPage() {
           filters.premiseAddress,
         ) &&
         includesText(row.premisePropertyType, filters.premiseType) &&
+        matchesCountFilter(
+          readMeterCount(row, "noAccess"),
+          filters.noAccessCount,
+        ) &&
+        matchesCountFilter(
+          readMeterCount(row, "disconnections"),
+          filters.disconnectionCount,
+        ) &&
+        matchesCountFilter(
+          readMeterCount(row, "reconnections"),
+          filters.reconnectionCount,
+        ) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
@@ -831,6 +995,14 @@ ${premiseId}`;
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
+                  {canLaunchCreditControl ? (
+                    <tr>
+                      <th colSpan={11} style={styles.groupHeaderSpacer} />
+                      <th colSpan={4} style={styles.creditControlGroup}>
+                        Credit control
+                      </th>
+                    </tr>
+                  ) : null}
                   <tr>
                   <th>
                     <SortButton
@@ -987,37 +1159,213 @@ ${premiseId}`;
                       onClick={() => setIsUpdatedAtFilterOpen(true)}
                     />
                   </th>
+
+                  {canLaunchCreditControl ? (
+                    <>
+                      {/* DR-R001 3.3: can anyone even get to this meter, read
+                          before send somebody to it. Its own column, outside
+                          the Credit control group. */}
+                      <th>
+                        <SortButton
+                          label="No Access"
+                          sortKey="noAccessCount"
+                          sortConfig={sortConfig}
+                          onSort={handleSort}
+                        />
+                        <FilterSelect
+                          value={filters.noAccessCount}
+                          onChange={(value) =>
+                            updateFilter("noAccessCount", value)
+                          }
+                        >
+                          <option value="ALL">All</option>
+                          <option value="NONE">Never refused</option>
+                          <option value="SOME">Refused at least once</option>
+                          <option value="MANY">Refused more than once</option>
+                        </FilterSelect>
+                      </th>
+
+                      <th>
+                        <SortButton
+                          label="Disconnections"
+                          sortKey="disconnectionCount"
+                          sortConfig={sortConfig}
+                          onSort={handleSort}
+                        />
+                        <FilterSelect
+                          value={filters.disconnectionCount}
+                          onChange={(value) =>
+                            updateFilter("disconnectionCount", value)
+                          }
+                        >
+                          <option value="ALL">All</option>
+                          <option value="NONE">Never disconnected</option>
+                          <option value="SOME">Disconnected at least once</option>
+                          <option value="MANY">Disconnected more than once</option>
+                        </FilterSelect>
+                      </th>
+                      <th aria-label="Disconnect" />
+
+                      <th>
+                        <SortButton
+                          label="Reconnections"
+                          sortKey="reconnectionCount"
+                          sortConfig={sortConfig}
+                          onSort={handleSort}
+                        />
+                        <FilterSelect
+                          value={filters.reconnectionCount}
+                          onChange={(value) =>
+                            updateFilter("reconnectionCount", value)
+                          }
+                        >
+                          <option value="ALL">All</option>
+                          <option value="NONE">Never reconnected</option>
+                          <option value="SOME">Reconnected at least once</option>
+                          <option value="MANY">Reconnected more than once</option>
+                        </FilterSelect>
+                      </th>
+                      <th aria-label="Reconnect" />
+                    </>
+                  ) : null}
                 </tr>
               </thead>
 
                 <tbody>
                   {sortedMeterRows.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="muted">
+                      <td colSpan={canLaunchCreditControl ? 15 : 10} className="muted">
                         No meters match the current filters. Clear or adjust a
                         column filter above.
                       </td>
                     </tr>
                   ) : (
-                    paginatedMeterRows.map((row) => (
+                    paginatedMeterRows.map((row) => {
+                      const statusState = String(
+                        row.statusState || row.status || "NAv",
+                      ).toUpperCase();
+
+                      const canDisconnect = statusState === "CONNECTED";
+                      const canReconnect = statusState === "DISCONNECTED";
+                      const isChecking = checkingMeterId === row.id;
+
+                      return (
                       <tr key={row.id}>
-                        <td>{row.meterNo}</td>
+                        <td>
+                          {/* The TRN Registry's own windows, brought across. */}
+                          <CellButton
+                            onClick={() => setMeterDetailsId(row.id)}
+                            title="Meter details"
+                          >
+                            {row.meterNo}
+                          </CellButton>
+                        </td>
                         <td>{getMeterTypeLabel(row.meterType)}</td>
                         <td>{getMeterKindLabel(row.meterKind)}</td>
                         <td>{getMeterPhaseLabel(row.meterPhase)}</td>
                         <td>{row.visibility}</td>
-                        <td>{row.statusState || row.status || "NAv"}</td>
-                        <td>{row.erfNo}</td>
+                        <td>{statusState}</td>
                         <td>
-                          <strong>{row.premiseAddress || "NAv"}</strong>
+                          <CellButton
+                            onClick={() =>
+                              setMapView({
+                                erfId: row.erfId,
+                                erfNo: row.erfNo,
+                                wardPcode: row?.parents?.wardPcode,
+                              })
+                            }
+                            title="Where this ERF is"
+                          >
+                            {row.erfNo}
+                          </CellButton>
+                        </td>
+                        <td>
+                          <CellButton
+                            onClick={() =>
+                              setMapView({
+                                erfId: row.erfId,
+                                erfNo: row.erfNo,
+                                wardPcode: row?.parents?.wardPcode,
+                                premiseId: row.premiseId,
+                                meterId: row.id,
+                              })
+                            }
+                            title="Where this premise and its meter are"
+                          >
+                            <strong>{row.premiseAddress || "NAv"}</strong>
+                          </CellButton>
                           <div className="muted" style={styles.smallMuted}>
                             {row.premiseId || "NAv"}
                           </div>
                         </td>
                         <td>{row.premisePropertyType}</td>
                         <td>{formatUpdatedAt(row.updatedAt)}</td>
+
+                        {canLaunchCreditControl ? (
+                          <>
+                            <td>
+                              <CellButton
+                                onClick={() =>
+                                  setNoAccessMeter({
+                                    id: row.id,
+                                    meterNo: row.meterNo,
+                                    premiseAddress: row.premiseAddress,
+                                  })
+                                }
+                                title="Every visit that could not reach this meter"
+                              >
+                                {readMeterCount(row, "noAccess")}
+                              </CellButton>
+                            </td>
+
+                            <td style={styles.countCell}>
+                              {readMeterCount(row, "disconnections")}
+                            </td>
+                            <td>
+                              <WorkButton
+                                disabled={!canDisconnect || isChecking}
+                                busy={isChecking}
+                                title={
+                                  canDisconnect
+                                    ? "Send a disconnection for this meter"
+                                    : statusState === "DISCONNECTED"
+                                      ? "This meter is already disconnected"
+                                      : "This meter is out of service"
+                                }
+                                onClick={() =>
+                                  launchCreditControl(row, "disconnect")
+                                }
+                              >
+                                Disconnect
+                              </WorkButton>
+                            </td>
+
+                            <td style={styles.countCell}>
+                              {readMeterCount(row, "reconnections")}
+                            </td>
+                            <td>
+                              <WorkButton
+                                disabled={!canReconnect || isChecking}
+                                busy={isChecking}
+                                title={
+                                  canReconnect
+                                    ? "Send a reconnection for this meter"
+                                    : statusState === "CONNECTED"
+                                      ? "This meter is already connected"
+                                      : "This meter is out of service"
+                                }
+                                onClick={() =>
+                                  launchCreditControl(row, "reconnect")
+                                }
+                              >
+                                Reconnect
+                              </WorkButton>
+                            </td>
+                          </>
+                        ) : null}
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1049,6 +1397,46 @@ ${premiseId}`;
             setIsUpdatedAtFilterOpen(false);
           }}
           onClose={() => setIsUpdatedAtFilterOpen(false)}
+        />
+      ) : null}
+
+      {/* The windows this register opens: the meter itself, where it is, its
+          No Access history, and the refusal when iREPS cannot account for it
+          (DR-R001 3.1, 3.2 and 3.3). */}
+      {meterDetailsId ? (
+        <MeterDeepDetailsModal
+          meterId={meterDetailsId}
+          onClose={() => setMeterDetailsId(null)}
+        />
+      ) : null}
+
+      {mapView ? (
+        <BoundaryMapModal
+          mode="ERF"
+          erfId={mapView.erfId}
+          erfNo={mapView.erfNo}
+          wardPcode={mapView.wardPcode}
+          pins={mapPins}
+          onClose={() => setMapView(null)}
+        />
+      ) : null}
+
+      {noAccessMeter ? (
+        <MeterNoAccessHistoryModal
+          meterId={noAccessMeter.id}
+          meterNo={noAccessMeter.meterNo}
+          premiseAddress={noAccessMeter.premiseAddress}
+          onClose={() => setNoAccessMeter(null)}
+        />
+      ) : null}
+
+      {guardRefusal ? (
+        <RegistrationGuardModal
+          meterId={guardRefusal.meterId}
+          meterNo={guardRefusal.meterNo}
+          message={guardRefusal.message}
+          checks={guardRefusal.checks}
+          onClose={() => setGuardRefusal(null)}
         />
       ) : null}
     </>
@@ -1104,6 +1492,56 @@ const styles = {
   smallMuted: {
     fontSize: "0.72rem",
     marginTop: "0.25rem",
+  },
+  groupHeaderSpacer: {
+    borderBottom: 0,
+    background: "transparent",
+  },
+  creditControlGroup: {
+    textAlign: "center",
+    fontSize: "0.72rem",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#b45309",
+    background: "#fff7ed",
+  },
+  countCell: {
+    fontVariantNumeric: "tabular-nums",
+    textAlign: "right",
+    paddingRight: "0.6rem",
+  },
+  cellButton: {
+    background: "transparent",
+    border: 0,
+    padding: 0,
+    color: "#1d4ed8",
+    cursor: "pointer",
+    font: "inherit",
+    textAlign: "left",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
+  },
+  workButton: {
+    border: "1px solid #b45309",
+    background: "#b45309",
+    color: "#fff",
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "0.78rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  workButtonDisabled: {
+    border: "1px solid #cbd5e1",
+    background: "#f1f5f9",
+    color: "#94a3b8",
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "0.78rem",
+    fontWeight: 600,
+    cursor: "not-allowed",
+    whiteSpace: "nowrap",
   },
   paginationBar: {
     display: "flex",

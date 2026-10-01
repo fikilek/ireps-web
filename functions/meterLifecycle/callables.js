@@ -333,6 +333,29 @@ function buildHistoryEvent({
   };
 }
 
+// DR-R001 3.2 and 3.3: three numbers the meter keeps about itself, so the
+// Meter Registry can show and filter them without counting transactions while
+// it draws. A disconnection or reconnection counts only when it was actually
+// done; any work that ended because nobody could reach the meter counts as a
+// No Access. Nothing is ever lowered.
+export function buildMeterCountPatch({ trnType, outcome }) {
+  if (normalizeUpper(outcome) === "NO_ACCESS") {
+    return { "counts.noAccess": FieldValue.increment(1) };
+  }
+
+  if (normalizeUpper(outcome) !== "SUCCESS") return {};
+
+  if (trnType === "METER_DISCONNECTION") {
+    return { "counts.disconnections": FieldValue.increment(1) };
+  }
+
+  if (trnType === "METER_RECONNECTION") {
+    return { "counts.reconnections": FieldValue.increment(1) };
+  }
+
+  return {};
+}
+
 function buildUpdateMetadataPatch({ now, actorUid, actorName }) {
   return {
     "metadata.updatedAt": now,
@@ -930,6 +953,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
           trnActiveLifecycle: FieldValue.delete(),
 
+          // DR-R001 3.2 and 3.3: the meter carries its own counts, raised in
+          // the same commit as the work that earned them.
+          ...buildMeterCountPatch({
+            trnType,
+            outcome: executionOutcome?.outcome,
+          }),
+
           ...buildUpdateMetadataPatch({
             now,
             actorUid,
@@ -943,9 +973,20 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         tx.update(astRef, astUpdatePatch);
 
-        if (actionCheck.astStatusChanged) {
+        // DR-R001 3.3: one No Access, written once. The premise's list is
+        // written here as well, because work the office issued was already
+        // created when it was issued and the create-time trigger never sees
+        // the refusal.
+        const premiseUpdatePatch = {
+          ...(actionCheck.astStatusChanged ? premiseServicePatch : {}),
+          ...(executionOutcome?.outcome === "NO_ACCESS"
+            ? { noAccessTrnIds: FieldValue.arrayUnion(trnId) }
+            : {}),
+        };
+
+        if (Object.keys(premiseUpdatePatch).length > 0) {
           tx.update(premiseRef, {
-            ...premiseServicePatch,
+            ...premiseUpdatePatch,
             ...buildUpdateMetadataPatch({
               now,
               actorUid,
@@ -1142,12 +1183,27 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       // never outlives the work itself.
       const hasStaleActiveLifecycle = Boolean(astDoc?.trnActiveLifecycle);
 
+      // DR-R001 3.2 and 3.3: the same three counts, whichever channel the work
+      // came from. The outcome is read from the document being written.
+      const fieldOutcome = trnToCreate?.executionOutcome?.outcome || "";
+
+      const countPatch = buildMeterCountPatch({
+        trnType,
+        outcome: fieldOutcome,
+      });
+
+      const countsChanged = Object.keys(countPatch).length > 0;
+
       const shouldUpdateAst =
-        actionCheck.astStatusChanged || astDataChanged || hasStaleActiveLifecycle;
+        actionCheck.astStatusChanged ||
+        astDataChanged ||
+        hasStaleActiveLifecycle ||
+        countsChanged;
 
       if (shouldUpdateAst) {
         const astUpdatePatch = {
           ...astPatch,
+          ...countPatch,
           ...buildUpdateMetadataPatch({
             now,
             actorUid,
@@ -1166,9 +1222,19 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         tx.update(astRef, astUpdatePatch);
       }
 
-      if (actionCheck.astStatusChanged) {
+      // The premise's No Access list is written here too. For work started in
+      // the field the create-time trigger also sees it, and arrayUnion by
+      // transaction id means it is held once however many times it is written.
+      const fieldPremisePatch = {
+        ...(actionCheck.astStatusChanged ? premiseServicePatch : {}),
+        ...(normalizeUpper(fieldOutcome) === "NO_ACCESS"
+          ? { noAccessTrnIds: FieldValue.arrayUnion(trnId) }
+          : {}),
+      };
+
+      if (Object.keys(fieldPremisePatch).length > 0) {
         tx.update(premiseRef, {
-          ...premiseServicePatch,
+          ...fieldPremisePatch,
           ...buildUpdateMetadataPatch({
             now,
             actorUid,

@@ -161,6 +161,72 @@ function BoundaryLayer({ geometry, mode }) {
   return null;
 }
 
+// DR-R001 3.2: the premise and the meter, drawn on the ERF they belong to,
+// with the line that joins the meter to its premise — because a meter is not
+// always inside the ERF. The same picture the office needs before it sends
+// anybody out.
+const PIN_COLOURS = {
+  PREMISE: "#1d4ed8",
+  METER: "#b45309",
+};
+
+function PinsLayer({ pins = [] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+
+    const drawn = pins
+      .filter((pin) => Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng))
+      .map(
+        (pin) =>
+          new window.google.maps.Marker({
+            map,
+            position: { lat: pin.lat, lng: pin.lng },
+            title: pin.label || pin.kind,
+            label: {
+              text: pin.kind === "METER" ? "M" : "P",
+              color: "#ffffff",
+              fontSize: "11px",
+              fontWeight: "700",
+            },
+            icon: {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 9,
+              fillColor: PIN_COLOURS[pin.kind] || "#334155",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            },
+          }),
+      );
+
+    const premise = pins.find((pin) => pin.kind === "PREMISE");
+    const meter = pins.find((pin) => pin.kind === "METER");
+
+    const joiningLine =
+      premise && meter && Number.isFinite(premise.lat) && Number.isFinite(meter.lat)
+        ? new window.google.maps.Polyline({
+            map,
+            path: [
+              { lat: premise.lat, lng: premise.lng },
+              { lat: meter.lat, lng: meter.lng },
+            ],
+            strokeColor: PIN_COLOURS.METER,
+            strokeOpacity: 0.9,
+            strokeWeight: 2,
+          })
+        : null;
+
+    return () => {
+      drawn.forEach((marker) => marker.setMap(null));
+      joiningLine?.setMap(null);
+    };
+  }, [map, pins]);
+
+  return null;
+}
+
 function DetailPill({ label, value }) {
   return (
     <div style={styles.detailPill}>
@@ -179,6 +245,7 @@ export default function BoundaryMapModal({
   erfNo,
   wardPcode,
   wardNo,
+  pins = [],
   onClose,
 }) {
   const normalizedMode = mode === "WARD" ? "WARD" : "ERF";
@@ -374,6 +441,8 @@ export default function BoundaryMapModal({
                     geometry={boundary.geometry}
                     mode={normalizedMode}
                   />
+
+                  <PinsLayer pins={pins} />
                 </Map>
               </APIProvider>
             </div>
