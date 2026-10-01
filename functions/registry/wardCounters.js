@@ -14,7 +14,11 @@ export const computeWardOperationalStatus = ({
   return totalErfs > 0 || premises > 0 || totalMeters > 0 || trns > 0;
 };
 
-const readCount = (snap) => snap.data()?.count || 0;
+const readCount = (snap) => {
+  const value = snap.data()?.count;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid count response');
+  return value;
+};
 
 const countQuery = async (query) => {
   const snap = await query.count().get();

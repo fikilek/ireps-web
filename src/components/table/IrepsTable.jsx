@@ -48,7 +48,17 @@ export default function IrepsTable({
   filters: controlledFilters,
   onFiltersChange,
   searchValue = null,
+  searchLabel = "Search all row fields",
+  searchPlaceholder = "IDs, meters, addresses, reasons, references…",
   downloads = {},
+  filterRows = null,
+  // Pages with KPIs can reuse the same domain-filtered rows here, avoiding a
+  // second pass. filterRows remains the domain matching contract.
+  filteredRows: providedFilteredRows = null,
+  stickyHeader = false,
+  maxHeight,
+  rowStyle,
+  onRowClick,
 }) {
   const [internalFilters, setInternalFilters] = useState({});
   const filters = controlledFilters ?? internalFilters;
@@ -62,8 +72,8 @@ export default function IrepsTable({
   const [rangeFilterFor, setRangeFilterFor] = useState("");
 
   const filtered = useMemo(
-    () => filterIrepsTableRows(rows, columns, { filters, searchValue }),
-    [rows, columns, filters, searchValue],
+    () => providedFilteredRows ?? (filterRows ? filterRows(rows, filters) : filterIrepsTableRows(rows, columns, { filters, searchValue })),
+    [rows, columns, filters, searchValue, filterRows, providedFilteredRows],
   );
 
   const sorted = useMemo(
@@ -73,7 +83,13 @@ export default function IrepsTable({
 
   const current = paginateIrepsTableRows(sorted, page, pageSize);
   const bands = irepsTableBands(columns, groups);
-  const filtersOn = Boolean(String(filters.$search || "").trim()) || columns.some((column) => irepsTableFilterActive(column, filters[column.key]));
+  const filtersOn = Boolean(String(filters.$search || "").trim()) || columns.some(
+    column => column.isFilterActive
+      ? column.isFilterActive(filters)
+      : irepsTableFilterActive(column, filters[column.key]),
+  ) || Boolean(filterRows && Object.values(filters).some(
+    value => value && (typeof value === "object" ? value.mode && value.mode !== "ALL" : value !== "ALL"),
+  ));
 
   useEffect(() => {
     onRowsShown?.(sorted);
@@ -131,18 +147,18 @@ export default function IrepsTable({
 
       {searchValue ? <div style={styles.searchBar}>
         <label style={styles.muted}>
-          Search all row fields
+          {searchLabel}
           <input type="search" style={{ ...styles.filter, marginTop: 4 }} value={filters.$search || ""}
-            placeholder="IDs, meters, addresses, reasons, references…"
+            placeholder={searchPlaceholder}
             onChange={event => setFilter("$search", event.target.value)} />
         </label>
       </div> : null}
 
       {pagination}
 
-      <div style={styles.scroll}>
+      <div style={{ ...styles.scroll, maxHeight }}>
         <table style={styles.table}>
-          <thead>
+          <thead style={stickyHeader ? { position: "sticky", top: 0, zIndex: 2, background: T.headBackground } : undefined}>
             {bands.length ? (
               <tr>
                 {bands.map((band) => (
@@ -155,8 +171,8 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={styles.head}>
-                  {column.filter ? (
+                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth }}>
+                  {(column.sortable ?? Boolean(column.filter)) ? (
                     <button
                       type="button"
                       style={styles.sortButton}
@@ -178,17 +194,18 @@ export default function IrepsTable({
             <tr>
               {columns.map((column) => (
                 <th key={column.key} style={styles.filterCell}>
-                  {!column.filter ? null : column.filter === "select" ? (
+                  {column.renderFilter ? column.renderFilter({ filters, setFilter }) : !column.filter ? null : column.filter === "select" ? (
                     <select
                       aria-label={`Filter ${column.label}`}
                       style={styles.filter}
-                      value={filters[column.key] || ""}
+                      value={filters[column.key] === column.filterAllValue ? "" : filters[column.key] || ""}
+                      disabled={column.filterDisabled}
                       onChange={(event) => setFilter(column.key, event.target.value)}
                     >
                       <option value="">All</option>
                       {irepsTableSelectOptions(rows, column).map((option) => (
-                        <option key={option} value={option}>
-                          {option}
+                        <option key={typeof option === "object" ? option.value : option} value={typeof option === "object" ? option.value : option}>
+                          {typeof option === "object" ? option.label : option}
                         </option>
                       ))}
                     </select>
@@ -207,6 +224,7 @@ export default function IrepsTable({
                       aria-label={`Filter ${column.label}`}
                       style={styles.filter}
                       value={filters[column.key] || ""}
+                      disabled={column.filterDisabled}
                       onChange={(event) => setFilter(column.key, event.target.value)}
                     />
                   )}
@@ -219,14 +237,15 @@ export default function IrepsTable({
             {current.rows.map((row, index) => (
               <tr
                 key={rowKey(row, index)}
-                style={index % 2 ? styles.stripeRow : styles.row}
+                style={{ ...(index % 2 ? styles.stripeRow : styles.row), ...rowStyle?.(row) }}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    style={{ ...styles.cell, textAlign: column.align || "left" }}
+                    style={{ ...styles.cell, minWidth: column.minWidth, textAlign: column.align || "left", ...column.cellStyle }}
                   >
-                    {column.render ? column.render(row) : column.value?.(row)}
+                    {column.render ? column.render(row, index) : column.value?.(row)}
                   </td>
                 ))}
               </tr>
@@ -270,6 +289,15 @@ export default function IrepsTable({
       ) : null}
     </section>
   );
+}
+
+// Compound domain filters use the same inputs and spacing as ordinary columns.
+export function IrepsTableFilterInput({ value, onChange, placeholder, style, ...props }) {
+  return <input {...props} aria-label={props["aria-label"] || placeholder} value={value || ""} onChange={event => onChange(event.target.value)} placeholder={placeholder} style={{ ...styles.filter, ...style }} />;
+}
+
+export function IrepsTableFilterSelect({ value, onChange, children, style, ...props }) {
+  return <select {...props} value={value ?? "ALL"} onChange={event => onChange(event.target.value)} style={{ ...styles.filter, ...style }}>{children}</select>;
 }
 
 function Pagination({ page, pageSize, totalPages, totalRows, onPage, onPageSize, filtersOn, onClear }) {

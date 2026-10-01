@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
+import { irepsTableDateRange as getReadingDateFilterRange } from "../../components/table/irepsTableModel.js";
+import IrepsTable from "../../components/table/IrepsTable";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
@@ -7,12 +10,10 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
 import { useGetRegistryMreadByWardQuery } from "../../redux/registryMreadApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
-import {
-  useGenerateMreadStagingMutation,
+import { useGenerateMreadStagingMutation,
   useListMreadStagingCyclesQuery,
 } from "../../redux/mreadStagingCyclesApi";
-import { DatetimeFilterButton } from "../../components/DatetimeFilter";
-import DownloadButtons from "../../components/DownloadButtons";
+
 import RegistryIdText from "../../components/RegistryIdText";
 import SharedMeterHistoryModal from "../../components/mread/MeterHistoryModal";
 
@@ -44,16 +45,9 @@ const EMPTY_READING_DATE_FILTER = {
 };
 
 const DEFAULT_SORT = { key: "completedAt", direction: "desc" };
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
+
 const NO_GEOFENCE_FILTER = "NO_GEOFENCE";
 const NAv = "NAv";
-
-// This repo lint profile does not mark JSX-only identifiers as used.
-// Keep this marker until the shared ESLint config enables react/jsx-uses-vars.
-function markJsxOnlyComponentUsage(...components) {
-  return components.length;
-}
 
 function safeText(value, fallback = NAv) {
   if (value === null || value === undefined) return fallback;
@@ -161,94 +155,6 @@ function getDateValue(value) {
 function getDateTimeMs(value) {
   const date = getDateValue(value);
   return date ? date.getTime() : 0;
-}
-
-function startOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function endOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
-}
-
-function addDays(date, days) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate() + days,
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-
-  const [year, month, day] = String(value).split("-").map(Number);
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getReadingDateFilterRange(filter = EMPTY_READING_DATE_FILTER) {
-  const mode = filter?.mode || "ALL";
-  const now = new Date();
-  const todayStart = startOfDay(now);
-
-  if (mode === "TODAY") return { start: todayStart, end: endOfDay(now) };
-
-  if (mode === "YESTERDAY") {
-    const yesterday = addDays(todayStart, -1);
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-  }
-
-  if (mode === "PAST_3_DAYS") {
-    return { start: addDays(todayStart, -2), end: endOfDay(now) };
-  }
-
-  if (mode === "THIS_WEEK") {
-    const sunday = addDays(todayStart, -todayStart.getDay());
-    const saturday = addDays(sunday, 6);
-    return { start: startOfDay(sunday), end: endOfDay(saturday) };
-  }
-
-  if (mode === "THIS_MONTH") {
-    return {
-      start: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0),
-      end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
-    };
-  }
-
-  if (mode === "CUSTOM") {
-    const startDate = parseDateOnly(filter?.startDate);
-    const endDate = parseDateOnly(filter?.endDate);
-
-    return {
-      start: startDate ? startOfDay(startDate) : null,
-      end: endDate ? endOfDay(endDate) : null,
-    };
-  }
-
-  return { start: null, end: null };
 }
 
 function matchesReadingDateFilter(value, filter = EMPTY_READING_DATE_FILTER) {
@@ -933,57 +839,6 @@ function getSortValue(row, key, astGeofenceByAstId = {}) {
   return "";
 }
 
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive
-    ? sortConfig.direction === "asc"
-      ? "↑"
-      : "↓"
-    : "↕";
-
-  return (
-    <button
-      type="button"
-      style={styles.sortButton}
-      onClick={() => onSort(sortKey)}
-    >
-      <span>{label}</span>
-      <span aria-hidden="true">{directionLabel}</span>
-    </button>
-  );
-}
-
-function FilterInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={styles.headerInput}
-    />
-  );
-}
-
-function FilterSelect({ value, onChange, children }) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={styles.headerSelect}
-    >
-      {children}
-    </select>
-  );
-}
-
-function HeaderCell({ minWidth = 130, children }) {
-  return (
-    <th style={{ ...styles.headerCell, minWidth }}>
-      <div style={styles.headerStack}>{children}</div>
-    </th>
-  );
-}
-
 function StatusPill({ children, tone = "default" }) {
   return (
     <span style={{ ...styles.statusPill, ...(styles[`${tone}Pill`] || {}) }}>
@@ -1072,645 +927,6 @@ function getAstDocIdFromRow(row = {}) {
   return astPath.startsWith("asts/") ? astPath.split("/").pop() : astPath;
 }
 
-function getAstMeterNo(astDoc = {}) {
-  return firstText(
-    astDoc?.astNo,
-    astDoc?.meterNo,
-    astDoc?.ast?.astData?.astNo,
-    astDoc?.ast?.astData?.meterNo,
-    astDoc?.master?.id,
-  );
-}
-
-function getAstMeterType(astDoc = {}) {
-  return firstText(astDoc?.meterType, astDoc?.ast?.astData?.meter?.serviceType);
-}
-
-function getAstMeterKind(astDoc = {}) {
-  return firstText(
-    astDoc?.meterKind,
-    astDoc?.ast?.astData?.meter?.kind,
-    astDoc?.ast?.astData?.meter?.type,
-  );
-}
-
-function getAstStatus(astDoc = {}) {
-  return firstText(astDoc?.statusState, astDoc?.status?.state);
-}
-
-function getAstPremiseAddress(astDoc = {}) {
-  return firstText(
-    astDoc?.premiseAddress,
-    astDoc?.accessData?.premise?.address,
-  );
-}
-
-function getAstPremiseId(astDoc = {}) {
-  return firstText(astDoc?.premiseId, astDoc?.accessData?.premise?.id);
-}
-
-function getAstErfNo(astDoc = {}) {
-  return firstText(astDoc?.erfNo, astDoc?.accessData?.erfNo);
-}
-
-function getAstWardPcode(astDoc = {}) {
-  return firstText(astDoc?.wardPcode, astDoc?.accessData?.parents?.wardPcode);
-}
-
-function getAstUpdatedAt(astDoc = {}) {
-  return firstValue(
-    astDoc?.updatedAt,
-    astDoc?.metadata?.updatedAt,
-    astDoc?.__updateTime__,
-  );
-}
-
-const BASELINE_READING_SOURCES = new Set([
-  "AST_CREATION",
-  "METER_DISCOVERY",
-  "METER_INSTALLATION",
-]);
-
-function isBaselineReadingSource(source = "") {
-  return BASELINE_READING_SOURCES.has(
-    String(source || "")
-      .trim()
-      .toUpperCase(),
-  );
-}
-
-function getAstMreadings(astDoc = {}) {
-  const readings = Array.isArray(astDoc?.mreadings) ? astDoc.mreadings : [];
-
-  const sortedReadings = readings
-    .map((item, index) => {
-      const readingValue = firstText(item?.reading, item?.currentReading);
-      const readingNumber = Number(readingValue);
-      const source = firstText(item?.source);
-      const storedSincePreviousReadingDisplay = firstText(
-        item?.sincePreviousReadingDisplay,
-        item?.daysSinceLastReadingDisplay,
-        item?.sincePreviousReading?.display,
-        item?.daysSinceLastReading?.display,
-        item?.["sincePreviousReading.display"],
-        item?.["daysSinceLastReading.display"],
-      );
-      const rawSincePreviousReadingMinutes = Number(
-        firstValue(
-          item?.sincePreviousReadingMinutes,
-          item?.daysSinceLastReadingMinutes,
-          item?.sincePreviousReading?.totalMinutes,
-          item?.daysSinceLastReading?.totalMinutes,
-          item?.["sincePreviousReading.totalMinutes"],
-          item?.["daysSinceLastReading.totalMinutes"],
-        ),
-      );
-      const isBaselineReading = isBaselineReadingSource(source);
-
-      return {
-        raw: item,
-        index,
-        key: `${item?.trnId || "mread"}-${item?.readingAt || index}`,
-        readingAt: firstValue(
-          item?.readingAt,
-          item?.completedAt,
-          item?.createdAt,
-        ),
-        reading: readingValue,
-        readingNumber: Number.isFinite(readingNumber) ? readingNumber : null,
-        trnId: firstText(item?.trnId, item?.sourceTrnId),
-        source,
-        outcomeLabel: isBaselineReading
-          ? "Baseline Reading"
-          : "Successful Reading",
-        reason: NAv,
-        capturedBy: firstText(
-          item?.capturedByName,
-          item?.capturedBy?.name,
-          item?.actor?.name,
-          item?.createdByUser,
-          item?.updatedByUser,
-        ),
-        capturedByUid: firstText(
-          item?.capturedByUid,
-          item?.capturedBy?.uid,
-          item?.actor?.uid,
-          item?.createdByUid,
-          item?.updatedByUid,
-        ),
-        sincePreviousReadingDisplay:
-          storedSincePreviousReadingDisplay !== NAv
-            ? storedSincePreviousReadingDisplay
-            : isBaselineReading
-              ? "0"
-              : NAv,
-        sincePreviousReadingMinutes: Number.isFinite(
-          rawSincePreviousReadingMinutes,
-        )
-          ? rawSincePreviousReadingMinutes
-          : isBaselineReading
-            ? 0
-            : null,
-      };
-    })
-    .filter((item) => item.readingAt || item.readingNumber !== null)
-    .sort((a, b) =>
-      String(b.readingAt || "").localeCompare(String(a.readingAt || "")),
-    );
-
-  return sortedReadings.map((item, index) => {
-    const previousRow = sortedReadings[index + 1] || null;
-    const previousReading = previousRow?.readingNumber ?? null;
-    const consumption =
-      item.readingNumber !== null && previousReading !== null
-        ? item.readingNumber - previousReading
-        : null;
-
-    return {
-      ...item,
-      previousReading,
-      consumption,
-    };
-  });
-}
-
-function isSameMeterHistoryTarget(row = {}, selectedRow = {}) {
-  const selectedAstId = getAstDocIdFromRow(selectedRow);
-  const rowAstId = getAstDocIdFromRow(row);
-
-  if (isMeaningfulText(selectedAstId) && isMeaningfulText(rowAstId)) {
-    return selectedAstId === rowAstId;
-  }
-
-  const selectedMeterNo = getMeterNo(selectedRow);
-  const rowMeterNo = getMeterNo(row);
-
-  return (
-    isMeaningfulText(selectedMeterNo) &&
-    isMeaningfulText(rowMeterNo) &&
-    normalizeText(selectedMeterNo) === normalizeText(rowMeterNo)
-  );
-}
-
-function getRegistryMreadHistoryRows(registryRows = [], selectedRow = {}) {
-  return registryRows
-    .filter((registryRow) => isSameMeterHistoryTarget(registryRow, selectedRow))
-    .map((registryRow, index) => {
-      const outcome = getOutcome(registryRow);
-      const isSuccessfulReading = outcome === "SUCCESSFUL_READING";
-      const trnId = getTrnId(registryRow);
-      const currentReading = getCurrentReading(registryRow);
-      const currentReadingNumber = Number(currentReading);
-      const previousReading = getPreviousReading(registryRow);
-      const previousReadingNumber = Number(previousReading);
-      const consumption = getConsumption(registryRow);
-      const consumptionNumber = Number(consumption);
-      const completedAt = firstMeaningfulValue(getCompletedAt(registryRow));
-      const readingAt = isSuccessfulReading
-        ? firstMeaningfulValue(getReadingAt(registryRow), completedAt)
-        : completedAt;
-
-      return {
-        raw: registryRow,
-        index,
-        key: `registry-${trnId || registryRow?.id || index}`,
-        readingAt,
-        completedAt,
-        reading:
-          isSuccessfulReading && Number.isFinite(currentReadingNumber)
-            ? currentReading
-            : NAv,
-        readingNumber:
-          isSuccessfulReading && Number.isFinite(currentReadingNumber)
-            ? currentReadingNumber
-            : null,
-        previousReading:
-          isSuccessfulReading && Number.isFinite(previousReadingNumber)
-            ? previousReadingNumber
-            : null,
-        consumption:
-          isSuccessfulReading && Number.isFinite(consumptionNumber)
-            ? consumptionNumber
-            : null,
-        trnId,
-        source: outcome === "NO_ACCESS" ? "NO_ACCESS" : "METER_READING",
-        outcomeLabel: getOutcomeLabel(outcome),
-        reason: getReasonText(registryRow),
-        capturedBy: getCapturedByName(registryRow),
-        capturedByUid: getCapturedByUid(registryRow),
-        sincePreviousReadingDisplay: isSuccessfulReading
-          ? getSincePreviousReadingDisplay(registryRow)
-          : NAv,
-        sincePreviousReadingMinutes: isSuccessfulReading
-          ? getSincePreviousReadingMinutes(registryRow)
-          : null,
-      };
-    });
-}
-
-function mergeMeterHistoryRows({
-  astRows = [],
-  registryRows = [],
-  selectedRow = {},
-} = {}) {
-  const mergedRows = [];
-  const seenTrnIds = new Set();
-
-  getRegistryMreadHistoryRows(registryRows, selectedRow).forEach((item) => {
-    const trnId = firstMeaningfulText(item.trnId, "");
-    if (trnId) seenTrnIds.add(trnId);
-    mergedRows.push(item);
-  });
-
-  astRows.forEach((item, index) => {
-    const trnId = firstMeaningfulText(item.trnId, "");
-
-    if (trnId && seenTrnIds.has(trnId)) return;
-    if (trnId) seenTrnIds.add(trnId);
-
-    mergedRows.push({
-      ...item,
-      key: `ast-${item.key || item.trnId || index}`,
-      outcomeLabel: item.outcomeLabel || "Successful Reading",
-      reason: item.reason || NAv,
-    });
-  });
-
-  return mergedRows.sort((a, b) => {
-    const bTime = getReadingAtMs(firstValue(b.readingAt, b.completedAt));
-    const aTime = getReadingAtMs(firstValue(a.readingAt, a.completedAt));
-
-    if (aTime !== null && bTime !== null) return bTime - aTime;
-    if (bTime !== null) return 1;
-    if (aTime !== null) return -1;
-
-    return compareNatural(String(b.readingAt || ""), String(a.readingAt || ""));
-  });
-}
-
-function getReadingAtMs(value) {
-  if (!value || value === NAv) return null;
-
-  if (typeof value?.toDate === "function") {
-    const millis = value.toDate().getTime();
-    return Number.isFinite(millis) ? millis : null;
-  }
-
-  if (typeof value?.seconds === "number") {
-    const millis = value.seconds * 1000;
-    return Number.isFinite(millis) ? millis : null;
-  }
-
-  const millis = Date.parse(String(value));
-  return Number.isFinite(millis) ? millis : null;
-}
-
-function formatSummaryMetric(value) {
-  if (value === null || value === undefined || value === "") return NAv;
-
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return NAv;
-
-  const roundedValue =
-    Math.abs(numberValue) >= 100
-      ? Math.round(numberValue)
-      : Number(numberValue.toFixed(2));
-
-  return roundedValue.toLocaleString();
-}
-
-function buildMeterReadingSummary(historyRows = []) {
-  const validRows = historyRows
-    .filter((item) => item?.readingNumber !== null)
-    .map((item, index) => ({
-      ...item,
-      readingAtMs: getReadingAtMs(item?.readingAt),
-      originalIndex: index,
-    }))
-    .sort((a, b) => {
-      if (a.readingAtMs !== null && b.readingAtMs !== null) {
-        return a.readingAtMs - b.readingAtMs;
-      }
-
-      if (a.readingAtMs !== null) return -1;
-      if (b.readingAtMs !== null) return 1;
-
-      // historyRows is already newest first, so reverse that order for oldest first.
-      return b.originalIndex - a.originalIndex;
-    });
-
-  const firstRow = validRows[0] || null;
-  const lastRow = validRows[validRows.length - 1] || null;
-  const firstReading = firstRow?.readingNumber ?? null;
-  const lastReading = lastRow?.readingNumber ?? null;
-  const totalConsumption =
-    firstReading !== null && lastReading !== null
-      ? lastReading - firstReading
-      : null;
-
-  const elapsedDays =
-    firstRow?.readingAtMs !== null &&
-    lastRow?.readingAtMs !== null &&
-    lastRow?.readingAtMs > firstRow?.readingAtMs
-      ? (lastRow.readingAtMs - firstRow.readingAtMs) / 86400000
-      : null;
-
-  const averagePerDay =
-    totalConsumption !== null && elapsedDays !== null && elapsedDays > 0
-      ? totalConsumption / elapsedDays
-      : null;
-
-  return {
-    firstReading,
-    lastReading,
-    totalConsumption,
-    averagePerDay,
-    averagePerWeek: averagePerDay !== null ? averagePerDay * 7 : null,
-    averagePerMonth: averagePerDay !== null ? averagePerDay * 30.4375 : null,
-    averagePerYear: averagePerDay !== null ? averagePerDay * 365.25 : null,
-  };
-}
-
-function MeterHistoryModal({ row, registryRows = [], onClose }) {
-  const astId = getAstDocIdFromRow(row);
-  const meterNo = getMeterNo(row);
-  const [astState, setAstState] = useState({
-    loading: true,
-    error: "",
-    ast: null,
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadAst() {
-      if (!astId) {
-        setAstState({
-          loading: false,
-          error: "No AST ID available on this registry row.",
-          ast: null,
-        });
-        return;
-      }
-
-      setAstState({ loading: true, error: "", ast: null });
-
-      try {
-        const db = getFirestore();
-        const astSnap = await getDoc(doc(db, "asts", astId));
-
-        if (cancelled) return;
-
-        if (!astSnap.exists()) {
-          setAstState({
-            loading: false,
-            error: `Meter AST not found: ${astId}`,
-            ast: null,
-          });
-          return;
-        }
-
-        setAstState({
-          loading: false,
-          error: "",
-          ast: {
-            id: astSnap.id,
-            ...astSnap.data(),
-          },
-        });
-      } catch (error) {
-        if (cancelled) return;
-        setAstState({
-          loading: false,
-          error: error?.message || "Could not load meter details.",
-          ast: null,
-        });
-      }
-    }
-
-    loadAst();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [astId]);
-
-  const astDoc = astState.ast || {};
-  const astHistoryRows = getAstMreadings(astDoc);
-  const historyRows = mergeMeterHistoryRows({
-    astRows: astHistoryRows,
-    registryRows,
-    selectedRow: row,
-  });
-  const readingSummary = buildMeterReadingSummary(historyRows);
-
-  return (
-    <div
-      style={styles.modalOverlay}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="mread-meter-history-title"
-    >
-      <div style={styles.modalCardLarge}>
-        <div style={styles.modalHeader}>
-          <div>
-            <p className="eyebrow">Meter Details & Reading History</p>
-            <h2 id="mread-meter-history-title">{meterNo}</h2>
-          </div>
-
-          <button
-            type="button"
-            style={styles.modalCloseButton}
-            onClick={onClose}
-          >
-            Close Meter
-          </button>
-        </div>
-
-        <div style={styles.modalBody}>
-          {astState.loading ? <LoadingSpinner /> : null}
-
-          {!astState.loading && astState.error ? (
-            <div className="empty-state">
-              <h2>Could not load meter details</h2>
-              <p className="muted">{astState.error}</p>
-            </div>
-          ) : null}
-
-          {!astState.loading && !astState.error && astDoc ? (
-            <div style={styles.meterHistoryStack}>
-              <section style={styles.detailsSection}>
-                <h3>Meter Details</h3>
-                <div style={styles.detailsTwoColumnGrid}>
-                  <div>
-                    <CompactDetailLine
-                      label="Meter No"
-                      value={getAstMeterNo(astDoc)}
-                    />
-                    <CompactDetailLine
-                      label="AST ID"
-                      value={astDoc.id || astId}
-                    />
-                    <CompactDetailLine
-                      label="Meter Type"
-                      value={getMeterTypeLabel(getAstMeterType(astDoc))}
-                    />
-                    <CompactDetailLine
-                      label="Meter Kind"
-                      value={getAstMeterKind(astDoc)}
-                    />
-                    <CompactDetailLine
-                      label="Status"
-                      value={getAstStatus(astDoc)}
-                    />
-                  </div>
-
-                  <div>
-                    <CompactDetailLine
-                      label="Premise Address"
-                      value={getAstPremiseAddress(astDoc)}
-                    />
-                    <CompactDetailLine
-                      label="Premise ID"
-                      value={getAstPremiseId(astDoc)}
-                    />
-                    <CompactDetailLine
-                      label="ERF No"
-                      value={getAstErfNo(astDoc)}
-                    />
-                    <CompactDetailLine
-                      label="Ward Pcode"
-                      value={getAstWardPcode(astDoc)}
-                    />
-                    <CompactDetailLine
-                      label="Updated At"
-                      value={formatDateTime(getAstUpdatedAt(astDoc))}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              <section style={styles.detailsSection}>
-                <div style={styles.readingSummaryGrid}>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">First Reading</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.firstReading)}
-                    </strong>
-                  </div>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">Last Reading</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.lastReading)}
-                    </strong>
-                  </div>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">Total Consumption</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.totalConsumption)}
-                    </strong>
-                  </div>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">Avg / Day</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.averagePerDay)}
-                    </strong>
-                  </div>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">Avg / Week</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.averagePerWeek)}
-                    </strong>
-                  </div>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">Avg / Month</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.averagePerMonth)}
-                    </strong>
-                  </div>
-                  <div style={styles.readingSummaryTile}>
-                    <span className="muted">Avg / Year</span>
-                    <strong>
-                      {formatSummaryMetric(readingSummary.averagePerYear)}
-                    </strong>
-                  </div>
-                </div>
-              </section>
-
-              <section style={styles.detailsSection}>
-                <div style={styles.sectionHeaderRow}>
-                  <div>
-                    <h3>Meter Reading / Attempt History</h3>
-                    <p className="muted">
-                      Registry attempts and cached readings for this meter.
-                    </p>
-                  </div>
-                  <span style={styles.statusPill}>
-                    {formatNumber(historyRows.length)} attempt(s)
-                  </span>
-                </div>
-
-                {historyRows.length === 0 ? (
-                  <p className="muted">
-                    No registry attempts or cached meter readings found for this
-                    meter.
-                  </p>
-                ) : (
-                  <div style={styles.historyTableWrap}>
-                    <table className="data-table" style={styles.historyTable}>
-                      <thead>
-                        <tr>
-                          <th>Date/Time</th>
-                          <th>Days Since Last Reading</th>
-                          <th>Outcome</th>
-                          <th>Reason</th>
-                          <th>Reading</th>
-                          <th>Prev Reading</th>
-                          <th>Consumption</th>
-                          <th>Read By</th>
-                          <th>TRN</th>
-                          <th>Source</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {historyRows.map((item) => (
-                          <tr key={item.key}>
-                            <td>{formatDateTime(item.readingAt)}</td>
-                            <td>{item.sincePreviousReadingDisplay}</td>
-                            <td>{item.outcomeLabel || NAv}</td>
-                            <td>{item.reason || NAv}</td>
-                            <td>
-                              <strong>{formatReading(item.reading)}</strong>
-                            </td>
-                            <td>{formatReading(item.previousReading)}</td>
-                            <td>
-                              <strong>{formatReading(item.consumption)}</strong>
-                            </td>
-                            <td>
-                              <strong>{item.capturedBy}</strong>
-                              <div style={styles.secondaryId}>
-                                <RegistryIdText value={item.capturedByUid} />
-                              </div>
-                            </td>
-                            <td>
-                              <RegistryIdText value={item.trnId} />
-                            </td>
-                            <td>{item.source}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function MreadStagingControllerModal({ lmPcode, onClose }) {
   const safeLmPcode = isMeaningfulText(lmPcode)
     ? String(lmPcode).trim()
@@ -1738,7 +954,6 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
     isFetching,
     refetch,
   } = useListMreadStagingCyclesQuery(queryArgs);
-  console.log(`Staging cycles`, data);
 
   const cycleRows = useMemo(
     () => (Array.isArray(data?.rows) ? data.rows : []),
@@ -1988,80 +1203,95 @@ function MreadStagingControllerModal({ lmPcode, onClose }) {
 
               {filteredCycleRows.length ? (
                 <div style={styles.stagingTableWrap}>
-                  <table
-                    className="data-table"
-                    style={styles.stagingCyclesTable}
-                  >
-                    <thead>
-                      <tr>
-                        <th>Cycle</th>
-                        <th>Window</th>
-                        <th>Base Cycle</th>
-                        <th>Iteration</th>
-                        <th>Last Generated</th>
-                        <th>Rows</th>
-                        <th>Staging</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredCycleRows.map((row) => {
-                        const selected =
-                          effectiveSelectedCycle?.cycleId === row.cycleId;
-                        const actionTone = getCycleActionTone(row);
-
-                        return (
-                          <tr
-                            key={row.cycleId || getCycleLabel(row)}
-                            style={
-                              selected ? styles.selectedStagingCycleRow : null
-                            }
-                            onClick={() => setSelectedCycle(row)}
-                          >
-                            <td>
-                              <strong>{getCycleLabel(row)}</strong>
-                              <div style={styles.secondaryId}>
-                                <RegistryIdText value={row.cycleId} />
-                              </div>
-                              {row.isCurrentCycle ? (
-                                <div style={styles.secondaryId}>
-                                  Current cycle
-                                </div>
-                              ) : null}
-                            </td>
-                            <td>{getCycleWindowDisplay(row)}</td>
-                            <td>{getBaseCycleLabel(row)}</td>
-                            <td>{formatNumber(getCycleIteration(row))}</td>
-                            <td>
-                              {formatDateTime(getCycleLastGeneratedAt(row))}
-                            </td>
-                            <td>{formatNumber(getCycleRowsCount(row))}</td>
-                            <td>
-                              <button
-                                type="button"
-                                style={
-                                  actionTone === "primary"
-                                    ? styles.primaryMiniButton
-                                    : styles.disabledMiniButton
-                                }
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleCycleAction(row);
-                                }}
-                                disabled={
-                                  actionTone === "disabled" || isGenerating
-                                }
-                                title={getCycleActionHelp(row)}
-                              >
-                                {isGenerating && actionTone === "primary"
-                                  ? "Staging..."
-                                  : getCycleActionLabel(row)}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <IrepsTable
+                title="Reading cycles"
+                rows={filteredCycleRows}
+                columns={[{
+                  key: "cycle",
+                  label: "Cycle",
+                  filter: "text",
+                  value: row => getCycleLabel(row),
+                  render: row => {
+                    return <><button type="button" className="text-link" onClick={() => setSelectedCycle(row)} aria-pressed={effectiveSelectedCycle?.cycleId === row.cycleId}>
+                                              <strong>{getCycleLabel(row)}</strong>
+                                              <div style={styles.secondaryId}>
+                                                <RegistryIdText value={row.cycleId} />
+                                              </div>
+                                              {row.isCurrentCycle ? <div style={styles.secondaryId}>
+                                                  Current cycle
+                                                </div> : null}
+                                            </button></>;
+                  }
+                }, {
+                  key: "window",
+                  label: "Window",
+                  filter: "text",
+                  value: row => getCycleWindowDisplay(row),
+                  render: row => {
+                    return <>{getCycleWindowDisplay(row)}</>;
+                  }
+                }, {
+                  key: "baseCycle",
+                  label: "Base Cycle",
+                  filter: "text",
+                  value: row => getBaseCycleLabel(row),
+                  render: row => {
+                    return <>{getBaseCycleLabel(row)}</>;
+                  }
+                }, {
+                  key: "iteration",
+                  label: "Iteration",
+                  filter: "text",
+                  value: row => getCycleIteration(row),
+                  render: row => {
+                    return <>{formatNumber(getCycleIteration(row))}</>;
+                  }
+                }, {
+                  key: "lastGenerated",
+                  label: "Last Generated",
+                  filter: "date",
+                  value: row => getDateTimeMs(getCycleLastGeneratedAt(row)),
+                  exportValue: row => formatDateTime(getCycleLastGeneratedAt(row)),
+                  render: row => {
+                    return <>
+                                              {formatDateTime(getCycleLastGeneratedAt(row))}
+                                            </>;
+                  }
+                }, {
+                  key: "rows",
+                  label: "Rows",
+                  filter: "text",
+                  value: row => getCycleRowsCount(row),
+                  render: row => {
+                    return <>{formatNumber(getCycleRowsCount(row))}</>;
+                  }
+                }, {
+                  key: "staging",
+                  label: "Staging",
+                  filter: null,
+                  value: row => getCycleActionLabel(row),
+                  render: row => {
+                    const actionTone = getCycleActionTone(row);
+                    return <>
+                                              <button type="button" style={actionTone === "primary" ? styles.primaryMiniButton : styles.disabledMiniButton} onClick={event => {
+                        event.stopPropagation();
+                        handleCycleAction(row);
+                      }} disabled={actionTone === "disabled" || isGenerating} title={getCycleActionHelp(row)}>
+                                                {isGenerating && actionTone === "primary" ? "Staging..." : getCycleActionLabel(row)}
+                                              </button>
+                                            </>;
+                  }
+                }]}
+                rowKey={row => row.cycleId || getCycleLabel(row)}
+                rowStyle={row => effectiveSelectedCycle?.cycleId === row.cycleId ? styles.selectedStagingCycleRow : undefined}
+                onRowClick={setSelectedCycle}
+                downloads={{
+                  fileBaseName: "reading_cycles",
+                  scope: {
+                    label: "Loaded reading cycles"
+                  }
+                }}
+              />
                 </div>
               ) : null}
             </section>
@@ -2151,209 +1381,6 @@ function HelpModal({ onClose }) {
                 premise ID, media tags, source paths, and metadata.
               </p>
             </section>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-        {formatNumber(totalRows)} rows
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={styles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const COMPLETED_AT_FILTER_OPTIONS = [
-  { mode: "TODAY", label: "Today" },
-  { mode: "YESTERDAY", label: "Yesterday" },
-  { mode: "PAST_3_DAYS", label: "Past 3 days" },
-  { mode: "THIS_WEEK", label: "This week" },
-  { mode: "THIS_MONTH", label: "This month" },
-  { mode: "CUSTOM", label: "Custom range" },
-];
-
-function CompletedAtFilterModal({ filter, onApply, onClear, onClose }) {
-  const [draftFilter, setDraftFilter] = useState({
-    ...EMPTY_READING_DATE_FILTER,
-    ...filter,
-  });
-
-  const selectedMode = draftFilter?.mode || "ALL";
-
-  function updateMode(mode) {
-    setDraftFilter((current) => ({
-      ...current,
-      mode,
-      startDate: mode === "CUSTOM" ? current.startDate || "" : "",
-      endDate: mode === "CUSTOM" ? current.endDate || "" : "",
-    }));
-  }
-
-  function updateDate(key, value) {
-    setDraftFilter((current) => ({
-      ...current,
-      mode: "CUSTOM",
-      [key]: value,
-    }));
-  }
-
-  return (
-    <div
-      style={styles.modalOverlay}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="mread-completed-at-filter-title"
-    >
-      <div style={styles.completedAtFilterCard}>
-        <div style={styles.modalHeader}>
-          <div>
-            <p className="eyebrow">Date / Time Filter</p>
-            <h2 id="mread-completed-at-filter-title">Filter Completed At</h2>
-            <p className="muted">
-              Filters MREAD rows by the TRN completion/submission date.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            style={styles.modalCloseButton}
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        <div style={styles.modalBody}>
-          <div style={styles.completedAtModeGrid}>
-            {COMPLETED_AT_FILTER_OPTIONS.map((option) => {
-              const isActive = selectedMode === option.mode;
-
-              return (
-                <button
-                  key={option.mode}
-                  type="button"
-                  style={{
-                    ...styles.completedAtModeButton,
-                    ...(isActive ? styles.completedAtModeButtonActive : {}),
-                  }}
-                  onClick={() => updateMode(option.mode)}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={styles.completedAtCustomGrid}>
-            <label style={styles.completedAtDateLabel}>
-              Start date
-              <input
-                type="date"
-                value={draftFilter.startDate || ""}
-                onChange={(event) =>
-                  updateDate("startDate", event.target.value)
-                }
-                style={styles.headerInput}
-              />
-            </label>
-
-            <label style={styles.completedAtDateLabel}>
-              End date
-              <input
-                type="date"
-                value={draftFilter.endDate || ""}
-                onChange={(event) => updateDate("endDate", event.target.value)}
-                style={styles.headerInput}
-              />
-            </label>
-          </div>
-
-          <div style={styles.completedAtFilterActions}>
-            <button
-              type="button"
-              style={styles.secondaryButton}
-              onClick={onClear}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              style={styles.primaryButton}
-              onClick={() => onApply(draftFilter)}
-            >
-              Apply Filter
-            </button>
           </div>
         </div>
       </div>
@@ -2674,51 +1701,23 @@ function RowDetailsModal({ row, onClose, astGeofenceByAstId = {} }) {
   );
 }
 
-markJsxOnlyComponentUsage(
-  Link,
-  DatetimeFilterButton,
-  SharedMeterHistoryModal,
-  CompletedAtFilterModal,
-  DownloadButtons,
-  RegistryIdText,
-  SortButton,
-  FilterInput,
-  FilterSelect,
-  HeaderCell,
-  StatusPill,
-  LoadingSpinner,
-  CompactDetailLine,
-  MediaLinksList,
-  PaginationControls,
-  MediaModal,
-  HelpModal,
-  RowDetailsModal,
-  MeterHistoryModal,
-  MreadStagingControllerModal,
-);
-
 export default function MreadRegistryPage() {
   const { activeWorkbase, role } = useAuth();
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const [sortConfig, setSortConfig] = useState(DEFAULT_SORT);
+
   const [filters, setFilters] = useState(EMPTY_MREAD_FILTERS);
-  const [readingDateFilter, setReadingDateFilter] = useState(
-    EMPTY_READING_DATE_FILTER,
-  );
-  const [isReadingDateFilterOpen, setIsReadingDateFilterOpen] = useState(false);
+
   const [selectedRow, setSelectedRow] = useState(null);
   const [selectedMeterRow, setSelectedMeterRow] = useState(null);
   const [selectedMediaRow, setSelectedMediaRow] = useState(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+
   const [astGeofenceByAstId, setAstGeofenceByAstId] = useState({});
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isStagingControllerOpen, setIsStagingControllerOpen] = useState(false);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
-  console.log(`Active LM Pcode: ${activeLmPcode}`);
 
   const activeWorkbaseName =
     activeWorkbase?.name ||
@@ -2795,77 +1794,27 @@ export default function MreadRegistryPage() {
     };
   }, [mreadRows, astGeofenceByAstId]);
 
-  const filteredMreadRows = useMemo(() => {
-    return mreadRows.filter((row) => {
+  const filterRegistryRows = useCallback((rows, tableFilters) => {
+    const filters = {
+      ...EMPTY_MREAD_FILTERS,
+      ...tableFilters
+    };
+    for (const key of Object.keys(EMPTY_MREAD_FILTERS)) {
+      if (EMPTY_MREAD_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
+    }
+    const readingDateFilter = tableFilters.completedAt || EMPTY_READING_DATE_FILTER;
+    return rows.filter(row => {
       const outcome = getOutcome(row);
       const mediaLinks = getEvidencePhotoLinks(row);
       const evidence = getEvidence(row);
-      const mediaStatus =
-        mediaLinks.length > 0 || evidence.photoCount > 0 || evidence.hasPhoto
-          ? "HAS_MEDIA"
-          : "NO_MEDIA";
+      const mediaStatus = mediaLinks.length > 0 || evidence.photoCount > 0 || evidence.hasPhoto ? "HAS_MEDIA" : "NO_MEDIA";
       const billingReadiness = getBillingReadiness(row);
       const completedAt = getCompletedAt(row);
-
-      return (
-        includesText(getMeterNo(row), filters.meterNo) &&
-        (filters.outcome === "ALL" || outcome === filters.outcome) &&
-        (filters.mediaStatus === "ALL" ||
-          mediaStatus === filters.mediaStatus) &&
-        includesText(
-          getSincePreviousReadingDisplay(row),
-          filters.sincePreviousReading,
-        ) &&
-        includesText(getReasonText(row), filters.reason) &&
-        includesText(
-          formatReading(getCurrentReading(row)),
-          filters.currentReading,
-        ) &&
-        includesText(
-          formatReading(getPreviousReading(row)),
-          filters.previousReading,
-        ) &&
-        includesText(formatReading(getConsumption(row)), filters.consumption) &&
-        (filters.meterType === "ALL" ||
-          normalizeText(getMeterType(row)) ===
-            normalizeText(filters.meterType)) &&
-        includesText(getMeterKind(row), filters.meterKind) &&
-        includesText(getMeterPhase(row), filters.meterPhase) &&
-        includesText(getErfNo(row), filters.erfNo) &&
-        includesText(
-          `${getPremiseAddress(row)} ${getPremiseId(row)}`,
-          filters.premiseAddress,
-        ) &&
-        includesText(getWardNo(row), filters.wardNo) &&
-        (filters.geofence === "ALL" ||
-          getGeofenceFilterValue(row, astGeofenceByAstId) ===
-            filters.geofence) &&
-        includesText(
-          `${getCapturedByName(row)} ${getCapturedByUid(row)}`,
-          filters.capturedBy,
-        ) &&
-        (filters.billingReadiness === "ALL" ||
-          billingReadiness === filters.billingReadiness) &&
-        (filters.reviewStatus === "ALL" ||
-          getReviewStatus(row) === filters.reviewStatus) &&
-        matchesReadingDateFilter(completedAt, readingDateFilter)
-      );
+      return includesText(getMeterNo(row), filters.meterNo) && (filters.outcome === "ALL" || outcome === filters.outcome) && (filters.mediaStatus === "ALL" || mediaStatus === filters.mediaStatus) && includesText(getSincePreviousReadingDisplay(row), filters.sincePreviousReading) && includesText(getReasonText(row), filters.reason) && includesText(formatReading(getCurrentReading(row)), filters.currentReading) && includesText(formatReading(getPreviousReading(row)), filters.previousReading) && includesText(formatReading(getConsumption(row)), filters.consumption) && (filters.meterType === "ALL" || normalizeText(getMeterType(row)) === normalizeText(filters.meterType)) && includesText(getMeterKind(row), filters.meterKind) && includesText(getMeterPhase(row), filters.meterPhase) && includesText(getErfNo(row), filters.erfNo) && includesText(`${getPremiseAddress(row)} ${getPremiseId(row)}`, filters.premiseAddress) && includesText(getWardNo(row), filters.wardNo) && (filters.geofence === "ALL" || getGeofenceFilterValue(row, astGeofenceByAstId) === filters.geofence) && includesText(`${getCapturedByName(row)} ${getCapturedByUid(row)}`, filters.capturedBy) && (filters.billingReadiness === "ALL" || billingReadiness === filters.billingReadiness) && (filters.reviewStatus === "ALL" || getReviewStatus(row) === filters.reviewStatus) && matchesReadingDateFilter(completedAt, readingDateFilter);
     });
-  }, [mreadRows, filters, readingDateFilter, astGeofenceByAstId]);
+  }, [astGeofenceByAstId]);
 
-  const sortedMreadRows = useMemo(() => {
-    const rows = [...filteredMreadRows];
-
-    rows.sort((a, b) => {
-      const comparison = compareNatural(
-        getSortValue(a, sortConfig.key, astGeofenceByAstId),
-        getSortValue(b, sortConfig.key, astGeofenceByAstId),
-      );
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-
-    return rows;
-  }, [filteredMreadRows, sortConfig, astGeofenceByAstId]);
+  const filteredMreadRows = useMemo(() => filterRegistryRows(mreadRows, filters), [mreadRows, filters, filterRegistryRows]);
 
   const geofenceOptions = useMemo(() => {
     const options = new Map();
@@ -2880,16 +1829,7 @@ export default function MreadRegistryPage() {
       .sort((left, right) => compareNatural(left.label, right.label));
   }, [mreadRows, astGeofenceByAstId]);
 
-  const totalRows = sortedMreadRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
-  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
-  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
-  const paginatedMreadRows = useMemo(() => {
-    return sortedMreadRows.slice(pageStartIndex, pageEndIndex);
-  }, [sortedMreadRows, pageStartIndex, pageEndIndex]);
-
-  const totals = sortedMreadRows.reduce(
+  const totals = filteredMreadRows.reduce(
     (accumulator, row) => {
       const outcome = getOutcome(row);
       const evidence = getEvidence(row);
@@ -3023,50 +1963,12 @@ export default function MreadRegistryPage() {
     ],
   );
 
-  function updateFilter(key, value) {
-    setCurrentPage(1);
-    setFilters((current) => ({ ...current, [key]: value }));
-  }
-
   function resetTableControls() {
     setFilters(EMPTY_MREAD_FILTERS);
-    setReadingDateFilter(EMPTY_READING_DATE_FILTER);
-    setSortConfig(DEFAULT_SORT);
-    setCurrentPage(1);
+
     setSelectedRow(null);
     setSelectedMeterRow(null);
     setSelectedMediaRow(null);
-  }
-
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc")
-        return { key: sortKey, direction: "desc" };
-      return DEFAULT_SORT;
-    });
-  }
-
-  function handlePageChange(nextPage) {
-    const normalizedPage = Number(nextPage);
-    const clampedPage = Math.max(
-      1,
-      Math.min(
-        Number.isFinite(normalizedPage) ? normalizedPage : 1,
-        totalPages,
-      ),
-    );
-    setCurrentPage(clampedPage);
-  }
-
-  function handlePageSizeChange(nextPageSize) {
-    const normalizedPageSize = Number(nextPageSize);
-    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
-      ? normalizedPageSize
-      : DEFAULT_PAGE_SIZE;
-    setPageSize(nextSize);
-    setCurrentPage(1);
   }
 
   function handleWardChange(event) {
@@ -3081,6 +1983,306 @@ export default function MreadRegistryPage() {
       lastSelectionType: nextWardPcode ? "WARD" : null,
     });
   }
+
+  const registryColumns = [{
+    key: "meterNo",
+    label: "Meter No",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterNo", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "meterNo", astGeofenceByAstId),
+    render: row => {
+      return <><button type="button" className="text-link" style={styles.meterNoButton} onClick={() => setSelectedMeterRow(row)} title="Open meter details and reading history">
+                                {getMeterNo(row)}
+                              </button></>;
+    },
+    minWidth: 150
+  }, {
+    key: "completedAt",
+    label: "Completed At",
+    filter: "date",
+    sortable: true,
+    value: row => getSortValue(row, "completedAt", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "completedAt", astGeofenceByAstId),
+    render: row => {
+      return <>{formatDateTime(getCompletedAt(row))}</>;
+    },
+    minWidth: 170
+  }, {
+    key: "sincePreviousReading",
+    label: "Days Since Last Reading",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "sincePreviousReading", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "sincePreviousReading", astGeofenceByAstId),
+    render: row => {
+      return <><strong>{getSincePreviousReadingDisplay(row)}</strong></>;
+    },
+    minWidth: 185
+  }, {
+    key: "outcome",
+    label: "Outcome",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "outcome", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "outcome", astGeofenceByAstId),
+    render: row => {
+      const outcome = getOutcome(row);
+      return <><StatusPill tone={getOutcomeTone(outcome)}>
+                                {getOutcomeLabel(outcome)}
+                              </StatusPill></>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "SUCCESSFUL_READING",
+      label: "Successful"
+    }, {
+      value: "UNSUCCESSFUL_READING",
+      label: "Unsuccessful"
+    }, {
+      value: "NO_ACCESS",
+      label: "No Access"
+    }],
+    minWidth: 170
+  }, {
+    key: "mediaStatus",
+    label: "Media",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "media", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "media", astGeofenceByAstId),
+    render: row => {
+      const evidence = getEvidence(row);
+      const mediaLinks = getEvidencePhotoLinks(row);
+      return <>{evidence.photoCount > 0 || mediaLinks.length > 0 ? <button type="button" style={styles.evidenceButton} onClick={() => setSelectedMediaRow(row)}>
+                                  {formatNumber(evidence.photoCount || mediaLinks.length)}{" "}
+                                  photo(s)
+                                </button> : <span className="muted">No media</span>}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "HAS_MEDIA",
+      label: "Has Media"
+    }, {
+      value: "NO_MEDIA",
+      label: "No Media"
+    }],
+    minWidth: 150
+  }, {
+    key: "reason",
+    label: "Reason",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "reason", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "reason", astGeofenceByAstId),
+    render: row => {
+      return <>{getReasonText(row)}</>;
+    },
+    minWidth: 180
+  }, {
+    key: "currentReading",
+    label: "Current Reading",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "currentReading", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "currentReading", astGeofenceByAstId),
+    render: row => {
+      return <><strong>
+                                {formatReading(getCurrentReading(row))}
+                              </strong></>;
+    },
+    minWidth: 145
+  }, {
+    key: "previousReading",
+    label: "Prev Reading",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "previousReading", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "previousReading", astGeofenceByAstId),
+    render: row => {
+      return <>{formatReading(getPreviousReading(row))}</>;
+    },
+    minWidth: 130
+  }, {
+    key: "consumption",
+    label: "Consumption",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "consumption", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "consumption", astGeofenceByAstId),
+    render: row => {
+      return <><strong>{formatReading(getConsumption(row))}</strong></>;
+    },
+    minWidth: 130
+  }, {
+    key: "meterType",
+    label: "Type",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterType", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "meterType", astGeofenceByAstId),
+    render: row => {
+      return <>{getMeterTypeLabel(getMeterType(row))}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "electricity",
+      label: "Electricity"
+    }, {
+      value: "water",
+      label: "Water"
+    }],
+    minWidth: 130
+  }, {
+    key: "meterKind",
+    label: "Kind",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterKind", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "meterKind", astGeofenceByAstId),
+    render: row => {
+      return <>{formatMeterAttribute(getMeterKind(row))}</>;
+    },
+    minWidth: 130
+  }, {
+    key: "meterPhase",
+    label: "Phase",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterPhase", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "meterPhase", astGeofenceByAstId),
+    render: row => {
+      return <>{formatMeterAttribute(getMeterPhase(row))}</>;
+    },
+    minWidth: 130
+  }, {
+    key: "erfNo",
+    label: "ERF No",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "erfNo", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "erfNo", astGeofenceByAstId),
+    render: row => {
+      return <>{getErfNo(row)}</>;
+    },
+    minWidth: 120
+  }, {
+    key: "premiseAddress",
+    label: "Premise Address",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseAddress", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "premiseAddress", astGeofenceByAstId),
+    render: row => {
+      return <><strong>{getPremiseAddress(row)}</strong>
+                              <div style={styles.secondaryId}>
+                                <RegistryIdText value={getPremiseId(row)} />
+                              </div></>;
+    },
+    minWidth: 240
+  }, {
+    key: "wardNo",
+    label: "Ward",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "wardNo", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "wardNo", astGeofenceByAstId),
+    render: row => {
+      return <><strong>{getWardNo(row)}</strong></>;
+    },
+    minWidth: 100
+  }, {
+    key: "geofence",
+    label: "Geofence",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "geofence", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "geofence", astGeofenceByAstId),
+    render: row => {
+      return <>{getGeofenceName(row, astGeofenceByAstId)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [...geofenceOptions.map(option => ({
+      value: option.value,
+      label: option.label
+    }))],
+    minWidth: 150
+  }, {
+    key: "capturedBy",
+    label: "Captured By",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "capturedBy", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "capturedBy", astGeofenceByAstId),
+    render: row => {
+      return <><strong>{getCapturedByName(row)}</strong>
+                              <div style={styles.secondaryId}>
+                                <RegistryIdText value={getCapturedByUid(row)} />
+                              </div>
+                              {isMeaningfulText(getCapturedByRole(row)) ? <div className="muted">
+                                  {getCapturedByRole(row)}
+                                </div> : null}</>;
+    },
+    minWidth: 160
+  }, {
+    key: "billingReadiness",
+    label: "Billing",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "billingReadiness", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "billingReadiness", astGeofenceByAstId),
+    render: row => {
+      return <><StatusPill tone={getBillingTone(getBillingReadiness(row))}>
+                                {getBillingReadinessLabel(getBillingReadiness(row))}
+                              </StatusPill></>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "BILLING_READY_CANDIDATE",
+      label: "Billing Ready"
+    }, {
+      value: "BILLING_REVIEW_REQUIRED",
+      label: "Review"
+    }, {
+      value: "NOT_BILLING_READY",
+      label: "Not Ready"
+    }],
+    minWidth: 170
+  }, {
+    key: "reviewStatus",
+    label: "Review",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "reviewStatus", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "reviewStatus", astGeofenceByAstId),
+    render: row => {
+      return <><StatusPill tone={getReviewTone(getReviewStatus(row))}>
+                                {getReviewStatus(row)}
+                              </StatusPill></>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "REVIEW_REQUIRED",
+      label: "Required"
+    }, {
+      value: "NAv",
+      label: "No Review"
+    }],
+    minWidth: 150
+  }, {
+    key: "actions",
+    label: "Actions",
+    filter: null,
+    sortable: false,
+    value: row => getSortValue(row, "actions", astGeofenceByAstId),
+    sortValue: row => getSortValue(row, "actions", astGeofenceByAstId),
+    render: row => {
+      return <><button type="button" className="text-link" onClick={() => setSelectedRow(row)}>
+                                View Details
+                              </button></>;
+    },
+    minWidth: 120
+  }];
 
   return (
     <>
@@ -3120,7 +2322,7 @@ export default function MreadRegistryPage() {
               ? "Opening registry..."
               : isFetching
                 ? "Streaming..."
-                : `${formatNumber(sortedMreadRows.length)} MREAD rows`}
+                : `${formatNumber(filteredMreadRows.length)} MREAD rows`}
           </div>
           <button
             type="button"
@@ -3136,14 +2338,7 @@ export default function MreadRegistryPage() {
           >
             ? Help
           </button>
-          <DownloadButtons
-            registryName="MREAD Registry"
-            rowsLabel="MREAD rows"
-            visibleRows={sortedMreadRows}
-            columns={quickDownloadColumns}
-            fileBaseName="mread_registry"
-            scope={quickDownloadScope}
-          />
+
         </div>
       </header>
 
@@ -3177,7 +2372,7 @@ export default function MreadRegistryPage() {
         </div>
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(sortedMreadRows.length)}</strong>
+          <strong>{formatNumber(filteredMreadRows.length)}</strong>
         </div>
         <div className="stat-card">
           <span>Successful</span>
@@ -3247,477 +2442,34 @@ export default function MreadRegistryPage() {
 
         {!isRegistryOpening && mreadRows.length > 0 ? (
           <>
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             <div className="table-wrap" style={styles.tableWrap}>
-              <table
-                className="data-table mread-registry-table"
-                style={styles.table}
-              >
-                <thead>
-                  <tr>
-                    <HeaderCell minWidth={150}>
-                      <SortButton
-                        label="Meter No"
-                        sortKey="meterNo"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.meterNo}
-                        onChange={(value) => updateFilter("meterNo", value)}
-                        placeholder="Meter no"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={170}>
-                      <SortButton
-                        label="Completed At"
-                        sortKey="completedAt"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <DatetimeFilterButton
-                        filter={readingDateFilter}
-                        onClick={() => setIsReadingDateFilterOpen(true)}
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={185}>
-                      <SortButton
-                        label="Days Since Last Reading"
-                        sortKey="sincePreviousReading"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.sincePreviousReading}
-                        onChange={(value) =>
-                          updateFilter("sincePreviousReading", value)
-                        }
-                        placeholder="Days / hrs / min"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={170}>
-                      <SortButton
-                        label="Outcome"
-                        sortKey="outcome"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.outcome}
-                        onChange={(value) => updateFilter("outcome", value)}
-                      >
-                        <option value="ALL">All</option>
-                        <option value="SUCCESSFUL_READING">Successful</option>
-                        <option value="UNSUCCESSFUL_READING">
-                          Unsuccessful
-                        </option>
-                        <option value="NO_ACCESS">No Access</option>
-                      </FilterSelect>
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={150}>
-                      <SortButton
-                        label="Media"
-                        sortKey="media"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.mediaStatus}
-                        onChange={(value) => updateFilter("mediaStatus", value)}
-                      >
-                        <option value="ALL">All</option>
-                        <option value="HAS_MEDIA">Has Media</option>
-                        <option value="NO_MEDIA">No Media</option>
-                      </FilterSelect>
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={180}>
-                      <SortButton
-                        label="Reason"
-                        sortKey="reason"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.reason}
-                        onChange={(value) => updateFilter("reason", value)}
-                        placeholder="Reason"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={145}>
-                      <SortButton
-                        label="Current Reading"
-                        sortKey="currentReading"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.currentReading}
-                        onChange={(value) =>
-                          updateFilter("currentReading", value)
-                        }
-                        placeholder="Current"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={130}>
-                      <SortButton
-                        label="Prev Reading"
-                        sortKey="previousReading"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.previousReading}
-                        onChange={(value) =>
-                          updateFilter("previousReading", value)
-                        }
-                        placeholder="Prev"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={130}>
-                      <SortButton
-                        label="Consumption"
-                        sortKey="consumption"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.consumption}
-                        onChange={(value) => updateFilter("consumption", value)}
-                        placeholder="Use"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={130}>
-                      <SortButton
-                        label="Type"
-                        sortKey="meterType"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.meterType}
-                        onChange={(value) => updateFilter("meterType", value)}
-                      >
-                        <option value="ALL">All</option>
-                        <option value="electricity">Electricity</option>
-                        <option value="water">Water</option>
-                      </FilterSelect>
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={130}>
-                      <SortButton
-                        label="Kind"
-                        sortKey="meterKind"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.meterKind}
-                        onChange={(value) => updateFilter("meterKind", value)}
-                        placeholder="Kind"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={130}>
-                      <SortButton
-                        label="Phase"
-                        sortKey="meterPhase"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.meterPhase}
-                        onChange={(value) => updateFilter("meterPhase", value)}
-                        placeholder="Phase"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={120}>
-                      <SortButton
-                        label="ERF No"
-                        sortKey="erfNo"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.erfNo}
-                        onChange={(value) => updateFilter("erfNo", value)}
-                        placeholder="ERF"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={240}>
-                      <SortButton
-                        label="Premise Address"
-                        sortKey="premiseAddress"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.premiseAddress}
-                        onChange={(value) =>
-                          updateFilter("premiseAddress", value)
-                        }
-                        placeholder="Address / ID"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={100}>
-                      <SortButton
-                        label="Ward"
-                        sortKey="wardNo"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.wardNo}
-                        onChange={(value) => updateFilter("wardNo", value)}
-                        placeholder="No"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={150}>
-                      <SortButton
-                        label="Geofence"
-                        sortKey="geofence"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.geofence}
-                        onChange={(value) => updateFilter("geofence", value)}
-                      >
-                        <option value="ALL">All Geofences</option>
-                        {geofenceOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={160}>
-                      <SortButton
-                        label="Captured By"
-                        sortKey="capturedBy"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.capturedBy}
-                        onChange={(value) => updateFilter("capturedBy", value)}
-                        placeholder="User"
-                      />
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={170}>
-                      <SortButton
-                        label="Billing"
-                        sortKey="billingReadiness"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.billingReadiness}
-                        onChange={(value) =>
-                          updateFilter("billingReadiness", value)
-                        }
-                      >
-                        <option value="ALL">All</option>
-                        <option value="BILLING_READY_CANDIDATE">
-                          Billing Ready
-                        </option>
-                        <option value="BILLING_REVIEW_REQUIRED">Review</option>
-                        <option value="NOT_BILLING_READY">Not Ready</option>
-                      </FilterSelect>
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={150}>
-                      <SortButton
-                        label="Review"
-                        sortKey="reviewStatus"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterSelect
-                        value={filters.reviewStatus}
-                        onChange={(value) =>
-                          updateFilter("reviewStatus", value)
-                        }
-                      >
-                        <option value="ALL">All</option>
-                        <option value="REVIEW_REQUIRED">Required</option>
-                        <option value="NAv">No Review</option>
-                      </FilterSelect>
-                    </HeaderCell>
-
-                    <HeaderCell minWidth={120}>Actions</HeaderCell>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {sortedMreadRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={20} className="muted">
-                        No MREAD rows match the current filters. Clear or adjust
-                        a column filter above.
-                      </td>
-                    </tr>
-                  ) : null}
-
-                  {paginatedMreadRows.map((row) => {
-                    const outcome = getOutcome(row);
-                    const evidence = getEvidence(row);
-                    const mediaLinks = getEvidencePhotoLinks(row);
-                    return (
-                      <tr key={row.id || getTrnId(row)}>
-                        <td>
-                          <button
-                            type="button"
-                            className="text-link"
-                            style={styles.meterNoButton}
-                            onClick={() => setSelectedMeterRow(row)}
-                            title="Open meter details and reading history"
-                          >
-                            {getMeterNo(row)}
-                          </button>
-                        </td>
-                        <td>{formatDateTime(getCompletedAt(row))}</td>
-                        <td>
-                          <strong>{getSincePreviousReadingDisplay(row)}</strong>
-                        </td>
-                        <td>
-                          <StatusPill tone={getOutcomeTone(outcome)}>
-                            {getOutcomeLabel(outcome)}
-                          </StatusPill>
-                        </td>
-                        <td>
-                          {evidence.photoCount > 0 || mediaLinks.length > 0 ? (
-                            <button
-                              type="button"
-                              style={styles.evidenceButton}
-                              onClick={() => setSelectedMediaRow(row)}
-                            >
-                              {formatNumber(
-                                evidence.photoCount || mediaLinks.length,
-                              )}{" "}
-                              photo(s)
-                            </button>
-                          ) : (
-                            <span className="muted">No media</span>
-                          )}
-                        </td>
-                        <td>{getReasonText(row)}</td>
-                        <td>
-                          <strong>
-                            {formatReading(getCurrentReading(row))}
-                          </strong>
-                        </td>
-                        <td>{formatReading(getPreviousReading(row))}</td>
-                        <td>
-                          <strong>{formatReading(getConsumption(row))}</strong>
-                        </td>
-                        <td>{getMeterTypeLabel(getMeterType(row))}</td>
-                        <td>{formatMeterAttribute(getMeterKind(row))}</td>
-                        <td>{formatMeterAttribute(getMeterPhase(row))}</td>
-                        <td>{getErfNo(row)}</td>
-                        <td>
-                          <strong>{getPremiseAddress(row)}</strong>
-                          <div style={styles.secondaryId}>
-                            <RegistryIdText value={getPremiseId(row)} />
-                          </div>
-                        </td>
-                        <td>
-                          <strong>{getWardNo(row)}</strong>
-                        </td>
-                        <td>{getGeofenceName(row, astGeofenceByAstId)}</td>
-                        <td>
-                          <strong>{getCapturedByName(row)}</strong>
-                          <div style={styles.secondaryId}>
-                            <RegistryIdText value={getCapturedByUid(row)} />
-                          </div>
-                          {isMeaningfulText(getCapturedByRole(row)) ? (
-                            <div className="muted">
-                              {getCapturedByRole(row)}
-                            </div>
-                          ) : null}
-                        </td>
-
-                        <td>
-                          <StatusPill
-                            tone={getBillingTone(getBillingReadiness(row))}
-                          >
-                            {getBillingReadinessLabel(getBillingReadiness(row))}
-                          </StatusPill>
-                        </td>
-                        <td>
-                          <StatusPill
-                            tone={getReviewTone(getReviewStatus(row))}
-                          >
-                            {getReviewStatus(row)}
-                          </StatusPill>
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="text-link"
-                            onClick={() => setSelectedRow(row)}
-                          >
-                            View Details
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <IrepsTable
+                key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
+                title="MREAD Registry"
+                rows={mreadRows}
+                columns={registryColumns}
+                rowKey={row => row.id || getTrnId(row)}
+                filters={filters}
+                onFiltersChange={setFilters}
+                filteredRows={filteredMreadRows}
+                filterRows={filterRegistryRows}
+                defaultSort={DEFAULT_SORT}
+                downloads={{
+                  registryName: "MREAD Registry",
+                  rowsLabel: "MREAD rows",
+                  columns: quickDownloadColumns,
+                  fileBaseName: "mread_registry",
+                  scope: quickDownloadScope
+                }}
+                stickyHeader
+                maxHeight="70vh"
+              />
             </div>
 
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
           </>
         ) : null}
       </section>
-
-      {isReadingDateFilterOpen ? (
-        <CompletedAtFilterModal
-          filter={readingDateFilter}
-          onApply={(nextFilter) => {
-            setCurrentPage(1);
-            setReadingDateFilter(nextFilter);
-            setIsReadingDateFilterOpen(false);
-          }}
-          onClear={() => {
-            setCurrentPage(1);
-            setReadingDateFilter(EMPTY_READING_DATE_FILTER);
-            setSortConfig(DEFAULT_SORT);
-            setIsReadingDateFilterOpen(false);
-          }}
-          onClose={() => setIsReadingDateFilterOpen(false)}
-        />
-      ) : null}
 
       {selectedRow ? (
         <RowDetailsModal
@@ -3884,9 +2636,7 @@ const styles = {
     border: "1px solid #e2e8f0",
     borderRadius: "1rem",
   },
-  stagingCyclesTable: {
-    minWidth: "920px",
-  },
+
   selectedStagingCycleRow: {
     background: "#eff6ff",
   },
@@ -3901,17 +2651,7 @@ const styles = {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
-  secondaryMiniButton: {
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    color: "#0f172a",
-    borderRadius: "0.65rem",
-    padding: "0.42rem 0.65rem",
-    fontSize: "0.78rem",
-    fontWeight: 850,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
+
   disabledMiniButton: {
     border: "1px solid #e2e8f0",
     background: "#f8fafc",
@@ -3944,49 +2684,7 @@ const styles = {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
-  },
+
   meterNoButton: {
     border: 0,
     background: "transparent",
@@ -4000,54 +2698,7 @@ const styles = {
     padding: "0 0.35rem 0.35rem",
     boxSizing: "border-box",
   },
-  table: {
-    minWidth: "2760px",
-  },
-  headerCell: {
-    verticalAlign: "top",
-    padding: "0.65rem 0.9rem",
-    whiteSpace: "normal",
-  },
-  headerStack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.4rem",
-    alignItems: "stretch",
-    minWidth: 0,
-  },
-  sortButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    font: "inherit",
-    fontWeight: 800,
-    padding: 0,
-    textAlign: "left",
-    gap: "0.5rem",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: 0,
-    padding: "0.38rem 0.45rem",
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    fontSize: "0.78rem",
-    boxSizing: "border-box",
-  },
-  headerSelect: {
-    width: "100%",
-    minWidth: 0,
-    padding: "0.38rem 0.45rem",
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    fontSize: "0.78rem",
-    boxSizing: "border-box",
-  },
+
   statusPill: {
     display: "inline-flex",
     alignItems: "center",
@@ -4104,16 +2755,7 @@ const styles = {
     padding: "1.5rem",
     background: "rgba(15, 23, 42, 0.58)",
   },
-  completedAtFilterCard: {
-    width: "min(620px, 96vw)",
-    maxHeight: "88vh",
-    overflow: "hidden",
-    background: "#fff",
-    borderRadius: "1.2rem",
-    boxShadow: "0 24px 70px rgba(15, 23, 42, 0.28)",
-    display: "flex",
-    flexDirection: "column",
-  },
+
   modalCardLarge: {
     width: "min(1120px, 96vw)",
     height: "min(88vh, 900px)",
@@ -4139,48 +2781,7 @@ const styles = {
     zIndex: 5,
     boxShadow: "0 8px 18px rgba(15, 23, 42, 0.08)",
   },
-  completedAtModeGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    gap: "0.6rem",
-    marginBottom: "1rem",
-  },
-  completedAtModeButton: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.75rem",
-    padding: "0.65rem 0.75rem",
-    fontWeight: 800,
-    cursor: "pointer",
-    textAlign: "left",
-  },
-  completedAtModeButtonActive: {
-    borderColor: "rgba(37, 99, 235, 0.55)",
-    background: "rgba(37, 99, 235, 0.08)",
-    color: "#1d4ed8",
-  },
-  completedAtCustomGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-    gap: "0.75rem",
-    marginTop: "0.75rem",
-  },
-  completedAtDateLabel: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.35rem",
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-  },
-  completedAtFilterActions: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: "0.65rem",
-    marginTop: "1.25rem",
-    flexWrap: "wrap",
-  },
+
   primaryButton: {
     border: "1px solid rgba(37, 99, 235, 0.55)",
     background: "#2563eb",
@@ -4190,15 +2791,7 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
-  secondaryButton: {
-    border: "1px solid rgba(148, 163, 184, 0.55)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "999px",
-    padding: "0.55rem 0.9rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
+
   modalBody: {
     flex: "1 1 auto",
     minHeight: 0,
@@ -4251,11 +2844,7 @@ const styles = {
     gap: "0.2rem",
     alignItems: "flex-start",
   },
-  meterHistoryStack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "1rem",
-  },
+
   sectionHeaderRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -4263,21 +2852,7 @@ const styles = {
     gap: "1rem",
     marginBottom: "0.75rem",
   },
-  readingSummaryGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-    gap: "0.55rem",
-  },
-  readingSummaryTile: {
-    border: "1px solid rgba(148, 163, 184, 0.22)",
-    borderRadius: "0.75rem",
-    padding: "0.55rem 0.65rem",
-    background: "rgba(255, 255, 255, 0.78)",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.2rem",
-    minWidth: 0,
-  },
+
   evidenceGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
@@ -4299,10 +2874,5 @@ const styles = {
   evidenceMetaGrid: {
     marginTop: "0.75rem",
   },
-  historyTableWrap: {
-    overflowX: "auto",
-  },
-  historyTable: {
-    minWidth: "920px",
-  },
+
 };

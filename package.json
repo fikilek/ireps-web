@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev:dev": "vite --mode dev",
+    "dev:users-preview": "vite --mode dev --config dev/users-preview.config.mjs --configLoader runner --host 127.0.0.1 --port 5191 --strictPort",
     "dev:test": "vite --mode test",
     "build:dev": "vite build --mode dev",
     "build:test": "vite build --mode test",

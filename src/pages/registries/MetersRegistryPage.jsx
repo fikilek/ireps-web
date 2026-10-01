@@ -1,5 +1,7 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
+import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
+import IrepsTable from "../../components/table/IrepsTable";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -17,14 +19,6 @@ import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
-import {
-  DatetimeFilterButton,
-  DatetimeFilterModal,
-} from "../../components/DatetimeFilter";
-import DownloadButtons from "../../components/DownloadButtons";
-
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
 
 const EMPTY_METER_FILTERS = {
   meterNo: "",
@@ -43,9 +37,14 @@ const EMPTY_METER_FILTERS = {
   reconnectionCount: "ALL",
 };
 
-// DR-R001 section 4: a Manager and a supervisor launch this work. Nobody else
-// sees the Credit control columns.
+// DR-R001 section 4: a Manager and a supervisor launch this work.
 const CREDIT_CONTROL_ROLES = ["MNG", "SPV"];
+
+const COUNT_FILTER_OPTIONS = [
+  { value: "NONE", label: "None" },
+  { value: "SOME", label: "At least one" },
+  { value: "MANY", label: "More than one" },
+];
 
 function readMeterCount(row, key) {
   const value = Number(row?.counts?.[key]);
@@ -72,6 +71,7 @@ function getActiveLmPcode(activeWorkbase) {
 }
 
 function formatNumber(value) {
+  if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
 }
@@ -205,100 +205,6 @@ function buildFilterOptions(rows, key) {
   ).sort(compareNatural);
 }
 
-// The grey band of group headings the TRN Registry uses.
-function GroupHeader({ children, colSpan, tone }) {
-  return (
-    <th
-      colSpan={colSpan}
-      style={tone === "credit" ? styles.creditControlGroupCell : styles.groupHeaderCell}
-    >
-      {children}
-    </th>
-  );
-}
-
-function MeterActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <rect
-        x="4"
-        y="3"
-        width="16"
-        height="18"
-        rx="2.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <rect x="7" y="6.5" width="10" height="5" rx="1" fill="currentColor" opacity=".35" />
-      <circle cx="9" cy="16" r="1.4" fill="currentColor" />
-      <circle cx="15" cy="16" r="1.4" fill="currentColor" />
-    </svg>
-  );
-}
-
-function ErfActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <path
-        d="M4 7.5 10 4.5l4 3 6-3v12l-6 3-4-3-6 3z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function PremiseActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <path
-        d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="10" r="2.4" fill="currentColor" />
-    </svg>
-  );
-}
-
-// Anything that opens a window wears the TRN Registry's pale blue pill.
-function DataActionButton({ children, onClick, title, icon, compact }) {
-  return (
-    <button
-      type="button"
-      style={compact ? styles.compactDataActionButton : styles.dataActionButton}
-      onClick={onClick}
-      title={title}
-    >
-      <span style={styles.dataActionIconWrap}>{icon}</span>
-      <span>{children}</span>
-    </button>
-  );
-}
-
-// Disconnect and Reconnect. A greyed button says why when you hover it, the way
-// Unallocate does on the TB Register (DR-R001 3.2 and section 6).
-function WorkButton({ children, onClick, disabled, busy, title, tone }) {
-  const activeStyle = tone === "reconnect" ? styles.reconnectButton : styles.workButton;
-
-  return (
-    <button
-      type="button"
-      style={disabled ? styles.workButtonDisabled : activeStyle}
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-    >
-      {busy ? "Checking…" : children}
-    </button>
-  );
-}
-
 function getSortValue(row, key) {
   if (key === "meterNo") return row.meterNo || "";
   if (key === "meterType") return getMeterTypeLabel(row.meterType);
@@ -319,122 +225,66 @@ function getSortValue(row, key) {
   return "";
 }
 
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive
-    ? sortConfig.direction === "asc"
-      ? "↑"
-      : "↓"
-    : "↕";
+// The register's own pills: anything that opens a window wears the one the
+// TRN Registry uses, and the two actions wear it in the colour of the work.
+function MeterActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="7" y="6.5" width="10" height="5" rx="1" fill="currentColor" opacity=".35" />
+      <circle cx="9" cy="16" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="16" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
 
+function ErfActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <path d="M4 7.5 10 4.5l4 3 6-3v12l-6 3-4-3-6 3z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PremiseActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="12" cy="10" r="2.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+function DataActionButton({ children, onClick, title, icon, compact }) {
   return (
     <button
       type="button"
-      style={styles.sortButton}
-      onClick={() => onSort(sortKey)}
+      style={compact ? styles.compactDataActionButton : styles.dataActionButton}
+      onClick={onClick}
+      title={title}
     >
-      <span>{label}</span>
-      <span>{directionLabel}</span>
+      <span style={styles.dataActionIconWrap}>{icon}</span>
+      <span>{children}</span>
     </button>
   );
 }
 
-function FilterInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={styles.headerInput}
-    />
-  );
-}
+// A greyed button says why when you hover it, the way Unallocate does on the
+// TB Register (DR-R001 3.2 and section 6).
+function WorkButton({ children, onClick, disabled, busy, title, tone }) {
+  const activeStyle =
+    tone === "reconnect" ? styles.reconnectButton : styles.workButton;
 
-function FilterSelect({ value, onChange, children }) {
   return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={styles.headerSelect}
+    <button
+      type="button"
+      style={disabled ? styles.workButtonDisabled : activeStyle}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
     >
-      {children}
-    </select>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-        {formatNumber(totalRows)} rows
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={styles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
+      {busy ? "Checking…" : children}
+    </button>
   );
 }
 
@@ -461,104 +311,6 @@ function getUpdatedAtDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function startOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function endOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
-}
-
-function addDays(date, days) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate() + days,
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-
-  const [year, month, day] = String(value).split("-").map(Number);
-
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
-  const mode = filter?.mode || "ALL";
-  const now = new Date();
-  const todayStart = startOfDay(now);
-
-  if (mode === "TODAY") {
-    return { start: todayStart, end: endOfDay(now) };
-  }
-
-  if (mode === "YESTERDAY") {
-    const yesterday = addDays(todayStart, -1);
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-  }
-
-  if (mode === "PAST_3_DAYS") {
-    return { start: addDays(todayStart, -2), end: endOfDay(now) };
-  }
-
-  if (mode === "THIS_WEEK") {
-    const sunday = addDays(todayStart, -todayStart.getDay());
-    const saturday = addDays(sunday, 6);
-    return { start: startOfDay(sunday), end: endOfDay(saturday) };
-  }
-
-  if (mode === "THIS_MONTH") {
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999,
-    );
-    return { start: firstDay, end: lastDay };
-  }
-
-  if (mode === "CUSTOM") {
-    const startDate = parseDateOnly(filter?.startDate);
-    const endDate = parseDateOnly(filter?.endDate);
-
-    return {
-      start: startDate ? startOfDay(startDate) : null,
-      end: endDate ? endOfDay(endDate) : null,
-    };
-  }
-
-  return { start: null, end: null };
-}
-
 function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
   if (!filter || filter.mode === "ALL") return true;
 
@@ -578,7 +330,48 @@ export default function MetersRegistryPage() {
   const { geoState, updateGeo } = useGeo();
   const navigate = useNavigate();
 
-  // DR-R001 section 4 and 3.2.
+  const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
+
+  const [filters, setFilters] = useState(EMPTY_METER_FILTERS);
+
+  const activeLmPcode = getActiveLmPcode(activeWorkbase);
+
+  const activeWorkbaseName =
+    activeWorkbase?.name ||
+    activeWorkbase?.lmName ||
+    activeWorkbase?.id ||
+    activeWorkbase?.pcode ||
+    "NAv";
+
+  const { data: wardRows = [], isLoading: wardsLoading } =
+    useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
+
+  const selectedWard = useMemo(() => {
+    const registryWard =
+      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
+    return buildRegistryWardSelection(registryWard, selectedWardPcode);
+  }, [wardRows, selectedWardPcode]);
+
+  const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
+
+  const {
+    data: meterRows = [],
+    isLoading,
+    isFetching,
+    error,
+  } = useGetRegistryMetersByWardQuery(effectiveSelectedWardPcode || skipToken);
+  const meterKindOptions = useMemo(
+    () => buildFilterOptions(meterRows, "meterKind"),
+    [meterRows],
+  );
+
+  const meterPhaseOptions = useMemo(
+    () => buildFilterOptions(meterRows, "meterPhase"),
+    [meterRows],
+  );
+
+  // DR-R001 section 4 and 3.2: only a Manager and a supervisor launch this
+  // work, so only they see the Credit control columns.
   const canLaunchCreditControl = CREDIT_CONTROL_ROLES.includes(
     String(role || "").toUpperCase(),
   );
@@ -600,12 +393,8 @@ export default function MetersRegistryPage() {
   const mapPins = useMemo(() => {
     const pins = [];
 
-    const premiseLat = Number(
-      pinPremise?.location?.lat ?? pinPremise?.gps?.lat,
-    );
-    const premiseLng = Number(
-      pinPremise?.location?.lng ?? pinPremise?.gps?.lng,
-    );
+    const premiseLat = Number(pinPremise?.location?.lat ?? pinPremise?.gps?.lat);
+    const premiseLng = Number(pinPremise?.location?.lng ?? pinPremise?.gps?.lng);
 
     if (Number.isFinite(premiseLat) && Number.isFinite(premiseLng)) {
       pins.push({
@@ -653,7 +442,7 @@ export default function MetersRegistryPage() {
         message: outcome?.message,
         checks: outcome?.data?.checks || outcome?.checks || [],
       });
-    } catch (error) {
+    } catch {
       setGuardRefusal({
         meterId: row.id,
         meterNo: row.meterNo,
@@ -666,121 +455,30 @@ export default function MetersRegistryPage() {
     }
   }
 
-  const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const [sortConfig, setSortConfig] = useState({
-    key: "updatedAt",
-    direction: "desc",
-  });
-  const [filters, setFilters] = useState(EMPTY_METER_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(
-    EMPTY_UPDATED_AT_FILTER,
-  );
-  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-
-  const activeLmPcode = getActiveLmPcode(activeWorkbase);
-
-  const activeWorkbaseName =
-    activeWorkbase?.name ||
-    activeWorkbase?.lmName ||
-    activeWorkbase?.id ||
-    activeWorkbase?.pcode ||
-    "NAv";
-
-  const { data: wardRows = [], isLoading: wardsLoading } =
-    useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
-
-  const selectedWard = useMemo(() => {
-    const registryWard =
-      wardRows.find((ward) => ward.wardPcode === selectedWardPcode) || null;
-    return buildRegistryWardSelection(registryWard, selectedWardPcode);
-  }, [wardRows, selectedWardPcode]);
-
-  const effectiveSelectedWardPcode = selectedWard?.wardPcode || "";
-
-  const {
-    data: meterRows = [],
-    isLoading,
-    isFetching,
-    error,
-  } = useGetRegistryMetersByWardQuery(effectiveSelectedWardPcode || skipToken);
-  const meterKindOptions = useMemo(
-    () => buildFilterOptions(meterRows, "meterKind"),
-    [meterRows],
-  );
-
-  const meterPhaseOptions = useMemo(
-    () => buildFilterOptions(meterRows, "meterPhase"),
-    [meterRows],
-  );
-
-  const filteredMeterRows = useMemo(() => {
-    return meterRows.filter((row) => {
+  const filterRegistryRows = useCallback((rows, tableFilters) => {
+    const filters = {
+      ...EMPTY_METER_FILTERS,
+      ...tableFilters
+    };
+    for (const key of Object.keys(EMPTY_METER_FILTERS)) {
+      if (EMPTY_METER_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
+    }
+    const updatedAtFilter = tableFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
+    return rows.filter(row => {
       const statusText = row.statusState || row.status || "NAv";
-
-      return (
-        includesText(row.meterNo, filters.meterNo) &&
-        (filters.meterType === "ALL" ||
-          String(row.meterType || "").toLowerCase() ===
-            filters.meterType.toLowerCase()) &&
-        (filters.meterKind === "ALL" ||
-          String(row.meterKind || "").toLowerCase() ===
-            filters.meterKind.toLowerCase()) &&
-        (filters.meterPhase === "ALL" ||
-          String(row.meterPhase || "").toLowerCase() ===
-            filters.meterPhase.toLowerCase()) &&
-        (filters.visibility === "ALL" ||
-          String(row.visibility || "").toUpperCase() === filters.visibility) &&
-        (filters.status === "ALL" ||
-          String(statusText || "").toUpperCase() === filters.status) &&
-        includesText(row.erfNo, filters.erfNo) &&
-        includesText(
-          `${row.premiseAddress || ""} ${row.premiseId || ""}`,
-          filters.premiseAddress,
-        ) &&
-        includesText(row.premisePropertyType, filters.premiseType) &&
-        matchesCountFilter(
-          readMeterCount(row, "noAccess"),
-          filters.noAccessCount,
-        ) &&
-        matchesCountFilter(
-          readMeterCount(row, "disconnections"),
-          filters.disconnectionCount,
-        ) &&
-        matchesCountFilter(
-          readMeterCount(row, "reconnections"),
-          filters.reconnectionCount,
-        ) &&
-        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
-      );
+      return includesText(row.meterNo, filters.meterNo) && (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) && (filters.meterKind === "ALL" || String(row.meterKind || "").toLowerCase() === filters.meterKind.toLowerCase()) && (filters.meterPhase === "ALL" || String(row.meterPhase || "").toLowerCase() === filters.meterPhase.toLowerCase()) && (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) && (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) && includesText(row.erfNo, filters.erfNo) && includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress) && includesText(row.premisePropertyType, filters.premiseType)
+        // DR-R001 3.2 and 3.3: never disconnected, disconnected more than
+        // once, nobody could get in — each count filters on its own.
+        && matchesCountFilter(readMeterCount(row, "noAccess"), filters.noAccessCount)
+        && matchesCountFilter(readMeterCount(row, "disconnections"), filters.disconnectionCount)
+        && matchesCountFilter(readMeterCount(row, "reconnections"), filters.reconnectionCount)
+        && matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter);
     });
-  }, [meterRows, filters, updatedAtFilter]);
+  }, []);
 
-  const sortedMeterRows = useMemo(() => {
-    const rows = [...filteredMeterRows];
+  const filteredMeterRows = useMemo(() => filterRegistryRows(meterRows, filters), [meterRows, filters, filterRegistryRows]);
 
-    rows.sort((a, b) => {
-      const comparison = compareNatural(
-        getSortValue(a, sortConfig.key),
-        getSortValue(b, sortConfig.key),
-      );
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-
-    return rows;
-  }, [filteredMeterRows, sortConfig]);
-
-  const totalRows = sortedMeterRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
-  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
-  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
-  const paginatedMeterRows = useMemo(() => {
-    return sortedMeterRows.slice(pageStartIndex, pageEndIndex);
-  }, [sortedMeterRows, pageStartIndex, pageEndIndex]);
-
-  const totals = sortedMeterRows.reduce(
+  const totals = filteredMeterRows.reduce(
     (accumulator, row) => {
       if (row.meterType === "electricity") accumulator.electricity += 1;
       if (row.meterType === "water") accumulator.water += 1;
@@ -857,47 +555,9 @@ ${premiseId}`;
     ],
   );
 
-  function updateFilter(key, value) {
-    setCurrentPage(1);
-    setFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc")
-        return { key: sortKey, direction: "desc" };
-      return { key: "updatedAt", direction: "desc" };
-    });
-  }
-
   function resetMeterRegistryControls() {
     setFilters(EMPTY_METER_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-    setCurrentPage(1);
-  }
 
-  function handlePageChange(nextPage) {
-    const normalizedPage = Number(nextPage);
-    const clampedPage = Math.max(
-      1,
-      Math.min(
-        Number.isFinite(normalizedPage) ? normalizedPage : 1,
-        totalPages,
-      ),
-    );
-    setCurrentPage(clampedPage);
-  }
-
-  function handlePageSizeChange(nextPageSize) {
-    const normalizedPageSize = Number(nextPageSize);
-    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
-      ? normalizedPageSize
-      : DEFAULT_PAGE_SIZE;
-    setPageSize(nextSize);
-    setCurrentPage(1);
   }
 
   function handleWardChange(event) {
@@ -912,6 +572,325 @@ ${premiseId}`;
       lastSelectionType: nextWardPcode ? "WARD" : null,
     });
   }
+
+  // The bands over the columns, the way the TRN Registry groups its own.
+  const registryGroups = [
+    { key: "identity", label: "Meter Identity" },
+    { key: "state", label: "Meter State" },
+    { key: "location", label: "Location and Actions" },
+    { key: "record", label: "Record" },
+    { key: "access", label: "Access" },
+    { key: "credit", label: "Credit Control" },
+  ];
+
+  const registryColumns = [{
+    key: "meterNo",
+    label: "Meter No",
+    group: "identity",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterNo"),
+    sortValue: row => getSortValue(row, "meterNo"),
+    render: row => {
+      return (
+        <DataActionButton
+          onClick={() => setMeterDetailsId(row.id)}
+          title="Open this meter's details"
+          icon={<MeterActionIcon />}
+        >
+          {row.meterNo}
+        </DataActionButton>
+      );
+    }
+  }, {
+    key: "meterType",
+    label: "Type",
+    group: "identity",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterType"),
+    sortValue: row => getSortValue(row, "meterType"),
+    render: row => {
+      return <>{getMeterTypeLabel(row.meterType)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "electricity",
+      label: "Electricity"
+    }, {
+      value: "water",
+      label: "Water"
+    }]
+  }, {
+    key: "meterKind",
+    label: "Kind",
+    group: "identity",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterKind"),
+    sortValue: row => getSortValue(row, "meterKind"),
+    render: row => {
+      return <>{getMeterKindLabel(row.meterKind)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [...meterKindOptions.map(meterKind => ({
+      value: meterKind,
+      label: getMeterKindLabel(meterKind)
+    }))]
+  }, {
+    key: "meterPhase",
+    label: "Phase",
+    group: "identity",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterPhase"),
+    sortValue: row => getSortValue(row, "meterPhase"),
+    render: row => {
+      return <>{getMeterPhaseLabel(row.meterPhase)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [...meterPhaseOptions.map(meterPhase => ({
+      value: meterPhase,
+      label: getMeterPhaseLabel(meterPhase)
+    }))]
+  }, {
+    key: "visibility",
+    label: "Visibility",
+    group: "state",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "visibility"),
+    sortValue: row => getSortValue(row, "visibility"),
+    render: row => {
+      return <>{row.visibility}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "VISIBLE",
+      label: "Visible"
+    }, {
+      value: "INVISIBLE",
+      label: "Invisible"
+    }]
+  }, {
+    key: "status",
+    label: "Status",
+    group: "state",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "status"),
+    sortValue: row => getSortValue(row, "status"),
+    render: row => {
+      return <>{row.statusState || row.status || "NAv"}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "FIELD",
+      label: "FIELD"
+    }, {
+      value: "CONNECTED",
+      label: "CONNECTED"
+    }, {
+      value: "DISCONNECTED",
+      label: "DISCONNECTED"
+    }, {
+      value: "REMOVED",
+      label: "REMOVED"
+    }, {
+      value: "DECOMMISSIONED",
+      label: "DECOMMISSIONED"
+    }]
+  }, {
+    key: "erfNo",
+    label: "ERF No",
+    group: "location",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "erfNo"),
+    sortValue: row => getSortValue(row, "erfNo"),
+    render: row => {
+      return (
+        <DataActionButton
+          compact
+          onClick={() =>
+            setMapView({
+              erfId: row.erfId,
+              erfNo: row.erfNo,
+              wardPcode: row?.parents?.wardPcode,
+            })
+          }
+          title="Where this ERF is"
+          icon={<ErfActionIcon />}
+        >
+          {row.erfNo}
+        </DataActionButton>
+      );
+    }
+  }, {
+    key: "premiseAddress",
+    label: "Premise Address",
+    group: "location",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseAddress"),
+    sortValue: row => getSortValue(row, "premiseAddress"),
+    render: row => {
+      return (
+        <>
+          <DataActionButton
+            compact
+            onClick={() =>
+              setMapView({
+                erfId: row.erfId,
+                erfNo: row.erfNo,
+                wardPcode: row?.parents?.wardPcode,
+                premiseId: row.premiseId,
+                meterId: row.id,
+              })
+            }
+            title="Where this premise and its meter are"
+            icon={<PremiseActionIcon />}
+          >
+            {row.premiseAddress || "NAv"}
+          </DataActionButton>
+          <div className="muted" style={styles.smallMuted}>
+            {row.premiseId || "NAv"}
+          </div>
+        </>
+      );
+    }
+  }, {
+    key: "premiseType",
+    label: "Premise Type",
+    group: "location",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseType"),
+    sortValue: row => getSortValue(row, "premiseType"),
+    render: row => {
+      return <>{row.premisePropertyType}</>;
+    }
+  }, {
+    key: "updatedAt",
+    label: "updatedAt",
+    group: "record",
+    filter: "date",
+    sortable: true,
+    value: row => getSortValue(row, "updatedAt"),
+    sortValue: row => getSortValue(row, "updatedAt"),
+    render: row => {
+      return <>{formatUpdatedAt(row.updatedAt)}</>;
+    }
+  },
+  // DR-R001 3.3: can anyone even get to this meter, read before send somebody
+  // to it. Its own column, outside the Credit control group, and the number is
+  // a button that opens the visits behind it.
+  ...(canLaunchCreditControl ? [{
+    key: "noAccessCount",
+    label: "No Access",
+    group: "access",
+    filter: "select",
+    sortable: true,
+    value: row => readMeterCount(row, "noAccess"),
+    sortValue: row => readMeterCount(row, "noAccess"),
+    filterAllValue: "ALL",
+    filterOptions: COUNT_FILTER_OPTIONS,
+    render: row => {
+      return (
+        <button
+          type="button"
+          style={styles.countChip}
+          onClick={() =>
+            setNoAccessMeter({
+              id: row.id,
+              meterNo: row.meterNo,
+              premiseAddress: row.premiseAddress,
+            })
+          }
+          title="Every visit that could not reach this meter"
+        >
+          {readMeterCount(row, "noAccess")}
+        </button>
+      );
+    }
+  }, {
+    // DR-R001 3.2: the count comes before the button, so the meter's history
+    // is read before the action is reached.
+    key: "disconnectionCount",
+    label: "Disconnections",
+    group: "credit",
+    filter: "select",
+    sortable: true,
+    value: row => readMeterCount(row, "disconnections"),
+    sortValue: row => readMeterCount(row, "disconnections"),
+    filterAllValue: "ALL",
+    filterOptions: COUNT_FILTER_OPTIONS,
+    render: row => {
+      return <span style={styles.countValue}>{readMeterCount(row, "disconnections")}</span>;
+    }
+  }, {
+    key: "disconnect",
+    label: " ",
+    group: "credit",
+    render: row => {
+      const statusState = String(row.statusState || row.status || "NAv").toUpperCase();
+
+      return (
+        <WorkButton
+          disabled={statusState !== "CONNECTED" || checkingMeterId === row.id}
+          busy={checkingMeterId === row.id}
+          title={
+            statusState === "CONNECTED"
+              ? "Send a disconnection for this meter"
+              : statusState === "DISCONNECTED"
+                ? "This meter is already disconnected"
+                : "This meter is out of service"
+          }
+          onClick={() => launchCreditControl(row, "disconnect")}
+        >
+          Disconnect
+        </WorkButton>
+      );
+    }
+  }, {
+    key: "reconnectionCount",
+    label: "Reconnections",
+    group: "credit",
+    filter: "select",
+    sortable: true,
+    value: row => readMeterCount(row, "reconnections"),
+    sortValue: row => readMeterCount(row, "reconnections"),
+    filterAllValue: "ALL",
+    filterOptions: COUNT_FILTER_OPTIONS,
+    render: row => {
+      return <span style={styles.countValue}>{readMeterCount(row, "reconnections")}</span>;
+    }
+  }, {
+    key: "reconnect",
+    label: "  ",
+    group: "credit",
+    render: row => {
+      const statusState = String(row.statusState || row.status || "NAv").toUpperCase();
+
+      return (
+        <WorkButton
+          tone="reconnect"
+          disabled={statusState !== "DISCONNECTED" || checkingMeterId === row.id}
+          busy={checkingMeterId === row.id}
+          title={
+            statusState === "DISCONNECTED"
+              ? "Send a reconnection for this meter"
+              : statusState === "CONNECTED"
+                ? "This meter is already connected"
+                : "This meter is out of service"
+          }
+          onClick={() => launchCreditControl(row, "reconnect")}
+        >
+          Reconnect
+        </WorkButton>
+      );
+    }
+  }] : [])];
 
   return (
     <>
@@ -932,16 +911,9 @@ ${premiseId}`;
           <div className="role-pill">
             {isFetching
               ? "Streaming..."
-              : `${formatNumber(sortedMeterRows.length)} meters`}
+              : `${formatNumber(filteredMeterRows.length)} meters`}
           </div>
-          <DownloadButtons
-            registryName="Meter Registry"
-            rowsLabel="meters"
-            visibleRows={sortedMeterRows}
-            columns={quickDownloadColumns}
-            fileBaseName="meters_registry"
-            scope={quickDownloadScope}
-          />
+
         </div>
       </header>
 
@@ -977,7 +949,7 @@ ${premiseId}`;
 
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(sortedMeterRows.length)}</strong>
+          <strong>{formatNumber(filteredMeterRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -1052,436 +1024,36 @@ ${premiseId}`;
 
         {meterRows.length > 0 ? (
           <>
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             <div className="table-wrap">
-              <table className="data-table" style={styles.registryTable}>
-                <thead>
-                  <tr>
-                    <GroupHeader colSpan={4}>Meter Identity</GroupHeader>
-                    <GroupHeader colSpan={2}>Meter Status</GroupHeader>
-                    <GroupHeader colSpan={3}>Location and Actions</GroupHeader>
-                    <GroupHeader colSpan={1}>Record</GroupHeader>
-                    {canLaunchCreditControl ? (
-                      <>
-                        <GroupHeader colSpan={1}>Access</GroupHeader>
-                        <GroupHeader colSpan={4} tone="credit">
-                          Credit Control
-                        </GroupHeader>
-                      </>
-                    ) : null}
-                  </tr>
-                  <tr>
-                  <th>
-                    <SortButton
-                      label="Meter No"
-                      sortKey="meterNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.meterNo}
-                      onChange={(value) => updateFilter("meterNo", value)}
-                      placeholder="Meter no"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Type"
-                      sortKey="meterType"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterType}
-                      onChange={(value) => updateFilter("meterType", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="electricity">Electricity</option>
-                      <option value="water">Water</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Kind"
-                      sortKey="meterKind"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterKind}
-                      onChange={(value) => updateFilter("meterKind", value)}
-                    >
-                      <option value="ALL">All</option>
-                      {meterKindOptions.map((meterKind) => (
-                        <option key={meterKind} value={meterKind}>
-                          {getMeterKindLabel(meterKind)}
-                        </option>
-                      ))}
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Phase"
-                      sortKey="meterPhase"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterPhase}
-                      onChange={(value) => updateFilter("meterPhase", value)}
-                    >
-                      <option value="ALL">All</option>
-                      {meterPhaseOptions.map((meterPhase) => (
-                        <option key={meterPhase} value={meterPhase}>
-                          {getMeterPhaseLabel(meterPhase)}
-                        </option>
-                      ))}
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Visibility"
-                      sortKey="visibility"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.visibility}
-                      onChange={(value) => updateFilter("visibility", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="VISIBLE">Visible</option>
-                      <option value="INVISIBLE">Invisible</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Status"
-                      sortKey="status"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.status}
-                      onChange={(value) => updateFilter("status", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="FIELD">FIELD</option>
-                      <option value="CONNECTED">CONNECTED</option>
-                      <option value="DISCONNECTED">DISCONNECTED</option>
-                      <option value="REMOVED">REMOVED</option>
-                      <option value="DECOMMISSIONED">DECOMMISSIONED</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="ERF No"
-                      sortKey="erfNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.erfNo}
-                      onChange={(value) => updateFilter("erfNo", value)}
-                      placeholder="ERF"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Premise Address"
-                      sortKey="premiseAddress"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.premiseAddress}
-                      onChange={(value) =>
-                        updateFilter("premiseAddress", value)
-                      }
-                      placeholder="Address / ID"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Premise Type"
-                      sortKey="premiseType"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.premiseType}
-                      onChange={(value) => updateFilter("premiseType", value)}
-                      placeholder="Type"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="updatedAt"
-                      sortKey="updatedAt"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <DatetimeFilterButton
-                      filter={updatedAtFilter}
-                      onClick={() => setIsUpdatedAtFilterOpen(true)}
-                    />
-                  </th>
-
-                  {canLaunchCreditControl ? (
-                    <>
-                      {/* DR-R001 3.3: can anyone even get to this meter, read
-                          before send somebody to it. Its own column, outside
-                          the Credit control group. */}
-                      <th>
-                        <SortButton
-                          label="No Access"
-                          sortKey="noAccessCount"
-                          sortConfig={sortConfig}
-                          onSort={handleSort}
-                        />
-                        <FilterSelect
-                          value={filters.noAccessCount}
-                          onChange={(value) =>
-                            updateFilter("noAccessCount", value)
-                          }
-                        >
-                          <option value="ALL">All</option>
-                          <option value="NONE">Never refused</option>
-                          <option value="SOME">Refused at least once</option>
-                          <option value="MANY">Refused more than once</option>
-                        </FilterSelect>
-                      </th>
-
-                      <th>
-                        <SortButton
-                          label="Disconnections"
-                          sortKey="disconnectionCount"
-                          sortConfig={sortConfig}
-                          onSort={handleSort}
-                        />
-                        <FilterSelect
-                          value={filters.disconnectionCount}
-                          onChange={(value) =>
-                            updateFilter("disconnectionCount", value)
-                          }
-                        >
-                          <option value="ALL">All</option>
-                          <option value="NONE">Never disconnected</option>
-                          <option value="SOME">Disconnected at least once</option>
-                          <option value="MANY">Disconnected more than once</option>
-                        </FilterSelect>
-                      </th>
-                      <th aria-label="Disconnect" />
-
-                      <th>
-                        <SortButton
-                          label="Reconnections"
-                          sortKey="reconnectionCount"
-                          sortConfig={sortConfig}
-                          onSort={handleSort}
-                        />
-                        <FilterSelect
-                          value={filters.reconnectionCount}
-                          onChange={(value) =>
-                            updateFilter("reconnectionCount", value)
-                          }
-                        >
-                          <option value="ALL">All</option>
-                          <option value="NONE">Never reconnected</option>
-                          <option value="SOME">Reconnected at least once</option>
-                          <option value="MANY">Reconnected more than once</option>
-                        </FilterSelect>
-                      </th>
-                      <th aria-label="Reconnect" />
-                    </>
-                  ) : null}
-                </tr>
-              </thead>
-
-                <tbody>
-                  {sortedMeterRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={canLaunchCreditControl ? 15 : 10} className="muted">
-                        No meters match the current filters. Clear or adjust a
-                        column filter above.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedMeterRows.map((row) => {
-                      const statusState = String(
-                        row.statusState || row.status || "NAv",
-                      ).toUpperCase();
-
-                      const canDisconnect = statusState === "CONNECTED";
-                      const canReconnect = statusState === "DISCONNECTED";
-                      const isChecking = checkingMeterId === row.id;
-
-                      return (
-                      <tr key={row.id}>
-                        <td style={styles.meterCell}>
-                          {/* The TRN Registry's own windows, brought across. */}
-                          <DataActionButton
-                            onClick={() => setMeterDetailsId(row.id)}
-                            title="Open this meter's details"
-                            icon={<MeterActionIcon />}
-                          >
-                            {row.meterNo}
-                          </DataActionButton>
-                        </td>
-                        <td>{getMeterTypeLabel(row.meterType)}</td>
-                        <td>{getMeterKindLabel(row.meterKind)}</td>
-                        <td>{getMeterPhaseLabel(row.meterPhase)}</td>
-                        <td>{row.visibility}</td>
-                        <td>{statusState}</td>
-                        <td>
-                          <DataActionButton
-                            compact
-                            onClick={() =>
-                              setMapView({
-                                erfId: row.erfId,
-                                erfNo: row.erfNo,
-                                wardPcode: row?.parents?.wardPcode,
-                              })
-                            }
-                            title="Where this ERF is"
-                            icon={<ErfActionIcon />}
-                          >
-                            {row.erfNo}
-                          </DataActionButton>
-                        </td>
-                        <td style={styles.addressCell}>
-                          <DataActionButton
-                            compact
-                            onClick={() =>
-                              setMapView({
-                                erfId: row.erfId,
-                                erfNo: row.erfNo,
-                                wardPcode: row?.parents?.wardPcode,
-                                premiseId: row.premiseId,
-                                meterId: row.id,
-                              })
-                            }
-                            title="Where this premise and its meter are"
-                            icon={<PremiseActionIcon />}
-                          >
-                            {row.premiseAddress || "NAv"}
-                          </DataActionButton>
-                          <div className="muted" style={styles.smallMuted}>
-                            {row.premiseId || "NAv"}
-                          </div>
-                        </td>
-                        <td>{row.premisePropertyType}</td>
-                        <td>{formatUpdatedAt(row.updatedAt)}</td>
-
-                        {canLaunchCreditControl ? (
-                          <>
-                            <td style={styles.countCell}>
-                              <button
-                                type="button"
-                                style={styles.countChip}
-                                onClick={() =>
-                                  setNoAccessMeter({
-                                    id: row.id,
-                                    meterNo: row.meterNo,
-                                    premiseAddress: row.premiseAddress,
-                                  })
-                                }
-                                title="Every visit that could not reach this meter"
-                              >
-                                {readMeterCount(row, "noAccess")}
-                              </button>
-                            </td>
-
-                            <td style={styles.countCell}>
-                              {readMeterCount(row, "disconnections")}
-                            </td>
-                            <td>
-                              <WorkButton
-                                disabled={!canDisconnect || isChecking}
-                                busy={isChecking}
-                                title={
-                                  canDisconnect
-                                    ? "Send a disconnection for this meter"
-                                    : statusState === "DISCONNECTED"
-                                      ? "This meter is already disconnected"
-                                      : "This meter is out of service"
-                                }
-                                onClick={() =>
-                                  launchCreditControl(row, "disconnect")
-                                }
-                              >
-                                Disconnect
-                              </WorkButton>
-                            </td>
-
-                            <td style={styles.countCell}>
-                              {readMeterCount(row, "reconnections")}
-                            </td>
-                            <td>
-                              <WorkButton
-                                tone="reconnect"
-                                disabled={!canReconnect || isChecking}
-                                busy={isChecking}
-                                title={
-                                  canReconnect
-                                    ? "Send a reconnection for this meter"
-                                    : statusState === "CONNECTED"
-                                      ? "This meter is already connected"
-                                      : "This meter is out of service"
-                                }
-                                onClick={() =>
-                                  launchCreditControl(row, "reconnect")
-                                }
-                              >
-                                Reconnect
-                              </WorkButton>
-                            </td>
-                          </>
-                        ) : null}
-                      </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              <IrepsTable
+                key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
+                title="Meters Registry"
+                rows={meterRows}
+                columns={registryColumns}
+                groups={registryGroups}
+                rowKey={row => row.id}
+                filters={filters}
+                onFiltersChange={setFilters}
+                filteredRows={filteredMeterRows}
+                filterRows={filterRegistryRows}
+                defaultSort={{
+                  key: "updatedAt",
+                  direction: "desc"
+                }}
+                downloads={{
+                  registryName: "Meter Registry",
+                  rowsLabel: "meters",
+                  columns: quickDownloadColumns,
+                  fileBaseName: "meters_registry",
+                  scope: quickDownloadScope
+                }}
+              />
             </div>
 
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
           </>
         ) : null}
       </section>
-
-      {isUpdatedAtFilterOpen ? (
-        <DatetimeFilterModal
-          filter={updatedAtFilter}
-          onApply={(nextFilter) => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(nextFilter);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClear={() => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClose={() => setIsUpdatedAtFilterOpen(false)}
-        />
-      ) : null}
 
       {/* The windows this register opens: the meter itself, where it is, its
           No Access history, and the refusal when iREPS cannot account for it
@@ -1539,67 +1111,12 @@ const styles = {
     boxSizing: "border-box",
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
-  sortButton: {
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.4rem",
-    padding: 0,
-    fontWeight: 900,
-    textAlign: "left",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: "8rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
+
+  smallMuted: {
     fontSize: "0.72rem",
-    boxSizing: "border-box",
+    marginTop: "0.25rem",
   },
-  headerSelect: {
-    width: "100%",
-    minWidth: "8rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-    background: "#ffffff",
-    boxSizing: "border-box",
-  },
-  // The TRN Registry's own table language, so the two registers read the same:
-  // a grey band of group headings, and pale blue pills for anything that opens
-  // a window.
-  registryTable: {
-    minWidth: "2200px",
-  },
-  groupHeaderCell: {
-    background: "#e2e8f0",
-    color: "#0f172a",
-    textAlign: "center",
-    fontSize: "0.78rem",
-    fontWeight: 900,
-    letterSpacing: "0.035em",
-    textTransform: "uppercase",
-    borderRight: "2px solid #cbd5e1",
-  },
-  creditControlGroupCell: {
-    background: "#fde8d4",
-    color: "#7c2d12",
-    textAlign: "center",
-    fontSize: "0.78rem",
-    fontWeight: 900,
-    letterSpacing: "0.035em",
-    textTransform: "uppercase",
-    borderRight: "2px solid #cbd5e1",
-  },
+  // The TRN Registry's pill, for anything that opens a window.
   dataActionButton: {
     minHeight: "2.5rem",
     display: "inline-flex",
@@ -1646,32 +1163,13 @@ const styles = {
     width: "1.05rem",
     height: "1.05rem",
   },
-  meterCell: {
-    minWidth: "12rem",
-    whiteSpace: "nowrap",
-  },
-  addressCell: {
-    minWidth: "15rem",
-    maxWidth: "22rem",
-    whiteSpace: "normal",
-  },
-  smallMuted: {
-    fontSize: "0.72rem",
-    marginTop: "0.25rem",
-  },
-  countCell: {
-    minWidth: "7rem",
-    fontVariantNumeric: "tabular-nums",
-    textAlign: "center",
-    fontWeight: 850,
-  },
+  // DR-R001 3.3: the No Access number is a button.
   countChip: {
     minHeight: "2.5rem",
     minWidth: "3.2rem",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "0.42rem",
     border: "1px solid #fcd9b6",
     background: "#fff7ed",
     color: "#9a3412",
@@ -1682,8 +1180,13 @@ const styles = {
     cursor: "pointer",
     borderRadius: "0.65rem",
   },
-  // Disconnect and Reconnect keep the TRN Registry's pill, in the colour of
-  // the work they do (DR-R001 3.2).
+  countValue: {
+    display: "inline-block",
+    minWidth: "2rem",
+    fontWeight: 850,
+    fontVariantNumeric: "tabular-nums",
+  },
+  // Disconnect and Reconnect: the same pill, in the colour of the work.
   workButton: {
     minHeight: "2.5rem",
     display: "inline-flex",
@@ -1728,48 +1231,5 @@ const styles = {
     cursor: "not-allowed",
     borderRadius: "0.65rem",
     whiteSpace: "nowrap",
-  },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
   },
 };
