@@ -1,22 +1,16 @@
-import { useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
+import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
+import IrepsTable, { IrepsTableFilterInput as FilterInput, IrepsTableFilterSelect as FilterSelect } from "../../components/table/IrepsTable";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
-import {
-  useGetRegistryAccountsByWardQuery,
+import { useGetRegistryAccountsByWardQuery,
   useLazyGetFieldAccountDataHistoryByPremiseQuery,
 } from "../../redux/registryAccountsApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
-import {
-  DatetimeFilterButton,
-  DatetimeFilterModal,
-} from "../../components/DatetimeFilter";
-import DownloadButtons from "../../components/DownloadButtons";
-
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
 const EMPTY_ROWS = [];
 
 function getActiveLmPcode(activeWorkbase) {
@@ -146,30 +140,9 @@ function getSortValue(row, key) {
   return "";
 }
 
-function compareNatural(a, b) {
-  if (typeof a === "number" && typeof b === "number") {
-    return a - b;
-  }
 
-  return String(a || "").localeCompare(String(b || ""), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
 
-function compareDefaultRows(a, b) {
-  const wardCompare = compareNatural(
-    getWardNumberFromPcode(a.wardPcode),
-    getWardNumberFromPcode(b.wardPcode),
-  );
 
-  if (wardCompare !== 0) return wardCompare;
-
-  const erfCompare = compareNatural(a.erfNo, b.erfNo);
-  if (erfCompare !== 0) return erfCompare;
-
-  return compareNatural(a.premiseAddress, b.premiseAddress);
-}
 
 function countFilterMatches(count, mode) {
   if (!mode || mode === "ALL") return true;
@@ -199,122 +172,6 @@ function occupantHasDetails(occupant = {}) {
     occupant?.contact?.phone ||
     occupant?.contact?.whatsapp ||
     occupant?.contact?.email
-  );
-}
-
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig?.key === sortKey;
-  const arrow = !isActive ? "↕" : sortConfig.direction === "asc" ? "↑" : "↓";
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(sortKey)}
-      style={styles.sortButton}
-      title={`Sort by ${label}`}
-    >
-      <span>{label}</span>
-      <span>{arrow}</span>
-    </button>
-  );
-}
-
-function FilterInput({ value, onChange, placeholder, style = null }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={{ ...styles.headerInput, ...(style || {}) }}
-    />
-  );
-}
-
-function FilterSelect({ value, onChange, children, style = null }) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={{ ...styles.headerSelect, ...(style || {}) }}
-    >
-      {children}
-    </select>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-        {formatNumber(totalRows)} rows
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={styles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -357,32 +214,23 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }) {
 }
 
 function SimpleListTable({ columns = [], rows = [], emptyText = "No rows found." }) {
-  if (!rows.length) {
-    return <p className="muted">{emptyText}</p>;
-  }
-
-  return (
-    <div className="table-wrap">
-      <table className="data-table">
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column.key}>{column.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={row.id || rowIndex}>
-              {columns.map((column) => (
-                <td key={column.key}>{column.render(row, rowIndex)}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+ // Preserve the original index used by parallel accountMasterIds references.
+ const records = rows.map((source, sourceIndex) => ({ source, sourceIndex }));
+ const tableColumns = columns.map(column => ({ ...column, filter: "text", value: record => column.render(record.source, record.sourceIndex), render: record => column.render(record.source, record.sourceIndex) }));
+ const title = columns.some(column => column.key === "accountNo") ? "Linked accounts" : "Linked meters";
+ return <IrepsTable
+                title={title}
+                rows={records}
+                columns={tableColumns}
+                rowKey={record => record.source.id || record.sourceIndex}
+                emptyText={emptyText}
+                downloads={{
+                  fileBaseName: title.replaceAll(" ", "_"),
+                  scope: {
+                    label: "Selected premise"
+                  }
+                }}
+              />;
 }
 
 function DetailLine({ label, value }) {
@@ -483,20 +331,11 @@ function HistoryCard({ historyRow }) {
   );
 }
 
-
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
   startDate: "",
   endDate: "",
 };
-
-function buildUpdatedAtFilter(mode) {
-  return {
-    mode,
-    startDate: "",
-    endDate: "",
-  };
-}
 
 function getUpdatedAtDate(value) {
   if (!value || value === "NAv") return null;
@@ -513,72 +352,6 @@ function getUpdatedAtDate(value) {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-}
-
-function endOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
-}
-
-function addDays(date, days) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-
-  const [year, month, day] = String(value).split("-").map(Number);
-
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
-  const mode = filter?.mode || "ALL";
-  const now = new Date();
-  const todayStart = startOfDay(now);
-
-  if (mode === "TODAY") {
-    return { start: todayStart, end: endOfDay(now) };
-  }
-
-  if (mode === "YESTERDAY") {
-    const yesterday = addDays(todayStart, -1);
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-  }
-
-  if (mode === "PAST_3_DAYS") {
-    return { start: addDays(todayStart, -2), end: endOfDay(now) };
-  }
-
-  if (mode === "THIS_WEEK") {
-    const sunday = addDays(todayStart, -todayStart.getDay());
-    const saturday = addDays(sunday, 6);
-    return { start: startOfDay(sunday), end: endOfDay(saturday) };
-  }
-
-  if (mode === "THIS_MONTH") {
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    return { start: firstDay, end: lastDay };
-  }
-
-  if (mode === "CUSTOM") {
-    const startDate = parseDateOnly(filter?.startDate);
-    const endDate = parseDateOnly(filter?.endDate);
-
-    return {
-      start: startDate ? startOfDay(startDate) : null,
-      end: endDate ? endOfDay(endDate) : null,
-    };
-  }
-
-  return { start: null, end: null };
 }
 
 function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
@@ -600,16 +373,13 @@ export default function AccountsRegistryPage() {
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
+
   const [filters, setFilters] = useState(EMPTY_ACCOUNT_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
-  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
+
   const [modalState, setModalState] = useState({ type: "", row: null });
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName =
@@ -655,63 +425,23 @@ export default function AccountsRegistryPage() {
     },
   );
 
-  const filteredRows = useMemo(() => {
-    return accountRows.filter((row) => {
-      const accountSearchMatch = !filters.accountSearch
-        ? true
-        : row.accounts.some((account) =>
-            includesText(account.accountNo, filters.accountSearch),
-          );
-
-      const meterSearchMatch = !filters.meterSearch
-        ? true
-        : row.meters.some(
-            (meter) =>
-              includesText(meter.meterNo, filters.meterSearch) ||
-              includesText(meter.meterId, filters.meterSearch),
-          );
-
-      return (
-        includesText(row.premiseAddress, filters.premiseAddress) &&
-        includesText(row.erfNo, filters.erfNo) &&
-        includesText(row.ownerLabel, filters.owner) &&
-        (filters.ownerType === "ALL" || row.ownerType === filters.ownerType) &&
-        accountSearchMatch &&
-        countFilterMatches(row.accountCount, filters.accountCountMode) &&
-        meterSearchMatch &&
-        countFilterMatches(row.meterCount, filters.meterCountMode) &&
-        (filters.historyStatus === "ALL" ||
-          row.historyStatus === filters.historyStatus) &&
-        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
-      );
-    });
-  }, [accountRows, filters, updatedAtFilter]);
-
-  const sortedRows = useMemo(() => {
-    const rows = [...filteredRows];
-
-    if (!sortConfig?.key || sortConfig.key === "default") {
-      return rows.sort(compareDefaultRows);
+  const filterRegistryRows = useCallback((rows, tableFilters) => {
+    const filters = {
+      ...EMPTY_ACCOUNT_FILTERS,
+      ...tableFilters
+    };
+    for (const key of Object.keys(EMPTY_ACCOUNT_FILTERS)) {
+      if (EMPTY_ACCOUNT_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
     }
-
-    return rows.sort((a, b) => {
-      const compare = compareNatural(
-        getSortValue(a, sortConfig.key),
-        getSortValue(b, sortConfig.key),
-      );
-
-      return sortConfig.direction === "desc" ? compare * -1 : compare;
+    const updatedAtFilter = tableFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
+    return rows.filter(row => {
+      const accountSearchMatch = !filters.accountSearch ? true : row.accounts.some(account => includesText(account.accountNo, filters.accountSearch));
+      const meterSearchMatch = !filters.meterSearch ? true : row.meters.some(meter => includesText(meter.meterNo, filters.meterSearch) || includesText(meter.meterId, filters.meterSearch));
+      return includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.erfNo, filters.erfNo) && includesText(row.ownerLabel, filters.owner) && (filters.ownerType === "ALL" || row.ownerType === filters.ownerType) && accountSearchMatch && countFilterMatches(row.accountCount, filters.accountCountMode) && meterSearchMatch && countFilterMatches(row.meterCount, filters.meterCountMode) && (filters.historyStatus === "ALL" || row.historyStatus === filters.historyStatus) && matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter);
     });
-  }, [filteredRows, sortConfig]);
+  }, []);
 
-  const totalRows = sortedRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
-  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
-  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
-  const paginatedRows = useMemo(() => {
-    return sortedRows.slice(pageStartIndex, pageEndIndex);
-  }, [sortedRows, pageStartIndex, pageEndIndex]);
+  const filteredRows = useMemo(() => filterRegistryRows(accountRows, filters), [accountRows, filters, filterRegistryRows]);
 
   const quickDownloadColumns = useMemo(
     () => [
@@ -770,51 +500,13 @@ export default function AccountsRegistryPage() {
   );
 
   function updateFilter(key, value) {
-    setCurrentPage(1);
+
     setFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) {
-        return { key: sortKey, direction: "asc" };
-      }
-
-      if (current.direction === "asc") {
-        return { key: sortKey, direction: "desc" };
-      }
-
-      return { key: "updatedAt", direction: "desc" };
-    });
   }
 
   function resetAccountRegistryControls() {
     setFilters(EMPTY_ACCOUNT_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-    setCurrentPage(1);
-  }
 
-  function handlePageChange(nextPage) {
-    const normalizedPage = Number(nextPage);
-    const clampedPage = Math.max(
-      1,
-      Math.min(
-        Number.isFinite(normalizedPage) ? normalizedPage : 1,
-        totalPages,
-      ),
-    );
-    setCurrentPage(clampedPage);
-  }
-
-  function handlePageSizeChange(nextPageSize) {
-    const normalizedPageSize = Number(nextPageSize);
-    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
-      ? normalizedPageSize
-      : DEFAULT_PAGE_SIZE;
-    setPageSize(nextSize);
-    setCurrentPage(1);
   }
 
   function handleWardChange(value) {
@@ -862,9 +554,161 @@ export default function AccountsRegistryPage() {
 
   const visiblePremiseSummary = !effectiveSelectedWardPcode
     ? "No ward selected"
-    : sortedRows.length === accountRows.length
+    : filteredRows.length === accountRows.length
       ? `Showing ${formatNumber(accountRows.length)} account registry premise(s)`
-      : `Showing ${formatNumber(sortedRows.length)} of ${formatNumber(accountRows.length)} account registry premise(s)`;
+      : `Showing ${formatNumber(filteredRows.length)} of ${formatNumber(accountRows.length)} account registry premise(s)`;
+
+  const registryColumns = [{
+    key: "premiseAddress",
+    label: "Premise Address",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseAddress"),
+    sortValue: row => getSortValue(row, "premiseAddress"),
+    render: row => {
+      return <><strong>{row.premiseAddress}</strong>
+                              <div className="muted" style={styles.smallMuted}>
+                                {row.premiseId}
+                              </div></>;
+    }
+  }, {
+    key: "ward",
+    label: "Ward",
+    filter: null,
+    sortable: true,
+    value: row => getSortValue(row, "ward"),
+    sortValue: row => getSortValue(row, "ward"),
+    render: row => {
+      return <>{getWardNumberDisplay(row.wardPcode)}</>;
+    },
+    renderFilter: () => <><FilterSelect aria-label="Registry ward scope" value={effectiveSelectedWardPcode} onChange={handleWardChange}>
+                            <option value="">Select ward</option>
+                            {wardRows.map(ward => <option key={ward.wardPcode} value={ward.wardPcode}>
+                                Ward {ward.wardNumber}
+                              </option>)}
+                          </FilterSelect></>,
+    isFilterActive: () => false
+  }, {
+    key: "erfNo",
+    label: "ERF No",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "erfNo"),
+    sortValue: row => getSortValue(row, "erfNo"),
+    render: row => {
+      return <>{row.erfNo}</>;
+    }
+  }, {
+    key: "owner",
+    label: "Owner",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "owner"),
+    sortValue: row => getSortValue(row, "owner"),
+    render: row => {
+      return <>{row.ownerLabel}</>;
+    }
+  }, {
+    key: "ownerType",
+    label: "Owner Type",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "ownerType"),
+    sortValue: row => getSortValue(row, "ownerType"),
+    render: row => {
+      return <>{getOwnerTypeLabel(row.ownerType)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "NATURAL_PERSON",
+      label: "Natural Person"
+    }, {
+      value: "JURISTIC_PERSON",
+      label: "Juristic Person"
+    }]
+  }, {
+    key: "accounts",
+    label: "Accounts",
+    filter: null,
+    sortable: true,
+    value: row => getSortValue(row, "accounts"),
+    sortValue: row => getSortValue(row, "accounts"),
+    render: row => {
+      return <><CountPill count={row.accountCount} label={row.accountCount === 1 ? "Account" : "Accounts"} onClick={() => openModal("accounts", row)} /></>;
+    },
+    renderFilter: () => <><div style={styles.pairedFilters}>
+                            <FilterInput value={filters.accountSearch} onChange={value => updateFilter("accountSearch", value)} placeholder="Account no" style={styles.pairedFilterInput} />
+                            <FilterSelect aria-label="Filter account count" value={filters.accountCountMode} onChange={value => updateFilter("accountCountMode", value)} style={styles.pairedFilterSelect}>
+                              <option value="ALL">Any</option>
+                              <option value="ZERO">0</option>
+                              <option value="ONE">1</option>
+                              <option value="MULTIPLE">2+</option>
+                            </FilterSelect>
+                          </div></>,
+    isFilterActive: filters => Boolean(filters.accountSearch && filters.accountSearch !== "ALL") || Boolean(filters.accountCountMode && filters.accountCountMode !== "ALL")
+  }, {
+    key: "meters",
+    label: "Meters",
+    filter: null,
+    sortable: true,
+    value: row => getSortValue(row, "meters"),
+    sortValue: row => getSortValue(row, "meters"),
+    render: row => {
+      return <><CountPill count={row.meterCount} label={row.meterCount === 1 ? "Meter" : "Meters"} onClick={() => openModal("meters", row)} /></>;
+    },
+    renderFilter: () => <><div style={styles.pairedFilters}>
+                            <FilterInput value={filters.meterSearch} onChange={value => updateFilter("meterSearch", value)} placeholder="Meter no" style={styles.pairedFilterInput} />
+                            <FilterSelect aria-label="Filter meter count" value={filters.meterCountMode} onChange={value => updateFilter("meterCountMode", value)} style={styles.pairedFilterSelect}>
+                              <option value="ALL">Any</option>
+                              <option value="ZERO">0</option>
+                              <option value="ONE">1</option>
+                              <option value="MULTIPLE">2+</option>
+                            </FilterSelect>
+                          </div></>,
+    isFilterActive: filters => Boolean(filters.meterSearch && filters.meterSearch !== "ALL") || Boolean(filters.meterCountMode && filters.meterCountMode !== "ALL")
+  }, {
+    key: "historyStatus",
+    label: "History",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "history"),
+    sortValue: row => getSortValue(row, "history"),
+    render: row => {
+      return <><button type="button" style={styles.textButton} onClick={() => openHistoryModal(row)}>
+                                {row.historyStatus === "HAS_HISTORY" ? "View History" : "No History"}
+                              </button></>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "HAS_HISTORY",
+      label: "Has history"
+    }, {
+      value: "NO_HISTORY",
+      label: "No history"
+    }]
+  }, {
+    key: "actions",
+    label: "Actions",
+    filter: null,
+    sortable: false,
+    value: row => getSortValue(row, "actions"),
+    sortValue: row => getSortValue(row, "actions"),
+    render: row => {
+      return <><button type="button" style={styles.actionButton} onClick={() => openModal("details", row)}>
+                                View Details
+                              </button></>;
+    }
+  }, {
+    key: "updatedAt",
+    label: "updatedAt",
+    filter: "date",
+    sortable: true,
+    value: row => getSortValue(row, "updatedAt"),
+    sortValue: row => getSortValue(row, "updatedAt"),
+    render: row => {
+      return <>{formatUpdatedAt(row.updatedAt)}</>;
+    }
+  }];
 
   return (
     <>
@@ -885,16 +729,9 @@ export default function AccountsRegistryPage() {
           <div className="role-pill">
             {isFetching
               ? "Streaming..."
-              : `${formatNumber(sortedRows.length)} account registry rows`}
+              : `${formatNumber(filteredRows.length)} account registry rows`}
           </div>
-          <DownloadButtons
-            registryName="Account Registry"
-            rowsLabel="account registry rows"
-            visibleRows={sortedRows}
-            columns={quickDownloadColumns}
-            fileBaseName="accounts_registry"
-            scope={quickDownloadScope}
-          />
+
         </div>
       </header>
 
@@ -930,7 +767,7 @@ export default function AccountsRegistryPage() {
 
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(sortedRows.length)}</strong>
+          <strong>{formatNumber(filteredRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -1000,247 +837,32 @@ export default function AccountsRegistryPage() {
 
         {accountRows.length > 0 ? (
           <>
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                  <th>
-                    <SortButton
-                      label="Premise Address"
-                      sortKey="premiseAddress"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.premiseAddress}
-                      onChange={(value) => updateFilter("premiseAddress", value)}
-                      placeholder="Filter address"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Ward"
-                      sortKey="ward"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={effectiveSelectedWardPcode}
-                      onChange={handleWardChange}
-                    >
-                      <option value="">Select ward</option>
-                      {wardRows.map((ward) => (
-                        <option key={ward.wardPcode} value={ward.wardPcode}>
-                          Ward {ward.wardNumber}
-                        </option>
-                      ))}
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="ERF No"
-                      sortKey="erfNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.erfNo}
-                      onChange={(value) => updateFilter("erfNo", value)}
-                      placeholder="ERF"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Owner"
-                      sortKey="owner"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.owner}
-                      onChange={(value) => updateFilter("owner", value)}
-                      placeholder="Owner"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Owner Type"
-                      sortKey="ownerType"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.ownerType}
-                      onChange={(value) => updateFilter("ownerType", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="NATURAL_PERSON">Natural Person</option>
-                      <option value="JURISTIC_PERSON">Juristic Person</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Accounts"
-                      sortKey="accounts"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <div style={styles.pairedFilters}>
-                      <FilterInput
-                        value={filters.accountSearch}
-                        onChange={(value) => updateFilter("accountSearch", value)}
-                        placeholder="Account no"
-                        style={styles.pairedFilterInput}
-                      />
-                      <FilterSelect
-                        value={filters.accountCountMode}
-                        onChange={(value) => updateFilter("accountCountMode", value)}
-                        style={styles.pairedFilterSelect}
-                      >
-                        <option value="ALL">Any</option>
-                        <option value="ZERO">0</option>
-                        <option value="ONE">1</option>
-                        <option value="MULTIPLE">2+</option>
-                      </FilterSelect>
-                    </div>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Meters"
-                      sortKey="meters"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <div style={styles.pairedFilters}>
-                      <FilterInput
-                        value={filters.meterSearch}
-                        onChange={(value) => updateFilter("meterSearch", value)}
-                        placeholder="Meter no"
-                        style={styles.pairedFilterInput}
-                      />
-                      <FilterSelect
-                        value={filters.meterCountMode}
-                        onChange={(value) => updateFilter("meterCountMode", value)}
-                        style={styles.pairedFilterSelect}
-                      >
-                        <option value="ALL">Any</option>
-                        <option value="ZERO">0</option>
-                        <option value="ONE">1</option>
-                        <option value="MULTIPLE">2+</option>
-                      </FilterSelect>
-                    </div>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="History"
-                      sortKey="history"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.historyStatus}
-                      onChange={(value) => updateFilter("historyStatus", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="HAS_HISTORY">Has history</option>
-                      <option value="NO_HISTORY">No history</option>
-                    </FilterSelect>
-                  </th>
-                  <th>Actions</th>
-                  <th>
-                    <SortButton
-                      label="updatedAt"
-                      sortKey="updatedAt"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <DatetimeFilterButton
-                      filter={updatedAtFilter}
-                      onClick={() => setIsUpdatedAtFilterOpen(true)}
-                    />
-                  </th>
-                </tr>
-              </thead>
-
-                <tbody>
-                  {sortedRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="muted">
-                        No account registry rows match the current filters. Clear or adjust a column filter above.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <strong>{row.premiseAddress}</strong>
-                        <div className="muted" style={styles.smallMuted}>
-                          {row.premiseId}
-                        </div>
-                      </td>
-                      <td>{getWardNumberDisplay(row.wardPcode)}</td>
-                      <td>{row.erfNo}</td>
-                      <td>{row.ownerLabel}</td>
-                      <td>{getOwnerTypeLabel(row.ownerType)}</td>
-                      <td>
-                        <CountPill
-                          count={row.accountCount}
-                          label={row.accountCount === 1 ? "Account" : "Accounts"}
-                          onClick={() => openModal("accounts", row)}
-                        />
-                      </td>
-                      <td>
-                        <CountPill
-                          count={row.meterCount}
-                          label={row.meterCount === 1 ? "Meter" : "Meters"}
-                          onClick={() => openModal("meters", row)}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          style={styles.textButton}
-                          onClick={() => openHistoryModal(row)}
-                        >
-                          {row.historyStatus === "HAS_HISTORY"
-                            ? "View History"
-                            : "No History"}
-                        </button>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          style={styles.actionButton}
-                          onClick={() => openModal("details", row)}
-                        >
-                          View Details
-                        </button>
-                      </td>
-                      <td>{formatUpdatedAt(row.updatedAt)}</td>
-                    </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <IrepsTable
+                key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
+                title="Accounts Registry"
+                rows={accountRows}
+                columns={registryColumns}
+                rowKey={row => row.id}
+                filters={filters}
+                onFiltersChange={setFilters}
+                filteredRows={filteredRows}
+                filterRows={filterRegistryRows}
+                defaultSort={{
+                  key: "updatedAt",
+                  direction: "desc"
+                }}
+                downloads={{
+                  registryName: "Account Registry",
+                  rowsLabel: "account registry rows",
+                  columns: quickDownloadColumns,
+                  fileBaseName: "accounts_registry",
+                  scope: quickDownloadScope
+                }}
+              />
             </div>
 
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
           </>
         ) : null}
       </section>
@@ -1441,22 +1063,6 @@ export default function AccountsRegistryPage() {
         </ModalShell>
       ) : null}
 
-      {isUpdatedAtFilterOpen ? (
-        <DatetimeFilterModal
-          filter={updatedAtFilter}
-          onApply={(nextFilter) => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(nextFilter);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClear={() => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClose={() => setIsUpdatedAtFilterOpen(false)}
-        />
-      ) : null}
     </>
   );
 }
@@ -1471,39 +1077,7 @@ const styles = {
     paddingBottom: "0.85rem",
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
-  sortButton: {
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.4rem",
-    padding: 0,
-    fontWeight: 900,
-    textAlign: "left",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: "8rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-  },
-  headerSelect: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-    background: "#ffffff",
-  },
+
   pairedFilters: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 7fr) minmax(0, 3fr)",
@@ -1707,47 +1281,5 @@ const styles = {
     fontSize: "0.8rem",
     fontWeight: 900,
   },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
-  },
+
 };

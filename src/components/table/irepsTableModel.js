@@ -60,6 +60,7 @@ export function irepsTableDateRange(filter, now = new Date()) {
 
 export function irepsTableFilterActive(column, filter) {
   if (!column?.filter) return false;
+  if (column.filterAllValue !== undefined && filter === column.filterAllValue) return false;
   if (column.filter === "salesRange") return isSalesRangeFilterActive(filter);
   if (column.filter === "date") {
     return Boolean(filter && typeof filter === "object" && filter.mode && filter.mode !== "ALL");
