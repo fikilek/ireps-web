@@ -21,6 +21,7 @@ import MeterMediaGalleryModal from "./components/MeterMediaGalleryModal";
 import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
 import MeterReportPreviewModal from "./components/MeterReportPreviewModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
+import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 
 const EMPTY_METER_FILTERS = {
   meterNo: "",
@@ -32,6 +33,7 @@ const EMPTY_METER_FILTERS = {
   erfNo: "",
   premiseAddress: "",
   premiseType: "",
+  registration: "ALL",
   // DR-R001 3.2 and 3.3: each count filters on its own. The office types the
   // number it is looking for — 0 for never, 1, 2 — the way the TRN Registry's
   // media count is typed.
@@ -42,6 +44,26 @@ const EMPTY_METER_FILTERS = {
 
 // DR-R001 section 4: a Manager and a supervisor launch this work.
 const CREDIT_CONTROL_ROLES = ["MNG", "SPV"];
+
+// DR-R001 3.1: a meter carries the id of the transaction that created it, so
+// how it came into iREPS is read straight off that id. No new field, no guess.
+const REGISTRATIONS = {
+  DISCOVERED: { label: "Discovered", prefix: "TRN_MDIS_" },
+  INSTALLED: { label: "Installed", prefix: "TRN_MINST_" },
+};
+
+function registrationOf(row) {
+  const id = String(row?.id || "").toUpperCase();
+
+  if (id.startsWith(REGISTRATIONS.INSTALLED.prefix)) return "INSTALLED";
+  if (id.startsWith(REGISTRATIONS.DISCOVERED.prefix)) return "DISCOVERED";
+
+  return "NAv";
+}
+
+function registrationLabel(row) {
+  return REGISTRATIONS[registrationOf(row)]?.label || "NAv";
+}
 
 function readMeterCount(row, key) {
   const value = Number(row?.counts?.[key]);
@@ -219,6 +241,8 @@ function getSortValue(row, key) {
   if (key === "premiseType") return row.premisePropertyType || "";
   if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
 
+  if (key === "registration") return registrationLabel(row);
+
   // DR-R001 3.2 and 3.3: the meter's own numbers sort as numbers.
   if (key === "noAccessCount") return readMeterCount(row, "noAccess");
   if (key === "disconnectionCount") return readMeterCount(row, "disconnections");
@@ -244,6 +268,25 @@ function ErfActionIcon() {
   return (
     <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
       <path d="M4 7.5 10 4.5l4 3 6-3v12l-6 3-4-3-6 3z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DiscoveredActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M15.8 15.8 20 20" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function InstalledActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <path d="M12 3v7" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path d="M7.5 10h9v4.5a4.5 4.5 0 0 1-9 0z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M12 19v2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
     </svg>
   );
 }
@@ -402,6 +445,7 @@ export default function MetersRegistryPage() {
   const [mapView, setMapView] = useState(null);
   const [noAccessMeter, setNoAccessMeter] = useState(null);
   const [mediaMeter, setMediaMeter] = useState(null);
+  const [registrationTrnId, setRegistrationTrnId] = useState(null);
   const [reportMeter, setReportMeter] = useState(null);
   const [guardRefusal, setGuardRefusal] = useState(null);
   const [checkingMeterId, setCheckingMeterId] = useState(null);
@@ -491,6 +535,7 @@ export default function MetersRegistryPage() {
     return rows.filter(row => {
       const statusText = row.statusState || row.status || "NAv";
       return includesText(row.meterNo, filters.meterNo) && (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) && (filters.meterKind === "ALL" || String(row.meterKind || "").toLowerCase() === filters.meterKind.toLowerCase()) && (filters.meterPhase === "ALL" || String(row.meterPhase || "").toLowerCase() === filters.meterPhase.toLowerCase()) && (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) && (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) && includesText(row.erfNo, filters.erfNo) && includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress) && includesText(row.premisePropertyType, filters.premiseType)
+        && (filters.registration === "ALL" || registrationOf(row) === filters.registration)
         // DR-R001 3.2 and 3.3: never disconnected, disconnected more than
         // once, nobody could get in — each count filters on its own.
         && matchesCountFilter(readMeterCount(row, "noAccess"), filters.noAccessCount)
@@ -771,6 +816,38 @@ ${premiseId}`;
             {row.premiseAddress || "NAv"}
           </DataActionButton>
         </>
+      );
+    }
+  }, {
+    // How this meter came into iREPS, and the transaction that put it there.
+    key: "registration",
+    label: "Registered by",
+    group: "identity",
+    filter: "select",
+    sortable: true,
+    value: row => registrationLabel(row),
+    sortValue: row => registrationLabel(row),
+    filterAllValue: "ALL",
+    filterOptions: [
+      { value: "DISCOVERED", label: "Discovered" },
+      { value: "INSTALLED", label: "Installed" },
+    ],
+    render: row => {
+      const kind = registrationOf(row);
+
+      if (kind === "NAv") {
+        return <span className="muted">NAv</span>;
+      }
+
+      return (
+        <DataActionButton
+          compact
+          onClick={() => setRegistrationTrnId(row.id)}
+          title={`Open the ${REGISTRATIONS[kind].label.toLowerCase()} transaction that created this meter`}
+          icon={kind === "INSTALLED" ? <InstalledActionIcon /> : <DiscoveredActionIcon />}
+        >
+          {REGISTRATIONS[kind].label}
+        </DataActionButton>
       );
     }
   }, {
@@ -1156,6 +1233,15 @@ ${premiseId}`;
           wardPcode={mapView.wardPcode}
           pins={mapPins}
           onClose={() => setMapView(null)}
+        />
+      ) : null}
+
+      {/* The transaction that created this meter, in the window the TRN
+          Registry opens for any transaction. */}
+      {registrationTrnId ? (
+        <TrnReportPreviewModal
+          trnId={registrationTrnId}
+          onClose={() => setRegistrationTrnId(null)}
         />
       ) : null}
 
