@@ -29,7 +29,17 @@ initializeApp({ credential: applicationDefault() });
 
 const db = getFirestore();
 
+// The register reads a copy of the meter, so the copy is rebuilt here rather
+// than left to the trigger: whichever version of the trigger an environment
+// happens to be running, the register shows what the meter says.
+const { rebuildMeterRegistryRow } = await import(
+  "../registry/meterRegistryRowRebuild.js"
+);
+
 const APPLY = process.argv.includes("--apply");
+// Rebuild every register row of a meter that carries a count, even where the
+// meter's own numbers were already right.
+const ROWS_ONLY = process.argv.includes("--rows");
 const LM_INDEX = process.argv.indexOf("--lm");
 const LM_PCODE = LM_INDEX > -1 ? process.argv[LM_INDEX + 1] : "";
 
@@ -104,7 +114,10 @@ async function readTransactions() {
       const premiseId = premiseOf(trn);
 
       if (!premiseId) {
-        // A batch No Access whose row names no premise. By design, not a gap.
+        // A No Access with no premise to attach it to. A finding, not a fix: the
+        // Meter Discovery validator never asked for the ERF or the premise on a
+        // no-access visit, so the record was written without them. NA-R001 fixes
+        // the form and then backfills what evidence can name.
         noAccessWithoutPremise.push(doc.id);
         return;
       }
@@ -121,6 +134,7 @@ async function readTransactions() {
 async function writeMeterCounts(counts) {
   const changed = [];
   const missingMeters = [];
+  const rowsRebuilt = [];
 
   for (const [astId, wanted] of counts) {
     const ref = db.collection("asts").doc(astId);
@@ -139,11 +153,12 @@ async function writeMeterCounts(counts) {
       Number(held.reconnections || 0) !== wanted.reconnections ||
       Number(held.noAccess || 0) !== wanted.noAccess;
 
-    if (!differs) continue;
+    const carriesACount =
+      wanted.disconnections > 0 || wanted.reconnections > 0 || wanted.noAccess > 0;
 
-    changed.push({ astId, held, wanted });
+    if (differs) changed.push({ astId, held, wanted });
 
-    if (APPLY) {
+    if (APPLY && differs) {
       await ref.update({
         "counts.disconnections": wanted.disconnections,
         "counts.reconnections": wanted.reconnections,
@@ -153,9 +168,14 @@ async function writeMeterCounts(counts) {
         "metadata.updatedByUser": "Meter counts backfill",
       });
     }
+
+    if (APPLY && (differs || (ROWS_ONLY && carriesACount))) {
+      await rebuildMeterRegistryRow(astId);
+      rowsRebuilt.push(astId);
+    }
   }
 
-  return { changed, missingMeters };
+  return { changed, missingMeters, rowsRebuilt };
 }
 
 async function reconcilePremiseNoAccess(noAccessByPremise) {
@@ -219,7 +239,7 @@ async function main() {
   console.log(`\nTransactions read: ${read}`);
   console.log(`Meters with work behind them: ${counts.size}`);
 
-  const { changed, missingMeters } = await writeMeterCounts(counts);
+  const { changed, missingMeters, rowsRebuilt } = await writeMeterCounts(counts);
   const { missingFromPremise, onPremiseWithoutTrn, missingPremises } =
     await reconcilePremiseNoAccess(noAccessByPremise);
 
@@ -229,6 +249,10 @@ async function main() {
     (row) =>
       `${row.astId}  held ${row.held.disconnections || 0}/${row.held.reconnections || 0}/${row.held.noAccess || 0}` +
       `  →  ${row.wanted.disconnections}/${row.wanted.reconnections}/${row.wanted.noAccess}  (dcn/rcn/na)`,
+  );
+
+  console.log(
+    `\nRegister rows rebuilt so the page shows the same numbers: ${rowsRebuilt.length}`,
   );
 
   report(
@@ -253,7 +277,7 @@ async function main() {
     (row) => `${row.premiseId}  ${row.extra.join(", ")}`,
   );
   console.log(
-    `\nNo Access visits naming no premise (by design, batch rows): ${noAccessWithoutPremise.length}`,
+    `\nNo Access visits with no premise to attach them to (NA-R001): ${noAccessWithoutPremise.length}`,
   );
 
   if (!APPLY) {
