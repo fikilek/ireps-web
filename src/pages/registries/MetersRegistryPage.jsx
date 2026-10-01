@@ -777,9 +777,6 @@ ${premiseId}`;
           >
             {row.premiseAddress || "NAv"}
           </DataActionButton>
-          <div className="muted" style={styles.smallMuted}>
-            {row.premiseId || "NAv"}
-          </div>
         </>
       );
     }
