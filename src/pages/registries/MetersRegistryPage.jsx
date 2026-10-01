@@ -205,22 +205,91 @@ function buildFilterOptions(rows, key) {
   ).sort(compareNatural);
 }
 
-// A cell that opens something. The same look the TRN Registry gives its own.
-function CellButton({ children, onClick, title }) {
+// The grey band of group headings the TRN Registry uses.
+function GroupHeader({ children, colSpan, tone }) {
   return (
-    <button type="button" style={styles.cellButton} onClick={onClick} title={title}>
+    <th
+      colSpan={colSpan}
+      style={tone === "credit" ? styles.creditControlGroupCell : styles.groupHeaderCell}
+    >
       {children}
+    </th>
+  );
+}
+
+function MeterActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <rect
+        x="4"
+        y="3"
+        width="16"
+        height="18"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <rect x="7" y="6.5" width="10" height="5" rx="1" fill="currentColor" opacity=".35" />
+      <circle cx="9" cy="16" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="16" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ErfActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <path
+        d="M4 7.5 10 4.5l4 3 6-3v12l-6 3-4-3-6 3z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PremiseActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
+      <path
+        d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="10" r="2.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+// Anything that opens a window wears the TRN Registry's pale blue pill.
+function DataActionButton({ children, onClick, title, icon, compact }) {
+  return (
+    <button
+      type="button"
+      style={compact ? styles.compactDataActionButton : styles.dataActionButton}
+      onClick={onClick}
+      title={title}
+    >
+      <span style={styles.dataActionIconWrap}>{icon}</span>
+      <span>{children}</span>
     </button>
   );
 }
 
 // Disconnect and Reconnect. A greyed button says why when you hover it, the way
 // Unallocate does on the TB Register (DR-R001 3.2 and section 6).
-function WorkButton({ children, onClick, disabled, busy, title }) {
+function WorkButton({ children, onClick, disabled, busy, title, tone }) {
+  const activeStyle = tone === "reconnect" ? styles.reconnectButton : styles.workButton;
+
   return (
     <button
       type="button"
-      style={disabled ? styles.workButtonDisabled : styles.workButton}
+      style={disabled ? styles.workButtonDisabled : activeStyle}
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -993,16 +1062,22 @@ ${premiseId}`;
             />
 
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table" style={styles.registryTable}>
                 <thead>
-                  {canLaunchCreditControl ? (
-                    <tr>
-                      <th colSpan={11} style={styles.groupHeaderSpacer} />
-                      <th colSpan={4} style={styles.creditControlGroup}>
-                        Credit control
-                      </th>
-                    </tr>
-                  ) : null}
+                  <tr>
+                    <GroupHeader colSpan={4}>Meter Identity</GroupHeader>
+                    <GroupHeader colSpan={2}>Meter Status</GroupHeader>
+                    <GroupHeader colSpan={3}>Location and Actions</GroupHeader>
+                    <GroupHeader colSpan={1}>Record</GroupHeader>
+                    {canLaunchCreditControl ? (
+                      <>
+                        <GroupHeader colSpan={1}>Access</GroupHeader>
+                        <GroupHeader colSpan={4} tone="credit">
+                          Credit Control
+                        </GroupHeader>
+                      </>
+                    ) : null}
+                  </tr>
                   <tr>
                   <th>
                     <SortButton
@@ -1251,14 +1326,15 @@ ${premiseId}`;
 
                       return (
                       <tr key={row.id}>
-                        <td>
+                        <td style={styles.meterCell}>
                           {/* The TRN Registry's own windows, brought across. */}
-                          <CellButton
+                          <DataActionButton
                             onClick={() => setMeterDetailsId(row.id)}
-                            title="Meter details"
+                            title="Open this meter's details"
+                            icon={<MeterActionIcon />}
                           >
                             {row.meterNo}
-                          </CellButton>
+                          </DataActionButton>
                         </td>
                         <td>{getMeterTypeLabel(row.meterType)}</td>
                         <td>{getMeterKindLabel(row.meterKind)}</td>
@@ -1266,7 +1342,8 @@ ${premiseId}`;
                         <td>{row.visibility}</td>
                         <td>{statusState}</td>
                         <td>
-                          <CellButton
+                          <DataActionButton
+                            compact
                             onClick={() =>
                               setMapView({
                                 erfId: row.erfId,
@@ -1275,12 +1352,14 @@ ${premiseId}`;
                               })
                             }
                             title="Where this ERF is"
+                            icon={<ErfActionIcon />}
                           >
                             {row.erfNo}
-                          </CellButton>
+                          </DataActionButton>
                         </td>
-                        <td>
-                          <CellButton
+                        <td style={styles.addressCell}>
+                          <DataActionButton
+                            compact
                             onClick={() =>
                               setMapView({
                                 erfId: row.erfId,
@@ -1291,9 +1370,10 @@ ${premiseId}`;
                               })
                             }
                             title="Where this premise and its meter are"
+                            icon={<PremiseActionIcon />}
                           >
-                            <strong>{row.premiseAddress || "NAv"}</strong>
-                          </CellButton>
+                            {row.premiseAddress || "NAv"}
+                          </DataActionButton>
                           <div className="muted" style={styles.smallMuted}>
                             {row.premiseId || "NAv"}
                           </div>
@@ -1303,8 +1383,10 @@ ${premiseId}`;
 
                         {canLaunchCreditControl ? (
                           <>
-                            <td>
-                              <CellButton
+                            <td style={styles.countCell}>
+                              <button
+                                type="button"
+                                style={styles.countChip}
                                 onClick={() =>
                                   setNoAccessMeter({
                                     id: row.id,
@@ -1315,7 +1397,7 @@ ${premiseId}`;
                                 title="Every visit that could not reach this meter"
                               >
                                 {readMeterCount(row, "noAccess")}
-                              </CellButton>
+                              </button>
                             </td>
 
                             <td style={styles.countCell}>
@@ -1345,6 +1427,7 @@ ${premiseId}`;
                             </td>
                             <td>
                               <WorkButton
+                                tone="reconnect"
                                 disabled={!canReconnect || isChecking}
                                 busy={isChecking}
                                 title={
@@ -1472,75 +1555,178 @@ const styles = {
   },
   headerInput: {
     width: "100%",
-    minWidth: "7.5rem",
+    minWidth: "8rem",
     marginTop: "0.4rem",
     border: "1px solid #cbd5e1",
     borderRadius: "0.45rem",
     padding: "0.36rem 0.45rem",
     fontSize: "0.72rem",
+    boxSizing: "border-box",
   },
   headerSelect: {
     width: "100%",
-    minWidth: "7.5rem",
+    minWidth: "8rem",
     marginTop: "0.4rem",
     border: "1px solid #cbd5e1",
     borderRadius: "0.45rem",
     padding: "0.36rem 0.45rem",
     fontSize: "0.72rem",
     background: "#ffffff",
+    boxSizing: "border-box",
+  },
+  // The TRN Registry's own table language, so the two registers read the same:
+  // a grey band of group headings, and pale blue pills for anything that opens
+  // a window.
+  registryTable: {
+    minWidth: "2200px",
+  },
+  groupHeaderCell: {
+    background: "#e2e8f0",
+    color: "#0f172a",
+    textAlign: "center",
+    fontSize: "0.78rem",
+    fontWeight: 900,
+    letterSpacing: "0.035em",
+    textTransform: "uppercase",
+    borderRight: "2px solid #cbd5e1",
+  },
+  creditControlGroupCell: {
+    background: "#fde8d4",
+    color: "#7c2d12",
+    textAlign: "center",
+    fontSize: "0.78rem",
+    fontWeight: 900,
+    letterSpacing: "0.035em",
+    textTransform: "uppercase",
+    borderRight: "2px solid #cbd5e1",
+  },
+  dataActionButton: {
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.48rem",
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    padding: "0.38rem 0.62rem",
+    font: "inherit",
+    fontWeight: 850,
+    cursor: "pointer",
+    borderRadius: "0.65rem",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+  },
+  compactDataActionButton: {
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.42rem",
+    border: "1px solid #bfdbfe",
+    background: "#f8fbff",
+    color: "#1d4ed8",
+    padding: "0.38rem 0.54rem",
+    font: "inherit",
+    fontWeight: 850,
+    cursor: "pointer",
+    borderRadius: "0.65rem",
+    whiteSpace: "nowrap",
+  },
+  dataActionIconWrap: {
+    width: "1.55rem",
+    height: "1.55rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: "0 0 auto",
+    borderRadius: "0.45rem",
+    background: "#dbeafe",
+  },
+  actionSvgIcon: {
+    display: "block",
+    width: "1.05rem",
+    height: "1.05rem",
+  },
+  meterCell: {
+    minWidth: "12rem",
+    whiteSpace: "nowrap",
+  },
+  addressCell: {
+    minWidth: "15rem",
+    maxWidth: "22rem",
+    whiteSpace: "normal",
   },
   smallMuted: {
     fontSize: "0.72rem",
     marginTop: "0.25rem",
   },
-  groupHeaderSpacer: {
-    borderBottom: 0,
-    background: "transparent",
-  },
-  creditControlGroup: {
-    textAlign: "center",
-    fontSize: "0.72rem",
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    color: "#b45309",
-    background: "#fff7ed",
-  },
   countCell: {
+    minWidth: "7rem",
     fontVariantNumeric: "tabular-nums",
-    textAlign: "right",
-    paddingRight: "0.6rem",
+    textAlign: "center",
+    fontWeight: 850,
   },
-  cellButton: {
-    background: "transparent",
-    border: 0,
-    padding: 0,
-    color: "#1d4ed8",
-    cursor: "pointer",
+  countChip: {
+    minHeight: "2.5rem",
+    minWidth: "3.2rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.42rem",
+    border: "1px solid #fcd9b6",
+    background: "#fff7ed",
+    color: "#9a3412",
+    padding: "0.38rem 0.62rem",
     font: "inherit",
-    textAlign: "left",
-    textDecoration: "underline",
-    textUnderlineOffset: "2px",
-  },
-  workButton: {
-    border: "1px solid #b45309",
-    background: "#b45309",
-    color: "#fff",
-    borderRadius: "6px",
-    padding: "4px 10px",
-    fontSize: "0.78rem",
-    fontWeight: 600,
+    fontWeight: 850,
+    fontVariantNumeric: "tabular-nums",
     cursor: "pointer",
+    borderRadius: "0.65rem",
+  },
+  // Disconnect and Reconnect keep the TRN Registry's pill, in the colour of
+  // the work they do (DR-R001 3.2).
+  workButton: {
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #c2410c",
+    background: "#ea580c",
+    color: "#ffffff",
+    padding: "0.38rem 0.75rem",
+    font: "inherit",
+    fontWeight: 850,
+    cursor: "pointer",
+    borderRadius: "0.65rem",
+    whiteSpace: "nowrap",
+  },
+  reconnectButton: {
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #15803d",
+    background: "#16a34a",
+    color: "#ffffff",
+    padding: "0.38rem 0.75rem",
+    font: "inherit",
+    fontWeight: 850,
+    cursor: "pointer",
+    borderRadius: "0.65rem",
     whiteSpace: "nowrap",
   },
   workButtonDisabled: {
-    border: "1px solid #cbd5e1",
+    minHeight: "2.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #e2e8f0",
     background: "#f1f5f9",
     color: "#94a3b8",
-    borderRadius: "6px",
-    padding: "4px 10px",
-    fontSize: "0.78rem",
-    fontWeight: 600,
+    padding: "0.38rem 0.75rem",
+    font: "inherit",
+    fontWeight: 850,
     cursor: "not-allowed",
+    borderRadius: "0.65rem",
     whiteSpace: "nowrap",
   },
   paginationBar: {
