@@ -172,6 +172,47 @@ test("no-access discovery requires NA, reason and uploaded photo", () => {
   expectCode({ ...good, media: [{ tag: "noAccessPhoto" }] }, "NO_ACCESS_PHOTO_REQUIRED");
 });
 
+// No Access rules NA-R043 (1.0.0). Until this sprint the no-access branch returned before
+// the requiredTextFields list, so a no access was never asked for its ERF on this path. It
+// had produced no bad record on DEV only because the screen supplies what the validator
+// never demanded — which is not the same as the rule being enforced.
+test("NA-R043: a no-access discovery must say which ERF could not be accessed", () => {
+  const good = {
+    id: "TRN_MDIS_1_NA_ZA5241002_100",
+    accessData: {
+      ...baseAccessData(),
+      access: { hasAccess: "no", reason: "Property Locked" },
+    },
+    ast: null,
+    meterType: "NA",
+    media: media("noAccessPhoto"),
+  };
+
+  expectPass(good);
+  expectCode(deepMerge(good, { accessData: { erfId: "" } }), "NO_ACCESS_ERF_REQUIRED");
+  expectCode(deepMerge(good, { accessData: { erfId: "   " } }), "NO_ACCESS_ERF_REQUIRED");
+  expectCode(deepMerge(good, { accessData: { erfNo: "" } }), "NO_ACCESS_ERF_NO_REQUIRED");
+});
+
+// NA-R044 / NA-R084.1: the premise is carried only when it existed at the moment of the
+// visit. A worker at a locked gate often cannot honestly say which unit they were at, so a
+// no access on the ERF alone is a complete record and is never refused for it.
+test("NA-R044: a no-access discovery with no premise is still accepted", () => {
+  const good = {
+    id: "TRN_MDIS_1_NA_ZA5241002_100",
+    accessData: {
+      ...baseAccessData(),
+      premise: null,
+      access: { hasAccess: "no", reason: "Property Locked" },
+    },
+    ast: null,
+    meterType: "NA",
+    media: media("noAccessPhoto"),
+  };
+
+  expectPass(good);
+});
+
 test("common discovery identity, field, status and GPS gates remain enforced", () => {
   expectCode(deepMerge(baseElectricity(), { id: "BAD_1" }), "INVALID_TRN_ID");
   expectCode(deepMerge(baseElectricity(), { accessData: { trnType: "OTHER" } }), "INVALID_TRN_TYPE");

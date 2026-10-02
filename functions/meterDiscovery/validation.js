@@ -618,6 +618,34 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
       );
     }
 
+    // No Access rules NA-R043 (1.0.0): every no access carries its ERF, on the Normal Path
+    // and the Sales Path alike. "There can be no access data without knowing what it is that
+    // you were not able to access" (owner, 2026-10-01).
+    //
+    // THIS IS THE DEFECT THIS SPRINT CLOSES. Until now this branch returned here, and the
+    // requiredTextFields list below — which holds accessData.erfId, accessData.erfNo and
+    // accessData.premise.id — ran only for a visit WITH access. A no access had never once
+    // been asked for its geography on this path. It produced no bad record on DEV only
+    // because the screen supplies what the validator never demanded, which is not the same
+    // as the rule being enforced.
+    //
+    // The premise is deliberately NOT required: it is carried only when it existed at the
+    // moment of the visit (NA-R044, NA-R084.1), and a worker at a locked gate often cannot
+    // honestly say which unit they were at.
+    if (!hasRequiredText(accessData?.erfId)) {
+      return buildFailureResult(
+        "NO_ACCESS_ERF_REQUIRED",
+        "A No Access must say which ERF could not be accessed",
+      );
+    }
+
+    if (!hasRequiredText(accessData?.erfNo)) {
+      return buildFailureResult(
+        "NO_ACCESS_ERF_NO_REQUIRED",
+        "A No Access must carry the ERF number",
+      );
+    }
+
     return null;
   }
 
