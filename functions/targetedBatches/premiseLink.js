@@ -1869,3 +1869,231 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
   };
 }
 
+/**
+ * No Access rules NA-R003 (1.0.0) — the batch bookkeeping that follows a no access.
+ *
+ * The twin of completeTargetedBatchMeterDiscoveryInTransaction above, and deliberately beside
+ * it: one closes a row because a meter was found, this one records that a worker went and
+ * could not touch it. Both write the same three documents, under the same guards, inside the
+ * caller's transaction.
+ *
+ * It is MOVED from recordTargetedBatchNoAccessCallable, which is deleted once no phone still
+ * holds work queued against it. A targeted batch is not a path and not a transaction type —
+ * it is the route that takes a worker to an ERF, after which the work is an ordinary Meter
+ * Discovery (owner, 2026-10-02). So this is not a second way of recording a no access; it is
+ * the batch half of the one way.
+ *
+ * PRECONDITION: the caller is creating the transaction in this same Firestore transaction.
+ * A no access is NOT idempotent by row — a second visit that also fails is a second, real no
+ * access — so the only safe key is the TRN id, and the caller already holds it. Calling this
+ * for a TRN that already exists would count one visit twice.
+ */
+export async function recordTargetedBatchNoAccessInTransaction({
+  transaction,
+  db,
+  trnData,
+  actor = {},
+  now = Timestamp.now(),
+}) {
+  const rawContext = trnData?.targetedBatchContext;
+
+  if (!rawContext) {
+    return { applied: false, reason: "NO_BATCH_CONTEXT" };
+  }
+
+  // GMR-R038: a context the SERVER recognised is not work handed over from a batch row.
+  //
+  // The worker came in on the Normal Path on a premise that happens to belong to a batch, and
+  // GMR-R038 stamps the batch on the transaction so the report knows whose work it is. It
+  // carries none of the Sales Path shape. Treating it as a hand-over is what threw
+  // TARGETED_BATCH_CONTEXT_INVALID out of a trigger that had already written a transaction,
+  // leaving the row NOT_STARTED and the worker told nothing (owner, on TEST, 2026-09-28).
+  // A no access must not repeat that: the record stands, and no row is touched.
+  if (isServerRecognisedBatchContext(rawContext)) {
+    return { applied: false, reason: "RECOGNISED_CONTEXT_ONLY" };
+  }
+
+  const context = normalizeTargetedBatchPremiseContext(rawContext);
+
+  if (!context) {
+    throw controlledError(
+      "TARGETED_BATCH_CONTEXT_INVALID",
+      "The No Access TRN carries invalid Targeted Batch context.",
+    );
+  }
+
+  assertCompleteTargetedBatchPremiseContext(context);
+
+  const parentRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.uploads)
+    .doc(context.tbId);
+  const rowRef = db.collection(TARGETED_BATCH_COLLECTIONS.rows).doc(context.rowId);
+  const salesRef = db
+    .collection(TARGETED_BATCH_COLLECTIONS.sales)
+    .doc(context.salesDocId);
+
+  const [parentSnapshot, rowSnapshot, salesSnapshot] = await Promise.all([
+    transaction.get(parentRef),
+    transaction.get(rowRef),
+    transaction.get(salesRef),
+  ]);
+
+  const parent = requireDocument(
+    parentSnapshot,
+    "TARGETED_BATCH_NOT_FOUND",
+    `Targeted Batch ${context.tbId} was not found.`,
+  );
+  const row = requireDocument(
+    rowSnapshot,
+    "TARGETED_BATCH_ROW_NOT_FOUND",
+    `Targeted Batch row ${context.rowId} was not found.`,
+  );
+  const sales = requireDocument(
+    salesSnapshot,
+    "SALES_DOCUMENT_NOT_FOUND",
+    `Sales document ${context.salesDocId} was not found.`,
+  );
+
+  assertSalesBatchExecutionMembership(sales, context.tbId);
+  assertParentReady(parent, context.tbId);
+  assertRowReady(row, context.rowId);
+
+  const exact = exactSalesTbRef({ tbRefs: sales.tbRefs }, context.tbId);
+  if (!exact.ok) {
+    throw controlledError(
+      exact.code,
+      "The Sales Targeted Batch reference is malformed or ambiguous.",
+    );
+  }
+
+  const { index, reference } = exact;
+  const existingRowId = normalizeText(reference?.rowId);
+  if (existingRowId && existingRowId !== normalizeText(context.rowId)) {
+    throw controlledError(
+      "SALES_TB_REF_ROW_CONFLICT",
+      "The Sales Targeted Batch reference belongs to another TB Row.",
+      { existingRowId, expectedRowId: context.rowId },
+    );
+  }
+
+  const fieldWork = reference?.fieldWork || {};
+
+  if (fieldWork.noAccess !== undefined && !Array.isArray(fieldWork.noAccess)) {
+    throw controlledError("FIELDWORK_INVALID", "Sales fieldWork.noAccess is invalid.");
+  }
+
+  // NA-R041: a no access never completes a row, and it is never recorded against a row whose
+  // meter has already been found. The work is done; there is nothing left to fail to reach.
+  if (normalizeText(fieldWork.meterId)) {
+    throw controlledError(
+      "TARGETED_BATCH_METER_ALREADY_LINKED",
+      "A meter is already linked. No Access cannot be recorded.",
+    );
+  }
+
+  if (normalizeUpper(fieldWork.status) === "COMPLETED") {
+    throw controlledError(
+      "TARGETED_BATCH_EXECUTION_COMPLETED",
+      "Sales field work is completed.",
+    );
+  }
+
+  const capturedIso =
+    normalizeText(trnData?.metadata?.createdOnDevice) ||
+    normalizeText(trnData?.metadata?.createdAt) ||
+    new Date().toISOString();
+
+  const summary = {
+    date: capturedIso.slice(0, 10),
+    time: capturedIso.slice(11, 19),
+    user: normalizeText(actor.name) || "NAv",
+  };
+
+  // NA-R084.1: the premise is whatever the record itself carries. It is never looked up, and
+  // a premise made after the visit is never read back onto it.
+  const premiseId = readNullableText(trnData?.accessData?.premise?.id);
+
+  const updatedTbRefs = [...sales.tbRefs];
+  updatedTbRefs[index] = {
+    ...reference,
+    rowId: context.rowId,
+    fieldWork: {
+      ...fieldWork,
+      status: "IN_PROGRESS",
+      noAccess: [...(fieldWork.noAccess || []), summary],
+      premiseId,
+      updatedAt: now,
+    },
+  };
+
+  transaction.update(salesRef, {
+    tbRefs: updatedTbRefs,
+    ...buildSalesAllMetersOperationalMetadataPatch({
+      existing: sales,
+      operationTimestamp: now,
+      actorUid: actor.uid,
+      actorUser: actor.name,
+    }),
+  });
+
+  const rowStatus = normalizeUpper(
+    row?.execution?.status ||
+      (row?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"),
+  );
+
+  const rowPatch = {
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actor.uid,
+    "metadata.updatedByUser": actor.name,
+  };
+
+  if (rowStatus === "NOT_STARTED") {
+    Object.assign(rowPatch, {
+      "execution.status": "IN_PROGRESS",
+      "execution.startedAt": row?.execution?.startedAt || now,
+      "execution.completedAt": null,
+    });
+  }
+
+  transaction.update(rowRef, rowPatch);
+
+  const parentStatus = normalizeUpper(
+    parent?.execution?.status ||
+      (parent?.schemaVersion === "0.3.0" ? "UNAVAILABLE" : "NOT_STARTED"),
+  );
+
+  const parentPatch = {
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actor.uid,
+    "metadata.updatedByUser": actor.name,
+    // TB-R069 (1.3.87): a no access is one of the five events that move a batch.
+    ...lastActivityPatch(LAST_ACTIVITY_KINDS.NO_ACCESS, now, actor),
+  };
+
+  if (parentStatus === "NOT_STARTED" || rowStatus === "NOT_STARTED") {
+    // Targeted Batch rules section 14: the batch is In Progress once field work starts on any row.
+    Object.assign(parentPatch, {
+      status: "IN_PROGRESS",
+      "execution.status": "IN_PROGRESS",
+      "execution.startedAt": parent?.execution?.startedAt || now,
+      "execution.completedAt": null,
+    });
+
+    if (rowStatus === "NOT_STARTED") {
+      parentPatch["counts.executionStartedRows"] =
+        readNonNegativeInteger(parent?.counts?.executionStartedRows) + 1;
+    }
+  }
+
+  transaction.update(parentRef, parentPatch);
+
+  return {
+    applied: true,
+    tbId: context.tbId,
+    rowId: context.rowId,
+    salesDocId: context.salesDocId,
+    premiseId,
+    rowStatus: "IN_PROGRESS",
+    noAccessCount: updatedTbRefs[index].fieldWork.noAccess.length,
+  };
+}
