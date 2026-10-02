@@ -176,7 +176,7 @@ test("no-access discovery requires NA, reason and uploaded photo", () => {
 // the requiredTextFields list, so a no access was never asked for its ERF on this path. It
 // had produced no bad record on DEV only because the screen supplies what the validator
 // never demanded — which is not the same as the rule being enforced.
-test("NA-R043: a no-access discovery must say which ERF could not be accessed", () => {
+test("NA-R043: a no-access discovery must carry the ERF ID (the number is not a gate)", () => {
   const good = {
     id: "TRN_MDIS_1_NA_ZA5241002_100",
     accessData: {
@@ -191,7 +191,8 @@ test("NA-R043: a no-access discovery must say which ERF could not be accessed", 
   expectPass(good);
   expectCode(deepMerge(good, { accessData: { erfId: "" } }), "NO_ACCESS_ERF_REQUIRED");
   expectCode(deepMerge(good, { accessData: { erfId: "   " } }), "NO_ACCESS_ERF_REQUIRED");
-  expectCode(deepMerge(good, { accessData: { erfNo: "" } }), "NO_ACCESS_ERF_NO_REQUIRED");
+  // The ERF NUMBER is not a gate (owner, 2026-10-02): it is a label, derivable from the ID.
+  expectPass(deepMerge(good, { accessData: { erfNo: "" } }));
 });
 
 // NA-R044 / NA-R084.1: the premise is carried only when it existed at the moment of the

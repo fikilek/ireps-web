@@ -62,8 +62,16 @@ function requireText(value, field, code) {
  */
 export function assertNoAccessGeography({ erfId, erfNo } = {}) {
   return {
+    // The ERF ID is the requirement. It is identity: it resolves into everything else, so a
+    // record carrying it can always be placed. "All you need is the ID of the ERF ... if
+    // there is any query, we go and check what that ID belongs to" (owner, 2026-10-01).
     erfId: requireText(erfId, "accessData.erfId", "NO_ACCESS_ERF_REQUIRED"),
-    erfNo: requireText(erfNo, "accessData.erfNo", "NO_ACCESS_ERF_NO_REQUIRED"),
+
+    // The ERF NUMBER is not the ERF ID and is not a gate (owner, 2026-10-02). It is a label
+    // a person reads, derivable from the ID, and enrichment under GMR-R006 — which may add
+    // descriptive values but never decides whether a record stands. It is carried when the
+    // phone has it, because it is free and saves a lookup, and reads NAv when it does not.
+    erfNo: normalizeText(erfNo) || "NAv",
   };
 }
 

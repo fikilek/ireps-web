@@ -42,14 +42,16 @@ test("NA-R043: a no access without an ERF id is refused", () => {
   );
 });
 
-test("NA-R043: a no access without an ERF number is refused", () => {
-  assert.equal(
-    code(() => assertNoAccessGeography({ erfId: "ERF_1", erfNo: "" })),
-    "NO_ACCESS_ERF_NO_REQUIRED",
-  );
+test("NA-R043: the ERF NUMBER is not a gate — the ID is", () => {
+  // The owner, 2 October 2026: the ERF number is not the ERF ID, they are different things.
+  // The ID is identity and resolves into everything else; the number is a label a person
+  // reads, and enrichment under GMR-R006 never decides whether a record stands.
+  const geography = assertNoAccessGeography({ erfId: "ERF_1", erfNo: "" });
+  assert.equal(geography.erfId, "ERF_1");
+  assert.equal(geography.erfNo, "NAv");
 });
 
-test("NA-R043: the ERF is carried through, both parts", () => {
+test("NA-R043: the ERF number is carried when the phone has it", () => {
   assert.deepEqual(
     assertNoAccessGeography({ erfId: " ERF_1 ", erfNo: " 5214 " }),
     { erfId: "ERF_1", erfNo: "5214" },
@@ -323,7 +325,7 @@ test("NA-R043: the ERF rule applies to every transaction type, not just the Sale
         buildNoAccessData({
           trnType,
           erfId: "",
-          erfNo: "",
+          erfNo: "5214",
           reason: { reasonCode: "Property Locked" },
           media: PHOTO,
           location: GPS,
@@ -331,7 +333,7 @@ test("NA-R043: the ERF rule applies to every transaction type, not just the Sale
         }),
       ),
       "NO_ACCESS_ERF_REQUIRED",
-      `${trnType} must demand an ERF`,
+      `${trnType} must demand an ERF ID even when it has the number`,
     );
   }
 });

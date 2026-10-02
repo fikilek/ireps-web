@@ -632,17 +632,14 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
     // The premise is deliberately NOT required: it is carried only when it existed at the
     // moment of the visit (NA-R044, NA-R084.1), and a worker at a locked gate often cannot
     // honestly say which unit they were at.
+    // The ERF ID is the requirement, not the ERF number (owner, 2026-10-02). They are
+    // different things: the ID is identity and resolves into everything else, while the
+    // number is a label a person reads and is enrichment under GMR-R006. A record carrying
+    // the ID can always be placed; one carrying only a number cannot.
     if (!hasRequiredText(accessData?.erfId)) {
       return buildFailureResult(
         "NO_ACCESS_ERF_REQUIRED",
         "A No Access must say which ERF could not be accessed",
-      );
-    }
-
-    if (!hasRequiredText(accessData?.erfNo)) {
-      return buildFailureResult(
-        "NO_ACCESS_ERF_NO_REQUIRED",
-        "A No Access must carry the ERF number",
       );
     }
 
