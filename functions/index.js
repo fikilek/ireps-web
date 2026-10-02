@@ -109,6 +109,7 @@ import {
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
 import { normalizeNoAccessAccessData } from "./noAccess/recordNoAccess.js";
+import { recordTargetedBatchNoAccessInTransaction } from "./targetedBatches/premiseLink.js";
 import {
   plainReasonFor,
   recordCaptureFailure,
@@ -3610,11 +3611,42 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       }
     } else {
       // No Access: the transaction is the whole record and there is no meter to make. RG-R001 s.1.
+      //
+      // No Access rules NA-R003 (1.2.0): when the work came from a batch row, the row, the Sales
+      // record and the batch move in the SAME commit as the transaction. That bookkeeping used to
+      // live in a separate No Access screen and its own callable, which is what made a no access
+      // from a batch row a different kind of thing from a no access anywhere else. It is the same
+      // thing now, so it is written here, once, with the record.
+      //
+      // The reads come FIRST and the writes after, because Firestore allows no read once a
+      // transaction has written. So: look for the transaction, let the batch half take its reads
+      // and make its updates, and create the transaction last. If the batch half refuses - the
+      // meter is already found, the row is not open - nothing is written at all, which is the
+      // behaviour the deleted callable had.
       try {
-        await trnRef.create(finalPayload);
+        await db.runTransaction(async (tx) => {
+          const existing = await tx.get(trnRef);
+
+          if (existing.exists) {
+            // Two senders can reach here with the same work - the background one and the worker
+            // tapping Sync. The second must not be told its saved work was refused (RG-R001 s.5),
+            // and the batch must not count one visit twice.
+            logger.info("onMeterDiscoveryCallable --no access trn already there", {
+              trnId: data.id,
+            });
+            return;
+          }
+
+          await recordTargetedBatchNoAccessInTransaction({
+            transaction: tx,
+            db,
+            trnData: finalPayload,
+            actor: { uid: caller.uid, name: actorName },
+          });
+
+          tx.create(trnRef, finalPayload);
+        });
       } catch (error) {
-        // Two senders can reach here with the same work — the background one and the worker tapping
-        // Sync. The second must not be told its saved work was refused (RG-R001 section 5).
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
 
         logger.info("onMeterDiscoveryCallable --no access trn already there", {
