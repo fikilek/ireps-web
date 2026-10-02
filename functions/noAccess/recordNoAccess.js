@@ -248,13 +248,35 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
  * no access that nobody can place.
  */
 export function normalizeNoAccessAccessData(accessData = {}, { actor = {} } = {}) {
-  // No Access records ONE thing: the worker could not touch the meter. It does not decide
-  // anything about the ERF or the premise - that is settled before the work is issued. It
-  // carries the ERF id it was given, and the premise if there is one.
+  // The ERF is checked first: a record that cannot say which ERF cannot say which premise
+  // either, and the worker should be told the more fundamental thing.
+  const geography = assertNoAccessGeography(accessData);
+  const premise = normalizeNoAccessPremise(accessData.premise);
+
+  // NA-R044 (1.3.0): a no access is to a PREMISE, and a premise is a prerequisite.
+  //
+  // An ERF can hold many premises - thirteen shops at one address is a real case on LIVE - so
+  // a no access against an ERF alone names nothing a person can act on, and the open/closed
+  // grouping cannot work on it: one open group for a whole block tells a manager nothing.
+  //
+  // This is the server's half. The phone's half is that a worker is never offered the work:
+  // the gate holds the premise id before any form opens, and My Work Orders disables the
+  // button on a row that has no premise (NA-R044.3). Nothing should ever reach here without
+  // one - and if it does, it is refused rather than recorded in a form nobody can act on.
+  if (!premise) {
+    throw noAccessError(
+      "NO_ACCESS_PREMISE_REQUIRED",
+      "A No Access must say which premise could not be accessed.",
+      { trnType: accessData.trnType },
+    );
+  }
+
+  // No Access decides nothing ABOUT the ERF or the premise - that is settled before the work
+  // is issued. It carries what it was given, and refuses when it was given too little.
   return {
     ...accessData,
-    ...assertNoAccessGeography(accessData),
-    premise: normalizeNoAccessPremise(accessData.premise),
+    ...geography,
+    premise,
     access: buildNoAccessAccessBlock(accessData.access, { actor }),
   };
 }

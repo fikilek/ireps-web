@@ -351,7 +351,12 @@ test("NA-R043: the ERF rule applies to every transaction type, not just the Sale
 
 test("the one door refuses a no access with no ERF id, whatever sent it", () => {
   assert.equal(
-    code(() => normalizeNoAccessAccessData({ access: { reason: "Property Locked" } }, { actor: ACTOR })),
+    code(() =>
+      normalizeNoAccessAccessData(
+        { premise: { id: "PRM_1" }, access: { reasonCode: "Property Locked" } },
+        { actor: ACTOR },
+      ),
+    ),
     "NO_ACCESS_ERF_REQUIRED",
   );
 });
@@ -361,6 +366,7 @@ test("the one door keeps what the form sent and settles only what the rules own"
     {
       trnType: "METER_INSTALLATION",
       erfId: "ERF_1",
+      premise: { id: "PRM_1" },
       parents: { lmPcode: "LM1", wardPcode: "W6" },
       access: { reasonCode: "OTHER", reasonOther: "Vicious dogs" },
     },
@@ -370,42 +376,7 @@ test("the one door keeps what the form sent and settles only what the rules own"
   assert.deepEqual(out.parents, { lmPcode: "LM1", wardPcode: "W6" }, "untouched fields survive");
   assert.equal(out.trnType, "METER_INSTALLATION");
   assert.equal(out.erfNo, "NAv", "the ERF number is a label, defaulted not demanded");
-  assert.equal(out.premise, null);
-  assert.equal(out.access.hasAccess, "no");
-  assert.equal(out.access.reasonCode, "OTHER");
-  assert.equal(out.access.reason, "Vicious dogs");
-});
-
-/* ------------------------------------------------------------------ *
- * The one door — NA-R043 enforced wherever a callable records a no access
- *
- * Meter Discovery is validated before it reaches the recorder. Meter Installation is NOT
- * validated by anything, so without this gate it would have kept accepting a no access that
- * nobody can place. That is the fault this sprint exists to fix, reappearing on another path.
- * ------------------------------------------------------------------ */
-
-test("the one door refuses a no access with no ERF id, whatever sent it", () => {
-  assert.equal(
-    code(() => normalizeNoAccessAccessData({ access: { reason: "Property Locked" } }, { actor: ACTOR })),
-    "NO_ACCESS_ERF_REQUIRED",
-  );
-});
-
-test("the one door keeps what the form sent and settles only what the rules own", () => {
-  const out = normalizeNoAccessAccessData(
-    {
-      trnType: "METER_INSTALLATION",
-      erfId: "ERF_1",
-      parents: { lmPcode: "LM1", wardPcode: "W6" },
-      access: { reasonCode: "OTHER", reasonOther: "Vicious dogs" },
-    },
-    { actor: ACTOR },
-  );
-
-  assert.deepEqual(out.parents, { lmPcode: "LM1", wardPcode: "W6" }, "untouched fields survive");
-  assert.equal(out.trnType, "METER_INSTALLATION");
-  assert.equal(out.erfNo, "NAv", "the ERF number is a label, defaulted not demanded");
-  assert.equal(out.premise, null);
+  assert.deepEqual(out.premise, { id: "PRM_1" });
   assert.equal(out.access.hasAccess, "no");
   assert.equal(out.access.reasonCode, "OTHER");
   assert.equal(out.access.reason, "Vicious dogs");
@@ -441,4 +412,41 @@ test("GMR-R027: a payload with no municipality is spotted as unplaceable", () =>
   assert.equal(noAccessParentsAreMissing({}), true);
   assert.equal(noAccessParentsAreMissing({ lmPcode: "NAv" }), true);
   assert.equal(noAccessParentsAreMissing({ lmPcode: "KZN241" }), false);
+});
+
+/* ------------------------------------------------------------------ *
+ * NA-R044 (1.3.0) — a no access is to a premise, on every path
+ * ------------------------------------------------------------------ */
+
+const onPath = (trnType, premise) =>
+  normalizeNoAccessAccessData(
+    { trnType, erfId: "ERF_1", premise, access: { reasonCode: "Property Locked" } },
+    { actor: ACTOR },
+  );
+
+test("NA-R044: a no access with no premise is refused, on all seven", () => {
+  for (const trnType of [
+    "METER_DISCOVERY", "METER_INSTALLATION", "METER_INSPECTION",
+    "METER_DISCONNECTION", "METER_RECONNECTION", "METER_READING", "METER_REMOVAL",
+  ]) {
+    assert.equal(
+      code(() => onPath(trnType, null)),
+      "NO_ACCESS_PREMISE_REQUIRED",
+      `${trnType} must name a premise`,
+    );
+  }
+});
+
+test("NA-R044: an ERF alone is not enough, because an ERF can be a block of flats", () => {
+  assert.equal(code(() => onPath("METER_DISCOVERY", null)), "NO_ACCESS_PREMISE_REQUIRED");
+});
+
+test("NA-R044: a premise satisfies it on every path", () => {
+  for (const trnType of ["METER_DISCOVERY", "METER_READING"]) {
+    assert.deepEqual(onPath(trnType, { id: "PRM_1" }).premise, { id: "PRM_1" });
+  }
+});
+
+test("NA-R034 with NA-R044: an NAv premise id is no premise, so it is refused", () => {
+  assert.equal(code(() => onPath("METER_DISCOVERY", { id: "NAv" })), "NO_ACCESS_PREMISE_REQUIRED");
 });
