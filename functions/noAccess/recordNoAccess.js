@@ -84,6 +84,15 @@ export function assertNoAccessGeography({ erfId, erfNo } = {}) {
  * in an id satisfies an "is it there?" check and then points at nothing, which is the fault
  * RG-R001 records.
  */
+/**
+ * NA-R043 / NA-R034 — the ERF number is a label a person reads, not a gate. It is carried
+ * when the phone has it and reads NAv when it does not. The rule lives here, with the other
+ * no-access rules, rather than in each callable that happens to record one.
+ */
+export function readNoAccessErfNo(erfNo) {
+  return normalizeText(erfNo) || "NAv";
+}
+
 export function normalizeNoAccessPremise(premise) {
   const id = normalizeText(premise?.id ?? premise);
   if (!id || normalizeUpper(id) === "NAV") return null;
@@ -128,6 +137,62 @@ export function normalizeNoAccessReason(input = {}) {
     reasonOther: other,
     reason: other,
   };
+}
+
+/**
+ * TEMPORARY, AND DATED: read a reason out of whatever a phone still sends.
+ *
+ * Retired at stage 5 of the implementation plan, once no phone in the field still holds work
+ * queued under an older build. Until then it exists for exactly one reason: a worker who
+ * walked to a property, could not get in, and captured the visit with no signal must not have
+ * that visit REFUSED because their app predates this change. That is work already done.
+ *
+ * This is not an accommodation of dirty data — the data is cleaned and the writers are fixed.
+ * It is a door held open for submissions already in flight, and it closes on a date.
+ *
+ * The shapes it understands, all of which exist in the field today:
+ *   { reasonCode, reasonOther }             the one shape, after this sprint
+ *   { reason: "Property Locked" }           Meter Discovery, Meter Installation
+ *   { reason: "Other: Vicious dogs" }       the sentence encoding
+ *   { reason: { code, label, otherText } }  the structured encoding
+ *   { reasonSelect, reason }                Inspection, Reading, DCN, RCN, Removal
+ *   { noAccessReason } / { reasonText }     the lifecycle completion path
+ */
+export function readIncomingNoAccessReason(access = {}) {
+  if (normalizeText(access.reasonCode)) {
+    return { reasonCode: access.reasonCode, reasonOther: access.reasonOther };
+  }
+
+  const raw = access.reason;
+
+  // The structured encoding: { code, label, otherText }.
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return {
+      reasonCode: normalizeText(raw.code) || normalizeText(raw.label),
+      reasonOther: raw.otherText,
+    };
+  }
+
+  const candidate =
+    normalizeText(access.reasonSelect) ||
+    normalizeText(raw) ||
+    normalizeText(access.noAccessReason) ||
+    normalizeText(access.reasonText);
+
+  // The sentence encoding: "Other: <the worker's words>", and a bare "Other".
+  const sentence = /^other\s*:?\s*(.*)$/i.exec(candidate);
+  if (sentence) {
+    return {
+      reasonCode: NO_ACCESS_OTHER_CODE,
+      reasonOther:
+        normalizeText(sentence[1]) ||
+        normalizeText(access.reasonOther) ||
+        normalizeText(access.noAccessReason) ||
+        normalizeText(access.reasonText),
+    };
+  }
+
+  return { reasonCode: candidate, reasonOther: access.reasonOther };
 }
 
 /**
@@ -214,7 +279,7 @@ export function assertNoAccessLocation(location) {
  * which is the September report fault.
  */
 export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
-  const reason = normalizeNoAccessReason(input);
+  const reason = normalizeNoAccessReason(readIncomingNoAccessReason(input));
   return {
     hasAccess: "no",
     ...reason,
@@ -229,6 +294,26 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
  * premise through a batch row — NA-R050 forbids that at read time too, because a row's
  * premise can be swapped (TB-R067) and a past visit would change what it appears to say.
  */
+/**
+ * Take the accessData a form sent and return it in the one shape, with the ERF gate applied.
+ *
+ * This is the single door every callable goes through, so the gate cannot be enforced on one
+ * path and forgotten on another — which is the exact fault this sprint exists to fix. Meter
+ * Discovery is validated by meterDiscovery/validation.js before it ever reaches here; Meter
+ * Installation is NOT validated by anything, so without this it would have kept accepting a
+ * no access that nobody can place.
+ */
+export function normalizeNoAccessAccessData(accessData = {}, { actor = {} } = {}) {
+  const geography = assertNoAccessGeography(accessData);
+
+  return {
+    ...accessData,
+    ...geography,
+    premise: normalizeNoAccessPremise(accessData.premise),
+    access: buildNoAccessAccessBlock(accessData.access, { actor }),
+  };
+}
+
 export function buildNoAccessData({ trnType, erfId, erfNo, premise, reason, media, location, actor, parents } = {}) {
   const geography = assertNoAccessGeography({ erfId, erfNo });
 

@@ -14,6 +14,7 @@ import {
   buildNoAccessAccessBlock,
   buildNoAccessData,
   normalizeNoAccessAppointment,
+  normalizeNoAccessAccessData,
   normalizeNoAccessPremise,
   normalizeNoAccessReason,
 } from "../noAccess/recordNoAccess.js";
@@ -336,4 +337,87 @@ test("NA-R043: the ERF rule applies to every transaction type, not just the Sale
       `${trnType} must demand an ERF ID even when it has the number`,
     );
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * Work already in flight — the door that closes at stage 5
+ *
+ * A worker who walked to a property, could not get in, and captured the visit with no signal
+ * must not have that visit refused because their app predates this change. Every encoding
+ * below exists on a phone in the field today.
+ * ------------------------------------------------------------------ */
+
+const incoming = (access) => buildNoAccessAccessBlock(access, { actor: ACTOR });
+
+test("in flight: Meter Discovery's plain reason string still submits", () => {
+  assert.equal(incoming({ reason: "Property Locked" }).reasonCode, "Property Locked");
+});
+
+test("in flight: the Other sentence encoding still submits, with the words kept", () => {
+  const block = incoming({ reason: "Other: Vicious dogs" });
+  assert.equal(block.reasonCode, "OTHER");
+  assert.equal(block.reasonOther, "Vicious dogs");
+  assert.equal(block.reason, "Vicious dogs");
+});
+
+test("in flight: the structured encoding still submits", () => {
+  const block = incoming({ reason: { code: "OTHER", label: "Other", otherText: "Vicious dogs" } });
+  assert.equal(block.reasonCode, "OTHER");
+  assert.equal(block.reasonOther, "Vicious dogs");
+});
+
+test("in flight: reasonSelect from the five lifecycle forms still submits", () => {
+  assert.equal(incoming({ reasonSelect: "Meter Obstructed", reason: "Meter Obstructed" }).reasonCode, "Meter Obstructed");
+});
+
+test("in flight: the lifecycle path's noAccessReason still submits", () => {
+  assert.equal(incoming({ noAccessReason: "Property Vacant" }).reasonCode, "Property Vacant");
+});
+
+test("in flight: reasonText still submits", () => {
+  assert.equal(incoming({ reasonText: "Unsafe / Dangerous Environment" }).reasonCode, "Unsafe / Dangerous Environment");
+});
+
+test("in flight: a bare Other with nothing said is still refused, as it is today", () => {
+  assert.equal(code(() => incoming({ reason: "Other" })), "NO_ACCESS_REASON_OTHER_REQUIRED");
+});
+
+test("the one shape wins when a phone sends both old and new", () => {
+  const block = incoming({ reasonCode: "Property Vacant", reason: "Property Locked" });
+  assert.equal(block.reasonCode, "Property Vacant");
+});
+
+/* ------------------------------------------------------------------ *
+ * The one door — NA-R043 enforced wherever a callable records a no access
+ *
+ * Meter Discovery is validated before it reaches the recorder. Meter Installation is NOT
+ * validated by anything, so without this gate it would have kept accepting a no access that
+ * nobody can place. That is the fault this sprint exists to fix, reappearing on another path.
+ * ------------------------------------------------------------------ */
+
+test("the one door refuses a no access with no ERF id, whatever sent it", () => {
+  assert.equal(
+    code(() => normalizeNoAccessAccessData({ access: { reason: "Property Locked" } }, { actor: ACTOR })),
+    "NO_ACCESS_ERF_REQUIRED",
+  );
+});
+
+test("the one door keeps what the form sent and settles only what the rules own", () => {
+  const out = normalizeNoAccessAccessData(
+    {
+      trnType: "METER_INSTALLATION",
+      erfId: "ERF_1",
+      parents: { lmPcode: "LM1", wardPcode: "W6" },
+      access: { reason: "Other: Vicious dogs" },
+    },
+    { actor: ACTOR },
+  );
+
+  assert.deepEqual(out.parents, { lmPcode: "LM1", wardPcode: "W6" }, "untouched fields survive");
+  assert.equal(out.trnType, "METER_INSTALLATION");
+  assert.equal(out.erfNo, "NAv", "the ERF number is a label, defaulted not demanded");
+  assert.equal(out.premise, null);
+  assert.equal(out.access.hasAccess, "no");
+  assert.equal(out.access.reasonCode, "OTHER");
+  assert.equal(out.access.reason, "Vicious dogs");
 });

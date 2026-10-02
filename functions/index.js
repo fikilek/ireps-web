@@ -107,6 +107,8 @@ import {
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+// No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
+import { normalizeNoAccessAccessData } from "./noAccess/recordNoAccess.js";
 import {
   plainReasonFor,
   recordCaptureFailure,
@@ -3485,6 +3487,23 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
 
     delete safePayload.metadata;
 
+    // No Access rules NA-R001 (1.0.0): the SERVER owns the shape of a no access, not the form
+    // that happened to send it.
+    //
+    // Five field names held the reason between them and three encodings held "Other", because
+    // each form wrote it its own way. Normalising here means every no access reaches `trns` in
+    // one shape whatever built it — which is the whole point of one No Access form, enforced
+    // where it cannot be forgotten.
+    //
+    // NA-R031.2: access.reason always carries the display words. The General Monthly Report
+    // reads it first, and the Meter Reading registry's chain reaches it, so both survive the
+    // old names being retired only because this is filled every time.
+    if (hasAccess === "no") {
+      safePayload.accessData = normalizeNoAccessAccessData(safePayload?.accessData, {
+        actor: { uid: caller.uid, name: actorName },
+      });
+    }
+
     if (targetedBatchValidation?.isTargetedBatch) {
       safePayload.targetedBatchContext =
         targetedBatchValidation.targetedBatchContext;
@@ -5433,7 +5452,16 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       updatedByUser: actorName,
     };
 
-    const finalAccessData = safePayload?.accessData || {};
+    // No Access rules NA-R001 (1.0.0): one shape, whichever form sent it. Meter Installation
+    // used to write accessData.access.reason alone, Meter Discovery the same, and the five
+    // lifecycle forms a reasonSelect beside it — so the same field reached `trns` three ways.
+    // The server settles it here, as it does on Meter Discovery.
+    const finalAccessData =
+      hasAccess === "no"
+        ? normalizeNoAccessAccessData(safePayload?.accessData, {
+            actor: { uid: caller.uid, name: actorName },
+          })
+        : safePayload?.accessData || {};
 
     if (hasAccess === "no") {
       await trnRef.set(
