@@ -98,7 +98,6 @@ import { onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCalla
 import { onUnallocateTargetedBatchCallable } from "./targetedBatches/unallocateCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
 import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatchRowsCallable.js";
-import { recordTargetedBatchNoAccessCallable } from "./targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import {
   classifyTargetedBatchPremiseRoute,
   completeTargetedBatchMeterDiscoveryInTransaction,
@@ -249,7 +248,6 @@ export {
   onUnallocateTargetedBatchCallable,
   onAcceptRejectTargetedBatchCallable,
   getTargetedBatchRowsCallable,
-  recordTargetedBatchNoAccessCallable,
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,

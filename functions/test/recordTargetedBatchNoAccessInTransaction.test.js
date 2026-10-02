@@ -288,3 +288,32 @@ test("NA-R084.1: the row's own premise is never read back onto the visit", async
   const { result } = await run({ row: rowDoc({ refs: { erfId: ERF_ID, premiseId: "PRM_LATER" } }) });
   assert.equal(result.premiseId, null, "the row's premise must not leak onto the record");
 });
+
+/* ------------------------------------------------------------------ *
+ * Moved from targetedBatchNoAccessRule, which tested the deleted callable.
+ * These two were not covered here and would have been lost with it.
+ * ------------------------------------------------------------------ */
+
+test("the first no access stamps the row onto a Sales reference that had none", async () => {
+  // A Sales record that has never been worked carries the batch and no row. The first no
+  // access is what ties the row to it.
+  const { writes } = await run();
+  assert.equal(writeFor(writes, "sales").tbRefs[0].rowId, ROW_ID);
+});
+
+test("a Sales reference already tied to another row is refused", async () => {
+  const sales = {
+    id: SALES_ID,
+    targetedBatchId: TB_ID,
+    tbRefs: [
+      {
+        id: TB_ID,
+        date: NOW,
+        rowId: "TBR_SOMEONE_ELSE_000009",
+        fieldWork: { status: "IN_PROGRESS", updatedAt: NOW },
+      },
+    ],
+  };
+
+  assert.equal(await codeOf({ sales }), "SALES_TB_REF_ROW_CONFLICT");
+});

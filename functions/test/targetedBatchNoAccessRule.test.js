@@ -2,10 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { enrichTargetedBatchRow } from "../targetedBatches/getTargetedBatchRowsCallable.js";
-import {
-  buildSalesAppend,
-  resolveSalesTbRef,
-} from "../targetedBatches/recordTargetedBatchNoAccessCallable.js";
 
 const TB_ID = "TGB_20260804_221932_OP6H";
 const ROW_ID = "TBR_20260804_221932_OP6H_000001";
@@ -78,68 +74,8 @@ test("row enrichment returns NA length and fieldWork meterId", () => {
   assert.equal(result.noAccessSourceStatus, "OK");
 });
 
-test("first NA accepts the original batch-only Sales tbRef and stamps rowId", () => {
-  const creationDate = { seconds: 1, nanoseconds: 0 };
-  const result = buildSalesAppend({
-    tbRefs: [{ id: TB_ID, date: creationDate }],
-    input: input(),
-    premiseId: null,
-    actorName: "Peter Peter",
-    now: NOW,
-  });
 
-  assert.equal(result.count, 1);
-  assert.equal(result.tbRefs[0].id, TB_ID);
-  assert.strictEqual(result.tbRefs[0].date, creationDate);
-  assert.equal(result.tbRefs[0].rowId, ROW_ID);
-  assert.equal(result.tbRefs[0].fieldWork.meterId, undefined);
-  assert.deepEqual(result.tbRefs[0].fieldWork.noAccess, [
-    {
-      date: "2026-08-05",
-      time: "00:05:06",
-      user: "Peter Peter",
-    },
-  ]);
-});
 
-test("NA is rejected only when fieldWork meterId has a value", () => {
-  assert.throws(
-    () =>
-      buildSalesAppend({
-        tbRefs: [
-          {
-            id: TB_ID,
-            date: NOW,
-            rowId: ROW_ID,
-            fieldWork: {
-              status: "IN_PROGRESS", updatedAt: NOW,
-              meterId: "AST_001",
-              noAccess: [],
-            },
-          },
-        ],
-        input: input(),
-        premiseId: null,
-        actorName: "Peter Peter",
-        now: NOW,
-      }),
-    (error) => {
-      assert.equal(error.code, "TARGETED_BATCH_METER_ALREADY_LINKED");
-      return true;
-    },
-  );
-});
 
-test("a Sales tbRef already assigned to another row is rejected", () => {
-  assert.throws(
-    () =>
-      resolveSalesTbRef({
-        tbRefs: [{ id: TB_ID, date: NOW, rowId: "TBR_OTHER", fieldWork: { status: "IN_PROGRESS", updatedAt: NOW } }],
-        input: input(),
-      }),
-    (error) => {
-      assert.equal(error.code, "SALES_TB_REF_ROW_CONFLICT");
-      return true;
-    },
-  );
-});
+
+
