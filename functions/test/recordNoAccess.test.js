@@ -340,51 +340,38 @@ test("NA-R043: the ERF rule applies to every transaction type, not just the Sale
 });
 
 /* ------------------------------------------------------------------ *
- * Work already in flight — the door that closes at stage 5
+ * The one door — NA-R043 enforced wherever a callable records a no access
  *
- * A worker who walked to a property, could not get in, and captured the visit with no signal
- * must not have that visit refused because their app predates this change. Every encoding
- * below exists on a phone in the field today.
+ * Meter Discovery is validated before it reaches the recorder. Meter Installation is NOT
+ * validated by anything, so without this gate it would have kept accepting a no access that
+ * nobody can place. That is the fault this sprint exists to fix, reappearing on another path.
  * ------------------------------------------------------------------ */
 
-const incoming = (access) => buildNoAccessAccessBlock(access, { actor: ACTOR });
-
-test("in flight: Meter Discovery's plain reason string still submits", () => {
-  assert.equal(incoming({ reason: "Property Locked" }).reasonCode, "Property Locked");
+test("the one door refuses a no access with no ERF id, whatever sent it", () => {
+  assert.equal(
+    code(() => normalizeNoAccessAccessData({ access: { reason: "Property Locked" } }, { actor: ACTOR })),
+    "NO_ACCESS_ERF_REQUIRED",
+  );
 });
 
-test("in flight: the Other sentence encoding still submits, with the words kept", () => {
-  const block = incoming({ reason: "Other: Vicious dogs" });
-  assert.equal(block.reasonCode, "OTHER");
-  assert.equal(block.reasonOther, "Vicious dogs");
-  assert.equal(block.reason, "Vicious dogs");
-});
+test("the one door keeps what the form sent and settles only what the rules own", () => {
+  const out = normalizeNoAccessAccessData(
+    {
+      trnType: "METER_INSTALLATION",
+      erfId: "ERF_1",
+      parents: { lmPcode: "LM1", wardPcode: "W6" },
+      access: { reasonCode: "OTHER", reasonOther: "Vicious dogs" },
+    },
+    { actor: ACTOR },
+  );
 
-test("in flight: the structured encoding still submits", () => {
-  const block = incoming({ reason: { code: "OTHER", label: "Other", otherText: "Vicious dogs" } });
-  assert.equal(block.reasonCode, "OTHER");
-  assert.equal(block.reasonOther, "Vicious dogs");
-});
-
-test("in flight: reasonSelect from the five lifecycle forms still submits", () => {
-  assert.equal(incoming({ reasonSelect: "Meter Obstructed", reason: "Meter Obstructed" }).reasonCode, "Meter Obstructed");
-});
-
-test("in flight: the lifecycle path's noAccessReason still submits", () => {
-  assert.equal(incoming({ noAccessReason: "Property Vacant" }).reasonCode, "Property Vacant");
-});
-
-test("in flight: reasonText still submits", () => {
-  assert.equal(incoming({ reasonText: "Unsafe / Dangerous Environment" }).reasonCode, "Unsafe / Dangerous Environment");
-});
-
-test("in flight: a bare Other with nothing said is still refused, as it is today", () => {
-  assert.equal(code(() => incoming({ reason: "Other" })), "NO_ACCESS_REASON_OTHER_REQUIRED");
-});
-
-test("the one shape wins when a phone sends both old and new", () => {
-  const block = incoming({ reasonCode: "Property Vacant", reason: "Property Locked" });
-  assert.equal(block.reasonCode, "Property Vacant");
+  assert.deepEqual(out.parents, { lmPcode: "LM1", wardPcode: "W6" }, "untouched fields survive");
+  assert.equal(out.trnType, "METER_INSTALLATION");
+  assert.equal(out.erfNo, "NAv", "the ERF number is a label, defaulted not demanded");
+  assert.equal(out.premise, null);
+  assert.equal(out.access.hasAccess, "no");
+  assert.equal(out.access.reasonCode, "OTHER");
+  assert.equal(out.access.reason, "Vicious dogs");
 });
 
 /* ------------------------------------------------------------------ *
@@ -408,7 +395,7 @@ test("the one door keeps what the form sent and settles only what the rules own"
       trnType: "METER_INSTALLATION",
       erfId: "ERF_1",
       parents: { lmPcode: "LM1", wardPcode: "W6" },
-      access: { reason: "Other: Vicious dogs" },
+      access: { reasonCode: "OTHER", reasonOther: "Vicious dogs" },
     },
     { actor: ACTOR },
   );
@@ -420,50 +407,4 @@ test("the one door keeps what the form sent and settles only what the rules own"
   assert.equal(out.access.hasAccess, "no");
   assert.equal(out.access.reasonCode, "OTHER");
   assert.equal(out.access.reason, "Vicious dogs");
-});
-
-/* ------------------------------------------------------------------ *
- * NA-R044 — when a premise is "possible", made precise
- *
- * A meter cannot exist without a premise (ERF, then premise, then meter), so work issued
- * against an existing meter always has one to carry. A registration may not. Treating both
- * the same would cost the lifecycle path the one check that catches a real fault there.
- * ------------------------------------------------------------------ */
-
-const noAccessOn = (trnType, premise) =>
-  normalizeNoAccessAccessData(
-    { trnType, erfId: "ERF_1", premise, access: { reason: "Property Locked" } },
-    { actor: ACTOR },
-  );
-
-test("NA-R044: a registration no access with no premise is complete", () => {
-  for (const trnType of ["METER_DISCOVERY", "METER_INSTALLATION"]) {
-    assert.equal(noAccessOn(trnType, null).premise, null, `${trnType} must accept no premise`);
-  }
-});
-
-test("NA-R044: work on an existing meter must say which premise", () => {
-  for (const trnType of [
-    "METER_INSPECTION", "METER_DISCONNECTION", "METER_RECONNECTION",
-    "METER_READING", "METER_REMOVAL",
-  ]) {
-    assert.equal(
-      code(() => noAccessOn(trnType, null)),
-      "NO_ACCESS_PREMISE_REQUIRED",
-      `${trnType} must demand a premise`,
-    );
-  }
-});
-
-test("NA-R044: a premise satisfies the rule on every path", () => {
-  for (const trnType of [
-    "METER_DISCOVERY", "METER_INSTALLATION", "METER_INSPECTION",
-    "METER_DISCONNECTION", "METER_RECONNECTION", "METER_READING", "METER_REMOVAL",
-  ]) {
-    assert.deepEqual(noAccessOn(trnType, { id: "PRM_1" }).premise, { id: "PRM_1" });
-  }
-});
-
-test("NA-R034: an NAv premise id on lifecycle work is a missing premise, not a value", () => {
-  assert.equal(code(() => noAccessOn("METER_READING", { id: "NAv" })), "NO_ACCESS_PREMISE_REQUIRED");
 });

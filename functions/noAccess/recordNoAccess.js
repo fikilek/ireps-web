@@ -140,62 +140,6 @@ export function normalizeNoAccessReason(input = {}) {
 }
 
 /**
- * TEMPORARY, AND DATED: read a reason out of whatever a phone still sends.
- *
- * Retired at stage 5 of the implementation plan, once no phone in the field still holds work
- * queued under an older build. Until then it exists for exactly one reason: a worker who
- * walked to a property, could not get in, and captured the visit with no signal must not have
- * that visit REFUSED because their app predates this change. That is work already done.
- *
- * This is not an accommodation of dirty data — the data is cleaned and the writers are fixed.
- * It is a door held open for submissions already in flight, and it closes on a date.
- *
- * The shapes it understands, all of which exist in the field today:
- *   { reasonCode, reasonOther }             the one shape, after this sprint
- *   { reason: "Property Locked" }           Meter Discovery, Meter Installation
- *   { reason: "Other: Vicious dogs" }       the sentence encoding
- *   { reason: { code, label, otherText } }  the structured encoding
- *   { reasonSelect, reason }                Inspection, Reading, DCN, RCN, Removal
- *   { noAccessReason } / { reasonText }     the lifecycle completion path
- */
-export function readIncomingNoAccessReason(access = {}) {
-  if (normalizeText(access.reasonCode)) {
-    return { reasonCode: access.reasonCode, reasonOther: access.reasonOther };
-  }
-
-  const raw = access.reason;
-
-  // The structured encoding: { code, label, otherText }.
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return {
-      reasonCode: normalizeText(raw.code) || normalizeText(raw.label),
-      reasonOther: raw.otherText,
-    };
-  }
-
-  const candidate =
-    normalizeText(access.reasonSelect) ||
-    normalizeText(raw) ||
-    normalizeText(access.noAccessReason) ||
-    normalizeText(access.reasonText);
-
-  // The sentence encoding: "Other: <the worker's words>", and a bare "Other".
-  const sentence = /^other\s*:?\s*(.*)$/i.exec(candidate);
-  if (sentence) {
-    return {
-      reasonCode: NO_ACCESS_OTHER_CODE,
-      reasonOther:
-        normalizeText(sentence[1]) ||
-        normalizeText(access.reasonOther) ||
-        normalizeText(access.noAccessReason) ||
-        normalizeText(access.reasonText),
-    };
-  }
-
-  return { reasonCode: candidate, reasonOther: access.reasonOther };
-}
-
-/**
  * NA-R020 … NA-R027 — the NA Appointment.
  *
  * Optional on every reason. The phone checks that it is in the future at capture (NA-R023);
@@ -279,7 +223,7 @@ export function assertNoAccessLocation(location) {
  * which is the September report fault.
  */
 export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
-  const reason = normalizeNoAccessReason(readIncomingNoAccessReason(input));
+  const reason = normalizeNoAccessReason(input);
   return {
     hasAccess: "no",
     ...reason,
@@ -303,55 +247,14 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
  * Installation is NOT validated by anything, so without this it would have kept accepting a
  * no access that nobody can place.
  */
-/**
- * NA-R044 — "a premise ID where possible" (owner, 1 October 2026), made precise.
- *
- * When a premise is possible depends on what kind of work it is, and it is not a judgement:
- *
- *   REGISTRATION — Meter Discovery, Meter Installation. The worker is sent to an ERF to find
- *   or fit a meter that may not be there yet, and the premise is made as part of that work.
- *   At a locked gate there may be no premise AND no way to name one honestly — two of the
- *   LIVE records say exactly that, "cannot locate this meter number in this flats". So the
- *   premise is OPTIONAL, and the ERF alone is a complete record.
- *
- *   EVERYTHING ELSE — inspection, disconnection, reconnection, reading, removal. The work is
- *   issued against a meter that already exists, and under the owner's registration rule a
- *   meter cannot exist without a premise: ERF, then premise, then meter. So the premise is
- *   always there to be carried, and a no access without one is a FAULT, not an honest gap.
- *
- * Measured before this was written (DCN & RCN stream, DEV, 2 October 2026): all 192 meters
- * carry accessData.erfId, erfNo and premise.id — 192 of 192. Nothing has to be worked around.
- *
- * Without this the lifecycle path would lose the one check that catches a real fault there,
- * because a missing premise would look as normal as it legitimately is on a registration.
- */
-export const NO_ACCESS_PREMISE_OPTIONAL_TRN_TYPES = Object.freeze([
-  "METER_DISCOVERY",
-  "METER_INSTALLATION",
-]);
-
-export function isNoAccessPremiseRequired(trnType) {
-  const type = normalizeUpper(trnType);
-  if (!type) return false;
-  return !NO_ACCESS_PREMISE_OPTIONAL_TRN_TYPES.includes(type);
-}
-
 export function normalizeNoAccessAccessData(accessData = {}, { actor = {} } = {}) {
-  const geography = assertNoAccessGeography(accessData);
-  const premise = normalizeNoAccessPremise(accessData.premise);
-
-  if (!premise && isNoAccessPremiseRequired(accessData.trnType)) {
-    throw noAccessError(
-      "NO_ACCESS_PREMISE_REQUIRED",
-      "Work issued against an existing meter must say which premise could not be accessed.",
-      { trnType: accessData.trnType },
-    );
-  }
-
+  // No Access records ONE thing: the worker could not touch the meter. It does not decide
+  // anything about the ERF or the premise - that is settled before the work is issued. It
+  // carries the ERF id it was given, and the premise if there is one.
   return {
     ...accessData,
-    ...geography,
-    premise,
+    ...assertNoAccessGeography(accessData),
+    premise: normalizeNoAccessPremise(accessData.premise),
     access: buildNoAccessAccessBlock(accessData.access, { actor }),
   };
 }
