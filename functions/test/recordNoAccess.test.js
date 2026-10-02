@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 
 import {
   assertNoAccessGeography,
+  buildNoAccessParentsFromErf,
+  noAccessParentsAreMissing,
   assertNoAccessLocation,
   assertNoAccessMedia,
   buildNoAccessAccessBlock,
@@ -407,4 +409,36 @@ test("the one door keeps what the form sent and settles only what the rules own"
   assert.equal(out.access.hasAccess, "no");
   assert.equal(out.access.reasonCode, "OTHER");
   assert.equal(out.access.reason, "Vicious dogs");
+});
+
+/* ------------------------------------------------------------------ *
+ * NA-R043 — the municipality and ward come from the ERF, not from the phone
+ * ------------------------------------------------------------------ */
+
+test("the ERF is the authority for where the work was", () => {
+  const parents = buildNoAccessParentsFromErf({
+    admin: {
+      country: { pcode: "ZA" },
+      province: { pcode: "ZA-KZN" },
+      districtMunicipality: { pcode: "DC21" },
+      localMunicipality: { pcode: "kzn241" },
+      ward: { pcode: "w6" },
+    },
+  });
+
+  assert.equal(parents.lmPcode, "KZN241");
+  assert.equal(parents.wardPcode, "W6");
+  assert.equal(parents.dmPcode, "DC21");
+});
+
+test("an ERF missing its admin reads NAv rather than blank, and never crashes", () => {
+  const parents = buildNoAccessParentsFromErf({});
+  assert.equal(parents.lmPcode, "NAv");
+  assert.equal(parents.countryPcode, "ZA");
+});
+
+test("GMR-R027: a payload with no municipality is spotted as unplaceable", () => {
+  assert.equal(noAccessParentsAreMissing({}), true);
+  assert.equal(noAccessParentsAreMissing({ lmPcode: "NAv" }), true);
+  assert.equal(noAccessParentsAreMissing({ lmPcode: "KZN241" }), false);
 });

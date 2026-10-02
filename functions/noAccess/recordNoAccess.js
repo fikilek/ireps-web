@@ -273,3 +273,31 @@ export function buildNoAccessData({ trnType, erfId, erfNo, premise, reason, medi
     access: buildNoAccessAccessBlock(reason, { actor }),
   };
 }
+
+/**
+ * NA-R043 — where the municipality and the ward on a no access come from.
+ *
+ * The ERF is the authority for which municipality and ward a property is in, so they are read
+ * from the ERF rather than taken from whatever the phone had cached. It also means the No
+ * Access screen does not have to assemble them, and the two screens that open it cannot
+ * assemble them two different ways — which is how this field set drifted everywhere else.
+ *
+ * The General Monthly Report reads `accessData.parents.lmPcode` and is indexed on it
+ * (GMR-R027), so a no access that reached `trns` without it would be invisible to the report.
+ */
+export function buildNoAccessParentsFromErf(erf = {}) {
+  const admin = erf?.admin || {};
+  return {
+    countryPcode: normalizeText(admin?.country?.pcode) || "ZA",
+    provincePcode: normalizeText(admin?.province?.pcode) || "NAv",
+    dmPcode: normalizeText(admin?.districtMunicipality?.pcode) || "NAv",
+    lmPcode: normalizeUpper(admin?.localMunicipality?.pcode) || "NAv",
+    wardPcode: normalizeUpper(admin?.ward?.pcode) || "NAv",
+  };
+}
+
+/** True when a payload's parents cannot place the work for the monthly report. */
+export function noAccessParentsAreMissing(parents = {}) {
+  const lm = normalizeUpper(parents?.lmPcode);
+  return !lm || lm === "NAV";
+}

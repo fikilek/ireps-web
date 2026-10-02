@@ -108,7 +108,11 @@ import {
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
-import { normalizeNoAccessAccessData } from "./noAccess/recordNoAccess.js";
+import {
+  buildNoAccessParentsFromErf,
+  noAccessParentsAreMissing,
+  normalizeNoAccessAccessData,
+} from "./noAccess/recordNoAccess.js";
 import { recordTargetedBatchNoAccessInTransaction } from "./targetedBatches/premiseLink.js";
 import {
   plainReasonFor,
@@ -3503,6 +3507,30 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       safePayload.accessData = normalizeNoAccessAccessData(safePayload?.accessData, {
         actor: { uid: caller.uid, name: actorName },
       });
+
+      // NA-R043: the municipality and ward are read from the ERF, which is the authority for
+      // where a property is, rather than taken from whatever the phone had cached. The No
+      // Access screen therefore does not assemble them, and the screens that open it cannot
+      // assemble them two different ways.
+      //
+      // GMR-R027 indexes the monthly report on accessData.parents.lmPcode, so a no access that
+      // reached trns without it would be invisible to the report - a record that exists and
+      // cannot be counted.
+      if (noAccessParentsAreMissing(safePayload?.accessData?.parents)) {
+        const erfSnap = await db
+          .collection("ireps_erfs")
+          .doc(safePayload.accessData.erfId)
+          .get();
+
+        if (erfSnap.exists) {
+          safePayload.accessData.parents = buildNoAccessParentsFromErf(erfSnap.data());
+        } else {
+          logger.warn("onMeterDiscoveryCallable --no access ERF not found", {
+            trnId: data.id,
+            erfId: safePayload.accessData.erfId,
+          });
+        }
+      }
     }
 
     if (targetedBatchValidation?.isTargetedBatch) {
