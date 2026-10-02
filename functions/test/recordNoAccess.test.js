@@ -421,3 +421,49 @@ test("the one door keeps what the form sent and settles only what the rules own"
   assert.equal(out.access.reasonCode, "OTHER");
   assert.equal(out.access.reason, "Vicious dogs");
 });
+
+/* ------------------------------------------------------------------ *
+ * NA-R044 — when a premise is "possible", made precise
+ *
+ * A meter cannot exist without a premise (ERF, then premise, then meter), so work issued
+ * against an existing meter always has one to carry. A registration may not. Treating both
+ * the same would cost the lifecycle path the one check that catches a real fault there.
+ * ------------------------------------------------------------------ */
+
+const noAccessOn = (trnType, premise) =>
+  normalizeNoAccessAccessData(
+    { trnType, erfId: "ERF_1", premise, access: { reason: "Property Locked" } },
+    { actor: ACTOR },
+  );
+
+test("NA-R044: a registration no access with no premise is complete", () => {
+  for (const trnType of ["METER_DISCOVERY", "METER_INSTALLATION"]) {
+    assert.equal(noAccessOn(trnType, null).premise, null, `${trnType} must accept no premise`);
+  }
+});
+
+test("NA-R044: work on an existing meter must say which premise", () => {
+  for (const trnType of [
+    "METER_INSPECTION", "METER_DISCONNECTION", "METER_RECONNECTION",
+    "METER_READING", "METER_REMOVAL",
+  ]) {
+    assert.equal(
+      code(() => noAccessOn(trnType, null)),
+      "NO_ACCESS_PREMISE_REQUIRED",
+      `${trnType} must demand a premise`,
+    );
+  }
+});
+
+test("NA-R044: a premise satisfies the rule on every path", () => {
+  for (const trnType of [
+    "METER_DISCOVERY", "METER_INSTALLATION", "METER_INSPECTION",
+    "METER_DISCONNECTION", "METER_RECONNECTION", "METER_READING", "METER_REMOVAL",
+  ]) {
+    assert.deepEqual(noAccessOn(trnType, { id: "PRM_1" }).premise, { id: "PRM_1" });
+  }
+});
+
+test("NA-R034: an NAv premise id on lifecycle work is a missing premise, not a value", () => {
+  assert.equal(code(() => noAccessOn("METER_READING", { id: "NAv" })), "NO_ACCESS_PREMISE_REQUIRED");
+});

@@ -303,13 +303,55 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
  * Installation is NOT validated by anything, so without this it would have kept accepting a
  * no access that nobody can place.
  */
+/**
+ * NA-R044 — "a premise ID where possible" (owner, 1 October 2026), made precise.
+ *
+ * When a premise is possible depends on what kind of work it is, and it is not a judgement:
+ *
+ *   REGISTRATION — Meter Discovery, Meter Installation. The worker is sent to an ERF to find
+ *   or fit a meter that may not be there yet, and the premise is made as part of that work.
+ *   At a locked gate there may be no premise AND no way to name one honestly — two of the
+ *   LIVE records say exactly that, "cannot locate this meter number in this flats". So the
+ *   premise is OPTIONAL, and the ERF alone is a complete record.
+ *
+ *   EVERYTHING ELSE — inspection, disconnection, reconnection, reading, removal. The work is
+ *   issued against a meter that already exists, and under the owner's registration rule a
+ *   meter cannot exist without a premise: ERF, then premise, then meter. So the premise is
+ *   always there to be carried, and a no access without one is a FAULT, not an honest gap.
+ *
+ * Measured before this was written (DCN & RCN stream, DEV, 2 October 2026): all 192 meters
+ * carry accessData.erfId, erfNo and premise.id — 192 of 192. Nothing has to be worked around.
+ *
+ * Without this the lifecycle path would lose the one check that catches a real fault there,
+ * because a missing premise would look as normal as it legitimately is on a registration.
+ */
+export const NO_ACCESS_PREMISE_OPTIONAL_TRN_TYPES = Object.freeze([
+  "METER_DISCOVERY",
+  "METER_INSTALLATION",
+]);
+
+export function isNoAccessPremiseRequired(trnType) {
+  const type = normalizeUpper(trnType);
+  if (!type) return false;
+  return !NO_ACCESS_PREMISE_OPTIONAL_TRN_TYPES.includes(type);
+}
+
 export function normalizeNoAccessAccessData(accessData = {}, { actor = {} } = {}) {
   const geography = assertNoAccessGeography(accessData);
+  const premise = normalizeNoAccessPremise(accessData.premise);
+
+  if (!premise && isNoAccessPremiseRequired(accessData.trnType)) {
+    throw noAccessError(
+      "NO_ACCESS_PREMISE_REQUIRED",
+      "Work issued against an existing meter must say which premise could not be accessed.",
+      { trnType: accessData.trnType },
+    );
+  }
 
   return {
     ...accessData,
     ...geography,
-    premise: normalizeNoAccessPremise(accessData.premise),
+    premise,
     access: buildNoAccessAccessBlock(accessData.access, { actor }),
   };
 }
