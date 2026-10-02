@@ -264,6 +264,58 @@ test("NA-R003: the same shape comes out whichever transaction it belongs to", ()
   assert.equal(new Set(shapes).size, 1, "every transaction type must produce one shape");
 });
 
+/* ------------------------------------------------------------------ *
+ * NA-R031.2 — access.reason is a guarantee readers depend on
+ *
+ * The General Monthly Report reads access.reason FIRST in getNoAccessReason, and the Meter
+ * Reading registry's eleven-deep chain reaches it too. Both survive the retirement of the
+ * old field names only because this writer always fills it. If the record ever carried
+ * reasonCode and reasonOther alone, leaving the words to be composed at read time, the
+ * monthly report would show nothing for every no access and nothing would error.
+ *
+ * Raised by the DCN & RCN stream, 2 October 2026. It is the hasAccess coupling pointed the
+ * other way, and this test is what stops it being rediscovered on a LIVE report.
+ * ------------------------------------------------------------------ */
+
+test("NA-R031.2: access.reason is never empty, for any reason on any transaction type", () => {
+  const reasons = [
+    { reasonCode: "Property Locked" },
+    { reasonCode: "Property Vacant" },
+    { reasonCode: "Property Demolished" },
+    { reasonCode: "OTHER", reasonOther: "Vicious dogs" },
+  ];
+
+  const types = [
+    "METER_DISCOVERY", "METER_INSTALLATION", "METER_INSPECTION",
+    "METER_DISCONNECTION", "METER_RECONNECTION", "METER_READING", "METER_REMOVAL",
+  ];
+
+  for (const trnType of types) {
+    for (const reason of reasons) {
+      const { access } = buildNoAccessData({
+        trnType, erfId: "ERF_1", erfNo: "5214",
+        reason, media: PHOTO, location: GPS, actor: ACTOR,
+      });
+      assert.equal(
+        typeof access.reason === "string" && access.reason.trim().length > 0,
+        true,
+        `${trnType} / ${reason.reasonCode}: access.reason must carry the display words`,
+      );
+    }
+  }
+});
+
+test("NA-R031.2: the words are the worker's own when the reason is Other", () => {
+  const { access } = buildNoAccessData({
+    trnType: "METER_DISCOVERY", erfId: "ERF_1", erfNo: "5214",
+    reason: { reasonCode: "OTHER", reasonOther: "Vicious dogs" },
+    media: PHOTO, location: GPS, actor: ACTOR,
+  });
+  // Not the code "OTHER", which is what a report would print if the words were composed
+  // at read time from the code alone.
+  assert.equal(access.reason, "Vicious dogs");
+});
+
 test("NA-R043: the ERF rule applies to every transaction type, not just the Sales Path", () => {
   for (const trnType of ["METER_DISCOVERY", "METER_READING", "METER_REMOVAL"]) {
     assert.equal(
