@@ -3265,6 +3265,59 @@ export const REGISTRATION_DEPS = {
   logger,
 };
 
+/**
+ * TR-R003 (0.6.0) — the position on a no access, resolved in ONE place.
+ *
+ * The owner, 3 October: "the AST location GPS must always be the asset location. The fallback
+ * is the premise location, where the asset location doesn't exist."
+ *
+ * The phone no longer sends one. A worker who could not touch the meter is standing at a gate,
+ * not at the meter, so their fix was never the asset's position. The server has both
+ * authorities in front of it and reads them, the same way it already reads the ERF for the
+ * municipality and the ward.
+ *
+ * WHY IT IS A FUNCTION AND NOT TWO COPIES. Meter Discovery and Meter Installation each have
+ * their own no access branch, and on 3 October a fix written into one of them did not reach
+ * the other - the same way the reason came to have five field names and the access card five
+ * private copies. One door, called from both.
+ *
+ * Mutates the payload in place: sets ast.location, and removes the retired root `location`
+ * and the astId that was only ever asked so the asset could be looked up.
+ */
+async function placeNoAccessPosition(payload) {
+  const astId = String(payload?.astId || "").trim();
+  let assetLocation = null;
+
+  if (astId) {
+    const astSnap = await db.collection("asts").doc(astId).get();
+    // Measured on DEV, 3 Oct: all 192 assets keep their position at ast.location, none without.
+    if (astSnap.exists) assetLocation = astSnap.data()?.ast?.location || null;
+  }
+
+  let premiseGeometry = null;
+
+  if (!readGpsPoint(assetLocation)) {
+    const premiseId = String(payload?.accessData?.premise?.id || "").trim();
+
+    if (premiseId) {
+      const prmSnap = await db.collection("premises").doc(premiseId).get();
+      // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
+      // NA-R044 making a premise a prerequisite, the fallback always reaches.
+      if (prmSnap.exists) premiseGeometry = prmSnap.data()?.geometry || null;
+    }
+  }
+
+  payload.ast = {
+    ...(payload.ast && typeof payload.ast === "object" ? payload.ast : {}),
+    location: buildNoAccessLocation({ assetLocation, premiseGeometry }),
+  };
+
+  delete payload.location;
+  delete payload.astId;
+
+  return payload;
+}
+
 export const onMeterDiscoveryCallable = onCall(async (request) => {
   try {
     const data = request?.data || {};
@@ -3532,50 +3585,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         }
       }
 
-      // TR-R003 (0.6.0): the position, resolved HERE and nowhere else.
-      //
-      // The owner, 3 October: "the AST location GPS must always be the asset location. The
-      // fallback is the premise location, where the asset location doesn't exist."
-      //
-      // The phone no longer sends one. A worker who could not touch the meter is standing at a
-      // gate, not at the meter, so their fix was never the asset's position. The server has
-      // both authorities in front of it - the asset document and the premise document - so it
-      // reads them, the same way it already reads the ERF for the municipality and the ward.
-      //
-      // One door, like the reason before it (normalizeNoAccessAccessData). Two screens open No
-      // Access; if either resolved its own position they would drift, which is how every field
-      // in this record set came to have two spellings.
-      const noAccessAstId = String(safePayload?.astId || "").trim();
-      let assetLocation = null;
-
-      if (noAccessAstId) {
-        const astSnap = await db.collection("asts").doc(noAccessAstId).get();
-        // Measured on DEV, 3 Oct: all 192 assets keep their position at ast.location, none without.
-        if (astSnap.exists) assetLocation = astSnap.data()?.ast?.location || null;
-      }
-
-      let premiseGeometry = null;
-
-      if (!readGpsPoint(assetLocation)) {
-        const noAccessPremiseId = String(safePayload?.accessData?.premise?.id || "").trim();
-
-        if (noAccessPremiseId) {
-          const prmSnap = await db.collection("premises").doc(noAccessPremiseId).get();
-          // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
-          // NA-R044 making a premise a prerequisite, the fallback always reaches.
-          if (prmSnap.exists) premiseGeometry = prmSnap.data()?.geometry || null;
-        }
-      }
-
-      safePayload.ast = {
-        ...(safePayload.ast && typeof safePayload.ast === "object" ? safePayload.ast : {}),
-        location: buildNoAccessLocation({ assetLocation, premiseGeometry }),
-      };
-
-      // The retired home. Every record that used it was a no access written by this screen.
-      delete safePayload.location;
-      // It was only ever asked so the asset could be looked up; it is not part of the record.
-      delete safePayload.astId;
+      await placeNoAccessPosition(safePayload);
     }
 
     if (targetedBatchValidation?.isTargetedBatch) {
@@ -5569,11 +5579,17 @@ export const onMeterInstallationCallable = onCall(async (request) => {
         : safePayload?.accessData || {};
 
     if (hasAccess === "no") {
+      // TR-R003: the same door Meter Discovery uses. This branch wrote `ast: null`, so a no
+      // access installation carried no position at all - and root `location`, if the phone had
+      // sent one, went straight through in the spread below.
+      const positioned = await placeNoAccessPosition({
+        ...safePayload,
+        accessData: finalAccessData,
+      });
+
       await trnRef.set(
         {
-          ...safePayload,
-          accessData: finalAccessData,
-          ast: null,
+          ...positioned,
           meterType: "NA",
           metadata,
         },

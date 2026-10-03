@@ -532,3 +532,43 @@ test("readGpsPoint takes both spellings and rejects what is not a position", () 
   assert.equal(readGpsPoint({ lat: 91, lng: 28.04 }), null);
   assert.equal(readGpsPoint({ lat: -26.2, lng: 181 }), null);
 });
+
+// ---------------------------------------------------------------------------
+// One door, checked in the source.
+//
+// On 3 October a No Access fix was written into the Meter Discovery callable and did not reach
+// the Meter Installation one, which has its own no access branch. That is the same fault as
+// five field names for one reason and five private copies of one access card, and it is the
+// reason this guard exists rather than a comment asking people to remember.
+// ---------------------------------------------------------------------------
+
+test("TR-R003: both no access branches resolve the position through the one helper", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../index.js", import.meta.url), "utf8");
+
+  // Read the CODE, not the prose. A guard that matches comments can be tripped by a comment
+  // explaining the very thing it forbids - and worse, silenced by deleting one.
+  const code = source
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed && !trimmed.startsWith("//") && !trimmed.startsWith("*") && !trimmed.startsWith("/*");
+    })
+    .join("\n");
+
+  const branches = code.match(/hasAccess === "no"/g) || [];
+  assert.ok(branches.length >= 2, "the no access branches have moved; this guard is reading nothing");
+
+  const calls = code.match(/await placeNoAccessPosition\(/g) || [];
+  assert.equal(
+    calls.length,
+    2,
+    "a no access branch is not resolving its position: Meter Discovery and Meter Installation each have one, and a fix to either must reach both",
+  );
+
+  assert.equal(
+    /ast:\s*null/.test(code),
+    false,
+    "a no access is writing ast: null again, which leaves the record with no position at all",
+  );
+});
