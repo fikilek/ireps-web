@@ -19,6 +19,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { formatPropertyType, formatStreetAddress } from "../premises/streetAddress.js";
+
 const SCRIPT_NAME = "31_backfill_trn_shape.js";
 const CONFIRM_TOKEN = "BACKFILL_TRN_SHAPE";
 
@@ -348,6 +350,32 @@ async function main() {
       }
     }
 
+    // 6a. the premise written the way every other transaction writes it (NA-R030): the address
+    //     and the property type as WORDS, from the premise document, which is the authority
+    //     for its own address.
+    //
+    //     The owner, 3 October, on the TRN Registry: "there is no access without an address."
+    //     normalizeNoAccessPremise used to return the id alone, so these showed NAv while 478
+    //     of the other 493 showed their street.
+    const premiseDoc = premiseById.get(premiseId);
+
+    if (premiseDoc) {
+      const address = formatStreetAddress(premiseDoc.address);
+      const propertyType = formatPropertyType(premiseDoc.propertyType);
+      const currentAddress = get(data, "accessData", "premise", "address");
+      const currentType = get(data, "accessData", "premise", "propertyType");
+
+      if (address && (!isFilled(currentAddress) || currentAddress === "NAv")) {
+        update["accessData.premise.address"] = address;
+        count("premise address from the premise");
+      }
+
+      if (propertyType && (!isFilled(currentType) || currentType === "NAv")) {
+        update["accessData.premise.propertyType"] = propertyType;
+        count("premise property type from the premise");
+      }
+    }
+
     // 7. the position: the asset's own, else the premise's — and it always says which
     //    (TR-R003). A PREMISE label on work where the meter is known is a defect to look at,
     //    not a tidy result.
@@ -485,6 +513,7 @@ async function main() {
     if (RETIRED_METADATA_KEYS.some((key) => key in (d.metadata || {}))) faults.push("a retired metadata key");
     if ("location" in d) faults.push("root location");
     if (DEVICE_METADATA_KEYS.some((key) => !(key in (d.metadata || {})))) faults.push("a device metadata key is absent");
+    if (isFilled(get(d, "accessData", "premise", "id")) && !isFilled(get(d, "accessData", "premise", "address"))) faults.push("a premise with no address");
 
     if (faults.length) failures.push({ id: doc.id, faults });
   });
