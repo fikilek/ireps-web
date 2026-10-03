@@ -56,6 +56,10 @@ export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
   "meterType",
   "ast",
   "media",
+  // TR-R001 0.7.0 (owner, 3 Oct 2026): the worker's own words, on every kind of transaction
+  // including a no access - which has no work property to put them in. Declared here as well
+  // as in the rule, or the strip would throw away the one key he asked to keep.
+  "fieldComment",
   ...TRN_ROOT_OBJECT_KEYS,
   // The one property named for the work (TR-R001). A no access carries none of them.
   "commissioning",

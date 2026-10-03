@@ -192,8 +192,18 @@ export function normalizeNoAccessAppointment(appointment, { actor = {} } = {}) {
   return {
     at: when.toISOString(),
     madeAt: normalizeText(appointment.madeAt) || new Date().toISOString(),
-    madeByUid: normalizeText(appointment.madeByUid) || normalizeText(actor.uid) || "NAv",
-    madeByUser: normalizeText(appointment.madeByUser) || normalizeText(actor.name) || "NAv",
+    // WHO IS ALWAYS THE SIGNED-IN CALLER, NEVER THE PHONE (owner's record, 3 Oct 2026).
+    //
+    // This took the phone's value FIRST and fell back to the caller. On his own capture the
+    // phone sent "Fieldworker" - its own fallback, because its profile had no name - and that
+    // beat the server's "Peter Peter". One record then carried two names for one person: the
+    // appointment was made by "Fieldworker" and the record created by "Peter Peter".
+    //
+    // The server holds the auth token. It is the authority for who is calling, exactly as the
+    // ERF is the authority for the municipality, and metadata already says so: "who, always
+    // from the signed-in caller and never from the phone".
+    madeByUid: normalizeText(actor.uid) || normalizeText(appointment.madeByUid) || "NAv",
+    madeByUser: normalizeText(actor.name) || normalizeText(appointment.madeByUser) || "NAv",
   };
 }
 

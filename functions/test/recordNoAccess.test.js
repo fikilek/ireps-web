@@ -724,6 +724,7 @@ test("TR-R001: a no access is cut down to the agreed root", async () => {
     id: "TRN_1",
     trnType: "METER_DISCOVERY",
     accessData: { trnType: "METER_DISCOVERY" },
+    fieldComment: { text: "under the dog" },
     metadata: {},
     meterType: "NA",
     ast: { location: { gps: { lat: -28, lng: 30 }, source: "PREMISE" } },
@@ -741,9 +742,12 @@ test("TR-R001: a no access is cut down to the agreed root", async () => {
     geofenceRefs: [],
     bucket: "x",
     corrections: [],
-    fieldComment: { text: "" },
     meterDiscoveryContractVersion: 2,
   });
+
+  // TR-R001 0.7.0: fieldComment IS declared - the owner kept it, because it is the worker's own
+  // words and a no access has no work property to put them in.
+  assert.deepEqual(written.fieldComment, { text: "under the dog" });
 
   for (const gone of [
     "capturedAt",
@@ -753,7 +757,6 @@ test("TR-R001: a no access is cut down to the agreed root", async () => {
     "geofenceRefs",
     "bucket",
     "corrections",
-    "fieldComment",
     "meterDiscoveryContractVersion",
   ]) {
     assert.equal(gone in written, false, `${gone} is on the root again, and no rule declares it`);
@@ -818,4 +821,36 @@ test("NA-R005: a no access id is accepted, and so is the work's own", async () =
   // The old shape carried NA in the middle, never at the end. It is not a no access by this
   // test, which is why NA-R005 says no reader may assume one shape or the other.
   assert.equal(isNoAccessTrnId("TRN_MDIS_1790997797249_NA_ZA5241006_5293"), false);
+});
+
+// ---------------------------------------------------------------------------
+// WHO is always the signed-in caller, never the phone.
+//
+// On the owner's own capture, 3 October: the appointment said it was made by "Fieldworker" -
+// the PHONE's fallback, because its profile had no name - while the record said it was created
+// by "Peter Peter". One record, two names for one person.
+// ---------------------------------------------------------------------------
+
+test("the server's actor beats whatever the phone claims about who", () => {
+  const appointment = normalizeNoAccessAppointment(
+    {
+      at: "2026-10-13T23:00:00.000Z",
+      madeAt: "2026-10-03T14:59:34.131Z",
+      madeByUid: "SOMEONE_ELSE",
+      madeByUser: "Fieldworker",
+    },
+    { actor: { uid: "RSEHoLEpg0W3bwWkEH3rgUnjMVu1", name: "Peter Peter" } },
+  );
+
+  assert.equal(appointment.madeByUser, "Peter Peter");
+  assert.equal(appointment.madeByUid, "RSEHoLEpg0W3bwWkEH3rgUnjMVu1");
+});
+
+test("where the server somehow has no actor, the phone's value is still better than nothing", () => {
+  const appointment = normalizeNoAccessAppointment(
+    { at: "2026-10-13T23:00:00.000Z", madeByUser: "Peter Peter" },
+    { actor: {} },
+  );
+
+  assert.equal(appointment.madeByUser, "Peter Peter");
 });
