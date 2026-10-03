@@ -16,6 +16,10 @@
 // test: the gate tests below run without an emulator. That is why these two primitives are
 // written here rather than imported from targetedBatches/helpers.js, which pulls in
 // firebase-admin for a Timestamp this module never uses.
+//
+// streetAddress.js is pure for the same reason, so importing it costs this module nothing.
+import { formatPropertyType, formatStreetAddress } from "../premises/streetAddress.js";
+
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeUpper = (value) => normalizeText(value).toUpperCase();
 
@@ -96,7 +100,24 @@ export function readNoAccessErfNo(erfNo) {
 export function normalizeNoAccessPremise(premise) {
   const id = normalizeText(premise?.id ?? premise);
   if (!id || normalizeUpper(id) === "NAV") return null;
-  return { id };
+
+  // NA-R030: a no access writes the premise the way every other transaction writes it -
+  // { id, address, propertyType }, the address and the type as WORDS.
+  //
+  // This used to return { id } alone, and the TRN Registry showed NAv in the Address column
+  // for every no access on DEV while 478 of the other 493 transactions showed their street.
+  // The owner, 3 October: "remember, we've just agreed that there is no access without an
+  // address". Stripping it made a complete record look like an incomplete one, and NAv is
+  // supposed to mean something is missing - so it was pointing at a fault that did not exist
+  // while hiding the one that did.
+  //
+  // NAv where there is genuinely nothing: the server fills both from the premise document
+  // itself wherever it can, so NAv here is a real gap and worth investigating.
+  return {
+    id,
+    address: formatStreetAddress(premise?.address) || "NAv",
+    propertyType: formatPropertyType(premise?.propertyType) || "NAv",
+  };
 }
 
 /**

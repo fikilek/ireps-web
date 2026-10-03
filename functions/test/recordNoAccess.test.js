@@ -137,7 +137,14 @@ test("NA-R034: an NAv written into a premise id is treated as absent", () => {
 });
 
 test("NA-R084.1: a premise that was there at the visit is carried", () => {
-  assert.deepEqual(normalizeNoAccessPremise({ id: "PRM_1" }), { id: "PRM_1" });
+  // NA-R030: and it is carried the way every other transaction carries it - { id, address,
+  // propertyType }. An id with nothing beside it showed NAv in the TRN Registry's Address
+  // column for every no access, which pointed at a gap that was not there.
+  assert.deepEqual(normalizeNoAccessPremise({ id: "PRM_1" }), {
+    id: "PRM_1",
+    address: "NAv",
+    propertyType: "NAv",
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -379,7 +386,7 @@ test("the one door keeps what the form sent and settles only what the rules own"
   assert.deepEqual(out.parents, { lmPcode: "LM1", wardPcode: "W6" }, "untouched fields survive");
   assert.equal(out.trnType, "METER_INSTALLATION");
   assert.equal(out.erfNo, "NAv", "the ERF number is a label, defaulted not demanded");
-  assert.deepEqual(out.premise, { id: "PRM_1" });
+  assert.deepEqual(out.premise, { id: "PRM_1", address: "NAv", propertyType: "NAv" });
   assert.equal(out.access.hasAccess, "no");
   assert.equal(out.access.reasonCode, "OTHER");
   assert.equal(out.access.reason, "Vicious dogs");
@@ -446,7 +453,11 @@ test("NA-R044: an ERF alone is not enough, because an ERF can be a block of flat
 
 test("NA-R044: a premise satisfies it on every path", () => {
   for (const trnType of ["METER_DISCOVERY", "METER_READING"]) {
-    assert.deepEqual(onPath(trnType, { id: "PRM_1" }).premise, { id: "PRM_1" });
+    assert.deepEqual(onPath(trnType, { id: "PRM_1" }).premise, {
+      id: "PRM_1",
+      address: "NAv",
+      propertyType: "NAv",
+    });
   }
 });
 
@@ -559,11 +570,11 @@ test("TR-R003: both no access branches resolve the position through the one help
   const branches = code.match(/hasAccess === "no"/g) || [];
   assert.ok(branches.length >= 2, "the no access branches have moved; this guard is reading nothing");
 
-  const calls = code.match(/await placeNoAccessPosition\(/g) || [];
+  const calls = code.match(/await completeNoAccessFromAuthorities\(/g) || [];
   assert.equal(
     calls.length,
     2,
-    "a no access branch is not resolving its position: Meter Discovery and Meter Installation each have one, and a fix to either must reach both",
+    "a no access branch is not completing itself from the authorities: Meter Discovery and Meter Installation each have one, and a fix to either must reach both",
   );
 
   assert.equal(
@@ -571,4 +582,68 @@ test("TR-R003: both no access branches resolve the position through the one help
     false,
     "a no access is writing ast: null again, which leaves the record with no position at all",
   );
+});
+
+
+// ---------------------------------------------------------------------------
+// NA-R030 — the premise is written the way every other transaction writes it.
+//
+// The owner, 3 October, looking at the TRN Registry: "remember, we've just agreed that there
+// is no access without an address". normalizeNoAccessPremise returned { id } alone, so every
+// no access showed NAv in the Address column while 478 of the other 493 transactions showed
+// their street. NAv is supposed to mean something is missing - so it pointed at a fault that
+// did not exist and hid the one that did.
+// ---------------------------------------------------------------------------
+
+test("NA-R030: the premise keeps its address and property type, as words", () => {
+  const premise = normalizeNoAccessPremise({
+    id: "PRM_1790997780895_674_W006_5293",
+    address: { strNo: "5293", strName: "Craigside", strType: "Street", suburbName: "Dundee" },
+    propertyType: { type: "Residential", name: "", unitNo: "" },
+  });
+
+  assert.equal(premise.id, "PRM_1790997780895_674_W006_5293");
+  assert.equal(premise.address, "5293 Craigside Street");
+  assert.equal(premise.propertyType, "Residential");
+});
+
+test("NA-R030: words in, the same words out", () => {
+  // A record that has already been through here, or a phone that sent words, is not mangled.
+  const premise = normalizeNoAccessPremise({
+    id: "PRM_1",
+    address: "5192 CRAIGSIDE Street",
+    propertyType: "Residential",
+  });
+
+  assert.equal(premise.address, "5192 CRAIGSIDE Street");
+  assert.equal(premise.propertyType, "Residential");
+});
+
+test("NA-R030: never the structured object, which crashes a screen", () => {
+  const premise = normalizeNoAccessPremise({
+    id: "PRM_1",
+    address: { strNo: "5293", strName: "Craigside", strType: "Street" },
+    propertyType: { type: "Residential" },
+  });
+
+  assert.equal(typeof premise.address, "string");
+  assert.equal(typeof premise.propertyType, "string");
+});
+
+test("NA-R030: a genuine gap is NAv, so it stays visible", () => {
+  const premise = normalizeNoAccessPremise({ id: "PRM_1" });
+
+  assert.equal(premise.address, "NAv");
+  assert.equal(premise.propertyType, "NAv");
+});
+
+test("the street type is not repeated when the name already carries it", () => {
+  // The owner, 24 September, on the map label: joining all three blindly gives
+  // "26 OLDACRE ST Street".
+  const premise = normalizeNoAccessPremise({
+    id: "PRM_1",
+    address: { strNo: "26", strName: "OLDACRE ST", strType: "Street" },
+  });
+
+  assert.equal(premise.address, "26 OLDACRE ST");
 });

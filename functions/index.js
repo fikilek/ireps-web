@@ -107,6 +107,7 @@ import {
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
+import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
 import {
   buildNoAccessLocation,
   buildNoAccessParentsFromErf,
@@ -3284,7 +3285,7 @@ export const REGISTRATION_DEPS = {
  * Mutates the payload in place: sets ast.location, and removes the retired root `location`
  * and the astId that was only ever asked so the asset could be looked up.
  */
-async function placeNoAccessPosition(payload) {
+async function completeNoAccessFromAuthorities(payload) {
   // Where the meter is named. The No Access screen sends `astId`, but a transaction that
   // already carries its meter names it at `ast.astData.astId` - NOT `ast.astData.id`, which
   // does not exist anywhere. Asking only for one of these returns nothing on the other path
@@ -3303,17 +3304,30 @@ async function placeNoAccessPosition(payload) {
     if (astSnap.exists) assetLocation = astSnap.data()?.ast?.location || null;
   }
 
-  let premiseGeometry = null;
+  // The premise is read EVERY time now, not only when the position falls back to it: it is
+  // also the authority for the address, and the phone's copy of that can be stale or absent.
+  // On 3 October two correct no accesses showed NAv in the TRN Registry's Address column while
+  // 478 of 493 other transactions showed their street - the premise had the address all along.
+  const premiseId = String(payload?.accessData?.premise?.id || "").trim();
+  let premise = null;
 
-  if (!readGpsPoint(assetLocation)) {
-    const premiseId = String(payload?.accessData?.premise?.id || "").trim();
+  if (premiseId) {
+    const prmSnap = await db.collection("premises").doc(premiseId).get();
+    if (prmSnap.exists) premise = prmSnap.data();
+  }
 
-    if (premiseId) {
-      const prmSnap = await db.collection("premises").doc(premiseId).get();
-      // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
-      // NA-R044 making a premise a prerequisite, the fallback always reaches.
-      if (prmSnap.exists) premiseGeometry = prmSnap.data()?.geometry || null;
-    }
+  // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
+  // NA-R044 making a premise a prerequisite, the fallback always reaches.
+  const premiseGeometry = readGpsPoint(assetLocation) ? null : premise?.geometry || null;
+
+  // NA-R030: the premise, written as every other transaction writes it - the address and the
+  // property type as WORDS, from the authority rather than from whatever the phone had.
+  if (premise && payload?.accessData?.premise) {
+    const address = formatStreetAddress(premise.address);
+    const propertyType = formatPropertyType(premise.propertyType);
+
+    if (address) payload.accessData.premise.address = address;
+    if (propertyType) payload.accessData.premise.propertyType = propertyType;
   }
 
   payload.ast = {
@@ -3594,7 +3608,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         }
       }
 
-      await placeNoAccessPosition(safePayload);
+      await completeNoAccessFromAuthorities(safePayload);
     }
 
     if (targetedBatchValidation?.isTargetedBatch) {
@@ -5591,7 +5605,7 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       // TR-R003: the same door Meter Discovery uses. This branch wrote `ast: null`, so a no
       // access installation carried no position at all - and root `location`, if the phone had
       // sent one, went straight through in the spread below.
-      const positioned = await placeNoAccessPosition({
+      const positioned = await completeNoAccessFromAuthorities({
         ...safePayload,
         accessData: finalAccessData,
       });
