@@ -108,6 +108,8 @@ import {
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
 import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
+// TR-R001: every transaction carries the same root, written where every path goes through it.
+import { applyTrnRootShape } from "./transactions/trnShape.js";
 import {
   buildNoAccessLocation,
   buildNoAccessParentsFromErf,
@@ -3629,6 +3631,12 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
 
     const now = nowIso;
 
+    // TR-R001 (0.6.0): the agreed root, on the way out. The backfill repaired 493 records on
+    // 3 October and the very next capture arrived without it - no trnType at the root and none
+    // of the five root objects - because the data had been repaired and the writer had not.
+    // NA-R080: writers first, then data. This is the writer's half.
+    applyTrnRootShape(safePayload);
+
     const finalPayload = {
       ...safePayload,
       // RG-R001 1.1.0 section 2: both times are kept. createdOnDevice is when the worker finished the
@@ -5605,10 +5613,12 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       // TR-R003: the same door Meter Discovery uses. This branch wrote `ast: null`, so a no
       // access installation carried no position at all - and root `location`, if the phone had
       // sent one, went straight through in the spread below.
-      const positioned = await completeNoAccessFromAuthorities({
-        ...safePayload,
-        accessData: finalAccessData,
-      });
+      const positioned = applyTrnRootShape(
+        await completeNoAccessFromAuthorities({
+          ...safePayload,
+          accessData: finalAccessData,
+        }),
+      );
 
       await trnRef.set(
         {
@@ -5715,6 +5725,11 @@ export const onMeterInstallationCallable = onCall(async (request) => {
           }
         : {}),
     };
+
+    // TR-R001: the agreed root on the installation path too. This branch builds its own
+    // document rather than passing finalPayload through, so a fix to the other one does not
+    // reach it - the same trap that left Meter Installation writing `ast: null` earlier today.
+    applyTrnRootShape(trnDoc);
 
     const astRef = db.collection("asts").doc(trnId);
     const masterRef = db.collection("meter_master").doc(meterNoNormalized);

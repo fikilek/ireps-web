@@ -647,3 +647,61 @@ test("the street type is not repeated when the name already carries it", () => {
 
   assert.equal(premise.address, "26 OLDACRE ST");
 });
+
+// ---------------------------------------------------------------------------
+// TR-R001 — the writer produces the agreed root, not just the backfill.
+//
+// On 3 October the backfill put all 493 transactions into the agreed shape and the very next
+// capture arrived without it: no trnType at the root and none of the five root objects. The
+// data had been repaired and the writer had not, so records were drifting back out as fast as
+// they were made — and the repaired ones sitting beside them made it look fixed.
+// ---------------------------------------------------------------------------
+
+test("TR-R001: the root is filled in, and trnType agrees with accessData", async () => {
+  const { applyTrnRootShape, TRN_ROOT_OBJECT_KEYS } = await import("../transactions/trnShape.js");
+
+  const payload = applyTrnRootShape({
+    id: "TRN_1",
+    meterType: "NA",
+    accessData: { trnType: "METER_DISCOVERY" },
+  });
+
+  assert.equal(payload.trnType, "METER_DISCOVERY");
+  for (const key of TRN_ROOT_OBJECT_KEYS) {
+    assert.deepEqual(payload[key], {}, `${key} is absent, so every reader must test for it`);
+  }
+});
+
+test("TR-R001: what the form filled is never overwritten", async () => {
+  const { applyTrnRootShape } = await import("../transactions/trnShape.js");
+
+  const payload = applyTrnRootShape({
+    accessData: { trnType: "METER_DISCONNECTION" },
+    status: { state: "CONNECTED" },
+    workflow: { state: "COMPLETED" },
+  });
+
+  assert.deepEqual(payload.status, { state: "CONNECTED" });
+  assert.deepEqual(payload.workflow, { state: "COMPLETED" });
+  assert.deepEqual(payload.origin, {}, "an absent key is still filled in");
+});
+
+test("TR-R001: every path that writes a transaction shapes its root", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../index.js", import.meta.url), "utf8");
+
+  const code = source
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed && !trimmed.startsWith("//") && !trimmed.startsWith("*") && !trimmed.startsWith("/*");
+    })
+    .join("\n");
+
+  const calls = code.match(/applyTrnRootShape\(/g) || [];
+  assert.equal(
+    calls.length,
+    3,
+    "a path that writes a transaction is not shaping its root: Meter Discovery, and Meter Installation's access and no access branches, each build their own document",
+  );
+});
