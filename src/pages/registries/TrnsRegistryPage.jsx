@@ -305,14 +305,21 @@ function getCompactTrnId(trnId, wardPcode) {
   if (!isActionableValue(fullTrnId)) return "NAv";
 
   const segments = fullTrnId.split("_").filter(Boolean);
-  const lastSegment = segments.at(-1) || "";
-  const suffix = lastSegment.slice(-4);
+
+  // NA-R005 (1.12.0): a no access ends in _NA, so the last segment is no longer what tells one
+  // record from another - every no access would compact to the same thing. The suffix is taken
+  // from the segment BEFORE it, and the compact id keeps the NA so a reader still sees it.
+  const isNoAccess = segments.at(-1) === "NA";
+  const identifying = (isNoAccess ? segments.at(-2) : segments.at(-1)) || "";
+  const suffix = identifying.slice(-4);
   const ward = isActionableValue(wardPcode)
     ? String(wardPcode).trim()
-    : segments.at(-2) || "";
+    : (isNoAccess ? segments.at(-3) : segments.at(-2)) || "";
 
-  if (ward && suffix) return `...${ward}_${suffix}`;
-  if (suffix) return `...${suffix}`;
+  const tail = isNoAccess ? "_NA" : "";
+
+  if (ward && suffix) return `...${ward}_${suffix}${tail}`;
+  if (suffix) return `...${suffix}${tail}`;
 
   return `...${fullTrnId.slice(-4)}`;
 }

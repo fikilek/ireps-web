@@ -793,16 +793,29 @@ test("TR-R001: the batch is kept, in the home the rule gives it", async () => {
 // ---------------------------------------------------------------------------
 
 test("NA-R005: a no access id is accepted, and so is the work's own", async () => {
-  const { isTrnIdForWork, noAccessTrnPrefix } = await import("../transactions/trnId.js");
+  const { isTrnIdForWork, isNoAccessTrnId } = await import("../transactions/trnId.js");
 
+  // NA-R005 (1.12.0): `_NA` is a SUFFIX, so a no access keeps the work's own prefix.
   assert.equal(isTrnIdForWork("TRN_MDIS_1791024322663_ELC_ZA5241006_1695", "TRN_MDIS_"), true);
-  assert.equal(isTrnIdForWork("TRN_NA_MDIS_1791024322663_NA_ZA5241006_1695", "TRN_MDIS_"), true);
-  assert.equal(isTrnIdForWork("TRN_NA_MINST_1791024322663_ELC_ZA5241006_1695", "TRN_MINST_"), true);
+  assert.equal(
+    isTrnIdForWork("TRN_MDIS_261003_124522663_K7X_NAv_ZA5241006_1695_NA", "TRN_MDIS_"),
+    true,
+  );
+  assert.equal(
+    isTrnIdForWork("TRN_MINST_261003_124522663_K7X_ELC_ZA5241006_1695_NA", "TRN_MINST_"),
+    true,
+  );
 
   // A no access on a DISCONNECTION is not a discovery (NA-R003), and the id says so.
-  assert.equal(isTrnIdForWork("TRN_NA_MDCN_1791024322663_ELC_ZA5241006_1695", "TRN_MDIS_"), false);
+  assert.equal(
+    isTrnIdForWork("TRN_MDCN_261003_124522663_K7X_ELC_ZA5241006_1695_NA", "TRN_MDIS_"),
+    false,
+  );
   assert.equal(isTrnIdForWork("", "TRN_MDIS_"), false);
-  assert.equal(isTrnIdForWork("TRN_SOMETHING_1", "TRN_MDIS_"), false);
 
-  assert.equal(noAccessTrnPrefix("TRN_MDIS_"), "TRN_NA_MDIS_");
+  assert.equal(isNoAccessTrnId("TRN_MDIS_261003_124522663_K7X_NAv_ZA5241006_1695_NA"), true);
+  assert.equal(isNoAccessTrnId("TRN_MDIS_1791024322663_ELC_ZA5241006_1695"), false);
+  // The old shape carried NA in the middle, never at the end. It is not a no access by this
+  // test, which is why NA-R005 says no reader may assume one shape or the other.
+  assert.equal(isNoAccessTrnId("TRN_MDIS_1790997797249_NA_ZA5241006_5293"), false);
 });

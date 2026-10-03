@@ -4,7 +4,7 @@
 // reference has always declared; a no access says so in the id and keeps the work after it:
 //
 //   work done:  TRN_MDIS_{timestamp}_{meterType}_{wardPcode}_{erfNo}
-//   no access:  TRN_NA_MDIS_{timestamp}_{meterType}_{wardPcode}_{erfNo}
+//   no access:  TRN_MDIS_{YYMMDD}_{HHMMSSmmm}_{tail}_{meterCat}_{wardPcode}_{erfNo}_NA
 //
 // WHY THIS MODULE EXISTS. The validators tested `startsWith("TRN_MDIS_")` and
 // `startsWith("TRN_MINST_")`, so the first no access built under NA-R005 would have been
@@ -18,9 +18,11 @@ export function accessTrnPrefix(workPrefix) {
 }
 
 /** The prefix the same kind of work carries when the worker could NOT reach the meter. */
-export function noAccessTrnPrefix(workPrefix) {
-  // TRN_MDIS_ -> TRN_NA_MDIS_
-  return String(workPrefix || "").trim().replace(/^TRN_/, "TRN_NA_");
+export const NO_ACCESS_TRN_SUFFIX = "_NA";
+
+/** Does this id say the worker could not reach the meter? NA-R005: the suffix, last. */
+export function isNoAccessTrnId(trnId) {
+  return String(trnId || "").trim().endsWith(NO_ACCESS_TRN_SUFFIX);
 }
 
 /**
@@ -34,10 +36,12 @@ export function isTrnIdForWork(trnId, workPrefix) {
   const id = String(trnId || "").trim();
   if (!id || !workPrefix) return false;
 
-  return id.startsWith(accessTrnPrefix(workPrefix)) || id.startsWith(noAccessTrnPrefix(workPrefix));
+  // NA-R005 (1.12.0): a no access keeps the work's own prefix and adds `_NA` at the END, so
+  // one prefix test covers both. An earlier draft put NA in FRONT; this is the settled shape.
+  return id.startsWith(accessTrnPrefix(workPrefix));
 }
 
 /** What to tell a caller whose id is neither shape. */
 export function trnIdShapeMessage(workPrefix) {
-  return `TRN id must start with ${accessTrnPrefix(workPrefix)} or, for a no access, ${noAccessTrnPrefix(workPrefix)}`;
+  return `TRN id must start with ${accessTrnPrefix(workPrefix)}`;
 }
