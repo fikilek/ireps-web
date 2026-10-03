@@ -3165,6 +3165,60 @@ const buildSuccessResult = (trnId, message = "TRN created successfully") => ({
 // worker, never the phone. A dry run is the default: it says what it would write and writes nothing.
 const REPAIR_ROLES = new Set(["MNG", "ADM", "SPU"]);
 
+/**
+ * TB-R059 / TB-R062 (1.3.91) — THE FRONT GATE.
+ *
+ * The owner, 3 October 2026: "The field worker that is doing the work should never be allowed
+ * to even open the form if the work is not theirs… the user must not waste his or her time
+ * submitting work that's going to be refused. Why don't you tell the user up front?"
+ *
+ * He proved the cost himself on ERF 5212: he picked a reason, took a photograph and set an
+ * appointment, twice, and only learned at submit that the ERF belonged to Simo Team.
+ *
+ * TWO GATES, AND THIS IS THE FIRST. It is a courtesy to the worker's time and nothing more -
+ * it can be stale, offline or skipped, and the submit path checks again regardless. Nothing
+ * here decides whether work is written; only the back gate does that.
+ *
+ * ONE WELL. It calls checkBatchWork - the SAME function the submit path calls - so the two
+ * gates cannot drift. A second implementation of this rule is how the front would start saying
+ * yes where the back says no, which is worse than having no front gate at all.
+ */
+export const checkBatchWorkCallable = onCall(async (request) => {
+  const caller = request.auth;
+
+  if (!caller) {
+    throw new HttpsError("unauthenticated", "Sign in first.");
+  }
+
+  const erfId = String(request.data?.erfId || "").trim();
+  const premiseId = String(request.data?.premiseId || "").trim();
+  const meterNo = String(request.data?.meterNo || "").trim();
+
+  if (!erfId && !premiseId && !meterNo) {
+    throw new HttpsError(
+      "invalid-argument",
+      "An ERF, a premise or a meter is needed to check whose batch this work is in.",
+    );
+  }
+
+  const decision = await checkBatchWork({
+    db,
+    uid: caller.uid,
+    erfId,
+    premiseId,
+    meterNo,
+    log: logger,
+  });
+
+  return {
+    allowed: decision?.allowed === true,
+    code: decision?.code || "NAv",
+    // The server's own sentence, which the phone shows word for word. The worker is never
+    // shown a code, and the phone never writes its own version of this.
+    message: decision?.message || "NAv",
+  };
+});
+
 export const repairRegistrationCallable = onCall(async (request) => {
   const caller = request.auth;
 
