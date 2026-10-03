@@ -218,18 +218,44 @@ function MediaActionIcon() {
   );
 }
 
+// The owner, 3 October 2026: "can we fix createdAt? it's 2 hrs behind."
+//
+// It was not behind - it was UTC, printed with no label. The record is right: TR-R002 keeps
+// every stored time in UTC and the NA-R005 id is the one deliberate exception. What was wrong
+// was this function: for a string it did `value.slice(0, 19)`, which CHOPS the ISO text and
+// hands over the UTC digits as if they were local. A capture at 18:35 in Dundee read 16:35.
+//
+// It also behaved two ways: a Firestore Timestamp went through toLocaleString() and came out
+// in the reader's own timezone, while a string came out in UTC. The same column, two clocks,
+// depending on which shape the row happened to hold.
+//
+// Africa/Johannesburg is named rather than left to the browser. The work happened in South
+// Africa, so a manager reading the registry from anywhere must see the time the worker saw.
+// SAST is UTC+2 all year, with no daylight saving.
+const SAST = "Africa/Johannesburg";
+
 function formatDateTime(value) {
   if (!value || value === "NAv") return "NAv";
 
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
+  const date =
+    typeof value?.toDate === "function" ? value.toDate() : new Date(value);
 
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
+  if (Number.isNaN(date?.getTime?.())) return "NAv";
 
-  return "NAv";
+  const parts = new Intl.DateTimeFormat("en-ZA", {
+    timeZone: SAST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(date)
+    .reduce((out, part) => ({ ...out, [part.type]: part.value }), {});
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
 function getDateMs(value) {
