@@ -322,8 +322,14 @@ test("the phone's own time is kept, and the server's time beside it", () => {
   });
 
   assert.equal(metadata.createdOnDevice, "2026-09-25T06:00:00.000Z");
-  assert.equal(metadata.createdOnServer, "2026-09-28T09:00:00.000Z");
+  // TR-R002: the server's time is createdAt. createdOnServer was the same value under a second
+  // name - measured identical on 13 of 13 DEV records - and is retired.
+  assert.equal(metadata.createdAt, "2026-09-28T09:00:00.000Z");
+  assert.equal(metadata.createdOnServer, undefined);
   assert.equal(metadata.createdByUser, "Kaiser");
+  // The device set carries WHO as well as when.
+  assert.equal(metadata.createdOnDeviceByUser, "Kaiser");
+  assert.equal(metadata.createdOnDeviceByUid, "uid-fwr");
   assert.equal(metadata[DEVICE_TIME_MISSING], undefined);
 });
 
@@ -346,8 +352,16 @@ test("a build that sends no time at all says so, rather than pretending", () => 
     nowIso: "2026-09-28T09:00:00.000Z",
   });
 
-  assert.equal(metadata.createdOnDevice, "2026-09-28T09:00:00.000Z");
-  assert.equal(metadata[DEVICE_TIME_MISSING], true);
+  // TR-R002, owner 3 Oct: "leave them empty for the true reflection of what they truly are."
+  //
+  // This used to be the SERVER's time, with a deviceTimeMissing flag beside it as the only
+  // thing saying the date was not real. That is a record claiming a work date nobody recorded -
+  // the arrival date wearing the work date's name, which is the fault RG-R001 exists to stop.
+  // The empty value is the flag, and it needs nothing beside it.
+  assert.equal(metadata.createdOnDevice, null);
+  assert.equal(metadata.createdOnDeviceByUid, null);
+  assert.equal(metadata.createdOnDeviceByUser, null);
+  assert.equal(metadata[DEVICE_TIME_MISSING], undefined);
 });
 
 test("a time that is not a time is not stored as one", () => {
@@ -358,8 +372,33 @@ test("a time that is not a time is not stored as one", () => {
     nowIso: "2026-09-28T09:00:00.000Z",
   });
 
-  assert.equal(metadata.createdOnDevice, "2026-09-28T09:00:00.000Z");
-  assert.equal(metadata[DEVICE_TIME_MISSING], true);
+  // "yesterday morning" is not a time, so nothing was captured: empty, not the server's clock.
+  assert.equal(metadata.createdOnDevice, null);
+  assert.equal(metadata[DEVICE_TIME_MISSING], undefined);
+});
+
+test("TR-R002: twelve keys, and no more", () => {
+  const metadata = buildRegistrationMetadata({
+    phoneMetadata: { createdOnDevice: "2026-09-25T06:00:00.000Z" },
+    actorUid: "uid-fwr",
+    actorName: "Kaiser",
+    nowIso: "2026-09-28T09:00:00.000Z",
+  });
+
+  assert.deepEqual(Object.keys(metadata).sort(), [
+    "createdAt",
+    "createdByUid",
+    "createdByUser",
+    "createdOnDevice",
+    "createdOnDeviceByUid",
+    "createdOnDeviceByUser",
+    "updatedAt",
+    "updatedByUid",
+    "updatedByUser",
+    "updatedOnDevice",
+    "updatedOnDeviceByUid",
+    "updatedOnDeviceByUser",
+  ]);
 });
 
 // ---------------------------------------------------------------------------

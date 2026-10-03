@@ -8,7 +8,12 @@
 // `createdOnDevice` is when the worker finished the form. `createdOnServer` is when the submission was
 // accepted. Everything that counts field work by date counts the device time.
 
-/** An older app sends no device time. We do not refuse the work for it; we say so instead. */
+/**
+ * RETIRED (TR-R002, 3 Oct 2026). It marked a record whose phone sent no device time, beside a
+ * createdOnDevice that had been filled with the SERVER's time - so the flag was the only thing
+ * saying the date was not real. The device time is now simply empty, which says it by itself.
+ * The name is kept because 2 records on DEV still carry it.
+ */
 export const DEVICE_TIME_MISSING = "deviceTimeMissing";
 
 const iso = (value) => {
@@ -40,22 +45,32 @@ export function buildRegistrationMetadata({
     iso(phoneMetadata?.updatedAt) ||
     deviceCreated;
 
+  // TR-R002 (0.6.0): TWELVE KEYS. Two matching sets of six - the server's, and the device's.
   return {
-    // When the work was done. Field work is counted by this.
-    createdOnDevice: deviceCreated || nowIso,
-    updatedOnDevice: deviceUpdated || nowIso,
-    // When the server accepted it.
-    createdOnServer: nowIso,
-    updatedOnServer: nowIso,
-    // Kept under their old names while readers still use them (opt01 retires them).
+    // THE SERVER SET - the standard iREPS block, on every document in iREPS.
     createdAt: nowIso,
-    updatedAt: nowIso,
-    // Who, always from the signed-in caller and never from the phone.
     createdByUid: actorUid,
     createdByUser: actorName,
+    updatedAt: nowIso,
     updatedByUid: actorUid,
     updatedByUser: actorName,
-    // An old build sent no device time, so the office can see why the two times are the same.
-    ...(deviceCreated ? {} : { [DEVICE_TIME_MISSING]: true }),
+
+    // THE DEVICE SET - the same six, for the phone. When and WHO, because the two actors can
+    // genuinely differ: a field worker captures on the phone, an office supervisor corrects it
+    // on the web. At capture they are the same person, and the identity is still taken from
+    // the signed-in caller and never from the phone.
+    //
+    // NULL WHERE NOTHING WAS CAPTURED, never the server's time (owner, 3 Oct 2026: "leave them
+    // empty for the true reflection of what they truly are"). This used to fall back to
+    // `nowIso`, so a record from an older build CLAIMED a work date that nobody had recorded -
+    // the arrival date wearing the work date's name, which is the exact fault RG-R001 was
+    // written to stop. The empty value is the flag; it needs no second field beside it saying
+    // the same thing, which is why deviceTimeMissing is gone.
+    createdOnDevice: deviceCreated || null,
+    createdOnDeviceByUid: deviceCreated ? actorUid : null,
+    createdOnDeviceByUser: deviceCreated ? actorName : null,
+    updatedOnDevice: deviceUpdated || null,
+    updatedOnDeviceByUid: deviceUpdated ? actorUid : null,
+    updatedOnDeviceByUser: deviceUpdated ? actorName : null,
   };
 }
