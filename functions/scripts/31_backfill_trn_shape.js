@@ -373,6 +373,35 @@ async function main() {
       }
     }
 
+    // 7a. a position that is already there but says nothing about itself.
+    //
+    // TR-R003 requires the label on every position, not only on the ones this script fills.
+    // 388 records had a position and no source.
+    //
+    // Where the worker HAD access the position was captured standing at the meter - that is
+    // where `asts` got its own position from in the first place - so it is the asset's and is
+    // labelled ASSET.
+    //
+    // Where the worker had NO access it was captured at a gate by the old No Access screen, so
+    // it is neither the asset's nor the premise's: it is the worker's own fix, which TR-R003
+    // says is not what this field holds. Replacing it is a real change to a recorded field
+    // observation, so this script REPORTS those and does not touch them. The owner decides.
+    const existingPoint = readGpsPoint(get(data, "ast", "location"));
+
+    if (existingPoint && !isFilled(get(data, "ast", "location", "source"))) {
+      const hadAccess = String(get(data, "accessData", "access", "hasAccess") || "").toLowerCase();
+
+      if (hadAccess === "yes") {
+        update["ast.location.source"] = "ASSET";
+        count("existing position labelled ASSET");
+      } else {
+        unresolved.push({
+          id,
+          why: "no access with a position captured at the gate by the old screen - owner's call",
+        });
+      }
+    }
+
     // 8. the retired home for the position.
     if ("location" in data) {
       update.location = admin.firestore.FieldValue.delete();
@@ -443,22 +472,29 @@ async function main() {
   console.log("VERIFY — reading every transaction back");
 
   const after = await db.collection("trns").get();
-  let stillWrong = 0;
+  const failures = [];
 
   after.forEach((doc) => {
     const d = doc.data();
-    const wrong =
-      ROOT_OBJECT_KEYS.some((key) => !(key in d)) ||
-      !isFilled(d.trnType) ||
-      !readGpsPoint(get(d, "ast", "location")) ||
-      RETIRED_METADATA_KEYS.some((key) => key in (d.metadata || {})) ||
-      "location" in d;
+    const faults = [];
 
-    if (wrong) stillWrong += 1;
+    if (ROOT_OBJECT_KEYS.some((key) => !(key in d))) faults.push("a root key is absent");
+    if (!isFilled(d.trnType)) faults.push("no trnType at the root");
+    if (!readGpsPoint(get(d, "ast", "location"))) faults.push("no position");
+    if (!isFilled(get(d, "ast", "location", "source"))) faults.push("position with no source");
+    if (RETIRED_METADATA_KEYS.some((key) => key in (d.metadata || {}))) faults.push("a retired metadata key");
+    if ("location" in d) faults.push("root location");
+    if (DEVICE_METADATA_KEYS.some((key) => !(key in (d.metadata || {})))) faults.push("a device metadata key is absent");
+
+    if (faults.length) failures.push({ id: doc.id, faults });
   });
 
-  console.log(`  transactions not yet in the agreed shape: ${stillWrong}`);
-  console.log(`  expected: ${unresolved.length} — the ones reported above`);
+  // Every check above, so the count and the list are the same set. A verify that counts one
+  // thing and explains another is how a number nobody can reconcile gets believed.
+  console.log(`  transactions not yet in the agreed shape: ${failures.length}`);
+  for (const failure of failures) {
+    console.log(`    ${failure.id}  —  ${failure.faults.join("; ")}`);
+  }
 }
 
 main().catch((error) => {
