@@ -527,7 +527,7 @@ export function buildGmrFieldRow({
   const captured = getCapturedAst(trn);
   const astData = getAstData(trn);
   const location = getLocation(trn);
-  const targeted = trn?.targetedBatchContext || {};
+  const targeted = (trn?.targetedBatchContext || trn?.origin?.targetedBatch) || {};
   const worker = getFieldWorker(trn);
   const premiseAddress = premise?.address || {};
   const normalisation = getNormalisation(trn);
@@ -774,7 +774,7 @@ export async function buildGeneralMonthlyReportDataset({
     premiseIds.push(trn?.accessData?.premise?.id);
     const fieldFoundMeterNo = normalizeMeterNo(getAstData(trn)?.astNo);
     salesIds.push(
-      trn?.targetedBatchContext?.salesDocId,
+      (trn?.targetedBatchContext || trn?.origin?.targetedBatch)?.salesDocId,
       isGmrLookupMeterNo(fieldFoundMeterNo) ? fieldFoundMeterNo : null,
     );
     astIds.push(getGmrAstId(trnId, trn));
@@ -833,7 +833,7 @@ export async function buildGeneralMonthlyReportDataset({
           meterMasterGapTrnIds.add(cleanText(trnId));
         }
       }
-      const salesId = cleanText(trn?.targetedBatchContext?.salesDocId) || lookupMeterNo;
+      const salesId = cleanText((trn?.targetedBatchContext || trn?.origin?.targetedBatch)?.salesDocId) || lookupMeterNo;
       const worker = getFieldWorker(trn);
       const fieldRow = buildGmrFieldRow({
           trnId,

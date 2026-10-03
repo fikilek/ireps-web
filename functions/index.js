@@ -109,7 +109,7 @@ import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./tar
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
 import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
 // TR-R001: every transaction carries the same root, written where every path goes through it.
-import { applyTrnRootShape } from "./transactions/trnShape.js";
+import { applyTrnRootShape, stripToDeclaredRoot } from "./transactions/trnShape.js";
 import {
   buildNoAccessLocation,
   buildNoAccessParentsFromErf,
@@ -3812,7 +3812,11 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
             actor: { uid: caller.uid, name: actorName },
           });
 
-          tx.create(trnRef, finalPayload);
+          // TR-R001: the agreed root and nothing else. A no access was reaching trns with
+          // capturedAt, sourceModule, executionOutcome, geofenceRefs and more hanging off the
+          // root, none of them declared. The batch it came from moves into `origin`, which is
+          // the declared home for "where the work came from and what it followed".
+          tx.create(trnRef, stripToDeclaredRoot(finalPayload));
         });
       } catch (error) {
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
@@ -5675,11 +5679,11 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       );
 
       await trnRef.set(
-        {
+        stripToDeclaredRoot({
           ...positioned,
           meterType: "NA",
           metadata,
-        },
+        }),
         { merge: true },
       );
 

@@ -45,3 +45,60 @@ export function applyTrnRootShape(payload = {}) {
 
   return payload;
 }
+
+
+// TR-R001 section 2: the WHOLE declared root. Nothing else belongs on a transaction.
+export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
+  "id",
+  "trnType",
+  "accessData",
+  "metadata",
+  "meterType",
+  "ast",
+  "media",
+  ...TRN_ROOT_OBJECT_KEYS,
+  // The one property named for the work (TR-R001). A no access carries none of them.
+  "commissioning",
+  "disconnection",
+  "reconnection",
+  "removal",
+  "inspection",
+  "meterReading",
+  "discovery",
+  "installation",
+]);
+
+/**
+ * Cut a transaction down to the agreed root, in place.
+ *
+ * The owner, 3 October: "We agreed on the root structure of the transaction. And now you're
+ * going outside that." A no access was reaching `trns` with capturedAt, sourceModule,
+ * executionOutcome, geofenceRefs, bucket and more hanging off the root - none of them in
+ * TR-R001, none of them ever put to him.
+ *
+ * WHAT IS KEPT RATHER THAN DROPPED. The batch a job came from is real and the monthly report
+ * needs it. TR-R001 already declares where it goes: `origin` is "where the work came from -
+ * field or office, and what it followed". So it moves INTO origin instead of being thrown
+ * away. Nothing else is moved: a key with no declared home is dropped, because a transaction
+ * carries the agreed root and nothing else.
+ */
+export function stripToDeclaredRoot(payload = {}) {
+  if (!payload || typeof payload !== "object") return payload;
+
+  const batch = payload.targetedBatchContext;
+
+  if (batch && typeof batch === "object") {
+    payload.origin = {
+      ...(payload.origin && typeof payload.origin === "object" ? payload.origin : {}),
+      targetedBatch: batch,
+    };
+  }
+
+  const declared = new Set(TRN_DECLARED_ROOT_KEYS);
+
+  for (const key of Object.keys(payload)) {
+    if (!declared.has(key)) delete payload[key];
+  }
+
+  return payload;
+}

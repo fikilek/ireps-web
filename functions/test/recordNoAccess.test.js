@@ -705,3 +705,81 @@ test("TR-R001: every path that writes a transaction shapes its root", async () =
     "a path that writes a transaction is not shaping its root: Meter Discovery, and Meter Installation's access and no access branches, each build their own document",
   );
 });
+
+// ---------------------------------------------------------------------------
+// TR-R001 — a no access carries the agreed root and NOTHING else.
+//
+// The owner, 3 October: "We agreed on the root structure of the transaction. And now you're
+// going outside that." No access records were reaching trns with capturedAt, sourceModule,
+// executionOutcome, assignmentHistory, geofenceRefs, bucket, corrections and fieldComment
+// hanging off the root — none of them declared, none of them ever put to him.
+// ---------------------------------------------------------------------------
+
+test("TR-R001: a no access is cut down to the agreed root", async () => {
+  const { stripToDeclaredRoot, TRN_DECLARED_ROOT_KEYS } = await import(
+    "../transactions/trnShape.js"
+  );
+
+  const written = stripToDeclaredRoot({
+    id: "TRN_1",
+    trnType: "METER_DISCOVERY",
+    accessData: { trnType: "METER_DISCOVERY" },
+    metadata: {},
+    meterType: "NA",
+    ast: { location: { gps: { lat: -28, lng: 30 }, source: "PREMISE" } },
+    media: [],
+    serviceProvider: {},
+    status: {},
+    assignment: {},
+    origin: {},
+    workflow: {},
+    // None of these are in TR-R001.
+    capturedAt: "2026-10-03T10:33:25.102Z",
+    sourceModule: "METER_DISCOVERY",
+    executionOutcome: {},
+    assignmentHistory: [],
+    geofenceRefs: [],
+    bucket: "x",
+    corrections: [],
+    fieldComment: { text: "" },
+    meterDiscoveryContractVersion: 2,
+  });
+
+  for (const gone of [
+    "capturedAt",
+    "sourceModule",
+    "executionOutcome",
+    "assignmentHistory",
+    "geofenceRefs",
+    "bucket",
+    "corrections",
+    "fieldComment",
+    "meterDiscoveryContractVersion",
+  ]) {
+    assert.equal(gone in written, false, `${gone} is on the root again, and no rule declares it`);
+  }
+
+  for (const key of Object.keys(written)) {
+    assert.ok(
+      TRN_DECLARED_ROOT_KEYS.includes(key),
+      `${key} reached the record and TR-R001 does not declare it`,
+    );
+  }
+});
+
+test("TR-R001: the batch is kept, in the home the rule gives it", async () => {
+  const { stripToDeclaredRoot } = await import("../transactions/trnShape.js");
+
+  // `origin` is "where the work came from — field or office, and what it followed". Dropping
+  // the batch would lose the link the monthly report counts by; leaving it at the root would
+  // leave a key no rule declares. It goes where the rule already put it.
+  const written = stripToDeclaredRoot({
+    id: "TRN_1",
+    origin: { channel: "FIELD" },
+    targetedBatchContext: { tbId: "TGB_1", rowId: "TBR_1" },
+  });
+
+  assert.equal("targetedBatchContext" in written, false);
+  assert.deepEqual(written.origin.targetedBatch, { tbId: "TGB_1", rowId: "TBR_1" });
+  assert.equal(written.origin.channel, "FIELD", "what origin already held is not thrown away");
+});
