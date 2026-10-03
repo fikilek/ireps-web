@@ -3285,7 +3285,16 @@ export const REGISTRATION_DEPS = {
  * and the astId that was only ever asked so the asset could be looked up.
  */
 async function placeNoAccessPosition(payload) {
-  const astId = String(payload?.astId || "").trim();
+  // Where the meter is named. The No Access screen sends `astId`, but a transaction that
+  // already carries its meter names it at `ast.astData.astId` - NOT `ast.astData.id`, which
+  // does not exist anywhere. Asking only for one of these returns nothing on the other path
+  // and the position then falls back to the premise silently, which under TR-R003 means "this
+  // meter has no position of its own, go and look at it". Writing that onto a meter whose
+  // position is sitting in `asts` manufactures a defect signal that looks exactly like a
+  // finding. Both spellings are read, deliberately.
+  const astId = String(
+    payload?.astId || payload?.ast?.astData?.astId || "",
+  ).trim();
   let assetLocation = null;
 
   if (astId) {
