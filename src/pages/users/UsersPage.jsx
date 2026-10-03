@@ -1,5 +1,15 @@
+/* eslint-disable no-unused-vars -- JSX components are consumed by React. */
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocsFromServer } from "firebase/firestore";
+import IrepsTable from "../../components/table/IrepsTable";
+import { filterIrepsTableRows } from "../../components/table/irepsTableModel.js";
+import {
+  NO_TEAM,
+  USERS_DEFAULT_SORT,
+  userStatusLabel as statusLabel,
+  usersTableColumns,
+  usersTableSearchValue,
+} from "./usersTableModel.js";
 
 import { useAuth } from "../../auth/useAuth";
 import { db } from "../../firebase";
@@ -9,11 +19,7 @@ import {
   useUpdateUserRoleMutation,
 } from "../../redux/usersApi";
 
-// UI-R002: the Users page is a standard iREPS table (ireps-skills/ireps-standard-table.md,
-// ireps-rules/ui-rules/registry-tables.md), with the Wards registry as its model.
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
-const NO_TEAM = "None";
+// Shared IrepsTable owns the table controls, filtering, sorting and pagination.
 
 // UI-R002 section 2: platform roles see every user; everyone else sees only their
 // own lineage — their company and every subcontractor below it.
@@ -59,17 +65,6 @@ function getLineageServiceProviderIds(rootId, serviceProviders = []) {
 
   return lineage;
 }
-
-const EMPTY_COLUMN_FILTERS = Object.freeze({
-  surname: "",
-  name: "",
-  email: "",
-  role: "",
-  serviceProviderName: "",
-  teams: "",
-  accountStatus: "",
-  onboardingStatus: "",
-});
 
 const ROLE_OPTIONS = [
   { value: "SPU", label: "Super User" },
@@ -121,11 +116,6 @@ const styles = {
     fontSize: "0.84rem",
     fontWeight: 800,
   },
-  filters: {
-    display: "grid",
-    gridTemplateColumns: "minmax(240px, 1fr) 190px 190px",
-    gap: "0.75rem",
-  },
   control: {
     minHeight: "2.6rem",
     border: "1px solid #cbd5e1",
@@ -135,41 +125,6 @@ const styles = {
     padding: "0.55rem 0.75rem",
     fontSize: "0.9rem",
     outline: "none",
-  },
-  card: {
-    overflow: "hidden",
-    border: "1px solid #e2e8f0",
-    borderRadius: "1rem",
-    background: "#ffffff",
-    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-  },
-  tableWrap: {
-    width: "100%",
-    overflowX: "auto",
-  },
-  table: {
-    width: "100%",
-    minWidth: "980px",
-    borderCollapse: "collapse",
-  },
-  th: {
-    padding: "0.8rem 0.9rem",
-    borderBottom: "1px solid #e2e8f0",
-    background: "#f8fafc",
-    color: "#475569",
-    fontSize: "0.76rem",
-    fontWeight: 900,
-    letterSpacing: "0.04em",
-    textAlign: "left",
-    textTransform: "uppercase",
-    whiteSpace: "nowrap",
-  },
-  td: {
-    padding: "0.85rem 0.9rem",
-    borderBottom: "1px solid #f1f5f9",
-    color: "#334155",
-    fontSize: "0.88rem",
-    verticalAlign: "middle",
   },
   userName: {
     color: "#0f172a",
@@ -373,13 +328,6 @@ function getMutationErrorMessage(error) {
     error?.message ||
     "Could not update the user role."
   );
-}
-
-function statusLabel(status) {
-  const value = normalizeUpper(status);
-  if (value === "ACTIVE" || value === "ENABLED") return "Enabled";
-  if (value === "DISABLED" || value === "INACTIVE") return "Disabled";
-  return value || "NAv";
 }
 
 function isStatusDisabled(status) {
@@ -608,88 +556,6 @@ function EditStatusModal({ user, onClose }) {
 
 
 const tableStyles = {
-  sortButton: {
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.4rem",
-    padding: 0,
-    fontWeight: 900,
-    textAlign: "left",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-    background: "#ffffff",
-  },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.75rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  clearButton: {
-    border: "1px solid #fecaca",
-    background: "#fef2f2",
-    color: "#b91c1c",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.62rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
-  },
   teamList: {
     display: "flex",
     flexWrap: "wrap",
@@ -699,19 +565,6 @@ const tableStyles = {
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString("en-ZA");
-}
-
-// The users API writes "NAv" for a missing value. It is not a value: it never
-// matches a filter, and it sorts after every real value.
-function realValue(value) {
-  const text = normalize(value);
-  return text.toUpperCase() === "NAV" ? "" : text;
-}
-
-function includesText(value, filterValue) {
-  const filterText = normalize(filterValue).toLowerCase();
-  if (!filterText) return true;
-  return realValue(value).toLowerCase().includes(filterText);
 }
 
 function compareNatural(a, b) {
@@ -725,174 +578,13 @@ function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort(compareNatural);
 }
 
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const direction = isActive
-    ? sortConfig.direction === "asc"
-      ? "↑"
-      : "↓"
-    : "↕";
-
-  return (
-    <button
-      type="button"
-      style={tableStyles.sortButton}
-      onClick={() => onSort(sortKey)}
-    >
-      <span>{label}</span>
-      <span>{direction}</span>
-    </button>
-  );
-}
-
-function FilterInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={tableStyles.headerInput}
-    />
-  );
-}
-
-function FilterSelect({ value, onChange, allLabel, options }) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={tableStyles.headerInput}
-    >
-      <option value="">{allLabel}</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-  hasActiveFilters,
-  onClearFilters,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={tableStyles.paginationBar}>
-      <div style={tableStyles.paginationLeft}>
-        <span className="muted">
-          Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-          {formatNumber(totalRows)} rows
-        </span>
-
-        {hasActiveFilters ? (
-          <button
-            type="button"
-            style={tableStyles.clearButton}
-            onClick={onClearFilters}
-          >
-            Clear All Filters
-          </button>
-        ) : null}
-      </div>
-
-      <div style={tableStyles.paginationControls}>
-        <label style={tableStyles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={tableStyles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={tableStyles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={tableStyles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={tableStyles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={tableStyles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={tableStyles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function getSortValue(user, key) {
-  if (key === "teams") return (user.teams || []).join(", ");
-  if (key === "accountStatus") return realValue(statusLabel(user.accountStatus));
-  return realValue(user[key]);
-}
-
-// Empty values last, whichever way the column is sorted.
-function compareForSort(a, b, direction) {
-  if (!a && !b) return 0;
-  if (!a) return 1;
-  if (!b) return -1;
-  return direction * compareNatural(a, b);
-}
-
 export default function UsersPage() {
   const {
     uid: actorUid,
     role: actorRole,
     serviceProvider: actorServiceProvider,
   } = useAuth();
-  const [searchText, setSearchText] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [columnFilters, setColumnFilters] = useState(EMPTY_COLUMN_FILTERS);
-  const [sortConfig, setSortConfig] = useState({
-    key: "surname",
-    direction: "asc",
-  });
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [filters, setFilters] = useState({});
   const [serviceProviders, setServiceProviders] = useState(null);
   const [serviceProvidersFailed, setServiceProvidersFailed] = useState(false);
   const [roleUser, setRoleUser] = useState(null);
@@ -999,16 +691,6 @@ export default function UsersPage() {
       roleUser
     : null;
 
-  const statusOptions = useMemo(() => {
-    return [
-      ...new Set(
-        lineageUsers
-          .map((user) => normalizeUpper(user.accountStatus))
-          .filter(Boolean),
-      ),
-    ].sort();
-  }, [lineageUsers]);
-
   const columnOptions = useMemo(
     () => ({
       role: uniqueSorted(userRows.map((user) => normalizeUpper(user.role))).map(
@@ -1068,106 +750,6 @@ export default function UsersPage() {
     [userRows],
   );
 
-  // Standard order: whole population → filter → sort → page.
-  const filteredUsers = useMemo(() => {
-    const search = normalize(searchText).toLowerCase();
-
-    return userRows.filter((user) => {
-      const matchesSearch =
-        !search ||
-        normalize(user.displayName).toLowerCase().includes(search) ||
-        normalize(user.email).toLowerCase().includes(search);
-
-      const matchesRole =
-        !roleFilter || normalizeUpper(user.role) === roleFilter;
-
-      const matchesStatus =
-        !statusFilter || normalizeUpper(user.accountStatus) === statusFilter;
-
-      const matchesTeam =
-        !columnFilters.teams ||
-        teamsLoading ||
-        teamsFailed ||
-        (columnFilters.teams === NO_TEAM
-          ? user.teams.length === 0
-          : user.teams.includes(columnFilters.teams));
-
-      return (
-        matchesSearch &&
-        matchesRole &&
-        matchesStatus &&
-        includesText(user.surname, columnFilters.surname) &&
-        includesText(user.name, columnFilters.name) &&
-        includesText(user.email, columnFilters.email) &&
-        (!columnFilters.role ||
-          normalizeUpper(user.role) === columnFilters.role) &&
-        (!columnFilters.serviceProviderName ||
-          normalize(user.serviceProviderName) ===
-            columnFilters.serviceProviderName) &&
-        matchesTeam &&
-        (!columnFilters.accountStatus ||
-          normalizeUpper(user.accountStatus) === columnFilters.accountStatus) &&
-        (!columnFilters.onboardingStatus ||
-          normalizeUpper(user.onboardingStatus) ===
-            columnFilters.onboardingStatus)
-      );
-    });
-  }, [
-    columnFilters,
-    roleFilter,
-    searchText,
-    statusFilter,
-    teamsFailed,
-    teamsLoading,
-    userRows,
-  ]);
-
-  const sortedUsers = useMemo(() => {
-    const direction = sortConfig.direction === "asc" ? 1 : -1;
-
-    return [...filteredUsers].sort((a, b) =>
-      compareForSort(
-        getSortValue(a, sortConfig.key),
-        getSortValue(b, sortConfig.key),
-        direction,
-      ),
-    );
-  }, [filteredUsers, sortConfig]);
-
-  const totalRows = sortedUsers.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pagedUsers = sortedUsers.slice(
-    (safeCurrentPage - 1) * pageSize,
-    safeCurrentPage * pageSize,
-  );
-
-  const hasActiveFilters = Object.values(columnFilters).some(Boolean);
-
-  function updateColumnFilter(key, value) {
-    setCurrentPage(1);
-    setColumnFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function clearColumnFilters() {
-    setCurrentPage(1);
-    setColumnFilters(EMPTY_COLUMN_FILTERS);
-  }
-
-  function handleSort(key) {
-    setCurrentPage(1);
-    setSortConfig((current) =>
-      current.key === key
-        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
-        : { key, direction: "asc" },
-    );
-  }
-
-  function handlePageSizeChange(nextSize) {
-    setCurrentPage(1);
-    setPageSize(nextSize);
-  }
-
   async function handleUpdateRole(user, newRole) {
     const userUid = normalize(user?.uid || user?.id);
     const normalizedNewRole = normalizeUpper(newRole);
@@ -1222,18 +804,83 @@ export default function UsersPage() {
     return formatNumber(value);
   }
 
-  const pagination = (
-    <PaginationControls
-      currentPage={safeCurrentPage}
-      pageSize={pageSize}
-      totalPages={totalPages}
-      totalRows={totalRows}
-      onPageChange={setCurrentPage}
-      onPageSizeChange={handlePageSizeChange}
-      hasActiveFilters={hasActiveFilters}
-      onClearFilters={clearColumnFilters}
-    />
-  );
+  function renderRole(user) {
+    const userUid = normalize(user.uid || user.id);
+    const roleEditable = canManageTargetRole({
+      actorUid,
+      actorRole,
+      targetUid: userUid,
+      targetRole: user.role,
+    });
+    const disabledReason = getRoleEditDisabledReason({
+      actorUid,
+      actorRole,
+      targetUid: userUid,
+      targetRole: user.role,
+    });
+    const roleFeedback = roleFeedbackByUser[userUid] || null;
+    const roleHasStreamed = roleFeedback?.type === "success" &&
+      normalizeUpper(user.role) === roleFeedback.expectedRole;
+    const roleFeedbackMessage = roleFeedback?.type === "pending"
+      ? "Updating role..."
+      : roleFeedback?.type === "error" ? roleFeedback.message
+        : roleFeedback?.type === "success" && roleHasStreamed ? "Role updated successfully."
+          : roleFeedback?.type === "success" ? "Role saved. Syncing live row..." : "";
+    const roleFeedbackColor = roleFeedback?.type === "error" ? "#b91c1c"
+      : roleFeedback?.type === "success" && roleHasStreamed ? "#166534" : "#1d4ed8";
+
+    return (
+      <div style={styles.roleCell}>
+        <button
+          type="button"
+          style={{
+            ...styles.editableBadge,
+            opacity: roleEditable ? 1 : 0.58,
+            cursor: roleEditable ? "pointer" : "not-allowed",
+          }}
+          disabled={!roleEditable}
+          onClick={() => setRoleUser(user)}
+          title={roleEditable ? `Edit ${user.displayName || "user"} role` : disabledReason}
+        >
+          {normalizeUpper(user.role) || "NAv"}{roleEditable ? " ▾" : ""}
+        </button>
+        {roleFeedbackMessage ? (
+          <span style={{ ...styles.roleFeedback, color: roleFeedbackColor }}>
+            {roleFeedbackMessage}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  const columns = usersTableColumns({
+    options: columnOptions,
+    teamsUnavailable: teamsLoading || teamsFailed,
+  }).map(column => ({
+    ...column,
+    render: user => {
+      if (column.key === "role") return renderRole(user);
+      if (column.key === "teams") {
+        if (teamsLoading) return <span style={styles.muted}>…</span>;
+        if (teamsFailed) return <span style={styles.muted}>NAv</span>;
+        return user.teams.length ? (
+          <div style={tableStyles.teamList}>
+            {user.teams.map(teamName => <span key={teamName} style={styles.staticBadge}>{teamName}</span>)}
+          </div>
+        ) : <span style={styles.muted}>{NO_TEAM}</span>;
+      }
+      if (column.key === "accountStatus") return <button type="button" style={styles.editableBadge} onClick={() => setStatusUser(user)} title={`Edit ${user.displayName || "user"} status`}>
+          {statusLabel(user.accountStatus)} ▾
+        </button>;
+      if (column.key === "onboardingStatus") return <span style={styles.staticBadge}>{normalizeUpper(user.onboardingStatus) || "NAv"}</span>;
+      if (column.key === "surname" || column.key === "name") return <span style={styles.userName}>{user[column.key] || "NAv"}</span>;
+      return <span style={column.key === "email" ? styles.muted : undefined}>{user[column.key] || "NAv"}</span>;
+    },
+  }));
+  const filteredUsers = filterIrepsTableRows(userRows, columns, { filters, searchValue: usersTableSearchValue });
+  const emptyText = usersFailed ? "Unable to load users."
+    : lineageFailed ? "The service providers could not be loaded, so your users cannot be shown. Refresh the page to try again."
+    : !isPlatformViewer && !actorServiceProviderId ? "Your profile has no service provider, so no users can be shown."
+    : userRows.length ? "No users match the current search or filters." : "No users found.";
 
   return (
     <section style={styles.page}>
@@ -1281,355 +928,33 @@ export default function UsersPage() {
         </div>
       </section>
 
-      <div style={styles.filters}>
-        <input
-          type="search"
-          aria-label="Search users"
-          placeholder="Search name or email..."
-          value={searchText}
-          onChange={(event) => {
-            setCurrentPage(1);
-            setSearchText(event.target.value);
-          }}
-          style={styles.control}
-        />
-
-        <select
-          aria-label="Filter users by role"
-          value={roleFilter}
-          onChange={(event) => {
-            setCurrentPage(1);
-            setRoleFilter(event.target.value);
-          }}
-          style={styles.control}
-        >
-          <option value="">All Roles</option>
-          {ROLE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          aria-label="Filter users by account status"
-          value={statusFilter}
-          onChange={(event) => {
-            setCurrentPage(1);
-            setStatusFilter(event.target.value);
-          }}
-          style={styles.control}
-        >
-          <option value="">All Statuses</option>
-          {statusOptions.map((status) => (
-            <option key={status} value={status}>
-              {statusLabel(status)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <section className="table-panel">
-        {pagination}
-
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>
-                  <SortButton
-                    label="Surname"
-                    sortKey="surname"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterInput
-                    value={columnFilters.surname}
-                    onChange={(value) => updateColumnFilter("surname", value)}
-                    placeholder="Surname"
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Name"
-                    sortKey="name"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterInput
-                    value={columnFilters.name}
-                    onChange={(value) => updateColumnFilter("name", value)}
-                    placeholder="Name"
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Email"
-                    sortKey="email"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterInput
-                    value={columnFilters.email}
-                    onChange={(value) => updateColumnFilter("email", value)}
-                    placeholder="Email"
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Role"
-                    sortKey="role"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterSelect
-                    value={columnFilters.role}
-                    onChange={(value) => updateColumnFilter("role", value)}
-                    allLabel="All roles"
-                    options={columnOptions.role}
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Service Provider"
-                    sortKey="serviceProviderName"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterSelect
-                    value={columnFilters.serviceProviderName}
-                    onChange={(value) =>
-                      updateColumnFilter("serviceProviderName", value)
-                    }
-                    allLabel="All service providers"
-                    options={columnOptions.serviceProviderName}
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Team"
-                    sortKey="teams"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterSelect
-                    value={columnFilters.teams}
-                    onChange={(value) => updateColumnFilter("teams", value)}
-                    allLabel="All teams"
-                    options={columnOptions.teams}
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Account Status"
-                    sortKey="accountStatus"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterSelect
-                    value={columnFilters.accountStatus}
-                    onChange={(value) =>
-                      updateColumnFilter("accountStatus", value)
-                    }
-                    allLabel="All statuses"
-                    options={columnOptions.accountStatus}
-                  />
-                </th>
-                <th>
-                  <SortButton
-                    label="Onboarding Status"
-                    sortKey="onboardingStatus"
-                    sortConfig={sortConfig}
-                    onSort={handleSort}
-                  />
-                  <FilterSelect
-                    value={columnFilters.onboardingStatus}
-                    onChange={(value) =>
-                      updateColumnFilter("onboardingStatus", value)
-                    }
-                    allLabel="All statuses"
-                    options={columnOptions.onboardingStatus}
-                  />
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {pagedUsers.map((user) => {
-                const userUid = normalize(user.uid || user.id);
-                const roleEditable = canManageTargetRole({
-                  actorUid,
-                  actorRole,
-                  targetUid: userUid,
-                  targetRole: user.role,
-                });
-                const disabledReason = getRoleEditDisabledReason({
-                  actorUid,
-                  actorRole,
-                  targetUid: userUid,
-                  targetRole: user.role,
-                });
-                const roleFeedback = roleFeedbackByUser[userUid] || null;
-                const roleHasStreamed =
-                  roleFeedback?.type === "success" &&
-                  normalizeUpper(user.role) === roleFeedback.expectedRole;
-
-                const roleFeedbackMessage =
-                  roleFeedback?.type === "pending"
-                    ? "Updating role..."
-                    : roleFeedback?.type === "error"
-                      ? roleFeedback.message
-                      : roleFeedback?.type === "success" && roleHasStreamed
-                        ? "Role updated successfully."
-                        : roleFeedback?.type === "success"
-                          ? "Role saved. Syncing live row..."
-                          : "";
-
-                const roleFeedbackColor =
-                  roleFeedback?.type === "error"
-                    ? "#b91c1c"
-                    : roleFeedback?.type === "success" && roleHasStreamed
-                      ? "#166534"
-                      : "#1d4ed8";
-
-                return (
-                  <tr key={userUid}>
-                    <td>
-                      <span style={styles.userName}>
-                        {user.surname || "NAv"}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span style={styles.userName}>{user.name || "NAv"}</span>
-                    </td>
-
-                    <td style={styles.muted}>{user.email || "NAv"}</td>
-
-                    <td>
-                      <div style={styles.roleCell}>
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.editableBadge,
-                            opacity: roleEditable ? 1 : 0.58,
-                            cursor: roleEditable ? "pointer" : "not-allowed",
-                          }}
-                          disabled={!roleEditable}
-                          onClick={() => setRoleUser(user)}
-                          title={
-                            roleEditable
-                              ? `Edit ${user.displayName || "user"} role`
-                              : disabledReason
-                          }
-                        >
-                          {normalizeUpper(user.role) || "NAv"}
-                          {roleEditable ? " ▾" : ""}
-                        </button>
-
-                        {roleFeedbackMessage ? (
-                          <span
-                            style={{
-                              ...styles.roleFeedback,
-                              color: roleFeedbackColor,
-                            }}
-                          >
-                            {roleFeedbackMessage}
-                          </span>
-                        ) : null}
-                      </div>
-                    </td>
-
-                    <td>{user.serviceProviderName || "NAv"}</td>
-
-                    <td>
-                      {teamsLoading ? (
-                        <span style={styles.muted}>…</span>
-                      ) : teamsFailed ? (
-                        <span style={styles.muted}>NAv</span>
-                      ) : user.teams.length ? (
-                        <div style={tableStyles.teamList}>
-                          {user.teams.map((teamName) => (
-                            <span key={teamName} style={styles.staticBadge}>
-                              {teamName}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span style={styles.muted}>{NO_TEAM}</span>
-                      )}
-                    </td>
-
-                    <td>
-                      <button
-                        type="button"
-                        style={styles.editableBadge}
-                        onClick={() => setStatusUser(user)}
-                        title={`Edit ${user.displayName || "user"} status`}
-                      >
-                        {statusLabel(user.accountStatus)} ▾
-                      </button>
-                    </td>
-
-                    <td>
-                      <span style={styles.staticBadge}>
-                        {normalizeUpper(user.onboardingStatus) || "NAv"}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {usersFailed ? (
-          <div style={styles.empty}>Unable to load users.</div>
-        ) : null}
-
-        {isPlatformViewer && serviceProvidersFailed ? (
-          <div style={styles.empty}>
-            The service providers could not be loaded, so the Service Providers
-            count is not shown. Refresh the page to try again.
-          </div>
-        ) : null}
-
-        {!usersFailed && lineageFailed ? (
-          <div style={styles.empty}>
-            The service providers could not be loaded, so your users cannot be
-            shown. Refresh the page to try again.
-          </div>
-        ) : null}
-
-        {!usersFailed && !lineageFailed && (isLoading || !lineageReady) ? (
-          <div style={styles.empty}>Loading Users...</div>
-        ) : null}
-
-        {!isLoading &&
-        lineageReady &&
-        !isPlatformViewer &&
-        !actorServiceProviderId ? (
-          <div style={styles.empty}>
-            Your profile has no service provider, so no users can be shown.
-          </div>
-        ) : null}
-
-        {!usersFailed &&
-        !isLoading &&
-        lineageReady &&
-        (isPlatformViewer || actorServiceProviderId) &&
-        lineageUsers.length === 0 ? (
-          <div style={styles.empty}>No users found.</div>
-        ) : null}
-
-        {!isLoading && lineageUsers.length > 0 && filteredUsers.length === 0 ? (
-          <div style={styles.empty}>
-            No users match the current search or filters.
-          </div>
-        ) : null}
-
-        {pagination}
-      </section>
+      <IrepsTable
+        key={`${actorUid}:${actorRole}:${actorServiceProviderId}`}
+        title="Users"
+        columns={columns}
+        rows={userRows}
+        rowKey={user => user.uid || user.id}
+        defaultSort={USERS_DEFAULT_SORT}
+        filters={filters}
+        onFiltersChange={setFilters}
+        searchValue={usersTableSearchValue}
+        searchLabel="Search users"
+        searchPlaceholder="Search name or email…"
+        loading={!usersFailed && !lineageFailed && (isLoading || !lineageReady)}
+        loadingText="Loading Users…"
+        emptyText={emptyText}
+        downloads={{
+          registryName: "Users",
+          fileBaseName: "users",
+          scope: { label: isPlatformViewer ? "All users" : "Your service provider and subcontractors" },
+        }}
+      />
+      {usersFailed && userRows.length > 0 ? <div style={styles.empty}>
+        Unable to refresh users. Showing previously loaded users.
+      </div> : null}
+      {isPlatformViewer && serviceProvidersFailed ? <div style={styles.empty}>
+        The service providers could not be loaded, so the Service Providers count is not shown. Refresh the page to try again.
+      </div> : null}
 
       {selectedRoleUser ? (
         <EditRoleModal

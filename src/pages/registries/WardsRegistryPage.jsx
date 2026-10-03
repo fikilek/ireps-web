@@ -1,15 +1,12 @@
-import { useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
+import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
+import IrepsTable from "../../components/table/IrepsTable";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
-import {
-  DatetimeFilterButton,
-  DatetimeFilterModal,
-} from "../../components/DatetimeFilter";
-import DownloadButtons from "../../components/DownloadButtons";
-
 const EMPTY_WARD_FILTERS = {
   wardNumber: "",
   formalErfCount: "",
@@ -22,9 +19,6 @@ const EMPTY_WARD_FILTERS = {
   trnCount: "",
 };
 
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
-
 function getActiveLmPcode(activeWorkbase) {
   return (
     activeWorkbase?.lmPcode ||
@@ -36,6 +30,7 @@ function getActiveLmPcode(activeWorkbase) {
 }
 
 function formatNumber(value) {
+  if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
 }
@@ -80,16 +75,7 @@ function includesText(value, filterValue) {
 }
 
 function getCountText(value) {
-  return String(Number(value) || 0);
-}
-
-function compareNatural(a, b) {
-  if (typeof a === "number" && typeof b === "number") return a - b;
-
-  return String(a || "").localeCompare(String(b || ""), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return String(value ?? "Pending");
 }
 
 function getSortValue(row, key) {
@@ -107,126 +93,11 @@ function getSortValue(row, key) {
   return "";
 }
 
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive
-    ? sortConfig.direction === "asc"
-      ? "↑"
-      : "↓"
-    : "↕";
-
-  return (
-    <button
-      type="button"
-      style={styles.sortButton}
-      onClick={() => onSort(sortKey)}
-    >
-      <span>{label}</span>
-      <span>{directionLabel}</span>
-    </button>
-  );
-}
-
-function FilterInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={styles.headerInput}
-    />
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-        {formatNumber(totalRows)} rows
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={styles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
   startDate: "",
   endDate: "",
 };
-
-function buildUpdatedAtFilter(mode) {
-  return {
-    mode,
-    startDate: "",
-    endDate: "",
-  };
-}
 
 function getUpdatedAtDate(value) {
   if (!value || value === "NAv") return null;
@@ -245,104 +116,6 @@ function getUpdatedAtDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function startOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function endOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
-}
-
-function addDays(date, days) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate() + days,
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-
-  const [year, month, day] = String(value).split("-").map(Number);
-
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
-  const mode = filter?.mode || "ALL";
-  const now = new Date();
-  const todayStart = startOfDay(now);
-
-  if (mode === "TODAY") {
-    return { start: todayStart, end: endOfDay(now) };
-  }
-
-  if (mode === "YESTERDAY") {
-    const yesterday = addDays(todayStart, -1);
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-  }
-
-  if (mode === "PAST_3_DAYS") {
-    return { start: addDays(todayStart, -2), end: endOfDay(now) };
-  }
-
-  if (mode === "THIS_WEEK") {
-    const sunday = addDays(todayStart, -todayStart.getDay());
-    const saturday = addDays(sunday, 6);
-    return { start: startOfDay(sunday), end: endOfDay(saturday) };
-  }
-
-  if (mode === "THIS_MONTH") {
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999,
-    );
-    return { start: firstDay, end: lastDay };
-  }
-
-  if (mode === "CUSTOM") {
-    const startDate = parseDateOnly(filter?.startDate);
-    const endDate = parseDateOnly(filter?.endDate);
-
-    return {
-      start: startDate ? startOfDay(startDate) : null,
-      end: endDate ? endOfDay(endDate) : null,
-    };
-  }
-
-  return { start: null, end: null };
-}
-
 function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
   if (!filter || filter.mode === "ALL") return true;
 
@@ -359,17 +132,8 @@ function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
 
 export default function WardsRegistryPage() {
   const { activeWorkbase, role } = useAuth();
-  const [sortConfig, setSortConfig] = useState({
-    key: "updatedAt",
-    direction: "desc",
-  });
+
   const [filters, setFilters] = useState(EMPTY_WARD_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(
-    EMPTY_UPDATED_AT_FILTER,
-  );
-  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -379,7 +143,6 @@ export default function WardsRegistryPage() {
     isFetching,
     error,
   } = useGetRegistryWardsByLmQuery(activeLmPcode || skipToken);
-  console.log(`wardRows`, wardRows);
 
   const activeWorkbaseName =
     activeWorkbase?.name ||
@@ -388,66 +151,30 @@ export default function WardsRegistryPage() {
     activeWorkbase?.pcode ||
     "NAv";
 
-  const filteredWardRows = useMemo(() => {
-    return wardRows.filter((row) => {
-      return (
-        includesText(row.wardNumber, filters.wardNumber) &&
-        includesText(
-          getCountText(row.formalErfCount),
-          filters.formalErfCount,
-        ) &&
-        includesText(
-          getCountText(row.informalErfCount),
-          filters.informalErfCount,
-        ) &&
-        includesText(getCountText(row.totalErfCount), filters.totalErfCount) &&
-        includesText(getCountText(row.premiseCount), filters.premiseCount) &&
-        includesText(
-          getCountText(row.electricityMeterCount),
-          filters.electricityMeterCount,
-        ) &&
-        includesText(
-          getCountText(row.waterMeterCount),
-          filters.waterMeterCount,
-        ) &&
-        includesText(getCountText(row.meterCount), filters.meterCount) &&
-        includesText(getCountText(row.trnCount), filters.trnCount) &&
-        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
-      );
+  const filterRegistryRows = useCallback((rows, tableFilters) => {
+    const filters = {
+      ...EMPTY_WARD_FILTERS,
+      ...tableFilters
+    };
+    for (const key of Object.keys(EMPTY_WARD_FILTERS)) {
+      if (EMPTY_WARD_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
+    }
+    const updatedAtFilter = tableFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
+    return rows.filter(row => {
+      return includesText(row.wardNumber, filters.wardNumber) && includesText(getCountText(row.formalErfCount), filters.formalErfCount) && includesText(getCountText(row.informalErfCount), filters.informalErfCount) && includesText(getCountText(row.totalErfCount), filters.totalErfCount) && includesText(getCountText(row.premiseCount), filters.premiseCount) && includesText(getCountText(row.electricityMeterCount), filters.electricityMeterCount) && includesText(getCountText(row.waterMeterCount), filters.waterMeterCount) && includesText(getCountText(row.meterCount), filters.meterCount) && includesText(getCountText(row.trnCount), filters.trnCount) && matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter);
     });
-  }, [wardRows, filters, updatedAtFilter]);
+  }, []);
 
-  const sortedWardRows = useMemo(() => {
-    const rows = [...filteredWardRows];
+  const filteredWardRows = useMemo(() => filterRegistryRows(wardRows, filters), [wardRows, filters, filterRegistryRows]);
 
-    rows.sort((a, b) => {
-      const comparison = compareNatural(
-        getSortValue(a, sortConfig.key),
-        getSortValue(b, sortConfig.key),
-      );
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-
-    return rows;
-  }, [filteredWardRows, sortConfig]);
-
-  const totalRows = sortedWardRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
-  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
-  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
-  const paginatedWardRows = useMemo(() => {
-    return sortedWardRows.slice(pageStartIndex, pageEndIndex);
-  }, [sortedWardRows, pageStartIndex, pageEndIndex]);
-
-  const totals = sortedWardRows.reduce(
+  const totals = filteredWardRows.reduce(
     (accumulator, row) => {
-      accumulator.totalErfs += row.totalErfCount;
-      accumulator.premises += row.premiseCount;
-      accumulator.electricityMeters += row.electricityMeterCount;
-      accumulator.waterMeters += row.waterMeterCount;
-      accumulator.meters += row.meterCount;
-      accumulator.trns += row.trnCount;
+      accumulator.totalErfs = typeof accumulator.totalErfs === "number" && typeof row.totalErfCount === "number" ? accumulator.totalErfs + row.totalErfCount : "Incomplete";
+      accumulator.premises = typeof accumulator.premises === "number" && typeof row.premiseCount === "number" ? accumulator.premises + row.premiseCount : "Incomplete";
+      accumulator.electricityMeters = typeof accumulator.electricityMeters === "number" && typeof row.electricityMeterCount === "number" ? accumulator.electricityMeters + row.electricityMeterCount : "Incomplete";
+      accumulator.waterMeters = typeof accumulator.waterMeters === "number" && typeof row.waterMeterCount === "number" ? accumulator.waterMeters + row.waterMeterCount : "Incomplete";
+      accumulator.meters = typeof accumulator.meters === "number" && typeof row.meterCount === "number" ? accumulator.meters + row.meterCount : "Incomplete";
+      accumulator.trns = typeof accumulator.trns === "number" && typeof row.trnCount === "number" ? accumulator.trns + row.trnCount : "Incomplete";
       return accumulator;
     },
     {
@@ -516,41 +243,107 @@ export default function WardsRegistryPage() {
     [activeWorkbaseName, activeLmPcode],
   );
 
-  function updateFilter(key, value) {
-    setCurrentPage(1);
-    setFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc")
-        return { key: sortKey, direction: "desc" };
-      return { key: "updatedAt", direction: "desc" };
-    });
-  }
-
-  function handlePageChange(nextPage) {
-    const normalizedPage = Number(nextPage);
-    const clampedPage = Math.max(
-      1,
-      Math.min(
-        Number.isFinite(normalizedPage) ? normalizedPage : 1,
-        totalPages,
-      ),
-    );
-    setCurrentPage(clampedPage);
-  }
-
-  function handlePageSizeChange(nextPageSize) {
-    const normalizedPageSize = Number(nextPageSize);
-    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
-      ? normalizedPageSize
-      : DEFAULT_PAGE_SIZE;
-    setPageSize(nextSize);
-    setCurrentPage(1);
-  }
+  const registryColumns = [{
+    key: "wardNumber",
+    label: "Ward",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "wardNumber"),
+    sortValue: row => getSortValue(row, "wardNumber"),
+    render: row => {
+      return <>{row.wardNumber}</>;
+    }
+  }, {
+    key: "formalErfCount",
+    label: "Formal ERFs",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "formalErfCount"),
+    sortValue: row => getSortValue(row, "formalErfCount"),
+    render: row => {
+      return <>{formatNumber(row.formalErfCount)}</>;
+    }
+  }, {
+    key: "informalErfCount",
+    label: "Informal ERFs",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "informalErfCount"),
+    sortValue: row => getSortValue(row, "informalErfCount"),
+    render: row => {
+      return <>{formatNumber(row.informalErfCount)}</>;
+    }
+  }, {
+    key: "totalErfCount",
+    label: "Total ERFs",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "totalErfCount"),
+    sortValue: row => getSortValue(row, "totalErfCount"),
+    render: row => {
+      return <>{formatNumber(row.totalErfCount)}</>;
+    }
+  }, {
+    key: "premiseCount",
+    label: "Premises",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseCount"),
+    sortValue: row => getSortValue(row, "premiseCount"),
+    render: row => {
+      return <>{formatNumber(row.premiseCount)}</>;
+    }
+  }, {
+    key: "electricityMeterCount",
+    label: "Electricity",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "electricityMeterCount"),
+    sortValue: row => getSortValue(row, "electricityMeterCount"),
+    render: row => {
+      return <>{formatNumber(row.electricityMeterCount)}</>;
+    }
+  }, {
+    key: "waterMeterCount",
+    label: "Water",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "waterMeterCount"),
+    sortValue: row => getSortValue(row, "waterMeterCount"),
+    render: row => {
+      return <>{formatNumber(row.waterMeterCount)}</>;
+    }
+  }, {
+    key: "meterCount",
+    label: "Total Meters",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterCount"),
+    sortValue: row => getSortValue(row, "meterCount"),
+    render: row => {
+      return <>{formatNumber(row.meterCount)}</>;
+    }
+  }, {
+    key: "trnCount",
+    label: "TRNs",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "trnCount"),
+    sortValue: row => getSortValue(row, "trnCount"),
+    render: row => {
+      return <>{formatNumber(row.trnCount)}</>;
+    }
+  }, {
+    key: "updatedAt",
+    label: "updatedAt",
+    filter: "date",
+    sortable: true,
+    value: row => getSortValue(row, "updatedAt"),
+    sortValue: row => getSortValue(row, "updatedAt"),
+    render: row => {
+      return <>{formatUpdatedAt(row.updatedAt)}</>;
+    }
+  }];
 
   return (
     <>
@@ -570,16 +363,9 @@ export default function WardsRegistryPage() {
           <div className="role-pill">
             {isFetching
               ? "Streaming..."
-              : `${formatNumber(sortedWardRows.length)} wards`}
+              : `${formatNumber(filteredWardRows.length)} wards`}
           </div>
-          <DownloadButtons
-            registryName="Ward Registry"
-            rowsLabel="wards"
-            visibleRows={sortedWardRows}
-            columns={quickDownloadColumns}
-            fileBaseName="wards_registry"
-            scope={quickDownloadScope}
-          />
+
         </div>
       </header>
 
@@ -591,7 +377,7 @@ export default function WardsRegistryPage() {
 
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(sortedWardRows.length)}</strong>
+          <strong>{formatNumber(filteredWardRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -663,219 +449,36 @@ export default function WardsRegistryPage() {
 
         {wardRows.length > 0 ? (
           <>
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>
-                      <SortButton
-                        label="Ward"
-                        sortKey="wardNumber"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.wardNumber}
-                        onChange={(value) => updateFilter("wardNumber", value)}
-                        placeholder="Ward"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Formal ERFs"
-                        sortKey="formalErfCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.formalErfCount}
-                        onChange={(value) =>
-                          updateFilter("formalErfCount", value)
-                        }
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Informal ERFs"
-                        sortKey="informalErfCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.informalErfCount}
-                        onChange={(value) =>
-                          updateFilter("informalErfCount", value)
-                        }
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Total ERFs"
-                        sortKey="totalErfCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.totalErfCount}
-                        onChange={(value) =>
-                          updateFilter("totalErfCount", value)
-                        }
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Premises"
-                        sortKey="premiseCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.premiseCount}
-                        onChange={(value) =>
-                          updateFilter("premiseCount", value)
-                        }
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Electricity"
-                        sortKey="electricityMeterCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.electricityMeterCount}
-                        onChange={(value) =>
-                          updateFilter("electricityMeterCount", value)
-                        }
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Water"
-                        sortKey="waterMeterCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.waterMeterCount}
-                        onChange={(value) =>
-                          updateFilter("waterMeterCount", value)
-                        }
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="Total Meters"
-                        sortKey="meterCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.meterCount}
-                        onChange={(value) => updateFilter("meterCount", value)}
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="TRNs"
-                        sortKey="trnCount"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <FilterInput
-                        value={filters.trnCount}
-                        onChange={(value) => updateFilter("trnCount", value)}
-                        placeholder="Filter"
-                      />
-                    </th>
-                    <th>
-                      <SortButton
-                        label="updatedAt"
-                        sortKey="updatedAt"
-                        sortConfig={sortConfig}
-                        onSort={handleSort}
-                      />
-                      <DatetimeFilterButton
-                        filter={updatedAtFilter}
-                        onClick={() => setIsUpdatedAtFilterOpen(true)}
-                      />
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {sortedWardRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="muted">
-                        No wards match the current filters. Clear or adjust a
-                        column filter above.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedWardRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.wardNumber}</td>
-                        <td>{formatNumber(row.formalErfCount)}</td>
-                        <td>{formatNumber(row.informalErfCount)}</td>
-                        <td>{formatNumber(row.totalErfCount)}</td>
-                        <td>{formatNumber(row.premiseCount)}</td>
-                        <td>{formatNumber(row.electricityMeterCount)}</td>
-                        <td>{formatNumber(row.waterMeterCount)}</td>
-                        <td>{formatNumber(row.meterCount)}</td>
-                        <td>{formatNumber(row.trnCount)}</td>
-                        <td>{formatUpdatedAt(row.updatedAt)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <IrepsTable
+                key={activeLmPcode}
+                title="Wards Registry"
+                rows={wardRows}
+                columns={registryColumns}
+                rowKey={row => row.id}
+                filters={filters}
+                onFiltersChange={setFilters}
+                filteredRows={filteredWardRows}
+                filterRows={filterRegistryRows}
+                defaultSort={{
+                  key: "updatedAt",
+                  direction: "desc"
+                }}
+                downloads={{
+                  registryName: "Ward Registry",
+                  rowsLabel: "wards",
+                  columns: quickDownloadColumns,
+                  fileBaseName: "wards_registry",
+                  scope: quickDownloadScope
+                }}
+              />
             </div>
 
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
           </>
         ) : null}
       </section>
 
-      {isUpdatedAtFilterOpen ? (
-        <DatetimeFilterModal
-          filter={updatedAtFilter}
-          onApply={(nextFilter) => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(nextFilter);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClear={() => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClose={() => setIsUpdatedAtFilterOpen(false)}
-        />
-      ) : null}
     </>
   );
 }
@@ -890,70 +493,5 @@ const styles = {
     paddingBottom: "0.85rem",
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
-  sortButton: {
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.4rem",
-    padding: 0,
-    fontWeight: 900,
-    textAlign: "left",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-  },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
-  },
+
 };

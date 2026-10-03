@@ -1,5 +1,7 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
+import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
+import IrepsTable from "../../components/table/IrepsTable";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
@@ -7,15 +9,6 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
 import { useGetRegistryMetersByWardQuery } from "../../redux/registryMetersApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
-import {
-  DatetimeFilterButton,
-  DatetimeFilterModal,
-} from "../../components/DatetimeFilter";
-import DownloadButtons from "../../components/DownloadButtons";
-
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
-
 const EMPTY_METER_FILTERS = {
   meterNo: "",
   meterType: "ALL",
@@ -39,6 +32,7 @@ function getActiveLmPcode(activeWorkbase) {
 }
 
 function formatNumber(value) {
+  if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
 }
@@ -187,125 +181,6 @@ function getSortValue(row, key) {
   return "";
 }
 
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive
-    ? sortConfig.direction === "asc"
-      ? "↑"
-      : "↓"
-    : "↕";
-
-  return (
-    <button
-      type="button"
-      style={styles.sortButton}
-      onClick={() => onSort(sortKey)}
-    >
-      <span>{label}</span>
-      <span>{directionLabel}</span>
-    </button>
-  );
-}
-
-function FilterInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={styles.headerInput}
-    />
-  );
-}
-
-function FilterSelect({ value, onChange, children }) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={styles.headerSelect}
-    >
-      {children}
-    </select>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-        {formatNumber(totalRows)} rows
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={styles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
   startDate: "",
@@ -329,104 +204,6 @@ function getUpdatedAtDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function startOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function endOfDay(date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
-}
-
-function addDays(date, days) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate() + days,
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-
-  const [year, month, day] = String(value).split("-").map(Number);
-
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
-  const mode = filter?.mode || "ALL";
-  const now = new Date();
-  const todayStart = startOfDay(now);
-
-  if (mode === "TODAY") {
-    return { start: todayStart, end: endOfDay(now) };
-  }
-
-  if (mode === "YESTERDAY") {
-    const yesterday = addDays(todayStart, -1);
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-  }
-
-  if (mode === "PAST_3_DAYS") {
-    return { start: addDays(todayStart, -2), end: endOfDay(now) };
-  }
-
-  if (mode === "THIS_WEEK") {
-    const sunday = addDays(todayStart, -todayStart.getDay());
-    const saturday = addDays(sunday, 6);
-    return { start: startOfDay(sunday), end: endOfDay(saturday) };
-  }
-
-  if (mode === "THIS_MONTH") {
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999,
-    );
-    return { start: firstDay, end: lastDay };
-  }
-
-  if (mode === "CUSTOM") {
-    const startDate = parseDateOnly(filter?.startDate);
-    const endDate = parseDateOnly(filter?.endDate);
-
-    return {
-      start: startDate ? startOfDay(startDate) : null,
-      end: endDate ? endOfDay(endDate) : null,
-    };
-  }
-
-  return { start: null, end: null };
-}
-
 function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
   if (!filter || filter.mode === "ALL") return true;
 
@@ -446,17 +223,8 @@ export default function MetersRegistryPage() {
   const { geoState, updateGeo } = useGeo();
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
-  const [sortConfig, setSortConfig] = useState({
-    key: "updatedAt",
-    direction: "desc",
-  });
+
   const [filters, setFilters] = useState(EMPTY_METER_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(
-    EMPTY_UPDATED_AT_FILTER,
-  );
-  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -494,60 +262,24 @@ export default function MetersRegistryPage() {
     [meterRows],
   );
 
-  const filteredMeterRows = useMemo(() => {
-    return meterRows.filter((row) => {
+  const filterRegistryRows = useCallback((rows, tableFilters) => {
+    const filters = {
+      ...EMPTY_METER_FILTERS,
+      ...tableFilters
+    };
+    for (const key of Object.keys(EMPTY_METER_FILTERS)) {
+      if (EMPTY_METER_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
+    }
+    const updatedAtFilter = tableFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
+    return rows.filter(row => {
       const statusText = row.statusState || row.status || "NAv";
-
-      return (
-        includesText(row.meterNo, filters.meterNo) &&
-        (filters.meterType === "ALL" ||
-          String(row.meterType || "").toLowerCase() ===
-            filters.meterType.toLowerCase()) &&
-        (filters.meterKind === "ALL" ||
-          String(row.meterKind || "").toLowerCase() ===
-            filters.meterKind.toLowerCase()) &&
-        (filters.meterPhase === "ALL" ||
-          String(row.meterPhase || "").toLowerCase() ===
-            filters.meterPhase.toLowerCase()) &&
-        (filters.visibility === "ALL" ||
-          String(row.visibility || "").toUpperCase() === filters.visibility) &&
-        (filters.status === "ALL" ||
-          String(statusText || "").toUpperCase() === filters.status) &&
-        includesText(row.erfNo, filters.erfNo) &&
-        includesText(
-          `${row.premiseAddress || ""} ${row.premiseId || ""}`,
-          filters.premiseAddress,
-        ) &&
-        includesText(row.premisePropertyType, filters.premiseType) &&
-        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
-      );
+      return includesText(row.meterNo, filters.meterNo) && (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) && (filters.meterKind === "ALL" || String(row.meterKind || "").toLowerCase() === filters.meterKind.toLowerCase()) && (filters.meterPhase === "ALL" || String(row.meterPhase || "").toLowerCase() === filters.meterPhase.toLowerCase()) && (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) && (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) && includesText(row.erfNo, filters.erfNo) && includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress) && includesText(row.premisePropertyType, filters.premiseType) && matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter);
     });
-  }, [meterRows, filters, updatedAtFilter]);
+  }, []);
 
-  const sortedMeterRows = useMemo(() => {
-    const rows = [...filteredMeterRows];
+  const filteredMeterRows = useMemo(() => filterRegistryRows(meterRows, filters), [meterRows, filters, filterRegistryRows]);
 
-    rows.sort((a, b) => {
-      const comparison = compareNatural(
-        getSortValue(a, sortConfig.key),
-        getSortValue(b, sortConfig.key),
-      );
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-
-    return rows;
-  }, [filteredMeterRows, sortConfig]);
-
-  const totalRows = sortedMeterRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
-  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
-  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
-  const paginatedMeterRows = useMemo(() => {
-    return sortedMeterRows.slice(pageStartIndex, pageEndIndex);
-  }, [sortedMeterRows, pageStartIndex, pageEndIndex]);
-
-  const totals = sortedMeterRows.reduce(
+  const totals = filteredMeterRows.reduce(
     (accumulator, row) => {
       if (row.meterType === "electricity") accumulator.electricity += 1;
       if (row.meterType === "water") accumulator.water += 1;
@@ -624,47 +356,9 @@ ${premiseId}`;
     ],
   );
 
-  function updateFilter(key, value) {
-    setCurrentPage(1);
-    setFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc")
-        return { key: sortKey, direction: "desc" };
-      return { key: "updatedAt", direction: "desc" };
-    });
-  }
-
   function resetMeterRegistryControls() {
     setFilters(EMPTY_METER_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-    setCurrentPage(1);
-  }
 
-  function handlePageChange(nextPage) {
-    const normalizedPage = Number(nextPage);
-    const clampedPage = Math.max(
-      1,
-      Math.min(
-        Number.isFinite(normalizedPage) ? normalizedPage : 1,
-        totalPages,
-      ),
-    );
-    setCurrentPage(clampedPage);
-  }
-
-  function handlePageSizeChange(nextPageSize) {
-    const normalizedPageSize = Number(nextPageSize);
-    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
-      ? normalizedPageSize
-      : DEFAULT_PAGE_SIZE;
-    setPageSize(nextSize);
-    setCurrentPage(1);
   }
 
   function handleWardChange(event) {
@@ -679,6 +373,154 @@ ${premiseId}`;
       lastSelectionType: nextWardPcode ? "WARD" : null,
     });
   }
+
+  const registryColumns = [{
+    key: "meterNo",
+    label: "Meter No",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterNo"),
+    sortValue: row => getSortValue(row, "meterNo"),
+    render: row => {
+      return <>{row.meterNo}</>;
+    }
+  }, {
+    key: "meterType",
+    label: "Type",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterType"),
+    sortValue: row => getSortValue(row, "meterType"),
+    render: row => {
+      return <>{getMeterTypeLabel(row.meterType)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "electricity",
+      label: "Electricity"
+    }, {
+      value: "water",
+      label: "Water"
+    }]
+  }, {
+    key: "meterKind",
+    label: "Kind",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterKind"),
+    sortValue: row => getSortValue(row, "meterKind"),
+    render: row => {
+      return <>{getMeterKindLabel(row.meterKind)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [...meterKindOptions.map(meterKind => ({
+      value: meterKind,
+      label: getMeterKindLabel(meterKind)
+    }))]
+  }, {
+    key: "meterPhase",
+    label: "Phase",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "meterPhase"),
+    sortValue: row => getSortValue(row, "meterPhase"),
+    render: row => {
+      return <>{getMeterPhaseLabel(row.meterPhase)}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [...meterPhaseOptions.map(meterPhase => ({
+      value: meterPhase,
+      label: getMeterPhaseLabel(meterPhase)
+    }))]
+  }, {
+    key: "visibility",
+    label: "Visibility",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "visibility"),
+    sortValue: row => getSortValue(row, "visibility"),
+    render: row => {
+      return <>{row.visibility}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "VISIBLE",
+      label: "Visible"
+    }, {
+      value: "INVISIBLE",
+      label: "Invisible"
+    }]
+  }, {
+    key: "status",
+    label: "Status",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "status"),
+    sortValue: row => getSortValue(row, "status"),
+    render: row => {
+      return <>{row.statusState || row.status || "NAv"}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "FIELD",
+      label: "FIELD"
+    }, {
+      value: "CONNECTED",
+      label: "CONNECTED"
+    }, {
+      value: "DISCONNECTED",
+      label: "DISCONNECTED"
+    }, {
+      value: "REMOVED",
+      label: "REMOVED"
+    }, {
+      value: "DECOMMISSIONED",
+      label: "DECOMMISSIONED"
+    }]
+  }, {
+    key: "erfNo",
+    label: "ERF No",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "erfNo"),
+    sortValue: row => getSortValue(row, "erfNo"),
+    render: row => {
+      return <>{row.erfNo}</>;
+    }
+  }, {
+    key: "premiseAddress",
+    label: "Premise Address",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseAddress"),
+    sortValue: row => getSortValue(row, "premiseAddress"),
+    render: row => {
+      return <><strong>{row.premiseAddress || "NAv"}</strong>
+                                <div className="muted" style={styles.smallMuted}>
+                                  {row.premiseId || "NAv"}
+                                </div></>;
+    }
+  }, {
+    key: "premiseType",
+    label: "Premise Type",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseType"),
+    sortValue: row => getSortValue(row, "premiseType"),
+    render: row => {
+      return <>{row.premisePropertyType}</>;
+    }
+  }, {
+    key: "updatedAt",
+    label: "updatedAt",
+    filter: "date",
+    sortable: true,
+    value: row => getSortValue(row, "updatedAt"),
+    sortValue: row => getSortValue(row, "updatedAt"),
+    render: row => {
+      return <>{formatUpdatedAt(row.updatedAt)}</>;
+    }
+  }];
 
   return (
     <>
@@ -699,16 +541,9 @@ ${premiseId}`;
           <div className="role-pill">
             {isFetching
               ? "Streaming..."
-              : `${formatNumber(sortedMeterRows.length)} meters`}
+              : `${formatNumber(filteredMeterRows.length)} meters`}
           </div>
-          <DownloadButtons
-            registryName="Meter Registry"
-            rowsLabel="meters"
-            visibleRows={sortedMeterRows}
-            columns={quickDownloadColumns}
-            fileBaseName="meters_registry"
-            scope={quickDownloadScope}
-          />
+
         </div>
       </header>
 
@@ -744,7 +579,7 @@ ${premiseId}`;
 
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(sortedMeterRows.length)}</strong>
+          <strong>{formatNumber(filteredMeterRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -819,238 +654,36 @@ ${premiseId}`;
 
         {meterRows.length > 0 ? (
           <>
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                  <th>
-                    <SortButton
-                      label="Meter No"
-                      sortKey="meterNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.meterNo}
-                      onChange={(value) => updateFilter("meterNo", value)}
-                      placeholder="Meter no"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Type"
-                      sortKey="meterType"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterType}
-                      onChange={(value) => updateFilter("meterType", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="electricity">Electricity</option>
-                      <option value="water">Water</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Kind"
-                      sortKey="meterKind"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterKind}
-                      onChange={(value) => updateFilter("meterKind", value)}
-                    >
-                      <option value="ALL">All</option>
-                      {meterKindOptions.map((meterKind) => (
-                        <option key={meterKind} value={meterKind}>
-                          {getMeterKindLabel(meterKind)}
-                        </option>
-                      ))}
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Phase"
-                      sortKey="meterPhase"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.meterPhase}
-                      onChange={(value) => updateFilter("meterPhase", value)}
-                    >
-                      <option value="ALL">All</option>
-                      {meterPhaseOptions.map((meterPhase) => (
-                        <option key={meterPhase} value={meterPhase}>
-                          {getMeterPhaseLabel(meterPhase)}
-                        </option>
-                      ))}
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Visibility"
-                      sortKey="visibility"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.visibility}
-                      onChange={(value) => updateFilter("visibility", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="VISIBLE">Visible</option>
-                      <option value="INVISIBLE">Invisible</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Status"
-                      sortKey="status"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterSelect
-                      value={filters.status}
-                      onChange={(value) => updateFilter("status", value)}
-                    >
-                      <option value="ALL">All</option>
-                      <option value="FIELD">FIELD</option>
-                      <option value="CONNECTED">CONNECTED</option>
-                      <option value="DISCONNECTED">DISCONNECTED</option>
-                      <option value="REMOVED">REMOVED</option>
-                      <option value="DECOMMISSIONED">DECOMMISSIONED</option>
-                    </FilterSelect>
-                  </th>
-                  <th>
-                    <SortButton
-                      label="ERF No"
-                      sortKey="erfNo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.erfNo}
-                      onChange={(value) => updateFilter("erfNo", value)}
-                      placeholder="ERF"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Premise Address"
-                      sortKey="premiseAddress"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.premiseAddress}
-                      onChange={(value) =>
-                        updateFilter("premiseAddress", value)
-                      }
-                      placeholder="Address / ID"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="Premise Type"
-                      sortKey="premiseType"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <FilterInput
-                      value={filters.premiseType}
-                      onChange={(value) => updateFilter("premiseType", value)}
-                      placeholder="Type"
-                    />
-                  </th>
-                  <th>
-                    <SortButton
-                      label="updatedAt"
-                      sortKey="updatedAt"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <DatetimeFilterButton
-                      filter={updatedAtFilter}
-                      onClick={() => setIsUpdatedAtFilterOpen(true)}
-                    />
-                  </th>
-                </tr>
-              </thead>
-
-                <tbody>
-                  {sortedMeterRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="muted">
-                        No meters match the current filters. Clear or adjust a
-                        column filter above.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedMeterRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.meterNo}</td>
-                        <td>{getMeterTypeLabel(row.meterType)}</td>
-                        <td>{getMeterKindLabel(row.meterKind)}</td>
-                        <td>{getMeterPhaseLabel(row.meterPhase)}</td>
-                        <td>{row.visibility}</td>
-                        <td>{row.statusState || row.status || "NAv"}</td>
-                        <td>{row.erfNo}</td>
-                        <td>
-                          <strong>{row.premiseAddress || "NAv"}</strong>
-                          <div className="muted" style={styles.smallMuted}>
-                            {row.premiseId || "NAv"}
-                          </div>
-                        </td>
-                        <td>{row.premisePropertyType}</td>
-                        <td>{formatUpdatedAt(row.updatedAt)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <IrepsTable
+                key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
+                title="Meters Registry"
+                rows={meterRows}
+                columns={registryColumns}
+                rowKey={row => row.id}
+                filters={filters}
+                onFiltersChange={setFilters}
+                filteredRows={filteredMeterRows}
+                filterRows={filterRegistryRows}
+                defaultSort={{
+                  key: "updatedAt",
+                  direction: "desc"
+                }}
+                downloads={{
+                  registryName: "Meter Registry",
+                  rowsLabel: "meters",
+                  columns: quickDownloadColumns,
+                  fileBaseName: "meters_registry",
+                  scope: quickDownloadScope
+                }}
+              />
             </div>
 
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
           </>
         ) : null}
       </section>
 
-      {isUpdatedAtFilterOpen ? (
-        <DatetimeFilterModal
-          filter={updatedAtFilter}
-          onApply={(nextFilter) => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(nextFilter);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClear={() => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClose={() => setIsUpdatedAtFilterOpen(false)}
-        />
-      ) : null}
     </>
   );
 }
@@ -1068,84 +701,10 @@ const styles = {
     boxSizing: "border-box",
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
-  sortButton: {
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.4rem",
-    padding: 0,
-    fontWeight: 900,
-    textAlign: "left",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-  },
-  headerSelect: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-    background: "#ffffff",
-  },
+
   smallMuted: {
     fontSize: "0.72rem",
     marginTop: "0.25rem",
   },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
-  },
+
 };

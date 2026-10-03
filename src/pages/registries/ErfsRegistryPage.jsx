@@ -1,25 +1,20 @@
-import { useMemo, useState } from "react";
+/* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
+import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
+import IrepsTable from "../../components/table/IrepsTable";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
-import {
-  useGetRegistryErfsPageByWardQuery,
+import { useGetRegistryErfsPageByWardQuery,
   useLazyGetRegistryErfsPageByWardQuery,
   useLazySearchRegistryErfsByLmQuery,
 } from "../../redux/registryErfsApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
-import {
-  DatetimeFilterButton,
-  DatetimeFilterModal,
-} from "../../components/DatetimeFilter";
-import DownloadButtons from "../../components/DownloadButtons";
-
 const ERF_PAGE_SIZE = 200;
 const ERF_SEARCH_LIMIT = 50;
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 5;
+
 const EMPTY_ROWS = [];
 
 const EMPTY_ERF_BROWSE_FILTERS = {
@@ -45,6 +40,7 @@ function getActiveLmPcode(activeWorkbase) {
 }
 
 function formatNumber(value) {
+  if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
 }
@@ -128,15 +124,6 @@ function buildRegistryWardSelection(ward, fallbackWardPcode = "") {
   };
 }
 
-function compareNatural(a, b) {
-  if (typeof a === "number" && typeof b === "number") return a - b;
-
-  return String(a || "").localeCompare(String(b || ""), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
 function getSortValue(row, key) {
   if (key === "erfNo") return row.erfNo || "";
   if (key === "erfType") return row.erfType || "";
@@ -152,130 +139,11 @@ function getSortValue(row, key) {
   return "";
 }
 
-function SortButton({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const directionLabel = isActive ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕";
-
-  return (
-    <button type="button" style={styles.sortButton} onClick={() => onSort(sortKey)}>
-      <span>{label}</span>
-      <span>{directionLabel}</span>
-    </button>
-  );
-}
-
-function FilterInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      style={styles.headerInput}
-    />
-  );
-}
-
-function FilterSelect({ value, onChange, children }) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={styles.headerSelect}
-    >
-      {children}
-    </select>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div className="muted">
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of{" "}
-        {formatNumber(totalRows)} rows
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-        <span style={styles.pageCountLabel}>
-          Page {formatNumber(currentPage)} of {formatNumber(totalPages)}
-        </span>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const EMPTY_UPDATED_AT_FILTER = {
   mode: "ALL",
   startDate: "",
   endDate: "",
 };
-
-function buildUpdatedAtFilter(mode) {
-  return {
-    mode,
-    startDate: "",
-    endDate: "",
-  };
-}
 
 function getUpdatedAtDate(value) {
   if (!value || value === "NAv") return null;
@@ -292,72 +160,6 @@ function getUpdatedAtDate(value) {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-}
-
-function endOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
-}
-
-function addDays(date, days) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-
-  const [year, month, day] = String(value).split("-").map(Number);
-
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getUpdatedAtFilterRange(filter = EMPTY_UPDATED_AT_FILTER) {
-  const mode = filter?.mode || "ALL";
-  const now = new Date();
-  const todayStart = startOfDay(now);
-
-  if (mode === "TODAY") {
-    return { start: todayStart, end: endOfDay(now) };
-  }
-
-  if (mode === "YESTERDAY") {
-    const yesterday = addDays(todayStart, -1);
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-  }
-
-  if (mode === "PAST_3_DAYS") {
-    return { start: addDays(todayStart, -2), end: endOfDay(now) };
-  }
-
-  if (mode === "THIS_WEEK") {
-    const sunday = addDays(todayStart, -todayStart.getDay());
-    const saturday = addDays(sunday, 6);
-    return { start: startOfDay(sunday), end: endOfDay(saturday) };
-  }
-
-  if (mode === "THIS_MONTH") {
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    return { start: firstDay, end: lastDay };
-  }
-
-  if (mode === "CUSTOM") {
-    const startDate = parseDateOnly(filter?.startDate);
-    const endDate = parseDateOnly(filter?.endDate);
-
-    return {
-      start: startDate ? startOfDay(startDate) : null,
-      end: endDate ? endOfDay(endDate) : null,
-    };
-  }
-
-  return { start: null, end: null };
 }
 
 function matchesUpdatedAtFilter(value, filter = EMPTY_UPDATED_AT_FILTER) {
@@ -380,11 +182,7 @@ export default function ErfsRegistryPage() {
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
   const [browseFilters, setBrowseFilters] = useState(EMPTY_ERF_BROWSE_FILTERS);
-  const [updatedAtFilter, setUpdatedAtFilter] = useState(EMPTY_UPDATED_AT_FILTER);
-  const [isUpdatedAtFilterOpen, setIsUpdatedAtFilterOpen] = useState(false);
-  const [sortConfig, setSortConfig] = useState({ key: "updatedAt", direction: "desc" });
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const updatedAtFilter = browseFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
 
   const [extraBrowseRows, setExtraBrowseRows] = useState([]);
   const [extraBrowseWardPcode, setExtraBrowseWardPcode] = useState("");
@@ -452,44 +250,22 @@ export default function ErfsRegistryPage() {
     return [...firstPageRows, ...activeExtraBrowseRows];
   }, [firstPageRows, activeExtraBrowseRows]);
 
-  const filteredBrowseRows = useMemo(() => {
-    return browseRows.filter((row) => {
+  const filterRegistryRows = useCallback((rows, tableFilters) => {
+    const browseFilters = {
+      ...EMPTY_ERF_BROWSE_FILTERS,
+      ...tableFilters
+    };
+    for (const key of Object.keys(EMPTY_ERF_BROWSE_FILTERS)) {
+      if (EMPTY_ERF_BROWSE_FILTERS[key] === "ALL" && !browseFilters[key]) browseFilters[key] = "ALL";
+    }
+    const updatedAtFilter = tableFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
+    return rows.filter(row => {
       const erfType = String(row.erfType || "NAv").toUpperCase();
-
-      return (
-        includesText(row.erfNo, browseFilters.erfNo) &&
-        (browseFilters.erfType === "ALL" || erfType === browseFilters.erfType) &&
-        includesText(getCountText(row.premiseCount), browseFilters.premiseCount) &&
-        includesText(getCountText(row.electricityMeterCount), browseFilters.electricityMeterCount) &&
-        includesText(getCountText(row.waterMeterCount), browseFilters.waterMeterCount) &&
-        includesText(getCountText(row.meterCount), browseFilters.meterCount) &&
-        includesText(getCountText(row.trnsAccessCount), browseFilters.trnsAccessCount) &&
-        includesText(getCountText(row.trnsNaCount), browseFilters.trnsNaCount) &&
-        includesText(getCountText(row.trnsTotalCount), browseFilters.trnsTotalCount) &&
-        matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
-      );
+      return includesText(row.erfNo, browseFilters.erfNo) && (browseFilters.erfType === "ALL" || erfType === browseFilters.erfType) && includesText(getCountText(row.premiseCount), browseFilters.premiseCount) && includesText(getCountText(row.electricityMeterCount), browseFilters.electricityMeterCount) && includesText(getCountText(row.waterMeterCount), browseFilters.waterMeterCount) && includesText(getCountText(row.meterCount), browseFilters.meterCount) && includesText(getCountText(row.trnsAccessCount), browseFilters.trnsAccessCount) && includesText(getCountText(row.trnsNaCount), browseFilters.trnsNaCount) && includesText(getCountText(row.trnsTotalCount), browseFilters.trnsTotalCount) && matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter);
     });
-  }, [browseRows, browseFilters, updatedAtFilter]);
+  }, []);
 
-  const sortedBrowseRows = useMemo(() => {
-    const rows = [...filteredBrowseRows];
-
-    rows.sort((a, b) => {
-      const comparison = compareNatural(getSortValue(a, sortConfig.key), getSortValue(b, sortConfig.key));
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-
-    return rows;
-  }, [filteredBrowseRows, sortConfig]);
-
-  const totalRows = sortedBrowseRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
-  const pageStartIndex = totalRows === 0 ? 0 : (safeCurrentPage - 1) * pageSize;
-  const pageEndIndex = Math.min(pageStartIndex + pageSize, totalRows);
-  const paginatedBrowseRows = useMemo(() => {
-    return sortedBrowseRows.slice(pageStartIndex, pageEndIndex);
-  }, [sortedBrowseRows, pageStartIndex, pageEndIndex]);
+  const filteredBrowseRows = useMemo(() => filterRegistryRows(browseRows, browseFilters), [browseRows, browseFilters, filterRegistryRows]);
 
   const hasActiveBrowseFilters = Object.values(browseFilters).some((value) => value && value !== "ALL") || updatedAtFilter.mode !== "ALL";
 
@@ -505,46 +281,9 @@ export default function ErfsRegistryPage() {
 
   const isBrowseFetching = isFirstPageFetching || isLoadMoreFetching;
 
-  function updateBrowseFilter(key, value) {
-    setCurrentPage(1);
-    setBrowseFilters((currentFilters) => ({ ...currentFilters, [key]: value }));
-  }
-
-  function handleSort(sortKey) {
-    setCurrentPage(1);
-    setSortConfig((current) => {
-      if (current.key !== sortKey) return { key: sortKey, direction: "asc" };
-      if (current.direction === "asc") return { key: sortKey, direction: "desc" };
-      return { key: "updatedAt", direction: "desc" };
-    });
-  }
-
-  function handlePageChange(nextPage) {
-    const normalizedPage = Number(nextPage);
-    const clampedPage = Math.max(
-      1,
-      Math.min(
-        Number.isFinite(normalizedPage) ? normalizedPage : 1,
-        totalPages,
-      ),
-    );
-    setCurrentPage(clampedPage);
-  }
-
-  function handlePageSizeChange(nextPageSize) {
-    const normalizedPageSize = Number(nextPageSize);
-    const nextSize = PAGE_SIZE_OPTIONS.includes(normalizedPageSize)
-      ? normalizedPageSize
-      : DEFAULT_PAGE_SIZE;
-    setPageSize(nextSize);
-    setCurrentPage(1);
-  }
-
   function resetBrowseControls(nextWardPcode) {
     setBrowseFilters(EMPTY_ERF_BROWSE_FILTERS);
-    setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-    setSortConfig({ key: "updatedAt", direction: "desc" });
-    setCurrentPage(1);
+
     setExtraBrowseRows([]);
     setExtraBrowseWardPcode(nextWardPcode || "");
     setNextCursorId(null);
@@ -656,7 +395,7 @@ export default function ErfsRegistryPage() {
     return wardPcode || "NAv";
   }
 
-  const browseTotals = sortedBrowseRows.reduce(
+  const browseTotals = filteredBrowseRows.reduce(
     (accumulator, row) => {
       accumulator.premises += row.premiseCount;
       accumulator.electricityMeters += row.electricityMeterCount;
@@ -718,6 +457,7 @@ export default function ErfsRegistryPage() {
 
   const quickDownloadScope = useMemo(
     () => ({
+      label: `${activeWorkbaseName} / ${getWardLabel(selectedWard)} / loaded rows only`,
       lmName: activeWorkbaseName,
       lmPcode: activeLmPcode || "NAv",
       wardLabel: getWardLabel(selectedWard),
@@ -728,6 +468,119 @@ export default function ErfsRegistryPage() {
 
   const selectedWardTotalErfs = selectedWard?.totalErfCount || 0;
   const hasBrowseError = Boolean(browseError || firstPageError);
+
+  const registryColumns = [{
+    key: "erfNo",
+    label: "ERF No",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "erfNo"),
+    sortValue: row => getSortValue(row, "erfNo"),
+    render: row => {
+      return <>{row.erfNo}</>;
+    }
+  }, {
+    key: "erfType",
+    label: "Type",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "erfType"),
+    sortValue: row => getSortValue(row, "erfType"),
+    render: row => {
+      return <>{row.erfType}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "FORMAL",
+      label: "Formal"
+    }, {
+      value: "INFORMAL",
+      label: "Informal"
+    }, {
+      value: "NAV",
+      label: "NAv"
+    }]
+  }, {
+    key: "premiseCount",
+    label: "Premises",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "premiseCount"),
+    sortValue: row => getSortValue(row, "premiseCount"),
+    render: row => {
+      return <>{formatNumber(row.premiseCount)}</>;
+    }
+  }, {
+    key: "electricityMeterCount",
+    label: "Electricity",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "electricityMeterCount"),
+    sortValue: row => getSortValue(row, "electricityMeterCount"),
+    render: row => {
+      return <>{formatNumber(row.electricityMeterCount)}</>;
+    }
+  }, {
+    key: "waterMeterCount",
+    label: "Water",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "waterMeterCount"),
+    sortValue: row => getSortValue(row, "waterMeterCount"),
+    render: row => {
+      return <>{formatNumber(row.waterMeterCount)}</>;
+    }
+  }, {
+    key: "meterCount",
+    label: "Total Meters",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "meterCount"),
+    sortValue: row => getSortValue(row, "meterCount"),
+    render: row => {
+      return <>{formatNumber(row.meterCount)}</>;
+    }
+  }, {
+    key: "trnsAccessCount",
+    label: "Access TRNs",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "trnsAccessCount"),
+    sortValue: row => getSortValue(row, "trnsAccessCount"),
+    render: row => {
+      return <>{formatNumber(row.trnsAccessCount)}</>;
+    }
+  }, {
+    key: "trnsNaCount",
+    label: "No Access",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "trnsNaCount"),
+    sortValue: row => getSortValue(row, "trnsNaCount"),
+    render: row => {
+      return <>{formatNumber(row.trnsNaCount)}</>;
+    }
+  }, {
+    key: "trnsTotalCount",
+    label: "Total TRNs",
+    filter: "text",
+    sortable: true,
+    value: row => getSortValue(row, "trnsTotalCount"),
+    sortValue: row => getSortValue(row, "trnsTotalCount"),
+    render: row => {
+      return <>{formatNumber(row.trnsTotalCount)}</>;
+    }
+  }, {
+    key: "updatedAt",
+    label: "updatedAt",
+    filter: "date",
+    sortable: true,
+    value: row => getSortValue(row, "updatedAt"),
+    sortValue: row => getSortValue(row, "updatedAt"),
+    render: row => {
+      return <>{formatUpdatedAt(row.updatedAt)}</>;
+    }
+  }];
 
   return (
     <>
@@ -752,14 +605,7 @@ export default function ErfsRegistryPage() {
           <div className="role-pill">
             {isBrowseFetching ? "Loading..." : `${formatNumber(browseRows.length)} loaded`}
           </div>
-          <DownloadButtons
-            registryName="ERF Registry"
-            rowsLabel="ERFs"
-            visibleRows={sortedBrowseRows}
-            columns={quickDownloadColumns}
-            fileBaseName="erfs_registry"
-            scope={quickDownloadScope}
-          />
+
         </div>
       </header>
 
@@ -795,7 +641,7 @@ export default function ErfsRegistryPage() {
 
         <div className="stat-card">
           <span>Filtered Rows</span>
-          <strong>{formatNumber(sortedBrowseRows.length)}</strong>
+          <strong>{formatNumber(filteredBrowseRows.length)}</strong>
         </div>
 
         <div className="stat-card">
@@ -867,109 +713,38 @@ export default function ErfsRegistryPage() {
 
         {browseRows.length > 0 ? (
           <>
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>
-                      <SortButton label="ERF No" sortKey="erfNo" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.erfNo} onChange={(value) => updateBrowseFilter("erfNo", value)} placeholder="Filter ERF" />
-                    </th>
-                    <th>
-                      <SortButton label="Type" sortKey="erfType" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterSelect value={browseFilters.erfType} onChange={(value) => updateBrowseFilter("erfType", value)}>
-                        <option value="ALL">All</option>
-                        <option value="FORMAL">Formal</option>
-                        <option value="INFORMAL">Informal</option>
-                        <option value="NAV">NAv</option>
-                      </FilterSelect>
-                    </th>
-                    <th>
-                      <SortButton label="Premises" sortKey="premiseCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.premiseCount} onChange={(value) => updateBrowseFilter("premiseCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="Electricity" sortKey="electricityMeterCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.electricityMeterCount} onChange={(value) => updateBrowseFilter("electricityMeterCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="Water" sortKey="waterMeterCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.waterMeterCount} onChange={(value) => updateBrowseFilter("waterMeterCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="Total Meters" sortKey="meterCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.meterCount} onChange={(value) => updateBrowseFilter("meterCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="Access TRNs" sortKey="trnsAccessCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.trnsAccessCount} onChange={(value) => updateBrowseFilter("trnsAccessCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="No Access" sortKey="trnsNaCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.trnsNaCount} onChange={(value) => updateBrowseFilter("trnsNaCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="Total TRNs" sortKey="trnsTotalCount" sortConfig={sortConfig} onSort={handleSort} />
-                      <FilterInput value={browseFilters.trnsTotalCount} onChange={(value) => updateBrowseFilter("trnsTotalCount", value)} placeholder="Filter" />
-                    </th>
-                    <th>
-                      <SortButton label="updatedAt" sortKey="updatedAt" sortConfig={sortConfig} onSort={handleSort} />
-                      <DatetimeFilterButton filter={updatedAtFilter} onClick={() => setIsUpdatedAtFilterOpen(true)} />
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {sortedBrowseRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="muted">
-                        No ERFs match the current filters. Clear or adjust a column filter above.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedBrowseRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.erfNo}</td>
-                        <td>{row.erfType}</td>
-                        <td>{formatNumber(row.premiseCount)}</td>
-                        <td>{formatNumber(row.electricityMeterCount)}</td>
-                        <td>{formatNumber(row.waterMeterCount)}</td>
-                        <td>{formatNumber(row.meterCount)}</td>
-                        <td>{formatNumber(row.trnsAccessCount)}</td>
-                        <td>{formatNumber(row.trnsNaCount)}</td>
-                        <td>{formatNumber(row.trnsTotalCount)}</td>
-                            <td>{formatUpdatedAt(row.updatedAt)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <IrepsTable
+                key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
+                title="ERF Registry"
+                rows={browseRows}
+                columns={registryColumns}
+                rowKey={row => row.id}
+                filters={browseFilters}
+                onFiltersChange={setBrowseFilters}
+                filteredRows={filteredBrowseRows}
+                filterRows={filterRegistryRows}
+                defaultSort={{
+                  key: "updatedAt",
+                  direction: "desc"
+                }}
+                downloads={{
+                  registryName: "ERF Registry",
+                  rowsLabel: "ERFs",
+                  columns: quickDownloadColumns,
+                  fileBaseName: "erfs_registry",
+                  scope: quickDownloadScope
+                }}
+              />
             </div>
-
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
 
             {activeHasMore || isBrowseFetching ? (
               <div className="load-more-row">
                 <div>
                   <strong>
                     {hasActiveBrowseFilters
-                      ? `${formatNumber(sortedBrowseRows.length)} filtered from ${formatNumber(browseRows.length)} loaded`
+                      ? `${formatNumber(filteredBrowseRows.length)} filtered from ${formatNumber(browseRows.length)} loaded`
                       : `${formatNumber(browseRows.length)} of ${formatNumber(selectedWardTotalErfs)} ward ERFs loaded`}
                   </strong>
                   <p className="muted">
@@ -1073,63 +848,119 @@ export default function ErfsRegistryPage() {
 
             {searchRows.length > 0 ? (
               <div className="table-wrap modal-table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>ERF No</th>
-                      <th>Ward</th>
-                      <th>Type</th>
-                      <th>Premises</th>
-                      <th>Electricity</th>
-                      <th>Water</th>
-                      <th>Total Meters</th>
-                      <th>No Access</th>
-                      <th>Total TRNs</th>
-                      <th>updatedAt</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {[...searchRows]
-                      .sort((a, b) => compareNatural(a.erfNo, b.erfNo))
-                      .map((row) => (
-                        <tr key={row.id}>
-                          <td>{row.erfNo}</td>
-                          <td>{getWardDisplay(row.wardPcode)}</td>
-                          <td>{row.erfType}</td>
-                          <td>{formatNumber(row.premiseCount)}</td>
-                          <td>{formatNumber(row.electricityMeterCount)}</td>
-                          <td>{formatNumber(row.waterMeterCount)}</td>
-                          <td>{formatNumber(row.meterCount)}</td>
-                          <td>{formatNumber(row.trnsNaCount)}</td>
-                          <td>{formatNumber(row.trnsTotalCount)}</td>
-                                <td>{formatUpdatedAt(row.updatedAt)}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+                <IrepsTable
+                title="ERF search results"
+                rows={searchRows}
+                columns={[{
+                  key: "erfNo",
+                  label: "ERF No",
+                  filter: "text",
+                  value: row => row.erfNo,
+                  render: row => <>{row.erfNo}</>
+                }, {
+                  key: "wardPcode",
+                  label: "Ward",
+                  filter: "select",
+                  value: row => getWardDisplay(row.wardPcode),
+                  render: row => <>{getWardDisplay(row.wardPcode)}</>
+                }, {
+                  key: "erfType",
+                  label: "Type",
+                  filter: "select",
+                  value: row => row.erfType,
+                  render: row => <>{row.erfType}</>
+                }, {
+                  key: "premiseCount",
+                  label: "Premises",
+                  filter: "text",
+                  value: row => row.premiseCount,
+                  render: row => <>{formatNumber(row.premiseCount)}</>
+                }, {
+                  key: "electricityMeterCount",
+                  label: "Electricity",
+                  filter: "text",
+                  value: row => row.electricityMeterCount,
+                  render: row => <>{formatNumber(row.electricityMeterCount)}</>
+                }, {
+                  key: "waterMeterCount",
+                  label: "Water",
+                  filter: "text",
+                  value: row => row.waterMeterCount,
+                  render: row => <>{formatNumber(row.waterMeterCount)}</>
+                }, {
+                  key: "meterCount",
+                  label: "Total Meters",
+                  filter: "text",
+                  value: row => row.meterCount,
+                  render: row => <>{formatNumber(row.meterCount)}</>
+                }, {
+                  key: "trnsNaCount",
+                  label: "No Access",
+                  filter: "text",
+                  value: row => row.trnsNaCount,
+                  render: row => <>{formatNumber(row.trnsNaCount)}</>
+                }, {
+                  key: "trnsTotalCount",
+                  label: "Total TRNs",
+                  filter: "text",
+                  value: row => row.trnsTotalCount,
+                  render: row => <>{formatNumber(row.trnsTotalCount)}</>
+                }, {
+                  key: "updatedAt",
+                  label: "updatedAt",
+                  filter: "date",
+                  value: row => getUpdatedAtMs(row.updatedAt),
+                  render: row => <>{formatUpdatedAt(row.updatedAt)}</>
+                }]}
+                defaultSort={{
+                  key: "erfNo",
+                  direction: "asc"
+                }}
+                downloads={{
+                  fileBaseName: "erf_search",
+                  scope: {
+                    label: "Loaded search matches",
+                    lmPcode: activeLmPcode
+                  },
+                  columns: [{
+                    header: "ERF No",
+                    value: row => row.erfNo
+                  }, {
+                    header: "Ward",
+                    value: row => getWardDisplay(row.wardPcode)
+                  }, {
+                    header: "Type",
+                    value: row => row.erfType
+                  }, {
+                    header: "Premises",
+                    value: row => row.premiseCount
+                  }, {
+                    header: "Electricity",
+                    value: row => row.electricityMeterCount
+                  }, {
+                    header: "Water",
+                    value: row => row.waterMeterCount
+                  }, {
+                    header: "Total Meters",
+                    value: row => row.meterCount
+                  }, {
+                    header: "No Access",
+                    value: row => row.trnsNaCount
+                  }, {
+                    header: "Total TRNs",
+                    value: row => row.trnsTotalCount
+                  }, {
+                    header: "updatedAt",
+                    value: row => formatUpdatedAt(row.updatedAt)
+                  }]
+                }}
+              />
               </div>
             ) : null}
           </div>
         </div>
       ) : null}
 
-      {isUpdatedAtFilterOpen ? (
-        <DatetimeFilterModal
-          filter={updatedAtFilter}
-          onApply={(nextFilter) => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(nextFilter);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClear={() => {
-            setCurrentPage(1);
-            setUpdatedAtFilter(EMPTY_UPDATED_AT_FILTER);
-            setIsUpdatedAtFilterOpen(false);
-          }}
-          onClose={() => setIsUpdatedAtFilterOpen(false)}
-        />
-      ) : null}
     </>
   );
 }
@@ -1144,80 +975,5 @@ const styles = {
     paddingBottom: "0.85rem",
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
   },
-  sortButton: {
-    width: "100%",
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.4rem",
-    padding: 0,
-    fontWeight: 900,
-    textAlign: "left",
-  },
-  headerInput: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-  },
-  headerSelect: {
-    width: "100%",
-    minWidth: "7.5rem",
-    marginTop: "0.4rem",
-    border: "1px solid #cbd5e1",
-    borderRadius: "0.45rem",
-    padding: "0.36rem 0.45rem",
-    fontSize: "0.72rem",
-    background: "#ffffff",
-  },
-  paginationBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "1rem",
-    padding: "0.75rem 0.9rem",
-    flexWrap: "wrap",
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.45rem",
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "#64748b",
-    fontSize: "0.82rem",
-    fontWeight: 700,
-  },
-  pageSizeSelect: {
-    border: "1px solid rgba(148, 163, 184, 0.45)",
-    borderRadius: "0.55rem",
-    padding: "0.34rem 0.45rem",
-    fontSize: "0.82rem",
-  },
-  paginationButton: {
-    border: "1px solid rgba(148, 163, 184, 0.42)",
-    background: "#fff",
-    color: "#0f172a",
-    borderRadius: "0.6rem",
-    padding: "0.36rem 0.58rem",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  pageCountLabel: {
-    color: "#334155",
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    padding: "0 0.2rem",
-  },
+
 };
