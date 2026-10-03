@@ -30,6 +30,84 @@ const __dirname = path.dirname(__filename);
 // TR-R001 section 2: the root, present and empty rather than absent.
 const ROOT_OBJECT_KEYS = ["status", "assignment", "origin", "workflow", "serviceProvider"];
 
+// TR-R001 section 2: the WHOLE declared root. Anything on a transaction that is not in this
+// list is a key no rule declares.
+//
+// The owner, 3 October, reading one of his own records: "capturedAt - in the rules, do we have
+// this in the root?" and "did our rules for metadata include deviceTimeMissing?" Neither was
+// declared. He found both by eye, one at a time, after finding the 11-key metadata the same
+// way. This list is here so the next one surfaces without him looking.
+const DECLARED_ROOT_KEYS = new Set([
+  "id",
+  "trnType",
+  "accessData",
+  "metadata",
+  "meterType",
+  "ast",
+  "media",
+  "serviceProvider",
+  "status",
+  "assignment",
+  "origin",
+  "workflow",
+]);
+
+// KEYS THAT EXIST BUT NO RULE DECLARES — FROZEN, 3 October 2026.
+//
+// The owner: "so you invent your rules and creep them in without my permission?" Twice today
+// that is exactly what happened: `capturedAt` on 22 records and
+// `accessData.premise.attachedByBackfill` on 5, neither ever put in front of him.
+//
+// This list is the fifteen that were already there when it was found, plus the two that were
+// mine. It is NOT approval. Every one of them is waiting for the owner to say whether it
+// belongs in TR-R001 or goes.
+//
+// WHAT IT DOES: anything NOT on this list and NOT declared is NEW, and this script exits
+// non-zero rather than printing a note. A field invented after today cannot reach the data
+// quietly - it has to go into the rules first, or the backfill refuses to run.
+const KNOWN_UNDECLARED = new Set([
+  "executionOutcome",
+  "corrections",
+  "derived",
+  "fieldComment",
+  "assignmentHistory",
+  "geofenceRefs",
+  "bucket",
+  "meterDiscoveryContractVersion",
+  "targetedBatchContext",
+  "sourceModule",
+  "refs",
+  "astId",
+  "premiseId",
+  "bgo",
+  "mreadings",
+  "treadings",
+  "capturedAt",
+  "trnId",
+  "replaces",
+  "master",
+  "processing",
+  "repair",
+  "originBatchId",
+  "replacement",
+]);
+
+// TR-R002: twelve keys, and no more.
+const DECLARED_METADATA_KEYS = new Set([
+  "createdAt",
+  "createdByUid",
+  "createdByUser",
+  "updatedAt",
+  "updatedByUid",
+  "updatedByUser",
+  "createdOnDevice",
+  "createdOnDeviceByUid",
+  "createdOnDeviceByUser",
+  "updatedOnDevice",
+  "updatedOnDeviceByUid",
+  "updatedOnDeviceByUser",
+]);
+
 // TR-R001: one work property, named for the work — never the other five empty beside it.
 const WORK_PROPERTY_BY_TYPE = {
   METER_COMMISSIONING: "commissioning",
@@ -43,6 +121,9 @@ const WORK_PROPERTY_BY_TYPE = {
 };
 const ALL_WORK_PROPERTIES = Object.values(WORK_PROPERTY_BY_TYPE);
 
+// A transaction may carry its own work property; TR-R001 declares one per kind of work.
+for (const property of ALL_WORK_PROPERTIES) DECLARED_ROOT_KEYS.add(property);
+
 // TR-R002: twelve keys. The server six are already on all 493; these six are the device set,
 // which has never been written on any record, and they are created EMPTY — not filled.
 const DEVICE_METADATA_KEYS = [
@@ -55,7 +136,15 @@ const DEVICE_METADATA_KEYS = [
 ];
 
 // TR-R002: retired. Measured 13 of 13 identical to createdAt / updatedAt.
-const RETIRED_METADATA_KEYS = ["createdOnServer", "updatedOnServer"];
+const RETIRED_METADATA_KEYS = [
+  "createdOnServer",
+  "updatedOnServer",
+  // Never in TR-R002, which names twelve keys (owner, 3 Oct 2026: "did our rules for metadata
+  // include this?" - they did not). It existed to prop up a fault: createdOnDevice was filled
+  // with the SERVER's time, so a flag was needed beside it to say the date was not real. The
+  // writer no longer does that and the empty value is the flag, so this says nothing.
+  "deviceTimeMissing",
+];
 
 function parseArgs(argv) {
   const args = { projectId: "ireps2", apply: false, confirm: null, help: false };
@@ -437,6 +526,57 @@ async function main() {
     }
 
     if (Object.keys(update).length) plans.push({ id, update, before: data });
+  }
+
+  // WHAT NO RULE DECLARES. Reported, never deleted: a key nobody declared may still be the
+  // only place something real is kept - capturedAt was exactly that, the one true device time
+  // sitting outside the shape while the declared field held the server's clock.
+  const undeclaredRoot = new Map();
+  const undeclaredMeta = new Map();
+
+  for (const { data } of rows) {
+    for (const key of Object.keys(data)) {
+      if (!DECLARED_ROOT_KEYS.has(key)) {
+        undeclaredRoot.set(key, (undeclaredRoot.get(key) || 0) + 1);
+      }
+    }
+    for (const key of Object.keys(data.metadata || {})) {
+      if (!DECLARED_METADATA_KEYS.has(key)) {
+        undeclaredMeta.set(key, (undeclaredMeta.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  // Anything outside BOTH the declared shape and the frozen list is new since 3 October.
+  // The retired keys are not inventions: this script removes them, which is why they are still
+  // in the data when it starts.
+  const retired = new Set(RETIRED_METADATA_KEYS);
+  const inventedSinceFreeze = [
+    ...[...undeclaredRoot.keys()],
+    ...[...undeclaredMeta.keys()],
+  ].filter((key) => !KNOWN_UNDECLARED.has(key) && !retired.has(key));
+
+  if (inventedSinceFreeze.length) {
+    console.error("");
+    console.error("REFUSED: a key is in the data that no rule declares and that is not on the");
+    console.error("frozen list of 3 October. It was invented after that date:");
+    for (const key of inventedSinceFreeze) console.error(`    ${key}`);
+    console.error("");
+    console.error("Put it in TR-R001 / TR-R002 and the schema first, with the owner, or take it");
+    console.error("out of the writer. This script will not run until then.");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (undeclaredRoot.size || undeclaredMeta.size) {
+    console.log("KEYS NO RULE DECLARES — frozen 3 Oct, awaiting the owner's decision");
+    for (const [key, count] of [...undeclaredRoot].sort((a, b) => b[1] - a[1])) {
+      console.log(`  root      ${key.padEnd(32)} ${String(count).padStart(5)}`);
+    }
+    for (const [key, count] of [...undeclaredMeta].sort((a, b) => b[1] - a[1])) {
+      console.log(`  metadata  ${key.padEnd(32)} ${String(count).padStart(5)}`);
+    }
+    console.log("");
   }
 
   console.log("WHAT WOULD CHANGE");
