@@ -423,9 +423,10 @@ async function main() {
       if (isFilled(premiseId)) {
         const premise = candidates.find((p) => p.id === premiseId);
         update["accessData.premise.id"] = premiseId;
-        // Stamped, so no reader mistakes a premise attached months later for the one the
-        // worker stood at (plan H.2).
-        update["accessData.premise.attachedByBackfill"] = true;
+        // NOT stamped. The plan said to mark a premise attached later so no reader mistakes it
+        // for the one the worker stood at - a real distinction - but a field for it was never
+        // put in the schema, so writing one was inventing a rule. If it is wanted it goes into
+        // the schema first.
         count("premise resolved from its ERF");
         premiseById.set(premiseId, premise);
       } else {
@@ -517,6 +518,40 @@ async function main() {
           why: "no access with a position captured at the gate by the old screen - owner's call",
         });
       }
+    }
+
+    // 7b. capturedAt — TR-R001 does not declare it, so it goes. But it is MOVED first, not
+    //     deleted: on these 22 records it holds the TRUE moment the worker finished the form,
+    //     while metadata.createdOnDevice holds the server's clock, because the old writer
+    //     substituted its own time when the phone sent none. Deleting it would destroy the one
+    //     honest device time on the record and leave the substitute behind.
+    const capturedAt = data.capturedAt;
+
+    if (isFilled(capturedAt)) {
+      const deviceTime = get(data, "metadata", "createdOnDevice");
+      const serverTime = get(data, "metadata", "createdAt");
+
+      // Only where the device time is missing or is plainly the server's clock wearing its name.
+      if (!isFilled(deviceTime) || deviceTime === serverTime) {
+        update["metadata.createdOnDevice"] = capturedAt;
+        update["metadata.updatedOnDevice"] = capturedAt;
+        count("device time recovered from capturedAt");
+      }
+    }
+
+    if ("capturedAt" in data) {
+      update.capturedAt = admin.firestore.FieldValue.delete();
+      count("capturedAt removed (not in TR-R001)");
+    }
+
+    // 7c. attachedByBackfill — written by THIS script on 3 October and never in the schema.
+    //     The owner: "so you invent your rules and creep them in without my permission?" It
+    //     goes. What it marked - a premise attached by repair rather than by the worker - is
+    //     a real distinction, and if it is wanted it goes in the schema first, with a name the
+    //     owner agrees.
+    if (get(data, "accessData", "premise", "attachedByBackfill") !== undefined) {
+      update["accessData.premise.attachedByBackfill"] = admin.firestore.FieldValue.delete();
+      count("attachedByBackfill removed (not in the schema)");
     }
 
     // 8. the retired home for the position.
