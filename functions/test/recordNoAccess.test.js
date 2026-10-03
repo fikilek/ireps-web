@@ -783,3 +783,26 @@ test("TR-R001: the batch is kept, in the home the rule gives it", async () => {
   assert.deepEqual(written.origin.targetedBatch, { tbId: "TGB_1", rowId: "TBR_1" });
   assert.equal(written.origin.channel, "FIELD", "what origin already held is not thrown away");
 });
+
+// ---------------------------------------------------------------------------
+// NA-R005 — the server accepts the id the rule tells the phone to build.
+//
+// The rule was written, the schema was written, the phone was changed — and the validators
+// still tested startsWith("TRN_MDIS_"). The first no access built under NA-R005 would have
+// been REFUSED on arrival with INVALID_TRN_ID. Found by checking before saying it was done.
+// ---------------------------------------------------------------------------
+
+test("NA-R005: a no access id is accepted, and so is the work's own", async () => {
+  const { isTrnIdForWork, noAccessTrnPrefix } = await import("../transactions/trnId.js");
+
+  assert.equal(isTrnIdForWork("TRN_MDIS_1791024322663_ELC_ZA5241006_1695", "TRN_MDIS_"), true);
+  assert.equal(isTrnIdForWork("TRN_NA_MDIS_1791024322663_NA_ZA5241006_1695", "TRN_MDIS_"), true);
+  assert.equal(isTrnIdForWork("TRN_NA_MINST_1791024322663_ELC_ZA5241006_1695", "TRN_MINST_"), true);
+
+  // A no access on a DISCONNECTION is not a discovery (NA-R003), and the id says so.
+  assert.equal(isTrnIdForWork("TRN_NA_MDCN_1791024322663_ELC_ZA5241006_1695", "TRN_MDIS_"), false);
+  assert.equal(isTrnIdForWork("", "TRN_MDIS_"), false);
+  assert.equal(isTrnIdForWork("TRN_SOMETHING_1", "TRN_MDIS_"), false);
+
+  assert.equal(noAccessTrnPrefix("TRN_MDIS_"), "TRN_NA_MDIS_");
+});

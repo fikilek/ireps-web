@@ -110,6 +110,7 @@ import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./tar
 import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
 // TR-R001: every transaction carries the same root, written where every path goes through it.
 import { applyTrnRootShape, stripToDeclaredRoot } from "./transactions/trnShape.js";
+import { isTrnIdForWork, trnIdShapeMessage } from "./transactions/trnId.js";
 import {
   buildNoAccessLocation,
   buildNoAccessParentsFromErf,
@@ -1228,11 +1229,9 @@ function validateMeterCreationPayload({
   const hasAccess = data?.accessData?.access?.hasAccess;
   const meterType = data?.meterType;
 
-  if (!trnId.startsWith(expectedTrnPrefix)) {
-    return buildFailureResult(
-      "INVALID_TRN_ID",
-      `TRN id must start with ${expectedTrnPrefix}`,
-    );
+  // NA-R005: the work's own prefix, or TRN_NA_ before it where the worker could not get in.
+  if (!isTrnIdForWork(trnId, expectedTrnPrefix)) {
+    return buildFailureResult("INVALID_TRN_ID", trnIdShapeMessage(expectedTrnPrefix));
   }
 
   if (data?.accessData?.trnType !== expectedTrnType) {

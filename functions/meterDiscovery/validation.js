@@ -1,4 +1,6 @@
 const METER_DISCOVERY_TRN_TYPE = "METER_DISCOVERY";
+import { isTrnIdForWork, trnIdShapeMessage } from "../transactions/trnId.js";
+
 const METER_DISCOVERY_TRN_PREFIX = "TRN_MDIS_";
 const METER_DISCOVERY_STATUSES = new Set(["CONNECTED", "DISCONNECTED"]);
 const METER_CATEGORIES = new Set(["Normal", "Bulk"]);
@@ -575,11 +577,9 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
   const meterType = data?.meterType;
   const media = data?.media || [];
 
-  if (!trnId.startsWith(METER_DISCOVERY_TRN_PREFIX)) {
-    return buildFailureResult(
-      "INVALID_TRN_ID",
-      `TRN id must start with ${METER_DISCOVERY_TRN_PREFIX}`,
-    );
+  // NA-R005: TRN_MDIS_… where the worker reached the meter, TRN_NA_MDIS_… where they did not.
+  if (!isTrnIdForWork(trnId, METER_DISCOVERY_TRN_PREFIX)) {
+    return buildFailureResult("INVALID_TRN_ID", trnIdShapeMessage(METER_DISCOVERY_TRN_PREFIX));
   }
 
   if (accessData?.trnType !== METER_DISCOVERY_TRN_TYPE) {
