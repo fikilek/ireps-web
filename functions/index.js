@@ -6063,6 +6063,30 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       throw error;
     }
 
+    // A REFUSAL IS NOT AN INTERNAL ERROR (owner, 3 Oct 2026: "any refusal must carry a proper
+    // reason, and that reason must be shown to the user").
+    //
+    // Every refusal this callable raises - NO_ACCESS_ERF_REQUIRED, NO_ACCESS_PREMISE_REQUIRED,
+    // NO_ACCESS_REASON_INVALID, NO_ACCESS_LOCATION_UNRESOLVED and the rest - was wrapped as
+    // "internal" here, and two things followed. The code was destroyed, so the worker was shown
+    // "Something went wrong" for a refusal the server had explained. And "internal" is not in
+    // the phone's list of thrown refusals, so the item stayed PENDING and was **retried for
+    // ever** - work the office had rejected, going round the queue until the phone was wiped.
+    //
+    // The Meter Discovery callable has carried the code through since 1.3.0. This one did not,
+    // which is the same split that let Installation write `ast: null` while Discovery did not.
+    if (error?.irepsCode || error?.conflict) {
+      const refusal = error?.conflict || {};
+      throw new HttpsError(
+        "failed-precondition",
+        refusal?.message || error?.message || "The work was refused.",
+        {
+          code: refusal?.conflictCode || refusal?.code || error.irepsCode,
+          message: refusal?.message || error?.message || "The work was refused.",
+        },
+      );
+    }
+
     throw new HttpsError(
       "internal",
       error?.message || "Failed to submit meter installation transaction",
