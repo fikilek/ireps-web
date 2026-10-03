@@ -108,9 +108,11 @@ import {
 import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
 import {
+  buildNoAccessLocation,
   buildNoAccessParentsFromErf,
   noAccessParentsAreMissing,
   normalizeNoAccessAccessData,
+  readGpsPoint,
 } from "./noAccess/recordNoAccess.js";
 import { recordTargetedBatchNoAccessInTransaction } from "./targetedBatches/premiseLink.js";
 import {
@@ -3529,6 +3531,51 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           });
         }
       }
+
+      // TR-R003 (0.6.0): the position, resolved HERE and nowhere else.
+      //
+      // The owner, 3 October: "the AST location GPS must always be the asset location. The
+      // fallback is the premise location, where the asset location doesn't exist."
+      //
+      // The phone no longer sends one. A worker who could not touch the meter is standing at a
+      // gate, not at the meter, so their fix was never the asset's position. The server has
+      // both authorities in front of it - the asset document and the premise document - so it
+      // reads them, the same way it already reads the ERF for the municipality and the ward.
+      //
+      // One door, like the reason before it (normalizeNoAccessAccessData). Two screens open No
+      // Access; if either resolved its own position they would drift, which is how every field
+      // in this record set came to have two spellings.
+      const noAccessAstId = String(safePayload?.astId || "").trim();
+      let assetLocation = null;
+
+      if (noAccessAstId) {
+        const astSnap = await db.collection("asts").doc(noAccessAstId).get();
+        // Measured on DEV, 3 Oct: all 192 assets keep their position at ast.location, none without.
+        if (astSnap.exists) assetLocation = astSnap.data()?.ast?.location || null;
+      }
+
+      let premiseGeometry = null;
+
+      if (!readGpsPoint(assetLocation)) {
+        const noAccessPremiseId = String(safePayload?.accessData?.premise?.id || "").trim();
+
+        if (noAccessPremiseId) {
+          const prmSnap = await db.collection("premises").doc(noAccessPremiseId).get();
+          // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
+          // NA-R044 making a premise a prerequisite, the fallback always reaches.
+          if (prmSnap.exists) premiseGeometry = prmSnap.data()?.geometry || null;
+        }
+      }
+
+      safePayload.ast = {
+        ...(safePayload.ast && typeof safePayload.ast === "object" ? safePayload.ast : {}),
+        location: buildNoAccessLocation({ assetLocation, premiseGeometry }),
+      };
+
+      // The retired home. Every record that used it was a no access written by this screen.
+      delete safePayload.location;
+      // It was only ever asked so the asset could be looked up; it is not part of the record.
+      delete safePayload.astId;
     }
 
     if (targetedBatchValidation?.isTargetedBatch) {

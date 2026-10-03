@@ -12,6 +12,9 @@ import {
   buildNoAccessParentsFromErf,
   noAccessParentsAreMissing,
   assertNoAccessLocation,
+  buildNoAccessLocation,
+  readGpsPoint,
+  NO_ACCESS_LOCATION_SOURCE,
   assertNoAccessMedia,
   buildNoAccessAccessBlock,
   buildNoAccessData,
@@ -449,4 +452,83 @@ test("NA-R044: a premise satisfies it on every path", () => {
 
 test("NA-R034 with NA-R044: an NAv premise id is no premise, so it is refused", () => {
   assert.equal(code(() => onPath("METER_DISCOVERY", { id: "NAv" })), "NO_ACCESS_PREMISE_REQUIRED");
+});
+
+
+// ---------------------------------------------------------------------------
+// TR-R003 (0.6.0) - the position: the asset first, the premise as the fallback,
+// and it always says which it is.
+//
+// Owner, 3 October: "the AST location GPS must always be the asset location. The fallback is
+// the premise location, where the asset location doesn't exist."
+// ---------------------------------------------------------------------------
+
+const ASSET_AT = { gps: { lat: -26.3465, lng: 28.7565 } };
+const PREMISE_AT = { centroid: { lat: -26.5697, lng: 28.3195 } };
+
+test("TR-R003: the asset's own position wins, and is labelled ASSET", () => {
+  const location = buildNoAccessLocation({
+    assetLocation: ASSET_AT,
+    premiseGeometry: PREMISE_AT,
+  });
+
+  assert.deepEqual(location.gps, { lat: -26.3465, lng: 28.7565 });
+  assert.equal(location.source, NO_ACCESS_LOCATION_SOURCE.ASSET);
+});
+
+test("TR-R003: no asset falls back to the premise, and is labelled PREMISE", () => {
+  // A first-visit Discovery that could not get in: there is no meter to have a position.
+  const location = buildNoAccessLocation({
+    assetLocation: null,
+    premiseGeometry: PREMISE_AT,
+  });
+
+  assert.deepEqual(location.gps, { lat: -26.5697, lng: 28.3195 });
+  assert.equal(location.source, NO_ACCESS_LOCATION_SOURCE.PREMISE);
+});
+
+test("TR-R003: an asset with no usable position still falls back", () => {
+  // The label then reads PREMISE on work where the meter is known, which is the signal that
+  // the meter has no position of its own - a job to fix, not a blank.
+  const location = buildNoAccessLocation({
+    assetLocation: { gps: { lat: null, lng: null } },
+    premiseGeometry: PREMISE_AT,
+  });
+
+  assert.equal(location.source, NO_ACCESS_LOCATION_SOURCE.PREMISE);
+});
+
+test("TR-R003: the label is never left off", () => {
+  for (const location of [
+    buildNoAccessLocation({ assetLocation: ASSET_AT }),
+    buildNoAccessLocation({ premiseGeometry: PREMISE_AT }),
+  ]) {
+    assert.ok(
+      location.source === "ASSET" || location.source === "PREMISE",
+      "a position without a source is a premise point that can pass for a meter point",
+    );
+  }
+});
+
+test("TR-R003: neither the asset nor the premise has one - refused, never blank", () => {
+  // NA-R044 makes a premise a prerequisite and every premise has a position, so reaching here
+  // means one of those is broken. A no access with no position is a visit nobody can place.
+  assert.throws(
+    () => buildNoAccessLocation({ assetLocation: null, premiseGeometry: null }),
+    (error) => error?.irepsCode === "NO_ACCESS_LOCATION_UNRESOLVED",
+  );
+});
+
+test("readGpsPoint takes both spellings and rejects what is not a position", () => {
+  assert.deepEqual(readGpsPoint({ lat: -26.2, lng: 28.04 }), { lat: -26.2, lng: 28.04 });
+  assert.deepEqual(readGpsPoint({ latitude: -26.2, longitude: 28.04 }), { lat: -26.2, lng: 28.04 });
+  assert.deepEqual(readGpsPoint({ gps: { lat: -26.2, lng: 28.04 } }), { lat: -26.2, lng: 28.04 });
+
+  assert.equal(readGpsPoint(null), null);
+  assert.equal(readGpsPoint({}), null);
+  assert.equal(readGpsPoint({ lat: "NAv", lng: "NAv" }), null);
+  // Out of range is not a position: 0,0 off Africa is the classic bad fix, but a latitude of
+  // 91 is simply impossible and must never be stored as somewhere.
+  assert.equal(readGpsPoint({ lat: 91, lng: 28.04 }), null);
+  assert.equal(readGpsPoint({ lat: -26.2, lng: 181 }), null);
 });

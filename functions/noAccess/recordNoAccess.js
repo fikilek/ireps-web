@@ -196,6 +196,77 @@ export function assertNoAccessMedia(media) {
   return media;
 }
 
+/**
+ * TR-R003 (0.6.0) — where a no access gets its position, and what it is allowed to call it.
+ *
+ * The owner, 3 October: "the AST location GPS must always be the asset location. The fallback
+ * is the premise location, where the asset location doesn't exist."
+ *
+ * Two cases, and both are real. Measured on DEV the same day: of 46 no access records, 22
+ * already had the meter - a Reading, an Inspection, a Disconnection, a Reconnection, a Removal
+ * - and 24 did not, because the meter has never been found.
+ *
+ * The fallback always reaches. All 264 premises on DEV carry geometry.centroid and none is
+ * without one, and NA-R044 makes a premise a prerequisite for every no access. So a no access
+ * can never be left without a position, and the 90 transactions that have none today are all
+ * repairable from their own premise.
+ *
+ * WHY THE LABEL IS NOT DECORATION. A premise point looks exactly like a meter point. Without
+ * `source` a map of meters plots the premise and nobody can tell: a flat of twelve meters
+ * shows twelve dots stacked on one spot and reads as twelve correct positions. That is the
+ * fault the NAv rule exists to stop - the reader is misled and the defect stays invisible at
+ * the same time. With the label every reader still gets a point, and one that needs the
+ * meter's own position can tell whether it has one.
+ *
+ * It is a signal, not a tag. PREMISE on a first Discovery is normal and expected. PREMISE on a
+ * Reading means a meter we have already found has no position of its own, which is a job.
+ */
+export const NO_ACCESS_LOCATION_SOURCE = Object.freeze({
+  ASSET: "ASSET",
+  PREMISE: "PREMISE",
+});
+
+/** A {lat, lng} if the value is one, otherwise null. Takes both spellings seen in the data. */
+export function readGpsPoint(value) {
+  const gps = value?.gps || value;
+  const lat = Number(gps?.lat ?? gps?.latitude);
+  const lng = Number(gps?.lng ?? gps?.longitude);
+  if (
+    !Number.isFinite(lat) || !Number.isFinite(lng) ||
+    lat < -90 || lat > 90 || lng < -180 || lng > 180
+  ) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+/**
+ * The asset first, the premise as the fallback. Returns what belongs at `ast.location`.
+ *
+ * `assetLocation` is the ast document's own `ast.location` - measured on DEV, all 192 assets
+ * keep their position there and none is without one.
+ * `premiseGeometry` is the premise document's `geometry` - all 264 carry `centroid`.
+ */
+export function buildNoAccessLocation({ assetLocation, premiseGeometry } = {}) {
+  const fromAsset = readGpsPoint(assetLocation);
+  if (fromAsset) {
+    return { gps: fromAsset, source: NO_ACCESS_LOCATION_SOURCE.ASSET };
+  }
+
+  const fromPremise = readGpsPoint(premiseGeometry?.centroid);
+  if (fromPremise) {
+    return { gps: fromPremise, source: NO_ACCESS_LOCATION_SOURCE.PREMISE };
+  }
+
+  // Neither. Under NA-R044 a no access always has a premise and a premise always has a
+  // position, so reaching here means one of those two is broken - which is a refusal, not a
+  // blank to be filled in. A no access with no position is a visit nobody can place.
+  throw noAccessError(
+    "NO_ACCESS_LOCATION_UNRESOLVED",
+    "No position could be found for this no access: the meter has none and neither does the premise.",
+  );
+}
+
 export function assertNoAccessLocation(location) {
   const gps = location?.gps || location;
   const lat = Number(gps?.lat);
