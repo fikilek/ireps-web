@@ -105,7 +105,7 @@ import {
   validateTargetedBatchMeterDiscoverySubmission,
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+import { checkBatchWork, profileServiceProviderId, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
 // No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
 import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
 // TR-R001: every transaction carries the same root, written where every path goes through it.
@@ -3340,7 +3340,9 @@ export const REGISTRATION_DEPS = {
  * Mutates the payload in place: sets ast.location, and removes the retired root `location`
  * and the astId that was only ever asked so the asset could be looked up.
  */
-async function completeNoAccessFromAuthorities(payload) {
+async function completeNoAccessFromAuthorities(payload, { actorUid } = {}) {
+  const isFilled = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+
   // Where the meter is named. The No Access screen sends `astId`, but a transaction that
   // already carries its meter names it at `ast.astData.astId` - NOT `ast.astData.id`, which
   // does not exist anywhere. Asking only for one of these returns nothing on the other path
@@ -3374,6 +3376,32 @@ async function completeNoAccessFromAuthorities(payload) {
   // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
   // NA-R044 making a premise a prerequisite, the fallback always reaches.
   const premiseGeometry = readGpsPoint(assetLocation) ? null : premise?.geometry || null;
+
+  // WHOSE WORK IT IS (owner's record, 3 Oct 2026). TR-R001 declares `serviceProvider`, and 447
+  // of 447 transactions WITH access carry it - the Discovery form sends it. The No Access
+  // screen did not, so only 31 of 56 no accesses had one and none of the new ones did: a visit
+  // nobody could be credited for, and a month of no access work that cannot be counted per
+  // service provider.
+  //
+  // It is read from the WORKER'S OWN RECORD rather than asked of the phone, the same way the
+  // municipality comes from the ERF and the address from the premise. The batch guard already
+  // resolves it this way for every submission, so this is the same answer from the same place.
+  if (!isFilled(payload?.serviceProvider?.id) && actorUid) {
+    const userSnap = await db.collection("users").doc(actorUid).get();
+
+    if (userSnap.exists) {
+      const profile = userSnap.data() || {};
+      const spId = profileServiceProviderId(profile);
+
+      if (spId) {
+        const spSnap = await db.collection("serviceProviders").doc(spId).get();
+        payload.serviceProvider = {
+          id: spId,
+          name: String(spSnap.exists ? spSnap.data()?.name || "" : "").trim() || "NAv",
+        };
+      }
+    }
+  }
 
   // NA-R030: the premise, written as every other transaction writes it - the address and the
   // property type as WORDS, from the authority rather than from whatever the phone had.
@@ -3663,7 +3691,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         }
       }
 
-      await completeNoAccessFromAuthorities(safePayload);
+      await completeNoAccessFromAuthorities(safePayload, { actorUid: caller.uid });
     }
 
     if (targetedBatchValidation?.isTargetedBatch) {
@@ -3815,7 +3843,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           // capturedAt, sourceModule, executionOutcome, geofenceRefs and more hanging off the
           // root, none of them declared. The batch it came from moves into `origin`, which is
           // the declared home for "where the work came from and what it followed".
-          tx.create(trnRef, stripToDeclaredRoot(finalPayload));
+          tx.create(trnRef, stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }));
         });
       } catch (error) {
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
@@ -5671,18 +5699,17 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       // access installation carried no position at all - and root `location`, if the phone had
       // sent one, went straight through in the spread below.
       const positioned = applyTrnRootShape(
-        await completeNoAccessFromAuthorities({
-          ...safePayload,
-          accessData: finalAccessData,
-        }),
+        await completeNoAccessFromAuthorities(
+          { ...safePayload, accessData: finalAccessData },
+          { actorUid: caller.uid },
+        ),
       );
 
       await trnRef.set(
-        stripToDeclaredRoot({
-          ...positioned,
-          meterType: "NA",
-          metadata,
-        }),
+        stripToDeclaredRoot(
+          { ...positioned, meterType: "NA", metadata },
+          { actor: { uid: caller.uid, name: actorName } },
+        ),
         { merge: true },
       );
 

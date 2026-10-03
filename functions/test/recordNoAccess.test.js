@@ -925,3 +925,27 @@ test("a discovery WITH access still goes through the full row checks", async () 
     }),
   );
 });
+
+test("the photographs carry the signed-in caller's name, not the phone's guess", async () => {
+  const { stripToDeclaredRoot } = await import("../transactions/trnShape.js");
+
+  const written = stripToDeclaredRoot(
+    {
+      id: "TRN_1",
+      media: [
+        {
+          tag: "noAccessPhoto",
+          created: { at: "2026-10-03T16:21:03.354Z", byUid: "U?", byUser: "Fieldworker" },
+          updated: { at: "2026-10-03T16:21:03.354Z", byUid: "U?", byUser: "Fieldworker" },
+        },
+      ],
+    },
+    { actor: { uid: "RSEHoLEpg0W3bwWkEH3rgUnjMVu1", name: "Peter Peter" } },
+  );
+
+  assert.equal(written.media[0].created.byUser, "Peter Peter");
+  assert.equal(written.media[0].updated.byUser, "Peter Peter");
+  assert.equal(written.media[0].created.byUid, "RSEHoLEpg0W3bwWkEH3rgUnjMVu1");
+  // The time the photograph was taken is the PHONE's and is never overwritten - only who.
+  assert.equal(written.media[0].created.at, "2026-10-03T16:21:03.354Z");
+});

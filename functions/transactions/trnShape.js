@@ -86,7 +86,7 @@ export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
  * away. Nothing else is moved: a key with no declared home is dropped, because a transaction
  * carries the agreed root and nothing else.
  */
-export function stripToDeclaredRoot(payload = {}) {
+export function stripToDeclaredRoot(payload = {}, { actor = null } = {}) {
   if (!payload || typeof payload !== "object") return payload;
 
   const batch = payload.targetedBatchContext;
@@ -96,6 +96,25 @@ export function stripToDeclaredRoot(payload = {}) {
       ...(payload.origin && typeof payload.origin === "object" ? payload.origin : {}),
       targetedBatch: batch,
     };
+  }
+
+  // WHO IS THE SIGNED-IN CALLER, ON THE PHOTOGRAPHS TOO (owner's record, 3 Oct 2026).
+  //
+  // The appointment was fixed this afternoon and the media was left. 35 photographs carry
+  // `byUser: "Fieldworker"` - the PHONE's fallback, because its profile had no name - beside a
+  // record created by "Peter Peter". One visit, two names for one person, and the photograph
+  // is the evidence the visit happened.
+  if (actor && Array.isArray(payload.media)) {
+    payload.media = payload.media.map((item) => {
+      if (!item || typeof item !== "object") return item;
+
+      const stamp = (who) =>
+        who && typeof who === "object"
+          ? { ...who, byUid: actor.uid || who.byUid, byUser: actor.name || who.byUser }
+          : who;
+
+      return { ...item, created: stamp(item.created), updated: stamp(item.updated) };
+    });
   }
 
   const declared = new Set(TRN_DECLARED_ROOT_KEYS);
