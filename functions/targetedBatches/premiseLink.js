@@ -1301,11 +1301,30 @@ export async function validateTargetedBatchMeterDiscoverySubmission({
 
   assertCompleteTargetedBatchPremiseContext(context);
 
+  // A NO ACCESS IS THE FLOW THIS WAS SENDING PEOPLE TO (owner's test, 3 Oct 2026).
+  //
+  // This threw TARGETED_BATCH_USE_NO_ACCESS_FLOW - "use the Targeted Batch No Access action" -
+  // at every no access carrying a batch row. That action was a SEPARATE SCREEN with its own
+  // callable, and it was deleted on 2 October when the seven forms were merged into one No
+  // Access form. So the guard was redirecting a worker to something that no longer exists,
+  // from inside the very screen it was naming.
+  //
+  // The owner hit it on his own batch, in his own team, opening it exactly as he should: My
+  // Work Orders -> the row -> No Access. Every Sales-path no access was refused this way, and
+  // only the Normal Path worked - which is why eleven tests in a row had passed without
+  // finding it.
+  //
+  // Everything below this point is the check for STARTING A ROW WITH A METER: the premise
+  // link, the Sales reference, the duplicate guard. None of it applies to a visit that found
+  // no meter. A no access does its own batch work in recordTargetedBatchNoAccessInTransaction,
+  // in the same commit as the transaction, so the context is handed back and nothing else here
+  // runs.
   if (data?.accessData?.access?.hasAccess !== "yes") {
-    throw controlledError(
-      "TARGETED_BATCH_USE_NO_ACCESS_FLOW",
-      "Use the Targeted Batch No Access action when the site cannot be accessed.",
-    );
+    return {
+      isTargetedBatch: true,
+      targetedBatchContext: context,
+      actor: null,
+    };
   }
 
   const uid = request?.auth?.uid;

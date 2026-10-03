@@ -854,3 +854,74 @@ test("where the server somehow has no actor, the phone's value is still better t
 
   assert.equal(appointment.madeByUser, "Peter Peter");
 });
+
+// ---------------------------------------------------------------------------
+// The Sales path — a No Access opened from a batch row.
+//
+// Found by the owner on 3 October, on his own batch, in his own team, opening it exactly as he
+// should: My Work Orders -> the row -> No Access. The server threw
+// TARGETED_BATCH_USE_NO_ACCESS_FLOW — "use the Targeted Batch No Access action" — which was a
+// SEPARATE SCREEN, deleted on 2 October when the seven forms were merged into one. The guard
+// was redirecting him to something that no longer exists, from inside the screen it named.
+//
+// EVERY Sales-path no access was refused this way. Eleven tests in a row had passed because
+// all eleven came from the premise card, and 822 server tests passed because none of them went
+// down this path.
+// ---------------------------------------------------------------------------
+
+test("a no access from a batch row is not refused, and keeps its batch", async () => {
+  const { validateTargetedBatchMeterDiscoverySubmission } = await import(
+    "../targetedBatches/premiseLink.js"
+  );
+
+  const context = {
+    tbId: "TGB_20260919_064808_K5RM",
+    rowId: "TBR_20260919_064808_K5RM_000001",
+    salesDocId: "04297749634",
+    erfId: "K241N0GT011800005267000000",
+    premiseId: "PRM_1791043060468_7_W006_5267",
+    sourceModule: "SALES_TARGETED_BATCH",
+    operationType: "METER_DISCOVERY",
+  };
+
+  const result = await validateTargetedBatchMeterDiscoverySubmission({
+    db: null,
+    request: { auth: { uid: "RSEHoLEpg0W3bwWkEH3rgUnjMVu1" } },
+    data: {
+      targetedBatchContext: context,
+      accessData: { access: { hasAccess: "no" } },
+    },
+  });
+
+  assert.equal(result.isTargetedBatch, true, "the batch is lost, so the row never moves");
+  assert.equal(result.targetedBatchContext.tbId, context.tbId);
+  assert.equal(result.targetedBatchContext.rowId, context.rowId);
+});
+
+test("a discovery WITH access still goes through the full row checks", async () => {
+  const { validateTargetedBatchMeterDiscoverySubmission } = await import(
+    "../targetedBatches/premiseLink.js"
+  );
+
+  // db is null, so if the access path still runs its reads it throws rather than returning —
+  // which is what proves the no access branch above is a genuine early return and not a hole
+  // that lets everything past.
+  await assert.rejects(
+    validateTargetedBatchMeterDiscoverySubmission({
+      db: null,
+      request: { auth: { uid: "U1" } },
+      data: {
+        targetedBatchContext: {
+          tbId: "TGB_1",
+          rowId: "TBR_1",
+          salesDocId: "S1",
+          erfId: "E1",
+          premiseId: "P1",
+          sourceModule: "SALES_TARGETED_BATCH",
+          operationType: "METER_DISCOVERY",
+        },
+        accessData: { access: { hasAccess: "yes" } },
+      },
+    }),
+  );
+});
