@@ -516,7 +516,17 @@ export function isKnownAstMeterKind(astDoc = {}, input = {}) {
 export function validateCommonLifecycleInput(data = {}) {
   const trnId = data?.id || "NAv";
   const trnType = data?.accessData?.trnType || "NAv";
-  const astId = data?.ast?.astData?.astId || "NAv";
+  // BOTH SPELLINGS, DELIBERATELY (owner's phone, 4 October 2026).
+  //
+  // NA-R001: there is ONE No Access form and every transaction type opens it. A Meter
+  // Inspection no access captured on that form was refused here with "ast.astData.astId is
+  // required" - the form names the meter as a flat `astId`, because TR-R003 makes the SERVER
+  // resolve the position from the asset, so the phone sends an id and not a meter block.
+  //
+  // The registration path already reads both (completeNoAccessFromAuthorities). Asking the
+  // phone to learn each callable's preferred spelling instead is how one field comes to have
+  // five names, which is the fault this whole stream has been undoing.
+  const astId = data?.ast?.astData?.astId || data?.astId || "NAv";
   const premiseId = data?.accessData?.premise?.id || "NAv";
 
   if (!data?.id || trnId === "NAv") {

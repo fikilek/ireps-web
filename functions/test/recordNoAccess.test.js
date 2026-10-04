@@ -1002,3 +1002,61 @@ test("the photographs carry the signed-in caller's name, not the phone's guess",
   // The time the photograph was taken is the PHONE's and is never overwritten - only who.
   assert.equal(written.media[0].created.at, "2026-10-03T16:21:03.354Z");
 });
+
+// NA-R001 — ONE NO ACCESS FORM, AND THE SERVER ANSWERS IT THE SAME WAY EVERY TIME
+//
+// The owner's phone, 4 October 2026, the first Meter Inspection no access ever captured on the
+// one No Access form: refused with INVALID_AST_ID, "ast.astData.astId is required".
+//
+// The form names the meter as a flat `astId`. That is deliberate: TR-R003 makes the server
+// resolve the position from the asset, so the phone sends an id rather than a meter block it
+// would have to fill in from a meter it could not reach. The registration path has always read
+// both spellings; the lifecycle path read only one.
+
+test("NA-R001: a lifecycle no access may name its meter the way the No Access form does", async () => {
+  const { validateCommonLifecycleInput } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateCommonLifecycleInput({
+    id: "TRN_MINS_261004_1_ABC_NAv_ZA5241006_5224_NA",
+    astId: "AST_5224_1",
+    accessData: {
+      trnType: "METER_INSPECTION",
+      premise: { id: "PRM_1790654515901_312_W006_5224" },
+      access: { hasAccess: "no", reason: "Property Locked" },
+    },
+  });
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test("NA-R001: the meter block is still read where a lifecycle form sends one", async () => {
+  const { validateCommonLifecycleInput } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateCommonLifecycleInput({
+    id: "TRN_MINS_261004_1_ABC_ELC_ZA5241006_5224",
+    ast: { astData: { astId: "AST_5224_1" } },
+    accessData: {
+      trnType: "METER_INSPECTION",
+      premise: { id: "PRM_1790654515901_312_W006_5224" },
+      access: { hasAccess: "yes" },
+    },
+  });
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test("NA-R001: a capture that names no meter at all is still refused", async () => {
+  const { validateCommonLifecycleInput } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateCommonLifecycleInput({
+    id: "TRN_MINS_261004_1_ABC_NAv_ZA5241006_5224_NA",
+    accessData: {
+      trnType: "METER_INSPECTION",
+      premise: { id: "PRM_1790654515901_312_W006_5224" },
+      access: { hasAccess: "no" },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "INVALID_AST_ID");
+});
