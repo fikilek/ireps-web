@@ -1,3 +1,4 @@
+import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -509,6 +510,17 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       }
     }
 
+    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no") {
+      try {
+        return await recordLifecycleNoAccess({ db, data, actor: { uid: actorUid, name: actorName }, now, isOffice: isWmsLifecycleExecution });
+      } catch (error) {
+        if (error.irepsCode) return buildFailureResult(error.irepsCode, error.message, { trnId, trnType, astId });
+        // Transport/server failures are retryable; they are not a business refusal.
+        logger.error("No Access could not be committed", { trnId, code: error.code, cause: error.message, stack: error.stack });
+        return buildFailureResult("UNAVAILABLE", "The server could not confirm this visit. It is safe to retry with the same visit ID.");
+      }
+    }
+
     const assignmentCheck = validateAssignment(
       data?.assignment || {},
       trnType,
@@ -867,6 +879,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           },
 
           "accessData.access": completedAccessBlock,
+          ...Object.fromEntries(Object.entries(cleanExecution.metadata || {})
+            .filter(([key]) => key.includes("OnDevice")).map(([key, value]) => [`metadata.${key}`, value])),
 
           ...buildUpdateMetadataPatch({
             now,

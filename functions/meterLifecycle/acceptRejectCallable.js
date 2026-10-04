@@ -160,7 +160,7 @@ function normalizeAssignmentTarget(target = {}) {
   };
 }
 
-function getAssignmentTargets(trnData = {}) {
+export function getAssignmentTargets(trnData = {}) {
   const targets = Array.isArray(trnData?.assignment?.targets)
     ? trnData.assignment.targets
     : [];
@@ -187,7 +187,7 @@ function getTargetTeamIdsFromRows(trnRows = []) {
   ];
 }
 
-function isAssignedToActor({
+export function isAssignedToActor({
   trnData = {},
   actorUid,
   actorSpId,

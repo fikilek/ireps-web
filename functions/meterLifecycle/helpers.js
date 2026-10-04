@@ -1,3 +1,4 @@
+import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import {
   anomalyPhotoRequired,
   applyFixesToFinding,
@@ -2550,11 +2551,7 @@ export function buildLifecycleTrnPayload({
           : astDoc?.status?.detail || data?.status?.detail || "NAv",
     },
 
-    metadata: buildFlatMetadata({
-      now,
-      actorUid,
-      actorName,
-    }),
+    metadata: buildRegistrationMetadata({ phoneMetadata: data?.metadata, nowIso: now, actorUid, actorName }),
 
     serviceProvider: sanitizeServiceProvider(
       data?.serviceProvider || astDoc?.serviceProvider || {},

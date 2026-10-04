@@ -52,7 +52,7 @@ export function noAccessError(code, message, details = {}) {
 
 function requireText(value, field, code) {
   const text = normalizeText(value);
-  if (!text) throw noAccessError(code, `${field} is required.`);
+  if (!text || normalizeUpper(text) === "NAV") throw noAccessError(code, `${field} is required.`);
   return text;
 }
 
@@ -142,7 +142,8 @@ export function normalizeNoAccessReason(input = {}) {
 
   if (upper !== NO_ACCESS_OTHER_CODE) {
     // NA-R032: nothing to write means NAv in a field a reader reads.
-    return { reasonCode: rawCode, reasonOther: "NAv", reason: rawCode };
+    const canonical = NO_ACCESS_REASON_CODES.find((code) => normalizeUpper(code) === upper);
+    return { reasonCode: canonical, reasonOther: "NAv", reason: canonical };
   }
 
   const other = normalizeText(input.reasonOther);
@@ -191,7 +192,7 @@ export function normalizeNoAccessAppointment(appointment, { actor = {} } = {}) {
 
   return {
     at: when.toISOString(),
-    madeAt: normalizeText(appointment.madeAt) || new Date().toISOString(),
+    madeAt: normalizeText(appointment.madeAt) || null,
     // WHO IS ALWAYS THE SIGNED-IN CALLER, NEVER THE PHONE (owner's record, 3 Oct 2026).
     //
     // This took the phone's value FIRST and fell back to the caller. On his own capture the
@@ -260,6 +261,7 @@ export const NO_ACCESS_LOCATION_SOURCE = Object.freeze({
 /** A {lat, lng} if the value is one, otherwise null. Takes both spellings seen in the data. */
 export function readGpsPoint(value) {
   const gps = value?.gps || value;
+  if ([gps?.lat ?? gps?.latitude, gps?.lng ?? gps?.longitude].some((v) => v === null || v === undefined || v === "")) return null;
   const lat = Number(gps?.lat ?? gps?.latitude);
   const lng = Number(gps?.lng ?? gps?.longitude);
   if (

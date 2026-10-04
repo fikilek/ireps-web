@@ -117,7 +117,10 @@ export function stripToDeclaredRoot(payload = {}, { actor = null } = {}) {
           ? { ...who, byUid: actor.uid || who.byUid, byUser: actor.name || who.byUser }
           : who;
 
-      return { ...item, created: stamp(item.created), updated: stamp(item.updated) };
+      return { ...item,
+        ...(item.created !== undefined ? { created: stamp(item.created) } : {}),
+        ...(item.updated !== undefined ? { updated: stamp(item.updated) } : {}),
+      };
     });
   }
 

@@ -1,3 +1,4 @@
+import { noAccessCaptureTime, deriveNoAccessGroups } from "../noAccess/groups.js";
 // General Monthly Report and General Report (GMR 1.5.0, schema 1.2.0).
 //
 // The report is the month's field transactions: one Field Data row per
@@ -257,6 +258,7 @@ export function hasWorkflow(trn = {}) {
 }
 
 export function getGmrSubmissionTime(trn = {}) {
+  if (trn?.accessData?.access?.hasAccess === "no") return noAccessCaptureTime(trn);
   if (hasWorkflow(trn)) {
     return normalizeUpper(trn.workflow.state) === "COMPLETED"
       ? timestampToIso(trn.workflow.completedAt)
@@ -579,6 +581,7 @@ export function buildGmrFieldRow({
     primaryFinding: anomaly,
     findingDetail: anomalyDetail,
     noAccessReason: noAccessReasonText,
+    noAccessAppointment: timestampToIso(trn?.accessData?.access?.appointment?.at),
     normalisation: buildGmrNormalisationText({
       finding: anomaly,
       actions,
@@ -708,11 +711,13 @@ async function selectMonthTransactions(db, lmPcode, window) {
   const startDate = new Date(window.startMs);
   const endDate = new Date(window.endMs);
 
-  const [createdText, createdStamp, completedText, completedStamp] = await Promise.all([
+  const [createdText, createdStamp, completedText, completedStamp, capturedText, capturedStamp] = await Promise.all([
     byLm.where("metadata.createdAt", ">=", window.startIso).where("metadata.createdAt", "<", window.endIso).get(),
     byLm.where("metadata.createdAt", ">=", startDate).where("metadata.createdAt", "<", endDate).get(),
     byLm.where("workflow.state", "==", "COMPLETED").where("workflow.completedAt", ">=", window.startIso).where("workflow.completedAt", "<", window.endIso).get(),
     byLm.where("workflow.state", "==", "COMPLETED").where("workflow.completedAt", ">=", startDate).where("workflow.completedAt", "<", endDate).get(),
+    byLm.where("metadata.createdOnDevice", ">=", window.startIso).where("metadata.createdOnDevice", "<", window.endIso).get(),
+    byLm.where("metadata.createdOnDevice", ">=", startDate).where("metadata.createdOnDevice", "<", endDate).get(),
   ]);
 
   // Workflow work created this month is kept too: if it was completed but its
@@ -721,11 +726,20 @@ async function selectMonthTransactions(db, lmPcode, window) {
   [createdText, createdStamp].forEach((snapshot) => {
     snapshot.docs.forEach((doc) => selected.set(doc.id, doc.data() || {}));
   });
-  [completedText, completedStamp].forEach((snapshot) => {
+  [completedText, completedStamp, capturedText, capturedStamp].forEach((snapshot) => {
     snapshot.docs.forEach((doc) => selected.set(doc.id, doc.data() || {}));
   });
 
   return selected;
+}
+
+async function selectNoAccessPremiseHistory(db, premiseIds) {
+  const result = [];
+  for (let index = 0; index < premiseIds.length; index += 30) {
+    const snapshot = await db.collection("trns").where("accessData.premise.id", "in", premiseIds.slice(index, index + 30)).get();
+    result.push(...snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
+  }
+  return result;
 }
 
 export async function buildGeneralMonthlyReportDataset({
@@ -737,6 +751,7 @@ export async function buildGeneralMonthlyReportDataset({
   endDate,
   generatedAt = new Date(),
   loadTransactions = selectMonthTransactions,
+  loadPremiseHistory = selectNoAccessPremiseHistory,
 }) {
   if (!db) throw new TypeError("Firestore db is required.");
   if (lmPcode !== GMR_LM_PCODE) {
@@ -750,6 +765,10 @@ export async function buildGeneralMonthlyReportDataset({
   selected.forEach((trn, trnId) => {
     if (isGmrTransactionInMonth(trn, window)) {
       entries.push([trnId, trn]);
+      return;
+    }
+    if (trn?.accessData?.access?.hasAccess === "no" && !noAccessCaptureTime(trn)) {
+      unplaced.push({ trnId, trnType: getGmrTrnType(trn), reason: "Capture date unknown. Server receipt time cannot place this visit in a month." });
       return;
     }
     if (
@@ -874,6 +893,16 @@ export async function buildGeneralMonthlyReportDataset({
     return counts;
   }, new Map());
 
+  const noAccessPremiseIds = [...new Set(entries.filter(([, trn]) => trn.accessData?.access?.hasAccess === "no").map(([, trn]) => trn.accessData?.premise?.id).filter(Boolean))];
+  const history = noAccessPremiseIds.length ? await loadPremiseHistory(db, noAccessPremiseIds) : [];
+  const noAccessGrouping = deriveNoAccessGroups(history, { cutoff: new Date(Math.min(window.endMs - 1, generatedAt.getTime())).toISOString() });
+  const groupsByVisit = new Map(noAccessGrouping.groups.flatMap((group) => group.visitIds.map((id) => [id, group])));
+  for (const row of noAccessRows) {
+    const group = groupsByVisit.get(row.trnId);
+    row.noAccessGroupStatus = group?.status || "UNKNOWN";
+    row.noAccessGroupId = group?.id || null;
+    row.noAccessClosingProof = group?.closingProof || null;
+  }
   const isGeneralReport = window.reportKind === "GR";
 
   return {
@@ -896,6 +925,7 @@ export async function buildGeneralMonthlyReportDataset({
     photoColumnCount,
     fieldRows,
     noAccessRows,
+    noAccessGrouping,
     unplaced,
     droppedCaptures,
     meterMasterGapCount: masterGapMeters.size,

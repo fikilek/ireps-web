@@ -1,8 +1,10 @@
+import { reconcilePremiseNoAccess, isTransientReconciliationError } from "./noAccess/reconcile.js";
 /* eslint-disable no-undef */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import {
   onDocumentCreated,
+  onDocumentDeleted,
   onDocumentUpdated,
 } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
@@ -1985,71 +1987,34 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
   },
 );
 
-export const onNoAccessRecorded = onDocumentCreated(
-  "trns/{trnId}",
-  async (event) => {
-    logger.log("onNoAccessRecorded ---- START");
+async function reconcileNoAccessChange(before, after, trnId) {
+  const relevant = [before, after].filter((trn) => trn?.accessData?.access?.hasAccess === "no");
+  if (!relevant.length) return;
+  const premiseIds = [...new Set(relevant.map((trn) => trn.accessData?.premise?.id).filter((id) => id && id !== "NAv"))];
+  const failureRef = db.doc(`noAccessReconciliationFailures/${trnId}`);
+  try {
+    const results = [];
+    for (const id of premiseIds) results.push(await reconcilePremiseNoAccess(db, id));
+    const erfIds = [...new Set(relevant.map((trn) => trn.accessData?.erfId).filter((id) => id && id !== "NAv"))];
+    for (const id of erfIds) await rebuildErfTrnCount(id);
+    if (!premiseIds.length || results.some((r) => r.code === "PREMISE_MISSING")) {
+      await failureRef.set({ code: "PREMISE_MISSING", trnId, premiseIds, updatedAt: new Date().toISOString(), retryable: false });
+      logger.error("No Access history needs office correction", { trnId, premiseIds });
+    } else await failureRef.delete();
+  } catch (error) {
+    const retryable = isTransientReconciliationError(error);
+    await failureRef.set({ code: String(error.code || "UNKNOWN"), message: error.message || "Reconciliation failed", trnId, premiseIds, retryable, updatedAt: new Date().toISOString() });
+    logger.error("No Access history reconciliation failed", { trnId, retryable, message: error.message });
+    if (retryable || !error.code) throw error;
+  }
+}
 
-    const trnData = event.data.data() || {};
-    const trnId = event.params.trnId;
-    const { accessData } = trnData;
-
-    if (accessData?.access?.hasAccess !== "no") {
-      logger.log("onNoAccessRecorded ---- Access was granted. Standing down.");
-      return null;
-    }
-
-    const premiseId = accessData?.premise?.id || null;
-    const metadata = trnData?.metadata || {};
-    const erfId = accessData?.erfId || null;
-
-    if (!premiseId) {
-      logger.error("onNoAccessRecorded ---- ERROR: No Premise ID found.");
-      return null;
-    }
-
-    try {
-      const premiseRef = db.collection("premises").doc(premiseId);
-
-      const agentName =
-        metadata?.updatedByUser || metadata?.createdByUser || "NAv";
-
-      const agentUid =
-        metadata?.updatedByUid || metadata?.createdByUid || "NAv";
-
-      const premiseMetadataPatch = buildPremiseUpdateMetadata(
-        agentUid,
-        agentName,
-      );
-
-      await premiseRef.update({
-        noAccessTrnIds: FieldValue.arrayUnion(trnId),
-        "metadata.updatedAt": premiseMetadataPatch.updatedAt,
-        "metadata.updatedByUid": premiseMetadataPatch.updatedByUid,
-        "metadata.updatedByUser": premiseMetadataPatch.updatedByUser,
-      });
-
-      logger.log(
-        `onNoAccessRecorded ---- SUCCESS: Recorded NA [${trnId}] for Premise [${premiseId}]`,
-      );
-
-      if (erfId) {
-        await db.collection("ireps_erfs").doc(erfId).update({
-          "metadata.updatedAt": new Date().toISOString(),
-          "metadata.updatedByUid": agentUid,
-          "metadata.updatedByUser": agentName,
-        });
-
-        await rebuildErfTrnCount(erfId);
-      }
-
-      return { success: true };
-    } catch (error) {
-      logger.error("onNoAccessRecorded ---- FATAL ERROR:", error);
-      return null;
-    }
-  },
-);
+export const onNoAccessRecorded = onDocumentCreated({ document: "trns/{trnId}", retry: true },
+  (event) => reconcileNoAccessChange(null, event.data?.data(), event.params.trnId));
+export const onNoAccessUpdated = onDocumentUpdated({ document: "trns/{trnId}", retry: true },
+  (event) => reconcileNoAccessChange(event.data?.before?.data(), event.data?.after?.data(), event.params.trnId));
+export const onNoAccessDeleted = onDocumentDeleted({ document: "trns/{trnId}", retry: true },
+  (event) => reconcileNoAccessChange(event.data?.data(), null, event.params.trnId));
 
 function normalizeName(value) {
   const str = String(value || "")
@@ -3848,6 +3813,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           // root, none of them declared. The batch it came from moves into `origin`, which is
           // the declared home for "where the work came from and what it followed".
           tx.create(trnRef, stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }));
+          tx.update(db.doc(`premises/${finalPayload.accessData.premise.id}`), { noAccessTrnIds: FieldValue.arrayUnion(data.id) });
         });
       } catch (error) {
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
@@ -5709,13 +5675,12 @@ export const onMeterInstallationCallable = onCall(async (request) => {
         ),
       );
 
-      await trnRef.set(
-        stripToDeclaredRoot(
-          { ...positioned, meterType: "NA", metadata },
-          { actor: { uid: caller.uid, name: actorName } },
-        ),
-        { merge: true },
-      );
+      await db.runTransaction(async (tx) => {
+        const previous = await tx.get(trnRef);
+        if (previous.exists) return;
+        tx.create(trnRef, stripToDeclaredRoot({ ...positioned, meterType: "NA", metadata }, { actor: { uid: caller.uid, name: actorName } }));
+        tx.update(db.doc(`premises/${finalAccessData.premise.id}`), { noAccessTrnIds: FieldValue.arrayUnion(trnId) });
+      });
 
       return {
         success: true,

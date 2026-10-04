@@ -331,6 +331,10 @@ export const GMR_NO_ACCESS_COLUMNS = Object.freeze([
   "TRANSACTION TYPE",
   "TRANSACTION NUMBER",
   "REASON",
+  "APPOINTMENT (SAST)",
+  "GROUP STATUS AT PERIOD END",
+  "CLOSING TRANSACTION",
+  "CLOSED AT (SAST)",
 ]);
 
 function addressText(row) {
@@ -362,6 +366,10 @@ export function buildNoAccessSheet(dataset) {
       row?.trnTypeLabel || row?.trnType || GMR_NAV,
       row?.trnId || GMR_NAV,
       row?.noAccessReason || GMR_NAV,
+      row?.noAccessAppointment ? formatJohannesburg(row.noAccessAppointment) : GMR_NAV,
+      row?.noAccessGroupStatus || "UNKNOWN",
+      row?.noAccessClosingProof?.trnId || GMR_NAV,
+      row?.noAccessClosingProof?.at ? formatJohannesburg(row.noAccessClosingProof.at) : GMR_NAV,
     ]),
   );
 
@@ -376,6 +384,7 @@ export function buildNoAccessSheet(dataset) {
     { wch: 20 },
     { wch: 26 },
     { wch: 40 },
+    { wch: 22 }, { wch: 26 }, { wch: 40 }, { wch: 22 },
   ];
   return worksheet;
 }

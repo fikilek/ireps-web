@@ -161,6 +161,9 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
     primaryFinding: null,
     findingDetail: null,
     noAccessReason: "Gate locked",
+    noAccessAppointment: "2026-10-06T08:00:00.000Z",
+    noAccessGroupStatus: "CLOSED",
+    noAccessClosingProof: { trnId: "PROOF_1", at: "2026-09-12T08:00:00.000Z" },
     erfNo: "689",
     normalisation: "NAv",
     normalisationActions: [],
@@ -183,6 +186,7 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
   assert.deepEqual(header, [
     "ITEM", "CAPTURE DATE", "FIELD WORKER", "TEAM", "ERF", "ADDRESS",
     "TRANSACTION TYPE", "TRANSACTION NUMBER", "REASON",
+    "APPOINTMENT (SAST)", "GROUP STATUS AT PERIOD END", "CLOSING TRANSACTION", "CLOSED AT (SAST)",
   ]);
   const listed = sheet[sheet.indexOf(header) + 1];
   assert.equal(listed[2], "Lefu Motlou");
@@ -191,6 +195,10 @@ test("a no access visit is off Field Data, on its own sheet, and still counted",
   assert.equal(listed[6], "Meter Discovery", "a no access is an outcome, not a transaction type");
   assert.equal(listed[7], "B");
   assert.equal(listed[8], "Gate locked", "the reason has a home at last");
+
+  assert.match(listed[9], /10:00/);
+  assert.equal(listed[10], "CLOSED");
+  assert.equal(listed[11], "PROOF_1");
 
   // It is still the period's work, so Field Stats counts it.
   const stats = XLSX.utils.sheet_to_json(workbook.Sheets["Field Stats"], { header: 1, defval: "" });
