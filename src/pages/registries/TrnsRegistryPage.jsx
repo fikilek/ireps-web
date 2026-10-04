@@ -14,6 +14,22 @@ import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 
 const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
 
+// A no access reads orange, the whole row (owner, 4 October 2026).
+//
+// A worker could not reach the meter, so the row has no meter number, no reading and no state
+// - it is a visit, not a measurement, and it should not have to be read column by column to be
+// told apart from the work that got in.
+//
+// The app's orange is #f97316, which is right for a stripe or a chip and too thin to read as
+// words on white. This is the darker stop of the same family.
+const NO_ACCESS_ROW_COLOUR = "#c2410c";
+
+function registryRowStyle(row) {
+  return String(row?.hasAccess).toUpperCase() === "NO"
+    ? { color: NO_ACCESS_ROW_COLOUR }
+    : undefined;
+}
+
 const TRN_TYPE_OPTIONS = [
   "METER_COMMISSIONING",
   "METER_DISCOVERY",
@@ -1055,6 +1071,7 @@ export default function TrnsRegistryPage() {
                 rows={trnRows}
                 columns={registryColumns}
                 rowKey={row => row.trnId}
+                rowStyle={registryRowStyle}
                 filters={filters}
                 onFiltersChange={setFilters}
                 filteredRows={filteredTrnRows}
