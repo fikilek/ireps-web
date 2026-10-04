@@ -453,20 +453,32 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     }
 
-    // MN-R001 1.1.0 section 8: an inspection is office work executed from an
-    // instruction, or field work started on the spot from the meter card.
+    // MN-R001 1.1.0 section 8: AN INSPECTION COMES FROM EITHER CHANNEL. Office work executed
+    // from an accepted instruction, or field work started on the spot from the meter card -
+    // and the owner, 4 October 2026: "an inspection can be originated on the field and in the
+    // office ... you can't disconnect a meter that's disconnected, so you will have to inspect
+    // it first and indicate that the meter is connected. The important thing is that the
+    // inspection tells you the origination channel. That's all."
+    //
+    // So this is NOT a rule that field work is forbidden. It is the check that the capture
+    // SAID which channel it came through. Its old name and message - INSPECTION_OFFICE_WMS_ONLY,
+    // "must complete an accepted office-originated instruction TRN" - stated a rule iREPS does
+    // not have, and on 4 October it told the owner his own field inspection was not allowed.
+    // A message that misnames the rule is worse than no message: it sends the reader to fix
+    // something that was never wrong.
     if (
       trnType === "METER_INSPECTION" &&
       !isWmsLifecycleExecution &&
       originChannel !== "FIELD"
     ) {
       return buildFailureResult(
-        "INSPECTION_OFFICE_WMS_ONLY",
-        "Meter inspection execution must complete an accepted office-originated instruction TRN",
+        "INSPECTION_ORIGIN_MISSING",
+        "A meter inspection must say which channel it came from: field work started at the meter, or an accepted office instruction",
         {
           trnId,
           trnType,
           astId,
+          originChannel: originChannel || "NAv",
         },
       );
     }
