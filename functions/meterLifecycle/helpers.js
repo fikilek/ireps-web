@@ -408,7 +408,22 @@ export function validateAssignment(
     // instruction.
     ["METER_RECONNECTION", "METER_INSPECTION"].includes(normalizedTrnType);
 
-  if (!instruction?.code) {
+  // WORK A WORKER STARTED THEMSELVES CARRIES NO INSTRUCTION.
+  //
+  // TR-R001 section 2 says it in the root table: `assignment` is "the office instruction that
+  // issued the work", and it is `{}` for work a worker started themselves. There is no office
+  // instruction behind a field inspection - that is what field-originated means.
+  //
+  // `fieldInstructionOptional` above has encoded this since it was written, and it was wired
+  // to the instruction TEXT only. The CODE was still demanded of everyone, so a field
+  // inspection was refused for not carrying an instruction the rules say it must not have.
+  //
+  // Found on the owner's phone, 4 October 2026, the first field no access ever sent down this
+  // path: INVALID_ASSIGNMENT_INSTRUCTION_CODE, "assignment.instruction.code is required".
+  //
+  // Where a code IS given it must still agree with the transaction type - an exemption from
+  // carrying one is not permission to carry the wrong one.
+  if (!instruction?.code && !fieldInstructionOptional) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_INSTRUCTION_CODE",
@@ -416,7 +431,7 @@ export function validateAssignment(
     };
   }
 
-  if (normalizeUpper(instruction.code) !== normalizedTrnType) {
+  if (instruction?.code && normalizeUpper(instruction.code) !== normalizedTrnType) {
     return {
       ok: false,
       code: "ASSIGNMENT_INSTRUCTION_MISMATCH",
@@ -436,7 +451,9 @@ export function validateAssignment(
     };
   }
 
-  if (targets.length === 0) {
+  // Nobody assigned it either. TR-R001: `assignment` is `{}` for work a worker started
+  // themselves - no instruction, and therefore no one it was issued to.
+  if (targets.length === 0 && !fieldInstructionOptional) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_TARGETS",

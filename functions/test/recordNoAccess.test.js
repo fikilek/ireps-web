@@ -1060,3 +1060,62 @@ test("NA-R001: a capture that names no meter at all is still refused", async () 
   assert.equal(result.ok, false);
   assert.equal(result.code, "INVALID_AST_ID");
 });
+
+// TR-R001 — WORK A WORKER STARTED THEMSELVES CARRIES NO INSTRUCTION
+//
+// The root table: `assignment` is "the office instruction that issued the work", and it is
+// `{}` for work a worker started themselves. A field inspection has no office instruction
+// behind it - that is what field-originated means.
+//
+// The owner's phone, 4 October 2026: a field Meter Inspection no access refused with
+// INVALID_ASSIGNMENT_INSTRUCTION_CODE, for not carrying an instruction the rules say it must
+// not have. validateAssignment had encoded the exemption since it was written and wired it to
+// the instruction TEXT only.
+
+test("TR-R001: a field inspection needs no instruction and no targets", async () => {
+  const { validateAssignment } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateAssignment({}, "METER_INSPECTION", { originChannel: "FIELD" });
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test("TR-R001: a field reconnection is the same", async () => {
+  const { validateAssignment } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateAssignment({}, "METER_RECONNECTION", { originChannel: "FIELD" });
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test("MN-R001 6.1: a disconnection and a removal still carry their instruction", async () => {
+  const { validateAssignment } = await import("../meterLifecycle/helpers.js");
+
+  for (const trnType of ["METER_DISCONNECTION", "METER_REMOVAL"]) {
+    const result = validateAssignment({}, trnType, { originChannel: "FIELD" });
+    assert.equal(result.ok, false, `${trnType} was let through without its instruction`);
+    assert.equal(result.code, "INVALID_ASSIGNMENT_INSTRUCTION_CODE");
+  }
+});
+
+test("TR-R001: office work still carries its instruction and who it went to", async () => {
+  const { validateAssignment } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateAssignment({}, "METER_INSPECTION", { originChannel: "OFFICE" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "INVALID_ASSIGNMENT_INSTRUCTION_CODE");
+});
+
+test("TR-R001: an exemption from carrying a code is not permission to carry the wrong one", async () => {
+  const { validateAssignment } = await import("../meterLifecycle/helpers.js");
+
+  const result = validateAssignment(
+    { instruction: { code: "METER_REMOVAL", text: "x" }, targets: [] },
+    "METER_INSPECTION",
+    { originChannel: "FIELD" },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "ASSIGNMENT_INSTRUCTION_MISMATCH");
+});
