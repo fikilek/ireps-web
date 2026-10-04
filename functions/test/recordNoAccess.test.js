@@ -657,7 +657,7 @@ test("the street type is not repeated when the name already carries it", () => {
 // they were made — and the repaired ones sitting beside them made it look fixed.
 // ---------------------------------------------------------------------------
 
-test("TR-R001: the root is filled in, and trnType agrees with accessData", async () => {
+test("TR-R001: the root is filled in", async () => {
   const { applyTrnRootShape, TRN_ROOT_OBJECT_KEYS } = await import("../transactions/trnShape.js");
 
   const payload = applyTrnRootShape({
@@ -666,10 +666,63 @@ test("TR-R001: the root is filled in, and trnType agrees with accessData", async
     accessData: { trnType: "METER_DISCOVERY" },
   });
 
-  assert.equal(payload.trnType, "METER_DISCOVERY");
   for (const key of TRN_ROOT_OBJECT_KEYS) {
     assert.deepEqual(payload[key], {}, `${key} is absent, so every reader must test for it`);
   }
+});
+
+test("TR-R001 0.8.0: the kind of work is in accessData, and only there", async () => {
+  // The owner, 4 October: "we already have it under accessData ... so we are redundant here."
+  // It was at the root for one day (0.3.0 to 0.8.0).
+  const { applyTrnRootShape, stripToDeclaredRoot } = await import("../transactions/trnShape.js");
+
+  const shaped = applyTrnRootShape({
+    id: "TRN_1",
+    accessData: { trnType: "METER_DISCOVERY" },
+  });
+  assert.equal("trnType" in shaped, false, "the root copy is written again");
+  assert.equal(shaped.accessData.trnType, "METER_DISCOVERY");
+
+  // And a phone or an older caller that still sends one has it taken off.
+  const stripped = stripToDeclaredRoot({
+    id: "TRN_1",
+    trnType: "METER_DISCOVERY",
+    accessData: { trnType: "METER_DISCOVERY" },
+  });
+  assert.equal("trnType" in stripped, false, "a root copy that arrives is kept");
+});
+
+test("TR-R001 0.9.0: a no access is not given an empty comment to carry", async () => {
+  // The owner, 4 October: "RSTE wanted this field comment on the Meter Discovery, not on the
+  // no access ... we're not even having it on the form."
+  //
+  // A no access form has no comment box, so a default would put an empty field on every no
+  // access forever - and an always-empty field reads as "the worker had nothing to say" when
+  // the truth is that nobody asked. That is the NAv rule: never hide a gap behind something
+  // that looks like an answer.
+  const { applyTrnRootShape } = await import("../transactions/trnShape.js");
+
+  const payload = applyTrnRootShape({
+    id: "TRN_1",
+    accessData: { trnType: "METER_DISCOVERY" },
+  });
+
+  assert.equal("fieldComment" in payload, false);
+});
+
+test("TR-R001: a comment a worker did write is never thrown away", async () => {
+  // It stays DECLARED - the Meter Discovery form asks for one, and the monthly report prints
+  // it. Only the empty default goes.
+  const { applyTrnRootShape, stripToDeclaredRoot } = await import("../transactions/trnShape.js");
+
+  const payload = stripToDeclaredRoot(
+    applyTrnRootShape({
+      accessData: { trnType: "METER_DISCOVERY" },
+      fieldComment: { text: "Gate chained, dogs loose." },
+    }),
+  );
+
+  assert.deepEqual(payload.fieldComment, { text: "Gate chained, dogs loose." });
 });
 
 test("TR-R001: what the form filled is never overwritten", async () => {

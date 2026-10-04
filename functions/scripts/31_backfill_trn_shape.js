@@ -39,7 +39,7 @@ const ROOT_OBJECT_KEYS = ["status", "assignment", "origin", "workflow", "service
 // way. This list is here so the next one surfaces without him looking.
 const DECLARED_ROOT_KEYS = new Set([
   "id",
-  "trnType",
+  // TR-R001 0.8.0: `trnType` is no longer declared at the root (owner, 4 October).
   "accessData",
   "metadata",
   "meterType",
@@ -341,11 +341,11 @@ async function main() {
     const update = {};
     const trnType = get(data, "accessData", "trnType");
 
-    // 1. trnType at the root, taken from accessData, which carries it on every record.
-    if (!isFilled(data.trnType) && isFilled(trnType)) {
-      update.trnType = trnType;
-      count("trnType at the root");
-    }
+    // 1. WITHDRAWN. TR-R001 0.8.0 (owner, 4 October 2026): the kind of work is in accessData
+    // and nowhere else - "we already have it under accessData ... so we are redundant here."
+    // This step added the root copy on 3 October and ran once; the copy it wrote on the 493
+    // records comes off in the section 2A sweep, with the other keys that leave the root. The
+    // step stays here, dead and labelled, so that re-running this script cannot put it back.
 
     // 2. the root keys: present and empty rather than absent.
     for (const key of ROOT_OBJECT_KEYS) {

@@ -110,6 +110,7 @@ import { checkBatchWork, profileServiceProviderId, recognisedBatchContext, recor
 import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
 // TR-R001: every transaction carries the same root, written where every path goes through it.
 import { applyTrnRootShape, stripToDeclaredRoot } from "./transactions/trnShape.js";
+import { serviceProviderName } from "./serviceProviders/serviceProviderName.js";
 import { isTrnIdForWork, trnIdShapeMessage } from "./transactions/trnId.js";
 import {
   buildNoAccessLocation,
@@ -3395,9 +3396,12 @@ async function completeNoAccessFromAuthorities(payload, { actorUid } = {}) {
 
       if (spId) {
         const spSnap = await db.collection("serviceProviders").doc(spId).get();
+        // A service provider document has no top-level `name` - the names live under
+        // `profile`. Reading one that does not exist is how every no access came to be stamped
+        // "NAv" beside a correctly resolved id (owner, 4 Oct, reading his own ERF 3619 record).
         payload.serviceProvider = {
           id: spId,
-          name: String(spSnap.exists ? spSnap.data()?.name || "" : "").trim() || "NAv",
+          name: serviceProviderName(spSnap.exists ? spSnap.data() : null),
         };
       }
     }

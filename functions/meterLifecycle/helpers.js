@@ -7,6 +7,7 @@ import {
   validateNormalisation,
   validateOtherAnomalies,
 } from "../meterDiscovery/validation.js";
+import { serviceProviderName } from "../serviceProviders/serviceProviderName.js";
 
 const NOW_FALLBACK_USER = "SYSTEM";
 
@@ -3163,18 +3164,11 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
 
 export function sanitizeServiceProvider(serviceProvider = {}) {
   const id = String(serviceProvider?.id || "").trim();
-  const name = String(
-    serviceProvider?.name ||
-      serviceProvider?.profile?.tradingName ||
-      serviceProvider?.profile?.registeredName ||
-      serviceProvider?.profile?.name ||
-      id ||
-      "NAv",
-  ).trim();
 
   return {
     id: id || "NAv",
-    name: name || "NAv",
+    // One chain for the whole of iREPS (owner, 4 Oct 2026): registeredName, tradingName, NAv.
+    name: serviceProviderName(serviceProvider),
   };
 }
 

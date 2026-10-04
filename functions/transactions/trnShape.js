@@ -26,17 +26,17 @@ export const TRN_ROOT_OBJECT_KEYS = Object.freeze([
 /**
  * Put a payload into the agreed root shape, in place.
  *
- * `trnType` at the root, agreeing with the one in `accessData` — TR-R001 requires both, and
- * the two always say the same thing.
+ * TR-R001 0.8.0 (owner, 4 Oct 2026): THE KIND OF WORK IS IN `accessData`, AND ONLY THERE.
+ * "we already have it under accessData ... so we are redundant here." This used to copy it to
+ * the root as well, for one day. Two homes for one fact is the thing this module exists to
+ * stop, so the copy goes and `accessData.trnType` - the home every transaction already had -
+ * stands alone.
  *
  * It only ever ADDS what is missing. A key the form filled is never touched, and a key that is
  * absent becomes `{}` — never `null`, which a reader would have to test for just the same.
  */
 export function applyTrnRootShape(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
-
-  const trnType = String(payload?.accessData?.trnType || payload?.trnType || "").trim();
-  if (trnType) payload.trnType = trnType;
 
   for (const key of TRN_ROOT_OBJECT_KEYS) {
     const value = payload[key];
@@ -50,15 +50,19 @@ export function applyTrnRootShape(payload = {}) {
 // TR-R001 section 2: the WHOLE declared root. Nothing else belongs on a transaction.
 export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
   "id",
-  "trnType",
+  // TR-R001 0.8.0: no `trnType` here. It is in `accessData` and nowhere else, so the strip
+  // below takes a root copy off anything that still sends one.
   "accessData",
   "metadata",
   "meterType",
   "ast",
   "media",
-  // TR-R001 0.7.0 (owner, 3 Oct 2026): the worker's own words, on every kind of transaction
-  // including a no access - which has no work property to put them in. Declared here as well
-  // as in the rule, or the strip would throw away the one key he asked to keep.
+  // TR-R001 0.9.0 (owner, 4 Oct 2026): the worker's own words, on the transactions whose form
+  // asks for them. It stays DECLARED so the strip never throws away a comment a worker wrote -
+  // but it is no longer defaulted onto a transaction that cannot carry one. A no access form
+  // has no comment box, so a default would put an empty field on every one of them forever,
+  // and an always-empty field reads as "the worker had nothing to say" when the truth is that
+  // nobody asked.
   "fieldComment",
   ...TRN_ROOT_OBJECT_KEYS,
   // The one property named for the work (TR-R001). A no access carries none of them.
