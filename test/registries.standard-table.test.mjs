@@ -43,6 +43,28 @@ function capture(Component, props = {}) {
 const pageTable = name => capture(modules[name].default);
 const filter = (table, filters) => table.filterRows ? table.filterRows(table.rows,filters) : filterIrepsTableRows(table.rows,table.columns,{filters});
 
+test("MREAD completion cells and downloads show SAST while sorting keeps the stored instant", () => {
+  const table = pageTable("Mread");
+  const column = table.columns.find(c => c.key === "completedAt");
+  const cases = [
+    ["2026-10-05T19:09:45.455Z", "2026-10-05 21:09:45"],
+    ["2026-10-05T19:06:58.076Z", "2026-10-05 21:06:58"],
+    ["2026-10-05T18:56:23.108Z", "2026-10-05 20:56:23"],
+    ["2026-10-05T22:00:00.000Z", "2026-10-06 00:00:00"],
+  ];
+  for (const [completedAt, expected] of cases) {
+    const row = { ...table.rows[0], completedAt };
+    assert.equal(renderToStaticMarkup(column.render(row)), expected);
+    assert.equal(column.sortValue(row), Date.parse(completedAt));
+    const downloadColumns = table.downloads.columns.filter(c => c.header === "Completed At");
+    assert.ok(downloadColumns.length > 0);
+    for (const download of downloadColumns) {
+      assert.equal(download.value(row), expected);
+    }
+    assert.equal(row.completedAt, completedAt);
+  }
+});
+
 test("all eight actual pages supply loaded rows and unique columns to the shared table", () => {
   for (const name of pages) {
     const table = pageTable(name);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, getDocs, getFirestore, limit, query, where } from "firebase/firestore";
 
 import RegistryIdText from "../RegistryIdText";
+import { formatSastDateTime as formatDateTime } from "../../utils/formatSastDateTime.js";
 
 const NAv = "NAv";
 const BASELINE_READING_SOURCES = new Set([
@@ -71,24 +72,6 @@ function formatReading(value) {
   if (value === 0 || value === "0") return "0";
   if (value === null || value === undefined || value === "") return NAv;
   return String(value);
-}
-
-function formatDateTime(value) {
-  if (!value || value === NAv) return NAv;
-
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  if (typeof value?.seconds === "number") {
-    return new Date(value.seconds * 1000).toLocaleString();
-  }
-
-  return NAv;
 }
 
 function getReadingAtMs(value) {
