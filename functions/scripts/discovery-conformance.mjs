@@ -173,7 +173,7 @@ try {
   console.log(JSON.stringify({ sourceCount: discovery.length, changes: changes.length, deletions: deletions.length, dependencies, remainingReferences, inspectedDocuments: snapshots.size }, null, 2));
   if (apply) {
     const reviewed = JSON.parse(fs.readFileSync(option('--reviewed-plan'), 'utf8'));
-    const reviewedContent = p => ({ projectId: p.projectId, changes: p.changes, deletions: p.deletions, dependencies: p.dependencies, deletedFiles: p.deletedFiles, remainingFileReferences: p.remainingFileReferences });
+    const reviewedContent = p => JSON.parse(JSON.stringify({ projectId: p.projectId, changes: p.changes, deletions: p.deletions, dependencies: p.dependencies, deletedFiles: p.deletedFiles, remainingFileReferences: p.remainingFileReferences }));
     assert.deepEqual(reviewedContent(plan), reviewedContent(reviewed), 'Source/dependencies changed since review; inspect the new plan before applying.');
     const updates = [...changes, ...dependencies.changes];
     const deletePaths = new Set([...deletions.map(d => d.path), ...dependencies.deletes]);
