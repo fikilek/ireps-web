@@ -42,7 +42,7 @@ export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now,
 }
 
 // The premise link and transaction are committed together; retries never create another visit.
-export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice }) {
+export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, validateAst = () => {} }) {
   const trnId = text(data.id);
   const astId = text(data.astId || data.ast?.astData?.astId);
   const access = normalizeNoAccessAccessData(data.accessData, { actor, metadata: data.metadata });
@@ -72,6 +72,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice }
     if (!premiseSnap.exists) fail("PREMISE_NOT_FOUND", "The premise is not on the server yet. This visit can be retried after the premise is saved.");
     if (!erfSnap.exists) fail("NO_ACCESS_ERF_NOT_FOUND", "The ERF record is missing. Ask the office to correct this work item.");
     const astDoc = astSnap.data();
+    validateAst(astDoc);
     const premise = premiseSnap.data();
     if ((present(astDoc.accessData?.premise?.id) && astDoc.accessData.premise.id !== premiseId) ||
         (present(astDoc.accessData?.erfId) && astDoc.accessData.erfId !== access.erfId) ||

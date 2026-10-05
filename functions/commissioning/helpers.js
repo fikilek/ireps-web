@@ -214,7 +214,8 @@ export function validateCommissioningCreateInput(data = {}) {
     };
   }
 
-  if (!data?.commissioning || typeof data.commissioning !== "object") {
+  if (normalizeLower(data?.accessData?.access?.hasAccess) !== "no" &&
+      (!data?.commissioning || typeof data.commissioning !== "object")) {
     return {
       ok: false,
       code: "INVALID_COMMISSIONING_DATA",
