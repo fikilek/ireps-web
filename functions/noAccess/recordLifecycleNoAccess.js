@@ -13,7 +13,7 @@ const fail = (code, message) => { throw noAccessError(code, message); };
 
 // Pure construction: neither meter work nor a second outcome is written for an inaccessible meter.
 export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now, existing = null, serviceProvider = {}, batch = null }) {
-  const accessData = normalizeNoAccessAccessData(data.accessData, { actor });
+  const accessData = normalizeNoAccessAccessData(data.accessData, { actor, metadata: data.metadata });
   const parents = buildNoAccessParentsFromErf(erf);
   if (noAccessParentsAreMissing(parents) || !present(parents.wardPcode)) fail("NO_ACCESS_GEOGRAPHY_UNRESOLVED", "The ERF has no municipality or ward. Ask the office to correct its geography.");
   assertNoAccessMedia(data.media);
@@ -47,7 +47,7 @@ export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now,
 export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice }) {
   const trnId = text(data.id);
   const astId = text(data.astId || data.ast?.astData?.astId);
-  const access = normalizeNoAccessAccessData(data.accessData, { actor });
+  const access = normalizeNoAccessAccessData(data.accessData, { actor, metadata: data.metadata });
   const premiseId = access.premise.id;
   const trnRef = db.doc(`trns/${trnId}`);
   const astRef = db.doc(`asts/${astId}`);

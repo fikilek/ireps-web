@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
 import { initializeApp, deleteApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { onMeterLifecycleTrnCallable } from "../meterLifecycle/callables.js";
@@ -8,7 +10,8 @@ import { reconcilePremiseNoAccess } from "../noAccess/reconcile.js";
 
 const enabled = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 test("shared phone payload through the real lifecycle callable and Firestore transaction", { skip: !enabled }, async (t) => {
-  const { buildNoAccessPayload } = await import("../../../ireps-mobile/src/features/meters/noAccessCapture.js");
+  const mobile = process.env.IREPS_MOBILE_ROOT || path.resolve("../ireps-mobile");
+  const { buildNoAccessPayload } = await import(pathToFileURL(path.join(mobile, "src/features/meters/noAccessCapture.js")));
   const projectId = process.env.GCLOUD_PROJECT;
   assert.match(projectId || "", /^demo-/, "This test must never connect to a real Firebase project.");
   assert.match(process.env.FIRESTORE_EMULATOR_HOST, /^(127\.0\.0\.1|localhost):\d+$/);
@@ -30,7 +33,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
   const make = (id, context = {}) => buildNoAccessPayload({ trnId: id, capturedAt,
     actor: { uid: "U1", name: "Worker" },
     context: { trnType: "METER_INSPECTION", astId: "A1", premiseId: "P1", erfId: "E1", erfNo: "1", ...context },
-    value: { reasonCode: "Property Locked", appointment },
+    value: { reasonCode: "Occupant requested a return visit", appointment: { ...appointment } },
     media: [{ tag: "noAccessPhoto", url: "https://example.test/photo.jpg", uri: "file:///phone/private/photo.jpg" }],
   });
   const send = (data, uid = "U1", role = "FWR") => onMeterLifecycleTrnCallable.run({ data, auth: { uid, token: { role, name: "Worker" } } });
@@ -40,6 +43,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.equal(result.success, true, JSON.stringify(result));
     const trn = (await db.doc("trns/T1").get()).data();
     assert.equal(trn.accessData.access.appointment.at, appointment.at);
+    assert.equal(trn.accessData.access.appointmentRuleVersion, 2);
     assert.equal(trn.accessData.access.reasonOther, "NAv");
     assert.equal(trn.ast.astData.astId, "A1");
     assert.equal(trn.ast.location.source, "ASSET");
@@ -104,6 +108,9 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
       ["NO_ACCESS_PHOTO_REQUIRED", (p) => { delete p.media[0].url; }],
       ["NO_ACCESS_GEOGRAPHY_MISMATCH", (p) => { p.accessData.erfId = "E2"; }],
       ["NO_ACCESS_ERF_REQUIRED", (p) => { p.accessData.erfId = "NAv"; }],
+      ["NO_ACCESS_APPOINTMENT_REQUIRED", (p) => { p.accessData.access.appointment = null; }],
+      ["NO_ACCESS_APPOINTMENT_NOT_ALLOWED", (p) => { p.accessData.access.reasonCode = "Property Locked"; }],
+      ["NO_ACCESS_APPOINTMENT_NOT_FUTURE_AT_CAPTURE", (p) => { p.accessData.access.appointment.at = capturedAt; }],
     ]) {
       await db.doc("ireps_erfs/E2").set({});
       const payload = make(code); alter(payload);

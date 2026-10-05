@@ -24,6 +24,8 @@ const normalizeText = (value) => String(value ?? "").trim();
 const normalizeUpper = (value) => normalizeText(value).toUpperCase();
 
 export const NO_ACCESS_OTHER_CODE = "OTHER";
+export const NO_ACCESS_RETURN_VISIT_REASON = "Occupant requested a return visit";
+export const NO_ACCESS_APPOINTMENT_RULE_VERSION = 2;
 
 // NA-R004: one list. The phone reads its own copy for the dropdown; this is what the server
 // will accept, and the two are kept the same by NA-R004, not by a build step.
@@ -35,6 +37,7 @@ export const NO_ACCESS_REASON_CODES = Object.freeze([
   "Meter Obstructed",
   "Property Demolished",
   "Property Vacant",
+  NO_ACCESS_RETURN_VISIT_REASON,
   NO_ACCESS_OTHER_CODE,
 ]);
 
@@ -164,9 +167,9 @@ export function normalizeNoAccessReason(input = {}) {
 /**
  * NA-R020 … NA-R027 — the NA Appointment.
  *
- * Optional on every reason. The phone checks that it is in the future at capture (NA-R023);
- * the server does NOT check that again (NA-R026), because a phone out of signal overnight
- * would otherwise have honest work refused for arriving late. The value is stored exactly as
+ * Normalise the stored shape for current and legacy captures. The access-block validator
+ * enforces the reason/version contract and checks original capture time, never arrival time
+ * (NA-R026), so a phone out of signal overnight can still deliver its agreement. It is stored as
  * captured and is never shifted or recalculated (NA-R025). There is no upper limit on how
  * far ahead it may be (owner, 2 October 2026).
  */
@@ -326,12 +329,39 @@ export function assertNoAccessLocation(location) {
  * it would make the count disagree with the list it opens — eleven claimed, eight shown,
  * which is the September report fault.
  */
-export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
+export function buildNoAccessAccessBlock(input = {}, { actor = {}, metadata = {} } = {}) {
   const reason = normalizeNoAccessReason(input);
+  const appointment = normalizeNoAccessAppointment(input.appointment, { actor });
+  const returnVisit = reason.reasonCode === NO_ACCESS_RETURN_VISIT_REASON;
+  const version = input.appointmentRuleVersion;
+  if (version != null && version !== NO_ACCESS_APPOINTMENT_RULE_VERSION) {
+    throw noAccessError("NO_ACCESS_APPOINTMENT_RULE_UNSUPPORTED", "Update the app before editing this saved visit; its appointment rule is not supported.");
+  }
+  // Unversioned older clients and queues keep their original contract. The new reason
+  // always opts into version 2, so omitting its marker cannot make its appointment optional.
+  const currentRule = version === NO_ACCESS_APPOINTMENT_RULE_VERSION || returnVisit;
+  if (currentRule && returnVisit && !appointment) {
+    throw noAccessError("NO_ACCESS_APPOINTMENT_REQUIRED", "Choose the date and time agreed for the return visit.");
+  }
+  if (currentRule && !returnVisit && appointment) {
+    throw noAccessError("NO_ACCESS_APPOINTMENT_NOT_ALLOWED", "Only Occupant requested a return visit can have an appointment. Correct the saved visit's reason or remove its appointment.");
+  }
+  if (currentRule && appointment) {
+    const captured = Date.parse(metadata.createdOnDevice);
+    const made = Date.parse(appointment.madeAt);
+    const at = Date.parse(appointment.at);
+    if (!Number.isFinite(captured) || !Number.isFinite(made)) {
+      throw noAccessError("NO_ACCESS_APPOINTMENT_INVALID", "The return appointment needs its original capture and agreement times. Reopen the saved visit and check it.");
+    }
+    if (at <= captured || at <= made) {
+      throw noAccessError("NO_ACCESS_APPOINTMENT_NOT_FUTURE_AT_CAPTURE", "The return appointment must be after the original visit and the time it was arranged.");
+    }
+  }
   return {
     hasAccess: "no",
     ...reason,
-    appointment: normalizeNoAccessAppointment(input.appointment, { actor }),
+    ...(currentRule ? { appointmentRuleVersion: NO_ACCESS_APPOINTMENT_RULE_VERSION } : {}),
+    appointment,
   };
 }
 
@@ -351,7 +381,7 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {} } = {}) {
  * Installation is NOT validated by anything, so without this it would have kept accepting a
  * no access that nobody can place.
  */
-export function normalizeNoAccessAccessData(accessData = {}, { actor = {} } = {}) {
+export function normalizeNoAccessAccessData(accessData = {}, { actor = {}, metadata = {} } = {}) {
   // The ERF is checked first: a record that cannot say which ERF cannot say which premise
   // either, and the worker should be told the more fundamental thing.
   const geography = assertNoAccessGeography(accessData);
@@ -381,11 +411,11 @@ export function normalizeNoAccessAccessData(accessData = {}, { actor = {} } = {}
     ...accessData,
     ...geography,
     premise,
-    access: buildNoAccessAccessBlock(accessData.access, { actor }),
+    access: buildNoAccessAccessBlock(accessData.access, { actor, metadata }),
   };
 }
 
-export function buildNoAccessData({ trnType, erfId, erfNo, premise, reason, media, location, actor, parents } = {}) {
+export function buildNoAccessData({ trnType, erfId, erfNo, premise, reason, media, location, actor, parents, metadata } = {}) {
   const geography = assertNoAccessGeography({ erfId, erfNo });
 
   assertNoAccessMedia(media);
@@ -396,7 +426,7 @@ export function buildNoAccessData({ trnType, erfId, erfNo, premise, reason, medi
     ...geography,
     ...(parents ? { parents } : {}),
     premise: normalizeNoAccessPremise(premise),
-    access: buildNoAccessAccessBlock(reason, { actor }),
+    access: buildNoAccessAccessBlock(reason, { actor, metadata }),
   };
 }
 

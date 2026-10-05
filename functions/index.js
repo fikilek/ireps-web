@@ -3634,6 +3634,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     if (hasAccess === "no") {
       safePayload.accessData = normalizeNoAccessAccessData(safePayload?.accessData, {
         actor: { uid: caller.uid, name: actorName },
+        metadata: data.metadata,
       });
 
       // NA-R043: the municipality and ward are read from the ERF, which is the authority for
@@ -5661,6 +5662,7 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       hasAccess === "no"
         ? normalizeNoAccessAccessData(safePayload?.accessData, {
             actor: { uid: caller.uid, name: actorName },
+            metadata: data.metadata,
           })
         : safePayload?.accessData || {};
 
