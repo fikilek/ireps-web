@@ -1,4 +1,4 @@
-import { NO_ACCESS_REASON_CODES, normalizeNoAccessReason } from "./recordNoAccess.js";
+import { NO_ACCESS_REASON_CODES, normalizeNoAccessReason, isReturnVisitReason } from "./recordNoAccess.js";
 
 // Structural Discovery migration only. Preserve captured words; never infer an occupant's
 // request, an appointment, a capture time, a premise or a physical meter state.
@@ -11,7 +11,7 @@ export function planDiscoveryAccessBackfill(record = {}) {
   const words = String(access.reasonCode || access.reason || "").trim();
   if (!words || words.toUpperCase() === "NAV") return null;
   const canonical = NO_ACCESS_REASON_CODES.find(reason => reason.toUpperCase() === words.toUpperCase());
-  if (canonical === "Occupant requested a return visit") return null;
+  if (isReturnVisitReason(words)) return null;
   const reason = normalizeNoAccessReason(canonical
     ? { reasonCode: canonical, reasonOther: access.reasonOther }
     : { reasonCode: "OTHER", reasonOther: String(access.reason || words).trim() });

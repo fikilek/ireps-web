@@ -489,7 +489,7 @@ export default function TrnsRegistryPage() {
       { header: "Has Access", value: (row) => getAccessLabel(row.hasAccess) },
       {
         header: "No Access Reason",
-        value: (row) => row.accessReason || "NAv",
+        value: (row) => [row.accessReason || "NAv", row.returnAppointmentLabel].filter(Boolean).join("\n"),
       },
       {
         header: "Meter Type",
@@ -764,7 +764,10 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <>{row.accessReason || "NAv"}</>;
+      return <div style={{ display: "grid", gap: 4, minWidth: 165 }}>
+        <span style={{ fontWeight: row.returnAppointmentLabel ? 600 : undefined }}>{row.accessReason || "NAv"}</span>
+        {row.returnAppointmentLabel && <span style={{ whiteSpace: "nowrap" }}>{row.returnAppointmentLabel}</span>}
+      </div>;
     },
     sortEmptyLast: true,
 

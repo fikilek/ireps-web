@@ -1,4 +1,5 @@
 import { reconcilePremiseNoAccess, isTransientReconciliationError } from "./noAccess/reconcile.js";
+import { noAccessPremiseMetadata } from "./noAccess/premiseMetadata.js";
 /* eslint-disable no-undef */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
@@ -3802,6 +3803,8 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
             return;
           }
 
+          const premiseRef = db.doc(`premises/${finalPayload.accessData.premise.id}`);
+          const premiseSnapshot = await tx.get(premiseRef);
           await recordTargetedBatchNoAccessInTransaction({
             transaction: tx,
             db,
@@ -3814,7 +3817,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           // root, none of them declared. The batch it came from moves into `origin`, which is
           // the declared home for "where the work came from and what it followed".
           tx.create(trnRef, stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }));
-          tx.update(db.doc(`premises/${finalPayload.accessData.premise.id}`), { noAccessTrnIds: FieldValue.arrayUnion(data.id) });
+          tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(data.id), ...noAccessPremiseMetadata(finalPayload.metadata, premiseSnapshot.data()?.metadata) });
         });
       } catch (error) {
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
@@ -5680,8 +5683,10 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       await db.runTransaction(async (tx) => {
         const previous = await tx.get(trnRef);
         if (previous.exists) return;
+        const premiseRef = db.doc(`premises/${finalAccessData.premise.id}`);
+        const premiseSnapshot = await tx.get(premiseRef);
         tx.create(trnRef, stripToDeclaredRoot({ ...positioned, meterType: "NA", metadata }, { actor: { uid: caller.uid, name: actorName } }));
-        tx.update(db.doc(`premises/${finalAccessData.premise.id}`), { noAccessTrnIds: FieldValue.arrayUnion(trnId) });
+        tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(trnId), ...noAccessPremiseMetadata(metadata, premiseSnapshot.data()?.metadata) });
       });
 
       return {

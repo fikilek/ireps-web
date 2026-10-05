@@ -24,7 +24,10 @@ const normalizeText = (value) => String(value ?? "").trim();
 const normalizeUpper = (value) => normalizeText(value).toUpperCase();
 
 export const NO_ACCESS_OTHER_CODE = "OTHER";
-export const NO_ACCESS_RETURN_VISIT_REASON = "Occupant requested a return visit";
+export const NO_ACCESS_RETURN_VISIT_REASON = "Return visit requested";
+// Older queued captures use the former name; every writer stores the current name.
+export const isReturnVisitReason = (value) => [NO_ACCESS_RETURN_VISIT_REASON, "Occupant requested a return visit"]
+  .some(reason => normalizeUpper(reason) === normalizeUpper(value));
 export const NO_ACCESS_APPOINTMENT_RULE_VERSION = 2;
 
 // NA-R004: one list. The phone reads its own copy for the dropdown; this is what the server
@@ -134,7 +137,7 @@ export function normalizeNoAccessReason(input = {}) {
     throw noAccessError("NO_ACCESS_REASON_REQUIRED", "A No Access reason is required.");
   }
 
-  const upper = normalizeUpper(rawCode);
+  const upper = normalizeUpper(isReturnVisitReason(rawCode) ? NO_ACCESS_RETURN_VISIT_REASON : rawCode);
   if (!NO_ACCESS_REASON_CODE_SET.has(upper)) {
     throw noAccessError(
       "NO_ACCESS_REASON_INVALID",
@@ -219,7 +222,7 @@ export function assertNoAccessMedia(media, access = {}, { uploaded = false } = {
   if (!Array.isArray(media)) {
     throw noAccessError("MEDIA_INVALID", "media must be an array.");
   }
-  const returnVisit = normalizeUpper(access.reasonCode ?? access.reason) === normalizeUpper(NO_ACCESS_RETURN_VISIT_REASON);
+  const returnVisit = isReturnVisitReason(access.reasonCode ?? access.reason);
   const photos = media.filter((item) => item?.tag === "noAccessPhoto");
   const hasPhoto = photos.some((item) => normalizeText(item?.url || item?.uri));
   if ((!returnVisit && !hasPhoto) || (uploaded && photos.some((item) => !/^https:\/\//i.test(normalizeText(item?.url))))) {
@@ -343,7 +346,7 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {}, metadata = {}
     throw noAccessError("NO_ACCESS_APPOINTMENT_REQUIRED", "Choose the date and time agreed for the return visit.");
   }
   if (!returnVisit && appointment) {
-    throw noAccessError("NO_ACCESS_APPOINTMENT_NOT_ALLOWED", "Only Occupant requested a return visit can have an appointment. Correct the saved visit's reason or remove its appointment.");
+    throw noAccessError("NO_ACCESS_APPOINTMENT_NOT_ALLOWED", "Only Return visit requested can have an appointment. Correct the saved visit's reason or remove its appointment.");
   }
   if (appointment) {
     const captured = Date.parse(metadata.createdOnDevice);

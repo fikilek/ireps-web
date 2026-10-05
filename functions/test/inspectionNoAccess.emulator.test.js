@@ -33,7 +33,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
   const make = (id, context = {}) => buildNoAccessPayload({ trnId: id, capturedAt,
     actor: { uid: "U1", name: "Worker" },
     context: { trnType: "METER_INSPECTION", astId: "A1", premiseId: "P1", erfId: "E1", erfNo: "1", ...context },
-    value: { reasonCode: "Occupant requested a return visit", appointment: { ...appointment } },
+    value: { reasonCode: "Return visit requested", appointment: { ...appointment } },
     media: [{ tag: "noAccessPhoto", url: "https://example.test/photo.jpg", uri: "file:///phone/private/photo.jpg" }],
   });
   const send = (data, uid = "U1", role = "FWR") => onMeterLifecycleTrnCallable.run({ data, auth: { uid, token: { role, name: "Worker" } } });
@@ -58,6 +58,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.equal("uri" in trn.media[0], false);
     assert.deepEqual((await db.doc("asts/A1").get()).data(), asset);
     assert.deepEqual((await db.doc("premises/P1").get()).data().noAccessTrnIds, ["T1"]);
+    assert.equal((await db.doc("premises/P1").get()).data().metadata.updatedAt, trn.metadata.updatedAt);
     const again = await send(payload);
     assert.equal(again.idempotent, true);
     assert.deepEqual((await db.doc("trns/T1").get()).data(), trn);

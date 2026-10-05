@@ -17,6 +17,15 @@ test("only the return reason may omit photo evidence; optional evidence still up
   assert.throws(() => assertNoAccessMedia([{ tag: "noAccessPhoto", uri: "file:///p.jpg" }], access, { uploaded: true }), error => error.code === "NO_ACCESS_PHOTO_REQUIRED");
 });
 const normalize = (value, capture = metadata) => buildNoAccessAccessBlock(value, { metadata: capture, actor });
+test("queued former wording becomes canonical without losing its appointment or photo exemption", () => {
+  const old = { ...access, reasonCode: "Occupant requested a return visit" };
+  const result = normalize(old);
+  assert.equal(result.reasonCode, "Return visit requested");
+  assert.equal(result.reason, "Return visit requested");
+  assert.equal(result.appointment.at, "2026-10-06T08:00:00.000Z");
+  assert.doesNotThrow(() => assertNoAccessMedia([], old, { uploaded: true }));
+  assert.throws(() => normalize({ ...old, appointment: null }), error => error.code === "NO_ACCESS_APPOINTMENT_REQUIRED");
+});
 const refused = (value, code, capture) => assert.throws(() => normalize(value, capture), (error) => error.irepsCode === code);
 
 test("return appointments carry version 2 and authenticated authorship", () => {

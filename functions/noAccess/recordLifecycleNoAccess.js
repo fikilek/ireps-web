@@ -1,4 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
+import { noAccessPremiseMetadata } from "./premiseMetadata.js";
 import { normalizeNoAccessAccessData, assertNoAccessMedia, buildNoAccessLocation, buildNoAccessParentsFromErf, noAccessParentsAreMissing, noAccessError } from "./recordNoAccess.js";
 import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import { stripToDeclaredRoot } from "../transactions/trnShape.js";
@@ -101,7 +102,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice }
       serviceProvider: spId ? { id: spId, name: serviceProviderName(spSnap?.data()) } : {},
       batch: existing?.origin?.targetedBatch || recognisedBatchContext({ decision, erfId: access.erfId, premiseId }) });
     tx.set(trnRef, payload);
-    tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(trnId) });
+    tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(trnId), ...noAccessPremiseMetadata(payload.metadata, premise.metadata) });
     // Completing office workflow releases the instruction lock, never a physical meter field.
     if (isOffice && astDoc.trnActiveLifecycle?.trnId === trnId) tx.update(astRef, { trnActiveLifecycle: FieldValue.delete() });
     if (isOffice) tx.set(trnRef.collection("history").doc(), { event: "COMPLETED", outcome: "NO_ACCESS", trnId,
