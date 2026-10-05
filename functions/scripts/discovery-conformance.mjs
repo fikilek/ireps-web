@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import admin from 'firebase-admin';
 import { planDiscoveryAccessBackfill } from '../noAccess/discoveryAccessBackfill.js';
 import { planDiscoveryCleanupDependencies, recordedTimeToIso } from '../noAccess/discoveryCleanupDependencies.js';
-import { normalizeNoAccessAccessData, buildNoAccessLocation, buildNoAccessParentsFromErf, readGpsPoint, NO_ACCESS_RETURN_VISIT_REASON } from '../noAccess/recordNoAccess.js';
+import { normalizeNoAccessAccessData, assertNoAccessMedia, buildNoAccessLocation, buildNoAccessParentsFromErf, readGpsPoint, NO_ACCESS_RETURN_VISIT_REASON } from '../noAccess/recordNoAccess.js';
 import { formatStreetAddress, formatPropertyType } from '../premises/streetAddress.js';
 
 const args = process.argv.slice(2);
@@ -102,7 +102,7 @@ try {
         if (!isDeepStrictEqual(previous, entry)) patch[key] = entry;
       }
       next = assignPatch(value, patch);
-      assert.ok(next.media?.some(m => m.tag === 'noAccessPhoto' && m.url), 'MISSING_PHOTO');
+      assertNoAccessMedia(next.media, next.accessData.access, { uploaded: true });
       for (const media of next.media.filter(m => m.tag === 'noAccessPhoto')) {
         const name = objectName(media.url); assert.ok(name, 'UNRESOLVED_PHOTO');
         const [metadata] = await bucket.file(name).getMetadata();

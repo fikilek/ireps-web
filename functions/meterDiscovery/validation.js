@@ -1,5 +1,6 @@
 const METER_DISCOVERY_TRN_TYPE = "METER_DISCOVERY";
 import { isTrnIdForWork, trnIdShapeMessage } from "../transactions/trnId.js";
+import { assertNoAccessMedia } from "../noAccess/recordNoAccess.js";
 
 const METER_DISCOVERY_TRN_PREFIX = "TRN_MDIS_";
 const METER_DISCOVERY_STATUSES = new Set(["CONNECTED", "DISCONNECTED"]);
@@ -611,11 +612,10 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
       );
     }
 
-    if (!hasTaggedMedia(media, "noAccessPhoto")) {
-      return buildFailureResult(
-        "NO_ACCESS_PHOTO_REQUIRED",
-        "No-access photo is required",
-      );
+    try {
+      assertNoAccessMedia(media, accessData.access, { uploaded: true });
+    } catch (error) {
+      return buildFailureResult(error.code, error.message);
     }
 
     // No Access rules NA-R043 (1.0.0): every no access carries its ERF, on the Normal Path

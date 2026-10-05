@@ -119,6 +119,7 @@ import {
   buildNoAccessParentsFromErf,
   noAccessParentsAreMissing,
   normalizeNoAccessAccessData,
+  assertNoAccessMedia,
   readGpsPoint,
 } from "./noAccess/recordNoAccess.js";
 import { recordTargetedBatchNoAccessInTransaction } from "./targetedBatches/premiseLink.js";
@@ -1266,11 +1267,10 @@ function validateMeterCreationPayload({
       );
     }
 
-    if (!hasTaggedMedia(data?.media, "noAccessPhoto")) {
-      return buildFailureResult(
-        "NO_ACCESS_PHOTO_REQUIRED",
-        "No-access photo is required",
-      );
+    try {
+      assertNoAccessMedia(data?.media, data?.accessData?.access, { uploaded: true });
+    } catch (error) {
+      return buildFailureResult(error.code, error.message);
     }
 
     return null;

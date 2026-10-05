@@ -212,20 +212,20 @@ export function normalizeNoAccessAppointment(appointment, { actor = {} } = {}) {
 }
 
 /**
- * The photograph (NA-R010) and the position. Both were already demanded on every path; they
- * are gathered here so one module says what a complete no access is.
+ * NA-R010/NA-R011: ordinary reasons require a photograph; return visits require an
+ * appointment instead. Existing optional evidence is retained and must upload normally.
  */
-export function assertNoAccessMedia(media) {
+export function assertNoAccessMedia(media, access = {}, { uploaded = false } = {}) {
   if (!Array.isArray(media)) {
     throw noAccessError("MEDIA_INVALID", "media must be an array.");
   }
-  const hasPhoto = media.some(
-    (item) => item?.tag === "noAccessPhoto" && normalizeText(item?.url || item?.uri),
-  );
-  if (!hasPhoto) {
+  const returnVisit = normalizeUpper(access.reasonCode ?? access.reason) === normalizeUpper(NO_ACCESS_RETURN_VISIT_REASON);
+  const photos = media.filter((item) => item?.tag === "noAccessPhoto");
+  const hasPhoto = photos.some((item) => normalizeText(item?.url || item?.uri));
+  if ((!returnVisit && !hasPhoto) || (uploaded && photos.some((item) => !/^https:\/\//i.test(normalizeText(item?.url))))) {
     throw noAccessError(
       "NO_ACCESS_PHOTO_REQUIRED",
-      "A No Access photograph is required.",
+      "Upload a photograph to support this No Access reason.",
     );
   }
   return media;
@@ -417,7 +417,7 @@ export function normalizeNoAccessAccessData(accessData = {}, { actor = {}, metad
 export function buildNoAccessData({ trnType, erfId, erfNo, premise, reason, media, location, actor, parents, metadata } = {}) {
   const geography = assertNoAccessGeography({ erfId, erfNo });
 
-  assertNoAccessMedia(media);
+  assertNoAccessMedia(media, reason);
   assertNoAccessLocation(location);
 
   return {

@@ -1,11 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNoAccessAccessBlock, NO_ACCESS_RETURN_VISIT_REASON as reasonCode } from "../noAccess/recordNoAccess.js";
+import { buildNoAccessAccessBlock, assertNoAccessMedia, NO_ACCESS_REASON_CODES, NO_ACCESS_RETURN_VISIT_REASON as reasonCode } from "../noAccess/recordNoAccess.js";
 
 const appointment = { at: "2026-10-06T08:00:00Z", madeAt: "2026-10-05T07:00:00Z" };
 const metadata = { createdOnDevice: "2026-10-05T07:05:00Z" };
 const actor = { uid: "U1", name: "Worker" };
 const access = { reasonCode, appointment, appointmentRuleVersion: 2 };
+
+test("only the return reason may omit photo evidence; optional evidence still uploads", () => {
+  assert.doesNotThrow(() => assertNoAccessMedia([], access, { uploaded: true }));
+  for (const code of NO_ACCESS_REASON_CODES.filter(code => code !== reasonCode)) {
+    assert.throws(() => assertNoAccessMedia([], { reasonCode: code }, { uploaded: true }), error => error.code === "NO_ACCESS_PHOTO_REQUIRED");
+    assert.doesNotThrow(() => assertNoAccessMedia([{ tag: "noAccessPhoto", url: "https://example.test/p.jpg" }], { reasonCode: code }, { uploaded: true }));
+  }
+  assert.throws(() => assertNoAccessMedia(undefined, access), error => error.code === "MEDIA_INVALID");
+  assert.throws(() => assertNoAccessMedia([{ tag: "noAccessPhoto", uri: "file:///p.jpg" }], access, { uploaded: true }), error => error.code === "NO_ACCESS_PHOTO_REQUIRED");
+});
 const normalize = (value, capture = metadata) => buildNoAccessAccessBlock(value, { metadata: capture, actor });
 const refused = (value, code, capture) => assert.throws(() => normalize(value, capture), (error) => error.irepsCode === code);
 

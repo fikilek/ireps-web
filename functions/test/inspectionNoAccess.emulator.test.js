@@ -100,6 +100,11 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
       const trn = (await db.doc(`trns/${type}`).get()).data();
       assert.equal(trn.ast.location.source, "PREMISE");
       assert.equal(trn.accessData.trnType, type);
+      const withoutPhoto = make(`${type}_RETURN_NO_PHOTO`, { trnType: type });
+      withoutPhoto.media = [];
+      const recorded = await send(withoutPhoto);
+      assert.equal(recorded.success, true, JSON.stringify(recorded));
+      assert.deepEqual((await db.doc(`trns/${withoutPhoto.id}`).get()).data().media, []);
     }
   });
   await t.test("invalid evidence, reason, geography, authority and instruction create no record", async () => {

@@ -32,12 +32,14 @@ test("Discovery and Installation enforce the return agreement through their real
       media: [{ tag: "noAccessPhoto", url: "https://example.test/photo.jpg" }],
     });
     const send = (data) => callable.run({ data, auth: { uid: "U1", token: { role: "FWR", name: "Worker" } } });
-    await t.test(`${type}: old appointment delivers once without creating a meter`, async () => {
+    await t.test(`${type}: photo-free return visit delivers once without creating a meter`, async () => {
       const payload = make("VALID");
+      payload.media = [];
       assert.equal((await send(payload)).success, true);
       const before = (await db.doc(`trns/${payload.id}`).get()).data();
       assert.equal(before.accessData.access.appointment.at, appointment.at);
       assert.equal(before.accessData.access.appointmentRuleVersion, 2);
+      assert.deepEqual(before.media, []);
       assert.equal((await send(payload)).success, true);
       assert.deepEqual((await db.doc(`trns/${payload.id}`).get()).data(), before);
       const premise = (await db.doc("premises/P1").get()).data();
@@ -49,6 +51,7 @@ test("Discovery and Installation enforce the return agreement through their real
     await t.test(`${type}: each invalid agreement is refused without a transaction or count change`, async () => {
       const before = (await db.doc("premises/P1").get()).data();
       for (const [code, alter] of [
+        ["NO_ACCESS_PHOTO_REQUIRED", p => { p.accessData.access.reasonCode = "Property Locked"; p.accessData.access.reason = "Property Locked"; p.accessData.access.appointment = null; p.media = []; }],
         ["NO_ACCESS_APPOINTMENT_REQUIRED", p => { p.accessData.access.appointment = null; }],
         ["NO_ACCESS_APPOINTMENT_NOT_ALLOWED", p => { p.accessData.access.reasonCode = "Property Locked"; }],
         ["NO_ACCESS_APPOINTMENT_NOT_FUTURE_AT_CAPTURE", p => { p.accessData.access.appointment.at = capturedAt; }],

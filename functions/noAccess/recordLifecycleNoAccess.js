@@ -16,10 +16,7 @@ export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now,
   const accessData = normalizeNoAccessAccessData(data.accessData, { actor, metadata: data.metadata });
   const parents = buildNoAccessParentsFromErf(erf);
   if (noAccessParentsAreMissing(parents) || !present(parents.wardPcode)) fail("NO_ACCESS_GEOGRAPHY_UNRESOLVED", "The ERF has no municipality or ward. Ask the office to correct its geography.");
-  assertNoAccessMedia(data.media);
-  if (!data.media.some((m) => m?.tag === "noAccessPhoto" && /^https:\/\//i.test(text(m.url)))) {
-    fail("NO_ACCESS_PHOTO_REQUIRED", "Upload the No Access photograph before submitting the visit.");
-  }
+  assertNoAccessMedia(data.media, accessData.access, { uploaded: true });
   const metadata = buildRegistrationMetadata({ phoneMetadata: data.metadata, actorUid: actor.uid, actorName: actor.name, nowIso: now });
   if (existing) {
     for (const key of ["createdAt", "createdByUid", "createdByUser"]) metadata[key] = existing.metadata?.[key] ?? null;
