@@ -3373,8 +3373,9 @@ export function buildLifecycleInstructionTrnPayload({
 
     bucket: sanitizeBucketRef(data?.bucket || data?.workorder || {}),
 
-    metadata: buildFlatMetadata({
-      now,
+    // An office instruction has no phone capture yet. Keep the device set present and null.
+    metadata: buildRegistrationMetadata({
+      nowIso: now,
       actorUid,
       actorName,
     }),

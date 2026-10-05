@@ -1,5 +1,5 @@
+import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import {
-  buildFlatMetadata,
   getAstCurrentState,
   getAstData,
   normalizeUpper,
@@ -434,8 +434,9 @@ export function buildCommissioningTrnPayload({
 
     media: sanitizeMedia(data?.media || []),
 
-    metadata: buildFlatMetadata({
-      now,
+    metadata: buildRegistrationMetadata({
+      phoneMetadata: data.metadata,
+      nowIso: now,
       actorUid,
       actorName,
     }),

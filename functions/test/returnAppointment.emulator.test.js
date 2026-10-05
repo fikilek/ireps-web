@@ -118,4 +118,21 @@ test("Discovery and Installation enforce the return agreement through their real
       assert.equal(stored.appointmentRuleVersion, 2);
     });
   }
+  await t.test("Commissioning's dedicated callable stores capture/edit times and preserves them on retry", async () => {
+    const { onCreateMeterCommissioningCallable } = await import("../commissioning/callable.js");
+    await db.doc("asts/A1").set({ meterType: "electricity", status: { state: "FIELD" },
+      accessData: { erfId: "E1", erfNo: "1", premise: { id: "P1" }, parents: { lmPcode: "ZA5241", wardPcode: "ZA5241006" } },
+      ast: { astData: { astId: "A1", astNo: "12345", meter: { type: "credit" } } } });
+    const payload = { id: "TRN_MCOM_CAPTURE", accessData: { trnType: "METER_COMMISSIONING", premise: { id: "P1" } },
+      ast: { astData: { astId: "A1" } }, commissioning: { finalSwitchOnTested: { answer: "yes" } },
+      media: [{ tag: "finalSwitchOnEvidence", url: "https://example.test/commissioning.jpg" }],
+      metadata: { createdOnDevice: capturedAt, updatedOnDevice: "2020-01-01T07:00:00.000Z", createdOnDeviceByUid: "SPOOFED" } };
+    const request = { data: payload, auth: { uid: "U1", token: { role: "FWR", name: "Worker" } } };
+    const result = await onCreateMeterCommissioningCallable.run(request);
+    assert.equal(result.success, true, JSON.stringify(result));
+    const before = (await db.doc(`trns/${payload.id}`).get()).data();
+    assert.deepEqual(before.metadata, buildRegistrationMetadata({ phoneMetadata: payload.metadata, actorUid: "U1", actorName: "Worker", nowIso: before.metadata.createdAt }));
+    assert.equal((await onCreateMeterCommissioningCallable.run(request)).idempotent, true);
+    assert.deepEqual((await db.doc(`trns/${payload.id}`).get()).data(), before);
+  });
 });
