@@ -7,6 +7,8 @@ import { getFirestore } from "firebase-admin/firestore";
 import { onMeterLifecycleTrnCallable } from "../meterLifecycle/callables.js";
 import { deriveNoAccessGroups } from "../noAccess/groups.js";
 import { reconcilePremiseNoAccess } from "../noAccess/reconcile.js";
+import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
+import { normalizeNoAccessAccessData } from "../noAccess/recordNoAccess.js";
 
 const enabled = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 test("shared phone payload through the real lifecycle callable and Firestore transaction", { skip: !enabled }, async (t) => {
@@ -101,6 +103,11 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
       const trn = (await db.doc(`trns/${type}`).get()).data();
       assert.equal(trn.ast.location.source, "PREMISE");
       assert.equal(trn.accessData.trnType, type);
+      assert.deepEqual(trn.metadata, buildRegistrationMetadata({
+        phoneMetadata: { createdOnDevice: capturedAt, updatedOnDevice: capturedAt },
+        actorUid: "U1", actorName: "Worker", nowIso: trn.metadata.createdAt,
+      }));
+      assert.doesNotThrow(() => normalizeNoAccessAccessData(trn.accessData, { metadata: trn.metadata }));
       const withoutPhoto = make(`${type}_RETURN_NO_PHOTO`, { trnType: type });
       withoutPhoto.media = [];
       const recorded = await send(withoutPhoto);

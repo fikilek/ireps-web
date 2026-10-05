@@ -15,6 +15,8 @@ test("Discovery and Installation enforce the return agreement through their real
   const { buildNoAccessPayload } = await import(pathToFileURL(path.join(mobile, "src/features/meters/noAccessCapture.js")));
   const { NO_ACCESS_REASONS } = await import(pathToFileURL(path.join(mobile, "src/features/meters/noAccessReasons.js")));
   const { NO_ACCESS_REASON_CODES } = await import("../noAccess/recordNoAccess.js");
+  const { normalizeNoAccessAccessData } = await import("../noAccess/recordNoAccess.js");
+  const { buildRegistrationMetadata } = await import("../registration/registrationMetadata.js");
   assert.deepEqual(NO_ACCESS_REASONS.map(s => s.toUpperCase()).sort(), NO_ACCESS_REASON_CODES.map(s => s.toUpperCase()).sort());
   await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${process.env.GCLOUD_PROJECT}/databases/(default)/documents`, { method: "DELETE" });
   await Promise.all([
@@ -44,6 +46,12 @@ test("Discovery and Installation enforce the return agreement through their real
       assert.equal(before.accessData.access.reasonCode, "Return visit requested");
       assert.equal(before.accessData.access.reason, "Return visit requested");
       assert.deepEqual(before.media, []);
+      assert.deepEqual(before.metadata, buildRegistrationMetadata({
+        phoneMetadata: payload.metadata, actorUid: "U1", actorName: "Worker", nowIso: before.metadata.createdAt,
+      }));
+      assert.equal(before.metadata.createdOnDevice, capturedAt);
+      assert.notEqual(before.metadata.createdAt, capturedAt, "Arrival must not replace the original offline capture time");
+      assert.doesNotThrow(() => normalizeNoAccessAccessData(before.accessData, { metadata: before.metadata }));
       assert.equal((await send(payload)).success, true);
       assert.deepEqual((await db.doc(`trns/${payload.id}`).get()).data(), before);
       const premise = (await db.doc("premises/P1").get()).data();
@@ -54,6 +62,26 @@ test("Discovery and Installation enforce the return agreement through their real
       assert.deepEqual(premise.services, {});
       assert.equal((await db.collection("asts").get()).size, 0);
       assert.equal((await db.collection("meter_master").get()).size, 0);
+    });
+    await t.test(`${type}: ordinary photo visit retains separate device times and authenticated identity`, async () => {
+      const payload = make("PHOTO");
+      payload.accessData.access.reasonCode = "Meter Obstructed";
+      payload.accessData.access.appointment = null;
+      payload.metadata.updatedOnDevice = "2020-01-01T07:00:00.000Z";
+      payload.metadata.createdOnDeviceByUid = "SPOOFED";
+      assert.equal((await send(payload)).success, true);
+      const stored = (await db.doc(`trns/${payload.id}`).get()).data();
+      assert.deepEqual(stored.metadata, buildRegistrationMetadata({
+        phoneMetadata: payload.metadata, actorUid: "U1", actorName: "Worker", nowIso: stored.metadata.createdAt,
+      }));
+      assert.equal(stored.metadata.createdOnDevice, capturedAt);
+      assert.equal(stored.metadata.updatedOnDevice, payload.metadata.updatedOnDevice);
+      assert.equal(stored.metadata.createdOnDeviceByUid, "U1");
+      assert.equal(stored.media.length, 1);
+      assert.doesNotThrow(() => normalizeNoAccessAccessData(stored.accessData, { metadata: stored.metadata }));
+      assert.equal((await send(payload)).success, true);
+      assert.deepEqual((await db.doc(`trns/${payload.id}`).get()).data(), stored);
+      assert.equal((await db.collection("asts").get()).size, 0);
     });
     await t.test(`${type}: each invalid agreement is refused without a transaction or count change`, async () => {
       const before = (await db.doc("premises/P1").get()).data();

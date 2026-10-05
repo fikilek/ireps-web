@@ -5648,14 +5648,14 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       caller.uid ||
       "SYSTEM";
 
-    const metadata = {
-      createdAt: now,
-      createdByUid: caller.uid,
-      createdByUser: actorName,
-      updatedAt: now,
-      updatedByUid: caller.uid,
-      updatedByUser: actorName,
-    };
+    // Use the same device/server metadata contract as Discovery and lifecycle work.
+    // An offline visit keeps its capture time when it eventually reaches the server.
+    const metadata = buildRegistrationMetadata({
+      phoneMetadata: data.metadata,
+      actorUid: caller.uid,
+      actorName,
+      nowIso: now,
+    });
 
     // No Access rules NA-R001 (1.0.0): one shape, whichever form sent it. Meter Installation
     // used to write accessData.access.reason alone, Meter Discovery the same, and the five
