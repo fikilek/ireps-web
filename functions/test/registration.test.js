@@ -97,18 +97,12 @@ function fakeTx(docs = {}) {
   };
 }
 
-const METADATA = {
-  createdOnDevice: "2026-09-25T06:00:00.000Z",
-  updatedOnDevice: "2026-09-25T06:00:00.000Z",
-  createdOnServer: "2026-09-28T09:00:00.000Z",
-  updatedOnServer: "2026-09-28T09:00:00.000Z",
-  createdAt: "2026-09-28T09:00:00.000Z",
-  updatedAt: "2026-09-28T09:00:00.000Z",
-  createdByUid: "uid-fwr",
-  createdByUser: "Kaiser",
-  updatedByUid: "uid-fwr",
-  updatedByUser: "Kaiser",
-};
+const METADATA = buildRegistrationMetadata({
+  phoneMetadata: { createdOnDevice: "2026-09-25T06:00:00.000Z" },
+  actorUid: "uid-fwr",
+  actorName: "Kaiser",
+  nowIso: "2026-09-28T09:00:00.000Z",
+});
 
 const TRN_ID = "TRN_MDIS_1790000000000_ELC_ZA5241006_1755";
 
@@ -161,7 +155,7 @@ function deps(overrides = {}) {
     }),
     projectMeterDiscoveryAstMedia: (media) => media,
     buildPremiseUpdateMetadata: () => ({
-      updatedAt: METADATA.updatedOnServer,
+      updatedAt: METADATA.updatedAt,
       updatedByUid: "uid-fwr",
       updatedByUser: "Kaiser",
     }),
@@ -219,12 +213,22 @@ test("the meter carries the transaction's own id, inside and out", async () => {
   assert.equal(result.derived.astId, TRN_ID);
 });
 
+test("registration consumes canonical server timestamps for ERF activity and derived processing", async () => {
+  const { tx, result } = await register({ "premises/PRM-1": { services: {} } });
+  const erf = tx.writes.find((write) => write.path === "ireps_erfs/ERF-1");
+  assert.equal(erf.value["metadata.updatedAt"], METADATA.updatedAt);
+  assert.equal(result.derived.processedAt, METADATA.updatedAt);
+  const ast = tx.writes.find((write) => write.path.startsWith("asts/"));
+  assert.equal(ast.value.metadata.createdOnDevice, "2026-09-25T06:00:00.000Z");
+  assert.equal(Object.keys(ast.value.metadata).length, 12);
+});
+
 test("the premise gets the meter on its own list, which is what the premise card reads", async () => {
   const { tx } = await register({ "premises/PRM-1": { services: {} } });
   const premise = tx.writes.find((write) => write.path === "premises/PRM-1");
 
   assert.deepEqual(premise.value["services.electricityMeters"], [
-    { trnId: TRN_ID, status: "CONNECTED", updatedAt: METADATA.updatedOnServer },
+    { trnId: TRN_ID, status: "CONNECTED", updatedAt: METADATA.updatedAt },
   ]);
   assert.equal(premise.value["occupancy.status"], "Accessed");
 });
