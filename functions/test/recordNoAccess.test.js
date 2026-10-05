@@ -224,6 +224,7 @@ test("a complete no access builds the one shape", () => {
   assert.equal(accessData.premise, null);
   assert.deepEqual(accessData.access, {
     hasAccess: "no",
+    appointmentRuleVersion: 2,
     reasonCode: "Property Locked",
     reasonOther: "NAv",
     reason: "Property Locked",

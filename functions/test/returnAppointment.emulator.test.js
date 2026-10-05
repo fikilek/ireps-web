@@ -64,16 +64,20 @@ test("Discovery and Installation enforce the return agreement through their real
       }
       assert.deepEqual((await db.doc("premises/P1").get()).data(), before);
     });
-    await t.test(`${type}: a legacy offline appointment still arrives unchanged`, async () => {
+    await t.test(`${type}: a legacy appointment under another reason is refused and can be corrected`, async () => {
       const payload = make("LEGACY");
       delete payload.accessData.access.appointmentRuleVersion;
       payload.accessData.access.reasonCode = "Property Locked";
+      const refused = await send(payload).catch(error => error.details);
+      assert.equal(refused.code, "NO_ACCESS_APPOINTMENT_NOT_ALLOWED");
+      assert.equal((await db.doc(`trns/${payload.id}`).get()).exists, false);
+      payload.accessData.access.reasonCode = "Occupant requested a return visit";
       const result = await send(payload);
       assert.equal(result.success, true, JSON.stringify(result));
       const stored = (await db.doc(`trns/${payload.id}`).get()).data().accessData.access;
-      assert.equal(stored.reasonCode, "Property Locked");
+      assert.equal(stored.reasonCode, "Occupant requested a return visit");
       assert.equal(stored.appointment.at, appointment.at);
-      assert.equal(Object.hasOwn(stored, "appointmentRuleVersion"), false);
+      assert.equal(stored.appointmentRuleVersion, 2);
     });
   }
 });

@@ -39,10 +39,9 @@ test("current appointments require readable original capture and agreement times
     refused({ ...access, appointment: { ...appointment, madeAt: invalid } }, "NO_ACCESS_APPOINTMENT_INVALID");
   }
 });
-test("legacy captures keep optional appointments even after their time and without capture metadata", () => {
+test("legacy captures must conform and cannot bypass the rule with a missing marker", () => {
   const legacy = { reasonCode: "Property Locked", appointment: { at: "2020-01-01T08:00:00Z" } };
-  const result = normalize(legacy, {});
-  assert.equal(Object.hasOwn(result, "appointmentRuleVersion"), false);
-  assert.equal(result.appointment.at, "2020-01-01T08:00:00.000Z");
+  refused(legacy, "NO_ACCESS_APPOINTMENT_NOT_ALLOWED", {});
   assert.equal(normalize({ reasonCode: "Property Locked" }, {}).appointment, null);
+  assert.equal(normalize({ reasonCode: "Property Locked" }, {}).appointmentRuleVersion, 2);
 });

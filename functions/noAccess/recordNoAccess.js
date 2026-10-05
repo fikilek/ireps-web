@@ -337,16 +337,15 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {}, metadata = {}
   if (version != null && version !== NO_ACCESS_APPOINTMENT_RULE_VERSION) {
     throw noAccessError("NO_ACCESS_APPOINTMENT_RULE_UNSUPPORTED", "Update the app before editing this saved visit; its appointment rule is not supported.");
   }
-  // Unversioned older clients and queues keep their original contract. The new reason
-  // always opts into version 2, so omitting its marker cannot make its appointment optional.
-  const currentRule = version === NO_ACCESS_APPOINTMENT_RULE_VERSION || returnVisit;
-  if (currentRule && returnVisit && !appointment) {
+  // The current rule applies to every submission, including older queued payloads.
+  // A missing marker can be filled; an incompatible agreement must be corrected.
+  if (returnVisit && !appointment) {
     throw noAccessError("NO_ACCESS_APPOINTMENT_REQUIRED", "Choose the date and time agreed for the return visit.");
   }
-  if (currentRule && !returnVisit && appointment) {
+  if (!returnVisit && appointment) {
     throw noAccessError("NO_ACCESS_APPOINTMENT_NOT_ALLOWED", "Only Occupant requested a return visit can have an appointment. Correct the saved visit's reason or remove its appointment.");
   }
-  if (currentRule && appointment) {
+  if (appointment) {
     const captured = Date.parse(metadata.createdOnDevice);
     const made = Date.parse(appointment.madeAt);
     const at = Date.parse(appointment.at);
@@ -360,7 +359,7 @@ export function buildNoAccessAccessBlock(input = {}, { actor = {}, metadata = {}
   return {
     hasAccess: "no",
     ...reason,
-    ...(currentRule ? { appointmentRuleVersion: NO_ACCESS_APPOINTMENT_RULE_VERSION } : {}),
+    appointmentRuleVersion: NO_ACCESS_APPOINTMENT_RULE_VERSION,
     appointment,
   };
 }
