@@ -257,7 +257,7 @@ export async function registerMeterInTransaction({
   // 5. The ERF is told something changed under it.
   if (erfRef) {
     tx.update(erfRef, {
-      "metadata.updatedAt": metadata.updatedOnServer,
+      "metadata.updatedAt": metadata.updatedAt,
       "metadata.updatedByUid": metadata.updatedByUid,
       "metadata.updatedByUser": metadata.updatedByUser,
     });
@@ -281,7 +281,7 @@ export async function registerMeterInTransaction({
           },
         }
       : {}),
-    processedAt: metadata.updatedOnServer,
+    processedAt: metadata.updatedAt,
   };
 
   return { astId, visibility, derived, salesSync, serviceBucket };

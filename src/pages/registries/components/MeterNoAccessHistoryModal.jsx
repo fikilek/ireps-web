@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 // DR-R001 3.3: the No Access number on the Meter Registry is a button, and
 // this is what it opens — every visit to this meter that ended because nobody
 // could reach it, newest first. When, who, what work, and the reason he gave.
@@ -7,6 +6,7 @@
 import { useEffect } from "react";
 
 import { useGetMeterNoAccessHistoryQuery } from "../../../redux/creditControlApi";
+import { formatSastDateTime } from "../../../utils/formatSastDateTime";
 
 const MODAL_CSS = `
 .na-modal-overlay {
@@ -43,17 +43,12 @@ const MODAL_CSS = `
 .na-modal-state { padding: 18px; color: #64748b; font-size: 14px; }
 `;
 
-function formatWhen(value) {
-  if (!value || value === "NAv") return "NAv";
-
-  if (typeof value === "string") return value.slice(0, 16).replace("T", " ");
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  return "NAv";
-}
+// The visit time is shown on the South African clock, the same as every other
+// registry. This window used to format it twice over and get it wrong both
+// ways: an ISO string was sliced and shown as raw UTC, and a Firestore
+// timestamp was shown in whatever timezone the reader's own computer was set
+// to. That is the fault the owner found on the MREAD registry on 5 October,
+// and formatSastDateTime is the one answer to it.
 
 function formatWork(value) {
   return String(value || "NAv")
@@ -142,7 +137,7 @@ export default function MeterNoAccessHistoryModal({
               <tbody>
                 {visits.map((visit) => (
                   <tr key={visit.id}>
-                    <td className="na-modal-when">{formatWhen(visit.when)}</td>
+                    <td className="na-modal-when">{formatSastDateTime(visit.when)}</td>
                     <td>{visit.worker}</td>
                     <td>{formatWork(visit.trnType)}</td>
                     <td>{visit.reason}</td>

@@ -34,6 +34,7 @@ function discovery(overrides = {}) {
     },
     metadata: {
       createdAt: "2026-09-10T08:00:00.000Z",
+      createdOnDevice: "2026-09-10T08:00:00.000Z",
       createdByUid: "U1",
       createdByUser: "Lefu Worker",
     },
@@ -225,6 +226,7 @@ test("a no access visit is never dropped", async () => {
     reportMonth: "2026-09",
     generatedAt: new Date("2026-09-21T10:00:00.000Z"),
     loadTransactions: async () => new Map([["TRN_NA_1", noAccess]]),
+    loadPremiseHistory: async () => [{ ...noAccess, id: "TRN_NA_1" }],
   });
 
   // GMR-R013 (1.11.0): it leaves Field Data for its own sheet, and it is still

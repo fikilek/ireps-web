@@ -1,3 +1,6 @@
+import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
+import { recordRefusedSubmission } from "../registration/refusedSubmissions.js";
+import { SYSTEM_FAULT_CODES } from "./systemFault.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -336,13 +339,15 @@ function buildHistoryEvent({
 // DR-R001 3.2 and 3.3: three numbers the meter keeps about itself, so the
 // Meter Registry can show and filter them without counting transactions while
 // it draws. A disconnection or reconnection counts only when it was actually
-// done; any work that ended because nobody could reach the meter counts as a
-// No Access. Nothing is ever lowered.
+// done. Nothing is ever lowered.
+//
+// No Access is NOT counted here, and must not be. Every No Access now leaves
+// this callable through one door — `recordLifecycleNoAccess` — before the
+// transaction body below is ever reached, so a count written here could never
+// fire. It is raised inside that one writer instead, in the same commit as the
+// record itself. That is what stops the number on the Meter Registry and the
+// list of visits behind it from disagreeing (DR-R001 3.3).
 export function buildMeterCountPatch({ trnType, outcome }) {
-  if (normalizeUpper(outcome) === "NO_ACCESS") {
-    return { "counts.noAccess": FieldValue.increment(1) };
-  }
-
   if (normalizeUpper(outcome) !== "SUCCESS") return {};
 
   if (trnType === "METER_DISCONNECTION") {
@@ -437,6 +442,32 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     const commonCheck = validateCommonLifecycleInput(data);
 
     if (!commonCheck.ok) {
+      // NA-R065 (owner, 7 October 2026) - A FAULT IN THE SYSTEM MUST BE VISIBLE.
+      //
+      // "If somehow the system does the ID wrong, you can't submit that because the ID doesn't
+      // meet the rules. But then in situations like that, we need to have a way to know, because
+      // then it means the problem is not from the user, it's from the system."
+      //
+      // These are the captures the APP built wrong: no transaction id, no accessData, no meter,
+      // no premise, a type this callable does not own. The worker can do nothing about any of
+      // them, so the phone no longer asks them to - which means that without this line the fault
+      // would live in one phone's queue and a log entry, and nobody would ever fix it.
+      //
+      // recordRefusedSubmission never throws and never blocks the answer: a failure to record a
+      // failure must not become a worse one.
+      if (SYSTEM_FAULT_CODES.includes(commonCheck.code)) {
+        await recordRefusedSubmission({
+          db,
+          trnId: data?.id || "NAv",
+          code: commonCheck.code,
+          message: commonCheck.message,
+          data,
+          actorUid,
+          actorUser: actorName,
+          now,
+        });
+      }
+
       return buildFailureResult(commonCheck.code, commonCheck.message);
     }
 
@@ -480,20 +511,32 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       );
     }
 
-    // MN-R001 1.1.0 section 8: an inspection is office work executed from an
-    // instruction, or field work started on the spot from the meter card.
+    // MN-R001 1.1.0 section 8: AN INSPECTION COMES FROM EITHER CHANNEL. Office work executed
+    // from an accepted instruction, or field work started on the spot from the meter card -
+    // and the owner, 4 October 2026: "an inspection can be originated on the field and in the
+    // office ... you can't disconnect a meter that's disconnected, so you will have to inspect
+    // it first and indicate that the meter is connected. The important thing is that the
+    // inspection tells you the origination channel. That's all."
+    //
+    // So this is NOT a rule that field work is forbidden. It is the check that the capture
+    // SAID which channel it came through. Its old name and message - INSPECTION_OFFICE_WMS_ONLY,
+    // "must complete an accepted office-originated instruction TRN" - stated a rule iREPS does
+    // not have, and on 4 October it told the owner his own field inspection was not allowed.
+    // A message that misnames the rule is worse than no message: it sends the reader to fix
+    // something that was never wrong.
     if (
       trnType === "METER_INSPECTION" &&
       !isWmsLifecycleExecution &&
       originChannel !== "FIELD"
     ) {
       return buildFailureResult(
-        "INSPECTION_OFFICE_WMS_ONLY",
-        "Meter inspection execution must complete an accepted office-originated instruction TRN",
+        "INSPECTION_ORIGIN_MISSING",
+        "A meter inspection must say which channel it came from: field work started at the meter, or an accepted office instruction",
         {
           trnId,
           trnType,
           astId,
+          originChannel: originChannel || "NAv",
         },
       );
     }
@@ -521,6 +564,17 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             actorServiceProviderId: fieldAuthority.spId,
           },
         );
+      }
+    }
+
+    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no") {
+      try {
+        return await recordLifecycleNoAccess({ db, data, actor: { uid: actorUid, name: actorName }, now, isOffice: isWmsLifecycleExecution });
+      } catch (error) {
+        if (error.irepsCode) return buildFailureResult(error.irepsCode, error.message, { trnId, trnType, astId });
+        // Transport/server failures are retryable; they are not a business refusal.
+        logger.error("No Access could not be committed", { trnId, code: error.code, cause: error.message, stack: error.stack });
+        return buildFailureResult("UNAVAILABLE", "The server could not confirm this visit. It is safe to retry with the same visit ID.");
       }
     }
 
@@ -740,7 +794,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         if (instructionAstId && instructionAstId !== astId) {
           responsePayload = buildFailureResult(
-            "INSTRUCTION_METER_MISMATCH",
+            "INSTRUCTION_ASSET_MISMATCH",
             "This work belongs to another meter",
             {
               trnId,
@@ -763,7 +817,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         if (!actorIsTheAssignee) {
           responsePayload = buildFailureResult(
-            "TRN_NOT_ASSIGNED_TO_ACTOR",
+            "INSTRUCTION_NOT_ASSIGNED",
             "This work was sent to somebody else",
             {
               trnId,
@@ -935,6 +989,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           },
 
           "accessData.access": completedAccessBlock,
+          ...Object.fromEntries(Object.entries(cleanExecution.metadata || {})
+            .filter(([key]) => key.includes("OnDevice")).map(([key, value]) => [`metadata.${key}`, value])),
 
           ...buildUpdateMetadataPatch({
             now,
@@ -973,15 +1029,16 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         tx.update(astRef, astUpdatePatch);
 
-        // DR-R001 3.3: one No Access, written once. The premise's list is
-        // written here as well, because work the office issued was already
-        // created when it was issued and the create-time trigger never sees
-        // the refusal.
+        // The premise's No Access list is NOT written here. It used to be,
+        // because work the office issued was already created when it was
+        // issued and the create-time trigger never saw the refusal. That hole
+        // is closed on main: `recordLifecycleNoAccess` writes the link in the
+        // same commit as the record, and `reconcileNoAccessChange` rebuilds
+        // the list from the transactions afterwards. A second writer appending
+        // here would be one fact with two owners — the shape that made these
+        // numbers stop agreeing in the first place.
         const premiseUpdatePatch = {
           ...(actionCheck.astStatusChanged ? premiseServicePatch : {}),
-          ...(executionOutcome?.outcome === "NO_ACCESS"
-            ? { noAccessTrnIds: FieldValue.arrayUnion(trnId) }
-            : {}),
         };
 
         if (Object.keys(premiseUpdatePatch).length > 0) {
@@ -1222,14 +1279,19 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         tx.update(astRef, astUpdatePatch);
       }
 
-      // The premise's No Access list is written here too. For work started in
-      // the field the create-time trigger also sees it, and arrayUnion by
-      // transaction id means it is held once however many times it is written.
+      // The premise's No Access list is NOT written here either, for the same
+      // reason as the office path above: one fact, one writer.
+      //
+      // There is a second reason on this path. A real No Access never reaches
+      // this code at all — it leaves through `recordLifecycleNoAccess` above.
+      // What could still arrive here is an outcome of NO_ACCESS on a visit
+      // where the worker DID reach the meter and simply did not do the work,
+      // which the outcome sanitiser allows. Writing that onto the premise's
+      // No Access list would put a second meaning behind the words: the owner's
+      // rule of 30 September is that No Access means the worker could not reach
+      // and touch the meter, and nothing else.
       const fieldPremisePatch = {
         ...(actionCheck.astStatusChanged ? premiseServicePatch : {}),
-        ...(normalizeUpper(fieldOutcome) === "NO_ACCESS"
-          ? { noAccessTrnIds: FieldValue.arrayUnion(trnId) }
-          : {}),
       };
 
       if (Object.keys(fieldPremisePatch).length > 0) {

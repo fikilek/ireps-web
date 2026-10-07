@@ -160,7 +160,7 @@ function normalizeAssignmentTarget(target = {}) {
   };
 }
 
-function getAssignmentTargets(trnData = {}) {
+export function getAssignmentTargets(trnData = {}) {
   const targets = Array.isArray(trnData?.assignment?.targets)
     ? trnData.assignment.targets
     : [];
@@ -187,7 +187,7 @@ function getTargetTeamIdsFromRows(trnRows = []) {
   ];
 }
 
-function isAssignedToActor({
+export function isAssignedToActor({
   trnData = {},
   actorUid,
   actorSpId,
@@ -532,7 +532,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
             })
           ) {
             responsePayload = buildFailureResult(
-              "TRN_NOT_ASSIGNED_TO_ACTOR",
+              "INSTRUCTION_NOT_ASSIGNED",
               "This TRN is not assigned to the current field actor",
               {
                 trnId: row.trnId,

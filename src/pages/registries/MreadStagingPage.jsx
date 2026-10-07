@@ -16,6 +16,7 @@ import { useGeo } from "../../context/GeoContext";
 
 import SharedMeterHistoryModal from "../../components/mread/MeterHistoryModal";
 import { FORM_TEXT } from "../../theme/formColors";
+import { formatSastDateTime as formatDateTime } from "../../utils/formatSastDateTime.js";
 
 const ROWS_FETCH_LIMIT = 1000;
 const DEFAULT_TABLE_SORT = { key: "", direction: "asc" };
@@ -30,32 +31,6 @@ function safeText(value, fallback = NAv) {
 function formatNumber(value) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : NAv;
-}
-
-function formatDateTime(value) {
-  if (!value || value === NAv) return NAv;
-
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (!text || text === NAv) return NAv;
-    return text.slice(0, 19).replace("T", " ");
-  }
-
-  if (value instanceof Date) {
-    const time = value.getTime();
-    return Number.isFinite(time) ? value.toLocaleString() : NAv;
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  const seconds = value?.seconds ?? value?._seconds;
-  if (typeof seconds === "number") {
-    return new Date(seconds * 1000).toLocaleString();
-  }
-
-  return NAv;
 }
 
 function isMeaningfulText(value) {

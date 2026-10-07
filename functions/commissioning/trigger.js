@@ -22,7 +22,8 @@ function getCommissioningType(trn = {}) {
 }
 
 function isCommissioningTrn(trn = {}) {
-  return getCommissioningType(trn) === COMMISSIONING_TRN_TYPE;
+  return getCommissioningType(trn) === COMMISSIONING_TRN_TYPE &&
+    String(trn.accessData?.access?.hasAccess).toLowerCase() !== "no";
 }
 
 function getProcessingActor(trn = {}) {

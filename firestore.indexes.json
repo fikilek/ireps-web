@@ -2425,6 +2425,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "trns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accessData.parents.lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "metadata.createdOnDevice",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

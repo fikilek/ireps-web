@@ -144,7 +144,13 @@ test("what the worker sent still wins, everywhere", () => {
 test("the report still decides AD HOC by what the transaction holds", () => {
   // Nothing in the report changes for any of this: it reads the context and shows AD HOC when there is
   // none — which, after the owner's rule, an illegal-connection find rightly is.
-  assert.match(reportSource, /targetedBatchContext \|\| \{\}/);
+  //
+  // TR-R001 (3 Oct 2026): targetedBatchContext is not a declared root key, so a no access now
+  // carries it inside `origin` - "where the work came from, and what it followed". The report
+  // reads BOTH homes, because records written before that date keep it at the root and no
+  // backfill has moved them. Dropping either side would lose a month of batch work.
+  assert.match(reportSource, /targetedBatchContext \|\| trn\?\.origin\?\.targetedBatch/);
+  assert.match(reportSource, /\|\| \{\}/);
 });
 
 // ------------------------------------------------- the two halves must agree about what they made

@@ -1,4 +1,5 @@
 import { LAST_ACTIVITY_KINDS, lastActivityPatch } from "./lastActivity.js";
+import { serviceProviderName } from "../serviceProviders/serviceProviderName.js";
 import { readBatchActor, snapshotReader } from "./sales-batch-resolution.js";
 import { readRowsTakenOut } from "./rowFollowsSales.js";
 import { onCall } from "firebase-functions/v2/https";
@@ -87,13 +88,9 @@ function getServiceProviderStatus(data = {}) {
   return normalizeUpper(data?.status || data?.lifecycleStatus);
 }
 
-function getServiceProviderName(data = {}, fallbackId = "") {
-  return readFirstText(
-    data?.profile?.tradingName,
-    data?.profile?.registeredName,
-    data?.name,
-    fallbackId,
-  );
+function getServiceProviderName(data = {}) {
+  // One chain for the whole of iREPS (owner, 4 Oct 2026): registeredName, tradingName, NAv.
+  return serviceProviderName(data);
 }
 
 function findSubcontractorMncClient(data = {}, actorMncId) {

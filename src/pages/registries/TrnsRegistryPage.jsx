@@ -14,6 +14,22 @@ import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 
 const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
 
+// A no access reads orange, the whole row (owner, 4 October 2026).
+//
+// A worker could not reach the meter, so the row has no meter number, no reading and no state
+// - it is a visit, not a measurement, and it should not have to be read column by column to be
+// told apart from the work that got in.
+//
+// The app's orange is #f97316, which is right for a stripe or a chip and too thin to read as
+// words on white. This is the darker stop of the same family.
+const NO_ACCESS_ROW_COLOUR = "#c2410c";
+
+function registryRowStyle(row) {
+  return String(row?.hasAccess).toUpperCase() === "NO"
+    ? { color: NO_ACCESS_ROW_COLOUR }
+    : undefined;
+}
+
 const TRN_TYPE_OPTIONS = [
   "METER_COMMISSIONING",
   "METER_DISCOVERY",
@@ -213,18 +229,44 @@ function MediaActionIcon() {
   );
 }
 
+// The owner, 3 October 2026: "can we fix createdAt? it's 2 hrs behind."
+//
+// It was not behind - it was UTC, printed with no label. The record is right: TR-R002 keeps
+// every stored time in UTC and the NA-R005 id is the one deliberate exception. What was wrong
+// was this function: for a string it did `value.slice(0, 19)`, which CHOPS the ISO text and
+// hands over the UTC digits as if they were local. A capture at 18:35 in Dundee read 16:35.
+//
+// It also behaved two ways: a Firestore Timestamp went through toLocaleString() and came out
+// in the reader's own timezone, while a string came out in UTC. The same column, two clocks,
+// depending on which shape the row happened to hold.
+//
+// Africa/Johannesburg is named rather than left to the browser. The work happened in South
+// Africa, so a manager reading the registry from anywhere must see the time the worker saw.
+// SAST is UTC+2 all year, with no daylight saving.
+const SAST = "Africa/Johannesburg";
+
 function formatDateTime(value) {
   if (!value || value === "NAv") return "NAv";
 
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
+  const date =
+    typeof value?.toDate === "function" ? value.toDate() : new Date(value);
 
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
+  if (Number.isNaN(date?.getTime?.())) return "NAv";
 
-  return "NAv";
+  const parts = new Intl.DateTimeFormat("en-ZA", {
+    timeZone: SAST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(date)
+    .reduce((out, part) => ({ ...out, [part.type]: part.value }), {});
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
 function getDateMs(value) {
@@ -300,14 +342,21 @@ function getCompactTrnId(trnId, wardPcode) {
   if (!isActionableValue(fullTrnId)) return "NAv";
 
   const segments = fullTrnId.split("_").filter(Boolean);
-  const lastSegment = segments.at(-1) || "";
-  const suffix = lastSegment.slice(-4);
+
+  // NA-R005 (1.12.0): a no access ends in _NA, so the last segment is no longer what tells one
+  // record from another - every no access would compact to the same thing. The suffix is taken
+  // from the segment BEFORE it, and the compact id keeps the NA so a reader still sees it.
+  const isNoAccess = segments.at(-1) === "NA";
+  const identifying = (isNoAccess ? segments.at(-2) : segments.at(-1)) || "";
+  const suffix = identifying.slice(-4);
   const ward = isActionableValue(wardPcode)
     ? String(wardPcode).trim()
-    : segments.at(-2) || "";
+    : (isNoAccess ? segments.at(-3) : segments.at(-2)) || "";
 
-  if (ward && suffix) return `...${ward}_${suffix}`;
-  if (suffix) return `...${suffix}`;
+  const tail = isNoAccess ? "_NA" : "";
+
+  if (ward && suffix) return `...${ward}_${suffix}${tail}`;
+  if (suffix) return `...${suffix}${tail}`;
 
   return `...${fullTrnId.slice(-4)}`;
 }
@@ -440,7 +489,7 @@ export default function TrnsRegistryPage() {
       { header: "Has Access", value: (row) => getAccessLabel(row.hasAccess) },
       {
         header: "No Access Reason",
-        value: (row) => row.accessReason || "NAv",
+        value: (row) => [row.accessReason || "NAv", row.returnAppointmentLabel].filter(Boolean).join("\n"),
       },
       {
         header: "Meter Type",
@@ -715,7 +764,10 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <>{row.accessReason || "NAv"}</>;
+      return <div style={{ display: "grid", gap: 4, minWidth: 165 }}>
+        <span style={{ fontWeight: row.returnAppointmentLabel ? 600 : undefined }}>{row.accessReason || "NAv"}</span>
+        {row.returnAppointmentLabel && <span style={{ whiteSpace: "nowrap" }}>{row.returnAppointmentLabel}</span>}
+      </div>;
     },
     sortEmptyLast: true,
 
@@ -1022,6 +1074,7 @@ export default function TrnsRegistryPage() {
                 rows={trnRows}
                 columns={registryColumns}
                 rowKey={row => row.trnId}
+                rowStyle={registryRowStyle}
                 filters={filters}
                 onFiltersChange={setFilters}
                 filteredRows={filteredTrnRows}

@@ -9,6 +9,7 @@ import {
   where,
 } from "firebase/firestore";
 
+import { registryNoAccessDetails } from "../utils/registryNoAccess.js";
 import { db } from "../firebase";
 
 const TRNS_COLLECTION = "trns";
@@ -323,7 +324,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     erfNo: valueOrNav(data.accessData?.erfNo),
     premiseAddress: valueOrNav(data.accessData?.premise?.address),
     hasAccess: normalizeRegistryCode(data.accessData?.access?.hasAccess),
-    accessReason: valueOrNav(data.accessData?.access?.reason),
+    ...registryNoAccessDetails(data.accessData?.access),
     meterNo,
     astNo: meterNo,
     meterType: normalizeRegistryCode(data.meterType),

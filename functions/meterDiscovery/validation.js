@@ -1,4 +1,7 @@
 const METER_DISCOVERY_TRN_TYPE = "METER_DISCOVERY";
+import { isTrnIdForWork, trnIdShapeMessage } from "../transactions/trnId.js";
+import { assertNoAccessMedia } from "../noAccess/recordNoAccess.js";
+
 const METER_DISCOVERY_TRN_PREFIX = "TRN_MDIS_";
 const METER_DISCOVERY_STATUSES = new Set(["CONNECTED", "DISCONNECTED"]);
 const METER_CATEGORIES = new Set(["Normal", "Bulk"]);
@@ -575,11 +578,9 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
   const meterType = data?.meterType;
   const media = data?.media || [];
 
-  if (!trnId.startsWith(METER_DISCOVERY_TRN_PREFIX)) {
-    return buildFailureResult(
-      "INVALID_TRN_ID",
-      `TRN id must start with ${METER_DISCOVERY_TRN_PREFIX}`,
-    );
+  // NA-R005: TRN_MDIS_… where the worker reached the meter, TRN_NA_MDIS_… where they did not.
+  if (!isTrnIdForWork(trnId, METER_DISCOVERY_TRN_PREFIX)) {
+    return buildFailureResult("INVALID_TRN_ID", trnIdShapeMessage(METER_DISCOVERY_TRN_PREFIX));
   }
 
   if (accessData?.trnType !== METER_DISCOVERY_TRN_TYPE) {
@@ -611,10 +612,34 @@ export function validateMeterDiscoveryPayload({ data = {} } = {}) {
       );
     }
 
-    if (!hasTaggedMedia(media, "noAccessPhoto")) {
+    try {
+      assertNoAccessMedia(media, accessData.access, { uploaded: true });
+    } catch (error) {
+      return buildFailureResult(error.code, error.message);
+    }
+
+    // No Access rules NA-R043 (1.0.0): every no access carries its ERF, on the Normal Path
+    // and the Sales Path alike. "There can be no access data without knowing what it is that
+    // you were not able to access" (owner, 2026-10-01).
+    //
+    // THIS IS THE DEFECT THIS SPRINT CLOSES. Until now this branch returned here, and the
+    // requiredTextFields list below — which holds accessData.erfId, accessData.erfNo and
+    // accessData.premise.id — ran only for a visit WITH access. A no access had never once
+    // been asked for its geography on this path. It produced no bad record on DEV only
+    // because the screen supplies what the validator never demanded, which is not the same
+    // as the rule being enforced.
+    //
+    // The premise is deliberately NOT required: it is carried only when it existed at the
+    // moment of the visit (NA-R044, NA-R084.1), and a worker at a locked gate often cannot
+    // honestly say which unit they were at.
+    // The ERF ID is the requirement, not the ERF number (owner, 2026-10-02). They are
+    // different things: the ID is identity and resolves into everything else, while the
+    // number is a label a person reads and is enrichment under GMR-R006. A record carrying
+    // the ID can always be placed; one carrying only a number cannot.
+    if (!hasRequiredText(accessData?.erfId)) {
       return buildFailureResult(
-        "NO_ACCESS_PHOTO_REQUIRED",
-        "No-access photo is required",
+        "NO_ACCESS_ERF_REQUIRED",
+        "A No Access must say which ERF could not be accessed",
       );
     }
 

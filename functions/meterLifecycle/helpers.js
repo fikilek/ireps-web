@@ -1,3 +1,4 @@
+import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import {
   anomalyPhotoRequired,
   applyFixesToFinding,
@@ -7,6 +8,7 @@ import {
   validateNormalisation,
   validateOtherAnomalies,
 } from "../meterDiscovery/validation.js";
+import { serviceProviderName } from "../serviceProviders/serviceProviderName.js";
 
 const NOW_FALLBACK_USER = "SYSTEM";
 
@@ -407,7 +409,22 @@ export function validateAssignment(
     // instruction.
     ["METER_RECONNECTION", "METER_INSPECTION"].includes(normalizedTrnType);
 
-  if (!instruction?.code) {
+  // WORK A WORKER STARTED THEMSELVES CARRIES NO INSTRUCTION.
+  //
+  // TR-R001 section 2 says it in the root table: `assignment` is "the office instruction that
+  // issued the work", and it is `{}` for work a worker started themselves. There is no office
+  // instruction behind a field inspection - that is what field-originated means.
+  //
+  // `fieldInstructionOptional` above has encoded this since it was written, and it was wired
+  // to the instruction TEXT only. The CODE was still demanded of everyone, so a field
+  // inspection was refused for not carrying an instruction the rules say it must not have.
+  //
+  // Found on the owner's phone, 4 October 2026, the first field no access ever sent down this
+  // path: INVALID_ASSIGNMENT_INSTRUCTION_CODE, "assignment.instruction.code is required".
+  //
+  // Where a code IS given it must still agree with the transaction type - an exemption from
+  // carrying one is not permission to carry the wrong one.
+  if (!instruction?.code && !fieldInstructionOptional) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_INSTRUCTION_CODE",
@@ -415,7 +432,7 @@ export function validateAssignment(
     };
   }
 
-  if (normalizeUpper(instruction.code) !== normalizedTrnType) {
+  if (instruction?.code && normalizeUpper(instruction.code) !== normalizedTrnType) {
     return {
       ok: false,
       code: "ASSIGNMENT_INSTRUCTION_MISMATCH",
@@ -435,7 +452,9 @@ export function validateAssignment(
     };
   }
 
-  if (targets.length === 0) {
+  // Nobody assigned it either. TR-R001: `assignment` is `{}` for work a worker started
+  // themselves - no instruction, and therefore no one it was issued to.
+  if (targets.length === 0 && !fieldInstructionOptional) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_TARGETS",
@@ -515,7 +534,17 @@ export function isKnownAstMeterKind(astDoc = {}, input = {}) {
 export function validateCommonLifecycleInput(data = {}) {
   const trnId = data?.id || "NAv";
   const trnType = data?.accessData?.trnType || "NAv";
-  const astId = data?.ast?.astData?.astId || "NAv";
+  // BOTH SPELLINGS, DELIBERATELY (owner's phone, 4 October 2026).
+  //
+  // NA-R001: there is ONE No Access form and every transaction type opens it. A Meter
+  // Inspection no access captured on that form was refused here with "ast.astData.astId is
+  // required" - the form names the meter as a flat `astId`, because TR-R003 makes the SERVER
+  // resolve the position from the asset, so the phone sends an id and not a meter block.
+  //
+  // The registration path already reads both (completeNoAccessFromAuthorities). Asking the
+  // phone to learn each callable's preferred spelling instead is how one field comes to have
+  // five names, which is the fault this whole stream has been undoing.
+  const astId = data?.ast?.astData?.astId || data?.astId || "NAv";
   const premiseId = data?.accessData?.premise?.id || "NAv";
 
   if (!data?.id || trnId === "NAv") {
@@ -2522,11 +2551,7 @@ export function buildLifecycleTrnPayload({
           : astDoc?.status?.detail || data?.status?.detail || "NAv",
     },
 
-    metadata: buildFlatMetadata({
-      now,
-      actorUid,
-      actorName,
-    }),
+    metadata: buildRegistrationMetadata({ phoneMetadata: data?.metadata, nowIso: now, actorUid, actorName }),
 
     serviceProvider: sanitizeServiceProvider(
       data?.serviceProvider || astDoc?.serviceProvider || {},
@@ -3163,18 +3188,11 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
 
 export function sanitizeServiceProvider(serviceProvider = {}) {
   const id = String(serviceProvider?.id || "").trim();
-  const name = String(
-    serviceProvider?.name ||
-      serviceProvider?.profile?.tradingName ||
-      serviceProvider?.profile?.registeredName ||
-      serviceProvider?.profile?.name ||
-      id ||
-      "NAv",
-  ).trim();
 
   return {
     id: id || "NAv",
-    name: name || "NAv",
+    // One chain for the whole of iREPS (owner, 4 Oct 2026): registeredName, tradingName, NAv.
+    name: serviceProviderName(serviceProvider),
   };
 }
 
@@ -3355,8 +3373,9 @@ export function buildLifecycleInstructionTrnPayload({
 
     bucket: sanitizeBucketRef(data?.bucket || data?.workorder || {}),
 
-    metadata: buildFlatMetadata({
-      now,
+    // An office instruction has no phone capture yet. Keep the device set present and null.
+    metadata: buildRegistrationMetadata({
+      nowIso: now,
       actorUid,
       actorName,
     }),

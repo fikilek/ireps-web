@@ -16,6 +16,7 @@ import { useGenerateMreadStagingMutation,
 
 import RegistryIdText from "../../components/RegistryIdText";
 import SharedMeterHistoryModal from "../../components/mread/MeterHistoryModal";
+import { formatSastDateTime as formatDateTime } from "../../utils/formatSastDateTime.js";
 
 const EMPTY_MREAD_FILTERS = {
   meterNo: "",
@@ -115,24 +116,6 @@ function formatReading(value) {
   if (value === 0 || value === "0") return "0";
   if (value === null || value === undefined || value === "") return NAv;
   return String(value);
-}
-
-function formatDateTime(value) {
-  if (!value || value === NAv) return NAv;
-
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  if (typeof value?.seconds === "number") {
-    return new Date(value.seconds * 1000).toLocaleString();
-  }
-
-  return NAv;
 }
 
 function getDateValue(value) {

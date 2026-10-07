@@ -11,6 +11,8 @@ import {
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { astMeterNo, checkBatchWork, recognisedBatchContext, recordErfOverride } from "../targetedBatches/batch-work-guard.js";
 import { recordDifferentMeterAtErf } from "../targetedBatches/differentMeterAtErf.js";
+import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
+import { noAccessError } from "../noAccess/recordNoAccess.js";
 
 import {
   COMMISSIONING_TRN_TYPE,
@@ -63,6 +65,25 @@ export const onCreateMeterCommissioningCallable = onCall(async (request) => {
           astId,
         },
       );
+    }
+
+    // An unreachable meter is a shared No Access visit, not failed commissioning work.
+    // The shared transaction owns evidence, capture metadata, ownership and safe retries.
+    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no") {
+      if (data.instructionTrnId || String(data.origin?.channel || "FIELD").toUpperCase() !== "FIELD") {
+        return buildFailureResult("INVALID_COMMISSIONING_ORIGIN", "Commissioning starts from the meter in the field.");
+      }
+      return await recordLifecycleNoAccess({
+        db, data, actor: { uid: actorUid, name: actorName }, now, isOffice: false,
+        validateAst: (astDoc) => {
+          if (String(astDoc.status?.state).toUpperCase() !== "FIELD") {
+            throw noAccessError("AST_NOT_FIELD", "Only FIELD meters can be commissioned");
+          }
+          if (!["electricity", "water"].includes(String(astDoc.meterType).toLowerCase())) {
+            throw noAccessError("INVALID_METER_TYPE", "Only electricity or water meters can be commissioned");
+          }
+        },
+      });
     }
 
     const trnRef = db.collection("trns").doc(trnId);

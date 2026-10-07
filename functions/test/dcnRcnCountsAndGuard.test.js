@@ -2,6 +2,7 @@
 //   the three counts a meter keeps about itself, and the guard that refuses to
 //   issue work for a meter iREPS cannot account for.
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 
 import { buildMeterCountPatch } from "../meterLifecycle/callables.js";
@@ -199,7 +200,17 @@ test("a reconnection that was done counts on the meter", () => {
   assert.deepEqual(Object.keys(patch), ["counts.reconnections"]);
 });
 
-test("work nobody could reach counts as a No Access, whatever the kind", () => {
+// This test used to assert the opposite, and it is the reason the break it now
+// guards against would have shipped. The No Access count was raised here, in
+// the lifecycle callable. Main then moved every No Access to its own writer,
+// returning before this code is reached — so the count became unreachable while
+// this test, which calls the helper directly and never the writer, stayed green.
+// The Meter Registry would have shown 0 No Access beside a window listing the
+// visits: a number disagreeing with the table it opens.
+//
+// So the helper must now refuse to count a No Access, and the count lives in
+// `recordLifecycleNoAccess`, beside the record and the premise's link.
+test("the lifecycle counter does not count a No Access — its one writer does", () => {
   for (const trnType of [
     "METER_DISCONNECTION",
     "METER_RECONNECTION",
@@ -208,11 +219,33 @@ test("work nobody could reach counts as a No Access, whatever the kind", () => {
     "METER_REMOVAL",
   ]) {
     assert.deepEqual(
-      Object.keys(buildMeterCountPatch({ trnType, outcome: "NO_ACCESS" })),
-      ["counts.noAccess"],
-      `${trnType} refused entry counts as a No Access`,
+      buildMeterCountPatch({ trnType, outcome: "NO_ACCESS" }),
+      {},
+      `${trnType} must not raise a count here; recordLifecycleNoAccess owns it`,
     );
   }
+});
+
+test("the one No Access writer raises the meter's count, once", async () => {
+  const source = await readFile(
+    new URL("../noAccess/recordLifecycleNoAccess.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /"counts\.noAccess":\s*FieldValue\.increment\(1\)/,
+    "recordLifecycleNoAccess must raise counts.noAccess — if this moved, the Meter Registry's number goes stale",
+  );
+  assert.match(
+    source,
+    /alreadyRecorded/,
+    "the increment must be guarded so a repeat delivery of the same visit cannot count twice",
+  );
+  assert.ok(
+    source.indexOf("alreadyRecorded") < source.indexOf('"counts.noAccess"'),
+    "the guard must be decided before the count is built",
+  );
 });
 
 test("an inspection or a reading that was done raises no count", () => {

@@ -125,7 +125,7 @@ export const onStartLifecycleInstructionCallable = onCall(async (request) => {
 
       if (!assigned) {
         responsePayload = buildFailureResult(
-          "TRN_NOT_ASSIGNED_TO_ACTOR",
+          "INSTRUCTION_NOT_ASSIGNED",
           "This work was sent to somebody else",
           { trnId, trnType, astId, actorUid },
         );

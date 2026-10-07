@@ -24,19 +24,14 @@ function formatNumber(value) {
 function formatUpdatedAt(value) {
   if (!value || value === "NAv") return "NAv";
 
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
+  const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+  if (!Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("en-ZA", { timeZone: "Africa/Johannesburg", dateStyle: "medium", timeStyle: "short" }).format(date);
 
   return "NAv";
 }
 
 function getTodayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
 function getWardLabel(wardRows, wardPcode) {
@@ -115,6 +110,9 @@ export default function NoAccessReportPage() {
       .sort((a, b) => b.count - a.count);
   }, [filteredRows]);
 
+  const groups = new Map(filteredRows.filter((row) => row.groupId).map((row) => [row.groupId, row.groupStatus]));
+  const openGroups = [...groups.values()].filter((status) => status === "OPEN").length;
+  const closedGroups = [...groups.values()].filter((status) => status === "CLOSED").length;
   const topReason = reasonSummary[0]?.reason || "NAv";
   const topUser = userSummary[0]?.userName || "NAv";
 
@@ -135,7 +133,7 @@ export default function NoAccessReportPage() {
           <h1>No Access Report</h1>
 
           <p className="muted">
-            Showing TRN-derived no-access report rows for {activeWorkbaseName}.
+            Showing no-access visits for {activeWorkbaseName}. Groups close only after a later successful access at the same premise. Dates and appointments are shown in SAST.
           </p>
 
           <Link className="text-link" to="/reports">
@@ -192,6 +190,9 @@ export default function NoAccessReportPage() {
       </section>
 
       <section className="dashboard-grid">
+        <div className="stat-card"><span>Open groups</span><strong>{openGroups}</strong></div>
+        <div className="stat-card"><span>Closed groups</span><strong>{closedGroups}</strong></div>
+        <div className="stat-card"><span>Unknown sequence</span><strong>{filteredRows.filter((row) => row.groupStatus === "UNKNOWN").length}</strong></div>
         <div className="stat-card">
           <span>No Access Rows</span>
           <strong>{formatNumber(filteredRows.length)}</strong>
@@ -238,8 +239,7 @@ export default function NoAccessReportPage() {
           <div className="empty-state error-box">
             <h2>Could not load No Access report</h2>
             <p className="muted">
-              Check Firestore rules, report_trn_no_access, or the LM field used
-              by the query.
+              Refresh the report. If it remains unavailable, contact the office.
             </p>
           </div>
         ) : null}
@@ -271,6 +271,9 @@ export default function NoAccessReportPage() {
                   <th>Premise Address</th>
                   <th>Property Type</th>
                   <th>Reason</th>
+                  <th>Appointment (SAST)</th>
+                  <th>Group</th>
+                  <th>Closing evidence</th>
                   <th>User</th>
                   <th>TRN Type</th>
                   <th>Updated</th>
@@ -286,6 +289,9 @@ export default function NoAccessReportPage() {
                     <td>{row.premiseAddress}</td>
                     <td>{row.premisePropertyType}</td>
                     <td>{row.reason}</td>
+                    <td>{row.appointment ? formatUpdatedAt(row.appointment) : "None"}</td>
+                    <td>{row.groupStatus}</td>
+                    <td>{row.closingProof ? `${row.closingProof.trnType}: ${row.closingProof.trnId} · ${formatUpdatedAt(row.closingProof.at)} · ${row.closingProof.worker}` : "—"}</td>
                     <td>{row.userName}</td>
                     <td>{row.trnType}</td>
                     <td>{formatUpdatedAt(row.updatedAt)}</td>

@@ -1,8 +1,11 @@
+import { reconcilePremiseNoAccess, isTransientReconciliationError } from "./noAccess/reconcile.js";
+import { noAccessPremiseMetadata } from "./noAccess/premiseMetadata.js";
 /* eslint-disable no-undef */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import {
   onDocumentCreated,
+  onDocumentDeleted,
   onDocumentUpdated,
 } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
@@ -102,7 +105,6 @@ import { onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCalla
 import { onUnallocateTargetedBatchCallable } from "./targetedBatches/unallocateCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "./targetedBatches/acceptanceCallable.js";
 import { getTargetedBatchRowsCallable } from "./targetedBatches/getTargetedBatchRowsCallable.js";
-import { recordTargetedBatchNoAccessCallable } from "./targetedBatches/recordTargetedBatchNoAccessCallable.js";
 import {
   classifyTargetedBatchPremiseRoute,
   completeTargetedBatchMeterDiscoveryInTransaction,
@@ -110,7 +112,22 @@ import {
   validateTargetedBatchMeterDiscoverySubmission,
 } from "./targetedBatches/premiseLink.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
-import { checkBatchWork, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+import { checkBatchWork, profileServiceProviderId, recognisedBatchContext, recordErfOverride } from "./targetedBatches/batch-work-guard.js";
+// No Access rules NA-R001 (1.0.0): one recorder, used by every transaction that can end in a no access.
+import { formatPropertyType, formatStreetAddress } from "./premises/streetAddress.js";
+// TR-R001: every transaction carries the same root, written where every path goes through it.
+import { applyTrnRootShape, stripToDeclaredRoot } from "./transactions/trnShape.js";
+import { serviceProviderName } from "./serviceProviders/serviceProviderName.js";
+import { isTrnIdForWork, trnIdShapeMessage } from "./transactions/trnId.js";
+import {
+  buildNoAccessLocation,
+  buildNoAccessParentsFromErf,
+  noAccessParentsAreMissing,
+  normalizeNoAccessAccessData,
+  assertNoAccessMedia,
+  readGpsPoint,
+} from "./noAccess/recordNoAccess.js";
+import { recordTargetedBatchNoAccessInTransaction } from "./targetedBatches/premiseLink.js";
 import {
   plainReasonFor,
   recordCaptureFailure,
@@ -248,7 +265,6 @@ export {
   onUnallocateTargetedBatchCallable,
   onAcceptRejectTargetedBatchCallable,
   getTargetedBatchRowsCallable,
-  recordTargetedBatchNoAccessCallable,
   onCreateAccountDataCallable,
   onFieldAccountDataWritten,
   onAccountMasterWritten,
@@ -1224,11 +1240,9 @@ function validateMeterCreationPayload({
   const hasAccess = data?.accessData?.access?.hasAccess;
   const meterType = data?.meterType;
 
-  if (!trnId.startsWith(expectedTrnPrefix)) {
-    return buildFailureResult(
-      "INVALID_TRN_ID",
-      `TRN id must start with ${expectedTrnPrefix}`,
-    );
+  // NA-R005: the work's own prefix, or TRN_NA_ before it where the worker could not get in.
+  if (!isTrnIdForWork(trnId, expectedTrnPrefix)) {
+    return buildFailureResult("INVALID_TRN_ID", trnIdShapeMessage(expectedTrnPrefix));
   }
 
   if (data?.accessData?.trnType !== expectedTrnType) {
@@ -1260,11 +1274,10 @@ function validateMeterCreationPayload({
       );
     }
 
-    if (!hasTaggedMedia(data?.media, "noAccessPhoto")) {
-      return buildFailureResult(
-        "NO_ACCESS_PHOTO_REQUIRED",
-        "No-access photo is required",
-      );
+    try {
+      assertNoAccessMedia(data?.media, data?.accessData?.access, { uploaded: true });
+    } catch (error) {
+      return buildFailureResult(error.code, error.message);
     }
 
     return null;
@@ -1981,71 +1994,34 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
   },
 );
 
-export const onNoAccessRecorded = onDocumentCreated(
-  "trns/{trnId}",
-  async (event) => {
-    logger.log("onNoAccessRecorded ---- START");
+async function reconcileNoAccessChange(before, after, trnId) {
+  const relevant = [before, after].filter((trn) => trn?.accessData?.access?.hasAccess === "no");
+  if (!relevant.length) return;
+  const premiseIds = [...new Set(relevant.map((trn) => trn.accessData?.premise?.id).filter((id) => id && id !== "NAv"))];
+  const failureRef = db.doc(`noAccessReconciliationFailures/${trnId}`);
+  try {
+    const results = [];
+    for (const id of premiseIds) results.push(await reconcilePremiseNoAccess(db, id));
+    const erfIds = [...new Set(relevant.map((trn) => trn.accessData?.erfId).filter((id) => id && id !== "NAv"))];
+    for (const id of erfIds) await rebuildErfTrnCount(id);
+    if (!premiseIds.length || results.some((r) => r.code === "PREMISE_MISSING")) {
+      await failureRef.set({ code: "PREMISE_MISSING", trnId, premiseIds, updatedAt: new Date().toISOString(), retryable: false });
+      logger.error("No Access history needs office correction", { trnId, premiseIds });
+    } else await failureRef.delete();
+  } catch (error) {
+    const retryable = isTransientReconciliationError(error);
+    await failureRef.set({ code: String(error.code || "UNKNOWN"), message: error.message || "Reconciliation failed", trnId, premiseIds, retryable, updatedAt: new Date().toISOString() });
+    logger.error("No Access history reconciliation failed", { trnId, retryable, message: error.message });
+    if (retryable || !error.code) throw error;
+  }
+}
 
-    const trnData = event.data.data() || {};
-    const trnId = event.params.trnId;
-    const { accessData } = trnData;
-
-    if (accessData?.access?.hasAccess !== "no") {
-      logger.log("onNoAccessRecorded ---- Access was granted. Standing down.");
-      return null;
-    }
-
-    const premiseId = accessData?.premise?.id || null;
-    const metadata = trnData?.metadata || {};
-    const erfId = accessData?.erfId || null;
-
-    if (!premiseId) {
-      logger.error("onNoAccessRecorded ---- ERROR: No Premise ID found.");
-      return null;
-    }
-
-    try {
-      const premiseRef = db.collection("premises").doc(premiseId);
-
-      const agentName =
-        metadata?.updatedByUser || metadata?.createdByUser || "NAv";
-
-      const agentUid =
-        metadata?.updatedByUid || metadata?.createdByUid || "NAv";
-
-      const premiseMetadataPatch = buildPremiseUpdateMetadata(
-        agentUid,
-        agentName,
-      );
-
-      await premiseRef.update({
-        noAccessTrnIds: FieldValue.arrayUnion(trnId),
-        "metadata.updatedAt": premiseMetadataPatch.updatedAt,
-        "metadata.updatedByUid": premiseMetadataPatch.updatedByUid,
-        "metadata.updatedByUser": premiseMetadataPatch.updatedByUser,
-      });
-
-      logger.log(
-        `onNoAccessRecorded ---- SUCCESS: Recorded NA [${trnId}] for Premise [${premiseId}]`,
-      );
-
-      if (erfId) {
-        await db.collection("ireps_erfs").doc(erfId).update({
-          "metadata.updatedAt": new Date().toISOString(),
-          "metadata.updatedByUid": agentUid,
-          "metadata.updatedByUser": agentName,
-        });
-
-        await rebuildErfTrnCount(erfId);
-      }
-
-      return { success: true };
-    } catch (error) {
-      logger.error("onNoAccessRecorded ---- FATAL ERROR:", error);
-      return null;
-    }
-  },
-);
+export const onNoAccessRecorded = onDocumentCreated({ document: "trns/{trnId}", retry: true },
+  (event) => reconcileNoAccessChange(null, event.data?.data(), event.params.trnId));
+export const onNoAccessUpdated = onDocumentUpdated({ document: "trns/{trnId}", retry: true },
+  (event) => reconcileNoAccessChange(event.data?.before?.data(), event.data?.after?.data(), event.params.trnId));
+export const onNoAccessDeleted = onDocumentDeleted({ document: "trns/{trnId}", retry: true },
+  (event) => reconcileNoAccessChange(event.data?.data(), null, event.params.trnId));
 
 function normalizeName(value) {
   const str = String(value || "")
@@ -3161,6 +3137,60 @@ const buildSuccessResult = (trnId, message = "TRN created successfully") => ({
 // worker, never the phone. A dry run is the default: it says what it would write and writes nothing.
 const REPAIR_ROLES = new Set(["MNG", "ADM", "SPU"]);
 
+/**
+ * TB-R059 / TB-R062 (1.3.91) — THE FRONT GATE.
+ *
+ * The owner, 3 October 2026: "The field worker that is doing the work should never be allowed
+ * to even open the form if the work is not theirs… the user must not waste his or her time
+ * submitting work that's going to be refused. Why don't you tell the user up front?"
+ *
+ * He proved the cost himself on ERF 5212: he picked a reason, took a photograph and set an
+ * appointment, twice, and only learned at submit that the ERF belonged to Simo Team.
+ *
+ * TWO GATES, AND THIS IS THE FIRST. It is a courtesy to the worker's time and nothing more -
+ * it can be stale, offline or skipped, and the submit path checks again regardless. Nothing
+ * here decides whether work is written; only the back gate does that.
+ *
+ * ONE WELL. It calls checkBatchWork - the SAME function the submit path calls - so the two
+ * gates cannot drift. A second implementation of this rule is how the front would start saying
+ * yes where the back says no, which is worse than having no front gate at all.
+ */
+export const checkBatchWorkCallable = onCall(async (request) => {
+  const caller = request.auth;
+
+  if (!caller) {
+    throw new HttpsError("unauthenticated", "Sign in first.");
+  }
+
+  const erfId = String(request.data?.erfId || "").trim();
+  const premiseId = String(request.data?.premiseId || "").trim();
+  const meterNo = String(request.data?.meterNo || "").trim();
+
+  if (!erfId && !premiseId && !meterNo) {
+    throw new HttpsError(
+      "invalid-argument",
+      "An ERF, a premise or a meter is needed to check whose batch this work is in.",
+    );
+  }
+
+  const decision = await checkBatchWork({
+    db,
+    uid: caller.uid,
+    erfId,
+    premiseId,
+    meterNo,
+    log: logger,
+  });
+
+  return {
+    allowed: decision?.allowed === true,
+    code: decision?.code || "NAv",
+    // The server's own sentence, which the phone shows word for word. The worker is never
+    // shown a code, and the phone never writes its own version of this.
+    message: decision?.message || "NAv",
+  };
+});
+
 export const repairRegistrationCallable = onCall(async (request) => {
   const caller = request.auth;
 
@@ -3263,6 +3293,112 @@ export const REGISTRATION_DEPS = {
   normalizePremiseServiceSnapshotItem,
   logger,
 };
+
+/**
+ * TR-R003 (0.6.0) — the position on a no access, resolved in ONE place.
+ *
+ * The owner, 3 October: "the AST location GPS must always be the asset location. The fallback
+ * is the premise location, where the asset location doesn't exist."
+ *
+ * The phone no longer sends one. A worker who could not touch the meter is standing at a gate,
+ * not at the meter, so their fix was never the asset's position. The server has both
+ * authorities in front of it and reads them, the same way it already reads the ERF for the
+ * municipality and the ward.
+ *
+ * WHY IT IS A FUNCTION AND NOT TWO COPIES. Meter Discovery and Meter Installation each have
+ * their own no access branch, and on 3 October a fix written into one of them did not reach
+ * the other - the same way the reason came to have five field names and the access card five
+ * private copies. One door, called from both.
+ *
+ * Mutates the payload in place: sets ast.location, and removes the retired root `location`
+ * and the astId that was only ever asked so the asset could be looked up.
+ */
+async function completeNoAccessFromAuthorities(payload, { actorUid } = {}) {
+  const isFilled = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+
+  // Where the meter is named. The No Access screen sends `astId`, but a transaction that
+  // already carries its meter names it at `ast.astData.astId` - NOT `ast.astData.id`, which
+  // does not exist anywhere. Asking only for one of these returns nothing on the other path
+  // and the position then falls back to the premise silently, which under TR-R003 means "this
+  // meter has no position of its own, go and look at it". Writing that onto a meter whose
+  // position is sitting in `asts` manufactures a defect signal that looks exactly like a
+  // finding. Both spellings are read, deliberately.
+  const astId = String(
+    payload?.astId || payload?.ast?.astData?.astId || "",
+  ).trim();
+  let assetLocation = null;
+
+  if (astId) {
+    const astSnap = await db.collection("asts").doc(astId).get();
+    // Measured on DEV, 3 Oct: all 192 assets keep their position at ast.location, none without.
+    if (astSnap.exists) assetLocation = astSnap.data()?.ast?.location || null;
+  }
+
+  // The premise is read EVERY time now, not only when the position falls back to it: it is
+  // also the authority for the address, and the phone's copy of that can be stale or absent.
+  // On 3 October two correct no accesses showed NAv in the TRN Registry's Address column while
+  // 478 of 493 other transactions showed their street - the premise had the address all along.
+  const premiseId = String(payload?.accessData?.premise?.id || "").trim();
+  let premise = null;
+
+  if (premiseId) {
+    const prmSnap = await db.collection("premises").doc(premiseId).get();
+    if (prmSnap.exists) premise = prmSnap.data();
+  }
+
+  // Measured on DEV, 3 Oct: all 264 premises carry geometry.centroid, none without. With
+  // NA-R044 making a premise a prerequisite, the fallback always reaches.
+  const premiseGeometry = readGpsPoint(assetLocation) ? null : premise?.geometry || null;
+
+  // WHOSE WORK IT IS (owner's record, 3 Oct 2026). TR-R001 declares `serviceProvider`, and 447
+  // of 447 transactions WITH access carry it - the Discovery form sends it. The No Access
+  // screen did not, so only 31 of 56 no accesses had one and none of the new ones did: a visit
+  // nobody could be credited for, and a month of no access work that cannot be counted per
+  // service provider.
+  //
+  // It is read from the WORKER'S OWN RECORD rather than asked of the phone, the same way the
+  // municipality comes from the ERF and the address from the premise. The batch guard already
+  // resolves it this way for every submission, so this is the same answer from the same place.
+  if (!isFilled(payload?.serviceProvider?.id) && actorUid) {
+    const userSnap = await db.collection("users").doc(actorUid).get();
+
+    if (userSnap.exists) {
+      const profile = userSnap.data() || {};
+      const spId = profileServiceProviderId(profile);
+
+      if (spId) {
+        const spSnap = await db.collection("serviceProviders").doc(spId).get();
+        // A service provider document has no top-level `name` - the names live under
+        // `profile`. Reading one that does not exist is how every no access came to be stamped
+        // "NAv" beside a correctly resolved id (owner, 4 Oct, reading his own ERF 3619 record).
+        payload.serviceProvider = {
+          id: spId,
+          name: serviceProviderName(spSnap.exists ? spSnap.data() : null),
+        };
+      }
+    }
+  }
+
+  // NA-R030: the premise, written as every other transaction writes it - the address and the
+  // property type as WORDS, from the authority rather than from whatever the phone had.
+  if (premise && payload?.accessData?.premise) {
+    const address = formatStreetAddress(premise.address);
+    const propertyType = formatPropertyType(premise.propertyType);
+
+    if (address) payload.accessData.premise.address = address;
+    if (propertyType) payload.accessData.premise.propertyType = propertyType;
+  }
+
+  payload.ast = {
+    ...(payload.ast && typeof payload.ast === "object" ? payload.ast : {}),
+    location: buildNoAccessLocation({ assetLocation, premiseGeometry }),
+  };
+
+  delete payload.location;
+  delete payload.astId;
+
+  return payload;
+}
 
 export const onMeterDiscoveryCallable = onCall(async (request) => {
   try {
@@ -3491,6 +3627,50 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
 
     delete safePayload.metadata;
 
+    // No Access rules NA-R001 (1.0.0): the SERVER owns the shape of a no access, not the form
+    // that happened to send it.
+    //
+    // Five field names held the reason between them and three encodings held "Other", because
+    // each form wrote it its own way. Normalising here means every no access reaches `trns` in
+    // one shape whatever built it — which is the whole point of one No Access form, enforced
+    // where it cannot be forgotten.
+    //
+    // NA-R031.2: access.reason always carries the display words. The General Monthly Report
+    // reads it first, and the Meter Reading registry's chain reaches it, so both survive the
+    // old names being retired only because this is filled every time.
+    if (hasAccess === "no") {
+      safePayload.accessData = normalizeNoAccessAccessData(safePayload?.accessData, {
+        actor: { uid: caller.uid, name: actorName },
+        metadata: data.metadata,
+      });
+
+      // NA-R043: the municipality and ward are read from the ERF, which is the authority for
+      // where a property is, rather than taken from whatever the phone had cached. The No
+      // Access screen therefore does not assemble them, and the screens that open it cannot
+      // assemble them two different ways.
+      //
+      // GMR-R027 indexes the monthly report on accessData.parents.lmPcode, so a no access that
+      // reached trns without it would be invisible to the report - a record that exists and
+      // cannot be counted.
+      if (noAccessParentsAreMissing(safePayload?.accessData?.parents)) {
+        const erfSnap = await db
+          .collection("ireps_erfs")
+          .doc(safePayload.accessData.erfId)
+          .get();
+
+        if (erfSnap.exists) {
+          safePayload.accessData.parents = buildNoAccessParentsFromErf(erfSnap.data());
+        } else {
+          logger.warn("onMeterDiscoveryCallable --no access ERF not found", {
+            trnId: data.id,
+            erfId: safePayload.accessData.erfId,
+          });
+        }
+      }
+
+      await completeNoAccessFromAuthorities(safePayload, { actorUid: caller.uid });
+    }
+
     if (targetedBatchValidation?.isTargetedBatch) {
       safePayload.targetedBatchContext =
         targetedBatchValidation.targetedBatchContext;
@@ -3508,6 +3688,12 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     }
 
     const now = nowIso;
+
+    // TR-R001 (0.6.0): the agreed root, on the way out. The backfill repaired 493 records on
+    // 3 October and the very next capture arrived without it - no trnType at the root and none
+    // of the five root objects - because the data had been repaired and the writer had not.
+    // NA-R080: writers first, then data. This is the writer's half.
+    applyTrnRootShape(safePayload);
 
     const finalPayload = {
       ...safePayload,
@@ -3597,11 +3783,49 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       }
     } else {
       // No Access: the transaction is the whole record and there is no meter to make. RG-R001 s.1.
+      //
+      // No Access rules NA-R003 (1.2.0): when the work came from a batch row, the row, the Sales
+      // record and the batch move in the SAME commit as the transaction. That bookkeeping used to
+      // live in a separate No Access screen and its own callable, which is what made a no access
+      // from a batch row a different kind of thing from a no access anywhere else. It is the same
+      // thing now, so it is written here, once, with the record.
+      //
+      // The reads come FIRST and the writes after, because Firestore allows no read once a
+      // transaction has written. So: look for the transaction, let the batch half take its reads
+      // and make its updates, and create the transaction last. If the batch half refuses - the
+      // meter is already found, the row is not open - nothing is written at all, which is the
+      // behaviour the deleted callable had.
       try {
-        await trnRef.create(finalPayload);
+        await db.runTransaction(async (tx) => {
+          const existing = await tx.get(trnRef);
+
+          if (existing.exists) {
+            // Two senders can reach here with the same work - the background one and the worker
+            // tapping Sync. The second must not be told its saved work was refused (RG-R001 s.5),
+            // and the batch must not count one visit twice.
+            logger.info("onMeterDiscoveryCallable --no access trn already there", {
+              trnId: data.id,
+            });
+            return;
+          }
+
+          const premiseRef = db.doc(`premises/${finalPayload.accessData.premise.id}`);
+          const premiseSnapshot = await tx.get(premiseRef);
+          await recordTargetedBatchNoAccessInTransaction({
+            transaction: tx,
+            db,
+            trnData: finalPayload,
+            actor: { uid: caller.uid, name: actorName },
+          });
+
+          // TR-R001: the agreed root and nothing else. A no access was reaching trns with
+          // capturedAt, sourceModule, executionOutcome, geofenceRefs and more hanging off the
+          // root, none of them declared. The batch it came from moves into `origin`, which is
+          // the declared home for "where the work came from and what it followed".
+          tx.create(trnRef, stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }));
+          tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(data.id), ...noAccessPremiseMetadata(finalPayload.metadata, premiseSnapshot.data()?.metadata) });
+        });
       } catch (error) {
-        // Two senders can reach here with the same work — the background one and the worker tapping
-        // Sync. The second must not be told its saved work was refused (RG-R001 section 5).
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
 
         logger.info("onMeterDiscoveryCallable --no access trn already there", {
@@ -5430,28 +5654,46 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       caller.uid ||
       "SYSTEM";
 
-    const metadata = {
-      createdAt: now,
-      createdByUid: caller.uid,
-      createdByUser: actorName,
-      updatedAt: now,
-      updatedByUid: caller.uid,
-      updatedByUser: actorName,
-    };
+    // Use the same device/server metadata contract as Discovery and lifecycle work.
+    // An offline visit keeps its capture time when it eventually reaches the server.
+    const metadata = buildRegistrationMetadata({
+      phoneMetadata: data.metadata,
+      actorUid: caller.uid,
+      actorName,
+      nowIso: now,
+    });
 
-    const finalAccessData = safePayload?.accessData || {};
+    // No Access rules NA-R001 (1.0.0): one shape, whichever form sent it. Meter Installation
+    // used to write accessData.access.reason alone, Meter Discovery the same, and the five
+    // lifecycle forms a reasonSelect beside it — so the same field reached `trns` three ways.
+    // The server settles it here, as it does on Meter Discovery.
+    const finalAccessData =
+      hasAccess === "no"
+        ? normalizeNoAccessAccessData(safePayload?.accessData, {
+            actor: { uid: caller.uid, name: actorName },
+            metadata: data.metadata,
+          })
+        : safePayload?.accessData || {};
 
     if (hasAccess === "no") {
-      await trnRef.set(
-        {
-          ...safePayload,
-          accessData: finalAccessData,
-          ast: null,
-          meterType: "NA",
-          metadata,
-        },
-        { merge: true },
+      // TR-R003: the same door Meter Discovery uses. This branch wrote `ast: null`, so a no
+      // access installation carried no position at all - and root `location`, if the phone had
+      // sent one, went straight through in the spread below.
+      const positioned = applyTrnRootShape(
+        await completeNoAccessFromAuthorities(
+          { ...safePayload, accessData: finalAccessData },
+          { actorUid: caller.uid },
+        ),
       );
+
+      await db.runTransaction(async (tx) => {
+        const previous = await tx.get(trnRef);
+        if (previous.exists) return;
+        const premiseRef = db.doc(`premises/${finalAccessData.premise.id}`);
+        const premiseSnapshot = await tx.get(premiseRef);
+        tx.create(trnRef, stripToDeclaredRoot({ ...positioned, meterType: "NA", metadata }, { actor: { uid: caller.uid, name: actorName } }));
+        tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(trnId), ...noAccessPremiseMetadata(metadata, premiseSnapshot.data()?.metadata) });
+      });
 
       return {
         success: true,
@@ -5549,6 +5791,11 @@ export const onMeterInstallationCallable = onCall(async (request) => {
           }
         : {}),
     };
+
+    // TR-R001: the agreed root on the installation path too. This branch builds its own
+    // document rather than passing finalPayload through, so a fix to the other one does not
+    // reach it - the same trap that left Meter Installation writing `ast: null` earlier today.
+    applyTrnRootShape(trnDoc);
 
     const astRef = db.collection("asts").doc(trnId);
     const masterRef = db.collection("meter_master").doc(meterNoNormalized);
@@ -5826,6 +6073,30 @@ export const onMeterInstallationCallable = onCall(async (request) => {
 
     if (error instanceof HttpsError) {
       throw error;
+    }
+
+    // A REFUSAL IS NOT AN INTERNAL ERROR (owner, 3 Oct 2026: "any refusal must carry a proper
+    // reason, and that reason must be shown to the user").
+    //
+    // Every refusal this callable raises - NO_ACCESS_ERF_REQUIRED, NO_ACCESS_PREMISE_REQUIRED,
+    // NO_ACCESS_REASON_INVALID, NO_ACCESS_LOCATION_UNRESOLVED and the rest - was wrapped as
+    // "internal" here, and two things followed. The code was destroyed, so the worker was shown
+    // "Something went wrong" for a refusal the server had explained. And "internal" is not in
+    // the phone's list of thrown refusals, so the item stayed PENDING and was **retried for
+    // ever** - work the office had rejected, going round the queue until the phone was wiped.
+    //
+    // The Meter Discovery callable has carried the code through since 1.3.0. This one did not,
+    // which is the same split that let Installation write `ast: null` while Discovery did not.
+    if (error?.irepsCode || error?.conflict) {
+      const refusal = error?.conflict || {};
+      throw new HttpsError(
+        "failed-precondition",
+        refusal?.message || error?.message || "The work was refused.",
+        {
+          code: refusal?.conflictCode || refusal?.code || error.irepsCode,
+          message: refusal?.message || error?.message || "The work was refused.",
+        },
+      );
     }
 
     throw new HttpsError(

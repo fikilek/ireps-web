@@ -1,40 +1,26 @@
+import { deriveNoAccessGroups, noAccessCaptureTime } from "../../functions/noAccess/groups.js";
+import { formatStreetAddress, formatPropertyType } from "../../functions/premises/streetAddress.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
 
-const NO_ACCESS_REPORT_COLLECTION = "report_trn_no_access";
-const NO_ACCESS_REPORT_LM_FIELD = "parents.lmPcode";
+const NO_ACCESS_REPORT_COLLECTION = "trns";
+const NO_ACCESS_REPORT_LM_FIELD = "accessData.parents.lmPcode";
 
-function normalizeNoAccessRow(id, data) {
+function normalizeNoAccessRow(id, data, group) {
+  const captured = noAccessCaptureTime(data);
   return {
-    id: data?.id || id,
-
-    lmPcode: data?.parents?.lmPcode || "NAv",
-    wardPcode: data?.parents?.wardPcode || "NAv",
-
-    activityDate: data?.activityDate || "NAv",
-
-    reason: data?.access?.reason || "NAv",
-    hasAccess: data?.access?.hasAccess || "NAv",
-
-    erfId: data?.erf?.id || "NAv",
-    erfNo: data?.erf?.no || "NAv",
-
-    premiseId: data?.premise?.id || "NAv",
-    premiseAddress: data?.premise?.address || "NAv",
-    premisePropertyType: data?.premise?.propertyType || "NAv",
-
-    trnType: data?.trn?.type || "NAv",
-    trnCreatedAt: data?.trn?.createdAt || "NAv",
-    trnUpdatedAt: data?.trn?.updatedAt || "NAv",
-
-    userUid: data?.user?.uid || "NAv",
-    userName: data?.user?.name || "NAv",
-
-    reportType: data?.reportType || "NAv",
-
-    updatedAt: data?.metadata?.updatedAt || data?.metadata?.createdAt || "NAv",
+    id, lmPcode: data.accessData?.parents?.lmPcode || "NAv", wardPcode: data.accessData?.parents?.wardPcode || "NAv",
+    activityDate: captured ? new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(captured)) : "Unknown date",
+    reason: data.accessData?.access?.reason || "NAv", appointment: data.accessData?.access?.appointment?.at || null,
+    erfId: data.accessData?.erfId || "NAv", erfNo: data.accessData?.erfNo || "NAv",
+    premiseId: data.accessData?.premise?.id || "NAv", premiseAddress: formatStreetAddress(data.accessData?.premise?.address) || "NAv",
+    premisePropertyType: formatPropertyType(data.accessData?.premise?.propertyType) || "NAv", trnType: data.accessData?.trnType || "NAv",
+    userUid: data.metadata?.createdOnDeviceByUid || data.workflow?.completedByUid || data.metadata?.createdByUid,
+    userName: data.metadata?.createdOnDeviceByUser || data.workflow?.completedByUser || data.metadata?.createdByUser || "NAv",
+    updatedAt: data.metadata?.updatedAt || null,
+    groupId: group?.id || null, groupStatus: group?.status || "UNKNOWN", closingProof: group?.closingProof || null,
   };
 }
 
@@ -79,14 +65,11 @@ export const reportNoAccessApi = createApi({
           unsubscribe = onSnapshot(
             reportQuery,
             (snapshot) => {
-              const rows = snapshot.docs
-                .map((documentSnapshot) =>
-                  normalizeNoAccessRow(
-                    documentSnapshot.id,
-                    documentSnapshot.data(),
-                  ),
-                )
-                .sort(sortNoAccessRows);
+              const transactions = snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id }));
+              const { groups } = deriveNoAccessGroups(transactions);
+              const groupByVisit = new Map(groups.flatMap((group) => group.visitIds.map((id) => [id, group])));
+              const rows = transactions.filter((trn) => trn.accessData?.access?.hasAccess === "no")
+                .map((trn) => normalizeNoAccessRow(trn.id, trn, groupByVisit.get(trn.id))).sort(sortNoAccessRows);
 
               updateCachedData((draft) => {
                 draft.splice(0, draft.length, ...rows);

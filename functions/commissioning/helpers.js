@@ -1,5 +1,5 @@
+import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import {
-  buildFlatMetadata,
   getAstCurrentState,
   getAstData,
   normalizeUpper,
@@ -214,7 +214,8 @@ export function validateCommissioningCreateInput(data = {}) {
     };
   }
 
-  if (!data?.commissioning || typeof data.commissioning !== "object") {
+  if (normalizeLower(data?.accessData?.access?.hasAccess) !== "no" &&
+      (!data?.commissioning || typeof data.commissioning !== "object")) {
     return {
       ok: false,
       code: "INVALID_COMMISSIONING_DATA",
@@ -434,8 +435,9 @@ export function buildCommissioningTrnPayload({
 
     media: sanitizeMedia(data?.media || []),
 
-    metadata: buildFlatMetadata({
-      now,
+    metadata: buildRegistrationMetadata({
+      phoneMetadata: data.metadata,
+      nowIso: now,
       actorUid,
       actorName,
     }),
