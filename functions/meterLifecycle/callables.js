@@ -1,4 +1,6 @@
 import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
+import { recordRefusedSubmission } from "../registration/refusedSubmissions.js";
+import { SYSTEM_FAULT_CODES } from "./systemFault.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -411,6 +413,32 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     const commonCheck = validateCommonLifecycleInput(data);
 
     if (!commonCheck.ok) {
+      // NA-R065 (owner, 7 October 2026) - A FAULT IN THE SYSTEM MUST BE VISIBLE.
+      //
+      // "If somehow the system does the ID wrong, you can't submit that because the ID doesn't
+      // meet the rules. But then in situations like that, we need to have a way to know, because
+      // then it means the problem is not from the user, it's from the system."
+      //
+      // These are the captures the APP built wrong: no transaction id, no accessData, no meter,
+      // no premise, a type this callable does not own. The worker can do nothing about any of
+      // them, so the phone no longer asks them to - which means that without this line the fault
+      // would live in one phone's queue and a log entry, and nobody would ever fix it.
+      //
+      // recordRefusedSubmission never throws and never blocks the answer: a failure to record a
+      // failure must not become a worse one.
+      if (SYSTEM_FAULT_CODES.includes(commonCheck.code)) {
+        await recordRefusedSubmission({
+          db,
+          trnId: data?.id || "NAv",
+          code: commonCheck.code,
+          message: commonCheck.message,
+          data,
+          actorUid,
+          actorUser: actorName,
+          now,
+        });
+      }
+
       return buildFailureResult(commonCheck.code, commonCheck.message);
     }
 

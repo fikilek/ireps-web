@@ -1120,3 +1120,93 @@ test("TR-R001: an exemption from carrying a code is not permission to carry the 
   assert.equal(result.ok, false);
   assert.equal(result.code, "ASSIGNMENT_INSTRUCTION_MISMATCH");
 });
+
+// NA-R065 — A FAULT IN THE SYSTEM IS NOT A FAULT IN THE WORKER, AND IT MUST BE VISIBLE.
+//
+// The owner, 7 October 2026: "if somehow the system does the ID wrong ... we need to have a way to
+// know, because then it means the problem is not from the user, it's from the system."
+
+test("NA-R065: the two repos agree on what a system fault is", async () => {
+  const { SYSTEM_FAULT_CODES } = await import("../meterLifecycle/systemFault.js");
+
+  // The phone cannot be imported from here, so the list is read from its source. A code the server
+  // calls a system fault and the phone does not is retried for ever; the reverse tells a worker
+  // that something they could have fixed is nobody's fault.
+  const { readFile } = await import("node:fs/promises");
+  const path = await import("node:path");
+
+  const roots = [
+    process.env.IREPS_MOBILE_ROOT,
+    path.resolve(process.cwd(), "../../ireps-mobile"),
+    "C:/dev/ireps-mobile",
+  ].filter(Boolean);
+
+  let mobileSource = null;
+  for (const root of roots) {
+    try {
+      mobileSource = await readFile(
+        path.join(root, "src/features/meters/noAccessSubmitMessages.js"),
+        "utf8",
+      );
+      break;
+    } catch {
+      // try the next one
+    }
+  }
+
+  // NA-R066: a check that cannot run must not report success.
+  assert.ok(
+    mobileSource,
+    `The phone's copy of the list could not be read, so the two repos could not be compared.\nLooked in:\n  ${roots.join("\n  ")}\nSet IREPS_MOBILE_ROOT to a checkout of ireps-mobile.`,
+  );
+
+  const block = mobileSource.slice(mobileSource.indexOf("export const SYSTEM_FAULT_CODES"));
+  const phoneCodes = [...block.slice(0, block.indexOf("]")).matchAll(/"([A-Z0-9_]+)"/g)].map(
+    (m) => m[1],
+  );
+
+  const missingOnPhone = SYSTEM_FAULT_CODES.filter((code) => !phoneCodes.includes(code));
+
+  assert.deepEqual(
+    missingOnPhone,
+    [],
+    `the server treats these as system faults and the phone does not, so it will retry them for ever: ${missingOnPhone.join(", ")}`,
+  );
+});
+
+test("NA-R065: a worker's own mistake is never recorded as a system fault", async () => {
+  const { isSystemFault } = await import("../meterLifecycle/systemFault.js");
+
+  for (const code of [
+    "NO_ACCESS_REASON_REQUIRED",
+    "NO_ACCESS_PHOTO_REQUIRED",
+    "INSTRUCTION_NOT_ACCEPTED",
+    "NO_ACCESS_APPOINTMENT_NOT_FUTURE_AT_CAPTURE",
+  ]) {
+    assert.equal(isSystemFault(code), false, `${code} was taken out of the worker's hands`);
+  }
+
+  assert.equal(isSystemFault("INVALID_PREMISE_ID"), true);
+  assert.equal(isSystemFault("invalid_trn_id"), true);
+});
+
+test("NA-R065: the lifecycle callable records a system fault where the office can see it", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../meterLifecycle/callables.js", import.meta.url), "utf8");
+
+  const block = source.slice(
+    source.indexOf("if (!commonCheck.ok) {"),
+    source.indexOf("const { trnId, trnType, astId, premiseId } = commonCheck;"),
+  );
+
+  assert.match(
+    block,
+    /SYSTEM_FAULT_CODES\.includes\(commonCheck\.code\)/,
+    "every refusal is recorded, or none is - the worker's own mistakes do not belong in the office's fault list",
+  );
+  assert.match(
+    block,
+    /recordRefusedSubmission\(/,
+    "a capture the app built wrong lives in one phone's queue and a log line, where nobody will fix it",
+  );
+});
