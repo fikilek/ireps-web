@@ -77,6 +77,37 @@ test("all eight actual pages supply loaded rows and unique columns to the shared
   }
 });
 
+test("TRN unit columns follow Address, combine filters, sort naturally and appear in downloads", () => {
+  const table = pageTable("Trns");
+  const keys = table.columns.map(column => column.key);
+  assert.deepEqual(keys.slice(keys.indexOf("premiseAddress"), keys.indexOf("erfNo") + 1), ["premiseAddress", "unitName", "unitNo", "erfNo"]);
+  assert.equal(filter(table, { unitName: "oak", unitNo: "10" })[0].trnId, "TRN-9");
+  assert.equal(filter(table, { unitName: "palm", unitNo: "10" }).length, 0);
+  const sorted = sortIrepsTableRows(table.rows, table.columns, { key: "unitNo", direction: "asc" });
+  assert.deepEqual(sorted.map(row => row.unitNo), ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "NAv"]);
+  const descending = sortIrepsTableRows(table.rows, table.columns, { key: "unitNo", direction: "desc" });
+  assert.equal(descending.at(-1).unitNo, "NAv");
+  for (const [key, header] of [["unitName", "Unit Name"], ["unitNo", "Unit No"]]) {
+    const column = table.columns.find(c => c.key === key);
+    assert.equal(renderToStaticMarkup(column.render(table.rows.at(-1))), "NAv");
+    const download = table.downloads.columns.find(c => c.header === header);
+    assert.equal(download.value(table.rows[9]), table.rows[9][key]);
+  }
+});
+
+test("Meter unit columns follow Address, filter independently and export the saved unit", () => {
+  const table = pageTable("Meters");
+  const keys = table.columns.map(c => c.key);
+  const address = keys.indexOf("premiseAddress");
+  assert.deepEqual(keys.slice(address, address + 3), ["premiseAddress", "premiseUnitName", "premiseUnitNo"]);
+  assert.equal(filter(table, { premiseUnitName: "oak", premiseUnitNo: "10" })[0].meterNo, "00010");
+  assert.equal(filter(table, { premiseUnitName: "palm", premiseUnitNo: "10" }).length, 0);
+  assert.deepEqual(sortIrepsTableRows(table.rows, table.columns, { key: "premiseUnitNo", direction: "asc" }).map(r => r.premiseUnitNo), ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "NAv"]);
+  assert.equal(sortIrepsTableRows(table.rows, table.columns, { key: "premiseUnitNo", direction: "desc" }).at(-1).premiseUnitNo, "NAv");
+  assert.equal(table.downloads.columns.find(c => c.header === "Unit Name").value(table.rows[9]), "Oak Court");
+  assert.equal(table.downloads.columns.find(c => c.header === "Unit No").value(table.rows[9]), "10");
+});
+
 test("registry text, categorical and compound account filters preserve business matching", () => {
   assert.equal(filter(pageTable("Wards"),{wardNumber:"012"}).length,1);
   assert.equal(filter(pageTable("Erfs"),{erfType:"FORMAL"}).length,6);
@@ -114,7 +145,7 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,16);
+  assert.equal(table.columns.length,18);
   assert.ok(table.columns.some(c=>!c.sortable && c.render));
 });
 

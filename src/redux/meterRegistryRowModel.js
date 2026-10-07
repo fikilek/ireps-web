@@ -12,6 +12,8 @@
 // The rules it serves: collection-shape-rules/asts.md 10.1 (ireps-rules) and
 // DR-SCH-009 (ireps-schemas).
 
+import { savedRegistryUnits } from "../utils/registryTrnUnits.js";
+
 export function serializeRegistryDateValue(value) {
   if (!value || value === "NAv") return "NAv";
 
@@ -37,6 +39,7 @@ export function serializeRegistryDateValue(value) {
 }
 
 export function normalizeMeterRegistryRow(id, data) {
+  const units = savedRegistryUnits({ unitName: data?.premiseUnitName, unitNo: data?.premiseUnitNo });
   return {
     id,
 
@@ -56,6 +59,8 @@ export function normalizeMeterRegistryRow(id, data) {
     premiseId: data?.premiseId || "NAv",
     premiseAddress: data?.premiseAddress || "NAv",
     premisePropertyType: data?.premisePropertyType || "NAv",
+    premiseUnitName: units.unitName,
+    premiseUnitNo: units.unitNo,
 
     lmPcode: data?.parents?.lmPcode || "NAv",
     wardPcode: data?.parents?.wardPcode || "NAv",

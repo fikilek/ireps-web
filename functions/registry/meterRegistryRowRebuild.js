@@ -2,6 +2,7 @@
 
 import * as logger from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
+import { savedPremiseUnits } from "./savedPremiseUnits.js";
 
 function normalizeMeterNo(value) {
   return String(value || "")
@@ -99,6 +100,7 @@ function buildMeterRegistryRow(astId, data = {}) {
     premiseId: data?.accessData?.premise?.id || "NAv",
     premiseAddress: data?.accessData?.premise?.address || "NAv",
     premisePropertyType: data?.accessData?.premise?.propertyType || "NAv",
+    ...savedPremiseUnits(data?.accessData?.premise),
 
     erfId: data?.accessData?.erfId || "NAv",
     erfNo: data?.accessData?.erfNo || "NAv",

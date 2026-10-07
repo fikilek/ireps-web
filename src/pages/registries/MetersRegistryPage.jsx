@@ -32,6 +32,8 @@ const EMPTY_METER_FILTERS = {
   status: "ALL",
   erfNo: "",
   premiseAddress: "",
+  premiseUnitName: "",
+  premiseUnitNo: "",
   premiseType: "",
   registration: "ALL",
   // DR-R001 3.2 and 3.3: each count filters on its own. The office types the
@@ -536,6 +538,8 @@ export default function MetersRegistryPage() {
       const statusText = row.statusState || row.status || "NAv";
       return includesText(row.meterNo, filters.meterNo) && (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) && (filters.meterKind === "ALL" || String(row.meterKind || "").toLowerCase() === filters.meterKind.toLowerCase()) && (filters.meterPhase === "ALL" || String(row.meterPhase || "").toLowerCase() === filters.meterPhase.toLowerCase()) && (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) && (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) && includesText(row.erfNo, filters.erfNo) && includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress) && includesText(row.premisePropertyType, filters.premiseType)
         && (filters.registration === "ALL" || registrationOf(row) === filters.registration)
+        && includesText(row.premiseUnitName, filters.premiseUnitName)
+        && includesText(row.premiseUnitNo, filters.premiseUnitNo)
         // DR-R001 3.2 and 3.3: never disconnected, disconnected more than
         // once, nobody could get in — each count filters on its own.
         && matchesCountFilter(readMeterCount(row, "noAccess"), filters.noAccessCount)
@@ -596,6 +600,14 @@ export default function MetersRegistryPage() {
           return `${address}
 ${premiseId}`;
         },
+      },
+      {
+        header: "Unit Name",
+        value: (row) => row.premiseUnitName || "NAv",
+      },
+      {
+        header: "Unit No",
+        value: (row) => row.premiseUnitNo || "NAv",
       },
       {
         header: "Premise Type",
@@ -818,6 +830,24 @@ ${premiseId}`;
         </>
       );
     }
+  }, {
+    key: "premiseUnitName",
+    label: "Unit Name",
+    filter: "text",
+    sortable: true,
+    value: row => row.premiseUnitName || "NAv",
+    sortValue: row => row.premiseUnitName === "NAv" ? null : row.premiseUnitName,
+    sortEmptyLast: true,
+    cellStyle: { minWidth: "10rem", maxWidth: "18rem", whiteSpace: "normal" },
+  }, {
+    key: "premiseUnitNo",
+    label: "Unit No",
+    filter: "text",
+    sortable: true,
+    value: row => row.premiseUnitNo || "NAv",
+    sortValue: row => row.premiseUnitNo === "NAv" ? null : row.premiseUnitNo,
+    sortEmptyLast: true,
+    cellStyle: { minWidth: "6rem" },
   }, {
     // How this meter came into iREPS, and the transaction that put it there.
     key: "registration",

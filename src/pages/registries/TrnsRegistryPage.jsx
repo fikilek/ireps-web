@@ -53,6 +53,8 @@ const EMPTY_TRN_FILTERS = {
   trnId: "",
   meterNo: "",
   premiseAddress: "",
+  unitName: "",
+  unitNo: "",
   erfNo: "",
   wardNo: "",
   mediaCount: "",
@@ -442,7 +444,7 @@ export default function TrnsRegistryPage() {
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
-      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && matchesDateFilter(row.createdAt, createdAtFilter);
+      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && matchesDateFilter(row.createdAt, createdAtFilter);
     });
   }, []);
 
@@ -482,6 +484,8 @@ export default function TrnsRegistryPage() {
         header: "Address",
         value: (row) => row.premiseAddress || "NAv",
       },
+      { header: "Unit Name", value: (row) => row.unitName || "NAv" },
+      { header: "Unit No", value: (row) => row.unitNo || "NAv" },
       { header: "ERF No", value: (row) => row.erfNo || "NAv" },
       { header: "Ward No", value: (row) => row.wardNo || "NAv" },
       { header: "Media Count", value: (row) => Number(row.mediaCount) || 0 },
@@ -616,6 +620,24 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
 
     cellStyle: styles.addressCell
+  }, {
+    key: "unitName",
+    label: "Unit Name",
+    filter: "text",
+    sortable: true,
+    value: row => isMissingSortValue(row.unitName) ? null : row.unitName,
+    render: row => row.unitName || "NAv",
+    sortEmptyLast: true,
+    cellStyle: { minWidth: "10rem", maxWidth: "18rem", whiteSpace: "normal" },
+  }, {
+    key: "unitNo",
+    label: "Unit No",
+    filter: "text",
+    sortable: true,
+    value: row => isMissingSortValue(row.unitNo) ? null : row.unitNo,
+    render: row => row.unitNo || "NAv",
+    sortEmptyLast: true,
+    cellStyle: { minWidth: "6rem" },
   }, {
     key: "erfNo",
     label: "ERF No",

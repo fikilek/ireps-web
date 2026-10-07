@@ -17,6 +17,7 @@ import { getAuth } from "firebase-admin/auth";
 import { onTrnWritten } from "./reports/trnReports.js";
 
 import { rebuildMeterRegistryRow } from "./registry/meterRegistryRowRebuild.js";
+import { didSavedPremiseAddressChange } from "./registry/savedPremiseUnits.js";
 import { newMeterCounts, readMeterCountsFingerprint } from "./registration/meterCounts.js";
 import { rebuildMeterRegistryRowCallable } from "./registry/meterCallable.js";
 
@@ -4707,6 +4708,7 @@ export const onMeterUpdated = onDocumentUpdated(
     const beforePremiseId = getPremiseIdFromAstData(dataBefore);
     const afterPremiseId = getPremiseIdFromAstData(dataAfter);
     const premiseChanged = beforePremiseId !== afterPremiseId;
+    const premiseAddressChanged = didSavedPremiseAddressChange(dataBefore, dataAfter);
 
     const beforeActiveLifecycleSignature = JSON.stringify(
       dataBefore?.trnActiveLifecycle || {},
@@ -4749,6 +4751,7 @@ export const onMeterUpdated = onDocumentUpdated(
       !meterTypeChanged &&
       !astNoChanged &&
       !premiseChanged &&
+      !premiseAddressChanged &&
       !activeLifecycleChanged &&
       !countsChanged
     ) {
@@ -4766,6 +4769,7 @@ export const onMeterUpdated = onDocumentUpdated(
       meterTypeChanged,
       astNoChanged,
       premiseChanged,
+      premiseAddressChanged,
       beforePremiseId,
       afterPremiseId,
       activeLifecycleChanged,

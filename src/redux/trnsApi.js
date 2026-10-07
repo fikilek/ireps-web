@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 
 import { registryNoAccessDetails } from "../utils/registryNoAccess.js";
+import { savedRegistryUnits } from "../utils/registryTrnUnits.js";
 import { db } from "../firebase";
 
 const TRNS_COLLECTION = "trns";
@@ -323,6 +324,8 @@ function normalizeTrnRegistryDoc(docSnap) {
     erfId: valueOrNav(data.accessData?.erfId),
     erfNo: valueOrNav(data.accessData?.erfNo),
     premiseAddress: valueOrNav(data.accessData?.premise?.address),
+    premiseId: valueOrNav(data.accessData?.premise?.id),
+    ...savedRegistryUnits(data.accessData?.premise),
     hasAccess: normalizeRegistryCode(data.accessData?.access?.hasAccess),
     ...registryNoAccessDetails(data.accessData?.access),
     meterNo,

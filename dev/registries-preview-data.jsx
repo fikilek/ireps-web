@@ -9,6 +9,9 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
   trnsAccessCount: i, trnsNaCount: 1, trnsTotalCount: i + 1,
   addressText: `${i + 1} Preview Road`, premiseAddress: `${i + 1} Preview Road`, premiseId: `premise-${i}`,
   propertyTypeType: i % 2 ? "RESIDENTIAL" : "COMMERCIAL", propertyTypeName: "House", premiseType: "Residential", unitNo: `${i + 1}`, occupancyStatus: i % 2 ? "OCCUPIED" : "VACANT",
+  unitName: i === 11 ? "NAv" : i % 2 ? "Oak Court" : "Palm Court",
+  premiseUnitName: i === 11 ? "NAv" : i % 2 ? "Oak Court" : "Palm Court",
+  premiseUnitNo: i === 11 ? "NAv" : String(i + 1),
   meterNo: `000${i + 1}`, meterType: i % 2 ? "water" : "electricity", meterKind: "PREPAID", meterPhase: "SINGLE_PHASE", visibility: "VISIBLE", status: "FIELD",
   ownerLabel: `Owner ${i + 1}`, ownerType: i % 2 ? "NATURAL_PERSON" : "JURISTIC_PERSON", occupantLabel: `Occupant ${i + 1}`,
   accounts: Array.from({length: 7}, (_, j) => ({accountNo: `A${i}-${7-j}`})), accountCount: 7,
@@ -24,7 +27,7 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
 }));
 export const previewRows = rowData;
 const empty = [];
-const result = data => ({data, isLoading:false, isFetching:false, isError:false, refetch: async()=>({data})});
+const result = data => ({data, currentData:data, isLoading:false, isFetching:false, isError:false, refetch: async()=>({data})});
 const scoped = arg => typeof arg === "symbol" ? empty : rowData;
 const wards = rowData.map((row,i)=>({...row,wardPcode:i===0?wardPcode:`ZA5241${String(i+2).padStart(3,"0")}`}));
 export const useAuth = () => ({activeWorkbase:{id:"ZA5241",lmPcode:"ZA5241",name:"Preview Municipality"},role:"MNG"});
@@ -34,7 +37,7 @@ export const useGetWardBoundariesByLmQuery = () => result(empty);
 export const useGetRegistryPremisesByWardQuery = arg => result(scoped(arg));
 export const useGetRegistryMetersByWardQuery = arg => result(scoped(arg));
 export const useGetRegistryAccountsByWardQuery = arg => result(scoped(arg));
-export const useGetRegistryTrnsByLmPcodeQuery = arg => result(scoped(arg));
+export const useGetRegistryTrnsByLmPcodeQuery = arg => result(scoped(arg).map(row => ({ ...row, unitNo: row.premiseUnitNo })));
 export const useGetRegistryMreadByWardQuery = arg => result(scoped(arg));
 const firstPage = {rows:rowData,hasMore:true,nextCursorId:"preview-cursor"};
 export const useGetRegistryErfsPageByWardQuery = arg => result(typeof arg === "symbol" ? {rows:empty} : firstPage);
