@@ -7,6 +7,7 @@ import { initializeApp, cert, deleteApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { ADDRESS_FIELDS, assertRegistryBackfillProject, planRegistryAddressBackfill } from "../maintenance/registryAddressBackfillPlan.js";
 import { savedPremiseUnits } from "../registry/savedPremiseUnits.js";
+import { readRegistryVerificationSnapshots } from "../maintenance/registryBackfillVerificationReads.js";
 
 const args = process.argv.slice(2);
 const option = name => args[args.indexOf(name) + 1];
@@ -93,16 +94,19 @@ try {
       }
     }));
     const verification = [];
+    const appliedPaths = new Set(results.filter(item => item.status === "APPLIED").map(item => item.path));
+    const snapshots = await readRegistryVerificationSnapshots(db,
+      candidates.filter(item => appliedPaths.has(item.path)).flatMap(item => [item.path, item.registryPath].filter(Boolean)));
     for (const result of results.filter(item => item.status === "APPLIED")) {
       const item = candidates.find(item => item.path === result.path);
-      const after = await db.doc(item.path).get();
+      const after = snapshots.get(item.path);
       const values = after.data()?.accessData?.premise;
       const fieldsMatch = ADDRESS_FIELDS.every(field => values?.[field] === item.values[field]);
       // JSON round-trip compares Firestore values to their saved backup form.
       const unrelatedUnchanged = isDeepStrictEqual(strip(JSON.parse(JSON.stringify(after.data()))), strip(backups.get(item.path).data));
       let registryMatches = true;
       if (item.registryPath) {
-        const row = await db.doc(item.registryPath).get();
+        const row = snapshots.get(item.registryPath);
         registryMatches = Object.entries(item.registryPatch).every(([k,v]) => row.data()?.[k] === v);
       }
       verification.push({ path: item.path, fieldsMatch, unrelatedUnchanged, registryMatches });
