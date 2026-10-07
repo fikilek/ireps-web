@@ -5,6 +5,11 @@ TRN and Meter registries, with filters, sorting and downloads. Backfill existing
 DEV records first, verify on hosted DEV, then follow separate TEST and LIVE
 review stages. Form changes are explicitly deferred.
 
+Owner follow-up: Property Type precedes Address in both registries and their
+downloads. The TRN row reads saved `accessData.premise.propertyType`; Meter
+Registry moves its existing property type column before the address. Both have
+text filtering and sorting; no additional data migration is needed for this column.
+
 The saved `accessData.premise` on `trns` and `asts` gains five string fields:
 `strNo`, `strName`, `strType`, `unitName`, `unitNo`. Existing `id` and
 `propertyType` remain unchanged. Saved `address` is rebuilt from the linked

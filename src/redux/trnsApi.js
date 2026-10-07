@@ -324,6 +324,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     erfId: valueOrNav(data.accessData?.erfId),
     erfNo: valueOrNav(data.accessData?.erfNo),
     premiseAddress: valueOrNav(data.accessData?.premise?.address),
+    premisePropertyType: valueOrNav(data.accessData?.premise?.propertyType),
     premiseId: valueOrNav(data.accessData?.premise?.id),
     ...savedRegistryUnits(data.accessData?.premise),
     hasAccess: normalizeRegistryCode(data.accessData?.access?.hasAccess),

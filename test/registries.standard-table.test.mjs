@@ -80,7 +80,10 @@ test("all eight actual pages supply loaded rows and unique columns to the shared
 test("TRN unit columns follow Address, combine filters, sort naturally and appear in downloads", () => {
   const table = pageTable("Trns");
   const keys = table.columns.map(column => column.key);
-  assert.deepEqual(keys.slice(keys.indexOf("premiseAddress"), keys.indexOf("erfNo") + 1), ["premiseAddress", "unitName", "unitNo", "erfNo"]);
+  assert.deepEqual(keys.slice(keys.indexOf("premisePropertyType"), keys.indexOf("erfNo") + 1), ["premisePropertyType", "premiseAddress", "unitName", "unitNo", "erfNo"]);
+  assert.equal(filter(table, { premisePropertyType: "commercial", unitNo: "1" })[0].trnId, "TRN-0");
+  assert.equal(filter(table, { premisePropertyType: "residential", unitNo: "1" }).length, 1);
+  assert.equal(table.downloads.columns.find(c => c.header === "Property Type").value(table.rows[0]), "Commercial");
   assert.equal(filter(table, { unitName: "oak", unitNo: "10" })[0].trnId, "TRN-9");
   assert.equal(filter(table, { unitName: "palm", unitNo: "10" }).length, 0);
   const sorted = sortIrepsTableRows(table.rows, table.columns, { key: "unitNo", direction: "asc" });
@@ -99,7 +102,9 @@ test("Meter unit columns follow Address, filter independently and export the sav
   const table = pageTable("Meters");
   const keys = table.columns.map(c => c.key);
   const address = keys.indexOf("premiseAddress");
-  assert.deepEqual(keys.slice(address, address + 3), ["premiseAddress", "premiseUnitName", "premiseUnitNo"]);
+  assert.deepEqual(keys.slice(address - 1, address + 3), ["premiseType", "premiseAddress", "premiseUnitName", "premiseUnitNo"]);
+  assert.equal(filter(table, { premiseType: "commercial" }).length, 6);
+  assert.equal(table.downloads.columns.find(c => c.header === "Property Type").value(table.rows[0]), "Commercial");
   assert.equal(filter(table, { premiseUnitName: "oak", premiseUnitNo: "10" })[0].meterNo, "00010");
   assert.equal(filter(table, { premiseUnitName: "palm", premiseUnitNo: "10" }).length, 0);
   assert.deepEqual(sortIrepsTableRows(table.rows, table.columns, { key: "premiseUnitNo", direction: "asc" }).map(r => r.premiseUnitNo), ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "NAv"]);
@@ -145,7 +150,7 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,18);
+  assert.equal(table.columns.length,19);
   assert.ok(table.columns.some(c=>!c.sortable && c.render));
 });
 

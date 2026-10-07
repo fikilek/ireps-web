@@ -10,6 +10,7 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
   addressText: `${i + 1} Preview Road`, premiseAddress: `${i + 1} Preview Road`, premiseId: `premise-${i}`,
   propertyTypeType: i % 2 ? "RESIDENTIAL" : "COMMERCIAL", propertyTypeName: "House", premiseType: "Residential", unitNo: `${i + 1}`, occupancyStatus: i % 2 ? "OCCUPIED" : "VACANT",
   unitName: i === 11 ? "NAv" : i % 2 ? "Oak Court" : "Palm Court",
+  premisePropertyType: i === 11 ? "NAv" : i % 2 ? "Residential" : "Commercial",
   premiseUnitName: i === 11 ? "NAv" : i % 2 ? "Oak Court" : "Palm Court",
   premiseUnitNo: i === 11 ? "NAv" : String(i + 1),
   meterNo: `000${i + 1}`, meterType: i % 2 ? "water" : "electricity", meterKind: "PREPAID", meterPhase: "SINGLE_PHASE", visibility: "VISIBLE", status: "FIELD",

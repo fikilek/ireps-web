@@ -593,6 +593,10 @@ export default function MetersRegistryPage() {
         value: (row) => row.erfNo || "NAv",
       },
       {
+        header: "Property Type",
+        value: (row) => row.premisePropertyType || "NAv",
+      },
+      {
         header: "Premise Address",
         value: (row) => {
           const address = row.premiseAddress || "NAv";
@@ -608,10 +612,6 @@ ${premiseId}`;
       {
         header: "Unit No",
         value: (row) => row.premiseUnitNo || "NAv",
-      },
-      {
-        header: "Premise Type",
-        value: (row) => row.premisePropertyType || "NAv",
       },
       {
         header: "updatedAt",
@@ -801,6 +801,15 @@ ${premiseId}`;
       );
     }
   }, {
+    key: "premiseType",
+    label: "Property Type",
+    group: "location",
+    filter: "text",
+    sortable: true,
+    value: row => row.premisePropertyType || "NAv",
+    sortValue: row => row.premisePropertyType === "NAv" ? null : row.premisePropertyType,
+    sortEmptyLast: true,
+  }, {
     key: "premiseAddress",
     label: "Premise Address",
     group: "location",
@@ -923,17 +932,6 @@ ${premiseId}`;
           Report
         </DataActionButton>
       );
-    }
-  }, {
-    key: "premiseType",
-    label: "Premise Type",
-    group: "location",
-    filter: "text",
-    sortable: true,
-    value: row => getSortValue(row, "premiseType"),
-    sortValue: row => getSortValue(row, "premiseType"),
-    render: row => {
-      return <>{row.premisePropertyType}</>;
     }
   }, {
     key: "updatedAt",

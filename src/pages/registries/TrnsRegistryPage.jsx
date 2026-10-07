@@ -53,6 +53,7 @@ const EMPTY_TRN_FILTERS = {
   trnId: "",
   meterNo: "",
   premiseAddress: "",
+  premisePropertyType: "",
   unitName: "",
   unitNo: "",
   erfNo: "",
@@ -441,6 +442,7 @@ export default function TrnsRegistryPage() {
     }
     const createdAtFilter = tableFilters.createdAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
+      if (!includesText(row.premisePropertyType, filters.premisePropertyType)) return false;
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
@@ -480,6 +482,7 @@ export default function TrnsRegistryPage() {
   const quickDownloadColumns = useMemo(
     () => [
       { header: "Meter No", value: (row) => row.meterNo || "NAv" },
+      { header: "Property Type", value: (row) => row.premisePropertyType || "NAv" },
       {
         header: "Address",
         value: (row) => row.premiseAddress || "NAv",
@@ -601,6 +604,14 @@ export default function TrnsRegistryPage() {
     }))],
     sortEmptyLast: true,
 
+  }, {
+    key: "premisePropertyType",
+    label: "Property Type",
+    filter: "text",
+    sortable: true,
+    value: row => isMissingSortValue(row.premisePropertyType) ? null : row.premisePropertyType,
+    render: row => row.premisePropertyType || "NAv",
+    sortEmptyLast: true,
   }, {
     key: "premiseAddress",
     label: "Address",
