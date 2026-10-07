@@ -351,6 +351,9 @@ async function fetchEmbeddableMedia(
 
   for (let mediaIndex = 0; mediaIndex < items.length; mediaIndex += 1) {
     const item = items[mediaIndex] || {};
+    // Field Comments in the printed report contain text and photos only. Keep
+    // original array indices for the authenticated transaction media loader.
+    if (["fieldCommentVoice", "fieldCommentVideo"].includes(item.tag)) continue;
     const url = item?.url;
     const sourceMediaIndex = Number.isInteger(item?.mediaIndex)
       ? item.mediaIndex
@@ -564,6 +567,141 @@ export async function buildQuickTrnPdfArtifact(
 
   sections.forEach(drawSection);
 
+  function drawFieldCommentsHeading(continued = false) {
+    page.drawText(continued ? "Field Comments (continued)" : "Field Comments", {
+      x: PAGE.margin,
+      y,
+      size: 11,
+      font: bold,
+      color: COLORS.blue,
+    });
+    y -= 12;
+    page.drawLine({
+      start: { x: PAGE.margin, y },
+      end: { x: PAGE.width - PAGE.margin, y },
+      thickness: 0.8,
+      color: COLORS.line,
+    });
+    y -= 20;
+  }
+
+  function drawFieldComments() {
+    const comment = raw?.fieldComment?.text;
+    const hasText = typeof comment === "string" && isMeaningful(comment);
+    const photos = media.filter((entry) => entry.item?.tag === "fieldCommentPhoto");
+    if (!hasText && !photos.length) return;
+
+    const contentWidth = PAGE.width - PAGE.margin * 2;
+    let headingDrawn = false;
+    function reserveCommentSpace(required) {
+      const headingHeight = headingDrawn ? 0 : 32;
+      if (y - required - headingHeight < 54) {
+        addPage();
+        drawFieldCommentsHeading(headingDrawn);
+      } else if (!headingDrawn) {
+        drawFieldCommentsHeading();
+      }
+      headingDrawn = true;
+    }
+
+    if (hasText) {
+      const lines = wrapText(regular, comment, 9.2, contentWidth - 24);
+      let offset = 0;
+      while (offset < lines.length) {
+        reserveCommentSpace(76);
+        page.drawText(offset ? "Field Comment Text (continued)" : "Field Comment Text", {
+          x: PAGE.margin,
+          y,
+          size: 9,
+          font: bold,
+          color: COLORS.ink,
+        });
+        y -= 14;
+        const count = Math.min(lines.length - offset, Math.floor((y - 54 - 32) / 12));
+        const height = count * 12 + 20;
+        page.drawRectangle({
+          x: PAGE.margin,
+          y: y - height,
+          width: contentWidth,
+          height,
+          color: COLORS.panel,
+        });
+        lines.slice(offset, offset + count).forEach((line, index) => {
+          page.drawText(line || " ", {
+            x: PAGE.margin + 12,
+            y: y - 15 - index * 12,
+            size: 9.2,
+            font: regular,
+            color: COLORS.ink,
+          });
+        });
+        offset += count;
+        y -= height + 20;
+      }
+    }
+
+    photos.forEach((entry, index) => {
+      const metadata = [];
+      if (isMeaningful(entry.item?.created?.byUser)) {
+        metadata.push(`Captured By: ${text(entry.item.created.byUser)}`);
+      }
+      if (isMeaningful(entry.item?.created?.at)) {
+        metadata.push(`Captured At: ${formatDateTime(entry.item.created.at)}`);
+      }
+      const metadataLines = metadata.length
+        ? wrapText(regular, metadata.join("  |  "), 8, contentWidth)
+        : [];
+      const scale = entry.image
+        ? Math.min((contentWidth - 16) / entry.image.width, 320 / entry.image.height)
+        : 0;
+      const imageHeight = entry.image ? entry.image.height * scale : 0;
+      const unavailableLines = entry.image ? [] : wrapText(
+        regular,
+        "Field Comment photo could not be loaded for this report. Please try generating it again.",
+        9.2,
+        contentWidth - 24,
+      );
+      const height = entry.image ? imageHeight + 16 : unavailableLines.length * 12 + 20;
+      reserveCommentSpace(18 + metadataLines.length * 11 + height + 20);
+      page.drawText(`Field Comment Photo ${index + 1}`, {
+        x: PAGE.margin,
+        y,
+        size: 9,
+        font: bold,
+        color: COLORS.ink,
+      });
+      y -= 18;
+      metadataLines.forEach((line) => {
+        page.drawText(line || " ", {
+          x: PAGE.margin, y, size: 8, font: regular, color: COLORS.muted,
+        });
+        y -= 11;
+      });
+      page.drawRectangle({
+        x: PAGE.margin, y: y - height, width: contentWidth, height, color: COLORS.panel,
+      });
+      if (entry.image) {
+        const width = entry.image.width * scale;
+        page.drawImage(entry.image, {
+          x: PAGE.margin + (contentWidth - width) / 2,
+          y: y - 8 - imageHeight,
+          width,
+          height: imageHeight,
+        });
+      } else {
+        unavailableLines.forEach((line, lineIndex) => {
+          page.drawText(line, {
+            x: PAGE.margin + 12, y: y - 15 - lineIndex * 12,
+            size: 9.2, font: regular, color: COLORS.muted,
+          });
+        });
+      }
+      y -= height + 20;
+    });
+  }
+
+  drawFieldComments();
+
   function drawEvidencePage(title, entry, { showCaptureMetadata = true } = {}) {
     addPage();
 
@@ -649,6 +787,7 @@ export async function buildQuickTrnPdfArtifact(
   }
 
   media.forEach((entry, index) => {
+    if (entry.item?.tag === "fieldCommentPhoto") return;
     const mediaLabel = titleCase(
       entry.item?.tag ||
         entry.item?.type ||
