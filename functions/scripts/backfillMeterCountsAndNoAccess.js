@@ -226,11 +226,64 @@ function report(title, rows, render) {
   if (rows.length > 20) console.log(`  … and ${rows.length - 20} more`);
 }
 
+// asts.md 10.1: every meter carries its three counts, from the moment it is
+// created. Meters made before that rule have no `counts` at all, and absent
+// reads the same as zero to anybody looking — which is how a count that never
+// reached the screen passed for a meter nothing had happened to. Writing the
+// zeros makes a missing `counts` mean one thing only: something is wrong.
+//
+// This writes zeros. It never lowers a number: a meter that already carries
+// counts is left to the pass that reconciles it against the transactions.
+async function initialiseMissingCounts() {
+  const given = [];
+
+  let query = db.collection("asts");
+
+  if (LM_PCODE) {
+    query = query.where("accessData.parents.lmPcode", "==", LM_PCODE);
+  }
+
+  const snapshot = await query.get();
+
+  for (const doc of snapshot.docs) {
+    if (doc.data()?.counts) continue;
+
+    given.push(doc.id);
+
+    if (APPLY) {
+      await doc.ref.update({
+        "counts.disconnections": 0,
+        "counts.reconnections": 0,
+        "counts.noAccess": 0,
+        "metadata.updatedAt": new Date().toISOString(),
+        "metadata.updatedByUid": "SYSTEM",
+        "metadata.updatedByUser": "Meter counts backfill",
+      });
+
+      // The register reads a copy, so the copy is brought with it. Without
+      // this the row still has no counts and the page cannot tell a meter
+      // nothing has happened to from a meter it was never told about.
+      await rebuildMeterRegistryRow(doc.id);
+    }
+  }
+
+  return { given, meters: snapshot.size };
+}
+
 async function main() {
   console.log(
     `Meter counts and No Access reconciliation — ${APPLY ? "APPLYING" : "DRY RUN"}${
       LM_PCODE ? ` — ${LM_PCODE}` : " — every municipality"
     }`,
+  );
+
+  const { given, meters } = await initialiseMissingCounts();
+
+  console.log(`\nMeters: ${meters}`);
+  console.log(
+    APPLY
+      ? `  carried no counts at all, now started at zero: ${given.length}`
+      : `  carry no counts at all, would be started at zero: ${given.length}`,
   );
 
   const { counts, noAccessByPremise, noAccessWithoutPremise, read } =

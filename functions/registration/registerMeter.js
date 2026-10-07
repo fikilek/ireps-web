@@ -14,6 +14,8 @@
 // Nothing in here may have an effect outside Firestore: a transaction can be retried, so a message to
 // a worker, a photograph upload or a counter bumped in here would happen twice (Firestore's own rule).
 
+import { newMeterCounts } from "./meterCounts.js";
+
 /** A failure the door can turn into a refusal the worker reads. */
 export function registrationError(irepsCode, message) {
   return Object.assign(new Error(message), { irepsCode });
@@ -171,6 +173,8 @@ export async function registerMeterInTransaction({
     tx.create(astRef, {
       accessData: trnData.accessData,
       ast: astPayload,
+      // asts.md 10.1: the meter carries its counts from the moment it exists.
+      counts: newMeterCounts(),
       ...(creationData.mreadings.length
         ? { mreadings: creationData.mreadings }
         : {}),

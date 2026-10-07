@@ -17,6 +17,7 @@ import { getAuth } from "firebase-admin/auth";
 import { onTrnWritten } from "./reports/trnReports.js";
 
 import { rebuildMeterRegistryRow } from "./registry/meterRegistryRowRebuild.js";
+import { newMeterCounts, readMeterCountsFingerprint } from "./registration/meterCounts.js";
 import { rebuildMeterRegistryRowCallable } from "./registry/meterCallable.js";
 
 import { rebuildPremiseRegistryRow } from "./registry/premiseRegistryRowRebuild.js";
@@ -1824,6 +1825,8 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
           tx.create(astRef, {
             accessData,
             ast: astPayload,
+            // asts.md 10.1: zero is a fact, absent is a defect.
+            counts: newMeterCounts(),
             ...(creationData.mreadings.length
               ? { mreadings: creationData.mreadings }
               : {}),
@@ -4725,6 +4728,19 @@ export const onMeterUpdated = onDocumentUpdated(
       dataAfter?.geofenceRefs || [],
     );
 
+    // UI-R008: the registry row is a copy, and a copy that is not rebuilt makes
+    // a screen that is on stream show an old number anyway. On 7 October a No
+    // Access raised counts.noAccess and changed nothing else on the meter, so
+    // every test below was false, this returned here, and the Meter Registry
+    // went on showing 3 while the meter held 4.
+    //
+    // Deciding from a hand-written list of fields is the fault itself: anything
+    // added to the meter is invisible to this until somebody remembers to add it
+    // here too. The counts are named now; the next field added needs the same.
+    const countsChanged =
+      readMeterCountsFingerprint(dataBefore) !==
+      readMeterCountsFingerprint(dataAfter);
+
     if (
       !updatedAtChanged &&
       !statusChanged &&
@@ -4733,7 +4749,8 @@ export const onMeterUpdated = onDocumentUpdated(
       !meterTypeChanged &&
       !astNoChanged &&
       !premiseChanged &&
-      !activeLifecycleChanged
+      !activeLifecycleChanged &&
+      !countsChanged
     ) {
       return null;
     }
@@ -4752,6 +4769,7 @@ export const onMeterUpdated = onDocumentUpdated(
       beforePremiseId,
       afterPremiseId,
       activeLifecycleChanged,
+      countsChanged,
     });
 
     await safeRun("onMeterUpdated geofence maintenance", astId, async () => {
@@ -5763,6 +5781,8 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     const astDoc = {
       accessData: finalAccessData,
       ast: finalAstPayload,
+      // asts.md 10.1: zero is a fact, absent is a defect.
+      counts: newMeterCounts(),
       ...(creationData.mreadings.length
         ? { mreadings: creationData.mreadings }
         : {}),

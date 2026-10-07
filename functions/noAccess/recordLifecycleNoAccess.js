@@ -119,7 +119,17 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     const astPatch = alreadyRecorded ? {} : { "counts.noAccess": FieldValue.increment(1) };
     // Completing office workflow releases the instruction lock, never a physical meter field.
     if (isOffice && astDoc.trnActiveLifecycle?.trnId === trnId) astPatch.trnActiveLifecycle = FieldValue.delete();
-    if (Object.keys(astPatch).length > 0) tx.update(astRef, astPatch);
+    // UI-R008: a write that changes a document stamps it. Raising the count
+    // without this left the meter claiming it had last changed an hour before
+    // it had — and the registry rebuild tests that stamp first, so the copy was
+    // never refreshed and the Meter Registry went on showing the old number
+    // while the meter held the new one.
+    if (Object.keys(astPatch).length > 0) {
+      astPatch["metadata.updatedAt"] = now;
+      astPatch["metadata.updatedByUid"] = actor.uid || "NAv";
+      astPatch["metadata.updatedByUser"] = actor.name || "NAv";
+      tx.update(astRef, astPatch);
+    }
     if (isOffice) tx.set(trnRef.collection("history").doc(), { event: "COMPLETED", outcome: "NO_ACCESS", trnId,
       trnType: access.trnType, astId, actorUid: actor.uid, actorName: actor.name, at: now });
     return { success: true, code: "OK", trnId, message: "No Access recorded. Meter state unchanged.",
