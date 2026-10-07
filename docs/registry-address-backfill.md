@@ -31,8 +31,11 @@ identifies this as a backfill from the current premise, not proof of historical
 capture. Original capture times, users, meter state, counts, media and links
 are preserved.
 
-`functions/scripts/backfillRegistryAddresses.js` is hard restricted to DEV
-`ireps2`. It defaults to a dry run with `--key` and `--output`. `--apply` uses
+Owner accepted hosted DEV and explicitly requested TEST deployment/backfill on
+7 October 2026. `functions/scripts/backfillRegistryAddresses.js` allows DEV
+`ireps2` and TEST `ireps-test` only; LIVE remains refused. It defaults to a DEV
+dry run with `--key` and `--output`; TEST requires `--project ireps-test` and a
+matching TEST credential. Plans must match the chosen project. `--apply` uses
 the saved plan and full before-images, checks source/target/registry versions
 in each transaction and writes an append-only result journal. Afterwards it
 checks every applied record's property category, address and five components, unchanged unrelated content and

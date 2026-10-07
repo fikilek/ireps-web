@@ -1,21 +1,21 @@
-// DEV-only migration. Defaults to a read-only dry run; --apply requires a
+// DEV/TEST migration. Defaults to a read-only DEV dry run; --apply requires a
 // previously saved plan. Backups include full Firestore field representations.
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { initializeApp, cert, deleteApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-import { ADDRESS_FIELDS, planRegistryAddressBackfill } from "../maintenance/registryAddressBackfillPlan.js";
+import { ADDRESS_FIELDS, assertRegistryBackfillProject, planRegistryAddressBackfill } from "../maintenance/registryAddressBackfillPlan.js";
 import { savedPremiseUnits } from "../registry/savedPremiseUnits.js";
 
 const args = process.argv.slice(2);
 const option = name => args[args.indexOf(name) + 1];
-if (!args.includes("--key") || !args.includes("--output")) throw new Error("Required: --key <DEV credential> --output <evidence directory>");
+if (!args.includes("--key") || !args.includes("--output")) throw new Error("Required: --key <matching project credential> --output <evidence directory> [--project ireps2|ireps-test]");
 const key = JSON.parse(fs.readFileSync(option("--key"), "utf8"));
-if (key.project_id !== "ireps2") throw new Error("This migration is restricted to DEV ireps2");
+const project = assertRegistryBackfillProject(args.includes("--project") ? option("--project") : "ireps2", key.project_id);
 const output = path.resolve(option("--output"));
 fs.mkdirSync(output, { recursive: true });
-const app = initializeApp({ projectId: "ireps2", credential: cert(key) });
+const app = initializeApp({ projectId: project, credential: cert(key) });
 const db = getFirestore(app);
 db.settings({ preferRest: true });
 const write = (name, data) => fs.writeFileSync(path.join(output, name), JSON.stringify(data, null, 2));
@@ -49,7 +49,7 @@ try {
       records.push(plan);
       if (plan.status === "UPDATE") for (const item of [snap, source, row].filter(Boolean)) backups.set(item.ref.path, backup(item));
     }
-    const summary = { project: "ireps2", mode: "dry-run", at: new Date().toISOString(), counts: {} };
+    const summary = { project, mode: "dry-run", at: new Date().toISOString(), counts: {} };
     for (const record of records) {
       const group = `${record.path.split('/')[0]}_${record.status}`;
       summary.counts[group] = (summary.counts[group] || 0) + 1;
@@ -61,7 +61,7 @@ try {
   } else {
     const plan = JSON.parse(fs.readFileSync(path.join(output, "plan.json"), "utf8"));
     const backups = new Map(JSON.parse(fs.readFileSync(path.join(output, "before-images.json"), "utf8")).map(item => [item.path, item]));
-    if (plan.project !== "ireps2") throw new Error("Plan project mismatch");
+    if (plan.project !== project) throw new Error("Plan project mismatch");
     if (fs.existsSync(path.join(output, "applied.jsonl"))) throw new Error("Apply already started; inspect its journal and create a fresh dry run before retrying");
     const candidates = plan.records.filter(record => record.status === "UPDATE");
     if (candidates.some(record => !backups.has(record.path) || !backups.has(record.sourcePath))) throw new Error("Incomplete backup");
@@ -107,7 +107,7 @@ try {
       }
       verification.push({ path: item.path, fieldsMatch, unrelatedUnchanged, registryMatches });
     }
-    const summary = { project: "ireps2", mode: "apply", at: new Date().toISOString(), counts: {}, verified: verification.length,
+    const summary = { project, mode: "apply", at: new Date().toISOString(), counts: {}, verified: verification.length,
       verificationFailures: verification.filter(row => !row.fieldsMatch || !row.unrelatedUnchanged || !row.registryMatches) };
     for (const result of results) summary.counts[result.status] = (summary.counts[result.status] || 0) + 1;
     write("verification.json", verification);

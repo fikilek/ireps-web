@@ -1,4 +1,9 @@
 export const ADDRESS_FIELDS = ["propertyType", "address", "strNo", "strName", "strType", "unitName", "unitNo"];
+export function assertRegistryBackfillProject(project, credentialProject) {
+  if (!["ireps2", "ireps-test"].includes(project)) throw new Error("Registry backfill is restricted to DEV and TEST");
+  if (credentialProject !== project) throw new Error("Credential project does not match the selected backfill project");
+  return project;
+}
 const text = value => typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 const absent = value => !text(value) || ["NAV", "N/A", "SELECT..."].includes(text(value).toUpperCase());
 

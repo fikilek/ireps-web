@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planRegistryAddressBackfill } from "../functions/maintenance/registryAddressBackfillPlan.js";
+import { assertRegistryBackfillProject, planRegistryAddressBackfill } from "../functions/maintenance/registryAddressBackfillPlan.js";
+test("backfill explicitly selects DEV or TEST with matching credentials and refuses LIVE", () => {
+  assert.equal(assertRegistryBackfillProject("ireps2", "ireps2"), "ireps2");
+  assert.equal(assertRegistryBackfillProject("ireps-test", "ireps-test"), "ireps-test");
+  assert.throws(() => assertRegistryBackfillProject("ireps2", "ireps-test"), /does not match/);
+  assert.throws(() => assertRegistryBackfillProject("ireps-test", "ireps2"), /does not match/);
+  assert.throws(() => assertRegistryBackfillProject("ireps-5c3e9", "ireps-5c3e9"), /restricted/);
+  assert.throws(() => assertRegistryBackfillProject(undefined, "ireps-test"), /restricted/);
+});
 const premise = { erfId: "erf1", parents: { lmPcode: "lm1" }, address: { strNo: "14", strName: "Mckenzie", strType: "Street" }, propertyType: { type: "Commercial", name: "Shop", unitNo: "04A" } };
 const record = { accessData: { erfId: "erf1", parents: { lmPcode: "lm1" }, premise: { id: "p1", address: "14 Mckenzie Street" } }, metadata: { createdAt: "2026-08-22" } };
 test("backfill patches separate property, street and unit fields and is idempotent", () => {
