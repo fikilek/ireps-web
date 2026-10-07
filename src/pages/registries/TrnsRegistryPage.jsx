@@ -11,6 +11,9 @@ import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import TrnMediaGalleryModal from "./components/TrnMediaGalleryModal";
 import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
+import TrnFieldCommentsModal from "./components/TrnFieldCommentsModal";
+import FieldCommentIcon from "./components/FieldCommentIcon";
+import { fieldCommentMediaUrls } from "../../utils/fieldComments.js";
 
 const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
 
@@ -422,6 +425,7 @@ export default function TrnsRegistryPage() {
   const [showTrnId, setShowTrnId] = useState(false);
   const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);
   const [selectedMediaTrnId, setSelectedMediaTrnId] = useState(null);
+  const [selectedCommentsTrnId, setSelectedCommentsTrnId] = useState(null);
   const [selectedReportTrnId, setSelectedReportTrnId] = useState(null);
   const [selectedBoundary, setSelectedBoundary] = useState(null);
 
@@ -512,6 +516,10 @@ export default function TrnsRegistryPage() {
         header: "Normalisation",
         value: (row) => row.normalisation || "NAv",
       },
+      { header: "Field Comment Text", value: row => row.fieldComments?.text || "NAv" },
+      { header: "Field Comment Photo", value: row => fieldCommentMediaUrls(row.fieldComments?.photos) },
+      { header: "Field Comment Voice Clip", value: row => fieldCommentMediaUrls(row.fieldComments?.voiceClips) },
+      { header: "Field Comment Video", value: row => fieldCommentMediaUrls(row.fieldComments?.videos) },
       {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
@@ -916,6 +924,29 @@ export default function TrnsRegistryPage() {
 
     cellStyle: styles.findingCell
   }, {
+    key: "fieldComments",
+    label: "Field Comments",
+    filter: null,
+    sortable: false,
+    value: row => row.fieldComments?.text || "NAv",
+    render: row => {
+      const comments = row.fieldComments;
+      const available = [
+        ["text", "Text", comments?.text && comments.text !== "NAv" ? 1 : 0],
+        ["photo", "Photo", comments?.photos?.length || 0],
+        ["voice", "Voice Clip", comments?.voiceClips?.length || 0],
+        ["video", "Video", comments?.videos?.length || 0],
+      ].filter(([, , count]) => count > 0);
+      return <div style={styles.commentCell}>
+        <button type="button" style={styles.compactDataActionButton} aria-label={`Open field comments for ${row.trnId}`} aria-haspopup="dialog" onClick={() => setSelectedCommentsTrnId(row.trnId)}>
+          <FieldCommentIcon />FC
+        </button>
+        <div style={styles.commentAvailability}>
+          {available.length ? available.map(([kind, label, count]) => <span key={kind} role="img" aria-label={`${label}: ${count}`} title={`${label}: ${count}`}><FieldCommentIcon kind={kind} /></span>) : <span>NAv</span>}
+        </div>
+      </div>;
+    },
+  }, {
     key: "createdByUser",
     label: "Created By User",
     filter: "text",
@@ -1152,6 +1183,10 @@ export default function TrnsRegistryPage() {
         />
       ) : null}
 
+      {selectedCommentsTrnId ? (
+        <TrnFieldCommentsModal key={`${activeLmPcode}-${selectedCommentsTrnId}`} trnId={selectedCommentsTrnId} onClose={() => setSelectedCommentsTrnId(null)} />
+      ) : null}
+
       {selectedBoundary ? (
         <BoundaryMapModal
           key={`${selectedBoundary.mode}-${
@@ -1291,6 +1326,8 @@ const styles = {
     maxWidth: "20rem",
     whiteSpace: "normal",
   },
+  commentCell: { display: "grid", gap: "8px", justifyItems: "start", minWidth: "7.5rem" },
+  commentAvailability: { display: "flex", gap: "7px", color: "#64748b", fontSize: "12px" },
   iconCell: {
     minWidth: "6rem",
     textAlign: "center",

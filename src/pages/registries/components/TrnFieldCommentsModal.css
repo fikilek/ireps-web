@@ -1,0 +1,55 @@
+.trn-field-comments {
+  width: min(780px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid #dce5f2;
+  border-radius: 20px;
+  color: #0f172a;
+  background: #fff;
+  box-shadow: 0 24px 64px #0f172a40;
+  overflow: hidden;
+  font-family: inherit;
+}
+.trn-field-comments[open] { display: flex; flex-direction: column; }
+.trn-field-comments::backdrop { background: rgb(15 23 42 / 60%); }
+.trn-field-comments * { box-sizing: border-box; }
+.trn-field-comments button { font: inherit; cursor: pointer; }
+.trn-field-comments button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.trn-field-comments .fc-modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 22px 24px 18px; border-bottom: 1px solid #dce5f2; flex-shrink: 0; }
+.trn-field-comments h2 { margin: 0 0 8px; color: #0f172a; font-size: 1.5rem; }
+.trn-field-comments .fc-context { margin: 0; color: #475569; overflow-wrap: anywhere; }
+.trn-field-comments .fc-trn-id { margin: 8px 0 0; color: #64748b; font-size: .75rem; overflow-wrap: anywhere; }
+.trn-field-comments .fc-close-button, .trn-field-comments .fc-secondary-button { color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; padding: 9px 14px; min-height: 42px; }
+.trn-field-comments .fc-close-button { flex-shrink: 0; }
+.trn-field-comments .fc-modal-body { padding: 22px 24px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.trn-field-comments .fc-content-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.trn-field-comments .fc-content-grid section { min-width: 0; }
+.trn-field-comments .fc-text-section { grid-column: 1 / -1; }
+.trn-field-comments .fc-photo-section { grid-row: span 2; }
+.trn-field-comments h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: .95rem; color: #0f172a; }
+.trn-field-comments h3 svg { flex-shrink: 0; color: #2563eb; }
+.trn-field-comments .fc-comment-text { padding: 14px 16px; border: 1px solid #dce5f2; border-radius: 12px; background: #f8fafc; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.trn-field-comments .fc-media-list { display: grid; gap: 12px; }
+.trn-field-comments .fc-photo-button { display: grid; gap: 8px; width: 100%; text-align: left; padding: 8px; border: 1px solid #dce5f2; border-radius: 12px; background: #f8fafc; color: #1d4ed8; }
+.trn-field-comments .fc-photo-button img { display: block; width: 100%; height: 180px; object-fit: contain; border-radius: 8px; }
+.trn-field-comments .fc-photo-button span { font-size: .85rem; padding: 2px 4px; }
+.trn-field-comments .fc-player-label { display: block; color: #475569; font-size: .8rem; margin-bottom: 8px; }
+.trn-field-comments audio, .trn-field-comments video { display: block; width: 100%; max-width: 100%; }
+.trn-field-comments video { max-height: 260px; border-radius: 12px; background: #111827; }
+.trn-field-comments .fc-empty { color: #64748b; margin: 0; }
+.trn-field-comments .fc-media-unavailable { padding: 12px; color: #9a3412; border: 1px solid #fed7aa; border-radius: 10px; background: #fff7ed; margin: 0; }
+.trn-field-comments .fc-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid #dce5f2; padding: 14px 24px; flex-shrink: 0; }
+.trn-field-comments .fc-modal-footer span { color: #64748b; font-size: .8rem; }
+.trn-field-comments .fc-primary-button { min-height: 42px; padding: 9px 22px; color: #fff; background: #2563eb; border: 1px solid #2563eb; border-radius: 10px; font-weight: 700; }
+.trn-field-comments .fc-enlarged-photo { display: grid; gap: 16px; }
+.trn-field-comments .fc-enlarged-photo button { justify-self: start; }
+.trn-field-comments .fc-enlarged-photo h3 { margin: 0; }
+.trn-field-comments .fc-enlarged-photo img { display: block; width: 100%; max-height: 65dvh; object-fit: contain; }
+@media (max-width: 600px) {
+  .trn-field-comments { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 14px; }
+  .trn-field-comments .fc-modal-header, .trn-field-comments .fc-modal-body, .trn-field-comments .fc-modal-footer { padding: 16px; }
+  .trn-field-comments .fc-content-grid { grid-template-columns: minmax(0, 1fr); }
+  .trn-field-comments .fc-photo-section { grid-row: auto; }
+}

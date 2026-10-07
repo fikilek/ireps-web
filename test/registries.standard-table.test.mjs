@@ -156,8 +156,24 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,19);
+  assert.equal(table.columns.length,20);
   assert.ok(table.columns.some(c=>!c.sortable && c.render));
+});
+
+test("FC follows Normalisation, opens the exact transaction and exports all four formats", () => {
+  const table = pageTable("Trns");
+  const index = table.columns.findIndex(c => c.key === "fieldComments");
+  assert.equal(table.columns[index - 1].key, "normalisation");
+  assert.equal(table.columns[index + 1].key, "createdByUser");
+  const column = table.columns[index];
+  assert.equal(column.sortable, false);
+  const row = { ...table.rows[0], fieldComments: { text: "Exact\nwords", photos: [{url:"https://example.test/photo.jpg"}], voiceClips: [], videos: [] } };
+  const markup = renderToStaticMarkup(column.render(row));
+  assert.match(markup, /Open field comments for TRN-0/);
+  assert.match(markup, /aria-haspopup="dialog"/);
+  assert.match(markup, /Photo: 1/);
+  const headers = ["Field Comment Text", "Field Comment Photo", "Field Comment Voice Clip", "Field Comment Video"];
+  assert.deepEqual(headers.map(header => table.downloads.columns.find(c => c.header === header).value(row)), ["Exact\nwords", "https://example.test/photo.jpg", "NAv", "NAv"]);
 });
 
 test("numeric staging sorting keeps missing readings last in both directions", () => {

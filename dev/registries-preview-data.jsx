@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getFieldComments } from "../src/utils/fieldComments.js";
 
 const wardPcode = "ZA5241002";
 const rowData = Array.from({ length: 12 }, (_, i) => ({
@@ -26,6 +27,20 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
   successfulReads: i, unsuccessful: 1, noAccess: 0, mediaEvidence: 0, geofence: "Preview boundary",
   billingReadiness: i % 2 ? "BILLING_READY_CANDIDATE" : "NOT_BILLING_READY", reviewStatus: "NAv",
 }));
+// FC browser-review cases use local synthetic media supplied by the test runner.
+rowData.forEach((row, index) => {
+  row.raw = { ast: { astData: { astNo: row.meterNo } }, accessData: { premise: { address: row.premiseAddress } } };
+  if (index === 0) row.raw = { ...row.raw, fieldComment: { text: "The terminal cover needs attention.\nPlease review the attached evidence." }, media: [
+    { tag: "fieldCommentPhoto", url: "http://127.0.0.1:5196/fc-fixtures/photo.svg" },
+    { tag: "fieldCommentPhoto", url: "http://127.0.0.1:5196/fc-fixtures/photo-two.svg" },
+    { tag: "fieldCommentVoice", url: "http://127.0.0.1:5196/fc-fixtures/voice.wav" },
+    { tag: "fieldCommentVideo", url: "http://127.0.0.1:5196/fc-fixtures/video.webm" },
+    { tag: "meterPhoto", url: "http://127.0.0.1:5196/fc-fixtures/excluded.svg" },
+  ] };
+  if (index === 1) row.raw.fieldComment = { text: "Text-only comment for the second transaction." };
+  if (index === 3) row.raw.media = [{ tag: "fieldCommentPhoto", url: "javascript:invalid" }];
+  row.fieldComments = getFieldComments(row.raw);
+});
 export const previewRows = rowData;
 const empty = [];
 const result = data => ({data, currentData:data, isLoading:false, isFetching:false, isError:false, refetch: async()=>({data})});
@@ -59,7 +74,11 @@ export const collection = (...args) => args;
 export const query = (...args) => args;
 export const where = (...args) => args;
 export const limit = (...args) => args;
-export const useGetTrnByIdQuery = id => result(rowData.find(row=>row.trnId===id) || rowData[0]);
+export function useGetTrnByIdQuery(id) {
+  const [retried, setRetried] = useState(false);
+  if (id === "TRN-4" && !retried) return { ...result(undefined), isError: true, error: { message: "Fixture read failure" }, refetch: () => setRetried(true) };
+  return result(rowData.find(row=>row.trnId===id));
+}
 export const useGetErfBoundaryByIdQuery = () => result(null);
 export const useGetWardBoundaryByPcodeQuery = () => result(null);
 // DR-R001 3.1, 3.2 and 3.3: the Meter Registry's Credit control columns. The

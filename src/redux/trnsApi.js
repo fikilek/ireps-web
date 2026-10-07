@@ -11,6 +11,7 @@ import {
 
 import { registryNoAccessDetails } from "../utils/registryNoAccess.js";
 import { savedRegistryUnits } from "../utils/registryTrnUnits.js";
+import { getFieldComments } from "../utils/fieldComments.js";
 import { db } from "../firebase";
 
 const TRNS_COLLECTION = "trns";
@@ -336,6 +337,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     anomaly: anomalyInfo.anomaly,
     anomalyDetail: anomalyInfo.anomalyDetail,
     normalisation: getRegistryMeterDiscoveryNormalisation(data),
+    fieldComments: getFieldComments(data),
     mediaCount: asArray(data.media).length,
     originChannel: getRegistryOriginChannel(data),
     createdByUid: valueOrNav(metadata.createdByUid),
