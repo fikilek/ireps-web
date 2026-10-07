@@ -39,7 +39,7 @@ try {
       const source = byId.get(data.accessData?.premise?.id);
       const proposed = planRegistryAddressBackfill(data, source?.data());
       const row = snap.ref.parent.id === "asts" ? registryById.get(snap.id) : null;
-      const registryPatch = row && proposed.values ? { ...savedPremiseUnits(proposed.values), premiseAddress: proposed.values.address } : null;
+      const registryPatch = row && proposed.values ? { ...savedPremiseUnits(proposed.values), premiseAddress: proposed.values.address, premisePropertyType: proposed.values.propertyType } : null;
       const registryNeedsUpdate = registryPatch && Object.entries(registryPatch).some(([k,v]) => row.data()[k] !== v);
       const plan = { path: snap.ref.path, updateTime: stamp(snap), sourcePath: source?.ref.path ?? null, sourceUpdateTime: source ? stamp(source) : null,
         ...proposed, registryPath: row?.ref.path ?? null, registryUpdateTime: row ? stamp(row) : null, registryPatch, registryNeedsUpdate: Boolean(registryNeedsUpdate),

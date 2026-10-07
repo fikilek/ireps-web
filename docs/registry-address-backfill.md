@@ -8,11 +8,14 @@ review stages. Form changes are explicitly deferred.
 Owner follow-up: Property Type precedes Address in both registries and their
 downloads. The TRN row reads saved `accessData.premise.propertyType`; Meter
 Registry moves its existing property type column before the address. Both have
-text filtering and sorting; no additional data migration is needed for this column.
+text filtering and sorting. Owner review exposed old composite property type
+strings (such as `Commercial Trading 1 1`). The corrective backfill replaces
+these with the linked premise's `propertyType.type` alone, keeping its name and
+number exclusively in the separate unit fields. Do not split or guess from text.
 
 The saved `accessData.premise` on `trns` and `asts` gains five string fields:
-`strNo`, `strName`, `strType`, `unitName`, `unitNo`. Existing `id` and
-`propertyType` remain unchanged. Saved `address` is rebuilt from the linked
+`strNo`, `strName`, `strType`, `unitName`, `unitNo`. Existing `id` stays unchanged;
+`propertyType` is the linked premise's category alone. Saved `address` is rebuilt from the linked
 premise's street components. Registry meter rows copy that address and unit fields into
 `premiseUnitName` and `premiseUnitNo`. Web pages read these saved values, without
 joining against a changing current premise or guessing units from free text.
@@ -31,7 +34,7 @@ are preserved.
 `ireps2`. It defaults to a dry run with `--key` and `--output`. `--apply` uses
 the saved plan and full before-images, checks source/target/registry versions
 in each transaction and writes an append-only result journal. Afterwards it
-checks every applied record's address and five components, unchanged unrelated content and
+checks every applied record's property category, address and five components, unchanged unrelated content and
 registry copy. A fresh dry run must then show no remaining proposed changes
 for the applied cohort. Do not overwrite a completed evidence directory.
 

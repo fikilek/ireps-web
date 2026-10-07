@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { planRegistryAddressBackfill } from "../functions/maintenance/registryAddressBackfillPlan.js";
-const premise = { erfId: "erf1", parents: { lmPcode: "lm1" }, address: { strNo: "14", strName: "Mckenzie", strType: "Street" }, propertyType: { name: "Shop", unitNo: "04A" } };
+const premise = { erfId: "erf1", parents: { lmPcode: "lm1" }, address: { strNo: "14", strName: "Mckenzie", strType: "Street" }, propertyType: { type: "Commercial", name: "Shop", unitNo: "04A" } };
 const record = { accessData: { erfId: "erf1", parents: { lmPcode: "lm1" }, premise: { id: "p1", address: "14 Mckenzie Street" } }, metadata: { createdAt: "2026-08-22" } };
-test("backfill only patches five address fields and is idempotent", () => {
+test("backfill patches separate property, street and unit fields and is idempotent", () => {
   const plan = planRegistryAddressBackfill(record, premise);
   assert.equal(plan.status, "UPDATE");
   assert.equal(plan.values.unitNo, "04A");
-  assert.equal(Object.keys(plan.patch).length, 5);
+  assert.equal(Object.keys(plan.patch).length, 6);
   assert.ok(Object.keys(plan.patch).every(key => key.startsWith("accessData.premise.")));
   const after = structuredClone(record);
   Object.assign(after.accessData.premise, plan.values);
@@ -34,6 +34,18 @@ test("linked premise prevails over differing saved street and unit values", () =
   assert.equal(existing.accessData.premise.address, "49 Maninjwa Street");
 });
 test("no unit facts are invented and numeric zero is preserved", () => {
-  assert.deepEqual(planRegistryAddressBackfill(record, { ...premise, propertyType: {} }).values, { address: "14 Mckenzie Street", strNo: "14", strName: "Mckenzie", strType: "Street", unitName: "NAv", unitNo: "NAv" });
+  assert.deepEqual(planRegistryAddressBackfill(record, { ...premise, propertyType: {} }).values, { propertyType: "NAv", address: "14 Mckenzie Street", strNo: "14", strName: "Mckenzie", strType: "Street", unitName: "NAv", unitNo: "NAv" });
   assert.equal(planRegistryAddressBackfill(record, { ...premise, propertyType: { unitNo: 0 } }).values.unitNo, "0");
+});
+test("property type is the linked premise category, without repeated business name or unit", () => {
+  for (const [type, name, unitNo] of [["Commercial", "Trading 1", "1"], ["Commercial", "Makhathini", "2"], ["Commercial", "Thisa Fish & Chips", "4"], ["Flats", "Boundary Flats", "2"]]) {
+    const source = { ...premise, propertyType: { type, name, unitNo } };
+    const existing = structuredClone(record);
+    Object.assign(existing.accessData.premise, planRegistryAddressBackfill(record, source).values);
+    existing.accessData.premise.propertyType = `${type} ${name} ${unitNo}`;
+    const plan = planRegistryAddressBackfill(existing, source);
+    assert.deepEqual(plan.patch, { "accessData.premise.propertyType": type });
+    assert.equal(plan.values.unitName, name);
+    assert.equal(plan.values.unitNo, unitNo);
+  }
 });

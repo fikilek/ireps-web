@@ -1,4 +1,4 @@
-export const ADDRESS_FIELDS = ["address", "strNo", "strName", "strType", "unitName", "unitNo"];
+export const ADDRESS_FIELDS = ["propertyType", "address", "strNo", "strName", "strType", "unitName", "unitNo"];
 const text = value => typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 const absent = value => !text(value) || ["NAV", "N/A", "SELECT..."].includes(text(value).toUpperCase());
 
@@ -12,6 +12,7 @@ export function planRegistryAddressBackfill(record, premise) {
   if (!record.accessData.erfId || record.accessData.erfId !== premise.erfId)
     return { status: "HOLD", reason: "ERF mismatch" };
   const values = {
+    propertyType: absent(premise.propertyType?.type) ? "NAv" : text(premise.propertyType.type),
     strNo: text(premise.address?.strNo),
     strName: text(premise.address?.strName),
     strType: text(premise.address?.strType),
