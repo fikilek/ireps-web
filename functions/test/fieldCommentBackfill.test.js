@@ -25,8 +25,13 @@ test("No Access, other forms, unknown access and malformed existing maps are not
     assert.deepEqual(plan.patch, {});
   }
 });
-test("migration allows matching DEV or TEST and refuses LIVE or mismatched credentials", () => {
-  assert.equal(assertFieldCommentBackfillProject("ireps2", "ireps2"), "ireps2");
-  assert.equal(assertFieldCommentBackfillProject("ireps-test", "ireps-test"), "ireps-test");
-  for (const args of [["ireps-5c3e9", "ireps-5c3e9"], ["ireps2", "ireps-5c3e9"], ["ireps-test", "ireps2"], ["ireps2", "ireps-test"], ["other-project", "other-project"]]) assert.throws(() => assertFieldCommentBackfillProject(...args));
+test("migration allows matching approved environments and refuses cross-project or unknown credentials", () => {
+  const projects = ["ireps2", "ireps-test", "ireps-5c3e9"];
+  for (const project of projects) {
+    assert.equal(assertFieldCommentBackfillProject(project, project), project);
+    for (const credentialProject of projects.filter(value => value !== project)) {
+      assert.throws(() => assertFieldCommentBackfillProject(project, credentialProject));
+    }
+  }
+  assert.throws(() => assertFieldCommentBackfillProject("other-project", "other-project"));
 });

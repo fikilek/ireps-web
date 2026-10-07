@@ -7,7 +7,7 @@ import { planFieldCommentBackfill, assertFieldCommentBackfillProject } from "../
 
 const args = process.argv.slice(2);
 const option = name => args[args.indexOf(name) + 1];
-if (!args.includes("--key") || !args.includes("--output")) throw new Error("Required: --key <matching credential> --output <new evidence directory> [--project ireps2|ireps-test] [--apply]");
+if (!args.includes("--key") || !args.includes("--output")) throw new Error("Required: --key <matching credential> --output <new evidence directory> [--project ireps2|ireps-test|ireps-5c3e9] [--apply]");
 const key = JSON.parse(fs.readFileSync(option("--key"), "utf8"));
 const project = assertFieldCommentBackfillProject(args.includes("--project") ? option("--project") : "ireps2", key.project_id);
 const output = path.resolve(option("--output"));
