@@ -3528,6 +3528,36 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         registered,
       });
 
+      // NA-R005 (one shape, 7 October 2026): before this id is called a success, it must be
+      // the SAME capture. A repeat of the same visit after a lost answer is normal and is
+      // answered as done. A DIFFERENT visit arriving under the same id is not a repeat — it is
+      // a collision, and treating it as success writes nothing while telling the worker his
+      // visit was saved. The lifecycle No Access writer has always compared; this path did not,
+      // and the three random characters in the old id shape were the only thing making the
+      // collision improbable. They are gone, so the comparison has to be real.
+      const existingTrn = trnSnap.data() || {};
+      const sameCapture =
+        String(existingTrn?.accessData?.trnType || "").trim() ===
+          String(data?.accessData?.trnType || "").trim() &&
+        String(existingTrn?.accessData?.premise?.id || "").trim() ===
+          String(data?.accessData?.premise?.id || "").trim() &&
+        String(
+          existingTrn?.metadata?.createdOnDeviceByUid ||
+            existingTrn?.metadata?.createdByUid ||
+            "",
+        ).trim() === String(request?.auth?.uid || "").trim();
+
+      if (!sameCapture) {
+        logger.warn("onMeterDiscoveryCallable --different work under an existing TRN id", {
+          trnId: data.id,
+        });
+
+        return refuse(
+          "TRN_ALREADY_EXISTS",
+          "This transaction number already records a different visit. Save this work again so it gets its own number.",
+        );
+      }
+
       if (registered) {
         return buildSuccessResult(
           data.id,

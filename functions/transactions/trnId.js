@@ -3,8 +3,17 @@
 // Agreed by the owner, 3 October 2026. Work that reached the meter keeps the shape the format
 // reference has always declared; a no access says so in the id and keeps the work after it:
 //
-//   work done:  TRN_MDIS_{timestamp}_{meterType}_{wardPcode}_{erfNo}
-//   no access:  TRN_MDIS_{YYMMDD}_{HHMMSSmmm}_{tail}_{meterCat}_{wardPcode}_{erfNo}_NA
+//   work done:  TRN_MDIS_{milliseconds}_{meterType}_{wardPcode}_{erfNo}
+//   no access:  TRN_MDIS_{milliseconds}_{meterType}_{wardPcode}_{erfNo}_NA
+//
+// ONE SHAPE (owner, 7 October 2026). A no access id is the ordinary id with `_NA` on the end,
+// and nothing else differs. It used to carry the date and the time as two segments plus three
+// random characters, so one kind of thing had two shapes and anything reading an id had to know
+// both. On a Discovery no access the meter type segment reads `NAv`, because no meter was
+// reached and nothing knows its type — the gap shown rather than filled.
+//
+// Ids already written keep their old shape for ever; an id is never rewritten. Every reader here
+// tests the PREFIX, so both shapes go on being understood.
 //
 // WHY THIS MODULE EXISTS. The validators tested `startsWith("TRN_MDIS_")` and
 // `startsWith("TRN_MINST_")`, so the first no access built under NA-R005 would have been
