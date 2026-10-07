@@ -120,20 +120,46 @@ export async function checkMeterRegistration({ db, astId }) {
     );
   }
 
-  const registrationAstId = String(
-    registration?.ast?.astData?.astId || "",
-  ).trim();
+  // DR-R001 3.1 check 4, corrected 7 October 2026.
+  //
+  // This used to read `registration.ast.astData.astId` and expect it to be the
+  // meter's id. A METER INSTALLATION writes that field; A METER DISCOVERY DOES
+  // NOT, and does not need to — the meter's id IS the registration's id, which
+  // is the one fact used to find this registration two reads ago. So the check
+  // asked the registration to repeat something it had never been asked to
+  // write, and refused 130 of the 194 meters on DEV: every meter that entered
+  // iREPS by a Discovery, which is to say nearly all of them.
+  //
+  // It asks the meter instead, and asks both records for the meter's number —
+  // two things true of both registration kinds, each measured at 194 of 194
+  // before being written into the rule.
+  const meterNamesRegistration =
+    String(astDoc?.ast?.astData?.astId || "").trim() === meterId;
 
-  const namesThisMeter = registrationAstId === meterId;
+  const registrationMeterNo = normalizeMeterNo(registration?.ast?.astData?.astNo);
+  const recordedMeterNo = normalizeMeterNo(astDoc?.ast?.astData?.astNo);
+  const numbersAgree =
+    Boolean(registrationMeterNo) && registrationMeterNo === recordedMeterNo;
+
+  const linked = meterNamesRegistration && numbersAgree;
+
   checks.push(
-    check("REGISTRATION_NAMES_METER", namesThisMeter, registrationAstId || "NAv"),
+    check(
+      "REGISTRATION_NAMES_METER",
+      linked,
+      meterNamesRegistration
+        ? `${registrationMeterNo || "NAv"} / ${recordedMeterNo || "NAv"}`
+        : String(astDoc?.ast?.astData?.astId || "").trim() || "NAv",
+    ),
   );
 
-  if (!namesThisMeter) {
+  if (!linked) {
     return result(
       checks,
       "REGISTRATION_METER_MISMATCH",
-      "The registration names a different meter",
+      meterNamesRegistration
+        ? "The meter and the registration that created it do not agree on the meter number"
+        : "This meter does not name the registration that created it",
     );
   }
 
@@ -168,15 +194,37 @@ export async function checkMeterRegistration({ db, astId }) {
   const masterAstId = String(masterSnap.data()?.refs?.asts?.id || "").trim();
   const masterAgrees = masterSnap.exists && masterAstId === meterId;
 
-  checks.push(check("METER_MASTER", masterAgrees, meterNo));
+  checks.push(
+    check("METER_MASTER", masterAgrees, masterSnap.exists ? masterAstId || "NAv" : meterNo),
+  );
 
   if (!masterAgrees) {
+    // Three different faults, and they are not the same job to fix. Measured on
+    // DEV on 7 October: 126 meters hold the middle one — meter master has the
+    // right number but its pointer back at the meter is empty, left that way by
+    // the canonical migration. None pointed at a different meter. Saying "a
+    // different meter" for an empty pointer sends somebody looking for a
+    // conflict that does not exist.
+    if (!masterSnap.exists) {
+      return result(
+        checks,
+        "METER_MASTER_MISSING",
+        "This meter's number is not registered in meter master",
+      );
+    }
+
+    if (!masterAstId) {
+      return result(
+        checks,
+        "METER_MASTER_NOT_LINKED",
+        "Meter master holds this number but does not name the meter it belongs to",
+      );
+    }
+
     return result(
       checks,
       "METER_MASTER_MISMATCH",
-      masterSnap.exists
-        ? "Meter master holds this number against a different meter"
-        : "This meter's number is not registered in meter master",
+      "Meter master holds this number against a different meter",
     );
   }
 

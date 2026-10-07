@@ -42,12 +42,17 @@ function soundWorld(overrides = {}) {
       accessData: { premise: { id: PREMISE } },
       status: { state: "CONNECTED" },
     },
+    // A real METER DISCOVERY transaction: it carries the meter's NUMBER and
+    // the meter's details, and no astId. The meter's id is this transaction's
+    // own id, so there is nothing for it to repeat. Building this fixture the
+    // other way - as an Installation, which does write astId - is what let the
+    // guard refuse every discovered meter on DEV while these tests stayed green.
     [`trns/${METER}`]: {
       accessData: {
         trnType: "METER_DISCOVERY",
         access: { hasAccess: "yes" },
       },
-      ast: { astData: { astId: METER } },
+      ast: { astData: { astNo: METER_NO } },
     },
     [`meter_master/${METER_NO}`]: { refs: { asts: { id: METER } } },
     [`premises/${PREMISE}`]: {
@@ -114,11 +119,43 @@ test("a meter made by something that is not a registration is refused", async ()
   assert.equal(outcome.code, "NOT_A_REGISTRATION");
 });
 
-test("a registration that names another meter is refused", async () => {
+// DR-R001 3.1 check 4, as corrected on 7 October 2026. It asks the METER to
+// name its registration, and asks both records for the meter number. Both are
+// true of a Discovery and of an Installation; the old check was true only of
+// an Installation and refused 130 of 194 meters on DEV.
+test("a meter made by an INSTALLATION passes, and so does one made by a DISCOVERY", async () => {
+  const discovered = await checkMeterRegistration({
+    db: dbWith(soundWorld()),
+    astId: METER,
+  });
+
+  // An Installation also writes the meter id onto its own transaction. That
+  // extra field must not be required, and must not get in the way either.
+  const installed = await checkMeterRegistration({
+    db: dbWith(
+      soundWorld({
+        [`trns/${METER}`]: {
+          accessData: {
+            trnType: "METER_INSTALLATION",
+            access: { hasAccess: "yes" },
+          },
+          ast: { astData: { astId: METER, astNo: METER_NO } },
+        },
+      }),
+    ),
+    astId: METER,
+  });
+
+  assert.equal(discovered.ok, true, "a discovered meter must not be refused");
+  assert.equal(installed.ok, true, "an installed meter must not be refused");
+});
+
+test("a meter that does not name its own registration is refused", async () => {
   const world = soundWorld({
-    [`trns/${METER}`]: {
-      accessData: { trnType: "METER_DISCOVERY", access: { hasAccess: "yes" } },
-      ast: { astData: { astId: "TRN_MDIS_SOMETHING_ELSE" } },
+    [`asts/${METER}`]: {
+      ast: { astData: { astId: "TRN_MDIS_SOMETHING_ELSE", astNo: METER_NO } },
+      accessData: { premise: { id: PREMISE } },
+      status: { state: "CONNECTED" },
     },
   });
 
@@ -128,11 +165,25 @@ test("a registration that names another meter is refused", async () => {
   assert.equal(outcome.code, "REGISTRATION_METER_MISMATCH");
 });
 
+test("a meter whose number differs from the one captured is refused", async () => {
+  const world = soundWorld({
+    [`trns/${METER}`]: {
+      accessData: { trnType: "METER_DISCOVERY", access: { hasAccess: "yes" } },
+      ast: { astData: { astNo: "99999999999" } },
+    },
+  });
+
+  const outcome = await checkMeterRegistration({ db: dbWith(world), astId: METER });
+
+  assert.equal(outcome.ok, false, "the meter that was made is not the meter that was captured");
+  assert.equal(outcome.code, "REGISTRATION_METER_MISMATCH");
+});
+
 test("a meter against a visit that never got in is refused", async () => {
   const world = soundWorld({
     [`trns/${METER}`]: {
       accessData: { trnType: "METER_DISCOVERY", access: { hasAccess: "no" } },
-      ast: { astData: { astId: METER } },
+      ast: { astData: { astNo: METER_NO } },
     },
   });
 
