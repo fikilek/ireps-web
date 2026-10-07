@@ -6,15 +6,18 @@ DEV records first, verify on hosted DEV, then follow separate TEST and LIVE
 review stages. Form changes are explicitly deferred.
 
 The saved `accessData.premise` on `trns` and `asts` gains five string fields:
-`strNo`, `strName`, `strType`, `unitName`, `unitNo`. Existing `id`, `address` and
-`propertyType` remain unchanged. Registry meter rows copy unit fields into
+`strNo`, `strName`, `strType`, `unitName`, `unitNo`. Existing `id` and
+`propertyType` remain unchanged. Saved `address` is rebuilt from the linked
+premise's street components. Registry meter rows copy that address and unit fields into
 `premiseUnitName` and `premiseUnitNo`. Web pages read these saved values, without
 joining against a changing current premise or guessing units from free text.
 
 The one-time reconstruction reads the linked premise's `address.strNo`,
 `address.strName`, `address.strType`, `propertyType.name` and
-`propertyType.unitNo`. It requires matching municipality, ERF and street text.
-Missing unit details become `NAv`; conflicts are held for review. The evidence
+`propertyType.unitNo`. It requires matching municipality and ERF, plus complete
+source street components. Owner clarification: the linked premise address must
+prevail, replacing differing saved street and unit values. Missing unit details
+become `NAv`; missing or mismatched premise references are held. The evidence
 identifies this as a backfill from the current premise, not proof of historical
 capture. Original capture times, users, meter state, counts, media and links
 are preserved.
@@ -23,7 +26,7 @@ are preserved.
 `ireps2`. It defaults to a dry run with `--key` and `--output`. `--apply` uses
 the saved plan and full before-images, checks source/target/registry versions
 in each transaction and writes an append-only result journal. Afterwards it
-checks every applied record's five values, unchanged unrelated content and
+checks every applied record's address and five components, unchanged unrelated content and
 registry copy. A fresh dry run must then show no remaining proposed changes
 for the applied cohort. Do not overwrite a completed evidence directory.
 
@@ -33,10 +36,12 @@ refresh; rebuilds preserve the saved unit fields. No indexes are required.
 Other transaction/report triggers may observe record updates; their original
 capture timestamps remain intact. Recheck derived results and record counts.
 
-Dry run at 12:41 UTC: 560 TRNs and 191 assets proposed, with 191 existing meter
+Superseded dry run at 12:41 UTC: 560 TRNs and 191 assets proposed, with 191 existing meter
 registry rows; 18 TRNs and three assets held for differing street addresses.
 29 TRNs have a sourced unit name, 18 a unit number; 17 assets have a name,
-11 a number. Evidence: `C:/dev/ireps-investigations/trn-address-backfill-20261007/`.
+11 a number. The owner's subsequent premise-prevails instruction resolves these
+address differences; refresh the dry run before applying.
+Evidence: `C:/dev/ireps-investigations/trn-address-backfill-20261007/`.
 
 Recovery: retain Firestore `fields` and `updateTime` backups and the apply
 journal. Restore only changed address fields after checking the current record

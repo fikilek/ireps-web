@@ -14,15 +14,26 @@ test("backfill only patches five address fields and is idempotent", () => {
   assert.equal(planRegistryAddressBackfill(after, premise).status, "UNCHANGED");
   assert.deepEqual(after.metadata, record.metadata);
 });
-test("address conflicts, bad identity and existing different units are held for review", () => {
-  for (const candidate of [null, { ...premise, erfId: "other" }, { ...premise, parents: { lmPcode: "other" } }, { ...premise, address: { ...premise.address, strNo: "15" } }]) {
+test("missing premise, bad identity and incomplete source street are held", () => {
+  for (const candidate of [null, { ...premise, erfId: "other" }, { ...premise, parents: { lmPcode: "other" } }, { ...premise, address: { ...premise.address, strNo: "" } }]) {
     assert.equal(planRegistryAddressBackfill(record, candidate).status, "HOLD");
   }
+});
+test("linked premise prevails over differing saved street and unit values", () => {
   const existing = structuredClone(record);
+  existing.accessData.premise.address = "49 Maninjwa Street";
+  existing.accessData.premise.strNo = "49";
   existing.accessData.premise.unitNo = "3";
-  assert.equal(planRegistryAddressBackfill(existing, premise).status, "HOLD");
+  const source = { ...premise, address: { strNo: "48", strName: "Maninjwa", strType: "Street" } };
+  const plan = planRegistryAddressBackfill(existing, source);
+  assert.equal(plan.status, "UPDATE");
+  assert.equal(plan.previousAddress, "49 Maninjwa Street");
+  assert.equal(plan.patch["accessData.premise.address"], "48 Maninjwa Street");
+  assert.equal(plan.patch["accessData.premise.strNo"], "48");
+  assert.equal(plan.patch["accessData.premise.unitNo"], "04A");
+  assert.equal(existing.accessData.premise.address, "49 Maninjwa Street");
 });
 test("no unit facts are invented and numeric zero is preserved", () => {
-  assert.deepEqual(planRegistryAddressBackfill(record, { ...premise, propertyType: {} }).values, { strNo: "14", strName: "Mckenzie", strType: "Street", unitName: "NAv", unitNo: "NAv" });
+  assert.deepEqual(planRegistryAddressBackfill(record, { ...premise, propertyType: {} }).values, { address: "14 Mckenzie Street", strNo: "14", strName: "Mckenzie", strType: "Street", unitName: "NAv", unitNo: "NAv" });
   assert.equal(planRegistryAddressBackfill(record, { ...premise, propertyType: { unitNo: 0 } }).values.unitNo, "0");
 });
