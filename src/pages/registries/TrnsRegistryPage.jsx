@@ -53,7 +53,7 @@ const EMPTY_TRN_FILTERS = {
   trnId: "",
   meterNo: "",
   premiseAddress: "",
-  premisePropertyType: "",
+  premisePropertyType: "ALL",
   unitName: "",
   unitNo: "",
   erfNo: "",
@@ -442,7 +442,7 @@ export default function TrnsRegistryPage() {
     }
     const createdAtFilter = tableFilters.createdAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
-      if (!includesText(row.premisePropertyType, filters.premisePropertyType)) return false;
+      if (!matchesSelect(row.premisePropertyType, filters.premisePropertyType)) return false;
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
@@ -607,9 +607,11 @@ export default function TrnsRegistryPage() {
   }, {
     key: "premisePropertyType",
     label: "Property Type",
-    filter: "text",
+    filter: "select",
+    filterAllValue: "ALL",
     sortable: true,
-    value: row => isMissingSortValue(row.premisePropertyType) ? null : row.premisePropertyType,
+    value: row => row.premisePropertyType || "NAv",
+    sortValue: row => isMissingSortValue(row.premisePropertyType) ? null : row.premisePropertyType,
     render: row => row.premisePropertyType || "NAv",
     sortEmptyLast: true,
   }, {

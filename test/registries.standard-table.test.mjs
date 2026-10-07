@@ -5,7 +5,7 @@ import { createServer } from "vite";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { filterIrepsTableRows, sortIrepsTableRows, paginateIrepsTableRows, irepsTableDownloadColumns, irepsTableBands } from "../src/components/table/irepsTableModel.js";
+import { filterIrepsTableRows, sortIrepsTableRows, paginateIrepsTableRows, irepsTableDownloadColumns, irepsTableBands, irepsTableSelectOptions } from "../src/components/table/irepsTableModel.js";
 
 // Render the actual registry pages against the opt-in, read-only API fixtures.
 // Capture their shared-table contract, not a duplicate of the page's logic.
@@ -84,6 +84,9 @@ test("TRN unit columns follow Address, combine filters, sort naturally and appea
   assert.equal(filter(table, { premisePropertyType: "commercial", unitNo: "1" })[0].trnId, "TRN-0");
   assert.equal(filter(table, { premisePropertyType: "residential", unitNo: "1" }).length, 1);
   assert.equal(table.downloads.columns.find(c => c.header === "Property Type").value(table.rows[0]), "Commercial");
+  assert.deepEqual(irepsTableSelectOptions(table.rows, table.columns.find(c => c.key === "premisePropertyType")), ["Commercial", "NAv", "Residential"]);
+  assert.equal(filter(table, { premisePropertyType: "Com" }).length, 0);
+  assert.equal(filter(table, { premisePropertyType: "NAv" }).length, 1);
   assert.equal(filter(table, { unitName: "oak", unitNo: "10" })[0].trnId, "TRN-9");
   assert.equal(filter(table, { unitName: "palm", unitNo: "10" }).length, 0);
   const sorted = sortIrepsTableRows(table.rows, table.columns, { key: "unitNo", direction: "asc" });
@@ -104,6 +107,9 @@ test("Meter unit columns follow Address, filter independently and export the sav
   const address = keys.indexOf("premiseAddress");
   assert.deepEqual(keys.slice(address - 1, address + 3), ["premiseType", "premiseAddress", "premiseUnitName", "premiseUnitNo"]);
   assert.equal(filter(table, { premiseType: "commercial" }).length, 6);
+  assert.deepEqual(irepsTableSelectOptions(table.rows, table.columns.find(c => c.key === "premiseType")), ["Commercial", "NAv", "Residential"]);
+  assert.equal(filter(table, { premiseType: "Com" }).length, 0);
+  assert.equal(filter(table, { premiseType: "NAv" }).length, 1);
   assert.equal(table.downloads.columns.find(c => c.header === "Property Type").value(table.rows[0]), "Commercial");
   assert.equal(filter(table, { premiseUnitName: "oak", premiseUnitNo: "10" })[0].meterNo, "00010");
   assert.equal(filter(table, { premiseUnitName: "palm", premiseUnitNo: "10" }).length, 0);

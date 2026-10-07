@@ -34,7 +34,7 @@ const EMPTY_METER_FILTERS = {
   premiseAddress: "",
   premiseUnitName: "",
   premiseUnitNo: "",
-  premiseType: "",
+  premiseType: "ALL",
   registration: "ALL",
   // DR-R001 3.2 and 3.3: each count filters on its own. The office types the
   // number it is looking for — 0 for never, 1, 2 — the way the TRN Registry's
@@ -535,8 +535,9 @@ export default function MetersRegistryPage() {
     }
     const updatedAtFilter = tableFilters.updatedAt || EMPTY_UPDATED_AT_FILTER;
     return rows.filter(row => {
+      if (filters.premiseType !== "ALL" && String(row.premisePropertyType || "NAv").trim().toLowerCase() !== filters.premiseType.trim().toLowerCase()) return false;
       const statusText = row.statusState || row.status || "NAv";
-      return includesText(row.meterNo, filters.meterNo) && (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) && (filters.meterKind === "ALL" || String(row.meterKind || "").toLowerCase() === filters.meterKind.toLowerCase()) && (filters.meterPhase === "ALL" || String(row.meterPhase || "").toLowerCase() === filters.meterPhase.toLowerCase()) && (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) && (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) && includesText(row.erfNo, filters.erfNo) && includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress) && includesText(row.premisePropertyType, filters.premiseType)
+      return includesText(row.meterNo, filters.meterNo) && (filters.meterType === "ALL" || String(row.meterType || "").toLowerCase() === filters.meterType.toLowerCase()) && (filters.meterKind === "ALL" || String(row.meterKind || "").toLowerCase() === filters.meterKind.toLowerCase()) && (filters.meterPhase === "ALL" || String(row.meterPhase || "").toLowerCase() === filters.meterPhase.toLowerCase()) && (filters.visibility === "ALL" || String(row.visibility || "").toUpperCase() === filters.visibility) && (filters.status === "ALL" || String(statusText || "").toUpperCase() === filters.status) && includesText(row.erfNo, filters.erfNo) && includesText(`${row.premiseAddress || ""} ${row.premiseId || ""}`, filters.premiseAddress)
         && (filters.registration === "ALL" || registrationOf(row) === filters.registration)
         && includesText(row.premiseUnitName, filters.premiseUnitName)
         && includesText(row.premiseUnitNo, filters.premiseUnitNo)
@@ -804,7 +805,8 @@ ${premiseId}`;
     key: "premiseType",
     label: "Property Type",
     group: "location",
-    filter: "text",
+    filter: "select",
+    filterAllValue: "ALL",
     sortable: true,
     value: row => row.premisePropertyType || "NAv",
     sortValue: row => row.premisePropertyType === "NAv" ? null : row.premisePropertyType,

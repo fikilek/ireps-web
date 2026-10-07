@@ -8,7 +8,8 @@ review stages. Form changes are explicitly deferred.
 Owner follow-up: Property Type precedes Address in both registries and their
 downloads. The TRN row reads saved `accessData.premise.propertyType`; Meter
 Registry moves its existing property type column before the address. Both have
-text filtering and sorting. Owner review exposed old composite property type
+an exact-match Property Type dropdown with All and the loaded categories, plus
+text filters for address/unit details and sorting. Owner review exposed old composite property type
 strings (such as `Commercial Trading 1 1`). The corrective backfill replaces
 these with the linked premise's `propertyType.type` alone, keeping its name and
 number exclusively in the separate unit fields. Do not split or guess from text.
