@@ -17,7 +17,9 @@ export function planFieldCommentBackfill(data = {}) {
 }
 
 export function assertFieldCommentBackfillProject(project, credentialProject) {
-  // Extend only when the owner authorizes the next environment's promotion.
-  if (project !== "ireps2" || credentialProject !== project) throw new Error("Only matching DEV (ireps2) credentials are allowed");
+  // Owner authorized TEST promotion; LIVE remains outside this migration.
+  if (!["ireps2", "ireps-test"].includes(project) || credentialProject !== project) {
+    throw new Error("Only matching DEV (ireps2) or TEST (ireps-test) credentials are allowed");
+  }
   return project;
 }
