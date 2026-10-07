@@ -484,6 +484,34 @@ export async function buildQuickTrnPdfArtifact(
     if (!page || y - required < 54) addPage();
   }
 
+  function drawFieldRow(label, valueLines) {
+    const rowHeight = Math.max(22, valueLines.length * 11 + 9);
+    page.drawRectangle({
+      x: PAGE.margin,
+      y: y - rowHeight + 6,
+      width: PAGE.width - PAGE.margin * 2,
+      height: rowHeight,
+      color: COLORS.panel,
+    });
+    page.drawText(winAnsi(label), {
+      x: PAGE.margin + 10,
+      y: y - 8,
+      size: 8,
+      font: bold,
+      color: COLORS.muted,
+    });
+    valueLines.forEach((line, index) => {
+      page.drawText(line || " ", {
+        x: PAGE.margin + 150,
+        y: y - 8 - index * 11,
+        size: 9.2,
+        font: regular,
+        color: COLORS.ink,
+      });
+    });
+    y -= rowHeight + 4;
+  }
+
 
   function drawSection(section) {
     if (!section.rows.length) return;
@@ -521,33 +549,7 @@ export async function buildQuickTrnPdfArtifact(
       const valueLines = wrapText(regular, value, 9.2, 330);
       const rowHeight = Math.max(22, valueLines.length * 11 + 9);
       ensureSpace(rowHeight + 4);
-
-      page.drawRectangle({
-        x: PAGE.margin,
-        y: y - rowHeight + 6,
-        width: PAGE.width - PAGE.margin * 2,
-        height: rowHeight,
-        color: COLORS.panel,
-      });
-      page.drawText(winAnsi(label), {
-        x: PAGE.margin + 10,
-        y: y - 8,
-        size: 8,
-        font: bold,
-        color: COLORS.muted,
-      });
-
-      valueLines.forEach((line, index) => {
-        page.drawText(line || " ", {
-          x: PAGE.margin + 150,
-          y: y - 8 - index * 11,
-          size: 9.2,
-          font: regular,
-          color: COLORS.ink,
-        });
-      });
-
-      y -= rowHeight + 4;
+      drawFieldRow(label, valueLines);
     }
 
     y -= 8;
@@ -582,7 +584,7 @@ export async function buildQuickTrnPdfArtifact(
       thickness: 0.8,
       color: COLORS.line,
     });
-    y -= 20;
+    y -= 13;
   }
 
   function drawFieldComments() {
@@ -594,7 +596,7 @@ export async function buildQuickTrnPdfArtifact(
     const contentWidth = PAGE.width - PAGE.margin * 2;
     let headingDrawn = false;
     function reserveCommentSpace(required) {
-      const headingHeight = headingDrawn ? 0 : 32;
+      const headingHeight = headingDrawn ? 0 : 25;
       if (y - required - headingHeight < 54) {
         addPage();
         drawFieldCommentsHeading(headingDrawn);
@@ -605,39 +607,20 @@ export async function buildQuickTrnPdfArtifact(
     }
 
     if (hasText) {
-      const lines = wrapText(regular, comment, 9.2, contentWidth - 24);
+      const lines = wrapText(regular, comment, 9.2, 330);
       let offset = 0;
       while (offset < lines.length) {
-        reserveCommentSpace(76);
-        page.drawText(offset ? "Field Comment Text (continued)" : "Field Comment Text", {
-          x: PAGE.margin,
-          y,
-          size: 9,
-          font: bold,
-          color: COLORS.ink,
-        });
-        y -= 14;
-        const count = Math.min(lines.length - offset, Math.floor((y - 54 - 32) / 12));
-        const height = count * 12 + 20;
-        page.drawRectangle({
-          x: PAGE.margin,
-          y: y - height,
-          width: contentWidth,
-          height,
-          color: COLORS.panel,
-        });
-        lines.slice(offset, offset + count).forEach((line, index) => {
-          page.drawText(line || " ", {
-            x: PAGE.margin + 12,
-            y: y - 15 - index * 12,
-            size: 9.2,
-            font: regular,
-            color: COLORS.ink,
-          });
-        });
+        reserveCommentSpace(26);
+        // Split only at line boundaries so the shared label/value row can
+        // continue on another page without entering the report footer.
+        const count = Math.min(lines.length - offset, Math.floor((y - 54 - 13) / 11));
+        drawFieldRow(
+          offset ? "Field Comment Text (continued)" : "Field Comment Text",
+          lines.slice(offset, offset + count),
+        );
         offset += count;
-        y -= height + 20;
       }
+      y -= 8;
     }
 
     photos.forEach((entry, index) => {
