@@ -1,6 +1,6 @@
 export const ADDRESS_FIELDS = ["propertyType", "address", "strNo", "strName", "strType", "unitName", "unitNo"];
 export function assertRegistryBackfillProject(project, credentialProject) {
-  if (!["ireps2", "ireps-test"].includes(project)) throw new Error("Registry backfill is restricted to DEV and TEST");
+  if (!["ireps2", "ireps-test", "ireps-5c3e9"].includes(project)) throw new Error("Registry backfill is restricted to configured iREPS projects");
   if (credentialProject !== project) throw new Error("Credential project does not match the selected backfill project");
   return project;
 }

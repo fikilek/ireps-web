@@ -1,4 +1,4 @@
-// DEV/TEST migration. Defaults to a read-only DEV dry run; --apply requires a
+// Environment-specific migration. Defaults to a read-only DEV dry run; --apply requires a
 // previously saved plan. Backups include full Firestore field representations.
 import fs from "node:fs";
 import path from "node:path";
@@ -10,7 +10,7 @@ import { savedPremiseUnits } from "../registry/savedPremiseUnits.js";
 
 const args = process.argv.slice(2);
 const option = name => args[args.indexOf(name) + 1];
-if (!args.includes("--key") || !args.includes("--output")) throw new Error("Required: --key <matching project credential> --output <evidence directory> [--project ireps2|ireps-test]");
+if (!args.includes("--key") || !args.includes("--output")) throw new Error("Required: --key <matching project credential> --output <evidence directory> [--project ireps2|ireps-test|ireps-5c3e9]");
 const key = JSON.parse(fs.readFileSync(option("--key"), "utf8"));
 const project = assertRegistryBackfillProject(args.includes("--project") ? option("--project") : "ireps2", key.project_id);
 const output = path.resolve(option("--output"));

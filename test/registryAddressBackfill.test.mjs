@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { assertRegistryBackfillProject, planRegistryAddressBackfill } from "../functions/maintenance/registryAddressBackfillPlan.js";
-test("backfill explicitly selects DEV or TEST with matching credentials and refuses LIVE", () => {
+test("backfill explicitly selects an iREPS project with matching credentials", () => {
   assert.equal(assertRegistryBackfillProject("ireps2", "ireps2"), "ireps2");
   assert.equal(assertRegistryBackfillProject("ireps-test", "ireps-test"), "ireps-test");
   assert.throws(() => assertRegistryBackfillProject("ireps2", "ireps-test"), /does not match/);
   assert.throws(() => assertRegistryBackfillProject("ireps-test", "ireps2"), /does not match/);
-  assert.throws(() => assertRegistryBackfillProject("ireps-5c3e9", "ireps-5c3e9"), /restricted/);
+  assert.equal(assertRegistryBackfillProject("ireps-5c3e9", "ireps-5c3e9"), "ireps-5c3e9");
+  assert.throws(() => assertRegistryBackfillProject("ireps-5c3e9", "ireps-test"), /does not match/);
+  assert.throws(() => assertRegistryBackfillProject("ireps-test", "ireps-5c3e9"), /does not match/);
+  assert.throws(() => assertRegistryBackfillProject("unknown", "unknown"), /restricted/);
   assert.throws(() => assertRegistryBackfillProject(undefined, "ireps-test"), /restricted/);
 });
 const premise = { erfId: "erf1", parents: { lmPcode: "lm1" }, address: { strNo: "14", strName: "Mckenzie", strType: "Street" }, propertyType: { type: "Commercial", name: "Shop", unitNo: "04A" } };
