@@ -19,6 +19,7 @@ import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import MeterMediaGalleryModal from "./components/MeterMediaGalleryModal";
 import ItoLaunchButtons from "../../components/ito/ItoLaunchButtons";
+import { ITO_COLUMN_LABEL } from "../../components/ito/itoTransactions";
 import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
 import MeterReportPreviewModal from "./components/MeterReportPreviewModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
@@ -993,7 +994,7 @@ ${premiseId}`;
     // The transaction is decided here, on the row. The ITO page that opens
     // next only says why, and to whom.
     key: "itoLaunch",
-    label: "Launch a transaction",
+    label: ITO_COLUMN_LABEL,
     group: "credit",
     render: row => (
       <ItoLaunchButtons

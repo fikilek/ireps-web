@@ -10,12 +10,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ITO_COLUMN_LABEL,
   ITO_TRANSACTIONS,
   readItoCount,
 } from "../src/components/ito/itoTransactions.js";
 
 const byWork = Object.fromEntries(ITO_TRANSACTIONS.map((t) => [t.work, t]));
 const STATES = ["FIELD", "CONNECTED", "DISCONNECTED", "REMOVED", "DECOMMISSIONED"];
+
+test("the column is called what the thing is called", () => {
+  // Owner, 9 October 2026. It was "Launch a transaction", which described what
+  // the buttons do instead of naming the thing. One thing, one word: a screen
+  // that calls it something of its own is how two names for one thing begin.
+  assert.equal(ITO_COLUMN_LABEL, "Individual Transaction Origination");
+});
 
 test("the button offers the five transactions the office can originate", () => {
   assert.deepEqual(

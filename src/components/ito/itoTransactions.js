@@ -4,6 +4,17 @@
 // No JSX here on purpose: these are the rules, and the rules are tested. The
 // icons live with the component that draws them.
 
+/**
+ * What the column is called, in full (owner, 9 October 2026).
+ *
+ * Not "Launch a transaction", which described what the buttons do rather than
+ * naming the thing. This IS Individual Transaction Origination, the name the
+ * owner gave it, and the same name the rules and the dictionary use. One
+ * thing, one word — a screen that calls it something of its own is how two
+ * names for one thing start.
+ */
+export const ITO_COLUMN_LABEL = "Individual Transaction Origination";
+
 const alwaysAvailable = () => true;
 const inState = (...states) => (state) => states.includes(state);
 
