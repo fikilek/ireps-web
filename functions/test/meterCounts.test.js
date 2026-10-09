@@ -199,6 +199,19 @@ test("the backfill counts by the same rules the writers use", async () => {
     !/outcome\(trn\) === "SUCCESS"/.test(source),
     "a reading writes SUCCESSFUL_READING, so a literal SUCCESS check counts no readings at all",
   );
+  // One writer, one archive. A second writer that did not archive was
+  // harmless where a handful of meters lacked the counts field and not
+  // harmless on LIVE, where all 1,637 lacked it and would have been written
+  // before the first before-image was taken.
+  assert.ok(
+    !/doc\.ref\.update\(/.test(source),
+    "only the archived pass may write a meter; a second writer cannot be archived by the first",
+  );
+  assert.match(
+    source,
+    /async function readAllMeters/,
+    "the pass that reads every meter must read, not write",
+  );
   assert.match(
     source,
     /typeof held\[key\] !== "number"/,

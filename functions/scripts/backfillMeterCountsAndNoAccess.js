@@ -331,7 +331,19 @@ function report(title, rows, render) {
 //
 // This writes zeros. It never lowers a number: a meter that already carries
 // counts is left to the pass that reconciles it against the transactions.
-async function initialiseMissingCounts() {
+/**
+ * Reads every meter, and reports which carry no `counts` field at all.
+ *
+ * **It writes nothing** (9 October 2026). It used to write the zeros itself,
+ * which was a second writer that did not archive — harmless where a handful of
+ * meters lacked the field, and not harmless on LIVE, where all 1,637 lacked it
+ * and would have been written before the first before-image was taken.
+ *
+ * It is redundant as a writer in any case: since a MISSING KEY counts as a
+ * difference, the archived pass below already writes every one of these. One
+ * writer, one archive.
+ */
+async function readAllMeters() {
   const given = [];
 
   let query = db.collection("asts");
@@ -343,27 +355,7 @@ async function initialiseMissingCounts() {
   const snapshot = await query.get();
 
   for (const doc of snapshot.docs) {
-    if (doc.data()?.counts) continue;
-
-    given.push(doc.id);
-
-    if (APPLY) {
-      const zeros = newMeterCounts();
-      const patch = {
-        "metadata.updatedAt": new Date().toISOString(),
-        "metadata.updatedByUid": "SYSTEM",
-        "metadata.updatedByUser": "Meter counts backfill",
-      };
-
-      for (const key of METER_COUNT_KEYS) patch[`counts.${key}`] = zeros[key];
-
-      await doc.ref.update(patch);
-
-      // The register reads a copy, so the copy is brought with it. Without
-      // this the row still has no counts and the page cannot tell a meter
-      // nothing has happened to from a meter it was never told about.
-      await rebuildMeterRegistryRow(doc.id);
-    }
+    if (!doc.data()?.counts) given.push(doc.id);
   }
 
   return { given, meters: snapshot.size, meterIds: snapshot.docs.map((doc) => doc.id) };
@@ -376,13 +368,11 @@ async function main() {
     }`,
   );
 
-  const { given, meters, meterIds } = await initialiseMissingCounts();
+  const { given, meters, meterIds } = await readAllMeters();
 
   console.log(`\nMeters: ${meters}`);
   console.log(
-    APPLY
-      ? `  carried no counts at all, now started at zero: ${given.length}`
-      : `  carry no counts at all, would be started at zero: ${given.length}`,
+    `  carry no counts at all, so every key is written for them: ${given.length}`,
   );
 
   const { counts, noAccessByPremise, noAccessWithoutPremise, read } =
