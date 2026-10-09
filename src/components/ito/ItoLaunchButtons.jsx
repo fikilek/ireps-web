@@ -10,7 +10,7 @@
 //
 // Which transaction is offered when, and how a count is read, live beside this
 // in `itoTransactions.jsx`.
-import { ITO_TRANSACTIONS, readItoCount } from "./itoTransactions";
+import { ITO_TRANSACTIONS, itoCountState, readItoCount } from "./itoTransactions";
 
 // One glyph per transaction, keyed by the work it stands for. DCN is a broken
 // line and RCN a joined one: opposites in SHAPE, so they are told apart without
@@ -54,6 +54,7 @@ export default function ItoLaunchButtons({ row, busy = false, onLaunch }) {
         const disabled = !allowed || busy;
         const count = readItoCount(row, transaction.countKey);
         const known = count !== null;
+        const countStyle = styles[itoCountState(count)];
 
         return (
           <button
@@ -88,7 +89,7 @@ export default function ItoLaunchButtons({ row, busy = false, onLaunch }) {
               {ICONS[transaction.work]}
             </svg>
             {transaction.code}
-            <span style={known ? styles.count : styles.countUnknown}>
+            <span style={countStyle}>
               {known ? count : "NAv"}
             </span>
           </button>
@@ -115,21 +116,23 @@ const buttonBase = {
   letterSpacing: "0.02em",
 };
 
+// The badge sits on the corner of the button. The white ring it used to carry
+// was there to lift a black disc off the button; these three read as chips,
+// which is what the No Access count beside them already is.
 const countBase = {
   position: "absolute",
-  top: "-7px",
-  right: "-7px",
-  minWidth: "19px",
-  height: "19px",
+  top: "-8px",
+  right: "-8px",
+  minWidth: "20px",
+  height: "20px",
   padding: "0 5px",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "#ffffff",
-  border: "2px solid #ffffff",
   borderRadius: "999px",
   fontSize: "10px",
-  fontWeight: "bold",
+  fontWeight: 850,
+  fontVariantNumeric: "tabular-nums",
   letterSpacing: 0,
 };
 
@@ -152,14 +155,30 @@ const styles = {
     color: "#94a3b8",
     cursor: "not-allowed",
   },
-  count: {
+  // Something has happened here. The No Access chip's own colours, so one
+  // glance down the column finds every meter that has a history.
+  some: {
     ...countBase,
-    background: "#0f172a",
+    background: "#fff7ed",
+    border: "1px solid #fcd9b6",
+    color: "#9a3412",
   },
-  // Amber, and the word rather than a number, so a gap cannot be mistaken for
-  // a meter nothing has ever happened to.
-  countUnknown: {
+  // Nothing has ever happened. It steps back, and that is the half that makes
+  // the other work: left heavy, zero would compete with the colour on every
+  // row and a meter with a history would still have to be read, not seen.
+  none: {
     ...countBase,
-    background: "#b45309",
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    color: "#94a3b8",
+  },
+  // iREPS holds no count for this meter. Dashed, so it differs in SHAPE and
+  // not only in colour — pale orange and pale amber are close enough to
+  // confuse at a glance, and a gap must never read as a quiet meter.
+  unknown: {
+    ...countBase,
+    background: "#fffbeb",
+    border: "1px dashed #b45309",
+    color: "#78350f",
   },
 };

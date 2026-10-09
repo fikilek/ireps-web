@@ -105,3 +105,24 @@ export function readItoCount(row, key) {
 
   return Math.max(0, Math.trunc(value));
 }
+
+/**
+ * How a count should read: `"some"`, `"none"` or `"unknown"`.
+ *
+ * Owner, 9 October 2026. Every count used to draw as a black disc, so the two
+ * on a meter that meant something looked exactly like the three that did not.
+ * A number above zero now takes the No Access chip's own colours, and **zero
+ * recedes** — that second half is what makes it work. Left black, zero would
+ * compete with the colour on every row, and a meter something has happened to
+ * would still have to be read rather than seen.
+ *
+ * `"unknown"` is drawn with a dashed edge as well as its own colour, because
+ * pale orange and pale amber are close enough to confuse at a glance. It
+ * differs in SHAPE too, so a count iREPS does not hold can never be mistaken
+ * for a meter nothing has happened to.
+ */
+export function itoCountState(count) {
+  if (count === null) return "unknown";
+
+  return count > 0 ? "some" : "none";
+}

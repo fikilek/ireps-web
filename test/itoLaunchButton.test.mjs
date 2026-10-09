@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   ITO_COLUMN_LABEL,
   ITO_TRANSACTIONS,
+  itoCountState,
   readItoCount,
 } from "../src/components/ito/itoTransactions.js";
 
@@ -124,6 +125,20 @@ test("a count the meter does not carry is NAv, not zero", () => {
   assert.equal(readItoCount(undefined, "disconnections"), null);
   assert.equal(readItoCount({ counts: { disconnections: "2" } }, "disconnections"), null);
   assert.equal(readItoCount({ counts: { disconnections: Number.NaN } }, "disconnections"), null);
+});
+
+test("a count above zero reads differently from a count of zero", () => {
+  // Owner, 9 October 2026. Every count used to draw as a black disc, so the
+  // ones that meant something looked exactly like the ones that did not.
+  assert.equal(itoCountState(1), "some");
+  assert.equal(itoCountState(12), "some");
+  assert.equal(itoCountState(0), "none");
+
+  // And a count iREPS does not hold is neither of those. Three states, never
+  // two: a gap is not a quiet meter.
+  assert.equal(itoCountState(null), "unknown");
+
+  assert.equal(new Set(["some", "none", "unknown"]).size, 3);
 });
 
 test("a count that is held is read as a whole, non-negative number", () => {
