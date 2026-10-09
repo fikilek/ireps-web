@@ -16,14 +16,57 @@
 // are marked on this page where they will go, rather than left blank: the
 // owner's standard is that a screen never shows the office nothing.
 import { useEffect, useMemo, useState } from "react";
+import { skipToken } from "@reduxjs/toolkit/query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
 import { ITO_TRANSACTIONS, readItoCount } from "../../components/ito/itoTransactions";
 import { itoReasonProblem, itoReasonsFor } from "../../components/ito/itoReasons";
-import { useGetMeterByIdQuery } from "../../redux/creditControlApi";
+import { buildWorkerChoices } from "../../components/ito/itoWorkers";
+import ItoMap from "../../components/ito/ItoMap";
+import { readPoint } from "../../components/ito/geoDistance";
+import ItoWorkerPicker from "../../components/ito/ItoWorkerPicker";
+import {
+  useGetMeterByIdQuery,
+  useGetPremiseByIdQuery,
+} from "../../redux/creditControlApi";
+import { useGetErfBoundaryByIdQuery } from "../../redux/mapErfsApi";
+import { useGetFwrLiveLocationsQuery } from "../../redux/fwrLiveLocationsApi";
+import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 
 const NAV = "NAv";
+
+/**
+ * An ERF boundary as a ring of points, out of whatever shape it arrives in.
+ *
+ * Tolerant on purpose: a boundary that cannot be read draws no polygon, and
+ * the meter, the premise and the line are still there. A map missing one
+ * outline is worth more to the office than no map.
+ */
+function erfRing(boundary) {
+  const geometry = boundary?.geometry || boundary;
+  const rings = geometry?.coordinates || geometry?.paths || geometry;
+
+  if (!Array.isArray(rings)) return null;
+
+  const flat = Array.isArray(rings[0]?.[0]) ? rings[0] : rings;
+
+  const ring = flat
+    .map((point) => {
+      if (Array.isArray(point)) {
+        const [lng, lat] = point;
+
+        return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+          ? { lat: Number(lat), lng: Number(lng) }
+          : null;
+      }
+
+      return readPoint(point);
+    })
+    .filter(Boolean);
+
+  return ring.length >= 3 ? ring : null;
+}
 
 /** A count in words, or NAv where the meter does not carry it (never 0). */
 function countPhrase(meter, key, one, many) {
@@ -50,7 +93,7 @@ function titleFor(name) {
 export default function ItoPage() {
   const { astId, work } = useParams();
   const navigate = useNavigate();
-  const { activeWorkbase } = useAuth() || {};
+  const { activeWorkbase, serviceProvider } = useAuth() || {};
 
   const transaction = useMemo(
     () =>
@@ -61,6 +104,40 @@ export default function ItoPage() {
   );
 
   const { data: meter, isLoading, isError } = useGetMeterByIdQuery(astId);
+
+  // Step 5: the meter on the ground, and who can be sent to it.
+  const meterPoint = readPoint(meter?.ast?.location?.gps);
+  const premiseId = String(meter?.accessData?.premise?.id || "").trim();
+  const erfId = String(meter?.accessData?.erfId || "").trim();
+
+  const { data: premise } = useGetPremiseByIdQuery(premiseId || skipToken);
+  const { data: erfBoundary } = useGetErfBoundaryByIdQuery(erfId || skipToken);
+  const { data: usersData, isLoading: usersLoading } = useGetUsersDirectoryQuery({ limit: 1000 });
+  const { data: liveData } = useGetFwrLiveLocationsQuery({ limit: 5000 });
+
+  // "Heard 40 seconds ago" has to keep counting, or the office reads a number
+  // that froze when the page opened.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const tick = setInterval(() => setNowMs(Date.now()), 30_000);
+
+    return () => clearInterval(tick);
+  }, []);
+
+  const [picked, setPicked] = useState(null);
+
+  const choices = useMemo(
+    () =>
+      buildWorkerChoices({
+        users: usersData?.users || usersData?.items || usersData || [],
+        liveLocations: liveData?.locations || liveData?.items || liveData || [],
+        meterPoint,
+        nowMs,
+        mainContractorId: serviceProvider?.id || null,
+      }),
+    [usersData, liveData, meterPoint, nowMs, serviceProvider],
+  );
 
   const [reasonCode, setReasonCode] = useState("");
   const [explanation, setExplanation] = useState("");
@@ -219,27 +296,28 @@ export default function ItoPage() {
 
       <div style={styles.columns}>
         <section style={{ ...styles.card, ...styles.mapCard }}>
-          <h2 style={styles.cardTitle}>The meter on the ground</h2>
-          <div style={styles.toCome}>
-            <strong style={styles.toComeTitle}>Step 5</strong>
-            <p style={styles.toComeText}>
-              The ERF, the premise and the meter with the line joining them, the
-              layer switches, and every field worker within 100 m drawn where he
-              is now. Approved on the design canvas, not built yet.
-            </p>
+          <div style={styles.cardHead}>
+            <h2 style={styles.cardTitle}>The meter on the ground</h2>
+            <span style={styles.cardAside}>
+              Field workers within {choices.radiusM} m are drawn here
+            </span>
           </div>
+          <ItoMap
+            meter={meterPoint}
+            premise={readPoint(premise)}
+            erfPaths={erfRing(erfBoundary)}
+            workers={choices.onTheMap}
+          />
         </section>
 
         <section style={{ ...styles.card, ...styles.whoCard }}>
           <h2 style={styles.cardTitle}>Who does it</h2>
-          <div style={styles.toCome}>
-            <strong style={styles.toComeTitle}>Step 5</strong>
-            <p style={styles.toComeText}>
-              iREPS suggests the nearest and says it is a suggestion. Every
-              field worker of the main contractor and its subcontractors is
-              listed, however far away, and any of them may be picked.
-            </p>
-          </div>
+          <ItoWorkerPicker
+            choices={choices}
+            selectedUid={picked?.uid || null}
+            onPick={setPicked}
+            loading={usersLoading}
+          />
         </section>
       </div>
 
@@ -359,10 +437,38 @@ export default function ItoPage() {
       <section style={{ ...styles.card, ...styles.footerCard }}>
         <div style={{ flex: "1 1 360px", minWidth: 0 }}>
           <span style={styles.label}>Allocated to</span>
-          <div style={styles.allocBox}>
-            <span style={styles.allocText}>
-              Nobody yet — choosing the worker is step 5.
-            </span>
+          <div
+            style={{ ...styles.allocBox, ...(picked ? styles.allocFilled : null) }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              const uid = event.dataTransfer.getData("text/plain");
+              const dropped = choices.all.find((worker) => worker.uid === uid);
+
+              if (dropped) setPicked(dropped);
+            }}
+          >
+            {picked ? (
+              <>
+                <span style={styles.allocWho}>
+                  <strong>{picked.name}</strong>
+                  <span style={styles.allocFacts}>
+                    {picked.distance} · {picked.movement} · {picked.heard}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPicked(null)}
+                  style={styles.allocClear}
+                >
+                  Change
+                </button>
+              </>
+            ) : (
+              <span style={styles.allocText}>
+                Nobody yet — click a worker, or drop one here
+              </span>
+            )}
           </div>
         </div>
         <div style={styles.actions}>
@@ -380,7 +486,9 @@ export default function ItoPage() {
         <p style={styles.footNote}>
           {problem
             ? problem
-            : "The reason is ready. Sending waits for step 5, the worker, and step 6, the sending window."}
+            : !picked
+              ? "Choose the field worker this goes to."
+              : "Ready to send. The sending window itself is step 6."}
         </p>
       </section>
     </section>
@@ -459,6 +567,20 @@ const styles = {
   mapCard: { flex: "999 1 620px", minWidth: 0 },
   whoCard: { flex: "1 1 380px", minWidth: 0 },
   cardTitle: { margin: 0, fontSize: 16 },
+  cardHead: { display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" },
+  cardAside: { fontSize: 12, color: "#64748b", flexGrow: 1, textAlign: "right" },
+  allocFilled: { borderStyle: "solid", borderColor: "#1d4ed8", background: "#eff6ff" },
+  allocWho: { flexGrow: 1, minWidth: 0 },
+  allocFacts: { display: "block", marginTop: 3, fontSize: 12, color: "#475569" },
+  allocClear: {
+    padding: "8px 14px",
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    background: "#ffffff",
+    color: "#0f172a",
+    fontSize: 13,
+    cursor: "pointer",
+  },
   toCome: {
     border: "2px dashed #cbd5e1",
     borderRadius: 14,
