@@ -299,16 +299,57 @@ test("the one No Access writer raises the meter's count, once", async () => {
   );
 });
 
-test("an inspection or a reading that was done raises no count", () => {
+// Until 9 October 2026 an inspection and a reading raised no count, because
+// the meter held only three numbers. The owner then asked for a count per
+// transaction type, so each of the five now raises its own.
+test("every kind of work that was done raises its own count", () => {
+  const expected = {
+    METER_DISCONNECTION: "disconnections",
+    METER_RECONNECTION: "reconnections",
+    METER_INSPECTION: "inspections",
+    METER_REMOVAL: "removals",
+  };
+
+  for (const [trnType, key] of Object.entries(expected)) {
+    const patch = buildMeterCountPatch({ trnType, outcome: "SUCCESS" });
+
+    assert.deepEqual(Object.keys(patch), [`counts.${key}`], `${trnType} must raise counts.${key}`);
+  }
+});
+
+test("a reading that was taken raises the reading count, though it never says SUCCESS", () => {
+  // THE TRAP THIS PINS. A Meter Reading writes SUCCESSFUL_READING, not
+  // SUCCESS. A count guarded on the literal SUCCESS therefore never moves, and
+  // nothing says so: the reading is recorded, the register shows nothing, and
+  // the number looks exactly like a meter nobody has ever read.
   assert.deepEqual(
-    buildMeterCountPatch({ trnType: "METER_INSPECTION", outcome: "SUCCESS" }),
-    {},
+    Object.keys(
+      buildMeterCountPatch({ trnType: "METER_READING", outcome: "SUCCESSFUL_READING" }),
+    ),
+    ["counts.readings"],
   );
+});
+
+test("work that was not done raises nothing", () => {
+  for (const outcome of ["NO_ACCESS", "UNSUCCESSFUL_READING", "", undefined]) {
+    assert.deepEqual(
+      buildMeterCountPatch({ trnType: "METER_DISCONNECTION", outcome }),
+      {},
+      `a disconnection with outcome ${JSON.stringify(outcome)} did not disconnect the meter`,
+    );
+  }
+
   assert.deepEqual(
-    buildMeterCountPatch({
-      trnType: "METER_READING",
-      outcome: "SUCCESSFUL_READING",
-    }),
+    buildMeterCountPatch({ trnType: "METER_READING", outcome: "UNSUCCESSFUL_READING" }),
     {},
+    "a reading that could not be taken is not a reading",
   );
+});
+
+test("a kind of work the meter does not count raises nothing", () => {
+  // A registration is the meter's own origin and is always exactly one; a
+  // commissioning is not issued from the ITO button. Neither is counted.
+  for (const trnType of ["METER_DISCOVERY", "METER_INSTALLATION", "METER_COMMISSIONING"]) {
+    assert.deepEqual(buildMeterCountPatch({ trnType, outcome: "SUCCESS" }), {});
+  }
 });

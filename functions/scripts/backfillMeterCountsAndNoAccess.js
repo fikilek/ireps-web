@@ -1,10 +1,22 @@
 // DR-R001 3.2 and 3.3 — the one-time count, and the reconciliation that goes
 // with it.
 //
-// Every meter carries three numbers from now on: how many times it was
-// disconnected, how many times it was reconnected, and how many visits to it
-// ended because nobody could reach it. The meters that already exist have to
-// be counted once, from the transactions, before those columns are shown.
+// Every meter carries SIX numbers (9 October 2026): how many times each of the
+// five kinds of work was actually done on it — disconnection, reconnection,
+// inspection, removal, reading — and how many visits to it ended because
+// nobody could reach it. The meters that already exist have to be counted
+// once, from the transactions, before the ITO button shows those numbers.
+//
+// The owner's instruction of 9 October: the numbers are made true in DEV, TEST
+// and LIVE BEFORE the button that displays them is built, because a button
+// carrying wrong numbers is worse than no button — the office would be
+// deciding from it.
+//
+// THE TRANSACTIONS ARE THE TRUTH, so this pass is authoritative in both
+// directions: a meter whose transactions say three disconnections is set to
+// three, and a meter with no transactions at all is set to zero rather than
+// left holding whatever it holds. Skipping the second case would leave a wrong
+// number standing precisely where nothing could ever correct it.
 //
 // The same pass reconciles the premises' No Access lists both ways, because a
 // No Access on work the office issued never reached the premise's list (Task
@@ -25,6 +37,13 @@
 import { initializeApp, applicationDefault } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
+import {
+  COUNT_KEY_BY_TRN_TYPE,
+  METER_COUNT_KEYS,
+  newMeterCounts,
+  outcomeMeansWorkWasDone,
+} from "../registration/meterCounts.js";
+
 initializeApp({ credential: applicationDefault() });
 
 const db = getFirestore();
@@ -43,10 +62,9 @@ const ROWS_ONLY = process.argv.includes("--rows");
 const LM_INDEX = process.argv.indexOf("--lm");
 const LM_PCODE = LM_INDEX > -1 ? process.argv[LM_INDEX + 1] : "";
 
-const COUNTED_WORK = {
-  METER_DISCONNECTION: "disconnections",
-  METER_RECONNECTION: "reconnections",
-};
+// The one well decides which kind of work raises which count
+// (registration/meterCounts.js). This script does not keep its own copy: a
+// fourth place naming the counts by hand is how one of them gets forgotten.
 
 function trnType(trn = {}) {
   return String(trn?.accessData?.trnType || trn?.trnType || "")
@@ -77,7 +95,7 @@ function premiseOf(trn = {}) {
 }
 
 async function readTransactions() {
-  const counts = new Map(); // astId -> {disconnections, reconnections, noAccess}
+  const counts = new Map(); // astId -> every count in METER_COUNT_KEYS
   const noAccessByPremise = new Map(); // premiseId -> Set(trnId)
   const noAccessWithoutPremise = [];
 
@@ -95,16 +113,12 @@ async function readTransactions() {
     const type = trnType(trn);
 
     if (meterId) {
-      const row = counts.get(meterId) || {
-        disconnections: 0,
-        reconnections: 0,
-        noAccess: 0,
-      };
+      const row = counts.get(meterId) || newMeterCounts();
 
       if (hasNoAccess(trn)) {
         row.noAccess += 1;
-      } else if (outcome(trn) === "SUCCESS" && COUNTED_WORK[type]) {
-        row[COUNTED_WORK[type]] += 1;
+      } else if (outcomeMeansWorkWasDone(outcome(trn)) && COUNT_KEY_BY_TRN_TYPE[type]) {
+        row[COUNT_KEY_BY_TRN_TYPE[type]] += 1;
       }
 
       counts.set(meterId, row);
@@ -148,25 +162,24 @@ async function writeMeterCounts(counts) {
 
     const held = snap.data()?.counts || {};
 
-    const differs =
-      Number(held.disconnections || 0) !== wanted.disconnections ||
-      Number(held.reconnections || 0) !== wanted.reconnections ||
-      Number(held.noAccess || 0) !== wanted.noAccess;
+    const differs = METER_COUNT_KEYS.some(
+      (key) => Number(held[key] || 0) !== Number(wanted[key] || 0),
+    );
 
-    const carriesACount =
-      wanted.disconnections > 0 || wanted.reconnections > 0 || wanted.noAccess > 0;
+    const carriesACount = METER_COUNT_KEYS.some((key) => Number(wanted[key] || 0) > 0);
 
     if (differs) changed.push({ astId, held, wanted });
 
     if (APPLY && differs) {
-      await ref.update({
-        "counts.disconnections": wanted.disconnections,
-        "counts.reconnections": wanted.reconnections,
-        "counts.noAccess": wanted.noAccess,
+      const patch = {
         "metadata.updatedAt": new Date().toISOString(),
         "metadata.updatedByUid": "SYSTEM",
         "metadata.updatedByUser": "Meter counts backfill",
-      });
+      };
+
+      for (const key of METER_COUNT_KEYS) patch[`counts.${key}`] = Number(wanted[key] || 0);
+
+      await ref.update(patch);
     }
 
     if (APPLY && (differs || (ROWS_ONLY && carriesACount))) {
@@ -251,14 +264,16 @@ async function initialiseMissingCounts() {
     given.push(doc.id);
 
     if (APPLY) {
-      await doc.ref.update({
-        "counts.disconnections": 0,
-        "counts.reconnections": 0,
-        "counts.noAccess": 0,
+      const zeros = newMeterCounts();
+      const patch = {
         "metadata.updatedAt": new Date().toISOString(),
         "metadata.updatedByUid": "SYSTEM",
         "metadata.updatedByUser": "Meter counts backfill",
-      });
+      };
+
+      for (const key of METER_COUNT_KEYS) patch[`counts.${key}`] = zeros[key];
+
+      await doc.ref.update(patch);
 
       // The register reads a copy, so the copy is brought with it. Without
       // this the row still has no counts and the page cannot tell a meter
@@ -267,7 +282,7 @@ async function initialiseMissingCounts() {
     }
   }
 
-  return { given, meters: snapshot.size };
+  return { given, meters: snapshot.size, meterIds: snapshot.docs.map((doc) => doc.id) };
 }
 
 async function main() {
@@ -277,7 +292,7 @@ async function main() {
     }`,
   );
 
-  const { given, meters } = await initialiseMissingCounts();
+  const { given, meters, meterIds } = await initialiseMissingCounts();
 
   console.log(`\nMeters: ${meters}`);
   console.log(
@@ -288,6 +303,21 @@ async function main() {
 
   const { counts, noAccessByPremise, noAccessWithoutPremise, read } =
     await readTransactions();
+
+  // A meter no transaction mentions must read zero, not whatever it happens to
+  // hold. Without this the pass only ever raises numbers and can never correct
+  // one that is too high — and a meter whose transactions were removed would
+  // keep its old count for ever, with nothing left that could disagree.
+  let untouchedByAnyWork = 0;
+
+  for (const meterId of meterIds) {
+    if (counts.has(meterId)) continue;
+
+    counts.set(meterId, newMeterCounts());
+    untouchedByAnyWork += 1;
+  }
+
+  console.log(`  no transaction names them, so every count is zero: ${untouchedByAnyWork}`);
 
   console.log(`\nTransactions read: ${read}`);
   console.log(`Meters with work behind them: ${counts.size}`);

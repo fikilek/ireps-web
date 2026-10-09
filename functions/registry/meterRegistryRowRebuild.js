@@ -3,6 +3,7 @@
 import * as logger from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
 import { savedPremiseUnits } from "./savedPremiseUnits.js";
+import { readMeterCounts } from "../registration/meterCounts.js";
 
 function normalizeMeterNo(value) {
   return String(value || "")
@@ -65,14 +66,6 @@ function resolveMeterStatus(data = {}) {
   };
 }
 
-// A meter that has never been disconnected reads 0, never blank: a number the
-// office can sort and filter on from the first day.
-function readCount(value) {
-  const number = Number(value);
-
-  return Number.isFinite(number) && number > 0 ? Math.trunc(number) : 0;
-}
-
 function buildMeterRegistryRow(astId, data = {}) {
   const sourceMetadata = getStandardMetadata(data?.metadata || {});
 
@@ -108,11 +101,10 @@ function buildMeterRegistryRow(astId, data = {}) {
     // DR-R001 3.2 and 3.3: the meter's own numbers, copied so the register can
     // show, sort and filter them without counting transactions while it draws.
     // The meter record is the truth; this is a copy, like the rest of this row.
-    counts: {
-      noAccess: readCount(data?.counts?.noAccess),
-      disconnections: readCount(data?.counts?.disconnections),
-      reconnections: readCount(data?.counts?.reconnections),
-    },
+    // Every count the meter carries, never a list written out again here. A
+    // count named in one place and forgotten in another is raised correctly
+    // and drawn nowhere, which is the 7 October defect exactly.
+    counts: readMeterCounts(data),
 
     parents: {
       countryPcode: data?.accessData?.parents?.countryPcode || "NAv",

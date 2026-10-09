@@ -1,4 +1,5 @@
 import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
+import { meterCountKeyForTrnType, outcomeMeansWorkWasDone } from "../registration/meterCounts.js";
 import { recordRefusedSubmission } from "../registration/refusedSubmissions.js";
 import { SYSTEM_FAULT_CODES } from "./systemFault.js";
 import { onCall } from "firebase-functions/v2/https";
@@ -348,17 +349,22 @@ function buildHistoryEvent({
 // record itself. That is what stops the number on the Meter Registry and the
 // list of visits behind it from disagreeing (DR-R001 3.3).
 export function buildMeterCountPatch({ trnType, outcome }) {
-  if (normalizeUpper(outcome) !== "SUCCESS") return {};
+  // Only work that was actually done raises a count. A visit that ended in No
+  // Access raises `counts.noAccess` instead, from the one No Access writer —
+  // the meter was not disconnected, so `disconnections` would be a lie.
+  //
+  // Which outcomes mean "done" is decided in one place, because a Meter
+  // Reading does not write SUCCESS: it writes SUCCESSFUL_READING.
+  if (!outcomeMeansWorkWasDone(outcome)) return {};
 
-  if (trnType === "METER_DISCONNECTION") {
-    return { "counts.disconnections": FieldValue.increment(1) };
-  }
+  // Which count this kind of work raises is decided in one place
+  // (`registration/meterCounts.js`), so a transaction type added there is
+  // counted here without this function being touched.
+  const key = meterCountKeyForTrnType(trnType);
 
-  if (trnType === "METER_RECONNECTION") {
-    return { "counts.reconnections": FieldValue.increment(1) };
-  }
+  if (!key) return {};
 
-  return {};
+  return { [`counts.${key}`]: FieldValue.increment(1) };
 }
 
 function buildUpdateMetadataPatch({ now, actorUid, actorName }) {
