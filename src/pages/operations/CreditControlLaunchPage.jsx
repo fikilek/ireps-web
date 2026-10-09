@@ -11,9 +11,15 @@ import { Link, useParams } from "react-router-dom";
 
 import { useGetMeterByIdQuery } from "../../redux/creditControlApi";
 
+// The five transactions the ITO button offers (DR-R001 3.2). This page is
+// still the stand-in for the ITO page itself; it names the work so the office
+// can see which button it pressed arrived here.
 const WORK_LABELS = {
   disconnect: "Disconnection",
   reconnect: "Reconnection",
+  inspect: "Inspection",
+  remove: "Removal",
+  read: "Meter reading",
 };
 
 export default function CreditControlLaunchPage() {

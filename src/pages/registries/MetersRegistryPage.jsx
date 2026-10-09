@@ -18,6 +18,7 @@ import {
 import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import MeterMediaGalleryModal from "./components/MeterMediaGalleryModal";
+import ItoLaunchButtons from "../../components/ito/ItoLaunchButtons";
 import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
 import MeterReportPreviewModal from "./components/MeterReportPreviewModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
@@ -493,7 +494,7 @@ export default function MetersRegistryPage() {
   // DR-R001 3.1: the guard runs before the window opens, so a meter iREPS
   // cannot account for never reaches a worker. The same check runs again on
   // the server when the work is issued.
-  async function launchCreditControl(row, work) {
+  async function launchIto(row, work) {
     if (checkingMeterId) return;
 
     setCheckingMeterId(row.id);
@@ -985,94 +986,22 @@ ${premiseId}`;
       );
     }
   }, {
-    // DR-R001 3.2: the count comes before the button, so the meter's history
-    // is read before the action is reached.
-    key: "disconnectionCount",
-    label: "Disconnections",
+    // DR-R001 3.2 (1.10.0, owner 9 October 2026): ONE BUTTON PER TRANSACTION,
+    // each carrying the meter's own count, replacing the Credit control group
+    // of two buttons and their two count columns.
+    //
+    // The transaction is decided here, on the row. The ITO page that opens
+    // next only says why, and to whom.
+    key: "itoLaunch",
+    label: "Launch a transaction",
     group: "credit",
-    filter: "text",
-    renderFilter: ({ filters: tableFilters, setFilter }) => (
-      <IrepsTableFilterInput
-        value={tableFilters.disconnectionCount || ""}
-        onChange={value => setFilter("disconnectionCount", value.replace(/[^0-9]/g, ""))}
-        placeholder="0, 1, 2…"
-        inputMode="numeric"
+    render: row => (
+      <ItoLaunchButtons
+        row={row}
+        busy={checkingMeterId === row.id}
+        onLaunch={launchIto}
       />
-    ),
-    sortable: true,
-    value: row => readMeterCount(row, "disconnections"),
-    sortValue: row => readMeterCount(row, "disconnections"),
-    render: row => {
-      return <span style={styles.countValue}>{readMeterCount(row, "disconnections")}</span>;
-    }
-  }, {
-    key: "disconnect",
-    label: " ",
-    group: "credit",
-    render: row => {
-      const statusState = String(row.statusState || row.status || "NAv").toUpperCase();
-
-      return (
-        <WorkButton
-          disabled={statusState !== "CONNECTED" || checkingMeterId === row.id}
-          busy={checkingMeterId === row.id}
-          title={
-            statusState === "CONNECTED"
-              ? "Send a disconnection for this meter"
-              : statusState === "DISCONNECTED"
-                ? "This meter is already disconnected"
-                : "This meter is out of service"
-          }
-          onClick={() => launchCreditControl(row, "disconnect")}
-        >
-          Disconnect
-        </WorkButton>
-      );
-    }
-  }, {
-    key: "reconnectionCount",
-    label: "Reconnections",
-    group: "credit",
-    filter: "text",
-    renderFilter: ({ filters: tableFilters, setFilter }) => (
-      <IrepsTableFilterInput
-        value={tableFilters.reconnectionCount || ""}
-        onChange={value => setFilter("reconnectionCount", value.replace(/[^0-9]/g, ""))}
-        placeholder="0, 1, 2…"
-        inputMode="numeric"
-      />
-    ),
-    sortable: true,
-    value: row => readMeterCount(row, "reconnections"),
-    sortValue: row => readMeterCount(row, "reconnections"),
-    render: row => {
-      return <span style={styles.countValue}>{readMeterCount(row, "reconnections")}</span>;
-    }
-  }, {
-    key: "reconnect",
-    label: "  ",
-    group: "credit",
-    render: row => {
-      const statusState = String(row.statusState || row.status || "NAv").toUpperCase();
-
-      return (
-        <WorkButton
-          tone="reconnect"
-          disabled={statusState !== "DISCONNECTED" || checkingMeterId === row.id}
-          busy={checkingMeterId === row.id}
-          title={
-            statusState === "DISCONNECTED"
-              ? "Send a reconnection for this meter"
-              : statusState === "CONNECTED"
-                ? "This meter is already connected"
-                : "This meter is out of service"
-          }
-          onClick={() => launchCreditControl(row, "reconnect")}
-        >
-          Reconnect
-        </WorkButton>
-      );
-    }
+    )
   }] : [])];
 
   // Owner, 1 October: every cell sits in the middle of its row and reads
