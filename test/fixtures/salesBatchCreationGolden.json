@@ -25,6 +25,13 @@
       "monthlyUnits": {
         "2026-07": 35
       },
+      "monthlyCategories": {
+        "2026-07": {
+          "leakageCategory": "CAT3 - Micro Purchaser (<R400)",
+          "riskTier": "Medium",
+          "riskScore": 5
+        }
+      },
       "master": {
         "id": "07100000001",
         "visibility": "INVISIBLE"
@@ -54,6 +61,13 @@
       },
       "monthlyUnits": {
         "2026-07": 35
+      },
+      "monthlyCategories": {
+        "2026-07": {
+          "leakageCategory": "CAT6 - Low kWh per Rand",
+          "riskTier": "High",
+          "riskScore": 7
+        }
       },
       "master": {
         "id": "07100000002",

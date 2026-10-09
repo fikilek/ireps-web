@@ -30,3 +30,51 @@ test("callable intent carries retained identities and signed evidence, without c
   assert.equal(Object.hasOwn(input, "draft"), false);
   assert.equal(Object.hasOwn(input, "monthlySalesC"), false);
 });
+
+// Rules TB-R046 (targeted-batch rules 1.3.28): only CAT meters are batched. The category is the one
+// Mpilo supplies for the LM's newest category month; iREPS never calculates it. Nothing pinned this at
+// the draft level, so when the rule arrived it broke the two tests above instead of failing a test of
+// its own. These do that job: the same canonical selection, refused for the category alone.
+const clone = () => JSON.parse(JSON.stringify(golden.rows));
+function plan(rows) {
+  const model = buildNonGpsBatchPlanningModel(rows);
+  return { model, result: buildNgpTargetedBatchDraftPlan({ targets: model.noGpsTargets, tbId, lmPcode: "ZA5241", lmName: "Endumeni" }) };
+}
+// The second row keeps its CAT category in every case below, so the LM's newest category month stays
+// 2026-07 and each refusal is the first row's own category, never a missing category month.
+test("a Sales meter with no category is refused, and its selection cannot be drafted", () => {
+  const rows = clone();
+  delete rows[0].monthlyCategories;
+  const { model, result } = plan(rows);
+  assert.equal(model.categoryMonth, "2026-07");
+  const [uncategorised, cat] = model.noGpsTargets;
+  assert.equal(uncategorised.category, "NONE");
+  assert.equal(uncategorised.batchable, false);
+  assert.equal(uncategorised.selectable, false);
+  assert.equal(uncategorised.batchabilityCode, "SALES_CATEGORY_NONE");
+  assert.match(uncategorised.batchabilityReason, /No category for 2026-07/);
+  // The refusal is the category and nothing else: the CAT meter beside it is still batchable.
+  assert.equal(cat.category, "CAT");
+  assert.equal(cat.batchable, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "NGP_SELECTION_NOT_BATCHABLE");
+});
+test("a Normal meter, and a CAT category in an older month, are both refused", () => {
+  const normal = clone();
+  normal[0].monthlyCategories["2026-07"].leakageCategory = "Normal - No Leakage Flag";
+  const refusedNormal = plan(normal);
+  assert.equal(refusedNormal.model.noGpsTargets[0].category, "NORMAL");
+  assert.equal(refusedNormal.model.noGpsTargets[0].batchabilityCode, "SALES_CATEGORY_NORMAL");
+  assert.equal(refusedNormal.result.ok, false);
+  assert.equal(refusedNormal.result.code, "NGP_SELECTION_NOT_BATCHABLE");
+  // TB-R046: a meter missing from the LM's newest category month has no category for batching,
+  // even where an older month gives it one.
+  const stale = clone();
+  stale[0].monthlyCategories = { "2026-06": stale[0].monthlyCategories["2026-07"] };
+  const refusedStale = plan(stale);
+  assert.equal(refusedStale.model.categoryMonth, "2026-07");
+  assert.equal(refusedStale.model.noGpsTargets[0].category, "NONE");
+  assert.equal(refusedStale.model.noGpsTargets[0].batchabilityCode, "SALES_CATEGORY_NONE");
+  assert.equal(refusedStale.result.ok, false);
+  assert.equal(refusedStale.result.code, "NGP_SELECTION_NOT_BATCHABLE");
+});
