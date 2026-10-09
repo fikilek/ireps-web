@@ -750,34 +750,6 @@ ${premiseId}`;
       label: "Invisible"
     }]
   }, {
-    key: "status",
-    label: "Status",
-    group: "state",
-    filter: "select",
-    sortable: true,
-    value: row => getSortValue(row, "status"),
-    sortValue: row => getSortValue(row, "status"),
-    render: row => {
-      return <>{row.statusState || row.status || "NAv"}</>;
-    },
-    filterAllValue: "ALL",
-    filterOptions: [{
-      value: "FIELD",
-      label: "FIELD"
-    }, {
-      value: "CONNECTED",
-      label: "CONNECTED"
-    }, {
-      value: "DISCONNECTED",
-      label: "DISCONNECTED"
-    }, {
-      value: "REMOVED",
-      label: "REMOVED"
-    }, {
-      value: "DECOMMISSIONED",
-      label: "DECOMMISSIONED"
-    }]
-  }, {
     key: "erfNo",
     label: "ERF No",
     group: "location",
@@ -986,6 +958,34 @@ ${premiseId}`;
         </button>
       );
     }
+  }, {
+    key: "status",
+    label: "Status",
+    group: "state",
+    filter: "select",
+    sortable: true,
+    value: row => getSortValue(row, "status"),
+    sortValue: row => getSortValue(row, "status"),
+    render: row => {
+      return <>{row.statusState || row.status || "NAv"}</>;
+    },
+    filterAllValue: "ALL",
+    filterOptions: [{
+      value: "FIELD",
+      label: "FIELD"
+    }, {
+      value: "CONNECTED",
+      label: "CONNECTED"
+    }, {
+      value: "DISCONNECTED",
+      label: "DISCONNECTED"
+    }, {
+      value: "REMOVED",
+      label: "REMOVED"
+    }, {
+      value: "DECOMMISSIONED",
+      label: "DECOMMISSIONED"
+    }]
   }, {
     // DR-R001 3.2 (1.10.0, owner 9 October 2026): ONE BUTTON PER TRANSACTION,
     // each carrying the meter's own count, replacing the Credit control group
