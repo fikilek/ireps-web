@@ -199,6 +199,16 @@ test("the backfill counts by the same rules the writers use", async () => {
     !/outcome\(trn\) === "SUCCESS"/.test(source),
     "a reading writes SUCCESSFUL_READING, so a literal SUCCESS check counts no readings at all",
   );
+  assert.match(
+    source,
+    /typeof held\[key\] !== "number"/,
+    // Found on DEV on 9 October by the verification, after the pass reported
+    // nothing left to do: 146 meters sat at all zeros, so comparing values
+    // alone saw no difference, and they kept a three-key counts object with
+    // the three new keys simply absent. Absent and zero are different facts,
+    // and a pass that only compares values enforces half the rule.
+    "a missing key must count as a difference, or a meter at all zeros never gains the new counts",
+  );
 });
 
 test("the one No Access writer stamps the meter it changed", async () => {

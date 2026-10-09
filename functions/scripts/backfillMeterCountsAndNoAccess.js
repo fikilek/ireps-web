@@ -34,6 +34,9 @@
 // whichever key is set. Run it on DEV first, read the report, then TEST, then
 // LIVE with the owner's go.
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { initializeApp, applicationDefault } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
@@ -61,6 +64,18 @@ const APPLY = process.argv.includes("--apply");
 const ROWS_ONLY = process.argv.includes("--rows");
 const LM_INDEX = process.argv.indexOf("--lm");
 const LM_PCODE = LM_INDEX > -1 ? process.argv[LM_INDEX + 1] : "";
+// Where the before-images go. Required to write anything: archive first is the
+// owner's standing rule for a data change, and a script that can be run
+// without one will eventually be run without one.
+const OUT_INDEX = process.argv.indexOf("--out");
+const OUT_DIR = OUT_INDEX > -1 ? process.argv[OUT_INDEX + 1] : "";
+
+if (APPLY && !OUT_DIR) {
+  console.error(
+    "Refusing to write without --out <folder>: every meter's counts are archived before they are changed.",
+  );
+  process.exit(1);
+}
 
 // The one well decides which kind of work raises which count
 // (registration/meterCounts.js). This script does not keep its own copy: a
@@ -149,7 +164,11 @@ async function writeMeterCounts(counts) {
   const changed = [];
   const missingMeters = [];
   const rowsRebuilt = [];
+  const rowsToRebuild = [];
 
+  // FIRST PASS: read only. Nothing is written until every meter that will be
+  // touched has been read and archived, so a run that dies halfway cannot
+  // leave meters changed with no record of what they held.
   for (const [astId, wanted] of counts) {
     const ref = db.collection("asts").doc(astId);
     const snap = await ref.get();
@@ -162,31 +181,96 @@ async function writeMeterCounts(counts) {
 
     const held = snap.data()?.counts || {};
 
+    // A MISSING KEY COUNTS AS A DIFFERENCE, not only a different number.
+    //
+    // Found by the verification on 9 October 2026, after this pass reported
+    // nothing left to do. 146 meters sat at all zeros, so comparing values
+    // alone found no difference — and they kept a three-key counts object with
+    // inspections, removals and readings simply absent, their register rows
+    // with them. The shape rule says all six are always present, and this
+    // file's own comment says absent and zero are different facts. The check
+    // has to ask both questions or it enforces only half the rule.
     const differs = METER_COUNT_KEYS.some(
-      (key) => Number(held[key] || 0) !== Number(wanted[key] || 0),
+      (key) => typeof held[key] !== "number" || Number(held[key]) !== Number(wanted[key] || 0),
     );
 
     const carriesACount = METER_COUNT_KEYS.some((key) => Number(wanted[key] || 0) > 0);
 
-    if (differs) changed.push({ astId, held, wanted });
-
-    if (APPLY && differs) {
-      const patch = {
-        "metadata.updatedAt": new Date().toISOString(),
-        "metadata.updatedByUid": "SYSTEM",
-        "metadata.updatedByUser": "Meter counts backfill",
-      };
-
-      for (const key of METER_COUNT_KEYS) patch[`counts.${key}`] = Number(wanted[key] || 0);
-
-      await ref.update(patch);
+    if (differs) {
+      changed.push({
+        astId,
+        held,
+        wanted,
+        // The whole meter's prior counts object, not only the six numbers we
+        // compare, so the archive can restore exactly what was there.
+        before: snap.data()?.counts ?? null,
+        updatedAtBefore: snap.data()?.metadata?.updatedAt ?? null,
+      });
     }
 
-    if (APPLY && (differs || (ROWS_ONLY && carriesACount))) {
-      await rebuildMeterRegistryRow(astId);
-      rowsRebuilt.push(astId);
-    }
+    if (ROWS_ONLY && carriesACount && !differs) rowsToRebuild.push(astId);
   }
+
+  if (!APPLY) return { changed, missingMeters, rowsRebuilt };
+
+  // The archive, written before the first update.
+  mkdirSync(OUT_DIR, { recursive: true });
+  writeFileSync(
+    join(OUT_DIR, "backup.json"),
+    JSON.stringify(
+      {
+        takenAt: new Date().toISOString(),
+        municipality: LM_PCODE || "every municipality",
+        meters: changed.length,
+        before: changed.map(({ astId, before, updatedAtBefore }) => ({
+          astId,
+          counts: before,
+          updatedAt: updatedAtBefore,
+        })),
+      },
+      null,
+      2,
+    ),
+  );
+  console.log(`\nArchived ${changed.length} meters' counts to ${join(OUT_DIR, "backup.json")}`);
+
+  // SECOND PASS: write.
+  for (const row of changed) {
+    const ref = db.collection("asts").doc(row.astId);
+    const patch = {
+      "metadata.updatedAt": new Date().toISOString(),
+      "metadata.updatedByUid": "SYSTEM",
+      "metadata.updatedByUser": "Meter counts backfill",
+    };
+
+    for (const key of METER_COUNT_KEYS) patch[`counts.${key}`] = Number(row.wanted[key] || 0);
+
+    await ref.update(patch);
+
+    // The register reads a copy, so the copy comes with it. Without this the
+    // meter is right and the page still shows the old number.
+    await rebuildMeterRegistryRow(row.astId);
+    rowsRebuilt.push(row.astId);
+  }
+
+  for (const astId of rowsToRebuild) {
+    await rebuildMeterRegistryRow(astId);
+    rowsRebuilt.push(astId);
+  }
+
+  writeFileSync(
+    join(OUT_DIR, "applied.json"),
+    JSON.stringify(
+      {
+        appliedAt: new Date().toISOString(),
+        metersWritten: changed.length,
+        registerRowsRebuilt: rowsRebuilt.length,
+        changes: changed.map(({ astId, held, wanted }) => ({ astId, held, wanted })),
+      },
+      null,
+      2,
+    ),
+  );
 
   return { changed, missingMeters, rowsRebuilt };
 }
@@ -320,7 +404,7 @@ async function main() {
   console.log(`  no transaction names them, so every count is zero: ${untouchedByAnyWork}`);
 
   console.log(`\nTransactions read: ${read}`);
-  console.log(`Meters with work behind them: ${counts.size}`);
+  console.log(`Meters considered, every one of them: ${counts.size}`);
 
   const { changed, missingMeters, rowsRebuilt } = await writeMeterCounts(counts);
   const { missingFromPremise, onPremiseWithoutTrn, missingPremises } =
@@ -329,9 +413,22 @@ async function main() {
   report(
     APPLY ? "Meter counts written" : "Meter counts that would change",
     changed,
-    (row) =>
-      `${row.astId}  held ${row.held.disconnections || 0}/${row.held.reconnections || 0}/${row.held.noAccess || 0}` +
-      `  →  ${row.wanted.disconnections}/${row.wanted.reconnections}/${row.wanted.noAccess}  (dcn/rcn/na)`,
+    // Every count, in the order METER_COUNT_KEYS gives them, and the ones that
+    // actually moved named at the end. A report that printed three of six said
+    // "50 would change" and then showed before and after as identical, which
+    // is worse than no report: it reads as a bug in the counting.
+    (row) => {
+      const held = METER_COUNT_KEYS.map((key) => Number(row.held[key] || 0));
+      const wanted = METER_COUNT_KEYS.map((key) => Number(row.wanted[key] || 0));
+      const moved = METER_COUNT_KEYS.filter(
+        (key, i) => held[i] !== wanted[i],
+      ).join(", ");
+
+      return (
+        `${row.astId}  held ${held.join("/")}  →  ${wanted.join("/")}` +
+        `  (${METER_COUNT_KEYS.join("/")})  — ${moved}`
+      );
+    },
   );
 
   console.log(
