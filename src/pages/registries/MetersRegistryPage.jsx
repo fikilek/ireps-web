@@ -504,7 +504,7 @@ export default function MetersRegistryPage() {
       const outcome = await checkMeterRegistration(row.id).unwrap();
 
       if (outcome?.success) {
-        navigate(`/operations/credit-control/${row.id}/${work}`);
+        navigate(`/operations/ito/${row.id}/${work}`);
         return;
       }
 
