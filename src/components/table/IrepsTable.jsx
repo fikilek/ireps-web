@@ -217,7 +217,7 @@ export default function IrepsTable({
         style={{ ...styles.scroll, maxHeight }}
         onScroll={topScrollbar ? () => syncScroll(bodyScrollRef, topScrollRef) : undefined}
       >
-        <table ref={tableRef} style={stickyHeader ? styles.tableSticky : styles.table}>
+        <table ref={tableRef} style={styles.table}>
           <thead style={stickyHeader ? { position: "sticky", top: 0, zIndex: 2, background: T.headBackground } : undefined}>
             {bands.length ? (
               <tr>
@@ -561,23 +561,6 @@ const styles = {
   table: {
     width: "100%",
     borderCollapse: "collapse",
-    fontSize: T.fontSize,
-    color: T.text,
-  },
-
-  // The same table, with its borders NOT collapsed.
-  //
-  // `border-collapse: collapse` paints borders at table level rather than on
-  // each cell, and a sticky thead's background does not cover that strip - so
-  // the rows passing underneath show through a hairline gap between the column
-  // titles and the filter inputs. Found by the owner on 10 October 2026.
-  // `separate` with zero spacing looks identical here, because every border in
-  // this table is already a border-bottom on a cell, and it lets the sticky
-  // header cover itself properly.
-  tableSticky: {
-    width: "100%",
-    borderCollapse: "separate",
-    borderSpacing: 0,
     fontSize: T.fontSize,
     color: T.text,
   },
