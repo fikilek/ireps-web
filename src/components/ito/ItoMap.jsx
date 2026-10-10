@@ -284,6 +284,30 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
 
   const allocatedPoint = readPoint(allocated?.point);
 
+  /**
+   * The job: the ERF outline, the premise and the meter.
+   *
+   * Deliberately NOT the field workers. A man 502 km away would pull the
+   * fit out to the whole province and the job would be a dot in the middle
+   * of it, which is the opposite of what this is for.
+   */
+  const jobPoints = useMemo(() => {
+    const list = [];
+
+    if (Array.isArray(erfPaths)) {
+      for (const point of erfPaths) {
+        const at = readPoint(point);
+
+        if (at) list.push(at);
+      }
+    }
+
+    if (premise) list.push(premise);
+    if (meter) list.push(meter);
+
+    return list;
+  }, [erfPaths, premise, meter]);
+
   const points = useMemo(() => {
     const list = [];
 
@@ -339,7 +363,7 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
             showWorkers={shown.workers}
           />
           <Fit points={points} />
-          <Focus request={focus} worker={readPoint(allocated?.point)} home={points} />
+          <Focus request={focus} worker={readPoint(allocated?.point)} home={jobPoints.length ? jobPoints : points} />
         </GoogleMap>
       </APIProvider>
 
@@ -347,6 +371,19 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
           the top right; these sit under it in the same 40x40 white squares the
           geofence and Sales maps use (GeofencePlanningLayers.jsx:618), so the
           office meets one set of map controls across iREPS and not three. */}
+      <button
+        type="button"
+        onClick={() => setFocus((current) => ({ target: "home", n: current.n + 1 }))}
+        title="Fit the ERF, the premise and the meter"
+        aria-label="Fit the ERF, the premise and the meter on the screen"
+        style={{ ...styles.control, top: 60 }}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#475569" strokeWidth="2" strokeLinejoin="round">
+          <rect x="3.5" y="5" width="17" height="14" rx="2" />
+          <circle cx="12" cy="12" r="2.2" fill="#b42318" stroke="none" />
+        </svg>
+      </button>
+
       <button
         type="button"
         onClick={() =>
@@ -372,7 +409,7 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
         }
         style={{
           ...styles.control,
-          top: 60,
+          top: 106,
           cursor: allocatedPoint ? "pointer" : "not-allowed",
         }}
       >
@@ -426,7 +463,7 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
           onClick={() => setOpen(true)}
           aria-label="Show map layers"
           title="Map layers"
-          style={{ ...styles.control, top: 106 }}
+          style={{ ...styles.control, top: 152 }}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 3 2 8l10 5 10-5-10-5Zm-7.5 8.2L2 12.5l10 5 10-5-2.5-1.3L12 15l-7.5-3.8Zm0 4.5L2 17l10 5 10-5-2.5-1.3L12 19.5l-7.5-3.8Z" fill="#475569" />
@@ -474,7 +511,7 @@ const styles = {
   panel: {
     position: "absolute",
     right: 14,
-    top: 106,
+    top: 152,
     zIndex: 55,
     width: 208,
     display: "grid",
