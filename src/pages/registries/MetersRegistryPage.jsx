@@ -453,6 +453,8 @@ export default function MetersRegistryPage() {
   const [reportMeter, setReportMeter] = useState(null);
   const [guardRefusal, setGuardRefusal] = useState(null);
   const [checkingMeterId, setCheckingMeterId] = useState(null);
+  // Which of the five was pressed, so that button alone shows the wait.
+  const [checkingWork, setCheckingWork] = useState(null);
 
   const [checkMeterRegistration] = useCheckMeterRegistrationMutation();
 
@@ -499,6 +501,7 @@ export default function MetersRegistryPage() {
     if (checkingMeterId) return;
 
     setCheckingMeterId(row.id);
+    setCheckingWork(work);
 
     try {
       const outcome = await checkMeterRegistration(row.id).unwrap();
@@ -524,6 +527,7 @@ export default function MetersRegistryPage() {
       });
     } finally {
       setCheckingMeterId(null);
+      setCheckingWork(null);
     }
   }
 
@@ -1000,6 +1004,7 @@ ${premiseId}`;
       <ItoLaunchButtons
         row={row}
         busy={checkingMeterId === row.id}
+        checkingWork={checkingWork}
         onLaunch={launchIto}
       />
     )

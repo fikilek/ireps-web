@@ -44,13 +44,42 @@ const ICONS = {
   ),
 };
 
-export default function ItoLaunchButtons({ row, busy = false, onLaunch }) {
+/**
+ * The wait between pressing a launch button and the ITO page opening.
+ *
+ * The seven checks of `DR-R001` 3.1 run on the server first, and that can
+ * take a few seconds. Until now every button simply greyed and the screen sat
+ * dead, which is the one thing the owner's submit standard forbids: visible
+ * progress while it runs, never silence. The phone learnt this the same way
+ * in October, when Installation's work check waited 5 to 20 seconds in
+ * silence and the owner asked for an indicator.
+ */
+function Spinner() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+      style={styles.spinner}
+    >
+      <path d="M8 1.6a6.4 6.4 0 1 0 6.4 6.4" />
+    </svg>
+  );
+}
+
+export default function ItoLaunchButtons({ row, busy = false, checkingWork = null, onLaunch }) {
   const state = String(row?.statusState || row?.status || "NAv").toUpperCase();
 
   return (
     <div style={styles.row}>
       {ITO_TRANSACTIONS.map((transaction) => {
         const allowed = transaction.available(state);
+        const checking = busy && checkingWork === transaction.work;
         const disabled = !allowed || busy;
         const count = readItoCount(row, transaction.countKey);
         const known = count !== null;
@@ -60,10 +89,18 @@ export default function ItoLaunchButtons({ row, busy = false, onLaunch }) {
           <button
             key={transaction.work}
             type="button"
-            style={disabled ? styles.buttonDisabled : styles.button}
+            style={
+              checking
+                ? { ...styles.button, ...styles.buttonChecking }
+                : disabled
+                  ? styles.buttonDisabled
+                  : styles.button
+            }
             disabled={disabled}
             title={
-              allowed
+              checking
+                ? `Checking the meter before ${transaction.name.toLowerCase()}…`
+                : allowed
                 ? `${transaction.name} — ${
                     known
                       ? `${count} on this meter already`
@@ -71,23 +108,31 @@ export default function ItoLaunchButtons({ row, busy = false, onLaunch }) {
                   }`
                 : transaction.refusal(state)
             }
-            aria-label={`${transaction.name}${
-              known ? `, ${count} on this meter already` : ", count not held"
-            }`}
+            aria-label={
+              checking
+                ? `Checking the meter before ${transaction.name.toLowerCase()}`
+                : `${transaction.name}${
+                    known ? `, ${count} on this meter already` : ", count not held"
+                  }`
+            }
             onClick={() => onLaunch(row, transaction.work)}
           >
-            <svg
-              viewBox="0 0 16 16"
-              width="15"
-              height="15"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              {ICONS[transaction.work]}
-            </svg>
+            {checking ? (
+              <Spinner />
+            ) : (
+              <svg
+                viewBox="0 0 16 16"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                {ICONS[transaction.work]}
+              </svg>
+            )}
             {transaction.code}
             <span style={countStyle}>
               {known ? count : "NAv"}
@@ -136,7 +181,22 @@ const countBase = {
   letterSpacing: 0,
 };
 
+const spinKeyframes = "ito-launch-spin";
+
+if (typeof document !== "undefined" && !document.getElementById(spinKeyframes)) {
+  const sheet = document.createElement("style");
+
+  sheet.id = spinKeyframes;
+  sheet.textContent =
+    "@keyframes ito-launch-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}";
+  document.head.append(sheet);
+}
+
 const styles = {
+  spinner: { animation: "ito-launch-spin 0.7s linear infinite" },
+  // The button that was pressed stays lit while the check runs, so the office
+  // can see WHICH one it is waiting on.
+  buttonChecking: { borderColor: "#1d4ed8", color: "#1d4ed8", cursor: "progress" },
   row: {
     display: "flex",
     gap: "10px",
