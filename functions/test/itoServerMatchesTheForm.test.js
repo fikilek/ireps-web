@@ -9,7 +9,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { readFile } from "node:fs/promises";
+
 import {
+  sanitizeAssignment,
   validateAssignment,
   validateCreateLifecycleInstructionInput,
   validateLifecycleInstructionAssignment,
@@ -132,4 +135,41 @@ test("a complete input passes, and the earlier refusals still stand", () => {
     "INVALID_PREMISE_ID",
     "the premise is still asked for before the workbase",
   );
+});
+
+test("the reason survives being written down", async () => {
+  // The owner's first office job stored NAv for a reason he had chosen: the
+  // stored instruction is rebuilt from a NAMED LIST, so a field added at one
+  // end and validated on the way in still arrived as nothing. Name the
+  // readers, not only the writers.
+  const stored = sanitizeAssignment({
+    targets,
+    instruction: {
+      code: "METER_DISCONNECTION",
+      text: "Disconnect at the circuit breaker",
+      reason: { code: "CREDIT_CONTROL_INSTRUCTION", words: "Client instruction", explanation: "NAv" },
+    },
+  });
+
+  assert.equal(stored.instruction.reason.code, "CREDIT_CONTROL_INSTRUCTION");
+  assert.equal(stored.instruction.reason.words, "Client instruction");
+  assert.equal(stored.instruction.reason.explanation, "NAv");
+});
+
+test("an instruction with no reason stores NAv, never nothing", () => {
+  // Field work has no office reason. NAv is the honest answer and keeps one
+  // shape for every instruction, so a reader never meets a missing key.
+  const stored = sanitizeAssignment({ targets, instruction: { code: "METER_DISCONNECTION" } });
+
+  assert.deepEqual(stored.instruction.reason, { code: "NAV", words: "NAv", explanation: "NAv" });
+});
+
+test("the send stamps when the job was issued", async () => {
+  // DR-R001 3.5. Nothing wrote it, so nothing could say how long a job had
+  // waited - and the reminder ladder of section 8 and the monitoring screen
+  // of 9.1 are both built on knowing exactly that.
+  const source = await readFile(new URL("../meterLifecycle/helpers.js", import.meta.url), "utf8");
+  const workflow = source.slice(source.indexOf('state: "ISSUED"'));
+
+  assert.match(workflow.slice(0, 400), /issuedAt: now,/);
 });

@@ -519,6 +519,22 @@ export function sanitizeAssignment(assignment = {}) {
       text: String(assignment?.instruction?.text || ""),
       notes: String(assignment?.instruction?.notes || ""),
       mediaRequired: assignment?.instruction?.mediaRequired === true,
+
+      // WHY the work was sent, as a code as well as words - `DR-R001` 3.4 and
+      // 1.11.2. This rebuilds the instruction from a named list and drops
+      // everything else, so a field added at the other end and validated on
+      // the way in still arrived as nothing: the owner's first office job
+      // stored NAv for a reason he had chosen.
+      //
+      // Name the readers, not only the writers.
+      //
+      // Field work has no office reason and stores NAv, which is the honest
+      // answer and keeps one shape for every instruction.
+      reason: {
+        code: normalizeUpper(assignment?.instruction?.reason?.code || "NAv"),
+        words: String(assignment?.instruction?.reason?.words || "NAv"),
+        explanation: String(assignment?.instruction?.reason?.explanation || "NAv"),
+      },
     },
 
     acceptedRejectedAt: assignment?.acceptedRejectedAt || null,
@@ -3386,6 +3402,11 @@ export function buildLifecycleInstructionTrnPayload({
 
     workflow: {
       state: "ISSUED",
+      // `DR-R001` 3.5: the send stamps when it was issued. Nothing wrote it,
+      // so nothing could say how long a job had been waiting - and the
+      // reminder ladder of section 8 and the monitoring screen of 9.1 are
+      // both built on knowing exactly that.
+      issuedAt: now,
       createdMode: "OFFICE",
       reassignmentCount: 0,
       executionStartedAt: null,
