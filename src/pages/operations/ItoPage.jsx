@@ -179,22 +179,6 @@ export default function ItoPage() {
     navigate(meterNoNow ? `/registries/meters?meter=${encodeURIComponent(meterNoNow)}` : "/registries/meters");
   }
 
-  const steps = [
-    image
-      ? {
-          key: ITO_STEPS.attach,
-          label: "Attaching the instruction",
-          done: stepState[ITO_STEPS.attach] === "done",
-          active: stepState[ITO_STEPS.attach] === "active",
-        }
-      : null,
-    {
-      key: ITO_STEPS.write,
-      label: "Checking the meter and writing the job",
-      done: stepState[ITO_STEPS.write] === "done",
-      active: stepState[ITO_STEPS.write] === "active",
-    },
-  ].filter(Boolean);
 
   const choices = useMemo(
     () =>
@@ -238,6 +222,23 @@ export default function ItoPage() {
   }, [image]);
 
   const reasons = itoReasonsFor(transaction?.work);
+  const steps = [
+    image
+      ? {
+          key: ITO_STEPS.attach,
+          label: "Attaching the instruction",
+          done: stepState[ITO_STEPS.attach] === "done",
+          active: stepState[ITO_STEPS.attach] === "active",
+        }
+      : null,
+    {
+      key: ITO_STEPS.write,
+      label: "Checking the meter and writing the job",
+      done: stepState[ITO_STEPS.write] === "done",
+      active: stepState[ITO_STEPS.write] === "active",
+    },
+  ].filter(Boolean);
+
   const problem = itoReasonProblem({
     work: transaction?.work,
     code: reasonCode,
