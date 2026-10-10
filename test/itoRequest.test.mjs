@@ -138,18 +138,21 @@ test("a rewording leaves the code untouched", () => {
   assert.notEqual(before.request.assignment.instruction.reason.words, after.request.assignment.instruction.reason.words);
 });
 
-test("the instruction is what the worker reads, and it is required", () => {
+test("the instruction is what the worker reads, and it is optional", () => {
   // The server demands assignment.instruction.text for every transaction but
   // a meter reading, so the office is told here rather than refused there.
   const { instruction } = build().request.assignment;
 
   assert.equal(instruction.text, "Disconnect at the box");
 
+  // Owner, 10 October 2026: optional, not conditional. The coded reason
+  // carries why the work is being sent; the words elaborate it for the worker
+  // and are not demanded. Nothing typed stores NAv.
   for (const nothing of [undefined, "", "   ", String.fromCharCode(10)]) {
     const out = build({ instructionWords: nothing });
 
-    assert.equal(out.ok, false, `an instruction of ${JSON.stringify(nothing)} must be refused`);
-    assert.match(out.message, /what the worker must do/i);
+    assert.equal(out.ok, true, `an instruction of ${JSON.stringify(nothing)} must be allowed`);
+    assert.equal(out.request.assignment.instruction.text, "NAv");
   }
 });
 
@@ -162,9 +165,10 @@ test("an image stands for the instruction, exactly as the server allows", () => 
     null,
   );
 
-  assert.match(
+  assert.equal(
     itoSendProblem({ work: "disconnect", reason: REASON, instructionWords: "", hasImage: false, worker: WORKER }),
-    /words|image/i,
+    null,
+    "neither words nor an image still sends - the reason is what is required",
   );
 
   assert.equal(build({ instructionWords: "", hasImage: true }).ok, true);

@@ -440,26 +440,15 @@ export function validateAssignment(
     };
   }
 
-  // WORDS, AN IMAGE, OR BOTH - `DR-R001` 3.4. A municipal instruction often
-  // arrives as a photograph or a screenshot, and an office that attached one
-  // has said what the work is; demanding typed words as well made the rule
-  // say something it does not.
+  // THE INSTRUCTION IS OPTIONAL (owner, 10 October 2026). The office says WHY
+  // through the reason, which is a code and is required below. The words and
+  // the image elaborate it for the worker and neither is demanded: a
+  // disconnection for Client instruction says what it is without a sentence
+  // after it.
   //
-  // Owner, 10 October 2026, on his first send: the instruction "must be
-  // optional", and the form must refuse exactly what the server refuses - the
-  // back is the safeguard, not the first thing that tells you.
-  if (
-    !String(instruction?.text || "").trim() &&
-    !hasInstructionMedia &&
-    normalizedTrnType !== "METER_READING" &&
-    !fieldInstructionOptional
-  ) {
-    return {
-      ok: false,
-      code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
-      message: "assignment.instruction needs words or an image",
-    };
-  }
+  // It was required, then required-unless-an-image - which is conditional,
+  // not optional, and still stopped an office that had neither. The owner
+  // asked twice.
 
   // WHY THE WORK IS BEING SENT. `DR-R001` 3.4: the reason is stored as a code
   // as well as words, so a rewording leaves old records countable. The form

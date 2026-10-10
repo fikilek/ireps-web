@@ -243,10 +243,14 @@ test("a field inspection needs no office instruction at the front door either", 
     true,
   );
 
-  // Office work still needs the words of the instruction.
+  // Office work no longer needs the words either (owner, 10 October 2026:
+  // "to make it optional"). It was required, then required-unless-an-image -
+  // conditional, not optional. What the office MUST say is WHY, and that is
+  // the reason code, which validateLifecycleInstructionAssignment demands of
+  // the office lane. The words elaborate it for the worker.
   assert.equal(
     validateAssignment(assignment, "METER_INSPECTION", { originChannel: "OFFICE" }).ok,
-    false,
+    true,
   );
 });
 

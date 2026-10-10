@@ -46,9 +46,11 @@ test("a complete office instruction passes", () => {
   assert.equal(result.ok, true, result.message);
 });
 
-test("words, an image, or both — and neither is refused", () => {
-  // DR-R001 3.4. A municipal instruction often arrives as a photograph, and
-  // an office that attached one has said what the work is.
+test("the instruction is optional — words, an image, or neither", () => {
+  // Owner, 10 October 2026: optional, not conditional. It was required, then
+  // required-unless-an-image, which still stopped an office that had neither.
+  // The coded reason carries WHY the work is being sent and is required; the
+  // words and the image elaborate it for the worker.
   const noWords = officeInstruction({ text: "" });
 
   assert.equal(
@@ -59,10 +61,11 @@ test("words, an image, or both — and neither is refused", () => {
     "an image alone is an instruction",
   );
 
-  const neither = validateLifecycleInstructionAssignment(noWords, "METER_DISCONNECTION");
-
-  assert.equal(neither.ok, false);
-  assert.match(neither.message, /words or an image/i);
+  assert.equal(
+    validateLifecycleInstructionAssignment(noWords, "METER_DISCONNECTION").ok,
+    true,
+    "and neither is still a job, because the reason says why",
+  );
 });
 
 test("the office must say why the work is being sent", () => {

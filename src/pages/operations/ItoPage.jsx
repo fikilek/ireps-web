@@ -247,8 +247,6 @@ export default function ItoPage() {
     work: transaction?.work,
     reason: reasons.find((item) => item.code === reasonCode) || null,
     explanation,
-    instructionWords: instruction,
-    hasImage: Boolean(image),
     worker: picked,
   });
 
@@ -446,7 +444,7 @@ export default function ItoPage() {
 
               <div style={styles.field}>
                 <label htmlFor="ito-instruction" style={styles.label}>
-                  The instruction, in words
+                  The instruction, in words — optional
                 </label>
                 <textarea
                   id="ito-instruction"

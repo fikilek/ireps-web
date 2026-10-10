@@ -90,20 +90,15 @@ export function buildItoTrnId({ trnType, meterType, wardPcode, erfNo, atMs }) {
  * words, an image, or both - and a meter reading needs neither, because the
  * reading is the instruction.
  */
-export function itoSendProblem({ work, reason, explanation, instructionWords, hasImage, worker } = {}) {
+export function itoSendProblem({ work, reason, explanation, worker } = {}) {
   const reasonProblem = itoReasonProblem({ work, code: reason?.code, explanation });
 
   if (reasonProblem) return reasonProblem;
 
   if (!worker?.uid) return "Choose the field worker this goes to.";
 
-  const said = String(instructionWords ?? "").trim();
-  const trnType = TRN_TYPE_BY_WORK[String(work || "").toLowerCase()];
-
-  if (!said && !hasImage && trnType !== "METER_READING") {
-    return "Say what the worker must do, or attach the instruction as an image.";
-  }
-
+  // The instruction is OPTIONAL. The reason above carries why the work is
+  // being sent; words and an image elaborate it and neither is demanded.
   return null;
 }
 
