@@ -314,6 +314,7 @@ export default function ItoPage() {
             premise={readPoint(premise)}
             erfPaths={erfRing(erfBoundary)}
             workers={choices.onTheMap}
+            allocated={picked}
           />
         </section>
 

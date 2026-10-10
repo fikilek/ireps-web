@@ -186,6 +186,60 @@ function initials(name) {
   return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
 }
 
+/**
+ * Puts the camera where the office asked for it.
+ *
+ * Same behaviour as the FWR monitoring map (`FwrMonitoringPage.jsx:493`):
+ * the camera is moved, then moved again on the next frame and once more
+ * shortly after, because Google settles the map asynchronously and a single
+ * setCenter can be undone by a fit that is still in flight. The request
+ * carries a counter so pressing the control twice re-centres rather than
+ * doing nothing.
+ */
+function Focus({ request, worker, home }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map || !request?.n) return undefined;
+
+    const target = request.target === "worker" ? worker : null;
+
+    if (request.target === "worker" && !target) return undefined;
+
+    const apply = () => {
+      if (target) {
+        map.setCenter(target);
+        map.setZoom(17);
+        return;
+      }
+
+      if (home.length === 1) {
+        map.setCenter(home[0]);
+        map.setZoom(18);
+        return;
+      }
+
+      const bounds = new window.google.maps.LatLngBounds();
+
+      home.forEach((point) => bounds.extend(point));
+      map.fitBounds(bounds, 64);
+    };
+
+    apply();
+
+    const frame = window.requestAnimationFrame(apply);
+    const timer = window.setTimeout(apply, 180);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, request?.n]);
+
+  return null;
+}
+
 function Fit({ points }) {
   const map = useMap();
 
@@ -214,14 +268,21 @@ const LAYERS = [
   { key: "workers", label: "Field workers" },
 ];
 
-export default function ItoMap({ meter, premise, erfPaths, workers = [] }) {
+export default function ItoMap({ meter, premise, erfPaths, workers = [], allocated = null }) {
   const [open, setOpen] = useState(true);
+  // Owner, 10 October 2026: there was no way to see where the allocated man
+  // actually is. The meter and the worker can be a long way apart - 502 km in
+  // the owner's own test - so the map needs to be told which of the two to
+  // look at, and to be able to come back.
+  const [focus, setFocus] = useState({ target: "home", n: 0 });
   const [shown, setShown] = useState({
     erfs: true,
     premises: true,
     meters: true,
     workers: true,
   });
+
+  const allocatedPoint = readPoint(allocated?.point);
 
   const points = useMemo(() => {
     const list = [];
@@ -278,8 +339,46 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [] }) {
             showWorkers={shown.workers}
           />
           <Fit points={points} />
+          <Focus request={focus} worker={readPoint(allocated?.point)} home={points} />
         </GoogleMap>
       </APIProvider>
+
+      <button
+        type="button"
+        onClick={() =>
+          setFocus((current) => ({
+            target: current.target === "worker" ? "home" : "worker",
+            n: current.n + 1,
+          }))
+        }
+        disabled={!allocatedPoint}
+        title={
+          !allocatedPoint
+            ? allocated
+              ? `iREPS has no position for ${allocated.name}`
+              : "Allocate a field worker to see where he is"
+            : focus.target === "worker"
+              ? "Back to the meter"
+              : `Centre on ${allocated.name}`
+        }
+        aria-label={
+          focus.target === "worker" ? "Back to the meter" : "Centre on the allocated field worker"
+        }
+        style={{ ...styles.focusButton, ...(allocatedPoint ? null : styles.focusOff) }}
+      >
+        {focus.target === "worker" ? (
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 21s-7-5.5-7-11a7 7 0 1 1 14 0c0 5.5-7 11-7 11z" />
+            <circle cx="12" cy="10" r="2.5" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="6.5" />
+            <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+          </svg>
+        )}
+      </button>
 
       {open ? (
         <div style={styles.layers}>
@@ -370,6 +469,22 @@ const styles = {
     cursor: "pointer",
     lineHeight: 1,
   },
+  focusButton: {
+    position: "absolute",
+    top: 14,
+    left: 14,
+    width: 34,
+    height: 34,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(255,255,255,0.97)",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    color: "#1d4ed8",
+    cursor: "pointer",
+  },
+  focusOff: { color: "#cbd5e1", cursor: "not-allowed" },
   layersIcon: {
     position: "absolute",
     top: 14,
