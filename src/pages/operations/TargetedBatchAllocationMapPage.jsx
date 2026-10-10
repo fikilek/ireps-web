@@ -38,7 +38,7 @@ import {
   enrichTeamsWithMembers,
   getActorMncServiceProviderId,
 } from "./targeted-batches/allocation/targetedBatchAllocationUtils";
-import BatchCreationModal from "./targeted-batches/draft/batch-creation-modal.jsx";
+import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
 
 // Targeted Batch rules TB-R047 (1.3.31): the Allocation Map. Every batch geofence of the LM on one map
 // (the one exception to one Ward per map), each labelled with its name and meter count. Clicking a ready
@@ -372,29 +372,29 @@ function AllocationWindow({ view, onConfirm, onClose }) {
   const totals = `${batchesText(selection.batches)} · ${metersText(selection.meters)} · ${selection.wards.join(", ")}`;
   if (view.kind === "confirm") {
     return (
-      <BatchCreationModal title={allocateButtonLabel(selection, target)} escapeAction={onClose}
+      <SubmitWindow title={allocateButtonLabel(selection, target)} escapeAction={onClose}
         lines={[`You are about to allocate ${batchesText(selection.batches)} (${metersText(selection.meters)}) to ${target.type === "TEAM" ? "TEAM" : "service provider"} ${target.name}.`]}
         actions={[{ label: "Allocate", primary: true, onClick: onConfirm }, { label: "Cancel", onClick: onClose }]}>
         <BatchList items={selection.items} />
         <p style={styles.windowTotals}>{totals}</p>
         <p style={styles.windowNote}>Each batch is allocated with the same checks as TB Allocation, all together or not at all.</p>
-      </BatchCreationModal>
+      </SubmitWindow>
     );
   }
   if (view.kind === "allocating") {
-    return <BatchCreationModal title={`Allocating ${batchesText(selection.batches)} to ${target.name}…`} working
+    return <SubmitWindow title={`Allocating ${batchesText(selection.batches)} to ${target.name}…`} working
       lines={[totals, "Please wait. Nothing is allocated until every batch passes its checks."]} />;
   }
   if (view.kind === "done") {
     return (
-      <BatchCreationModal title={`${batchesText(view.allocatedIds.length)} allocated to ${view.targetName}`} escapeAction={onClose}
+      <SubmitWindow title={`${batchesText(view.allocatedIds.length)} allocated to ${view.targetName}`} escapeAction={onClose}
         lines={[`They now wait for ${view.targetName} to accept them.`]} actions={[{ label: "OK", primary: true, onClick: onClose }]}>
         <BatchList items={selection.items} allocatedIds={view.allocatedIds} />
-      </BatchCreationModal>
+      </SubmitWindow>
     );
   }
   // failed or uncertain (TB-R047 1.3.37): what went wrong and what to do.
-  return <BatchCreationModal title={view.title} tone={view.tone} escapeAction={onClose} lines={view.lines}
+  return <SubmitWindow title={view.title} tone={view.tone} escapeAction={onClose} lines={view.lines}
     actions={[{ label: "OK", primary: true, onClick: onClose }]} />;
 }
 

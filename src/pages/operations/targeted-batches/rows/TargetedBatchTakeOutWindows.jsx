@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useEffect, useRef } from "react";
 
-import BatchCreationModal from "../draft/batch-creation-modal.jsx";
+import SubmitWindow from "../../../../components/submit/SubmitWindow.jsx";
 import {
   TAKE_OUT_REASON_MAX,
   takeOutConfirmWindow,
@@ -125,11 +125,11 @@ export default function TargetedBatchTakeOutWindows({
 
   if (view.kind === "working") {
     const progress = takeOutProgressWindow({ batch, items });
-    return <BatchCreationModal title={progress.title} working lines={progress.lines} />;
+    return <SubmitWindow title={progress.title} working lines={progress.lines} />;
   }
 
   return (
-    <BatchCreationModal
+    <SubmitWindow
       title={view.title}
       tone={view.tone}
       lines={view.lines}

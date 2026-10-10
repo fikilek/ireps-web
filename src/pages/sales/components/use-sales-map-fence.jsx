@@ -12,7 +12,7 @@ import { mapPoint } from "../../../features/maps/sales-batch-nearby.js";
 import { GeofenceDrawingBar, GeofenceDialogs } from "../../operations/geofence-shared-ui";
 import { DraftGeoFenceLayer } from "../../operations/geofence-map-layers";
 import GeofenceProgressModal from "../../operations/targeted-batches/draft/geofence-progress-modal.jsx";
-import BatchCreationModal from "../../operations/targeted-batches/draft/batch-creation-modal.jsx";
+import SubmitWindow from "../../../components/submit/SubmitWindow.jsx";
 import { GEOFENCE_PROGRESS_TIMEOUT_MS } from "../../operations/targeted-batches/draft/geofence-progress.js";
 import { salesDraftMessage } from "../../operations/targeted-batches/draft/sales-batch-draft-model";
 import { composeGeofenceName, geofenceNamePart, wardNumberFromPcode, findDuplicateGeofence, duplicateGeofenceNameMessage } from "../../../../functions/geofences/geofence-name.js";
@@ -178,7 +178,7 @@ export function useSalesMapFence({ drawing, planning = NO_PLANNING, canDraw = fa
       linkedTo={`batch ${progress.tbId}`} stillLinkingText="Its ERFs and meters are still being linked. The table filters to it as soon as they are."
       next={<><strong>Next:</strong> the table now shows this geofence&apos;s {progress.salesIds.length} meter{progress.salesIds.length === 1 ? "" : "s"}, ticked. Press <strong>Create Target Batch</strong> to open TB Draft with this geofence, or create the batch later from <strong>Batches &amp; Geofences</strong>.
         {leftOut.length ? <><br/><strong>Left out ({leftOut.length}):</strong> {leftOut.join("; ")}.</> : null}</>}/> : null}
-    {failure ? <BatchCreationModal title={failure.uncertain ? "Geofence not confirmed" : "Geofence not saved"} tone="error"
+    {failure ? <SubmitWindow title={failure.uncertain ? "Geofence not confirmed" : "Geofence not saved"} tone="error"
       lines={failure.uncertain
         ? [`${failure.name}: ${failure.message}`, "iREPS could not confirm whether it was saved. Check Batches & Geofences before you save it again; if it is there, create its batch from there."]
         : [`${failure.name}: ${failure.message}`, "Nothing was saved. Your drawing is still on the map: change it and press Save again, or Cancel."]}

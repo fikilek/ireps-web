@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 
 import { functions } from "../../firebase";
-import BatchCreationModal from "../operations/targeted-batches/draft/batch-creation-modal.jsx";
+import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
 import { downloadBrowserArtifact } from "../../utils/reportPlatform/downloadBrowserArtifact.js";
 import { generateGeneralMonthlyReportManaged } from "./generalMonthlyReportArtifact.js";
 import { getDefaultReportMonth } from "./generalMonthlyReportMonthModel.js";
@@ -331,7 +331,7 @@ export default function GeneralMonthlyReportPage() {
       ) : null}
 
       {phase === "confirm" ? (
-        <BatchCreationModal
+        <SubmitWindow
           title={`Generate the ${periodLabel} ${reportName}?`}
           lines={[
             `Endumeni. Every field transaction that reached the server ${isGeneralReport ? `between ${periodLabel}` : `in ${periodLabel}`}, one row each, with Field Stats per field worker and per team.`,
@@ -348,7 +348,7 @@ export default function GeneralMonthlyReportPage() {
       ) : null}
 
       {phase === "working" ? (
-        <BatchCreationModal
+        <SubmitWindow
           title={`Generating the ${periodLabel} report`}
           steps={steps}
           lines={[`Elapsed ${formatElapsed(elapsedSeconds)}`]}
@@ -357,7 +357,7 @@ export default function GeneralMonthlyReportPage() {
       ) : null}
 
       {phase === "done" && result ? (
-        <BatchCreationModal
+        <SubmitWindow
           title={`The ${resultMonthLabel} report is ready`}
           tone={unplacedCount > 0 ? "warning" : "info"}
           lines={[
@@ -381,7 +381,7 @@ export default function GeneralMonthlyReportPage() {
       ) : null}
 
       {phase === "failed" && failure ? (
-        <BatchCreationModal
+        <SubmitWindow
           title="The report was not generated"
           tone="error"
           lines={failureLines(failure.step, failure.error)}

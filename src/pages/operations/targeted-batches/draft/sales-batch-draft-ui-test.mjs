@@ -41,7 +41,7 @@ test("Clear draft cancellation preserves the draft; confirmation returns each Sa
    "./targeted-batches/draft/sales-batch-draft-model":model,
    "./targeted-batches/TargetedBatchDraftReview":{default:component},
    "./targeted-batches/TargetedBatchConfirmModal":{default:component},
-   "./targeted-batches/draft/batch-creation-modal.jsx":{default:component},
+   "../../../../components/submit/SubmitWindow.jsx":{default:component},
    "./targeted-batches/draft/batch-creation-window.js":{checkingText:()=>"",checkFailedLines:()=>[],creatingText:()=>"",creationSteps:()=>[],CREATION_NOT_CONFIRMED:""},
    "./targeted-batches/draft/targetedBatchDraftReviewStyles":styles,
   },{window:{confirm:text=>{prompts.push(text);return accepted;}}});

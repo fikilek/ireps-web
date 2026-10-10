@@ -1,11 +1,19 @@
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useEffect, useId, useRef } from "react";
-import BusySpinner from "../../../../components/busy-spinner.jsx";
+import BusySpinner from "../busy-spinner.jsx";
 
-// Targeted Batch rules TB-R040 (1.3.36) and TB-R047 (1.3.37): one window for confirming, checking, working and the result.
+// ONE WINDOW for confirming, checking, working and the result - the owner's
+// submit standard in a single component: a confirmation window before, visible
+// progress while it runs, and a result window after.
+//
+// It was built for Targeted Batches (TB-R040 1.3.36, TB-R047 1.3.37) and lived
+// under targeted-batches/draft with a batch's name on it, although the GMR and
+// the Sales map already sent through it. `DR-R001` 3.5 asks for the same three
+// windows again for ITO, and five other rule sets ask for them too, so it is
+// promoted here rather than copied. iREPS has one well for a thing.
 // While it works it has no buttons, keeps keyboard focus inside and ignores Escape, so nothing
 // behind it can be reached; a result window's Escape runs its escape action (OK, Close or Stay).
-export default function BatchCreationModal({ title, steps = null, lines = [], tone = "info", working = false, actions = [], escapeAction = null, children = null }) {
+export default function SubmitWindow({ title, steps = null, lines = [], tone = "info", working = false, actions = [], escapeAction = null, children = null }) {
   const card = useRef(null), firstAction = useRef(null), linesId = useId();
   useEffect(() => { (firstAction.current || card.current)?.focus(); }, [actions.length, title]);
   useEffect(() => {

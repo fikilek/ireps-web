@@ -28,7 +28,7 @@ import TargetedBatchDeleteModal from "./targeted-batches/TargetedBatchDeleteModa
 import TargetedBatchUnallocateModal from "./targeted-batches/TargetedBatchUnallocateModal";
 import { getUnallocateEligibility } from "./targeted-batches/unallocateEligibility";
 import { formatNumber } from "./targeted-batches/targetedBatchUtils";
-import BatchCreationModal from "./targeted-batches/draft/batch-creation-modal.jsx";
+import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
 import { batchArrival, CREATION_ARRIVAL_TIMEOUT_MS } from "./targeted-batches/draft/batch-creation-window.js";
 
 const PREPAID_SALES_NON_GPS_SOURCE = "PREPAID_SALES_NON_GPS";
@@ -1542,14 +1542,14 @@ export default function TargetedBatchesPage() {
       ) : null}
 
       {arrival?.phase === "opening" ? (
-        <BatchCreationModal
+        <SubmitWindow
           title="Creating the batch"
           working
           steps={arrival.steps}
           lines={[`${arrival.tbId} is created. Loading it in TB Register…`]}
         />
       ) : arrival?.phase === "created" ? (
-        <BatchCreationModal
+        <SubmitWindow
           title="Batch created"
           lines={[
             `Batch ID: ${arrival.tbId}`,

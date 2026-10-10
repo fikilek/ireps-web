@@ -198,7 +198,7 @@ test("the confirmation window takes the reason, and the keyboard starts in it", 
   assert.match(windows, /reasonRef\.current\?\.focus\(\)/);
   assert.match(windows, /Reason, in your own words \(required\)/);
   assert.match(windows, /disabled=\{!view\.canConfirm\}/);
-  assert.match(windows, /<BatchCreationModal title=\{progress\.title\} working lines=\{progress\.lines\} \/>/);
+  assert.match(windows, /<SubmitWindow title=\{progress\.title\} working lines=\{progress\.lines\} \/>/);
   assert.match(windows, /actions=\{\[\{ label: "OK", primary: true, onClick: onClose \}\]\}/);
 });
 

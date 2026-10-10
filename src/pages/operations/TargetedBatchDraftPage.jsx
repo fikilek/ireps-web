@@ -9,7 +9,7 @@ import { clearTargetedBatchDraft, selectTargetedBatchDraft, updateSalesDraftReso
 import { useGetSalesBatchDraftSnapshotQuery, useResolveSalesTargetedBatchMutation, useAssessSalesTargetedBatchMutation, useCreateSalesTargetedBatchMutation } from "../../redux/salesTargetedBatchApi";
 import { useGeofencePolygonDraft } from "../../features/maps/use-geofence-polygon-draft";
 import { salesDraftIntent, projectSalesDraft, draftGeometry, confirmationIdentity, salesDraftResolutionFailure, salesDraftReturnPath, salesDraftSignature, salesDraftMessage } from "./targeted-batches/draft/sales-batch-draft-model";
-import BatchCreationModal from "./targeted-batches/draft/batch-creation-modal.jsx";
+import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
 import { checkingText, checkFailedLines, creatingText, creationSteps, CREATION_NOT_CONFIRMED } from "./targeted-batches/draft/batch-creation-window.js";
 import TargetedBatchDraftReview from "./targeted-batches/TargetedBatchDraftReview";
 import TargetedBatchConfirmModal from "./targeted-batches/TargetedBatchConfirmModal";
@@ -146,13 +146,13 @@ function SalesDraftSession({ draft }) {
     {uncertain && !createState.isLoading && <button type="button" style={draftButtonStyle()} onClick={() => commitConfirmed(draft.uncertainRequest)}>Retry the same request</button>}
     {confirmation && !uncertain && !creationWindow && <TargetedBatchConfirmModal draft={draft} confirmation={confirmation} isCreating={createState.isLoading} stale={stale}
       onCancel={() => dispatch(setSalesDraftConfirmation({ tbId: draft.id, confirmation: null }))} onConfirm={() => { if (!stale) commitConfirmed(confirmation.input); }}/>}
-    {creationWindow?.kind === "checking" && <BatchCreationModal title="Checking the batch" working lines={[checkingText(creationWindow.count), "This usually takes a few seconds."]}/>}
-    {creationWindow?.kind === "check-failed" && <BatchCreationModal title="The batch can't be created yet" tone="error" lines={creationWindow.lines}
+    {creationWindow?.kind === "checking" && <SubmitWindow title="Checking the batch" working lines={[checkingText(creationWindow.count), "This usually takes a few seconds."]}/>}
+    {creationWindow?.kind === "check-failed" && <SubmitWindow title="The batch can't be created yet" tone="error" lines={creationWindow.lines}
       actions={[{ label: "OK", primary: true, onClick: () => setCreationWindow(null) }]} escapeAction={() => setCreationWindow(null)}/>}
-    {creationWindow?.kind === "creating" && <BatchCreationModal title="Creating the batch" working steps={creationSteps("create")} lines={[creatingText(creationWindow.count)]}/>}
-    {creationWindow?.kind === "failed" && <BatchCreationModal title="Batch not created" tone="error" lines={[creationWindow.message, "Nothing was created. OK returns to TB Draft."]}
+    {creationWindow?.kind === "creating" && <SubmitWindow title="Creating the batch" working steps={creationSteps("create")} lines={[creatingText(creationWindow.count)]}/>}
+    {creationWindow?.kind === "failed" && <SubmitWindow title="Batch not created" tone="error" lines={[creationWindow.message, "Nothing was created. OK returns to TB Draft."]}
       actions={[{ label: "OK", primary: true, onClick: closeFailedCreation }]} escapeAction={closeFailedCreation}/>}
-    {creationWindow?.kind === "uncertain" && <BatchCreationModal title="Batch not confirmed yet" tone="warning" lines={[creationWindow.message]}
+    {creationWindow?.kind === "uncertain" && <SubmitWindow title="Batch not confirmed yet" tone="warning" lines={[creationWindow.message]}
       actions={[{ label: "Retry the same request", primary: true, onClick: () => commitConfirmed(draft.uncertainRequest) }, { label: "Close", onClick: () => setCreationWindow(null) }]}
       escapeAction={() => setCreationWindow(null)}/>}</>;
 }
