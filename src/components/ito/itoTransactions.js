@@ -39,6 +39,7 @@ const inState = (...states) => (state) => states.includes(state);
 export const ITO_TRANSACTIONS = [
   {
     work: "disconnect",
+    trnType: "METER_DISCONNECTION",
     code: "DCN",
     name: "Disconnection",
     countKey: "disconnections",
@@ -50,6 +51,7 @@ export const ITO_TRANSACTIONS = [
   },
   {
     work: "reconnect",
+    trnType: "METER_RECONNECTION",
     code: "RCN",
     name: "Reconnection",
     countKey: "reconnections",
@@ -61,6 +63,7 @@ export const ITO_TRANSACTIONS = [
   },
   {
     work: "inspect",
+    trnType: "METER_INSPECTION",
     code: "INSP",
     name: "Inspection",
     countKey: "inspections",
@@ -69,6 +72,7 @@ export const ITO_TRANSACTIONS = [
   },
   {
     work: "remove",
+    trnType: "METER_REMOVAL",
     code: "REM",
     name: "Removal",
     countKey: "removals",
@@ -80,6 +84,7 @@ export const ITO_TRANSACTIONS = [
   },
   {
     work: "read",
+    trnType: "METER_READING",
     code: "MREAD",
     name: "Meter reading",
     countKey: "readings",
@@ -125,4 +130,20 @@ export function itoCountState(count) {
   if (count === null) return "unknown";
 
   return count > 0 ? "some" : "none";
+}
+
+/**
+ * The job already out on this meter of this kind, or `null`.
+ *
+ * `DR-R001` 5: more than one job may be out on a meter at once, but never two
+ * of the same kind. The server refuses the second one - but it refused it
+ * AFTER the office had filled in the whole ITO page, because the register
+ * could not see the job was there. The front must know what the back knows.
+ */
+export function openJobForWork(row, transaction) {
+  const open = row?.openJob;
+
+  if (!open?.trnId) return null;
+
+  return String(open.trnType || "").toUpperCase() === transaction.trnType ? open : null;
 }

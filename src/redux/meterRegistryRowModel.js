@@ -82,5 +82,10 @@ export function normalizeMeterRegistryRow(id, data) {
     // all 49 of their rows held the right numbers while the Meter Registry
     // showed 0 for every one of them, because this line did not exist.
     counts: data?.counts || null,
+
+    // The job already out on this meter (DR-R001 5). Named here for the same
+    // reason `counts` is: a field the row carries and the mapper forgets is
+    // written correctly and drawn nowhere.
+    openJob: data?.openJob || null,
   };
 }

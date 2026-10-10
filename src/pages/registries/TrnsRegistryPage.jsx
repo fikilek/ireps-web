@@ -420,7 +420,17 @@ export default function TrnsRegistryPage() {
     activeWorkbase?.pcode ||
     "NAv";
 
-  const [filters, setFilters] = useState(EMPTY_TRN_FILTERS);
+  // Arriving from the ITO button's open-job mark: ?meter=<number> opens this
+  // register on that meter alone, so the office lands on the job it asked
+  // about rather than on 246 rows.
+  const [filters, setFilters] = useState(() => {
+    const asked =
+      typeof window === "undefined"
+        ? null
+        : new URLSearchParams(window.location.search).get("meter");
+
+    return asked ? { ...EMPTY_TRN_FILTERS, meterNo: asked } : EMPTY_TRN_FILTERS;
+  });
 
   const [showTrnId, setShowTrnId] = useState(false);
   const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);

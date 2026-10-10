@@ -1008,6 +1008,9 @@ ${premiseId}`;
         row={row}
         busy={checkingMeterId === row.id}
         checkingWork={checkingWork}
+        onOpenJob={(row) =>
+          navigate(`/registries/trns?meter=${encodeURIComponent(row.meterNo || "")}`)
+        }
         onLaunch={launchIto}
       />
     )

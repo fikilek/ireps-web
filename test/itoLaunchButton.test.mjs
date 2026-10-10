@@ -9,10 +9,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { readFile } from "node:fs/promises";
+
 import {
   ITO_COLUMN_LABEL,
   ITO_TRANSACTIONS,
   itoCountState,
+  openJobForWork,
   readItoCount,
 } from "../src/components/ito/itoTransactions.js";
 
@@ -145,4 +148,55 @@ test("a count that is held is read as a whole, non-negative number", () => {
   assert.equal(readItoCount({ counts: { readings: 12 } }, "readings"), 12);
   assert.equal(readItoCount({ counts: { readings: 3.7 } }, "readings"), 3);
   assert.equal(readItoCount({ counts: { readings: -4 } }, "readings"), 0);
+});
+
+test("an open job finds its own button and no other", () => {
+  // DR-R001 5: never two of the same kind. A disconnection already out marks
+  // DCN; it must not mark RCN, INSP, REM or MREAD, which may still be sent.
+  const row = { openJob: { trnId: "TRN_MDCN_1", trnType: "METER_DISCONNECTION", workflowState: "ISSUED", assignedToName: "Peter M." } };
+
+  for (const transaction of ITO_TRANSACTIONS) {
+    const found = openJobForWork(row, transaction);
+
+    if (transaction.work === "disconnect") {
+      assert.equal(found?.trnId, "TRN_MDCN_1");
+    } else {
+      assert.equal(found, null, `${transaction.code} must not be marked`);
+    }
+  }
+});
+
+test("a meter with no job out is marked nowhere", () => {
+  for (const row of [{}, { openJob: null }, { openJob: {} }, { openJob: { trnId: "" } }]) {
+    for (const transaction of ITO_TRANSACTIONS) {
+      assert.equal(openJobForWork(row, transaction), null);
+    }
+  }
+});
+
+test("every transaction carries the type it is written as", () => {
+  // The mark matches on this. A button without it would never be marked, and
+  // nothing would fail - the office would simply never be told.
+  for (const transaction of ITO_TRANSACTIONS) {
+    assert.match(transaction.trnType, /^METER_[A-Z_]+$/, `${transaction.code} needs its trnType`);
+  }
+
+  const types = ITO_TRANSACTIONS.map((t) => t.trnType);
+  assert.equal(new Set(types).size, types.length, "two buttons must never share a type");
+});
+
+test("the whole chain names the open job, not just the screen", async () => {
+  // THE 7 OCTOBER FAULT, EXACTLY. The counts were right on the meter, right
+  // on the registry row and drawn nowhere, because one mapper named the
+  // fields it kept one at a time and `counts` was not among them. This marks
+  // the same four links for the open job so the next person cannot lose one.
+  const [copyMaker, viewMapper, trigger] = await Promise.all([
+    readFile(new URL("../functions/registry/meterRegistryRowRebuild.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/redux/meterRegistryRowModel.js", import.meta.url), "utf8"),
+    readFile(new URL("../functions/index.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(copyMaker, /openJob: readOpenJob\(data\)/, "the registry row must carry it");
+  assert.match(viewMapper, /openJob: data\?\.openJob/, "the view mapper must name it");
+  assert.match(trigger, /activeLifecycleChanged/, "the row must rebuild when the marker moves");
 });

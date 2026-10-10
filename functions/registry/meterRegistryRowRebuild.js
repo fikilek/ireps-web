@@ -66,6 +66,29 @@ function resolveMeterStatus(data = {}) {
   };
 }
 
+/**
+ * The job already out on this meter, as the register needs to show it.
+ *
+ * Only what a reader needs: which job, what kind, what state, and who holds
+ * it. The meter record is the truth; this is a copy, like the rest of the row.
+ */
+function readOpenJob(data = {}) {
+  const marker = data?.trnActiveLifecycle;
+  const trnId = String(marker?.trnId || "").trim();
+
+  if (!trnId) return null;
+
+  const assignedTo = marker?.assignedTo || {};
+
+  return {
+    trnId,
+    trnType: String(marker?.trnType || "NAv"),
+    workflowState: String(marker?.workflowState || "NAv"),
+    assignedToName: String(assignedTo?.name || "NAv"),
+    assignedToId: String(assignedTo?.id || assignedTo?.uid || "NAv"),
+  };
+}
+
 function buildMeterRegistryRow(astId, data = {}) {
   const sourceMetadata = getStandardMetadata(data?.metadata || {});
 
@@ -105,6 +128,14 @@ function buildMeterRegistryRow(astId, data = {}) {
     // count named in one place and forgotten in another is raised correctly
     // and drawn nowhere, which is the 7 October defect exactly.
     counts: readMeterCounts(data),
+
+    // THE JOB THAT IS ALREADY OUT ON THIS METER. `DR-R001` 5: more than one
+    // job may be out at once, but never two of the same kind. The meter
+    // carries the marker; the register could not see it, so the office met
+    // the refusal only after filling in the whole ITO page.
+    //
+    // `null` means no job is out, which is a fact and not an absence.
+    openJob: readOpenJob(data),
 
     parents: {
       countryPcode: data?.accessData?.parents?.countryPcode || "NAv",

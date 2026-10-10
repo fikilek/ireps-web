@@ -10,7 +10,7 @@
 //
 // Which transaction is offered when, and how a count is read, live beside this
 // in `itoTransactions.jsx`.
-import { ITO_TRANSACTIONS, itoCountState, readItoCount } from "./itoTransactions";
+import { ITO_TRANSACTIONS, itoCountState, readItoCount, openJobForWork } from "./itoTransactions";
 
 // One glyph per transaction, keyed by the work it stands for. DCN is a broken
 // line and RCN a joined one: opposites in SHAPE, so they are told apart without
@@ -72,7 +72,7 @@ function Spinner() {
   );
 }
 
-export default function ItoLaunchButtons({ row, busy = false, checkingWork = null, onLaunch }) {
+export default function ItoLaunchButtons({ row, busy = false, checkingWork = null, onLaunch, onOpenJob }) {
   const state = String(row?.statusState || row?.status || "NAv").toUpperCase();
 
   return (
@@ -85,9 +85,11 @@ export default function ItoLaunchButtons({ row, busy = false, checkingWork = nul
         const known = count !== null;
         const countStyle = styles[itoCountState(count)];
 
+        const openJob = openJobForWork(row, transaction);
+
         return (
+          <span key={transaction.work} style={styles.slot}>
           <button
-            key={transaction.work}
             type="button"
             style={
               checking
@@ -138,6 +140,22 @@ export default function ItoLaunchButtons({ row, busy = false, checkingWork = nul
               {known ? count : "NAv"}
             </span>
           </button>
+
+            {openJob ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenJob?.(row, openJob);
+                }}
+                title={`A ${transaction.name.toLowerCase()} is already out on this meter — ${openJob.workflowState.toLowerCase()}, with ${openJob.assignedToName}. Open it in the TRN Registry.`}
+                aria-label={`Open the ${transaction.name.toLowerCase()} already out on this meter`}
+                style={styles.openJob}
+              >
+                {openJob.workflowState === "ISSUED" ? "!" : "•"}
+              </button>
+            ) : null}
+          </span>
         );
       })}
     </div>
@@ -193,6 +211,33 @@ if (typeof document !== "undefined" && !document.getElementById(spinKeyframes)) 
 }
 
 const styles = {
+  // The button and the mark that sits on it. The count is top right, so an
+  // open job goes bottom left and the two never collide.
+  slot: { position: "relative", display: "inline-flex" },
+
+  // A job of this kind is ALREADY OUT on this meter (DR-R001 5). Not a grey
+  // button: hiding a button is not a rule, the refusal is - so the office
+  // still sees the work exists, sees that one is out, and can click through
+  // to it.
+  openJob: {
+    position: "absolute",
+    left: -5,
+    bottom: -5,
+    width: 16,
+    height: 16,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+    borderRadius: "50%",
+    border: "1px solid #ffffff",
+    background: "#b45309",
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: 800,
+    lineHeight: 1,
+    cursor: "pointer",
+  },
   spinner: { animation: "ito-launch-spin 0.7s linear infinite" },
   // The button that was pressed stays lit while the check runs, so the office
   // can see WHICH one it is waiting on.
