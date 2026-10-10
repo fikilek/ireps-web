@@ -397,7 +397,7 @@ export function normalizeAssignmentTargets(assignment = {}) {
 export function validateAssignment(
   assignment = {},
   trnType = "NAv",
-  { originChannel = "", hasInstructionMedia = false } = {},
+  { originChannel = "", hasInstructionMedia = false, requireReason = false } = {},
 ) {
   const instruction = assignment?.instruction || {};
   const targets = normalizeAssignmentTargets(assignment);
@@ -459,6 +459,41 @@ export function validateAssignment(
       code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
       message: "assignment.instruction needs words or an image",
     };
+  }
+
+  // WHY THE WORK IS BEING SENT. `DR-R001` 3.4: the reason is stored as a code
+  // as well as words, so a rewording leaves old records countable. The form
+  // has always demanded one; the server did not, so a client that skipped it
+  // could write a job iREPS could never explain.
+  //
+  // Owner, 10 October 2026: the same validation front and back. The back is
+  // the safeguard - it has to be at least as strict, or it is not safeguarding
+  // anything. It cannot know the agreed list of reasons, so it checks the
+  // shape: a code is there, and Other says what it was.
+  // Only the OFFICE lane carries a reason. A disconnection locked onto a
+  // Meter Discovery finding is field-originated: the finding IS the reason,
+  // and demanding an ITO one would refuse work the rules require (MN-R001).
+  if (requireReason) {
+    const reasonCode = String(instruction?.reason?.code || "").trim();
+
+    if (!reasonCode) {
+      return {
+        ok: false,
+        code: "INVALID_ASSIGNMENT_INSTRUCTION_REASON",
+        message: "Choose why this work is being sent.",
+      };
+    }
+
+    if (
+      normalizeUpper(reasonCode) === "OTHER" &&
+      !String(instruction?.reason?.explanation || "").trim().replace(/^NAv$/i, "")
+    ) {
+      return {
+        ok: false,
+        code: "INVALID_ASSIGNMENT_INSTRUCTION_REASON_EXPLANATION",
+        message: "Say what the other reason is.",
+      };
+    }
   }
 
   // Nobody assigned it either. TR-R001: `assignment` is `{}` for work a worker started
@@ -3101,6 +3136,23 @@ export function validateCreateLifecycleInstructionInput(data = {}) {
     };
   }
 
+  // Owner, 3 October 2026: every document iREPS writes carries `lmPcode` and
+  // `wardPcode`. A record without them is worse than wrong - it EXISTS AND
+  // CANNOT BE FOUND: not in the registry, not in the report, not in any count,
+  // and nothing says it is missing. The ITO page refuses to send one; the
+  // server now refuses to write one.
+  if (
+    !String(data?.accessData?.parents?.lmPcode || "").trim() ||
+    !String(data?.accessData?.parents?.wardPcode || "").trim()
+  ) {
+    return {
+      ok: false,
+      code: "INVALID_WORKBASE_OR_WARD",
+      message:
+        "This meter carries no workbase or no ward, so the job could not be found again once sent.",
+    };
+  }
+
   return {
     ok: true,
     trnId,
@@ -3115,7 +3167,10 @@ export function validateLifecycleInstructionAssignment(
   trnType = "NAv",
   { hasInstructionMedia = false } = {},
 ) {
-  return validateAssignment(assignment, trnType, { hasInstructionMedia });
+  // This is the office lane's own validator - the only caller is the callable
+  // that creates an instruction from Operations - so the reason is required
+  // here and nowhere else.
+  return validateAssignment(assignment, trnType, { hasInstructionMedia, requireReason: true });
 }
 
 export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
