@@ -2861,12 +2861,26 @@ export function validateMeterDisconnection({ data, astDoc }) {
     };
   }
 
-  // MN-R001 1.3.0: every disconnection says why, the field channel included.
-  if (!instructionText) {
+  // MN-R001 1.3.0: EVERY DISCONNECTION SAYS WHY, the field channel included.
+  //
+  // It used to insist the why was in the instruction's words. From the office
+  // it is the REASON - a code, required on the ITO page and on the server
+  // since 10 October - and the words are optional elaboration (owner, 10
+  // October: "to make it optional"). From the field it is still the
+  // instruction locked on by the finding.
+  //
+  // So the rule is unchanged and its test widens: a disconnection must say
+  // why, in one of the two places that carry why. Found on the owner's phone
+  // at 01:06 on 11 October, refusing a job the office had properly issued.
+  const reasonCode = String(
+    data?.assignment?.instruction?.reason?.code || "",
+  ).trim();
+
+  if (!instructionText && !reasonCode) {
     return {
       ok: false,
       code: "DISCONNECTION_INSTRUCTION_REQUIRED",
-      message: "Disconnection instruction is required",
+      message: "A disconnection must say why: a reason, or an instruction.",
     };
   }
 
