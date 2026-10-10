@@ -9,6 +9,7 @@
 // look but not yet a renderer; folding them into one belongs with the report
 // platform, not with this work.
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { formatSastDateTime } from "../formatSastDateTime";
 
 const NAV = "NAv";
 
@@ -46,12 +47,12 @@ function titleCase(value) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+// ONE CLOCK. This chopped the Z off a UTC instant and printed it as though it
+// were the reader's own - so a meter report said a disconnection happened at
+// 22:15 when it happened at 00:15 (owner, 11 October 2026). A sheet somebody
+// prints and files is the worst place to carry a wrong time.
 function formatDateTime(value) {
-  if (!isMeaningful(value)) return NAV;
-  if (typeof value === "string") return value.slice(0, 19).replace("T", " ");
-  if (typeof value?.toDate === "function") return value.toDate().toISOString().slice(0, 19).replace("T", " ");
-
-  return NAV;
+  return isMeaningful(value) ? formatSastDateTime(value) : NAV;
 }
 
 function count(value) {
@@ -281,7 +282,7 @@ export async function buildMeterPdfArtifact({ meter, transactions = [] }) {
 
   room(30);
   page.drawText(
-    winAnsi(`Produced ${new Date().toISOString().slice(0, 19).replace("T", " ")} from iREPS. The transactions are the record; this sheet is a reading of them.`),
+    winAnsi(`Produced ${formatSastDateTime(new Date())} from iREPS. The transactions are the record; this sheet is a reading of them.`),
     {
       x: PAGE.margin,
       y: PAGE.margin - 10,
