@@ -87,7 +87,10 @@ function wardLabel(wardPcode) {
 }
 
 function titleFor(name) {
-  return `Allocate this ${String(name || "work").toLowerCase()} to a field worker`;
+  // Owner, 10 October 2026: the transaction is named in capitals, so the
+  // office sees WHICH work it is sending at a glance rather than reading a
+  // sentence to find it.
+  return `Allocate ${String(name || "work").toUpperCase()} to a field worker`;
 }
 
 export default function ItoPage() {
