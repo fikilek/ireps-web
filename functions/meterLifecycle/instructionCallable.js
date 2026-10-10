@@ -326,9 +326,16 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         actorRole: authority.role,
       });
 
+      // An attached instruction image says what the work is just as words do
+      // (DR-R001 3.4), so the check has to know whether one came with it.
+      const instructionMediaAttached =
+        Array.isArray(data?.media) &&
+        data.media.some((item) => item?.tag === "instructionMedia");
+
       const assignmentCheck = validateLifecycleInstructionAssignment(
         data?.assignment || {},
         trnType,
+        { hasInstructionMedia: instructionMediaAttached },
       );
 
       if (!assignmentCheck.ok) {

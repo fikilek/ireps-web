@@ -18,6 +18,8 @@
 //
 // AN ID CAN NEVER BE REWRITTEN, so what goes in it is permanent.
 
+import { itoReasonProblem } from "./itoReasons.js";
+
 /** Mirrors `TRN_PREFIX_BY_TYPE` in `ireps-mobile/src/features/trns/trnId.js`. */
 export const TRN_PREFIX_BY_TYPE = Object.freeze({
   METER_DISCOVERY: "TRN_MDIS",
@@ -71,6 +73,40 @@ export function buildItoTrnId({ trnType, meterType, wardPcode, erfNo, atMs }) {
   ].join("_");
 }
 
+/**
+ * What stops this being sent, in the office's own words - or `null`.
+ *
+ * ONE WELL, and the reason it has to be one: **the form must refuse exactly
+ * what the server refuses** (owner, 10 October 2026). A form that lets
+ * something through knowing the back will send it straight back wastes the
+ * user's time and teaches him the form lies. The back is the safeguard, not
+ * the first thing that tells you.
+ *
+ * So the Submit button and the request builder ask this same question. If
+ * they asked separately they would drift, and the drift would show up as a
+ * refusal nobody could have avoided.
+ *
+ * It mirrors `validateAssignment` in `functions/meterLifecycle/helpers.js`:
+ * words, an image, or both - and a meter reading needs neither, because the
+ * reading is the instruction.
+ */
+export function itoSendProblem({ work, reason, explanation, instructionWords, hasImage, worker } = {}) {
+  const reasonProblem = itoReasonProblem({ work, code: reason?.code, explanation });
+
+  if (reasonProblem) return reasonProblem;
+
+  if (!worker?.uid) return "Choose the field worker this goes to.";
+
+  const said = String(instructionWords ?? "").trim();
+  const trnType = TRN_TYPE_BY_WORK[String(work || "").toLowerCase()];
+
+  if (!said && !hasImage && trnType !== "METER_READING") {
+    return "Say what the worker must do, or attach the instruction as an image.";
+  }
+
+  return null;
+}
+
 const text = (value) => {
   const said = String(value ?? "").trim();
 
@@ -91,6 +127,7 @@ export function buildItoRequest({
   reason,
   instructionWords,
   media = [],
+  hasImage = false,
   atMs,
 } = {}) {
   const trnType = TRN_TYPE_BY_WORK[String(work || "").toLowerCase()];
@@ -125,21 +162,18 @@ export function buildItoRequest({
     };
   }
 
-  if (!workerUid) return { ok: false, message: "Choose the field worker this goes to." };
+  const problem = itoSendProblem({
+    work,
+    reason,
+    explanation: reason?.explanation,
+    instructionWords,
+    hasImage,
+    worker: { uid: workerUid },
+  });
 
-  if (!reason?.code) return { ok: false, message: "Choose why this work is being sent." };
+  if (problem) return { ok: false, message: problem };
 
-  // The instruction reaches the worker's form word for word, so there has to
-  // be one. A meter reading is the exception the server itself makes: the
-  // reading is the instruction.
   const said = String(instructionWords ?? "").trim();
-
-  if (!said && trnType !== "METER_READING") {
-    return {
-      ok: false,
-      message: "Say what the worker must do. Your words reach his form exactly as you type them.",
-    };
-  }
 
   const id = buildItoTrnId({
     trnType,

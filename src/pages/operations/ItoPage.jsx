@@ -27,7 +27,7 @@ import ItoMap from "../../components/ito/ItoMap";
 import { readPoint } from "../../components/ito/geoDistance";
 import ItoWorkerPicker from "../../components/ito/ItoWorkerPicker";
 import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
-import { buildItoRequest } from "../../components/ito/itoRequest";
+import { buildItoRequest, itoSendProblem } from "../../components/ito/itoRequest";
 import { ITO_STEPS, sendItoRequest } from "../../components/ito/sendItoRequest";
 import {
   useGetMeterByIdQuery,
@@ -149,6 +149,7 @@ export default function ItoPage() {
       reason: { ...(reasons.find((item) => item.code === reasonCode) || {}), explanation },
       instructionWords: instruction,
       media: [],
+      hasImage: Boolean(image),
       atMs: stampNow(),
     });
 
@@ -239,14 +240,17 @@ export default function ItoPage() {
     },
   ].filter(Boolean);
 
-  // What stops this being sent, in the order the office would meet it. The
-  // instruction is required by the server for everything but a meter reading,
-  // so the office is told here rather than led into a refusal.
-  const problem =
-    itoReasonProblem({ work: transaction?.work, code: reasonCode, explanation }) ||
-    (!instruction.trim() && transaction?.work !== "read"
-      ? "Say what the worker must do. Your words reach his form exactly as you type them."
-      : null);
+  // What stops this being sent - the same question the request builder asks,
+  // which is the same rule the server applies. The form refuses exactly what
+  // the back refuses, so nothing is ever sent that was going to come back.
+  const problem = itoSendProblem({
+    work: transaction?.work,
+    reason: reasons.find((item) => item.code === reasonCode) || null,
+    explanation,
+    instructionWords: instruction,
+    hasImage: Boolean(image),
+    worker: picked,
+  });
 
   function takeImage(file) {
     if (!file) return;
@@ -519,11 +523,7 @@ export default function ItoPage() {
 
       <section style={{ ...styles.card, ...styles.footerCard }}>
         <p style={styles.footNote}>
-          {problem
-            ? problem
-            : !picked
-              ? "Choose the field worker this goes to."
-              : "Ready to send. The sending window itself is step 6."}
+          {problem || "Ready to send."}
         </p>
         <div style={styles.actions}>
           <button
@@ -535,9 +535,9 @@ export default function ItoPage() {
           </button>
           <button
             type="button"
-            disabled={Boolean(problem) || !picked}
+            disabled={Boolean(problem)}
             onClick={() => setPhase("confirm")}
-            style={problem || !picked ? styles.send : styles.sendReady}
+            style={problem ? styles.send : styles.sendReady}
           >
             Submit
           </button>

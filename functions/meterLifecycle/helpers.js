@@ -397,7 +397,7 @@ export function normalizeAssignmentTargets(assignment = {}) {
 export function validateAssignment(
   assignment = {},
   trnType = "NAv",
-  { originChannel = "" } = {},
+  { originChannel = "", hasInstructionMedia = false } = {},
 ) {
   const instruction = assignment?.instruction || {};
   const targets = normalizeAssignmentTargets(assignment);
@@ -440,15 +440,24 @@ export function validateAssignment(
     };
   }
 
+  // WORDS, AN IMAGE, OR BOTH - `DR-R001` 3.4. A municipal instruction often
+  // arrives as a photograph or a screenshot, and an office that attached one
+  // has said what the work is; demanding typed words as well made the rule
+  // say something it does not.
+  //
+  // Owner, 10 October 2026, on his first send: the instruction "must be
+  // optional", and the form must refuse exactly what the server refuses - the
+  // back is the safeguard, not the first thing that tells you.
   if (
     !String(instruction?.text || "").trim() &&
+    !hasInstructionMedia &&
     normalizedTrnType !== "METER_READING" &&
     !fieldInstructionOptional
   ) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_INSTRUCTION_TEXT",
-      message: "assignment.instruction.text is required",
+      message: "assignment.instruction needs words or an image",
     };
   }
 
@@ -3104,8 +3113,9 @@ export function validateCreateLifecycleInstructionInput(data = {}) {
 export function validateLifecycleInstructionAssignment(
   assignment = {},
   trnType = "NAv",
+  { hasInstructionMedia = false } = {},
 ) {
-  return validateAssignment(assignment, trnType);
+  return validateAssignment(assignment, trnType, { hasInstructionMedia });
 }
 
 export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {

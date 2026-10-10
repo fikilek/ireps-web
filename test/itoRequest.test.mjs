@@ -23,6 +23,7 @@ import {
   TRN_TYPE_BY_WORK,
   buildItoRequest,
   buildItoTrnId,
+  itoSendProblem,
   meterTypeCode,
 } from "../src/components/ito/itoRequest.js";
 
@@ -152,11 +153,29 @@ test("the instruction is what the worker reads, and it is required", () => {
   }
 });
 
-test("a meter reading needs no instruction, because the reading is one", () => {
-  const out = build({ work: "read", instructionWords: "" });
+test("an image stands for the instruction, exactly as the server allows", () => {
+  // DR-R001 3.4: words, an image, or both. The form must refuse what the
+  // server refuses and allow what it allows - nothing is sent that was going
+  // to come back.
+  assert.equal(
+    itoSendProblem({ work: "disconnect", reason: REASON, instructionWords: "", hasImage: true, worker: WORKER }),
+    null,
+  );
 
-  assert.equal(out.ok, true);
-  assert.equal(out.request.assignment.instruction.text, "NAv");
+  assert.match(
+    itoSendProblem({ work: "disconnect", reason: REASON, instructionWords: "", hasImage: false, worker: WORKER }),
+    /words|image/i,
+  );
+
+  assert.equal(build({ instructionWords: "", hasImage: true }).ok, true);
+});
+
+test("the transactions whose reasons are not settled cannot be sent at all", () => {
+  // Only disconnection has an agreed reason list. An empty list is the honest
+  // answer, and it stops the office sending work nobody has designed.
+  for (const work of ["reconnect", "inspect", "remove", "read"]) {
+    assert.ok(itoSendProblem({ work, worker: WORKER, instructionWords: "Do it" }));
+  }
 });
 
 test("an Other with no explanation still reads NAv rather than blank", () => {
