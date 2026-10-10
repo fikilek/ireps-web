@@ -10,7 +10,7 @@
 //   rowKey   how to identify a row
 // It owns sorting and pagination. Filters can be controlled by a page so KPI
 // cards and column filters share the same state. Downloads are standard.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DownloadButtons from "../DownloadButtons";
 import SalesRangeFilterModal from "../../pages/sales/components/SalesRangeFilterModal";
 import { EMPTY_SALES_RANGE_FILTER, getSalesRangeFilterButtonLabel } from "../../pages/sales/salesUtils.js";
@@ -56,10 +56,52 @@ export default function IrepsTable({
   // second pass. filterRows remains the domain matching contract.
   filteredRows: providedFilteredRows = null,
   stickyHeader = false,
+  // Owner, 10 October 2026, on the Meter Registry. Off by default: IrepsTable
+  // is shared by every registry, so these are switched on one table at a time
+  // rather than changing eight at once.
+  stickyFirstColumn = false,
+  topScrollbar = false,
   maxHeight,
   rowStyle,
   onRowClick,
 }) {
+  const topScrollRef = useRef(null);
+  const bodyScrollRef = useRef(null);
+  const tableRef = useRef(null);
+  const syncingRef = useRef(false);
+  const [tableWidth, setTableWidth] = useState(0);
+
+  // The strip above the table scrolls nothing of its own: it holds a spacer as
+  // wide as the table, and the two keep each other in step. The guard stops
+  // the pair bouncing a scroll back and forth between them.
+  function syncScroll(from, to) {
+    if (syncingRef.current || !from.current || !to.current) return;
+
+    syncingRef.current = true;
+    to.current.scrollLeft = from.current.scrollLeft;
+    window.requestAnimationFrame(() => {
+      syncingRef.current = false;
+    });
+  }
+
+  useEffect(() => {
+    if (!topScrollbar) return undefined;
+
+    const table = tableRef.current;
+
+    if (!table || typeof ResizeObserver === "undefined") return undefined;
+
+    const measure = () => setTableWidth(table.scrollWidth);
+
+    measure();
+
+    const observer = new ResizeObserver(measure);
+
+    observer.observe(table);
+
+    return () => observer.disconnect();
+  }, [topScrollbar, columns.length]);
+
   const [internalFilters, setInternalFilters] = useState({});
   const filters = controlledFilters ?? internalFilters;
   const setFilters = onFiltersChange ?? setInternalFilters;
@@ -156,8 +198,23 @@ export default function IrepsTable({
 
       {pagination}
 
-      <div style={{ ...styles.scroll, maxHeight }}>
-        <table style={styles.table}>
+      {topScrollbar ? (
+        <div
+          ref={topScrollRef}
+          style={styles.topScroll}
+          onScroll={() => syncScroll(topScrollRef, bodyScrollRef)}
+          aria-hidden="true"
+        >
+          <div style={{ width: tableWidth, height: 1 }} />
+        </div>
+      ) : null}
+
+      <div
+        ref={bodyScrollRef}
+        style={{ ...styles.scroll, maxHeight }}
+        onScroll={topScrollbar ? () => syncScroll(bodyScrollRef, topScrollRef) : undefined}
+      >
+        <table ref={tableRef} style={styles.table}>
           <thead style={stickyHeader ? { position: "sticky", top: 0, zIndex: 2, background: T.headBackground } : undefined}>
             {bands.length ? (
               <tr>
@@ -171,7 +228,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth }}>
+                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, ...(stickyFirstColumn && column === columns[0] ? styles.pinnedHead : null) }}>
                   {(column.sortable ?? Boolean(column.filter)) ? (
                     <button
                       type="button"
@@ -193,7 +250,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} style={styles.filterCell}>
+                <th key={column.key} style={{ ...styles.filterCell, ...(stickyFirstColumn && column === columns[0] ? styles.pinnedFilter : null) }}>
                   {column.renderFilter ? column.renderFilter({ filters, setFilter }) : !column.filter ? null : column.filter === "select" ? (
                     <select
                       aria-label={`Filter ${column.label}`}
@@ -243,7 +300,7 @@ export default function IrepsTable({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    style={{ ...styles.cell, minWidth: column.minWidth, textAlign: column.align || "left", ...column.cellStyle }}
+                    style={{ ...styles.cell, minWidth: column.minWidth, textAlign: column.align || "left", ...column.cellStyle, ...(stickyFirstColumn && column === columns[0] ? styles.pinnedCell : null) }}
                   >
                     {column.render ? column.render(row, index) : column.value?.(row)}
                   </td>
@@ -434,6 +491,47 @@ const styles = {
   },
 
   scroll: { overflowX: "auto" },
+
+  // A second scrollbar, above the table. On a long table the only scrollbar is
+  // at the foot of it, so reaching the right-hand columns means scrolling down
+  // first. Paired with a sticky header this one stays within reach.
+  topScroll: {
+    overflowX: "auto",
+    overflowY: "hidden",
+    // Tall enough to grab in every browser; it carries nothing else.
+    height: 14,
+    borderBottom: `1px solid ${T.border}`,
+  },
+
+  // The pinned first column. It must be OPAQUE or the columns sliding under it
+  // show through, and it must take the row's own background - stripe, hover or
+  // whatever a page sets through rowStyle - or it detaches and reads as a
+  // separate little table. `inherit` does both: the row already carries an
+  // explicit background.
+  pinnedCell: {
+    position: "sticky",
+    left: 0,
+    zIndex: 1,
+    background: "inherit",
+    borderRight: `1px solid ${T.border}`,
+    boxShadow: "2px 0 4px -2px rgba(15,23,42,0.18)",
+  },
+  pinnedHead: {
+    position: "sticky",
+    left: 0,
+    zIndex: 1,
+    background: T.headBackground,
+    borderRight: `1px solid ${T.border}`,
+    boxShadow: "2px 0 4px -2px rgba(15,23,42,0.18)",
+  },
+  pinnedFilter: {
+    position: "sticky",
+    left: 0,
+    zIndex: 1,
+    background: T.filterRowBackground,
+    borderRight: `1px solid ${T.border}`,
+    boxShadow: "2px 0 4px -2px rgba(15,23,42,0.18)",
+  },
 
   table: {
     width: "100%",

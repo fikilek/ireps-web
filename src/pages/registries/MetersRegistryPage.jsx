@@ -1155,6 +1155,10 @@ ${premiseId}`;
               <IrepsTable
                 key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
                 title="Meters Registry"
+        stickyHeader
+        stickyFirstColumn
+        topScrollbar
+        maxHeight="68vh"
                 rows={meterRows}
                 columns={centredColumns}
                 rowKey={row => row.id}
