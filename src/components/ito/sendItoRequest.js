@@ -20,6 +20,33 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import { functions, storage } from "../../firebase";
 
+/**
+ * What the server refused, said in the office's own words.
+ *
+ * The server's own messages name fields: "assignment.instruction.text is
+ * required" is true and is no use to the person reading it. The code stays,
+ * small, beside the words - the office can quote it and the next person can
+ * find it - but the sentence is one somebody can act on.
+ */
+const REFUSALS = Object.freeze({
+  INVALID_ASSIGNMENT_INSTRUCTION_TEXT:
+    "Say what the worker must do. Your words reach his form exactly as you type them.",
+  INVALID_ASSIGNMENT_INSTRUCTION_CODE:
+    "This work has no instruction behind it, so it cannot be sent from the office.",
+  ASSIGNMENT_INSTRUCTION_MISMATCH:
+    "The instruction does not match the work being sent. This is a fault in iREPS, not in what you typed.",
+  ACTIVE_LCT_ALREADY_EXISTS:
+    "This meter already has an open job of this kind. Finish or cancel that one before issuing another.",
+  TRN_ALREADY_EXISTS: "This job has already been sent.",
+  AST_NOT_FOUND: "This meter is no longer in iREPS, so nothing can be sent to it.",
+  PREMISE_NOT_FOUND:
+    "The premise this meter belongs to is no longer in iREPS. The record has to be fixed before work can be sent here.",
+  UNAUTHORIZED_LCT_ORIGINATOR:
+    "You cannot send work out. Only a manager, or a supervisor of the main contractor, can.",
+  INVALID_ASSIGNMENT_TARGETS: "Choose the field worker this goes to.",
+  UNAUTHENTICATED: "You are signed out. Sign in and send it again.",
+});
+
 export const ITO_STEPS = Object.freeze({
   attach: "attach",
   write: "write",
@@ -97,7 +124,8 @@ export async function sendItoRequest({ request, imageFile = null, onStep = () =>
     return {
       ok: false,
       wrote: false,
-      message: result?.message || "The office could not send this work.",
+      message:
+        REFUSALS[result?.code] || result?.message || "The office could not send this work.",
       code: result?.code || "NAv",
     };
   } catch (error) {

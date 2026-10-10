@@ -42,7 +42,7 @@ const WORKER = { uid: "u1", name: "Peter M." };
 const REASON = { code: "CREDIT_CONTROL_INSTRUCTION", words: "Client instruction" };
 
 const build = (over = {}) =>
-  buildItoRequest({ meter: METER, work: "disconnect", worker: WORKER, reason: REASON, atMs: AT, ...over });
+  buildItoRequest({ meter: METER, work: "disconnect", worker: WORKER, reason: REASON, instructionWords: "Disconnect at the box", atMs: AT, ...over });
 
 test("the prefixes are the phone's, letter for letter", async () => {
   // Two repositories, one shape. An office disconnection and a field
@@ -137,11 +137,30 @@ test("a rewording leaves the code untouched", () => {
   assert.notEqual(before.request.assignment.instruction.reason.words, after.request.assignment.instruction.reason.words);
 });
 
-test("nothing typed reads NAv, never blank", () => {
-  const { instruction } = build({ instructionWords: "   " }).request.assignment;
+test("the instruction is what the worker reads, and it is required", () => {
+  // The server demands assignment.instruction.text for every transaction but
+  // a meter reading, so the office is told here rather than refused there.
+  const { instruction } = build().request.assignment;
 
-  assert.equal(instruction.note, "NAv");
-  assert.equal(instruction.reason.explanation, "NAv");
+  assert.equal(instruction.text, "Disconnect at the box");
+
+  for (const nothing of [undefined, "", "   ", String.fromCharCode(10)]) {
+    const out = build({ instructionWords: nothing });
+
+    assert.equal(out.ok, false, `an instruction of ${JSON.stringify(nothing)} must be refused`);
+    assert.match(out.message, /what the worker must do/i);
+  }
+});
+
+test("a meter reading needs no instruction, because the reading is one", () => {
+  const out = build({ work: "read", instructionWords: "" });
+
+  assert.equal(out.ok, true);
+  assert.equal(out.request.assignment.instruction.text, "NAv");
+});
+
+test("an Other with no explanation still reads NAv rather than blank", () => {
+  assert.equal(build().request.assignment.instruction.reason.explanation, "NAv");
 });
 
 test("a meter with no premise is refused, in words the office can act on", () => {

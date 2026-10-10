@@ -239,11 +239,14 @@ export default function ItoPage() {
     },
   ].filter(Boolean);
 
-  const problem = itoReasonProblem({
-    work: transaction?.work,
-    code: reasonCode,
-    explanation,
-  });
+  // What stops this being sent, in the order the office would meet it. The
+  // instruction is required by the server for everything but a meter reading,
+  // so the office is told here rather than led into a refusal.
+  const problem =
+    itoReasonProblem({ work: transaction?.work, code: reasonCode, explanation }) ||
+    (!instruction.trim() && transaction?.work !== "read"
+      ? "Say what the worker must do. Your words reach his form exactly as you type them."
+      : null);
 
   function takeImage(file) {
     if (!file) return;
@@ -446,7 +449,7 @@ export default function ItoPage() {
                   rows={4}
                   value={instruction}
                   onChange={(event) => setInstruction(event.target.value)}
-                  placeholder="Type what the worker must know. It reaches his form word for word."
+                  placeholder="Type what the worker must do. It reaches his form word for word."
                   style={{ ...styles.input, resize: "vertical" }}
                 />
               </div>
@@ -639,7 +642,8 @@ export default function ItoPage() {
           lines={[
             outcome?.message || "The office could not send this work.",
             "Everything you typed and any image you attached are still on the form.",
-          ]}
+            outcome?.code && outcome.code !== "NAv" ? `Code: ${outcome.code}` : null,
+          ].filter(Boolean)}
           escapeAction={() => setPhase(null)}
           actions={[
             { key: "back", label: "Back to the form", primary: true, onClick: () => setPhase(null) },

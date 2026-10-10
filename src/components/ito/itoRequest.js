@@ -129,6 +129,18 @@ export function buildItoRequest({
 
   if (!reason?.code) return { ok: false, message: "Choose why this work is being sent." };
 
+  // The instruction reaches the worker's form word for word, so there has to
+  // be one. A meter reading is the exception the server itself makes: the
+  // reading is the instruction.
+  const said = String(instructionWords ?? "").trim();
+
+  if (!said && trnType !== "METER_READING") {
+    return {
+      ok: false,
+      message: "Say what the worker must do. Your words reach his form exactly as you type them.",
+    };
+  }
+
   const id = buildItoTrnId({
     trnType,
     meterType: meter?.meterType,
@@ -175,7 +187,9 @@ export function buildItoRequest({
             words: text(reason.words),
             explanation: text(reason.explanation),
           },
-          note: text(instructionWords),
+          // The words the worker reads, which the server requires for
+          // everything but a meter reading. It is `text`, not `note`.
+          text: said || "NAv",
           mediaRequired: false,
         },
       },
