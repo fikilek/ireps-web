@@ -86,11 +86,12 @@ function wardLabel(wardPcode) {
   return `Ward ${Number(match[1])}`;
 }
 
-function titleFor(name) {
-  // Owner, 10 October 2026: the transaction is named in capitals, so the
-  // office sees WHICH work it is sending at a glance rather than reading a
-  // sentence to find it.
-  return `Allocate ${String(name || "work").toUpperCase()} to a field worker`;
+// Owner, 10 October 2026: the transaction is named in capitals AND in bold,
+// so the office sees WHICH work it is sending at a glance rather than reading
+// a sentence to find it. The words around it carry normal weight on purpose —
+// a heading where everything is bold has nothing standing out in it.
+function workName(name) {
+  return String(name || "work").toUpperCase();
 }
 
 export default function ItoPage() {
@@ -253,7 +254,10 @@ export default function ItoPage() {
 
       <div style={styles.titleRow}>
         <span style={styles.code}>{transaction.code}</span>
-        <h1 style={styles.title}>{titleFor(transaction.name)}</h1>
+        <h1 style={styles.title}>
+          Allocate <strong style={styles.titleWork}>{workName(transaction.name)}</strong>{" "}
+          to a field worker
+        </h1>
       </div>
 
       {isError ? (
@@ -484,7 +488,15 @@ const styles = {
     fontWeight: "bold",
     letterSpacing: "0.02em",
   },
-  title: { margin: 0, fontSize: 26, lineHeight: 1.2, flexGrow: 1, minWidth: 0 },
+  title: {
+    margin: 0,
+    fontSize: 26,
+    fontWeight: 400,
+    lineHeight: 1.2,
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  titleWork: { fontWeight: 800 },
   band: {
     background: "#ffffff",
     border: "1px solid #e2e8f0",
