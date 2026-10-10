@@ -325,15 +325,20 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [] }) {
 }
 
 const styles = {
+  // The map fills whatever height its card has left, rather than sitting at a
+  // fixed 360 px with white space under it. The card is a flex column and the
+  // two columns stretch to the taller of them, so this takes up the slack the
+  // worker list on the right creates.
   shell: {
     position: "relative",
+    flex: "1 1 auto",
     border: "1px solid #e2e8f0",
     borderRadius: 16,
     overflow: "hidden",
     background: "#e8eef4",
     minHeight: 360,
   },
-  map: { width: "100%", height: 360 },
+  map: { width: "100%", height: "100%", minHeight: 360 },
   note: { margin: 0, fontSize: 13, lineHeight: 1.55, color: "#475569" },
   layers: {
     position: "absolute",
