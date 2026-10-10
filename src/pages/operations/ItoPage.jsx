@@ -240,66 +240,72 @@ export default function ItoPage() {
 
   return (
     <section className="page" style={styles.page}>
-      <nav style={styles.crumbs} aria-label="Where you are">
-        <Link to="/registries/meters" style={styles.crumbLink}>
-          Meter Registry
-        </Link>
-        <span aria-hidden="true">›</span>
-        <span>
-          {lmName} · {wardLabel(parents.wardPcode)}
-        </span>
-        <span aria-hidden="true">›</span>
-        <strong style={styles.crumbNow}>{meterNo}</strong>
-      </nav>
+      {/* Owner, 10 October 2026: which meter, which work, and what state it
+          is in must stay on screen. Scrolling to the worker list or the reason
+          used to carry all of it away, so the office could be half way down
+          the page with nothing saying what it was allocating. */}
+      <div style={styles.stickyHead}>
+        <nav style={styles.crumbs} aria-label="Where you are">
+          <Link to="/registries/meters" style={styles.crumbLink}>
+            Meter Registry
+          </Link>
+          <span aria-hidden="true">›</span>
+          <span>
+            {lmName} · {wardLabel(parents.wardPcode)}
+          </span>
+          <span aria-hidden="true">›</span>
+          <strong style={styles.crumbNow}>{meterNo}</strong>
+        </nav>
 
-      <div style={styles.titleRow}>
-        <span style={styles.code}>{transaction.code}</span>
-        <h1 style={styles.title}>
-          Allocate <strong style={styles.titleWork}>{workName(transaction.name)}</strong>{" "}
-          to a field worker
-        </h1>
+        <div style={styles.titleRow}>
+          <span style={styles.code}>{transaction.code}</span>
+          <h1 style={styles.title}>
+            Allocate <strong style={styles.titleWork}>{workName(transaction.name)}</strong>{" "}
+            to a field worker
+          </h1>
+        </div>
+
+        {isError ? (
+          <p style={styles.note}>This meter could not be read. Try again.</p>
+        ) : null}
+
+        <section style={styles.band}>
+          <div style={styles.bandCell}>
+            <span style={styles.label}>Meter</span>
+            <strong style={styles.meterNo}>{isLoading ? "…" : meterNo}</strong>
+            <span style={styles.sub}>
+              {meter?.meterType || NAV} · {meter?.ast?.astData?.meter?.type || NAV}
+            </span>
+          </div>
+          <div style={styles.bandCell}>
+            <span style={styles.label}>Meter status</span>
+            <span style={styles.pill}>
+              <span aria-hidden="true" style={styles.pillDot} />
+              {state}
+            </span>
+          </div>
+          <div style={{ ...styles.bandCell, flexGrow: 1, minWidth: 250 }}>
+            <span style={styles.label}>Where it is</span>
+            <strong style={styles.where}>
+              {meter?.accessData?.premise?.address || NAV}
+            </strong>
+            <span style={styles.sub}>
+              ERF {meter?.accessData?.erfNo || NAV} · {lmName} ·{" "}
+              {wardLabel(parents.wardPcode)} · {parents.wardPcode || NAV}
+            </span>
+          </div>
+          <div style={styles.bandCell}>
+            <span style={styles.label}>On this meter</span>
+            <span style={styles.counts}>
+              {countPhrase(meter, "disconnections", "disconnection", "disconnections")} ·{" "}
+              {countPhrase(meter, "reconnections", "reconnection", "reconnections")}
+              <br />
+              {countPhrase(meter, "inspections", "inspection", "inspections")} ·{" "}
+              {countPhrase(meter, "noAccess", "no access", "no access")}
+            </span>
+          </div>
+        </section>
       </div>
-
-      {isError ? (
-        <p style={styles.note}>This meter could not be read. Try again.</p>
-      ) : null}
-
-      <section style={styles.band}>
-        <div style={styles.bandCell}>
-          <span style={styles.label}>Meter</span>
-          <strong style={styles.meterNo}>{isLoading ? "…" : meterNo}</strong>
-          <span style={styles.sub}>
-            {meter?.meterType || NAV} · {meter?.ast?.astData?.meter?.type || NAV}
-          </span>
-        </div>
-        <div style={styles.bandCell}>
-          <span style={styles.label}>Meter status</span>
-          <span style={styles.pill}>
-            <span aria-hidden="true" style={styles.pillDot} />
-            {state}
-          </span>
-        </div>
-        <div style={{ ...styles.bandCell, flexGrow: 1, minWidth: 250 }}>
-          <span style={styles.label}>Where it is</span>
-          <strong style={styles.where}>
-            {meter?.accessData?.premise?.address || NAV}
-          </strong>
-          <span style={styles.sub}>
-            ERF {meter?.accessData?.erfNo || NAV} · {lmName} ·{" "}
-            {wardLabel(parents.wardPcode)} · {parents.wardPcode || NAV}
-          </span>
-        </div>
-        <div style={styles.bandCell}>
-          <span style={styles.label}>On this meter</span>
-          <span style={styles.counts}>
-            {countPhrase(meter, "disconnections", "disconnection", "disconnections")} ·{" "}
-            {countPhrase(meter, "reconnections", "reconnection", "reconnections")}
-            <br />
-            {countPhrase(meter, "inspections", "inspection", "inspections")} ·{" "}
-            {countPhrase(meter, "noAccess", "no access", "no access")}
-          </span>
-        </div>
-      </section>
 
       <div style={styles.columns}>
         <section style={{ ...styles.card, ...styles.mapCard }}>
@@ -469,6 +475,17 @@ export default function ItoPage() {
 
 const styles = {
   page: { display: "flex", flexDirection: "column", gap: 16, maxWidth: 1440 },
+  // The page's own background, or the cards would scroll visibly behind it.
+  stickyHead: {
+    position: "sticky",
+    top: 0,
+    zIndex: 20,
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+    paddingBottom: 12,
+    background: "#f8fafc",
+  },
   crumbs: {
     display: "flex",
     alignItems: "baseline",
