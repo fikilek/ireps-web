@@ -26,6 +26,9 @@ import { buildWorkerChoices } from "../../components/ito/itoWorkers";
 import ItoMap from "../../components/ito/ItoMap";
 import { readPoint } from "../../components/ito/geoDistance";
 import ItoWorkerPicker from "../../components/ito/ItoWorkerPicker";
+import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
+import { buildItoRequest } from "../../components/ito/itoRequest";
+import { ITO_STEPS, sendItoRequest } from "../../components/ito/sendItoRequest";
 import {
   useGetMeterByIdQuery,
   useGetPremiseByIdQuery,
@@ -90,6 +93,8 @@ function wardLabel(wardPcode) {
 // so the office sees WHICH work it is sending at a glance rather than reading
 // a sentence to find it. The words around it carry normal weight on purpose —
 // a heading where everything is bold has nothing standing out in it.
+const stampNow = () => Date.now();
+
 function workName(name) {
   return String(name || "work").toUpperCase();
 }
@@ -130,6 +135,66 @@ export default function ItoPage() {
   }, []);
 
   const [picked, setPicked] = useState(null);
+
+  // DR-R001 3.5, the four states: confirm, sending, it went, it did not.
+  const [phase, setPhase] = useState(null);
+  const [stepState, setStepState] = useState({});
+  const [outcome, setOutcome] = useState(null);
+
+  async function send() {
+    const built = buildItoRequest({
+      meter,
+      work: transaction.work,
+      worker: picked,
+      reason: { ...(reasons.find((item) => item.code === reasonCode) || {}), explanation },
+      instructionWords: instruction,
+      media: [],
+      atMs: stampNow(),
+    });
+
+    if (!built.ok) {
+      setOutcome({ ok: false, wrote: false, message: built.message });
+      setPhase("failed");
+      return;
+    }
+
+    setStepState({});
+    setPhase("sending");
+
+    const result = await sendItoRequest({
+      request: built.request,
+      imageFile: image?.file || null,
+      onStep: (key, state) => setStepState((current) => ({ ...current, [key]: state })),
+    });
+
+    setOutcome({ ...result, trnId: built.id });
+    setPhase(result.ok ? "sent" : "failed");
+  }
+
+  // Sent: back to the Meter Registry with this meter at the top of the list -
+  // which is to say, the only row, because its number is put in the filter.
+  function done() {
+    const meterNoNow = meter?.ast?.astData?.astNo || "";
+
+    navigate(meterNoNow ? `/registries/meters?meter=${encodeURIComponent(meterNoNow)}` : "/registries/meters");
+  }
+
+  const steps = [
+    image
+      ? {
+          key: ITO_STEPS.attach,
+          label: "Attaching the instruction",
+          done: stepState[ITO_STEPS.attach] === "done",
+          active: stepState[ITO_STEPS.attach] === "active",
+        }
+      : null,
+    {
+      key: ITO_STEPS.write,
+      label: "Checking the meter and writing the job",
+      done: stepState[ITO_STEPS.write] === "done",
+      active: stepState[ITO_STEPS.write] === "active",
+    },
+  ].filter(Boolean);
 
   const choices = useMemo(
     () =>
@@ -464,11 +529,122 @@ export default function ItoPage() {
           >
             Cancel
           </button>
-          <button type="button" disabled style={styles.send}>
+          <button
+            type="button"
+            disabled={Boolean(problem) || !picked}
+            onClick={() => setPhase("confirm")}
+            style={problem || !picked ? styles.send : styles.sendReady}
+          >
             Send it
           </button>
         </div>
       </section>
+
+      {phase === "confirm" ? (
+        <SubmitWindow
+          title={`Send this ${String(transaction.name).toLowerCase()}?`}
+          lines={[`Once it is sent, ${picked.name} can accept it. Nothing has been written yet.`]}
+          escapeAction={() => setPhase(null)}
+          actions={[
+            { key: "cancel", label: "Cancel", onClick: () => setPhase(null) },
+            { key: "send", label: "Send it", primary: true, onClick: send },
+          ]}
+        >
+          <dl style={styles.confirm}>
+            <div style={styles.confirmRow}>
+              <dt style={styles.confirmKey}>Meter</dt>
+              <dd style={styles.confirmValue}>
+                <strong>{meterNo}</strong> · {meter?.meterType || NAV} ·{" "}
+                {meter?.ast?.astData?.meter?.type || NAV}
+              </dd>
+            </div>
+            <div style={styles.confirmRow}>
+              <dt style={styles.confirmKey}>Where</dt>
+              <dd style={styles.confirmValue}>
+                {meter?.accessData?.premise?.address || NAV}
+                <br />
+                <span style={styles.sub}>
+                  ERF {meter?.accessData?.erfNo || NAV} · {lmName} ·{" "}
+                  {wardLabel(parents.wardPcode)}
+                </span>
+              </dd>
+            </div>
+            <div style={styles.confirmRow}>
+              <dt style={styles.confirmKey}>Transaction</dt>
+              <dd style={styles.confirmValue}>
+                <strong>{transaction.code}</strong> — {transaction.name}
+              </dd>
+            </div>
+            <div style={styles.confirmRow}>
+              <dt style={styles.confirmKey}>To</dt>
+              <dd style={styles.confirmValue}>
+                <strong>{picked.name}</strong> · {picked.distance} from the meter
+              </dd>
+            </div>
+            <div style={styles.confirmRow}>
+              <dt style={styles.confirmKey}>Reason</dt>
+              <dd style={styles.confirmValue}>
+                {reasons.find((item) => item.code === reasonCode)?.words || NAV}
+                {reasonCode === "OTHER" ? ` — ${explanation}` : ""}
+                {instruction.trim() ? (
+                  <>
+                    <br />
+                    <span style={styles.sub}>{instruction.trim()}</span>
+                  </>
+                ) : null}
+                {image ? (
+                  <>
+                    <br />
+                    <span style={styles.sub}>Image: {image.name}</span>
+                  </>
+                ) : null}
+              </dd>
+            </div>
+          </dl>
+        </SubmitWindow>
+      ) : null}
+
+      {phase === "sending" ? (
+        <SubmitWindow
+          title="Sending…"
+          working
+          steps={steps}
+          lines={[
+            "The job and the meter are written together, or neither is. This cannot be stopped now.",
+          ]}
+        />
+      ) : null}
+
+      {phase === "sent" ? (
+        <SubmitWindow
+          title={`Sent. ${picked?.name || "The worker"} has it.`}
+          lines={[
+            "It is waiting for him to accept. The next thing you will see is him accepting it — or the time passing without that.",
+            `Its number: ${outcome?.trnId || NAV}`,
+          ]}
+          escapeAction={done}
+          actions={[{ key: "done", label: "Done", primary: true, onClick: done }]}
+        />
+      ) : null}
+
+      {phase === "failed" ? (
+        <SubmitWindow
+          title={
+            outcome?.wrote === null
+              ? "iREPS could not be reached."
+              : "Not sent. Nothing was changed."
+          }
+          tone="error"
+          lines={[
+            outcome?.message || "The office could not send this work.",
+            "Everything you typed and any image you attached are still on the form.",
+          ]}
+          escapeAction={() => setPhase(null)}
+          actions={[
+            { key: "back", label: "Back to the form", primary: true, onClick: () => setPhase(null) },
+          ]}
+        />
+      ) : null}
     </section>
   );
 }
@@ -673,6 +849,26 @@ const styles = {
     fontSize: 14,
     cursor: "pointer",
   },
+  sendReady: {
+    padding: "13px 24px",
+    border: "1px solid #0f172a",
+    borderRadius: 12,
+    background: "#0f172a",
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "bold",
+    cursor: "pointer",
+  },
+  confirm: { margin: 0, display: "grid", gap: 2 },
+  confirmRow: {
+    display: "flex",
+    gap: 12,
+    padding: "9px 0",
+    borderTop: "1px solid #f1f5f9",
+    fontSize: 13,
+  },
+  confirmKey: { flex: "0 0 96px", color: "#64748b", margin: 0 },
+  confirmValue: { flexGrow: 1, minWidth: 0, margin: 0 },
   send: {
     padding: "13px 24px",
     border: "1px solid #cbd5e1",

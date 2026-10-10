@@ -401,7 +401,18 @@ export default function MetersRegistryPage() {
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
 
-  const [filters, setFilters] = useState(EMPTY_METER_FILTERS);
+  // DR-R001 3.5: after a job is sent the office lands back here "with that
+  // meter at the top of the list". It arrives as ?meter=<number>, which seeds
+  // the Meter No filter - so the meter is not merely at the top, it is the
+  // only row, and the office can see at once that its count has moved.
+  const [filters, setFilters] = useState(() => {
+    const asked =
+      typeof window === "undefined"
+        ? null
+        : new URLSearchParams(window.location.search).get("meter");
+
+    return asked ? { ...EMPTY_METER_FILTERS, meterNo: asked } : EMPTY_METER_FILTERS;
+  });
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
