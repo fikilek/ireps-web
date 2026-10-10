@@ -218,3 +218,31 @@ test("the attached image travels with the request", () => {
   assert.deepEqual(build({ media }).request.media, media);
   assert.deepEqual(build().request.media, [], "and nothing is invented when there is none");
 });
+
+test("an issued job does not claim the worker reached the meter", () => {
+  // Found in the owner's first office job: hasAccess "yes" on work nobody had
+  // done, copied out of the meter's own block where a worker really did reach
+  // it the day it was discovered. Access is settled at the service point and
+  // nowhere else; until then there is nothing to write, and nothing to write
+  // reads NAv.
+  const meterThatWasReached = {
+    ...METER,
+    accessData: {
+      ...METER.accessData,
+      access: { hasAccess: "yes", reason: "NAv" },
+    },
+  };
+
+  const { accessData } = build({ meter: meterThatWasReached }).request;
+
+  assert.equal(accessData.access.hasAccess, "NAv");
+  assert.equal(accessData.access.reason, "NAv");
+  assert.equal(accessData.erfNo, "5213", "the rest of the block is still carried");
+  assert.equal(accessData.premise.id, "PRM_1");
+});
+
+test("an instruction with no words stores NAv, never blank", () => {
+  const { instruction } = build({ instructionWords: "", hasImage: true }).request.assignment;
+
+  assert.equal(instruction.text, "NAv");
+});

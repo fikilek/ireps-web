@@ -195,6 +195,16 @@ export function buildItoRequest({
       accessData: {
         ...(meter?.accessData || {}),
         trnType,
+        // NOBODY HAS BEEN THERE YET. The meter's own block carries the access
+        // recorded when it was discovered - a worker really did reach it that
+        // day - and copying it wholesale made an ISSUED job state as fact
+        // something that has not happened. Found in the owner's first office
+        // job, 10 October 2026: hasAccess "yes" on work nobody had done.
+        //
+        // Access is settled at the service point by the worker and nowhere
+        // else. Until he settles it there is nothing to write, and where
+        // there is nothing to write iREPS writes NAv.
+        access: { hasAccess: "NAv", reason: "NAv" },
       },
       assignment: {
         // An individual request goes to exactly one field worker, never to a
