@@ -170,7 +170,8 @@ export default function IrepsTable({
   );
 
   return (
-    <section style={styles.frame} aria-label={title}>
+    <section style={stickyHeader ? styles.frameSticky : styles.frame} aria-label={title}>
+      <div style={stickyHeader ? styles.stickyTop : undefined}>
       <div style={styles.toolbar}>
         <strong>{title}</strong>
         <span style={{ ...styles.muted, marginLeft: "auto" }} aria-live="polite">
@@ -208,6 +209,8 @@ export default function IrepsTable({
           <div style={{ width: tableWidth, height: 1 }} />
         </div>
       ) : null}
+
+      </div>
 
       <div
         ref={bodyScrollRef}
@@ -427,6 +430,28 @@ const styles = {
     borderRadius: T.radius,
     background: T.rowBackground,
     overflow: "hidden",
+  },
+
+  // Same card, but clipped rather than hidden. `overflow: hidden` makes an
+  // element a scroll container, and a scroll container stops everything inside
+  // it sticking to the page - which is why the top block could not stay
+  // visible. `clip` cuts the corners the same way and is not a scroll
+  // container, so sticky survives it.
+  frameSticky: {
+    border: `1px solid ${T.border}`,
+    borderRadius: T.radius,
+    background: T.rowBackground,
+    overflow: "clip",
+  },
+
+  // Everything above the rows, held against the top of the screen: the title
+  // and its downloads, the pagination, and the scrollbar. Opaque, or the rows
+  // show through it as they pass underneath.
+  stickyTop: {
+    position: "sticky",
+    top: 0,
+    zIndex: 4,
+    background: T.rowBackground,
   },
 
   toolbar: {
