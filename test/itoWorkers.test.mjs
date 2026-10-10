@@ -102,8 +102,11 @@ test("a worker who has gone quiet is marked quiet, and still shows", () => {
   assert.equal(heardIsStale(null, NOW), true);
 });
 
-test("the work goes to a field worker, and a supervisor is one on the phone", () => {
-  assert.deepEqual(WORK_MAY_GO_TO, ["FWR", "SPV"]);
+test("the work goes to a field worker and to nobody else", () => {
+  // Owner, 10 October 2026: supervisors and managers do not normally go to
+  // the field, so they are not offered as the man to send. The monitoring
+  // screen still watches them - that is a different question.
+  assert.deepEqual(WORK_MAY_GO_TO, ["FWR"]);
 
   const { all } = buildWorkerChoices({
     users: [
@@ -117,7 +120,8 @@ test("the work goes to a field worker, and a supervisor is one on the phone", ()
     nowMs: NOW,
   });
 
-  assert.deepEqual(all.map((w) => w.name), ["Peter M.", "Tando S."]);
+  assert.deepEqual(all.map((w) => w.name), ["Peter M."]);
+  assert.ok(!all.some((w) => w.role === "SPV"), "a supervisor is never offered");
 });
 
 test("nearest first, and a worker with no position sorts last", () => {

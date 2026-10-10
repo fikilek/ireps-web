@@ -38,13 +38,16 @@ function strictNumber(value) {
 /**
  * Who may receive an individual transaction. `DR-R001` 4.
  *
- * **A field worker.** One of them, never a team and never a service provider.
- * `SPV` is included because a supervisor is an office user on the web and a
- * field worker on the phone, and the monitoring that already runs watches both
- * (`FwrMonitoringPage.jsx:30`). Sending is a different question and a narrower
- * one: only `MNG` and `SPV (MNC)` may send.
+ * **A field worker, and nobody else.** One of them, never a team and never a
+ * service provider.
+ *
+ * `SPV` was here and the owner removed it on 10 October 2026: **supervisors
+ * and managers do not normally go to the field.** The monitoring screen does
+ * watch both, because knowing where a supervisor is is useful; being offered
+ * one as the man to send to a meter is not. The two lists answer different
+ * questions and must not be the same list.
  */
-export const WORK_MAY_GO_TO = Object.freeze(["FWR", "SPV"]);
+export const WORK_MAY_GO_TO = Object.freeze(["FWR"]);
 
 const normaliseRole = (value) => String(value || "").trim().toUpperCase();
 
