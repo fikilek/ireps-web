@@ -273,7 +273,7 @@ export default function ItoPage() {
           </span>
         </div>
         <div style={styles.bandCell}>
-          <span style={styles.label}>Supply now</span>
+          <span style={styles.label}>Meter status</span>
           <span style={styles.pill}>
             <span aria-hidden="true" style={styles.pillDot} />
             {state}
