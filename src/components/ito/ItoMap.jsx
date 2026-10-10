@@ -269,7 +269,7 @@ const LAYERS = [
 ];
 
 export default function ItoMap({ meter, premise, erfPaths, workers = [], allocated = null }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   // Owner, 10 October 2026: there was no way to see where the allocated man
   // actually is. The meter and the worker can be a long way apart - 502 km in
   // the owner's own test - so the map needs to be told which of the two to
@@ -343,6 +343,10 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
         </GoogleMap>
       </APIProvider>
 
+      {/* The map's control stack. Google draws its own fullscreen control at
+          the top right; these sit under it in the same 40x40 white squares the
+          geofence and Sales maps use (GeofencePlanningLayers.jsx:618), so the
+          office meets one set of map controls across iREPS and not three. */}
       <button
         type="button"
         onClick={() =>
@@ -362,35 +366,42 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
               : `Centre on ${allocated.name}`
         }
         aria-label={
-          focus.target === "worker" ? "Back to the meter" : "Centre on the allocated field worker"
+          focus.target === "worker"
+            ? "Back to the meter"
+            : "Centre the map on the allocated field worker"
         }
-        style={{ ...styles.focusButton, ...(allocatedPoint ? null : styles.focusOff) }}
+        style={{
+          ...styles.control,
+          top: 60,
+          cursor: allocatedPoint ? "pointer" : "not-allowed",
+        }}
       >
         {focus.target === "worker" ? (
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke={allocatedPoint ? "#1d4ed8" : "#cbd5e1"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 21s-7-5.5-7-11a7 7 0 1 1 14 0c0 5.5-7 11-7 11z" />
             <circle cx="12" cy="10" r="2.5" />
           </svg>
         ) : (
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke={allocatedPoint ? "#1d4ed8" : "#cbd5e1"} strokeWidth="2" strokeLinecap="round">
             <circle cx="12" cy="12" r="6.5" />
-            <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+            <circle cx="12" cy="12" r="1.6" fill={allocatedPoint ? "#1d4ed8" : "#cbd5e1"} stroke="none" />
+            <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
           </svg>
         )}
       </button>
 
       {open ? (
-        <div style={styles.layers}>
-          <div style={styles.layersHead}>
-            <span style={styles.label}>Map layers</span>
+        <div style={styles.panel}>
+          <div style={styles.panelHead}>
+            <span style={styles.panelTitle}>Map layers</span>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              aria-label="Close the map layers box"
-              style={styles.close}
+              aria-label="Close map layers"
+              title="Close"
+              style={styles.panelClose}
             >
-              ✕
+              ×
             </button>
           </div>
           {LAYERS.map((layer) => (
@@ -413,12 +424,16 @@ export default function ItoMap({ meter, premise, erfPaths, workers = [], allocat
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label="Show the map layers box"
-          style={styles.layersIcon}
+          aria-label="Show map layers"
+          title="Map layers"
+          style={{ ...styles.control, top: 106 }}
         >
-          ☰
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 2 8l10 5 10-5-10-5Zm-7.5 8.2L2 12.5l10 5 10-5-2.5-1.3L12 15l-7.5-3.8Zm0 4.5L2 17l10 5 10-5-2.5-1.3L12 19.5l-7.5-3.8Z" fill="#475569" />
+          </svg>
         </button>
       )}
+
     </div>
   );
 }
@@ -439,18 +454,41 @@ const styles = {
   },
   map: { width: "100%", height: "100%", minHeight: 360 },
   note: { margin: 0, fontSize: 13, lineHeight: 1.55, color: "#475569" },
-  layers: {
+  // GeofencePlanningLayers.jsx:618 — the same square, shadow and radius as
+  // every other iREPS map control, so they stack with Google's own.
+  control: {
     position: "absolute",
-    top: 14,
-    right: 14,
-    width: 196,
-    background: "rgba(255,255,255,0.97)",
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: "12px 14px",
+    right: 10,
+    zIndex: 55,
+    width: 40,
+    height: 40,
+    display: "grid",
+    placeItems: "center",
+    border: 0,
+    borderRadius: 2,
+    background: "#ffffff",
+    boxShadow: "rgba(0, 0, 0, 0.3) 0 1px 4px -1px",
+    cursor: "pointer",
+    padding: 0,
   },
-  layersHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 9 },
-  label: {
+  panel: {
+    position: "absolute",
+    right: 14,
+    top: 106,
+    zIndex: 55,
+    width: 208,
+    display: "grid",
+    gap: 6,
+    padding: 10,
+    border: "1px solid #cbd5e1",
+    borderRadius: 12,
+    background: "rgba(255,255,255,0.96)",
+    boxShadow: "0 10px 24px rgba(15,23,42,0.14)",
+    color: "#0f172a",
+    fontSize: 12,
+  },
+  panelHead: { display: "flex", alignItems: "center", gap: 8 },
+  panelTitle: {
     flexGrow: 1,
     fontSize: 11,
     fontWeight: 900,
@@ -458,7 +496,7 @@ const styles = {
     letterSpacing: "0.04em",
     color: "#64748b",
   },
-  close: {
+  panelClose: {
     width: 22,
     height: 22,
     padding: 0,
@@ -468,35 +506,6 @@ const styles = {
     color: "#475569",
     cursor: "pointer",
     lineHeight: 1,
-  },
-  focusButton: {
-    position: "absolute",
-    top: 14,
-    left: 14,
-    width: 34,
-    height: 34,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "rgba(255,255,255,0.97)",
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    color: "#1d4ed8",
-    cursor: "pointer",
-  },
-  focusOff: { color: "#cbd5e1", cursor: "not-allowed" },
-  layersIcon: {
-    position: "absolute",
-    top: 14,
-    right: 14,
-    width: 34,
-    height: 34,
-    background: "rgba(255,255,255,0.97)",
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    color: "#475569",
-    cursor: "pointer",
-    fontSize: 15,
   },
   switchRow: { display: "flex", alignItems: "center", gap: 9, padding: "4px 0" },
   switchLabel: { fontSize: 13 },
