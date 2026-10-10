@@ -25,6 +25,12 @@ import MeterReportPreviewModal from "./components/MeterReportPreviewModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
 import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 
+// ONE CLOCK. This page kept its own copy that did `value.slice(0, 19)`,
+// which chops the Z off a UTC timestamp and prints it as if it were the
+// reader's own clock - two hours behind, every time (owner, 11 October
+// 2026). The shared formatter converts instead of truncating.
+import { formatSastDateTime as formatUpdatedAt } from "../../utils/formatSastDateTime";
+
 const EMPTY_METER_FILTERS = {
   meterNo: "",
   meterType: "ALL",
@@ -102,20 +108,6 @@ function formatNumber(value) {
   if (["Pending", "Unavailable", "Incomplete"].includes(value)) return value;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
-}
-
-function formatUpdatedAt(value) {
-  if (!value || value === "NAv") return "NAv";
-
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  return "NAv";
 }
 
 function getUpdatedAtMs(value) {

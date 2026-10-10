@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useGetTrnByIdQuery } from "../../../redux/trnsApi";
 import { useGetMeterByIdQuery } from "../../../redux/creditControlApi";
+import { formatSastDateTime } from "../../../utils/formatSastDateTime";
 
 const NAV = "NAv";
 
@@ -71,26 +72,12 @@ function formatYesNo(value) {
   return formatLabel(value);
 }
 
+// ONE CLOCK. This kept its own reader that did `value.slice(0, 19)`, which
+// chops the Z off a UTC timestamp and shows it as the reader's own clock -
+// two hours behind in South Africa (owner, 11 October 2026). The shared
+// formatter converts instead of truncating, and NAv still reads NAv.
 function formatDateTime(value) {
-  if (!isMeaningful(value)) return NAV;
-
-  if (typeof value === "string") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return value.slice(0, 19).replace("T", " ");
-    }
-    return value;
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  if (typeof value?.seconds === "number") {
-    return new Date(value.seconds * 1000).toLocaleString();
-  }
-
-  return String(value);
+  return isMeaningful(value) ? formatSastDateTime(value) : NAV;
 }
 
 function getWardNo(wardPcode) {

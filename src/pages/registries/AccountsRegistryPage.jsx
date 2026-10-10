@@ -11,6 +11,12 @@ import { useGetRegistryAccountsByWardQuery,
   useLazyGetFieldAccountDataHistoryByPremiseQuery,
 } from "../../redux/registryAccountsApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+
+// ONE CLOCK. This page kept its own copy that did `value.slice(0, 19)`,
+// which chops the Z off a UTC timestamp and prints it as if it were the
+// reader's own clock - two hours behind, every time (owner, 11 October
+// 2026). The shared formatter converts instead of truncating.
+import { formatSastDateTime as formatUpdatedAt } from "../../utils/formatSastDateTime";
 const EMPTY_ROWS = [];
 
 function getActiveLmPcode(activeWorkbase) {
@@ -26,20 +32,6 @@ function getActiveLmPcode(activeWorkbase) {
 function formatNumber(value) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
-}
-
-function formatUpdatedAt(value) {
-  if (!value || value === "NAv") return "NAv";
-
-  if (typeof value === "string") {
-    return value.slice(0, 19).replace("T", " ");
-  }
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString();
-  }
-
-  return "NAv";
 }
 
 function getUpdatedAtMs(value) {
@@ -139,10 +131,6 @@ function getSortValue(row, key) {
 
   return "";
 }
-
-
-
-
 
 function countFilterMatches(count, mode) {
   if (!mode || mode === "ALL") return true;

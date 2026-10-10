@@ -6,6 +6,12 @@ import { useAuth } from "../../auth/useAuth";
 import { useGetNoAccessRowsByLmQuery } from "../../redux/reportNoAccessApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
 
+// ONE CLOCK. This page kept its own copy that did `value.slice(0, 19)`,
+// which chops the Z off a UTC timestamp and prints it as if it were the
+// reader's own clock - two hours behind, every time (owner, 11 October
+// 2026). The shared formatter converts instead of truncating.
+import { formatSastDateTime as formatUpdatedAt } from "../../utils/formatSastDateTime";
+
 function getActiveLmPcode(activeWorkbase) {
   return (
     activeWorkbase?.lmPcode ||
@@ -19,15 +25,6 @@ function getActiveLmPcode(activeWorkbase) {
 function formatNumber(value) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toLocaleString() : "0";
-}
-
-function formatUpdatedAt(value) {
-  if (!value || value === "NAv") return "NAv";
-
-  const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
-  if (!Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("en-ZA", { timeZone: "Africa/Johannesburg", dateStyle: "medium", timeStyle: "short" }).format(date);
-
-  return "NAv";
 }
 
 function getTodayIsoDate() {
