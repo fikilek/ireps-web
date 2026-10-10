@@ -535,7 +535,7 @@ export default function ItoPage() {
             onClick={() => setPhase("confirm")}
             style={problem || !picked ? styles.send : styles.sendReady}
           >
-            Send it
+            Submit
           </button>
         </div>
       </section>
