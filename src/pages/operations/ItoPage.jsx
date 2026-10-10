@@ -311,11 +311,11 @@ export default function ItoPage() {
         </section>
 
         <section style={{ ...styles.card, ...styles.whoCard }}>
-          <h2 style={styles.cardTitle}>Who does it</h2>
           <ItoWorkerPicker
             choices={choices}
-            selectedUid={picked?.uid || null}
+            picked={picked}
             onPick={setPicked}
+            onClear={() => setPicked(null)}
             loading={usersLoading}
           />
         </section>
@@ -435,42 +435,13 @@ export default function ItoPage() {
       </section>
 
       <section style={{ ...styles.card, ...styles.footerCard }}>
-        <div style={{ flex: "1 1 360px", minWidth: 0 }}>
-          <span style={styles.label}>Allocated to</span>
-          <div
-            style={{ ...styles.allocBox, ...(picked ? styles.allocFilled : null) }}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              const uid = event.dataTransfer.getData("text/plain");
-              const dropped = choices.all.find((worker) => worker.uid === uid);
-
-              if (dropped) setPicked(dropped);
-            }}
-          >
-            {picked ? (
-              <>
-                <span style={styles.allocWho}>
-                  <strong>{picked.name}</strong>
-                  <span style={styles.allocFacts}>
-                    {picked.distance} · {picked.movement} · {picked.heard}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPicked(null)}
-                  style={styles.allocClear}
-                >
-                  Change
-                </button>
-              </>
-            ) : (
-              <span style={styles.allocText}>
-                Nobody yet — click a worker, or drop one here
-              </span>
-            )}
-          </div>
-        </div>
+        <p style={styles.footNote}>
+          {problem
+            ? problem
+            : !picked
+              ? "Choose the field worker this goes to."
+              : "Ready to send. The sending window itself is step 6."}
+        </p>
         <div style={styles.actions}>
           <button
             type="button"
@@ -483,13 +454,6 @@ export default function ItoPage() {
             Send it
           </button>
         </div>
-        <p style={styles.footNote}>
-          {problem
-            ? problem
-            : !picked
-              ? "Choose the field worker this goes to."
-              : "Ready to send. The sending window itself is step 6."}
-        </p>
       </section>
     </section>
   );
@@ -569,18 +533,6 @@ const styles = {
   cardTitle: { margin: 0, fontSize: 16 },
   cardHead: { display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" },
   cardAside: { fontSize: 12, color: "#64748b", flexGrow: 1, textAlign: "right" },
-  allocFilled: { borderStyle: "solid", borderColor: "#1d4ed8", background: "#eff6ff" },
-  allocWho: { flexGrow: 1, minWidth: 0 },
-  allocFacts: { display: "block", marginTop: 3, fontSize: 12, color: "#475569" },
-  allocClear: {
-    padding: "8px 14px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    background: "#ffffff",
-    color: "#0f172a",
-    fontSize: 13,
-    cursor: "pointer",
-  },
   toCome: {
     border: "2px dashed #cbd5e1",
     borderRadius: 14,
@@ -678,16 +630,6 @@ const styles = {
     cursor: "pointer",
   },
   footerCard: { flexDirection: "row", flexWrap: "wrap", gap: 18, alignItems: "center" },
-  allocBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    border: "2px dashed #cbd5e1",
-    borderRadius: 14,
-    padding: "14px 16px",
-    background: "#f8fafc",
-  },
-  allocText: { fontSize: 13, color: "#475569" },
   actions: { display: "flex", gap: 10, flexWrap: "wrap", marginLeft: "auto" },
   cancel: {
     padding: "13px 22px",
@@ -710,8 +652,9 @@ const styles = {
   },
   footNote: {
     margin: 0,
-    flexBasis: "100%",
-    fontSize: 12,
+    flex: "1 1 320px",
+    minWidth: 0,
+    fontSize: 13,
     lineHeight: 1.5,
     color: "#475569",
   },
