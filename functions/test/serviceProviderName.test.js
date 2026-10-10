@@ -39,3 +39,28 @@ test("with neither name, NAv — and NAv is the flag that the SP record is incom
   assert.equal(serviceProviderName({ id: "LgIrdHR7cnUPIHPzw5iZ" }), "NAv");
   assert.equal(serviceProviderName({ profile: { registeredName: "NAv", tradingName: "NAv" } }), "NAv");
 });
+
+test("a stamp keeps the name it was already given", () => {
+  // Found by the owner, 10 October 2026, in the first office job. Two shapes
+  // reach this function: a service provider DOCUMENT, which carries
+  // profile.registeredName and profile.tradingName, and a STAMP - the
+  // { id, name } a record keeps - which carries neither. Handed a stamp, the
+  // chain ran out and said NAv, although the meter's own stamp said RSTE.
+  assert.equal(serviceProviderName({ id: "SP_1", name: "RSTE" }), "RSTE");
+});
+
+test("a document still wins over a copy of one", () => {
+  assert.equal(
+    serviceProviderName({
+      name: "an old copy",
+      profile: { registeredName: "Real Registered Name" },
+    }),
+    "Real Registered Name",
+  );
+});
+
+test("a stamp that never had a name is still NAv", () => {
+  for (const stamp of [{ id: "SP_1" }, { id: "SP_1", name: "" }, { id: "SP_1", name: "NAv" }]) {
+    assert.equal(serviceProviderName(stamp), "NAv");
+  }
+});

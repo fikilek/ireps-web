@@ -21,11 +21,32 @@ function presentText(value) {
   return !text || text === "NAv" ? "" : text;
 }
 
-/** Registered name, then trading name, then NAv. */
+/**
+ * Registered name, then trading name, then a name already resolved, then NAv.
+ *
+ * TWO SHAPES REACH THIS FUNCTION and they are not the same thing.
+ *
+ * A service provider DOCUMENT carries `profile.registeredName` and
+ * `profile.tradingName`, and the first two links read it. A STAMP - the
+ * `{ id, name }` an iREPS record keeps of the provider it belongs to - carries
+ * neither, because its `name` was resolved by this same chain when it was
+ * written.
+ *
+ * Handed a stamp, the chain used to run out and return NAv. Found by the owner
+ * on 10 October 2026 in the first office job: the meter's own stamp said
+ * `RSTE` and the job it produced said `NAv`, because the meter's stamp was
+ * passed in where a document was expected.
+ *
+ * Reusing an already-resolved name is safe precisely because it came from
+ * here: the chain is idempotent, and `NAv` in it still means nothing was
+ * captured, so it is skipped like blank. It is LAST, so a real document always
+ * wins over a copy of one.
+ */
 export function serviceProviderName(serviceProvider = {}) {
   return (
     presentText(serviceProvider?.profile?.registeredName) ||
     presentText(serviceProvider?.profile?.tradingName) ||
+    presentText(serviceProvider?.name) ||
     "NAv"
   );
 }
