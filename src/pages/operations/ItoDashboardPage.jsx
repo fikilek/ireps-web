@@ -24,20 +24,26 @@ import {
   getActiveLmName,
   getActiveLmPcode,
 } from "./targeted-batches/dashboard/targetedBatchDashboardModel";
-import { NAV } from "./dashboard/operationsSummary";
+import { NAV, readTrnType } from "./dashboard/operationsSummary";
 import {
   ITO_TRN_LETTERS,
   ITO_TRN_TYPES,
   buildWorkerRows,
   describeAge,
   describeTicks,
+  isWaitingToBeGivenOut,
   monitoringAside,
+  refusalsOn,
   selectItoWork,
   summariseWorkers,
 } from "./ito-dashboard/itoMonitoring";
 
 const VIEWS = [
   { key: "worker", label: "Per worker", ready: true },
+  // `DR-R001` 9.2: Created needs a place to be seen, or a refused job falls
+  // down a hole - nobody clicked a meter to make it, so no meter click will
+  // find it again.
+  { key: "created", label: "Waiting", ready: true },
   { key: "area", label: "Per area", ready: false },
   { key: "map", label: "On the map", ready: false },
 ];
@@ -117,6 +123,51 @@ export default function ItoDashboardPage() {
 
   const work = useMemo(() => selectItoWork(trns.data, { trnTypes }), [trns.data, trnTypes]);
 
+  // Everything waiting to be given out: made and not yet allocated, refused,
+  // taken back, or expired. They all land in one place (`DR-R001` 5).
+  const waiting = useMemo(
+    () =>
+      work
+        .filter(isWaitingToBeGivenOut)
+        .map((trn) => ({
+          id: String(trn?.trnId || trn?.id || ""),
+          letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
+          meterNo: String(trn?.astNo || NAV),
+          erfNo: String(trn?.erfNo || NAV),
+          address: String(trn?.address || NAV),
+          refusals: refusalsOn(trn),
+          waitingSince: describeAge(
+            Date.parse(String(trn?.lastUpdatedAt || trn?.issuedAt || "")) || null,
+            nowMs,
+          ),
+        }))
+        .sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo))),
+    [work, nowMs],
+  );
+
+  const waitingColumns = useMemo(
+    () => [
+      { key: "meterNo", label: "Meter", filter: "text", sortable: true, minWidth: 140, value: (row) => row.meterNo },
+      { key: "letter", label: "Work", filter: "text", sortable: true, value: (row) => row.letter },
+      { key: "erfNo", label: "ERF", filter: "text", sortable: true, value: (row) => row.erfNo },
+      { key: "address", label: "Address", filter: "text", sortable: true, value: (row) => row.address },
+      {
+        // Why it is here rather than with somebody. A job made and never
+        // allocated has nothing to say, and says NAv rather than inventing
+        // a reason it came back.
+        key: "why",
+        label: "Why it is waiting",
+        sortable: true,
+        value: (row) =>
+          row.refusals.length
+            ? `Refused by ${row.refusals[row.refusals.length - 1].name}: ${row.refusals[row.refusals.length - 1].reason}`
+            : NAV,
+      },
+      { key: "waitingSince", label: "Waiting", align: "right", sortable: true, value: (row) => row.waitingSince },
+    ],
+    [],
+  );
+
   const rows = useMemo(
     () => buildWorkerRows({ trns: work, usersById, liveByUid, nowMs }),
     [work, usersById, liveByUid, nowMs],
@@ -139,12 +190,14 @@ export default function ItoDashboardPage() {
   const totals = useMemo(() => summariseWorkers(visible), [visible]);
   const aside = useMemo(() => monitoringAside(visible), [visible]);
 
+  // The columns' totals over the rows shown. A refusal is not a column -
+  // it is something a worker did, so it sits outside the total (`DR-R001` 5.1).
   const figures = [
     { key: "total", label: "Total", value: totals.total, lead: true },
     { key: "issued", label: "Issued", value: totals.issued },
     { key: "accepted", label: "Accepted", value: totals.accepted },
-    { key: "rejected", label: "Rejected", value: totals.rejected, attention: true },
     { key: "completed", label: "Completed", value: totals.completed },
+    { key: "refused", label: "Refused", value: totals.refused, attention: true },
     {
       key: "oldest",
       label: "Oldest waiting",
@@ -179,16 +232,17 @@ export default function ItoDashboardPage() {
     },
     { key: "issued", label: "Issued", align: "right", sortable: true, value: (row) => row.issued },
     { key: "accepted", label: "Accepted", align: "right", sortable: true, value: (row) => row.accepted },
+    { key: "completed", label: "Completed", align: "right", sortable: true, value: (row) => row.completed },
     {
-      key: "rejected",
-      label: "Rejected",
+      // What he did, not what he holds — so it sits outside his Total.
+      key: "refused",
+      label: "Refused",
       align: "right",
       sortable: true,
-      value: (row) => row.rejected,
+      value: (row) => row.refused,
       render: (row) =>
-        row.rejected > 0 ? <strong style={styles.rejected}>{row.rejected}</strong> : row.rejected,
+        row.refused > 0 ? <strong style={styles.rejected}>{row.refused}</strong> : row.refused,
     },
-    { key: "completed", label: "Completed", align: "right", sortable: true, value: (row) => row.completed },
     {
       key: "oldestWaiting",
       label: "Oldest waiting",
@@ -275,6 +329,24 @@ export default function ItoDashboardPage() {
             ? "Choose a ward above to load the monitoring."
             : "Activate a Local Municipality workbase to load the monitoring."}
         </p>
+      ) : view === "created" ? (
+        <>
+          <IrepsTable
+            title="Waiting to be given out"
+            columns={waitingColumns}
+            rows={waiting}
+            rowKey={(row, index) => row.id || `waiting-${index}`}
+            loading={trns.isLoading}
+            emptyText="Nothing is waiting to be allocated in this ward."
+            stickyFirstColumn
+          />
+
+          <p style={styles.footnote}>
+            Everything that came back is here — made and not yet allocated, refused
+            by a worker, taken back by the office, or expired after three days of
+            silence. Allocate from the meter, or delete it.
+          </p>
+        </>
       ) : view === "worker" ? (
         <>
           <div style={styles.figures}>

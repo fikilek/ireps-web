@@ -55,6 +55,9 @@ export const ITO_ISSUED_STATES = Object.freeze(["ISSUED", "REASSIGNED"]);
  */
 export const ITO_ACCEPTED_STATES = Object.freeze(["ACCEPTED"]);
 
+/** A job with nobody on it, waiting to be given out. `DR-R001` 5. */
+export const ITO_CREATED_STATES = Object.freeze(["CREATED"]);
+
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 
 // Two normalisers feed this screen - the registry rows flatten the fields,
@@ -78,45 +81,63 @@ function isOfficeIssued(row) {
 }
 
 function isItoWork(row) {
-  return ITO_TRN_TYPES.includes(readTrnType(row)) && isOfficeIssued(row);
+  if (!ITO_TRN_TYPES.includes(readTrnType(row))) return false;
+  if (!isOfficeIssued(row)) return false;
+
+  // Every reader excludes DELETED (`DR-R001` 5.5). A soft delete is only
+  // safe if each reader knows to skip it; otherwise deleted work quietly
+  // reappears in the numbers.
+  return readWorkflowState(row) !== "DELETED";
 }
 
-/**
- * The ITO summary for one ward.
- *
- * Field work never appears: it is on the worker's device until it is
- * submitted and it arrives finished, so there is no state to watch
- * (`DR-R001` 9). It is read in the TRN Registry instead.
- */
 export function summariseIto(rows) {
   const considered = Array.isArray(rows) ? rows.length : 0;
   const list = (Array.isArray(rows) ? rows : []).filter(isItoWork);
 
-  const figures = { issued: 0, accepted: 0, rejected: 0, completed: 0, cancelled: 0 };
+  const figures = { created: 0, issued: 0, accepted: 0, completed: 0 };
   const unaccounted = [];
 
+  // A refusal is no longer a state (`DR-R001` 5.1). The job it happened to
+  // is back in CREATED with nobody on it, so refusals are counted as THINGS
+  // THAT HAPPENED and sit outside the total, rather than pretending to be a
+  // place where work is.
+  let refusals = 0;
+
   for (const row of list) {
+    refusals += countRefusals(row);
+
     const state = readWorkflowState(row);
 
-    if (ITO_ISSUED_STATES.includes(state)) figures.issued += 1;
+    if (ITO_CREATED_STATES.includes(state)) figures.created += 1;
+    else if (ITO_ISSUED_STATES.includes(state)) figures.issued += 1;
     else if (ITO_ACCEPTED_STATES.includes(state)) figures.accepted += 1;
-    else if (state === "REJECTED") figures.rejected += 1;
     else if (state === "COMPLETED") figures.completed += 1;
-    else if (state === "CANCELLED") figures.cancelled += 1;
     else unaccounted.push(state || "(no state)");
   }
 
-  return { ...figures, total: list.length, considered, unaccounted };
+  return { ...figures, refusals, total: list.length, considered, unaccounted };
 }
 
 /**
- * A batch lane — TB or BGO — summarised from the batches themselves rather
- * than from the work inside them.
+ * How many times this job has been handed back. `DR-R001` 5.7.
  *
- * Counting the batch and not its rows is what keeps this cheap enough to
- * compute on the page. The rows are what the lane's own dashboard is for,
- * which is where the Open button goes.
+ * The list is the fast read of the history and is written in the same
+ * transaction as the refusal. A record rejected before 11 October 2026 has
+ * no list — it carries one reason on the document — so one known refusal
+ * counts as one, and an unknown number is never guessed at.
  */
+export function countRefusals(row) {
+  const written = row?.workflow?.rejections ?? row?.rejections;
+
+  if (Array.isArray(written)) return written.length;
+
+  const reason = String(row?.rejectReason ?? row?.assignment?.rejectReason ?? "").trim();
+
+  if (readWorkflowState(row) === "REJECTED") return 1;
+
+  return reason && reason.toUpperCase() !== "NAV" ? 1 : 0;
+}
+
 export function summariseBatches(batches, { statusOf, wardOf, wardPcode } = {}) {
   const readStatus = typeof statusOf === "function" ? statusOf : () => "";
   const readWard = typeof wardOf === "function" ? wardOf : () => "";
@@ -151,32 +172,31 @@ export function summariseBatches(batches, { statusOf, wardOf, wardPcode } = {}) 
 export function itoFigures(summary, { ready = true } = {}) {
   const value = (n) => (ready ? n : NAV);
 
-  // The same four the worker sees on his phone, less Progress, which cannot
-  // happen here (`DR-R001` 5). Each one is the request's own word.
+  // Four states a job can be sitting in, and they add up to the Total above
+  // them. `Created` took the place `Rejected` held until 11 October 2026: a
+  // refusal is not a place work sits, and the job it happened to is in
+  // `Created` now, waiting to be given out again.
   return [
+    { key: "created", label: "Created", value: value(summary?.created ?? 0), attention: true },
     { key: "issued", label: "Issued", value: value(summary?.issued ?? 0) },
     { key: "accepted", label: "Accepted", value: value(summary?.accepted ?? 0) },
-    { key: "rejected", label: "Rejected", value: value(summary?.rejected ?? 0), attention: true },
     { key: "completed", label: "Completed", value: value(summary?.completed ?? 0) },
   ];
 }
 
 /**
- * Counted, and deliberately given no tile of its own — so it is said in
- * words instead of being dropped. A cancelled job is neither out nor done,
- * and the owner asked for four figures, not five.
+ * Counted, given no tile, and said in words rather than dropped. A refusal
+ * happened; it is not somewhere work is.
  */
 export function itoAside(summary) {
   const notes = [];
 
-  const cancelled = Number(summary?.cancelled || 0);
+  const refusals = Number(summary?.refusals || 0);
 
-  if (cancelled > 0) notes.push(`${cancelled} cancelled`);
+  if (refusals > 0) notes.push(`${refusals} ${refusals === 1 ? "refusal" : "refusals"}`);
 
-  // Rows arrived and none of them counted. That is not "nothing out" - it is
-  // "nothing counted", and the two must never look the same. It is how the
-  // first build of this card showed 0 0 0 0 for a ward holding work, because
-  // the shape it was handed carried no origin channel.
+  // Rows arrived and none counted. That is not "nothing out", it is
+  // "nothing counted", and the two must never look the same.
   if (Number(summary?.considered || 0) > 0 && Number(summary?.total || 0) === 0) {
     notes.push(`${summary.considered} read, none of it office work`);
   }

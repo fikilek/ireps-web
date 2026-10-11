@@ -17,9 +17,11 @@
 import { describeHeard } from "../../../components/ito/itoWorkers.js";
 import {
   ITO_ACCEPTED_STATES,
+  ITO_CREATED_STATES,
   ITO_ISSUED_STATES,
   ITO_TRN_TYPES,
   NAV,
+  countRefusals,
   readOriginChannel,
   readTrnType,
   readWorkflowState,
@@ -27,11 +29,11 @@ import {
 
 export { ITO_TRN_TYPES };
 
-/** The states the office can filter by — the request's own words. */
+/** The states a job can be in on this screen. `DR-R001` 5. */
 export const ITO_STATES = Object.freeze([
+  { key: "CREATED", label: "Created" },
   { key: "ISSUED", label: "Issued" },
   { key: "ACCEPTED", label: "Accepted" },
-  { key: "REJECTED", label: "Rejected" },
   { key: "COMPLETED", label: "Completed" },
 ]);
 
@@ -53,10 +55,20 @@ export function columnFor(state) {
 
   if (ITO_ISSUED_STATES.includes(value)) return "issued";
   if (ITO_ACCEPTED_STATES.includes(value)) return "accepted";
-  if (value === "REJECTED") return "rejected";
   if (value === "COMPLETED") return "completed";
 
   return null;
+}
+
+/**
+ * Is this job waiting in the pool with nobody on it?
+ *
+ * `CREATED` has no column on the per-worker table on purpose: a job nobody
+ * holds is nobody's, so it does not belong on a table about workers. It is
+ * read in the Created view instead (`DR-R001` 9.2).
+ */
+export function isWaitingToBeGivenOut(trn) {
+  return ITO_CREATED_STATES.includes(readWorkflowState(trn));
 }
 
 /**
@@ -127,22 +139,32 @@ export function selectItoWork(trns, { trnTypes = [], states = [] } = {}) {
   return (Array.isArray(trns) ? trns : []).filter((trn) => {
     if (readOriginChannel(trn) !== "OFFICE") return false;
 
+    // Every reader excludes DELETED (`DR-R001` 5.5). A soft delete is only
+    // safe if each reader knows to skip it, or deleted work quietly
+    // reappears in the numbers.
+    if (readWorkflowState(trn) === "DELETED") return false;
+
     const type = readTrnType(trn);
 
     if (!ITO_TRN_TYPES.includes(type)) return false;
     if (wantedTypes && !wantedTypes.includes(type)) return false;
 
     if (wantedStates) {
-      const column = columnFor(readWorkflowState(trn));
+      const state = readWorkflowState(trn);
+      const named = ITO_CREATED_STATES.includes(state)
+        ? "CREATED"
+        : (columnFor(state) || "").toUpperCase();
 
-      if (!column || !wantedStates.includes(column.toUpperCase())) return false;
+      if (!named || !wantedStates.includes(named)) return false;
     }
 
     return true;
   });
 }
 
-const emptyCounts = () => ({ issued: 0, accepted: 0, rejected: 0, completed: 0 });
+// What a worker holds, or held. A refusal is not among them: it is
+// something he did, counted apart and shown outside his total.
+const emptyCounts = () => ({ issued: 0, accepted: 0, completed: 0 });
 
 /**
  * A row per worker: what he holds, how it is spread across the four states,
@@ -154,70 +176,94 @@ const emptyCounts = () => ({ issued: 0, accepted: 0, rejected: 0, completed: 0 }
  */
 export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } = {}) {
   const byWorker = new Map();
-  const unheld = {
-    counts: emptyCounts(),
-    total: 0,
-    cancelled: 0,
-    unaccounted: [],
-    types: new Map(),
-    rejectedJobs: [],
-    oldestIssuedMs: null,
+  const refusalsByUid = new Map();
+
+  const bucketFor = (uid, name) => {
+    if (!byWorker.has(uid)) {
+      byWorker.set(uid, {
+        uid,
+        name,
+        counts: emptyCounts(),
+        total: 0,
+        types: new Map(),
+        unaccounted: [],
+        oldestIssuedMs: null,
+      });
+    }
+
+    const found = byWorker.get(uid);
+
+    if (!found.name || found.name === NAV) found.name = name;
+
+    return found;
   };
 
+  const unheld = {
+    uid: "",
+    name: "Not with a worker",
+    counts: emptyCounts(),
+    total: 0,
+    types: new Map(),
+    unaccounted: [],
+    oldestIssuedMs: null,
+    unheld: true,
+  };
+
+  let unheldUsed = false;
+
   for (const trn of Array.isArray(trns) ? trns : []) {
+    // A refusal is something a worker DID, not work he holds. It is counted
+    // against him wherever the job has since gone - and a refused job has
+    // gone to CREATED with nobody on it (`DR-R001` 5.1), so counting it from
+    // the job's holder would count nothing at all.
+    for (const refusal of refusalsOn(trn)) {
+      const uid = text(refusal?.uid);
+
+      if (!uid) continue;
+
+      const held = refusalsByUid.get(uid) || { count: 0, name: text(refusal?.name) || NAV, jobs: [] };
+
+      held.count += 1;
+
+      if (held.jobs.length < 25) {
+        held.jobs.push({
+          trnId: text(trn?.trnId || trn?.id) || NAV,
+          meterNo: text(trn?.astNo) || NAV,
+          erfNo: text(trn?.erfNo) || NAV,
+          letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
+          reason: text(refusal?.reason) || NAV,
+        });
+      }
+
+      refusalsByUid.set(uid, held);
+    }
+
+    // A job waiting in the pool is nobody's, so it is on nobody's row. It is
+    // read in the Created view instead (`DR-R001` 9.2).
+    if (isWaitingToBeGivenOut(trn)) continue;
+
     const column = columnFor(readWorkflowState(trn));
     const type = readTrnType(trn);
     const holder = holderOf(trn);
-    const bucket = holder ? byWorker : null;
 
-    const target = holder
-      ? bucket.get(holder.id) || {
-          uid: holder.id,
-          name: holder.name,
-          counts: emptyCounts(),
-          total: 0,
-          cancelled: 0,
-          unaccounted: [],
-          types: new Map(),
-          rejectedJobs: [],
-          oldestIssuedMs: null,
-        }
-      : unheld;
+    const target = holder ? bucketFor(holder.id, holder.name) : unheld;
 
-    // The Total column is the sum of the four states beside it, by
-    // construction - owner, 11 October 2026: "the total work that Kaiser has
-    // been issued or allocated to, and then we check how much of it is still
-    // in the issued state". A row that does not add up is the fault that was
-    // found on his phone this morning, so it cannot be built that way here.
-    //
-    // A CANCELLED job is not in his total: the office withdrew it, so it is
-    // no longer his work (the same ruling as `UI-R005` 7 for his phone). It
-    // is counted apart and said in words beneath the table, never dropped.
+    if (!holder) unheldUsed = true;
+
     target.types.set(type, (target.types.get(type) || 0) + 1);
 
+    // The Total is the sum of the columns beside it, by construction - owner,
+    // 11 October 2026. A row that does not add up is the fault found on his
+    // phone that morning, so it cannot be built that way here.
     if (column) {
       target.counts[column] += 1;
       target.total += 1;
-    } else if (readWorkflowState(trn) === "CANCELLED") {
-      target.cancelled += 1;
     } else {
       target.unaccounted.push(readWorkflowState(trn) || "(no state)");
     }
 
-    // A rejected count opens those jobs with the worker's reason on each
-    // (`DR-R001` 9.1), so the reason is carried, never re-fetched.
-    if (column === "rejected") {
-      target.rejectedJobs.push({
-        trnId: text(trn?.trnId || trn?.id) || NAV,
-        meterNo: text(trn?.astNo) || NAV,
-        erfNo: text(trn?.erfNo) || NAV,
-        letter: ITO_TRN_LETTERS[type] || NAV,
-        reason: text(trn?.rejectReason) || NAV,
-      });
-    }
-
     // Only work still waiting on him has an age worth showing. A completed
-    // or rejected job has stopped waiting.
+    // job has stopped waiting.
     if (column === "issued" || column === "accepted") {
       const ms = issuedAtMs(trn);
 
@@ -225,16 +271,21 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
         target.oldestIssuedMs = ms;
       }
     }
+  }
 
-    if (holder) byWorker.set(holder.id, target);
+  // A worker who holds nothing but has refused something still gets a row.
+  // Dropping him would hide the refusal with him.
+  for (const uid of refusalsByUid.keys()) {
+    bucketFor(uid, refusalsByUid.get(uid).name);
   }
 
   const now = Number.isFinite(nowMs) ? nowMs : null;
 
-  const rows = Array.from(byWorker.values()).map((worker) => {
+  const toRow = (worker) => {
     const user = usersById?.[worker.uid] || null;
     const live = liveByUid?.[worker.uid] || null;
     const capturedAt = live?.capturedAtMs ?? live?.capturedAt ?? null;
+    const refused = refusalsByUid.get(worker.uid) || { count: 0, jobs: [] };
 
     return {
       uid: worker.uid,
@@ -244,41 +295,45 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
       // is the main contractor, so his provider's NAME is shown instead of a
       // classification that would have to be guessed.
       provider: text(user?.serviceProviderName) || "",
-      rejectedJobs: worker.rejectedJobs,
-      cancelled: worker.cancelled,
-      unaccounted: worker.unaccounted,
       transactions: lettersFor(worker.types),
       ...worker.counts,
       total: worker.total,
+      refused: refused.count,
+      refusedJobs: refused.jobs,
+      unaccounted: worker.unaccounted,
       oldestWaiting: describeAge(worker.oldestIssuedMs, now),
       oldestWaitingMs: worker.oldestIssuedMs,
       lastHeard: describeHeard(toMs(capturedAt), now ?? Date.now()),
+      unheld: Boolean(worker.unheld),
     };
-  });
+  };
 
-  // Work with no holder is its own row, never dropped. The same reason the
+  const rows = Array.from(byWorker.values()).map(toRow);
+
+  // Work with no holder is its own row, never dropped - the same reason the
   // per-area view gives "not in a geofence" a row: drop it and the rows stop
-  // adding up to the total above them, and the gap becomes invisible.
-  if (unheld.total > 0) {
-    rows.push({
-      uid: "",
-      name: "Not with a worker",
-      role: NAV,
-      provider: "",
-      rejectedJobs: unheld.rejectedJobs,
-      cancelled: unheld.cancelled,
-      unaccounted: unheld.unaccounted,
-      transactions: lettersFor(unheld.types),
-      ...unheld.counts,
-      total: unheld.total,
-      oldestWaiting: describeAge(unheld.oldestIssuedMs, now),
-      oldestWaitingMs: unheld.oldestIssuedMs,
-      lastHeard: NAV,
-      unheld: true,
-    });
-  }
+  // adding up to the figures above them, and the gap becomes invisible.
+  if (unheldUsed) rows.push(toRow(unheld));
 
   return rows.sort(byMostWaiting);
+}
+
+/** Every refusal written on a job. `DR-R001` 5.7. */
+export function refusalsOn(trn) {
+  const written = trn?.workflow?.rejections ?? trn?.rejections;
+
+  if (Array.isArray(written)) return written;
+
+  // Records rejected before 11 October 2026 carry one reason and no list.
+  if (countRefusals(trn) === 0) return [];
+
+  return [
+    {
+      uid: text(trn?.acceptedRejectedUid ?? trn?.assignment?.acceptedRejectedUid),
+      name: text(trn?.acceptedRejectedUser ?? trn?.assignment?.acceptedRejectedUser) || NAV,
+      reason: text(trn?.rejectReason ?? trn?.assignment?.rejectReason) || NAV,
+    },
+  ];
 }
 
 function byMostWaiting(a, b) {
@@ -345,26 +400,27 @@ export function describeAge(sinceMs, nowMs) {
 export function monitoringAside(rows) {
   const list = Array.isArray(rows) ? rows : [];
 
-  const cancelled = list.reduce((n, row) => n + (Number(row?.cancelled) || 0), 0);
+  const refusals = list.reduce((n, row) => n + (Number(row?.refused) || 0), 0);
   const unplaced = Array.from(new Set(list.flatMap((row) => row?.unaccounted || [])));
 
   const notes = [];
 
-  if (cancelled > 0) notes.push(`${cancelled} cancelled, not counted in any total`);
+  // A refusal is not a place work sits, so it has no column and is said in
+  // words instead of being dropped (`DR-R001` 5.1).
+  if (refusals > 0) notes.push(`${refusals} ${refusals === 1 ? "refusal" : "refusals"} in this ward`);
   if (unplaced.length) notes.push(`not in any column: ${unplaced.join(", ")}`);
 
   return notes;
 }
 
-/** The oldest job still waiting anywhere in the ward, and how many workers. */
 export function summariseWorkers(rows) {
-  const totals = { ...emptyCounts(), workers: 0, total: 0, oldestWaitingMs: null };
+  const totals = { ...emptyCounts(), workers: 0, total: 0, refused: 0, oldestWaitingMs: null };
 
   for (const row of Array.isArray(rows) ? rows : []) {
     totals.issued += row.issued || 0;
     totals.accepted += row.accepted || 0;
-    totals.rejected += row.rejected || 0;
     totals.completed += row.completed || 0;
+    totals.refused += row.refused || 0;
     totals.total += row.total || 0;
 
     if (!row.unheld) totals.workers += 1;
