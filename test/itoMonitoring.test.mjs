@@ -87,13 +87,13 @@ test("a row per worker, spread across the four columns", () => {
   assert.equal(peter.rejected, 1);
   assert.equal(peter.completed, 0);
   assert.equal(peter.total, 3);
-  assert.equal(peter.transactions, "DCN");
+  assert.equal(peter.transactions, "DCN 3");
 
   const mpho = rows.find((r) => r.uid === "u2");
 
   assert.equal(mpho.name, "Mpho N.", "a worker with no directory entry keeps his stamped name");
   assert.equal(mpho.completed, 1);
-  assert.equal(mpho.transactions, "MREAD");
+  assert.equal(mpho.transactions, "MREAD 1");
 });
 
 test("work with no holder gets its own row, never dropped", () => {
@@ -173,10 +173,41 @@ test("the holder is the user the job sits with", () => {
   assert.deepEqual(holderOf({ assignedTo: { uid: "u5", name: "Sipho" } }), { id: "u5", name: "Sipho" });
 });
 
-test("the letters say which transaction, and nothing held says NAv", () => {
-  assert.equal(lettersFor(["METER_DISCONNECTION", "METER_READING"]), "DCN MREAD");
-  assert.equal(lettersFor(["METER_DISCONNECTION", "METER_DISCONNECTION"]), "DCN");
-  assert.equal(lettersFor([]), "NAv");
+test("the letters carry their counts, as the board draws them", () => {
+  // "DCN 6 · RCN 2" - the office reads what he is carrying, not merely which
+  // kinds. Most-carried first.
+  assert.equal(
+    lettersFor(new Map([["METER_DISCONNECTION", 6], ["METER_RECONNECTION", 2]])),
+    "DCN 6 · RCN 2",
+  );
+  assert.equal(lettersFor({ METER_DISCONNECTION: 7 }), "DCN 7");
+  assert.equal(lettersFor(new Map()), "NAv");
+  assert.equal(lettersFor(null), "NAv");
+});
+
+test("a rejected count carries its jobs, so it can be opened with the reasons", () => {
+  // DR-R001 9.1: "A rejected count opens those jobs with the reason on each."
+  const rows = buildWorkerRows({
+    trns: [
+      job({ workflowState: "REJECTED", trnId: "TRN_A", astNo: "042042", rejectReason: "Dog on the property" }),
+      job({ workflowState: "REJECTED", trnId: "TRN_B", astNo: "042043" }),
+      job(),
+    ],
+    nowMs: NOW,
+  });
+
+  const peter = rows[0];
+
+  assert.equal(peter.rejected, 2);
+  assert.equal(peter.rejectedJobs.length, 2);
+  assert.deepEqual(peter.rejectedJobs[0], {
+    trnId: "TRN_A",
+    meterNo: "042042",
+    erfNo: "NAv",
+    letter: "DCN",
+    reason: "Dog on the property",
+  });
+  assert.equal(peter.rejectedJobs[1].reason, "NAv", "a rejection with no reason recorded says NAv");
 });
 
 test("the figures above the table are the sum of the rows beneath it", () => {

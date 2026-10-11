@@ -389,6 +389,10 @@ function normalizeTrnDoc(docSnap) {
     originChannel: getRegistryOriginChannel(data),
     wardPcode: valueOrNav(data.accessData?.parents?.wardPcode),
     lmPcode: valueOrNav(data.accessData?.parents?.lmPcode),
+    // The ITO monitoring screen opens a rejected count to show the worker's
+    // own reason on each job (DR-R001 9.1). It is written to
+    // assignment.rejectReason by acceptRejectCallable.
+    rejectReason: valueOrNav(data.assignment?.rejectReason),
     workflowState,
     state: workflowState,
     executionOutcomeCode,

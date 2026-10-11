@@ -154,7 +154,13 @@ const emptyCounts = () => ({ issued: 0, accepted: 0, rejected: 0, completed: 0 }
  */
 export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } = {}) {
   const byWorker = new Map();
-  const unheld = { counts: emptyCounts(), total: 0, types: new Set(), oldestIssuedMs: null };
+  const unheld = {
+    counts: emptyCounts(),
+    total: 0,
+    types: new Map(),
+    rejectedJobs: [],
+    oldestIssuedMs: null,
+  };
 
   for (const trn of Array.isArray(trns) ? trns : []) {
     const column = columnFor(readWorkflowState(trn));
@@ -168,15 +174,28 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
           name: holder.name,
           counts: emptyCounts(),
           total: 0,
-          types: new Set(),
+          types: new Map(),
+          rejectedJobs: [],
           oldestIssuedMs: null,
         }
       : unheld;
 
     target.total += 1;
-    target.types.add(type);
+    target.types.set(type, (target.types.get(type) || 0) + 1);
 
     if (column) target.counts[column] += 1;
+
+    // A rejected count opens those jobs with the worker's reason on each
+    // (`DR-R001` 9.1), so the reason is carried, never re-fetched.
+    if (column === "rejected") {
+      target.rejectedJobs.push({
+        trnId: text(trn?.trnId || trn?.id) || NAV,
+        meterNo: text(trn?.astNo) || NAV,
+        erfNo: text(trn?.erfNo) || NAV,
+        letter: ITO_TRN_LETTERS[type] || NAV,
+        reason: text(trn?.rejectReason) || NAV,
+      });
+    }
 
     // Only work still waiting on him has an age worth showing. A completed
     // or rejected job has stopped waiting.
@@ -202,6 +221,11 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
       uid: worker.uid,
       name: text(user?.name) || worker.name || NAV,
       role: text(user?.role) || NAV,
+      // The board says "Subcontractor" here. Nothing records which provider
+      // is the main contractor, so his provider's NAME is shown instead of a
+      // classification that would have to be guessed.
+      provider: text(user?.serviceProviderName) || "",
+      rejectedJobs: worker.rejectedJobs,
       transactions: lettersFor(worker.types),
       ...worker.counts,
       total: worker.total,
@@ -219,6 +243,8 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
       uid: "",
       name: "Not with a worker",
       role: NAV,
+      provider: "",
+      rejectedJobs: unheld.rejectedJobs,
       transactions: lettersFor(unheld.types),
       ...unheld.counts,
       total: unheld.total,
@@ -249,12 +275,18 @@ function toMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-export function lettersFor(types) {
-  const list = Array.from(types || [])
-    .map((type) => ITO_TRN_LETTERS[upper(type)])
-    .filter(Boolean);
+export function lettersFor(counts) {
+  // The board writes them with their counts - "DCN 6 · RCN 2" - so the
+  // office reads what he is carrying, not merely which kinds.
+  const entries = counts instanceof Map ? Array.from(counts.entries()) : Object.entries(counts || {});
 
-  return list.length ? Array.from(new Set(list)).join(" ") : NAV;
+  const parts = entries
+    .map(([type, n]) => [ITO_TRN_LETTERS[upper(type)], Number(n) || 0])
+    .filter(([letter]) => letter)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([letter, n]) => `${letter} ${n}`);
+
+  return parts.length ? parts.join(" · ") : NAV;
 }
 
 /**
