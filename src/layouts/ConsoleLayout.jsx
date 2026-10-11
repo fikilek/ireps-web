@@ -241,6 +241,12 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
+            // UI-R009: one dashboard. TB, BGO and ITO are reached from it.
+            label: "Dashboard",
+            path: "/operations/dashboard",
+            allowedRoles: MANAGEMENT_ROLES,
+          },
+          {
             label: "TC Uploads",
             path: "/operations/tc-uploads",
             allowedRoles: MANAGEMENT_ROLES,
@@ -251,18 +257,8 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "TB Dashboard",
-            path: "/operations/tb-dashboard",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
-          {
             label: "MD BGO",
             path: "/operations/bgo",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
-          {
-            label: "BGO Dashboard",
-            path: "/operations/bgo-dashboard",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
@@ -273,11 +269,6 @@ const navSections = [
           {
             label: "Geo-Fences",
             path: "/operations/geo-fences",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
-          {
-            label: "WMS Dashboard",
-            path: "/operations/wms-dashboard",
             allowedRoles: MANAGEMENT_ROLES,
           },
         ],
@@ -491,27 +482,22 @@ function getFlatNavItems(sections = []) {
 }
 
 function getActiveNavItem(items = [], pathname) {
-  const isTbDashboardRoute =
+  // UI-R009: TB and BGO no longer have menu entries of their own - the one
+  // Dashboard entry is their parent, so standing on either of their pages
+  // lights it. Without this they fall through to Operations Overview, which
+  // is a different page, and the menu would point at the wrong room.
+  const isUnderOneDashboard =
     pathname === "/operations/tb-dashboard" ||
-    /^\/operations\/targeted-batches\/[^/]+\/dashboard$/.test(pathname);
+    /^\/operations\/targeted-batches\/[^/]+\/dashboard$/.test(pathname) ||
+    pathname.includes("/bgo-dashboard");
 
-  if (isTbDashboardRoute) {
-    const tbDashboardItem = items.find(
-      (item) => item.path === "/operations/tb-dashboard",
+  if (isUnderOneDashboard) {
+    const oneDashboard = items.find(
+      (item) => item.path === "/operations/dashboard",
     );
 
-    if (tbDashboardItem) {
-      return tbDashboardItem;
-    }
-  }
-
-  if (pathname.includes("/bgo-dashboard")) {
-    const bgoDashboardItem = items.find(
-      (item) => item.path === "/operations/bgo-dashboard",
-    );
-
-    if (bgoDashboardItem) {
-      return bgoDashboardItem;
+    if (oneDashboard) {
+      return oneDashboard;
     }
   }
 

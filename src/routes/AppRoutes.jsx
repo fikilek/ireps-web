@@ -42,6 +42,7 @@ import ItoPage from "../pages/operations/ItoPage";
 import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
 import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
 import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboardPage";
+import OperationsDashboardPage from "../pages/operations/OperationsDashboardPage";
 import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPage";
 import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
@@ -467,6 +468,18 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TargetedBatchDraftPage />
+              </RoleRoute>
+            }
+          />
+
+          {/* UI-R009: Operations has one dashboard, and it is the way into
+              the others. The three pages keep their own routes - only the
+              way in changed. */}
+          <Route
+            path="/operations/dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <OperationsDashboardPage />
               </RoleRoute>
             }
           />
