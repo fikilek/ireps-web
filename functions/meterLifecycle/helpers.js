@@ -9,6 +9,7 @@ import {
   validateOtherAnomalies,
 } from "../meterDiscovery/validation.js";
 import { serviceProviderName } from "../serviceProviders/serviceProviderName.js";
+import { STATES_HOLDING_THE_METER } from "./trnStateMachine.js";
 
 const NOW_FALLBACK_USER = "SYSTEM";
 
@@ -40,12 +41,15 @@ export const OFFICE_LCT_INSTRUCTION_TRN_TYPES = [
   "METER_READING",
 ];
 
-export const ACTIVE_LCT_WORKFLOW_STATES = [
-  "ISSUED",
-  "REASSIGNED",
-  "ACCEPTED",
-  "IN_PROGRESS",
-];
+// The states in which a job holds its meter against another of its kind.
+// ONE WELL: the list lives in the state machine (`DR-R001` 5.2) and this is
+// a re-export so the guard and the machine cannot drift.
+//
+// It gained CREATED and lost REASSIGNED and IN_PROGRESS on 11 October 2026.
+// Nothing changes today: the census found no record anywhere resting in
+// either of the two that went, and CREATED has no writer yet. It will be
+// right the moment one exists.
+export const ACTIVE_LCT_WORKFLOW_STATES = STATES_HOLDING_THE_METER;
 
 export const LCT_WORKFLOW_STATES = [
   "ISSUED",
