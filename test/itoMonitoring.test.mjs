@@ -7,6 +7,7 @@ import {
   buildWorkerRows,
   columnFor,
   describeAge,
+  describeTicks,
   holderOf,
   lettersFor,
   selectItoWork,
@@ -328,4 +329,39 @@ test("a state with no column is named beneath the table, never dropped", () => {
 
 test("nothing to say when every job has a column", () => {
   assert.deepEqual(monitoringAside(buildWorkerRows({ trns: [job()], nowMs: NOW })), []);
+});
+
+test("the ticks are said the way the office would say them", () => {
+  assert.deepEqual(describeTicks([]), {
+    count: 0,
+    words: "",
+    showing: "Nothing ticked shows every transaction.",
+  });
+
+  assert.equal(describeTicks(["METER_DISCONNECTION"]).showing, "Showing DCN.");
+  assert.equal(
+    describeTicks(["METER_DISCONNECTION", "METER_RECONNECTION"]).showing,
+    "Showing DCN and RCN.",
+  );
+  assert.equal(
+    describeTicks(["METER_DISCONNECTION", "METER_RECONNECTION", "METER_INSPECTION"]).showing,
+    "Showing DCN, RCN and INSP.",
+  );
+  assert.equal(describeTicks(["METER_RECONNECTION", "METER_REMOVAL"]).count, 2);
+});
+
+test("the Clear button is drawn only when there is something to clear", async () => {
+  // Owner, 11 October 2026, choosing it over an always-present greyed one:
+  // a control that does nothing most of the time is the same fault as a chip
+  // that can only ever read 0.
+  const { readFile } = await import("node:fs/promises");
+  const page = await readFile(
+    new URL("../src/pages/operations/ItoDashboardPage.jsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(page, /ticks\.count > 0 \? \(/, "drawn only when ticks are on");
+  assert.match(page, /onClick=\{\(\) => setTrnTypes\(\[\]\)\}/, "and it clears them all");
+  assert.match(page, /Clear \{ticks\.count\} ×/, "saying how many");
+  assert.doesNotMatch(page, /disabled=\{!ticks\.count\}/, "never a dead control");
 });

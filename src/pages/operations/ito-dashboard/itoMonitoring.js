@@ -380,3 +380,26 @@ export function summariseWorkers(rows) {
 
   return totals;
 }
+
+/**
+ * What the ticked transactions say, in the office's own words.
+ *
+ * Used for the Clear button's count and for the line beside it, so the two
+ * can never name different things.
+ */
+export function describeTicks(trnTypes) {
+  const letters = (Array.isArray(trnTypes) ? trnTypes : [])
+    .map((type) => ITO_TRN_LETTERS[upper(type)])
+    .filter(Boolean);
+
+  if (!letters.length) return { count: 0, words: "", showing: "Nothing ticked shows every transaction." };
+
+  // "DCN", "DCN and RCN", "DCN, RCN and INSP" - read aloud the way the
+  // office would say it, not joined with commas to the end.
+  const words =
+    letters.length === 1
+      ? letters[0]
+      : `${letters.slice(0, -1).join(", ")} and ${letters[letters.length - 1]}`;
+
+  return { count: letters.length, words, showing: `Showing ${words}.` };
+}

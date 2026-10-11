@@ -30,6 +30,7 @@ import {
   ITO_TRN_TYPES,
   buildWorkerRows,
   describeAge,
+  describeTicks,
   monitoringAside,
   selectItoWork,
   summariseWorkers,
@@ -132,6 +133,8 @@ export default function ItoDashboardPage() {
   const handleRowsShown = useCallback((shown) => setShownRows(shown), []);
 
   const visible = shownRows ?? rows;
+
+  const ticks = describeTicks(trnTypes);
 
   const totals = useMemo(() => summariseWorkers(visible), [visible]);
   const aside = useMemo(() => monitoringAside(visible), [visible]);
@@ -251,8 +254,17 @@ export default function ItoDashboardPage() {
             {ITO_TRN_LETTERS[type]}
           </label>
         ))}
+        {/* Only there when there is something to clear, so it never sits
+            dead on the bar - and its presence is itself the sign that a
+            filter is on. It says how many it will clear. */}
+        {ticks.count > 0 ? (
+          <button type="button" onClick={() => setTrnTypes([])} style={styles.clear}>
+            Clear {ticks.count} ×
+          </button>
+        ) : null}
+
         <span style={styles.hint}>
-          Nothing ticked shows every transaction.
+          {ticks.showing}
           {ready ? ` ${work.length} jobs in this ward.` : ""}
         </span>
       </div>
@@ -353,6 +365,15 @@ const styles = {
     color: "#64748b",
   },
   tick: { display: "flex", gap: 5, alignItems: "center", fontSize: 13, color: "#0f172a" },
+  clear: {
+    border: "1px solid #c7d6ee",
+    background: "#ffffff",
+    color: "#185FA5",
+    borderRadius: 999,
+    padding: "4px 12px",
+    fontSize: 12,
+    cursor: "pointer",
+  },
   hint: { marginLeft: "auto", fontSize: 11, color: "#64748b" },
   notice: {
     margin: 0,
