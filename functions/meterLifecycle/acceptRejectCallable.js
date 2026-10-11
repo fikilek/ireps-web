@@ -1,6 +1,6 @@
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import {
   buildFailureResult,
@@ -9,9 +9,14 @@ import {
   getActorNameFromRequest,
   normalizeUpper,
 } from "./helpers.js";
+import { TRN_STATES, canMove } from "./trnStateMachine.js";
 
-const ACCEPT_ALLOWED_WORKFLOW_STATES = ["ISSUED", "REASSIGNED"];
-const REJECT_ALLOWED_WORKFLOW_STATES = ["ISSUED", "REASSIGNED", "ACCEPTED"];
+// The machine decides. `DR-R001` 5: only an ISSUED job can be accepted or
+// rejected. REASSIGNED is not a state (5.1) and a worker cannot hand back
+// what he has accepted (5.5) - his only other move would be a false No
+// Access, and the office override is what covers him.
+const ACCEPT_ALLOWED_WORKFLOW_STATES = [TRN_STATES.ISSUED];
+const REJECT_ALLOWED_WORKFLOW_STATES = [TRN_STATES.ISSUED];
 
 const ACCEPT_REJECT_ACTIONS = ["ACCEPT", "REJECT"];
 
@@ -23,8 +28,8 @@ function getAllowedWorkflowStatesForAction(action) {
 
 function getInvalidWorkflowStateMessage(action) {
   return action === "REJECT"
-    ? "Only ISSUED, REASSIGNED, or ACCEPTED TRNs can be rejected"
-    : "Only ISSUED or REASSIGNED TRNs can be accepted";
+    ? "Only work that is still Issued can be rejected. Once you have accepted it, ask the office to take it back."
+    : "Only work that is still Issued can be accepted.";
 }
 
 function normalizeTrnIds(data = {}) {
@@ -239,8 +244,23 @@ function buildWorkflowPatch({
     };
   }
 
+  // A rejected job is no longer his. The targets are cleared with the state,
+  // or it would sit in CREATED still wearing his name - his and nobody's at
+  // once, which is the exact fault these five states remove (`DR-R001` 5.1).
   return {
-    "workflow.state": "REJECTED",
+    "workflow.state": TRN_STATES.CREATED,
+    "assignment.targets": [],
+    // The fast read of what the history holds (`DR-R001` 5.7). The office's
+    // monitoring screen is ward-scoped and reads hundreds of transactions;
+    // opening a subcollection on each to count refusals would make a screen
+    // that gets slower every month. The history stays authoritative - this
+    // is written in the same transaction, so the two cannot disagree.
+    "workflow.rejections": FieldValue.arrayUnion({
+      uid: actorUid || "NAv",
+      name: actorName || "NAv",
+      at: now,
+      reason: rejectReason || "NAv",
+    }),
     "assignment.acceptedRejectedAt": now,
     "assignment.acceptedRejectedUid": actorUid,
     "assignment.acceptedRejectedUser": actorName,
@@ -574,7 +594,18 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           }
         }
 
-        const nextWorkflowState = action === "ACCEPT" ? "ACCEPTED" : "REJECTED";
+        // `DR-R001` 5: a rejection does not rest anywhere. It goes back to
+        // CREATED with nobody on it, and the refusal - who, when and why -
+        // lives in the history, which is the only place it exists (5.7).
+        const move = canMove(TRN_STATES.ISSUED, action === "ACCEPT" ? "accept" : "reject");
+
+        if (!move.ok) {
+          responsePayload = buildFailureResult("MOVE_NOT_ALLOWED", move.message, {});
+
+          return;
+        }
+
+        const nextWorkflowState = move.to;
 
         const patch = buildWorkflowPatch({
           action,
@@ -588,8 +619,14 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           const trnType = getTrnType(row.data) || "NAv";
           const astId = getAstId(row.data);
           const targets = getAssignmentTargets(row.data);
+
+          // On a rejection nobody holds it any more, so the meter's marker
+          // names nobody either. The meter is still held - CREATED holds it
+          // (5.2) - but by a job waiting to be given out, not by a worker.
           const assignedTo =
-            targets[0] || row.data?.trnActiveLifecycle?.assignedTo || {};
+            action === "ACCEPT"
+              ? targets[0] || row.data?.trnActiveLifecycle?.assignedTo || {}
+              : {};
 
           tx.update(row.ref, patch);
 
@@ -614,7 +651,10 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
               trnId: row.trnId,
               trnType,
               astId,
-              event: nextWorkflowState,
+              // The EVENT is what happened; the state is where it landed.
+              // A rejection is an event called REJECTED that lands in
+              // CREATED, and the history is the only record of it (5.7).
+              event: action === "ACCEPT" ? "ACCEPTED" : "REJECTED",
               workflowState: nextWorkflowState,
               actorUid,
               actorName,

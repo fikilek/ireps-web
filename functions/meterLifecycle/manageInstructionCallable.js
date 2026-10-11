@@ -9,6 +9,7 @@ import {
   getActorNameFromRequest,
   normalizeUpper,
 } from "./helpers.js";
+import { TRN_STATES } from "./trnStateMachine.js";
 
 const MANAGE_ACTIONS = ["REASSIGN", "CANCEL"];
 
@@ -308,7 +309,11 @@ function buildCancelPatch({ trnData, cancelReason, now, actorUid, actorName }) {
     "assignment.cancelledByUser": actorName,
     "assignment.cancelReason": cancelReason,
 
-    "workflow.state": "CANCELLED",
+    // The office has taken it back, so nobody holds it: the state goes to
+    // CREATED and the targets go with it. Leaving his name on it would make
+    // the job his and nobody's at once (`DR-R001` 5.1).
+    "workflow.state": TRN_STATES.CREATED,
+    "assignment.targets": [],
     "workflow.cancelledAt": now,
     "workflow.cancelledByUid": actorUid,
     "workflow.cancelledByUser": actorName,
@@ -721,7 +726,12 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         }
       }
 
-      const nextWorkflowState = action === "REASSIGN" ? "ISSUED" : "CANCELLED";
+      // `DR-R001` 5: both land in CREATED. A reassign is an allocate to
+      // somebody else, and a cancel - the office taking work back, which the
+      // screens call UNALLOCATE - leaves it with nobody. Neither rests in a
+      // state of its own; what happened is in the history (5.1, 5.7).
+      const nextWorkflowState =
+        action === "REASSIGN" ? TRN_STATES.ISSUED : TRN_STATES.CREATED;
 
       for (const row of rows) {
         const trnType = getTrnType(row.data) || "NAv";
@@ -758,12 +768,11 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           row.data?.assignment?.targets,
         );
 
+        // After a cancel nobody holds it, so the meter's marker names
+        // nobody. The meter is still held - CREATED holds it (5.2) - by a
+        // job waiting to be given out rather than by a worker.
         const assignedTo =
-          action === "REASSIGN"
-            ? newTargets?.[0] || {}
-            : existingTargets[0] ||
-              row.data?.trnActiveLifecycle?.assignedTo ||
-              {};
+          action === "REASSIGN" ? newTargets?.[0] || {} : {};
 
         tx.update(
           db.collection("asts").doc(astId),
@@ -786,6 +795,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             trnId: row.trnId,
             trnType,
             astId,
+            // The event is what happened; the state is where it landed.
             event: action === "REASSIGN" ? "REASSIGNED" : "CANCELLED",
             workflowState: nextWorkflowState,
             actorUid,
