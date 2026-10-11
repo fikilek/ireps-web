@@ -382,6 +382,13 @@ function normalizeTrnDoc(docSnap) {
     releaseState: valueOrNav(data.bgo?.releaseState),
     hiddenUntilBatchAccepted: data.bgo?.hiddenUntilBatchAccepted === true,
     trnType: valueOrNav(data.trnType || data.accessData?.trnType),
+    // The Operations Dashboard reads these two off this shape. Without them
+    // its office-channel filter matched nothing and the ITO card showed 0
+    // where it meant "not counted" - which is the one thing a 0 must never
+    // mean (owner, 30 September 2026).
+    originChannel: getRegistryOriginChannel(data),
+    wardPcode: valueOrNav(data.accessData?.parents?.wardPcode),
+    lmPcode: valueOrNav(data.accessData?.parents?.lmPcode),
     workflowState,
     state: workflowState,
     executionOutcomeCode,

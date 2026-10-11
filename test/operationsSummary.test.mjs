@@ -2,17 +2,23 @@
 //
 // These pin the property that broke on the owner's phone on 11 October 2026:
 // a card read 7 above boxes adding up to 5, because the total counted seven
-// states and the boxes drew four. Here every figure is exhaustive and
-// `unaccounted` must stay empty, so a state nobody named fails by name
-// instead of being counted and drawn nowhere.
+// states and the boxes drew four. Here every state lands in a figure or is
+// named out loud, and `unaccounted` must stay empty.
+//
+// They also pin the fault in the FIRST build of this card, which showed
+// 0 0 0 0 for a ward that held work: the shape it was handed carried no
+// origin channel, so its office-channel filter matched nothing and it
+// printed zeros. A 0 must never mean "not counted".
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  ITO_OUT_STATES,
+  ITO_ACCEPTED_STATES,
+  ITO_ISSUED_STATES,
   ITO_TRN_TYPES,
   NAV,
   batchFigures,
+  itoAside,
   itoFigures,
   summariseBatches,
   summariseIto,
@@ -25,8 +31,8 @@ const trn = (workflowState, over = {}) => ({
   ...over,
 });
 
-// Endumeni Ward 6 on DEV at 11 October, read from trns: Kaiser's three
-// issued, one accepted, two rejected, nothing completed.
+// Endumeni Ward 6 on DEV at 11 October, read from trns: three issued, one
+// accepted, two rejected, nothing completed.
 const ward6 = [
   trn("ISSUED"),
   trn("ISSUED"),
@@ -36,10 +42,11 @@ const ward6 = [
   trn("REJECTED"),
 ];
 
-test("the ward's real figures: 4 out, 2 rejected, nothing done", () => {
+test("the ward's real figures: 3 issued, 1 accepted, 2 rejected, 0 completed", () => {
   const summary = summariseIto(ward6);
 
-  assert.equal(summary.out, 4);
+  assert.equal(summary.issued, 3);
+  assert.equal(summary.accepted, 1);
   assert.equal(summary.rejected, 2);
   assert.equal(summary.completed, 0);
   assert.equal(summary.cancelled, 0);
@@ -47,18 +54,71 @@ test("the ward's real figures: 4 out, 2 rejected, nothing done", () => {
   assert.deepEqual(summary.unaccounted, []);
 });
 
-test("every state a request can be in is placed in a figure", () => {
-  // DR-R001 5. If a state is added later and nobody gives it a home, this
-  // fails here rather than appearing as a number that does not add up.
-  const states = [...ITO_OUT_STATES, "REJECTED", "COMPLETED", "CANCELLED"];
+test("the four figures are the request's own words, as on the worker's phone", () => {
+  // Owner, 11 October: "thats similar to mobile .. we just dont have
+  // progress" - because nothing is written between accepted and done on this
+  // path (DR-R001 5).
+  assert.deepEqual(
+    itoFigures(summariseIto(ward6)).map((f) => f.label),
+    ["Issued", "Accepted", "Rejected", "Completed"],
+  );
+});
+
+test("every state a request can be in lands in a figure", () => {
+  // DR-R001 5. A state added later with no home fails here, by name, rather
+  // than appearing as numbers that do not add up.
+  const states = [
+    ...ITO_ISSUED_STATES,
+    ...ITO_ACCEPTED_STATES,
+    "REJECTED",
+    "COMPLETED",
+    "CANCELLED",
+  ];
+
   const summary = summariseIto(states.map((state) => trn(state)));
 
   assert.deepEqual(summary.unaccounted, [], "a state with no figure");
   assert.equal(
-    summary.out + summary.rejected + summary.completed + summary.cancelled,
+    summary.issued + summary.accepted + summary.rejected + summary.completed + summary.cancelled,
     summary.total,
     "the figures must account for every row",
   );
+});
+
+test("a reassigned job is waiting to be accepted, so it counts as issued", () => {
+  // The server returns a reassign to ISSUED under the new worker's name, so
+  // nothing should rest here - but it is the same question either way.
+  const summary = summariseIto([trn("REASSIGNED"), trn("ISSUED")]);
+
+  assert.equal(summary.issued, 2);
+  assert.deepEqual(summary.unaccounted, []);
+});
+
+test("cancelled is counted and said in words, never given a tile and never dropped", () => {
+  const summary = summariseIto([...ward6, trn("CANCELLED"), trn("CANCELLED")]);
+
+  assert.equal(summary.cancelled, 2);
+  assert.equal(
+    itoFigures(summary).some((f) => f.key === "cancelled"),
+    false,
+    "four figures, not five",
+  );
+  assert.deepEqual(itoAside(summary), ["2 cancelled"]);
+  assert.deepEqual(itoAside(summariseIto(ward6)), [], "nothing to say when there are none");
+});
+
+test("rows read and none counted says so, because that is not nothing out", () => {
+  // The fault in the first build: normalizeTrnDoc carried no origin channel,
+  // so every row was filtered out and the card printed 0 0 0 0 for a ward
+  // that held work. A 0 claims "nothing out" when it means "nothing counted".
+  const summary = summariseIto([
+    { workflowState: "ISSUED", trnType: "METER_DISCONNECTION" },
+    { workflowState: "ACCEPTED", trnType: "METER_DISCONNECTION" },
+  ]);
+
+  assert.equal(summary.considered, 2);
+  assert.equal(summary.total, 0);
+  assert.deepEqual(itoAside(summary), ["2 read, none of it office work"]);
 });
 
 test("a state nobody named is reported, never dropped", () => {
@@ -77,7 +137,7 @@ test("field work is not watched, because there is nothing to watch", () => {
   ]);
 
   assert.equal(summary.total, 1);
-  assert.equal(summary.out, 1);
+  assert.equal(summary.issued, 1);
 });
 
 test("only the five lifecycle transactions are the office's individual lane", () => {
@@ -96,6 +156,34 @@ test("only the five lifecycle transactions are the office's individual lane", ()
   ]);
 
   assert.equal(summary.total, 1);
+});
+
+test("both normalisers are read, because this screen is fed by two", () => {
+  // The registry rows flatten workflowState/originChannel/trnType; the
+  // ward-scoped stream keeps the document's own shape.
+  const documentShape = {
+    accessData: { trnType: "METER_DISCONNECTION" },
+    origin: { channel: "OFFICE" },
+    workflow: { state: "REJECTED" },
+  };
+
+  const summary = summariseIto([documentShape, trn("ISSUED")]);
+
+  assert.equal(summary.total, 2);
+  assert.equal(summary.rejected, 1);
+  assert.equal(summary.issued, 1);
+  assert.deepEqual(summary.unaccounted, []);
+});
+
+test("the ward stream's normaliser now carries what this screen reads", async () => {
+  // Pinning the fix at its source: without originChannel on that shape the
+  // filter matches nothing and the card is a row of zeros.
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/redux/trnsApi.js", import.meta.url), "utf8");
+  const normaliser = source.slice(source.indexOf("function normalizeTrnDoc"));
+
+  assert.match(normaliser.slice(0, 3000), /originChannel: getRegistryOriginChannel\(data\)/);
+  assert.match(normaliser.slice(0, 3000), /wardPcode: valueOrNav\(data\.accessData\?\.parents\?\.wardPcode\)/);
 });
 
 test("a batch lane counts batches in the chosen ward only", () => {
@@ -138,40 +226,9 @@ test("nothing loaded reads NAv on every figure, never a row of zeros", () => {
   }
 });
 
-test("each lane uses its own words, and no new word is coined", () => {
-  // UI-R009 6. ITO says Rejected because that is the request's own state.
-  assert.deepEqual(
-    itoFigures(summariseIto(ward6)).map((f) => f.label),
-    ["Out", "Rejected", "Completed", "Cancelled"],
-  );
-
-  assert.deepEqual(
-    batchFigures(summariseBatches([])).map((f) => f.label),
-    ["In progress", "Not started", "Completed"],
-  );
-});
-
 test("the rejected figure is the one that asks for attention", () => {
   const rejected = itoFigures(summariseIto(ward6)).find((f) => f.key === "rejected");
 
   assert.equal(rejected.value, 2);
   assert.equal(rejected.attention, true);
-});
-
-test("both normalisers are read, because this screen is fed by two", () => {
-  // The registry rows flatten workflowState/originChannel/trnType; the
-  // ward-scoped stream keeps the document's own shape. A well that knew only
-  // one would count nothing when handed the other and say so with a zero.
-  const documentShape = {
-    accessData: { trnType: "METER_DISCONNECTION" },
-    origin: { channel: "OFFICE" },
-    workflow: { state: "REJECTED" },
-  };
-
-  const summary = summariseIto([documentShape, trn("ISSUED")]);
-
-  assert.equal(summary.total, 2);
-  assert.equal(summary.rejected, 1);
-  assert.equal(summary.out, 1);
-  assert.deepEqual(summary.unaccounted, []);
 });

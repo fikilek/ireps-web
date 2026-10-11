@@ -34,15 +34,18 @@ export const ITO_TRN_TYPES = Object.freeze([
 ]);
 
 /**
- * Work that is still out there. Nobody has finished it and nobody has
- * handed it back, so it is the office's open question.
+ * A job nobody has answered yet. A reassign returns the request to `ISSUED`
+ * under the new worker's name (`DR-R001` 5), so `REASSIGNED` is the same
+ * question: it is out and waiting to be accepted.
  */
-export const ITO_OUT_STATES = Object.freeze([
-  "ISSUED",
-  "REASSIGNED",
-  "ACCEPTED",
-  "IN_PROGRESS",
-]);
+export const ITO_ISSUED_STATES = Object.freeze(["ISSUED", "REASSIGNED"]);
+
+/**
+ * A job a worker has taken. `IN_PROGRESS` is not written on this path -
+ * *"There is nothing between accepted and done"* (`DR-R001` 5) - but if one
+ * ever appears it belongs with accepted rather than in no figure at all.
+ */
+export const ITO_ACCEPTED_STATES = Object.freeze(["ACCEPTED", "IN_PROGRESS"]);
 
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 
@@ -78,22 +81,24 @@ function isItoWork(row) {
  * (`DR-R001` 9). It is read in the TRN Registry instead.
  */
 export function summariseIto(rows) {
+  const considered = Array.isArray(rows) ? rows.length : 0;
   const list = (Array.isArray(rows) ? rows : []).filter(isItoWork);
 
-  const figures = { out: 0, rejected: 0, completed: 0, cancelled: 0 };
+  const figures = { issued: 0, accepted: 0, rejected: 0, completed: 0, cancelled: 0 };
   const unaccounted = [];
 
   for (const row of list) {
     const state = readWorkflowState(row);
 
-    if (ITO_OUT_STATES.includes(state)) figures.out += 1;
+    if (ITO_ISSUED_STATES.includes(state)) figures.issued += 1;
+    else if (ITO_ACCEPTED_STATES.includes(state)) figures.accepted += 1;
     else if (state === "REJECTED") figures.rejected += 1;
     else if (state === "COMPLETED") figures.completed += 1;
     else if (state === "CANCELLED") figures.cancelled += 1;
     else unaccounted.push(state || "(no state)");
   }
 
-  return { ...figures, total: list.length, unaccounted };
+  return { ...figures, total: list.length, considered, unaccounted };
 }
 
 /**
@@ -138,12 +143,37 @@ export function summariseBatches(batches, { statusOf, wardOf, wardPcode } = {}) 
 export function itoFigures(summary, { ready = true } = {}) {
   const value = (n) => (ready ? n : NAV);
 
+  // The same four the worker sees on his phone, less Progress, which cannot
+  // happen here (`DR-R001` 5). Each one is the request's own word.
   return [
-    { key: "out", label: "Out", value: value(summary?.out ?? 0) },
+    { key: "issued", label: "Issued", value: value(summary?.issued ?? 0) },
+    { key: "accepted", label: "Accepted", value: value(summary?.accepted ?? 0) },
     { key: "rejected", label: "Rejected", value: value(summary?.rejected ?? 0), attention: true },
     { key: "completed", label: "Completed", value: value(summary?.completed ?? 0) },
-    { key: "cancelled", label: "Cancelled", value: value(summary?.cancelled ?? 0) },
   ];
+}
+
+/**
+ * Counted, and deliberately given no tile of its own — so it is said in
+ * words instead of being dropped. A cancelled job is neither out nor done,
+ * and the owner asked for four figures, not five.
+ */
+export function itoAside(summary) {
+  const notes = [];
+
+  const cancelled = Number(summary?.cancelled || 0);
+
+  if (cancelled > 0) notes.push(`${cancelled} cancelled`);
+
+  // Rows arrived and none of them counted. That is not "nothing out" - it is
+  // "nothing counted", and the two must never look the same. It is how the
+  // first build of this card showed 0 0 0 0 for a ward holding work, because
+  // the shape it was handed carried no origin channel.
+  if (Number(summary?.considered || 0) > 0 && Number(summary?.total || 0) === 0) {
+    notes.push(`${summary.considered} read, none of it office work`);
+  }
+
+  return notes;
 }
 
 export function batchFigures(summary, { ready = true } = {}) {

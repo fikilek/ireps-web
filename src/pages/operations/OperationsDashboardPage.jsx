@@ -26,6 +26,7 @@ import {
 import {
   NAV,
   batchFigures,
+  itoAside,
   itoFigures,
   summariseBatches,
   summariseIto,
@@ -116,6 +117,7 @@ export default function OperationsDashboardPage() {
       name: "ITO",
       what: "Individually originated",
       figures: itoFigures(itoSummary, { ready }),
+      aside: itoAside(itoSummary),
       to: null,
       open: "ITO dashboard — next",
       summary: itoSummary,
@@ -165,6 +167,14 @@ export default function OperationsDashboardPage() {
                 </div>
               ))}
             </div>
+
+            {/* Counted but given no tile - said in words rather than
+                dropped. Cancelled jobs, and the case where rows arrived and
+                none of them counted, which is "nothing counted" and not
+                "nothing out". */}
+            {ready && lane.aside?.length ? (
+              <p style={styles.aside}>{lane.aside.join(" · ")}</p>
+            ) : null}
 
             {/* A state nobody gave a figure is shown, never dropped. The
                 alternative is the fault of 11 October: counted in one place
@@ -244,6 +254,7 @@ const styles = {
     textTransform: "uppercase",
     color: "#64748b",
   },
+  aside: { margin: 0, fontSize: 11, color: "#4d6b96" },
   unaccounted: { margin: 0, fontSize: 11, color: "#A32D2D" },
   open: {
     display: "block",
