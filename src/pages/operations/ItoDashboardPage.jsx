@@ -1,15 +1,15 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-// The ITO monitoring screen. `DR-R001` 9.1, built to the owner's board.
+// The ITO monitoring screen. `DR-R001` 9.1, to the owner's board and his
+// revision of it on 11 October 2026.
 //
-// One screen, three views, one filter bar, every transaction type. This is
-// the first view - per worker. Per area and on the map are marked where they
-// go rather than left blank.
+// One screen, three views, one filter bar. This is per worker; per area and
+// on the map are next, and their pills switch to them.
 //
 // IT IS WATCHING THE RECORD, NOT THE WORK (`DR-R001` 9). A worker can be at
 // the meter with the job finished while this still reads Accepted, because
 // his submission has not landed. So every row says when he was last heard
 // from, and nothing here claims more than it knows.
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import IrepsTable from "../../components/table/IrepsTable";
@@ -26,11 +26,11 @@ import {
 } from "./targeted-batches/dashboard/targetedBatchDashboardModel";
 import { NAV } from "./dashboard/operationsSummary";
 import {
-  ITO_STATES,
   ITO_TRN_LETTERS,
   ITO_TRN_TYPES,
   buildWorkerRows,
   describeAge,
+  monitoringAside,
   selectItoWork,
   summariseWorkers,
 } from "./ito-dashboard/itoMonitoring";
@@ -64,8 +64,11 @@ export default function ItoDashboardPage() {
   const ready = Boolean(lmPcode && wardPcode);
 
   const [view, setView] = useState("worker");
+
+  // Only the transactions are ticked up here. The four states are columns on
+  // the table now, and the table filters its own columns (owner, 11 October
+  // 2026) - two places to narrow the same thing is one too many.
   const [trnTypes, setTrnTypes] = useState([]);
-  const [states, setStates] = useState([]);
 
   // "Heard 4 min ago" has to keep counting, or the office reads a number
   // that froze when the page opened.
@@ -111,19 +114,30 @@ export default function ItoDashboardPage() {
     return map;
   }, [liveData]);
 
-  const work = useMemo(
-    () => selectItoWork(trns.data, { trnTypes, states }),
-    [trns.data, trnTypes, states],
-  );
+  const work = useMemo(() => selectItoWork(trns.data, { trnTypes }), [trns.data, trnTypes]);
 
   const rows = useMemo(
     () => buildWorkerRows({ trns: work, usersById, liveByUid, nowMs }),
     [work, usersById, liveByUid, nowMs],
   );
 
-  const totals = useMemo(() => summariseWorkers(rows), [rows]);
+  // The figures total THE ROWS THE TABLE IS SHOWING, not the whole ward, so
+  // they can never disagree with what is beneath them. Tick DCN only, or
+  // filter a column, and they move with it. A figure that stands apart from
+  // its rows is how two places come to hold one number and drift.
+  const [shownRows, setShownRows] = useState(null);
+
+  // Stable, because IrepsTable reports its rows from an effect keyed on the
+  // columns array - a new array each render would loop.
+  const handleRowsShown = useCallback((shown) => setShownRows(shown), []);
+
+  const visible = shownRows ?? rows;
+
+  const totals = useMemo(() => summariseWorkers(visible), [visible]);
+  const aside = useMemo(() => monitoringAside(visible), [visible]);
 
   const figures = [
+    { key: "total", label: "Total", value: totals.total, lead: true },
     { key: "issued", label: "Issued", value: totals.issued },
     { key: "accepted", label: "Accepted", value: totals.accepted },
     { key: "rejected", label: "Rejected", value: totals.rejected, attention: true },
@@ -132,29 +146,33 @@ export default function ItoDashboardPage() {
       key: "oldest",
       label: "Oldest waiting",
       value: describeAge(totals.oldestWaitingMs, nowMs),
+      quiet: true,
     },
   ];
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       key: "name",
       label: "Field worker",
       filter: "text",
       sortable: true,
+      minWidth: 170,
       value: (row) => row.name,
       render: (row) => (
         <span>
           <span style={styles.workerName}>{row.name}</span>
-          <span style={styles.workerRole}>{row.unheld ? "no holder" : row.role}</span>
+          <span style={styles.workerSub}>{row.unheld ? "no holder" : row.provider || row.role}</span>
         </span>
       ),
     },
     {
-      key: "transactions",
-      label: "Transactions",
-      filter: "text",
+      // The total stands out from the states it is made of.
+      key: "total",
+      label: "Total",
+      align: "right",
       sortable: true,
-      value: (row) => row.transactions,
+      value: (row) => row.total,
+      render: (row) => <strong style={styles.total}>{row.total}</strong>,
     },
     { key: "issued", label: "Issued", align: "right", sortable: true, value: (row) => row.issued },
     { key: "accepted", label: "Accepted", align: "right", sortable: true, value: (row) => row.accepted },
@@ -182,52 +200,19 @@ export default function ItoDashboardPage() {
       sortable: true,
       value: (row) => row.lastHeard,
     },
-  ];
+  ], []);
 
   return (
     <section style={styles.page}>
-      <p style={styles.eyebrow}>
-        <Link to="/operations/dashboard" style={styles.crumb}>
-          Operations / Dashboard
-        </Link>{" "}
-        / ITO
-      </p>
-      <h2 style={styles.title}>ITO monitoring</h2>
-      <p style={styles.lede}>
-        Office-issued individual work in {lmName || NAV}
-        {lmPcode ? ` (${lmPcode})` : ""}. Field work is not here — it reaches the
-        server finished, so there is nothing to watch; read it in the TRN Registry.
-      </p>
-
-      <WardScopeHeader />
-
-      <div style={styles.filters}>
-        <div style={styles.filterGroup}>
-          <span style={styles.filterLabel}>Transactions</span>
-          {ITO_TRN_TYPES.map((type) => (
-            <label key={type} style={styles.tick}>
-              <input
-                type="checkbox"
-                checked={trnTypes.includes(type)}
-                onChange={() => setTrnTypes((list) => toggle(list, type))}
-              />
-              {ITO_TRN_LETTERS[type]}
-            </label>
-          ))}
-        </div>
-
-        <div style={styles.filterGroup}>
-          <span style={styles.filterLabel}>State</span>
-          {ITO_STATES.map((state) => (
-            <label key={state.key} style={styles.tick}>
-              <input
-                type="checkbox"
-                checked={states.includes(state.key)}
-                onChange={() => setStates((list) => toggle(list, state.key))}
-              />
-              {state.label}
-            </label>
-          ))}
+      <div style={styles.head}>
+        <div>
+          <p style={styles.eyebrow}>
+            <Link to="/operations/dashboard" style={styles.crumb}>
+              Operations / Dashboard
+            </Link>{" "}
+            / ITO
+          </p>
+          <h2 style={styles.title}>ITO monitoring</h2>
         </div>
 
         <div style={styles.views}>
@@ -246,11 +231,31 @@ export default function ItoDashboardPage() {
         </div>
       </div>
 
-      {/* Nothing ticked means everything, which is what the office expects
-          from a row of empty boxes. */}
-      <p style={styles.hint}>
-        Nothing ticked shows everything. {ready ? `${work.length} jobs in this ward.` : ""}
+      <p style={styles.lede}>
+        Office-issued individual work in {lmName || NAV}
+        {lmPcode ? ` (${lmPcode})` : ""}. Field work is not here — it reaches the
+        server finished, so there is nothing to watch; read it in the TRN Registry.
       </p>
+
+      <WardScopeHeader />
+
+      <div style={styles.filters}>
+        <span style={styles.filterLabel}>Transactions</span>
+        {ITO_TRN_TYPES.map((type) => (
+          <label key={type} style={styles.tick}>
+            <input
+              type="checkbox"
+              checked={trnTypes.includes(type)}
+              onChange={() => setTrnTypes((list) => toggle(list, type))}
+            />
+            {ITO_TRN_LETTERS[type]}
+          </label>
+        ))}
+        <span style={styles.hint}>
+          Nothing ticked shows every transaction.
+          {ready ? ` ${work.length} jobs in this ward.` : ""}
+        </span>
+      </div>
 
       {!ready ? (
         <p style={styles.notice}>
@@ -258,42 +263,57 @@ export default function ItoDashboardPage() {
             ? "Choose a ward above to load the monitoring."
             : "Activate a Local Municipality workbase to load the monitoring."}
         </p>
-      ) : (
+      ) : view === "worker" ? (
         <>
           <div style={styles.figures}>
             {figures.map((figure) => (
               <div
                 key={figure.key}
-                style={
-                  figure.attention && Number(figure.value) > 0
-                    ? { ...styles.figure, ...styles.figureAttention }
-                    : styles.figure
-                }
+                style={{
+                  ...styles.figure,
+                  ...(figure.lead ? styles.figureLead : null),
+                  ...(figure.attention && Number(figure.value) > 0 ? styles.figureAttention : null),
+                  ...(figure.quiet ? styles.figureQuiet : null),
+                }}
               >
-                <p style={styles.figureValue}>{figure.value}</p>
+                <p style={figure.lead ? { ...styles.figureValue, ...styles.figureValueLead } : styles.figureValue}>
+                  {figure.value}
+                </p>
                 <p style={styles.figureLabel}>{figure.label}</p>
               </div>
             ))}
           </div>
 
-          {view === "worker" ? (
-            <IrepsTable
-              title="Per worker"
-              columns={columns}
-              rows={rows}
-              rowKey={(row, index) => row.uid || `unheld-${index}`}
-              loading={trns.isLoading}
-              emptyText="No office-issued work in this ward matches the ticks."
-            />
-          ) : null}
+          <IrepsTable
+            title="Per worker"
+            columns={columns}
+            rows={rows}
+            rowKey={(row, index) => row.uid || `unheld-${index}`}
+            loading={trns.isLoading}
+            emptyText="No office-issued work in this ward matches the ticks."
+            // The worker's name never scrolls away from his numbers.
+            stickyFirstColumn
+            onRowsShown={handleRowsShown}
+          />
+
+          {/* Counted but given no column — said in words rather than dropped. */}
+          {aside.length ? <p style={styles.aside}>{aside.join(" · ")}</p> : null}
+
+          <p style={styles.footnote}>
+            <strong>Oldest waiting</strong> is the oldest job still waiting on that
+            worker, read from when it was issued. A job issued before that was
+            recorded has no age and reads <strong>NAv</strong> — never 0, which would
+            read as nothing waiting. {totals.workers} workers, {totals.total} jobs.
+          </p>
         </>
-      )}
+      ) : null}
     </section>
   );
 }
 
 const styles = {
   page: { display: "flex", flexDirection: "column", gap: 12 },
+  head: { display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" },
   eyebrow: {
     margin: 0,
     fontSize: 12,
@@ -304,9 +324,21 @@ const styles = {
   crumb: { color: "#185FA5", textDecoration: "none" },
   title: { margin: 0, fontSize: 22, fontWeight: 600, color: "#0f172a" },
   lede: { margin: 0, fontSize: 13, color: "#475569" },
+  views: { display: "flex", gap: 6, marginLeft: "auto" },
+  view: {
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#0f172a",
+    borderRadius: 10,
+    padding: "8px 15px",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  viewOn: { background: "#0f172a", color: "#ffffff", borderColor: "#0f172a" },
   filters: {
     display: "flex",
-    gap: 16,
+    gap: 14,
     flexWrap: "wrap",
     alignItems: "center",
     background: "#f6f9fe",
@@ -314,26 +346,14 @@ const styles = {
     borderRadius: 12,
     padding: "10px 12px",
   },
-  filterGroup: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
   filterLabel: {
     fontSize: 10,
     letterSpacing: 0.5,
     textTransform: "uppercase",
     color: "#64748b",
   },
-  tick: { display: "flex", gap: 4, alignItems: "center", fontSize: 12, color: "#0f172a" },
-  views: { display: "flex", gap: 6, marginLeft: "auto" },
-  view: {
-    border: "1px solid #c7d6ee",
-    background: "#ffffff",
-    color: "#334155",
-    borderRadius: 999,
-    padding: "5px 12px",
-    fontSize: 12,
-    cursor: "pointer",
-  },
-  viewOn: { background: "#11203c", color: "#ffffff", borderColor: "#11203c" },
-  hint: { margin: 0, fontSize: 11, color: "#64748b" },
+  tick: { display: "flex", gap: 5, alignItems: "center", fontSize: 13, color: "#0f172a" },
+  hint: { marginLeft: "auto", fontSize: 11, color: "#64748b" },
   notice: {
     margin: 0,
     padding: "10px 12px",
@@ -345,22 +365,28 @@ const styles = {
   },
   figures: { display: "flex", gap: 8, flexWrap: "wrap" },
   figure: {
-    flex: "1 1 120px",
+    flex: "1 1 110px",
     background: "#ffffff",
-    border: "1px solid #dbe6f8",
-    borderRadius: 10,
-    padding: "9px 12px",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    padding: "10px 13px",
   },
-  figureAttention: { background: "#fff5f5", border: "1px solid #f7c1c1" },
-  figureValue: { margin: 0, fontSize: 20, fontWeight: 600, color: "#0f172a" },
+  figureLead: { borderColor: "#0f172a" },
+  figureAttention: { background: "#fff5f5", borderColor: "#fecaca" },
+  figureQuiet: { borderStyle: "dashed", borderColor: "#b45309" },
+  figureValue: { margin: 0, fontSize: 22, fontWeight: 600, color: "#0f172a" },
+  figureValueLead: { fontSize: 26, fontWeight: 700 },
   figureLabel: {
     margin: 0,
     fontSize: 10,
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
     textTransform: "uppercase",
     color: "#64748b",
   },
   workerName: { display: "block", fontWeight: 600, color: "#0f172a" },
-  workerRole: { display: "block", fontSize: 11, color: "#64748b" },
+  workerSub: { display: "block", fontSize: 11, color: "#64748b" },
+  total: { fontSize: 15, fontWeight: 700, color: "#0f172a" },
   rejected: { color: "#A32D2D" },
+  aside: { margin: 0, fontSize: 12, color: "#78350f" },
+  footnote: { margin: 0, fontSize: 12, lineHeight: 1.5, color: "#475569" },
 };

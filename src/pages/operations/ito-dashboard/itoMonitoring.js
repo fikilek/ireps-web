@@ -157,6 +157,8 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
   const unheld = {
     counts: emptyCounts(),
     total: 0,
+    cancelled: 0,
+    unaccounted: [],
     types: new Map(),
     rejectedJobs: [],
     oldestIssuedMs: null,
@@ -174,16 +176,33 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
           name: holder.name,
           counts: emptyCounts(),
           total: 0,
+          cancelled: 0,
+          unaccounted: [],
           types: new Map(),
           rejectedJobs: [],
           oldestIssuedMs: null,
         }
       : unheld;
 
-    target.total += 1;
+    // The Total column is the sum of the four states beside it, by
+    // construction - owner, 11 October 2026: "the total work that Kaiser has
+    // been issued or allocated to, and then we check how much of it is still
+    // in the issued state". A row that does not add up is the fault that was
+    // found on his phone this morning, so it cannot be built that way here.
+    //
+    // A CANCELLED job is not in his total: the office withdrew it, so it is
+    // no longer his work (the same ruling as `UI-R005` 7 for his phone). It
+    // is counted apart and said in words beneath the table, never dropped.
     target.types.set(type, (target.types.get(type) || 0) + 1);
 
-    if (column) target.counts[column] += 1;
+    if (column) {
+      target.counts[column] += 1;
+      target.total += 1;
+    } else if (readWorkflowState(trn) === "CANCELLED") {
+      target.cancelled += 1;
+    } else {
+      target.unaccounted.push(readWorkflowState(trn) || "(no state)");
+    }
 
     // A rejected count opens those jobs with the worker's reason on each
     // (`DR-R001` 9.1), so the reason is carried, never re-fetched.
@@ -226,6 +245,8 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
       // classification that would have to be guessed.
       provider: text(user?.serviceProviderName) || "",
       rejectedJobs: worker.rejectedJobs,
+      cancelled: worker.cancelled,
+      unaccounted: worker.unaccounted,
       transactions: lettersFor(worker.types),
       ...worker.counts,
       total: worker.total,
@@ -245,6 +266,8 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
       role: NAV,
       provider: "",
       rejectedJobs: unheld.rejectedJobs,
+      cancelled: unheld.cancelled,
+      unaccounted: unheld.unaccounted,
       transactions: lettersFor(unheld.types),
       ...unheld.counts,
       total: unheld.total,
@@ -312,15 +335,37 @@ export function describeAge(sinceMs, nowMs) {
   return `${Math.floor(hours / 24)} d`;
 }
 
-/** The four figures above the table, and the oldest job anywhere in them. */
+/**
+ * What is counted but has no column, said in words beneath the table.
+ *
+ * Cancelled jobs, and any state nobody gave a column. The alternative is the
+ * fault of 11 October: counted in one place, drawn in none, with nothing
+ * saying why the numbers would not add up.
+ */
+export function monitoringAside(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+
+  const cancelled = list.reduce((n, row) => n + (Number(row?.cancelled) || 0), 0);
+  const unplaced = Array.from(new Set(list.flatMap((row) => row?.unaccounted || [])));
+
+  const notes = [];
+
+  if (cancelled > 0) notes.push(`${cancelled} cancelled, not counted in any total`);
+  if (unplaced.length) notes.push(`not in any column: ${unplaced.join(", ")}`);
+
+  return notes;
+}
+
+/** The oldest job still waiting anywhere in the ward, and how many workers. */
 export function summariseWorkers(rows) {
-  const totals = { ...emptyCounts(), workers: 0, oldestWaitingMs: null };
+  const totals = { ...emptyCounts(), workers: 0, total: 0, oldestWaitingMs: null };
 
   for (const row of Array.isArray(rows) ? rows : []) {
     totals.issued += row.issued || 0;
     totals.accepted += row.accepted || 0;
     totals.rejected += row.rejected || 0;
     totals.completed += row.completed || 0;
+    totals.total += row.total || 0;
 
     if (!row.unheld) totals.workers += 1;
 

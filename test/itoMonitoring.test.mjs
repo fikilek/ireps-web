@@ -10,6 +10,7 @@ import {
   holderOf,
   lettersFor,
   selectItoWork,
+  monitoringAside,
   summariseWorkers,
 } from "../src/pages/operations/ito-dashboard/itoMonitoring.js";
 
@@ -283,4 +284,48 @@ test("the ward stream's normaliser carries the flattened target this reads", asy
 
   assert.match(normaliser.slice(0, 3000), /targetId: target\.id/);
   assert.match(normaliser.slice(0, 3000), /targetType: target\.type/);
+});
+
+test("the Total column is the sum of the four states beside it", () => {
+  // Owner, 11 October 2026: the total is what the worker was allocated, and
+  // the four states say how it is split. A row that does not add up is the
+  // fault found on his phone this morning.
+  const rows = buildWorkerRows({
+    trns: [
+      job(),
+      job({ workflowState: "ACCEPTED" }),
+      job({ workflowState: "REJECTED" }),
+      job({ workflowState: "COMPLETED" }),
+    ],
+    nowMs: NOW,
+  });
+
+  const row = rows[0];
+
+  assert.equal(row.total, 4);
+  assert.equal(row.issued + row.accepted + row.rejected + row.completed, row.total);
+});
+
+test("a cancelled job is not in his total, and is said in words", () => {
+  // The office withdrew it, so it is no longer his work - the same ruling as
+  // UI-R005 7 made for his phone. Counted apart, never dropped.
+  const rows = buildWorkerRows({
+    trns: [job(), job({ workflowState: "CANCELLED" }), job({ workflowState: "CANCELLED" })],
+    nowMs: NOW,
+  });
+
+  assert.equal(rows[0].total, 1, "the cancelled pair is not his work");
+  assert.equal(rows[0].issued + rows[0].accepted + rows[0].rejected + rows[0].completed, 1);
+  assert.deepEqual(monitoringAside(rows), ["2 cancelled, not counted in any total"]);
+});
+
+test("a state with no column is named beneath the table, never dropped", () => {
+  const rows = buildWorkerRows({ trns: [job({ workflowState: "SOMETHING_NEW" })], nowMs: NOW });
+
+  assert.equal(rows[0].total, 0);
+  assert.deepEqual(monitoringAside(rows), ["not in any column: SOMETHING_NEW"]);
+});
+
+test("nothing to say when every job has a column", () => {
+  assert.deepEqual(monitoringAside(buildWorkerRows({ trns: [job()], nowMs: NOW })), []);
 });
