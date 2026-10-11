@@ -193,3 +193,33 @@ export function batchFigures(summary, { ready = true } = {}) {
     { key: "completed", label: "Completed", value: value(summary?.completed ?? 0) },
   ];
 }
+
+/**
+ * The Total shown on a lane card, which is **the sum of the tiles drawn on
+ * that card** — not a number worked out beside them.
+ *
+ * Owner, 11 October 2026, on the Operations Dashboard: the ITO card reads 9,
+ * and 4 + 1 + 2 + 2 is 9. Summing the figures themselves is what makes that
+ * true by construction: a figure added, removed or renamed moves the total
+ * with it, and a card cannot come to disagree with its own numbers.
+ *
+ * `NAv` when any figure is `NAv`, because a total of what is not counted is
+ * not a number — and a 0 there would read as "nothing in this lane".
+ */
+export function sumFigures(figures) {
+  const list = Array.isArray(figures) ? figures : [];
+
+  if (!list.length) return NAV;
+
+  let total = 0;
+
+  for (const figure of list) {
+    const value = Number(figure?.value);
+
+    if (!Number.isFinite(value)) return NAV;
+
+    total += value;
+  }
+
+  return total;
+}

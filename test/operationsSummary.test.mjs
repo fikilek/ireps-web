@@ -21,6 +21,7 @@ import {
   itoAside,
   itoFigures,
   summariseBatches,
+  sumFigures,
   summariseIto,
 } from "../src/pages/operations/dashboard/operationsSummary.js";
 
@@ -243,4 +244,37 @@ test("the rejected figure is the one that asks for attention", () => {
 
   assert.equal(rejected.value, 2);
   assert.equal(rejected.attention, true);
+});
+
+test("a lane card's Total is the sum of the tiles drawn on it", () => {
+  // Owner, 11 October 2026: the ITO card reads 9, and 4 + 1 + 2 + 2 is 9.
+  // Summing the figures themselves makes that true by construction - a
+  // figure added or renamed moves the total with it.
+  const summary = summariseIto([
+    trn("ISSUED"), trn("ISSUED"), trn("ISSUED"), trn("ISSUED"),
+    trn("ACCEPTED"),
+    trn("REJECTED"), trn("REJECTED"),
+    trn("COMPLETED"), trn("COMPLETED"),
+  ]);
+
+  const figures = itoFigures(summary);
+
+  assert.deepEqual(figures.map((f) => f.value), [4, 1, 2, 2]);
+  assert.equal(sumFigures(figures), 9);
+});
+
+test("a lane that cannot count reads NAv, never 0", () => {
+  // A 0 there would read as "nothing in this lane" when it means "nothing
+  // counted" - the distinction this screen exists to keep.
+  assert.equal(sumFigures(itoFigures(summariseIto([]), { ready: false })), NAV);
+  assert.equal(sumFigures(batchFigures(summariseBatches([]), { ready: false })), NAV);
+  assert.equal(sumFigures([]), NAV);
+  assert.equal(sumFigures(null), NAV);
+});
+
+test("a cancelled job is in no tile, so it is in no card total either", () => {
+  const summary = summariseIto([trn("ISSUED"), trn("CANCELLED")]);
+
+  assert.equal(sumFigures(itoFigures(summary)), 1);
+  assert.deepEqual(itoAside(summary), ["1 cancelled"]);
 });

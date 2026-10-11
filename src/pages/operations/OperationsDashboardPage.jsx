@@ -28,6 +28,7 @@ import {
   batchFigures,
   itoAside,
   itoFigures,
+  sumFigures,
   summariseBatches,
   summariseIto,
 } from "./dashboard/operationsSummary";
@@ -93,6 +94,8 @@ export default function OperationsDashboardPage() {
     [bgo.data, wardPcode],
   );
 
+  const withTotal = (lane) => ({ ...lane, total: sumFigures(lane.figures) });
+
   const lanes = [
     {
       key: "tb",
@@ -122,7 +125,7 @@ export default function OperationsDashboardPage() {
       open: "Open ITO dashboard",
       summary: itoSummary,
     },
-  ];
+  ].map(withTotal);
 
   return (
     <section style={styles.page}>
@@ -148,8 +151,17 @@ export default function OperationsDashboardPage() {
         {lanes.map((lane) => (
           <article key={lane.key} style={styles.card}>
             <div style={styles.cardHead}>
-              <p style={styles.laneName}>{lane.name}</p>
-              <p style={styles.laneWhat}>{lane.what}</p>
+              <div>
+                <p style={styles.laneName}>{lane.name}</p>
+                <p style={styles.laneWhat}>{lane.what}</p>
+              </div>
+
+              {/* The sum of the tiles below it, so the card cannot disagree
+                  with its own numbers. */}
+              <div style={styles.laneTotal}>
+                <p style={styles.laneTotalValue}>{lane.total}</p>
+                <p style={styles.laneTotalLabel}>Total</p>
+              </div>
             </div>
 
             <div style={styles.figures}>
@@ -234,7 +246,28 @@ const styles = {
     flexDirection: "column",
     gap: 10,
   },
-  cardHead: { display: "flex", flexDirection: "column", gap: 2 },
+  cardHead: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  laneTotal: {
+    background: "#ffffff",
+    border: "1px solid #0f172a",
+    borderRadius: 10,
+    padding: "5px 11px",
+    textAlign: "center",
+    minWidth: 54,
+  },
+  laneTotalValue: { margin: 0, fontSize: 20, fontWeight: 700, color: "#0f172a" },
+  laneTotalLabel: {
+    margin: 0,
+    fontSize: 9,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    color: "#64748b",
+  },
   laneName: { margin: 0, fontSize: 16, fontWeight: 600, color: "#0f172a" },
   laneWhat: { margin: 0, fontSize: 12, color: "#4d6b96" },
   figures: { display: "flex", gap: 6, flexWrap: "wrap" },
