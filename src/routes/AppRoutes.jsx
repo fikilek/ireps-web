@@ -43,6 +43,7 @@ import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
 import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
 import TargetedBatchDashboardPage from "../pages/operations/TargetedBatchDashboardPage";
 import OperationsDashboardPage from "../pages/operations/OperationsDashboardPage";
+import ItoDashboardPage from "../pages/operations/ItoDashboardPage";
 import TargetedBatchDetailsPage from "../pages/operations/TargetedBatchDetailsPage";
 import TargetedBatchFinalReportPage from "../pages/operations/TargetedBatchFinalReportPage";
 import TargetedBatchAllocationPage from "../pages/operations/TargetedBatchAllocationPage";
@@ -480,6 +481,17 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <OperationsDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          {/* DR-R001 9.1: reached from the one Dashboard, no menu entry of
+              its own. */}
+          <Route
+            path="/operations/ito-dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <ItoDashboardPage />
               </RoleRoute>
             }
           />

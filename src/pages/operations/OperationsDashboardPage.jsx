@@ -118,8 +118,8 @@ export default function OperationsDashboardPage() {
       what: "Individually originated",
       figures: itoFigures(itoSummary, { ready }),
       aside: itoAside(itoSummary),
-      to: null,
-      open: "ITO dashboard — next",
+      to: "/operations/ito-dashboard",
+      open: "Open ITO dashboard",
       summary: itoSummary,
     },
   ];

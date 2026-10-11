@@ -41,11 +41,19 @@ export const ITO_TRN_TYPES = Object.freeze([
 export const ITO_ISSUED_STATES = Object.freeze(["ISSUED", "REASSIGNED"]);
 
 /**
- * A job a worker has taken. `IN_PROGRESS` is not written on this path -
- * *"There is nothing between accepted and done"* (`DR-R001` 5) - but if one
- * ever appears it belongs with accepted rather than in no figure at all.
+ * A job a worker has taken.
+ *
+ * There is NOTHING between accepted and submitted on this path. The owner,
+ * 9 October 2026 and again on 11 October: you allocate, he accepts, and the
+ * next thing is a submission or a no access - and a no access IS the end of
+ * it, there is nothing further he will do. Unlike a targeted batch, where a
+ * premise and a no access give the office something to watch, an individual
+ * transaction has no in-between for anyone to report.
+ *
+ * So `IN_PROGRESS` is not listed here, and is not quietly folded in either.
+ * If one ever reaches this screen it is a fault, and it surfaces as one.
  */
-export const ITO_ACCEPTED_STATES = Object.freeze(["ACCEPTED", "IN_PROGRESS"]);
+export const ITO_ACCEPTED_STATES = Object.freeze(["ACCEPTED"]);
 
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 

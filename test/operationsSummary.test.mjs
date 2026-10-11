@@ -64,6 +64,18 @@ test("the four figures are the request's own words, as on the worker's phone", (
   );
 });
 
+test("there is no in-progress on this path, and one would surface as a fault", () => {
+  // Owner, 9 and 11 October 2026: you allocate, he accepts, and the next
+  // thing is a submission or a no access - and a no access is the end of it.
+  // Nothing happens in between, so nothing is reported from in between.
+  assert.deepEqual(ITO_ACCEPTED_STATES, ["ACCEPTED"]);
+
+  const summary = summariseIto([trn("IN_PROGRESS")]);
+
+  assert.equal(summary.accepted, 0, "never quietly folded into accepted");
+  assert.deepEqual(summary.unaccounted, ["IN_PROGRESS"], "it shows, as the fault it would be");
+});
+
 test("every state a request can be in lands in a figure", () => {
   // DR-R001 5. A state added later with no home fails here, by name, rather
   // than appearing as numbers that do not add up.
