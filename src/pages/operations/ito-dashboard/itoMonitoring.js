@@ -59,20 +59,49 @@ export function columnFor(state) {
   return null;
 }
 
-/** The one worker a job is sitting with, or null. */
+/**
+ * The one worker a job is sitting with, or null.
+ *
+ * THREE SHAPES REACH THIS SCREEN and it must read all of them. The raw
+ * document keeps `assignment.targets`; `normalizeTrnDoc` flattens the first
+ * target to `target` / `targetType` / `targetId` / `targetName`; and the
+ * meter's own marker carries `assignedTo`. Reading one of the three put
+ * every job in Ward 6 under "Not with a worker" on the first build.
+ *
+ * `valueOrNav` turns a missing value into the literal string "NAv", so that
+ * is an absence here, not an id.
+ */
 export function holderOf(trn) {
+  const present = (value) => {
+    const v = text(value);
+
+    return v && upper(v) !== "NAV" ? v : "";
+  };
+
+  const named = (id, name) => (id ? { id, name: present(name) || NAV } : null);
+
   const targets = Array.isArray(trn?.assignment?.targets) ? trn.assignment.targets : [];
   const user = targets.find((target) => upper(target?.type) === "USER");
 
-  if (user) return { id: text(user.id || user.uid), name: text(user.name) || NAV };
+  if (user) {
+    const found = named(present(user.id) || present(user.uid), user.name);
+
+    if (found) return found;
+  }
+
+  // normalizeTrnDoc's flattened first target.
+  if (upper(trn?.targetType || trn?.target?.type) === "USER") {
+    const found = named(
+      present(trn?.targetId) || present(trn?.target?.id) || present(trn?.target?.uid),
+      trn?.targetName || trn?.target?.name,
+    );
+
+    if (found) return found;
+  }
 
   const assigned = trn?.assignedTo || trn?.trnActiveLifecycle?.assignedTo;
 
-  if (assigned?.id || assigned?.uid) {
-    return { id: text(assigned.id || assigned.uid), name: text(assigned.name) || NAV };
-  }
-
-  return null;
+  return named(present(assigned?.id) || present(assigned?.uid), assigned?.name);
 }
 
 function issuedAtMs(trn) {

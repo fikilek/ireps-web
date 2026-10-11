@@ -220,3 +220,36 @@ test("the worker with the most still waiting comes first", () => {
 
   assert.equal(rows[0].uid, "busy");
 });
+
+test("the holder is found in all three shapes this screen is fed", () => {
+  // The first build read only assignment.targets, so every job in Ward 6
+  // landed under "Not with a worker". normalizeTrnDoc flattens the first
+  // target instead, and valueOrNav writes the literal string "NAv" where a
+  // value is missing - which is an absence, not an id.
+  assert.deepEqual(
+    holderOf({ targetType: "USER", targetId: "u7", targetName: "Kaiser Kaiser" }),
+    { id: "u7", name: "Kaiser Kaiser" },
+  );
+
+  assert.deepEqual(
+    holderOf({ target: { type: "USER", id: "u8", name: "Peter M." } }),
+    { id: "u8", name: "Peter M." },
+  );
+
+  assert.equal(
+    holderOf({ targetType: "USER", targetId: "NAv", targetName: "NAv" }),
+    null,
+    "NAv is an absence, never an id",
+  );
+
+  assert.equal(holderOf({ targetType: "TEAM", targetId: "t1" }), null, "a team is not a worker");
+});
+
+test("the ward stream's normaliser carries the flattened target this reads", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/redux/trnsApi.js", import.meta.url), "utf8");
+  const normaliser = source.slice(source.indexOf("function normalizeTrnDoc"));
+
+  assert.match(normaliser.slice(0, 3000), /targetId: target\.id/);
+  assert.match(normaliser.slice(0, 3000), /targetType: target\.type/);
+});
