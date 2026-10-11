@@ -332,10 +332,17 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         Array.isArray(data?.media) &&
         data.media.some((item) => item?.tag === "instructionMedia");
 
+      // `DR-R001` 5: the launch button creates a transaction with nobody on
+      // it. A worker's name arrives later, on the ITO page, which allocates.
+      // Both arrive here - with targets it is created and issued in one act,
+      // which is how the Waiting view's "allocate from here" will work too.
+      const allocating =
+        Array.isArray(data?.assignment?.targets) && data.assignment.targets.length > 0;
+
       const assignmentCheck = validateLifecycleInstructionAssignment(
         data?.assignment || {},
         trnType,
-        { hasInstructionMedia: instructionMediaAttached },
+        { hasInstructionMedia: instructionMediaAttached, allocating },
       );
 
       if (!assignmentCheck.ok) {
@@ -350,9 +357,9 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         );
       }
 
-      const individualTargetCheck = validateIndividualLaneTargets(
-        data?.assignment || {},
-      );
+      const individualTargetCheck = allocating
+        ? validateIndividualLaneTargets(data?.assignment || {})
+        : { ok: true };
 
       if (!individualTargetCheck.ok) {
         return buildFailureResult(
@@ -518,6 +525,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
           now,
           actorUid,
           actorName,
+          allocating,
         });
 
         const targets = Array.isArray(cleanInstructionTrn?.assignment?.targets)

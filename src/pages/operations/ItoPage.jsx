@@ -17,18 +17,18 @@
 // owner's standard is that a screen never shows the office nothing.
 import { useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
-import { ITO_TRANSACTIONS, readItoCount } from "../../components/ito/itoTransactions";
+import { ITO_TRANSACTIONS, readItoCount, allocatingTrnId } from "../../components/ito/itoTransactions";
 import { itoReasonProblem, itoReasonsFor } from "../../components/ito/itoReasons";
 import { buildWorkerChoices } from "../../components/ito/itoWorkers";
 import ItoMap from "../../components/ito/ItoMap";
 import { readPoint } from "../../components/ito/geoDistance";
 import ItoWorkerPicker from "../../components/ito/ItoWorkerPicker";
 import SubmitWindow from "../../components/submit/SubmitWindow.jsx";
-import { buildItoRequest, itoSendProblem } from "../../components/ito/itoRequest";
-import { ITO_STEPS, sendItoRequest } from "../../components/ito/sendItoRequest";
+import { buildItoAllocation, itoSendProblem } from "../../components/ito/itoRequest";
+import { ITO_STEPS, allocateItoRequest } from "../../components/ito/sendItoRequest";
 import {
   useGetMeterByIdQuery,
   useGetPremiseByIdQuery,
@@ -101,6 +101,7 @@ function workName(name) {
 
 export default function ItoPage() {
   const { astId, work } = useParams();
+  const [search] = useSearchParams();
   const navigate = useNavigate();
   const { activeWorkbase, serviceProvider } = useAuth() || {};
 
@@ -113,6 +114,14 @@ export default function ItoPage() {
   );
 
   const { data: meter, isLoading, isError } = useGetMeterByIdQuery(astId);
+
+  // The transaction this page allocates. The button made it; this page puts
+  // a name, a reason and words on it (`DR-R001` 5).
+  const trnId = allocatingTrnId({
+    fromUrl: search.get("trn"),
+    meter,
+    transaction,
+  });
 
   // Step 5: the meter on the ground, and who can be sent to it.
   const meterPoint = readPoint(meter?.ast?.location?.gps);
@@ -142,15 +151,14 @@ export default function ItoPage() {
   const [outcome, setOutcome] = useState(null);
 
   async function send() {
-    const built = buildItoRequest({
-      meter,
+    const built = buildItoAllocation({
+      trnId,
       work: transaction.work,
       worker: picked,
       reason: { ...(reasons.find((item) => item.code === reasonCode) || {}), explanation },
       instructionWords: instruction,
       media: [],
       hasImage: Boolean(image),
-      atMs: stampNow(),
     });
 
     if (!built.ok) {
@@ -162,8 +170,8 @@ export default function ItoPage() {
     setStepState({});
     setPhase("sending");
 
-    const result = await sendItoRequest({
-      request: built.request,
+    const result = await allocateItoRequest({
+      allocation: built.request,
       imageFile: image?.file || null,
       onStep: (key, state) => setStepState((current) => ({ ...current, [key]: state })),
     });
@@ -243,12 +251,17 @@ export default function ItoPage() {
   // What stops this being sent - the same question the request builder asks,
   // which is the same rule the server applies. The form refuses exactly what
   // the back refuses, so nothing is ever sent that was going to come back.
-  const problem = itoSendProblem({
-    work: transaction?.work,
-    reason: reasons.find((item) => item.code === reasonCode) || null,
-    explanation,
-    worker: picked,
-  });
+  const problem =
+    itoSendProblem({
+      work: transaction?.work,
+      reason: reasons.find((item) => item.code === reasonCode) || null,
+      explanation,
+      worker: picked,
+    }) ||
+    // THE FRONT MUST KNOW WHAT THE BACK KNOWS. Without a transaction the
+    // allocate has nothing to land on, and finding that out at Send would
+    // waste everything the office had typed.
+    (trnId ? null : "This page does not know which transaction it is allocating. Open it again from the meter's row.");
 
   function takeImage(file) {
     if (!file) return;
@@ -575,6 +588,11 @@ export default function ItoPage() {
               <dt style={styles.confirmKey}>Transaction</dt>
               <dd style={styles.confirmValue}>
                 <strong>{transaction.code}</strong> — {transaction.name}
+                <br />
+                {/* The work already exists - the button made it (`DR-R001`
+                    5) - so the office is shown its number before it sends,
+                    not only afterwards. */}
+                <span style={styles.sub}>{trnId || NAV}</span>
               </dd>
             </div>
             <div style={styles.confirmRow}>

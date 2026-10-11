@@ -8,14 +8,55 @@ import {
   buildTrnActiveLifecycle,
   getActorNameFromRequest,
   normalizeUpper,
+  sanitizeAssignment,
+  validateLifecycleInstructionAssignment,
 } from "./helpers.js";
-import { TRN_STATES } from "./trnStateMachine.js";
+import { TRN_STATES, canMoveAs, currentState } from "./trnStateMachine.js";
 
-const MANAGE_ACTIONS = ["REASSIGN", "CANCEL"];
+const MANAGE_ACTIONS = ["ALLOCATE", "REASSIGN", "CANCEL"];
 
-const REASSIGN_ALLOWED_STATES = ["ISSUED", "REJECTED"];
+/**
+ * What each action is, in the machine's own moves. `DR-R001` 5.
+ *
+ * ALLOCATE gives a waiting job to a worker. CANCEL is what the screens call
+ * UNALLOCATE: the office takes it back and it waits again. REASSIGN is both
+ * at once - take it off one man and give it to another - so it is checked as
+ * both moves, in order. Nothing here keeps its own list of which states an
+ * action is allowed from; that is the machine's answer, once.
+ */
+const ACTION_MOVES = {
+  ALLOCATE: ["allocate"],
+  CANCEL: ["cancel"],
+  REASSIGN: ["cancel", "allocate"],
+};
 
-const CANCEL_ALLOWED_STATES = ["ISSUED", "REJECTED"];
+/**
+ * Whether this actor may make this action's moves from this state, and where
+ * it ends up. A REASSIGN from ACCEPTED passes here because the machine lets
+ * a supervisor cancel accepted work - the override of `DR-R001` 5.5, for the
+ * man who took the job and then could not go.
+ */
+function checkAction({ action, state, role }) {
+  let from = currentState(state);
+
+  if (!from) {
+    return {
+      ok: false,
+      code: "UNKNOWN_TRN_STATE",
+      message: `${state || "A transaction with no state"} is not a state iREPS knows.`,
+    };
+  }
+
+  for (const move of ACTION_MOVES[action] || []) {
+    const result = canMoveAs(from, move, role);
+
+    if (!result.ok) return result;
+
+    from = result.to;
+  }
+
+  return { ok: true, to: from };
+}
 
 const MANAGED_LCT_TYPES = [
   "METER_INSPECTION",
@@ -228,6 +269,55 @@ function validateNewTargets(targets = []) {
   };
 }
 
+/**
+ * The instruction as it will stand once this allocate is written.
+ *
+ * `DR-R001` 3.4 and 5: the button creates the work, and the ITO page says
+ * why, in what words, and with what attached - at the moment it chooses the
+ * worker. So the instruction arrives HERE, not at creation.
+ *
+ * It is merged onto what the transaction already carries rather than
+ * replacing it, because creation wrote the code and an allocate that sent
+ * only a reason would otherwise wipe it.
+ */
+export function mergeInstruction({ trnData, instruction }) {
+  const stored = trnData?.assignment?.instruction || {};
+  const sent = instruction || {};
+
+  const merged = { ...stored, ...sent };
+
+  // The reason is a code and its words (`DR-R001` 3.4), so a partial reason
+  // would quietly keep half of an old one.
+  if (sent?.reason) merged.reason = { ...(stored.reason || {}), ...sent.reason };
+
+  return merged;
+}
+
+/**
+ * Whether this allocate's instruction is one iREPS may write. THE SAME
+ * VALIDATOR THE CREATE USES (owner, 10 October 2026: the same validation
+ * front and back). A second copy here is how the two lanes come to accept
+ * different work.
+ */
+export function checkAllocationInstruction({ trnData, trnType, instruction, targets, media }) {
+  const hasInstructionMedia =
+    (Array.isArray(media) ? media : []).some(
+      (item) => normalizeUpper(item?.tag) === "INSTRUCTIONMEDIA",
+    ) ||
+    (Array.isArray(trnData?.media) ? trnData.media : []).some(
+      (item) => normalizeUpper(item?.tag) === "INSTRUCTIONMEDIA",
+    );
+
+  return validateLifecycleInstructionAssignment(
+    {
+      instruction: mergeInstruction({ trnData, instruction }),
+      targets,
+    },
+    trnType,
+    { hasInstructionMedia, allocating: true },
+  );
+}
+
 function buildAssignmentHistoryItem({
   trnData,
   action,
@@ -261,17 +351,27 @@ function buildAssignmentHistoryItem({
   };
 }
 
-function buildReassignPatch({
+/**
+ * Putting a worker's name on a waiting job. `DR-R001` 5.
+ *
+ * One writer for ALLOCATE and REASSIGN, because they write the same thing: a
+ * name goes on, the state becomes ISSUED, and the clock starts. A second
+ * copy for the first allocate is how the two come to stamp different fields.
+ */
+function buildAllocatePatch({
   trnData,
   targets,
   reason,
+  instruction = null,
+  media = null,
   now,
   actorUid,
   actorName,
+  reassigning = false,
 }) {
   const currentCount = Number(trnData?.workflow?.reassignmentCount || 0);
 
-  return {
+  const patch = {
     "assignment.targets": targets,
 
     "assignment.acceptedRejectedAt": null,
@@ -279,11 +379,11 @@ function buildReassignPatch({
     "assignment.acceptedRejectedUser": null,
     "assignment.rejectReason": "",
 
-    "workflow.state": "ISSUED",
-    "workflow.reassignedAt": now,
-    "workflow.reassignedByUid": actorUid,
-    "workflow.reassignedByUser": actorName,
-    "workflow.reassignmentCount": currentCount + 1,
+    "workflow.state": TRN_STATES.ISSUED,
+    // `DR-R001` 5.6: the three-day clock runs from here, so it is stamped
+    // every time a name goes on. A job handed to a second man has waited on
+    // him since now, not since the first man was asked.
+    "workflow.issuedAt": now,
 
     "metadata.updatedAt": now,
     "metadata.updatedByUid": actorUid,
@@ -292,7 +392,7 @@ function buildReassignPatch({
     assignmentHistory: FieldValue.arrayUnion(
       buildAssignmentHistoryItem({
         trnData,
-        action: "REASSIGN",
+        action: reassigning ? "REASSIGN" : "ALLOCATE",
         reason,
         now,
         actorUid,
@@ -300,6 +400,28 @@ function buildReassignPatch({
       }),
     ),
   };
+
+  // The instruction is written only where one was sent. A reassign sends
+  // none and must not blank the one the worker before him was given.
+  if (instruction) {
+    patch["assignment.instruction"] = sanitizeAssignment({
+      instruction: mergeInstruction({ trnData, instruction }),
+      targets,
+    }).instruction;
+  }
+
+  if (Array.isArray(media) && media.length > 0) {
+    patch.media = FieldValue.arrayUnion(...media);
+  }
+
+  if (reassigning) {
+    patch["workflow.reassignedAt"] = now;
+    patch["workflow.reassignedByUid"] = actorUid;
+    patch["workflow.reassignedByUser"] = actorName;
+    patch["workflow.reassignmentCount"] = currentCount + 1;
+  }
+
+  return patch;
 }
 
 function buildCancelPatch({ trnData, cancelReason, now, actorUid, actorName }) {
@@ -402,12 +524,13 @@ function buildNotificationRecord({
   actorUid,
   actorName,
   now,
+  reassigning = false,
 }) {
   const targetType = normalizeUpper(target?.type || "USER");
   const targetName = String(target?.name || target?.id || "NAv").trim();
 
   return {
-    type: "MLCT_REASSIGNED",
+    type: reassigning ? "MLCT_REASSIGNED" : "MLCT_ISSUED",
     channelPreference: ["IN_APP", "EMAIL", "WHATSAPP"],
 
     recipient: {
@@ -425,11 +548,12 @@ function buildNotificationRecord({
     },
 
     message: {
-      title: "Lifecycle work reassigned",
-      body:
+      title: reassigning ? "Lifecycle work reassigned" : "Lifecycle work issued",
+      body: `A ${
         trnType === "METER_DISCONNECTION"
-          ? "A meter disconnection work item has been reassigned to you."
-          : "A meter lifecycle work item has been reassigned to you.",
+          ? "meter disconnection"
+          : "meter lifecycle"
+      } work item has been ${reassigning ? "reassigned" : "issued"} to you.`,
     },
 
     delivery: {
@@ -485,7 +609,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
     if (!authority.ok) {
       return buildFailureResult(
         "UNAUTHORIZED_LCT_MANAGER",
-        "Only MNG and SPV(MNC) can reassign or cancel lifecycle instructions",
+        "Only MNG and SPV(MNC) can allocate, reassign or cancel lifecycle instructions",
         {
           actorRole: authority.role,
           actorSpId: authority.spId,
@@ -503,10 +627,16 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
       data?.cancelReason || data?.reason || "",
     ).trim();
 
+    // What the ITO page fills in as it allocates: why, the words the worker
+    // reads, and anything attached (`DR-R001` 3.4). Absent on a reassign.
+    const instruction =
+      data?.instruction || data?.assignment?.instruction || null;
+    const media = Array.isArray(data?.media) ? data.media : [];
+
     if (!MANAGE_ACTIONS.includes(action)) {
       return buildFailureResult(
         "INVALID_MANAGE_ACTION",
-        "action must be REASSIGN or CANCEL",
+        "action must be ALLOCATE, REASSIGN or CANCEL",
       );
     }
 
@@ -529,7 +659,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
 
     let newTargets = null;
 
-    if (action === "REASSIGN") {
+    if (action === "ALLOCATE" || action === "REASSIGN") {
       const targetsCheck = validateNewTargets(getNewTargetsFromRequest(data));
 
       if (!targetsCheck.ok) {
@@ -649,104 +779,72 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           return;
         }
 
-        if (workflowState === "COMPLETED") {
-          responsePayload = buildFailureResult(
-            "TRN_ALREADY_COMPLETED",
-            "Completed lifecycle instructions cannot be reassigned or cancelled",
-            {
-              trnId: row.trnId,
-              trnType,
-              workflowState,
-            },
-          );
+        // ONE GATE. This used to be five hand-written refusals - completed,
+        // cancelled, in progress, and a list of allowed states for each
+        // action - each able to disagree with the others and with the rule.
+        // The machine answers it once, and its refusal says what the state
+        // CAN take instead of only no (`DR-R001` 5).
+        const check = checkAction({
+          action,
+          state: workflowState,
+          role: authority.role,
+        });
+
+        if (!check.ok) {
+          responsePayload = buildFailureResult(check.code, check.message, {
+            trnId: row.trnId,
+            trnType,
+            workflowState: currentState(workflowState) || workflowState || "NAv",
+          });
 
           return;
         }
 
-        if (workflowState === "CANCELLED") {
-          responsePayload = buildFailureResult(
-            "TRN_ALREADY_CANCELLED",
-            "Cancelled lifecycle instructions cannot be changed",
-            {
-              trnId: row.trnId,
-              trnType,
-              workflowState,
-            },
-          );
+        if (action === "ALLOCATE") {
+          const instructionCheck = checkAllocationInstruction({
+            trnData: row.data,
+            trnType,
+            instruction,
+            targets: newTargets,
+            media,
+          });
 
-          return;
+          if (!instructionCheck.ok) {
+            responsePayload = buildFailureResult(
+              instructionCheck.code,
+              instructionCheck.message,
+              { trnId: row.trnId, trnType },
+            );
+
+            return;
+          }
         }
 
-        if (workflowState === "IN_PROGRESS") {
-          responsePayload = buildFailureResult(
-            "TRN_IN_PROGRESS",
-            "In-progress lifecycle instructions cannot be reassigned or cancelled",
-            {
-              trnId: row.trnId,
-              trnType,
-              workflowState,
-            },
-          );
-
-          return;
-        }
-
-        if (
-          action === "REASSIGN" &&
-          !REASSIGN_ALLOWED_STATES.includes(workflowState)
-        ) {
-          responsePayload = buildFailureResult(
-            "INVALID_REASSIGN_STATE",
-            "Only ISSUED or REJECTED lifecycle instructions can be reassigned",
-            {
-              trnId: row.trnId,
-              trnType,
-              workflowState: workflowState || "NAv",
-            },
-          );
-
-          return;
-        }
-
-        if (
-          action === "CANCEL" &&
-          !CANCEL_ALLOWED_STATES.includes(workflowState)
-        ) {
-          responsePayload = buildFailureResult(
-            "INVALID_CANCEL_STATE",
-            "Only ISSUED or REJECTED lifecycle instructions can be cancelled",
-            {
-              trnId: row.trnId,
-              trnType,
-              workflowState: workflowState || "NAv",
-            },
-          );
-
-          return;
-        }
+        row.nextState = check.to;
       }
 
-      // `DR-R001` 5: both land in CREATED. A reassign is an allocate to
-      // somebody else, and a cancel - the office taking work back, which the
-      // screens call UNALLOCATE - leaves it with nobody. Neither rests in a
-      // state of its own; what happened is in the history (5.1, 5.7).
-      const nextWorkflowState =
-        action === "REASSIGN" ? TRN_STATES.ISSUED : TRN_STATES.CREATED;
+      // Where each action lands comes from the machine, which checked every
+      // row above - never from a second reading of the action here.
+      const nextWorkflowState = rows[0]?.nextState || TRN_STATES.CREATED;
+      const allocating = action === "ALLOCATE" || action === "REASSIGN";
 
       for (const row of rows) {
         const trnType = getTrnType(row.data) || "NAv";
         const astId = getAstId(row.data);
 
-        if (action === "REASSIGN") {
+        if (allocating) {
           tx.update(
             row.ref,
-            buildReassignPatch({
+            buildAllocatePatch({
               trnData: row.data,
               targets: newTargets,
               reason,
+              instruction: action === "ALLOCATE" ? instruction : null,
+              media: action === "ALLOCATE" ? media : null,
               now,
               actorUid,
               actorName,
+              reassigning: action === "REASSIGN",
             }),
           );
         }
@@ -771,8 +869,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
         // After a cancel nobody holds it, so the meter's marker names
         // nobody. The meter is still held - CREATED holds it (5.2) - by a
         // job waiting to be given out rather than by a worker.
-        const assignedTo =
-          action === "REASSIGN" ? newTargets?.[0] || {} : {};
+        const assignedTo = allocating ? newTargets?.[0] || {} : {};
 
         tx.update(
           db.collection("asts").doc(astId),
@@ -796,21 +893,28 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             trnType,
             astId,
             // The event is what happened; the state is where it landed.
-            event: action === "REASSIGN" ? "REASSIGNED" : "CANCELLED",
+            // `ALLOCATED` and `REASSIGNED` both land in ISSUED, and only the
+            // history can tell the office which of the two it was.
+            event:
+              action === "CANCEL"
+                ? "CANCELLED"
+                : action === "REASSIGN"
+                  ? "REASSIGNED"
+                  : "ALLOCATED",
             workflowState: nextWorkflowState,
             actorUid,
             actorName,
             now,
             note:
-              action === "REASSIGN"
-                ? `Lifecycle instruction reassigned and returned to ISSUED: ${
-                    reason || "NAv"
-                  }`
-                : `Lifecycle instruction cancelled: ${cancelReason}`,
+              action === "CANCEL"
+                ? `Lifecycle instruction cancelled: ${cancelReason}`
+                : `Lifecycle instruction ${
+                    action === "REASSIGN" ? "reassigned" : "allocated"
+                  } to ${newTargets?.[0]?.name || "NAv"}: ${reason || "NAv"}`,
           }),
         );
 
-        if (action === "REASSIGN") {
+        if (allocating) {
           for (const target of newTargets) {
             const notificationRef = db.collection("notifications").doc();
 
@@ -819,11 +923,12 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
               buildNotificationRecord({
                 trnId: row.trnId,
                 trnType,
-                workflowState: "ISSUED",
+                workflowState: TRN_STATES.ISSUED,
                 target,
                 actorUid,
                 actorName,
                 now,
+                reassigning: action === "REASSIGN",
               }),
             );
           }
@@ -832,9 +937,11 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
 
       responsePayload = buildSuccessResult(
         trnIds.length === 1 ? trnIds[0] : "MULTI",
-        action === "REASSIGN"
-          ? "Lifecycle instruction reassigned successfully"
-          : "Lifecycle instruction cancelled successfully",
+        action === "CANCEL"
+          ? "Lifecycle instruction cancelled successfully"
+          : `Lifecycle instruction ${
+              action === "REASSIGN" ? "reassigned" : "allocated"
+            } successfully`,
         {
           action,
           trnIds,

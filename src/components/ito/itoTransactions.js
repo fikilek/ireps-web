@@ -147,3 +147,36 @@ export function openJobForWork(row, transaction) {
 
   return String(open.trnType || "").toUpperCase() === transaction.trnType ? open : null;
 }
+
+/**
+ * Which transaction the ITO page is allocating, or `""`.
+ *
+ * `DR-R001` 5, owner 11 October 2026: the button on the meter's row creates
+ * the work and the page allocates it, so the page does not make a
+ * transaction - it is handed one.
+ *
+ * TWO WAYS IN, ONE ANSWER, and that is deliberate rather than a hedge. The
+ * button has just created it and says which in the address, so that is read
+ * first. A page reloaded or opened from a bookmark has no such address, and
+ * the meter's own marker names the one job of this kind out on it - which by
+ * `DR-R001` 5.2 is the same job, because a second of its kind cannot exist.
+ * Both are read HERE so there is one answer and not two.
+ *
+ * Empty is a fault to show, not a gap to fill: an allocate with no
+ * transaction behind it would create nothing and refuse at the last step,
+ * after the office had filled in the whole form.
+ */
+export function allocatingTrnId({ fromUrl, meter, transaction } = {}) {
+  const said = String(fromUrl || "").trim();
+
+  if (said) return said;
+
+  const marker = meter?.trnActiveLifecycle || null;
+  const markedType = String(marker?.trnType || "").toUpperCase();
+
+  if (marker?.trnId && markedType === transaction?.trnType) {
+    return String(marker.trnId).trim();
+  }
+
+  return "";
+}

@@ -102,6 +102,81 @@ export function itoSendProblem({ work, reason, explanation, worker } = {}) {
   return null;
 }
 
+/**
+ * The allocate the ITO page sends. `DR-R001` 3.4, 5.
+ *
+ * The transaction already exists - the button made it - so this carries only
+ * what the page decided: who it goes to, why, in what words, and whatever is
+ * attached. It goes to `onManageLifecycleInstructionCallable`, the office's
+ * own callable, which validates it through the same well the create uses.
+ */
+export function buildItoAllocation({
+  trnId,
+  work,
+  worker,
+  reason,
+  instructionWords,
+  media = [],
+  hasImage = false,
+} = {}) {
+  const trnType = TRN_TYPE_BY_WORK[String(work || "").toLowerCase()];
+
+  if (!trnType) return { ok: false, message: "That is not a transaction iREPS sends." };
+
+  const id = String(trnId || "").trim();
+
+  if (!id) {
+    return {
+      ok: false,
+      message:
+        "This page does not know which transaction it is allocating, so nothing can be sent. Open it again from the meter's row.",
+    };
+  }
+
+  const workerUid = String(worker?.uid || "").trim();
+
+  const problem = itoSendProblem({
+    work,
+    reason,
+    explanation: reason?.explanation,
+    instructionWords,
+    hasImage,
+    worker: { uid: workerUid },
+  });
+
+  if (problem) return { ok: false, message: problem };
+
+  const said = String(instructionWords ?? "").trim();
+
+  return {
+    ok: true,
+    id,
+    request: {
+      action: "ALLOCATE",
+      trnId: id,
+      targets: [
+        {
+          type: "USER",
+          id: workerUid,
+          uid: workerUid,
+          name: text(worker?.name),
+        },
+      ],
+      instruction: {
+        code: trnType,
+        reason: {
+          code: reason.code,
+          words: text(reason.words),
+          explanation: text(reason.explanation),
+        },
+        text: said || "NAv",
+        mediaRequired: false,
+      },
+      media,
+    },
+  };
+}
+
 const text = (value) => {
   const said = String(value ?? "").trim();
 
@@ -115,6 +190,64 @@ const text = (value) => {
  * It refuses rather than sending half a request: the server would refuse it
  * anyway, and a refusal the office can read beats `INVALID_PREMISE_ID`.
  */
+/**
+ * NAv IS NOT A VALUE. Owner, 30 September 2026: it marks a gap, so a reader
+ * must never pass it on as if it were the thing it stands for. A registry row
+ * writes "NAv" where a meter has no premise or no ward, and handing that
+ * through would create a job whose premise is the word NAv - which exists and
+ * cannot be found.
+ */
+export function notNav(value) {
+  const said = String(value ?? "").trim();
+
+  return said && said.toUpperCase() !== "NAV" ? said : "";
+}
+
+/**
+ * The registry row, in the shape the ITO request builder reads.
+ *
+ * The row already holds everything the create needs - the meter, its premise,
+ * its ERF, its municipality and its ward - so no second read is made for it.
+ * The server builds the job's own access block from the ASSET (`DR-R001` 3.4,
+ * `TR-R001`), so this is what the office is looking at, used to make the
+ * number and to refuse early where a fact is missing.
+ */
+export function meterFromRegistryRow(row) {
+  const astId = notNav(row?.meterId) || String(row?.id || "");
+
+  return {
+    id: astId,
+    meterType: row?.meterType,
+    ast: { astData: { astId } },
+    accessData: {
+      erfId: notNav(row?.erfId),
+      erfNo: notNav(row?.erfNo),
+      premise: {
+        id: notNav(row?.premiseId),
+        address: notNav(row?.premiseAddress),
+      },
+      parents: {
+        lmPcode: notNav(row?.lmPcode),
+        wardPcode: notNav(row?.wardPcode),
+      },
+    },
+  };
+}
+
+/**
+ * Everything the create callable needs to write the job, or the reason it
+ * cannot be built.
+ *
+ * TWO SHAPES, ONE BUILDER. `DR-R001` 5, owner 11 October 2026: the button on
+ * the meter's row CREATES the work, and the ITO page ALLOCATES it. The button
+ * knows two facts - this meter, this kind of work - and nothing else, so with
+ * `allocating: false` this builds a transaction with nobody on it and no
+ * reason yet. The meter's own checks, the id and the access block are the
+ * same either way, which is why they are not written twice.
+ *
+ * It refuses rather than sending half a request: the server would refuse it
+ * anyway, and a refusal the office can read beats `INVALID_PREMISE_ID`.
+ */
 export function buildItoRequest({
   meter,
   work,
@@ -124,6 +257,7 @@ export function buildItoRequest({
   media = [],
   hasImage = false,
   atMs,
+  allocating = true,
 } = {}) {
   const trnType = TRN_TYPE_BY_WORK[String(work || "").toLowerCase()];
 
@@ -157,14 +291,18 @@ export function buildItoRequest({
     };
   }
 
-  const problem = itoSendProblem({
-    work,
-    reason,
-    explanation: reason?.explanation,
-    instructionWords,
-    hasImage,
-    worker: { uid: workerUid },
-  });
+  // The worker and the reason are the ITO page's to supply. Demanding them
+  // at the button would refuse the owner's own flow.
+  const problem = allocating
+    ? itoSendProblem({
+        work,
+        reason,
+        explanation: reason?.explanation,
+        instructionWords,
+        hasImage,
+        worker: { uid: workerUid },
+      })
+    : null;
 
   if (problem) return { ok: false, message: problem };
 
@@ -203,15 +341,19 @@ export function buildItoRequest({
       },
       assignment: {
         // An individual request goes to exactly one field worker, never to a
-        // team and never to a service provider (DR-R001 4).
-        targets: [
-          {
-            type: "USER",
-            id: workerUid,
-            uid: workerUid,
-            name: text(worker?.name),
-          },
-        ],
+        // team and never to a service provider (DR-R001 4) - and to NOBODY
+        // while it is only created. A name here would make the job somebody's
+        // before the office had chosen him.
+        targets: allocating
+          ? [
+              {
+                type: "USER",
+                id: workerUid,
+                uid: workerUid,
+                name: text(worker?.name),
+              },
+            ]
+          : [],
         instruction: {
           // The server requires this to equal the transaction type, which is
           // why the reason needs a field of its own below.
@@ -221,10 +363,13 @@ export function buildItoRequest({
           // uncountable and a code survives it - and this wording is changing
           // now, from Credit Control Instruction and Non Payment to Client
           // instruction and Customer instruction.
+          // Nothing has been chosen yet on a create, and where there is
+          // nothing to write iREPS writes NAv - which the server refuses as
+          // a reason, so this cannot be allocated until the page says why.
           reason: {
-            code: reason.code,
-            words: text(reason.words),
-            explanation: text(reason.explanation),
+            code: allocating ? reason.code : "NAv",
+            words: text(allocating ? reason.words : ""),
+            explanation: text(allocating ? reason.explanation : ""),
           },
           // The words the worker reads, which the server requires for
           // everything but a meter reading. It is `text`, not `note`.

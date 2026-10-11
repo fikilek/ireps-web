@@ -51,15 +51,10 @@ export const OFFICE_LCT_INSTRUCTION_TRN_TYPES = [
 // right the moment one exists.
 export const ACTIVE_LCT_WORKFLOW_STATES = STATES_HOLDING_THE_METER;
 
-export const LCT_WORKFLOW_STATES = [
-  "ISSUED",
-  "REASSIGNED",
-  "ACCEPTED",
-  "REJECTED",
-  "IN_PROGRESS",
-  "COMPLETED",
-  "CANCELLED",
-];
+// `LCT_WORKFLOW_STATES` - the old seven words - was removed on 11 October
+// 2026. Nothing read it, and a list of seven states standing beside a
+// machine of five is an invitation to use the wrong one. `TRN_STATE_LIST` in
+// `meterLifecycle/trnStateMachine.js` is the list.
 
 export const COMMISSIONING_MEDIA_TAGS = {
   vendingEvidence: "vendingEvidence",
@@ -401,7 +396,25 @@ export function normalizeAssignmentTargets(assignment = {}) {
 export function validateAssignment(
   assignment = {},
   trnType = "NAv",
-  { originChannel = "", hasInstructionMedia = false, requireReason = false } = {},
+  {
+    originChannel = "",
+    hasInstructionMedia = false,
+    requireReason = false,
+    // `DR-R001` 5: a transaction is CREATED before it is allocated, so it
+    // may legitimately have nobody on it yet.
+    //
+    // WHAT A CREATE CARRIES, AND WHAT AN ALLOCATE CARRIES. A correction to my
+    // own first reading of this, 11 October 2026: I wrote here that the
+    // reason is still required at creation - "the office says why the work
+    // exists at the moment it makes it". The owner's flow says otherwise.
+    // The button on the meter's row carries only two facts, the meter and
+    // the kind of work; the reason, the words and the worker are all chosen
+    // on the ITO page afterwards. So the reason is required to ALLOCATE, not
+    // to create, and the two travel on the same flag. The instruction is
+    // nothing to write until then, and where there is nothing to write iREPS
+    // writes NAv.
+    allocating = true,
+  } = {},
 ) {
   const instruction = assignment?.instruction || {};
   const targets = normalizeAssignmentTargets(assignment);
@@ -466,8 +479,19 @@ export function validateAssignment(
   // Only the OFFICE lane carries a reason. A disconnection locked onto a
   // Meter Discovery finding is field-originated: the finding IS the reason,
   // and demanding an ITO one would refuse work the rules require (MN-R001).
-  if (requireReason) {
-    const reasonCode = String(instruction?.reason?.code || "").trim();
+  if (requireReason && allocating) {
+    // NAv IS NOT A REASON. Owner, 30 September 2026: NAv marks a gap, and a
+    // gap must never satisfy the thing it is a gap in.
+    //
+    // Found on 11 October while building the allocate: a transaction created
+    // at the ITO button carries `reason.code: "NAv"` - correctly, because
+    // nothing has been chosen yet - and this check only asked whether the
+    // string was empty. So an allocate that sent no reason at all passed,
+    // and the job reached a worker with NAv where its reason should be. The
+    // explanation check two lines down already knew this; the code did not.
+    const reasonCode = String(instruction?.reason?.code || "")
+      .trim()
+      .replace(/^NAv$/i, "");
 
     if (!reasonCode) {
       return {
@@ -491,7 +515,7 @@ export function validateAssignment(
 
   // Nobody assigned it either. TR-R001: `assignment` is `{}` for work a worker started
   // themselves - no instruction, and therefore no one it was issued to.
-  if (targets.length === 0 && !fieldInstructionOptional) {
+  if (allocating && targets.length === 0 && !fieldInstructionOptional) {
     return {
       ok: false,
       code: "INVALID_ASSIGNMENT_TARGETS",
@@ -3188,12 +3212,16 @@ export function validateCreateLifecycleInstructionInput(data = {}) {
 export function validateLifecycleInstructionAssignment(
   assignment = {},
   trnType = "NAv",
-  { hasInstructionMedia = false } = {},
+  { hasInstructionMedia = false, allocating = true } = {},
 ) {
   // This is the office lane's own validator - the only caller is the callable
   // that creates an instruction from Operations - so the reason is required
   // here and nowhere else.
-  return validateAssignment(assignment, trnType, { hasInstructionMedia, requireReason: true });
+  return validateAssignment(assignment, trnType, {
+    hasInstructionMedia,
+    requireReason: true,
+    allocating,
+  });
 }
 
 export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
@@ -3349,6 +3377,7 @@ export function buildLifecycleInstructionTrnPayload({
   now,
   actorUid,
   actorName,
+  allocating = true,
 }) {
   const trnType = normalizeUpper(
     data?.trnType || data?.accessData?.trnType || "",
@@ -3408,12 +3437,17 @@ export function buildLifecycleInstructionTrnPayload({
     assignment: sanitizeAssignment(data?.assignment || {}),
 
     workflow: {
-      state: "ISSUED",
+      // `DR-R001` 5: pressing the launch button CREATES the transaction. It
+      // is only ISSUED when a worker's name goes on it, which happens on the
+      // ITO page. A job with nobody on it is CREATED, and has no issued time
+      // because it has not been issued - NAv is the honest answer, and a
+      // date here would make the three-day clock start on a job nobody has.
+      state: allocating ? "ISSUED" : "CREATED",
       // `DR-R001` 3.5: the send stamps when it was issued. Nothing wrote it,
       // so nothing could say how long a job had been waiting - and the
       // reminder ladder of section 8 and the monitoring screen of 9.1 are
       // both built on knowing exactly that.
-      issuedAt: now,
+      issuedAt: allocating ? now : null,
       createdMode: "OFFICE",
       reassignmentCount: 0,
       executionStartedAt: null,

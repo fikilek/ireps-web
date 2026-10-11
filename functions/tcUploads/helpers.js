@@ -1,13 +1,19 @@
 import { createHash } from "node:crypto";
 
+import {
+  STATES_HOLDING_THE_METER,
+  currentState,
+} from "../meterLifecycle/trnStateMachine.js";
+
 export const TC_ALLOWED_ROLES = ["SPU", "ADM", "MNG", "SPV"];
 
-export const TC_ACTIVE_WORKFLOW_STATES = [
-  "ISSUED",
-  "ACCEPTED",
-  "REASSIGNED",
-  "IN_PROGRESS",
-];
+// ONE WELL: which states mean work is already out on this meter is the state
+// machine's answer (`DR-R001` 5.2), not a second list kept here.
+//
+// It gained CREATED on 11 October 2026, and that is not cosmetic: a job made
+// by the ITO button has nobody on it yet, and a BGO batch that read it as
+// free would put a second disconnection out on the same meter.
+export const TC_ACTIVE_WORKFLOW_STATES = STATES_HOLDING_THE_METER;
 
 export const TC_TRN_TYPE_TO_CODE = {
   METER_DISCONNECTION: "MDCN",
@@ -475,7 +481,11 @@ export function getActiveSameOperationLifecycle({ trnType, astData }) {
   const workflowState = normalizeUpper(lifecycle?.workflowState);
 
   if (lifecycleTrnType !== requestedTrnType) return null;
-  if (!TC_ACTIVE_WORKFLOW_STATES.includes(workflowState)) return null;
+  // The meter's own marker may still carry one of the four old words, so the
+  // stored value is placed on one of the five before it is tested.
+  if (!TC_ACTIVE_WORKFLOW_STATES.includes(currentState(workflowState))) {
+    return null;
+  }
 
   return {
     trnId: lifecycle?.trnId || "NAv",

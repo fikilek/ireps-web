@@ -108,19 +108,43 @@ export const OLD_STATE_LANDS_IN = Object.freeze({
 
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 
+/**
+ * The state a stored value means TODAY, placed on one of the five.
+ *
+ * Records written before 11 October 2026 - and the copies of the state kept
+ * on the meter and on its registry row - may still carry one of the four old
+ * words. A reader that tested them against the five directly would read
+ * `REASSIGNED` as "no state" and so read a meter with work out on it as
+ * free. This is the one seam where the old words are understood; everything
+ * else asks for one of the five.
+ *
+ * Returns "" for a value that cannot be placed - which is a fault to show,
+ * not a gap to fill with a plausible state.
+ */
+export function currentState(raw) {
+  const state = upper(raw);
+
+  if (TRN_STATE_LIST.includes(state)) return state;
+
+  return OLD_STATE_LANDS_IN[state] || "";
+}
+
 /** Is this one of the five? */
 export function isTrnState(state) {
   return TRN_STATE_LIST.includes(upper(state));
 }
 
-/** Does a job in this state hold its meter against another of its kind? */
+/**
+ * Does a job in this state hold its meter against another of its kind?
+ * It reads stored state, so it places an old word first (`currentState`).
+ */
 export function holdsTheMeter(state) {
-  return STATES_HOLDING_THE_METER.includes(upper(state));
+  return STATES_HOLDING_THE_METER.includes(currentState(state));
 }
 
 /** Is this job the worker's, and so drawn on his phone? */
 export function theWorkerSees(state) {
-  return STATES_THE_WORKER_SEES.includes(upper(state));
+  return STATES_THE_WORKER_SEES.includes(currentState(state));
 }
 
 /**

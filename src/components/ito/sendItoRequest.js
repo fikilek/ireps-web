@@ -45,37 +45,73 @@ const REFUSALS = Object.freeze({
     "You cannot send work out. Only a manager, or a supervisor of the main contractor, can.",
   INVALID_ASSIGNMENT_TARGETS: "Choose the field worker this goes to.",
   UNAUTHENTICATED: "You are signed out. Sign in and send it again.",
+  INVALID_ASSIGNMENT_INSTRUCTION_REASON: "Choose why this work is being sent.",
+  INVALID_ASSIGNMENT_INSTRUCTION_REASON_EXPLANATION:
+    "Say what the other reason is.",
+  // The office's own callable refuses by the state machine's words, which
+  // already say what the state can take instead (`DR-R001` 5), so those are
+  // passed through rather than rewritten here.
+  UNAUTHORIZED_LCT_MANAGER:
+    "You cannot allocate work. Only a manager, or a supervisor of the main contractor, can.",
+  TRN_NOT_FOUND:
+    "This transaction is no longer in iREPS, so it cannot be allocated. Start again from the meter's row.",
 });
 
-export const ITO_STEPS = Object.freeze({
-  attach: "attach",
-  write: "write",
-});
+/**
+ * Making the work, at the button on the meter's row. `DR-R001` 3.2, 5.
+ *
+ * It writes a transaction with NOBODY ON IT - the office has chosen only the
+ * meter and the kind of work - and the ITO page then allocates it. No image
+ * goes up here: an image belongs to the instruction, and the instruction is
+ * what the page fills in.
+ *
+ * It never throws. A create that does not come back is the one case where we
+ * do not know whether the work exists, and the office is told exactly that
+ * rather than a guess either way.
+ */
+export async function createItoTransaction({ request }) {
+  try {
+    const callable = httpsCallable(functions, "onCreateMeterLifecycleInstructionCallable");
+    const response = await callable(request);
+    const result = response?.data || {};
 
-/** Where an office instruction's image lives. */
-export function instructionMediaPath({ trnId, fileName }) {
-  const safe = String(fileName || "instruction")
-    .replace(/[^A-Za-z0-9._-]/g, "_")
-    .slice(-60);
+    if (result?.success) return { ok: true, wrote: true, trnId: request.id, result };
 
-  return `lifecycleInstructions/${trnId}/${Date.now()}_${safe}`;
+    return {
+      ok: false,
+      wrote: false,
+      message:
+        REFUSALS[result?.code] || result?.message || "This work could not be created.",
+      code: result?.code || "NAv",
+      checks: result?.data?.checks || result?.checks || [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      wrote: null,
+      message:
+        "iREPS could not be reached, so this work may or may not have been created. Look at the meter's row again before pressing it a second time.",
+      detail: error?.message || String(error),
+    };
+  }
 }
 
 /**
- * Sends one request, reporting each stage as it really happens.
+ * Allocating it, on the ITO page. `DR-R001` 3.4, 3.5, 5.
  *
- * It never throws: the office gets an answer either way, and the answer says
- * whether anything was written. A thrown error that reached the window would
- * leave the office looking at a spinner.
+ * The same two steps the office has always watched - the attachment going
+ * up, then the write - because that is still what happens. What changed is
+ * which callable does the write: the transaction already exists, so this
+ * puts a name on it rather than creating one.
  */
-export async function sendItoRequest({ request, imageFile = null, onStep = () => {} }) {
-  let media = Array.isArray(request?.media) ? [...request.media] : [];
+export async function allocateItoRequest({ allocation, imageFile = null, onStep = () => {} }) {
+  let media = Array.isArray(allocation?.media) ? [...allocation.media] : [];
 
   if (imageFile) {
     onStep(ITO_STEPS.attach, "active");
 
     try {
-      const path = instructionMediaPath({ trnId: request.id, fileName: imageFile.name });
+      const path = instructionMediaPath({ trnId: allocation.trnId, fileName: imageFile.name });
       const objectRef = ref(storage, path);
 
       await uploadBytes(objectRef, imageFile, { contentType: imageFile.type || "image/jpeg" });
@@ -98,7 +134,7 @@ export async function sendItoRequest({ request, imageFile = null, onStep = () =>
         ok: false,
         wrote: false,
         message:
-          "The image could not be attached, so nothing was sent. Everything you typed is still on the form — try again, or remove the image and send without it.",
+          "The image could not be attached, so nothing was sent. Everything you typed is still on the form - try again, or remove the image and send without it.",
         detail: error?.message || String(error),
       };
     }
@@ -107,41 +143,53 @@ export async function sendItoRequest({ request, imageFile = null, onStep = () =>
   onStep(ITO_STEPS.write, "active");
 
   try {
-    const callable = httpsCallable(functions, "onCreateMeterLifecycleInstructionCallable");
-    const response = await callable({ ...request, media });
+    const callable = httpsCallable(functions, "onManageLifecycleInstructionCallable");
+    const response = await callable({ ...allocation, media });
     const result = response?.data || {};
 
     if (result?.success) {
       onStep(ITO_STEPS.write, "done");
 
-      return { ok: true, wrote: true, trnId: request.id, result };
+      return { ok: true, wrote: true, trnId: allocation.trnId, result };
     }
 
     onStep(ITO_STEPS.write, "failed");
 
-    // The server refused on a rule. It wrote nothing: its create runs in one
-    // transaction, so a refusal leaves the meter exactly as it was.
+    // The server refused on a rule, and wrote nothing: its allocate runs in
+    // one transaction, so the job is exactly as it was - still waiting.
     return {
       ok: false,
       wrote: false,
       message:
-        REFUSALS[result?.code] || result?.message || "The office could not send this work.",
+        REFUSALS[result?.code] || result?.message || "The office could not allocate this work.",
       code: result?.code || "NAv",
     };
   } catch (error) {
     onStep(ITO_STEPS.write, "failed");
 
-    // The call itself did not come back. We do NOT know whether the job was
-    // written, and saying "nothing was changed" here would be a guess. The
-    // duplicate-id refusal is what makes pressing Send again safe: the same
-    // request carries the same id, so a second attempt cannot issue a second
-    // job (DR-R001 3.5).
+    // We do NOT know whether it went. Allocating twice is harmless in a way
+    // creating twice is not: the second allocate lands on the same
+    // transaction, and the worst it can do is name the same worker again.
     return {
       ok: false,
       wrote: null,
       message:
-        "iREPS could not be reached, so this may or may not have gone out. Send it again — the job carries its own number, so it cannot go twice.",
+        "iREPS could not be reached, so this may or may not have gone out. Send it again - it is the same job either way, so it cannot go twice.",
       detail: error?.message || String(error),
     };
   }
+}
+
+export const ITO_STEPS = Object.freeze({
+  attach: "attach",
+  write: "write",
+});
+
+/** Where an office instruction's image lives. */
+export function instructionMediaPath({ trnId, fileName }) {
+  const safe = String(fileName || "instruction")
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .slice(-60);
+
+  return `lifecycleInstructions/${trnId}/${Date.now()}_${safe}`;
 }

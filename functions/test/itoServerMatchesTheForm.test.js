@@ -171,8 +171,13 @@ test("the send stamps when the job was issued", async () => {
   // DR-R001 3.5. Nothing wrote it, so nothing could say how long a job had
   // waited - and the reminder ladder of section 8 and the monitoring screen
   // of 9.1 are both built on knowing exactly that.
+  //
+  // Since 11 October the stamp is conditional: a transaction made by the
+  // button has nobody on it, so it is CREATED and carries no issued time
+  // (`DR-R001` 5). The stamp still goes on at the moment a name does.
   const source = await readFile(new URL("../meterLifecycle/helpers.js", import.meta.url), "utf8");
-  const workflow = source.slice(source.indexOf('state: "ISSUED"'));
+  const workflow = source.slice(source.indexOf('state: allocating ? "ISSUED"'));
 
-  assert.match(workflow.slice(0, 400), /issuedAt: now,/);
+  assert.notEqual(workflow, source, "the workflow block must still be found");
+  assert.match(workflow.slice(0, 400), /issuedAt: allocating \? now : null,/);
 });

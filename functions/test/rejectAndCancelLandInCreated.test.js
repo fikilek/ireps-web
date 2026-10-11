@@ -63,10 +63,16 @@ test("a cancel lands in CREATED and takes his name off it too", async () => {
 });
 
 test("a reassign is still an allocate to somebody else", async () => {
+  // Since the ALLOCATE action landed, a reassign is checked as the two moves
+  // it actually is - cancel, then allocate - and written by the same writer
+  // as a first allocate. The one thing only the history can say is which of
+  // the two it was.
   const source = await read("manageInstructionCallable.js");
 
-  assert.match(source, /action === "REASSIGN" \? TRN_STATES\.ISSUED : TRN_STATES\.CREATED/);
-  assert.match(source, /event: action === "REASSIGN" \? "REASSIGNED" : "CANCELLED"/);
+  assert.match(source, /REASSIGN: \["cancel", "allocate"\]/);
+  assert.match(source, /reassigning: action === "REASSIGN"/);
+  assert.match(source, /: "ALLOCATED"/);
+  assert.match(source, /\? "REASSIGNED"/);
 });
 
 test("the meter's marker names nobody once nobody holds it", async () => {
@@ -76,7 +82,7 @@ test("the meter's marker names nobody once nobody holds it", async () => {
   const manage = await read("manageInstructionCallable.js");
 
   assert.match(accept, /action === "ACCEPT"\s*\n\s*\? targets\[0\]/);
-  assert.match(manage, /action === "REASSIGN" \? newTargets\?\.\[0\] \|\| \{\} : \{\}/);
+  assert.match(manage, /const assignedTo = allocating \? newTargets\?\.\[0\] \|\| \{\} : \{\}/);
 });
 
 test("CREATED still holds the meter, so no second of its kind can be made", async () => {

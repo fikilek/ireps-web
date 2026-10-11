@@ -19,7 +19,10 @@ import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import MeterMediaGalleryModal from "./components/MeterMediaGalleryModal";
 import ItoLaunchButtons from "../../components/ito/ItoLaunchButtons";
-import { ITO_COLUMN_LABEL } from "../../components/ito/itoTransactions";
+import { ITO_COLUMN_LABEL, ITO_TRANSACTIONS } from "../../components/ito/itoTransactions";
+import { buildItoRequest, meterFromRegistryRow } from "../../components/ito/itoRequest";
+import { createItoTransaction } from "../../components/ito/sendItoRequest";
+import SubmitWindow from "../../components/submit/SubmitWindow";
 import MeterNoAccessHistoryModal from "./components/MeterNoAccessHistoryModal";
 import MeterReportPreviewModal from "./components/MeterReportPreviewModal";
 import RegistrationGuardModal from "./components/RegistrationGuardModal";
@@ -30,6 +33,15 @@ import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 // reader's own clock - two hours behind, every time (owner, 11 October
 // 2026). The shared formatter converts instead of truncating.
 import { formatSastDateTime as formatUpdatedAt } from "../../utils/formatSastDateTime";
+
+const NAV_TEXT = "NAv";
+
+/** The name of the work a launch button stands for. `DR-R001` 3.2. */
+function itoNameFor(work) {
+  return (
+    ITO_TRANSACTIONS.find((item) => item.work === work)?.name || "transaction"
+  );
+}
 
 const EMPTY_METER_FILTERS = {
   meterNo: "",
@@ -458,6 +470,10 @@ export default function MetersRegistryPage() {
   const [checkingMeterId, setCheckingMeterId] = useState(null);
   // Which of the five was pressed, so that button alone shows the wait.
   const [checkingWork, setCheckingWork] = useState(null);
+  // `DR-R001` 3.2, owner 11 October 2026: pressing the button CREATES a
+  // transaction, so it says so and waits to be told to go ahead. An action
+  // that writes a record must never be a single unconfirmed click.
+  const [creating, setCreating] = useState(null);
 
   const [checkMeterRegistration] = useCheckMeterRegistrationMutation();
 
@@ -497,12 +513,23 @@ export default function MetersRegistryPage() {
     return pins;
   }, [pinMeter, pinPremise]);
 
-  // DR-R001 3.1: the guard runs before the window opens, so a meter iREPS
-  // cannot account for never reaches a worker. The same check runs again on
-  // the server when the work is issued.
-  async function launchIto(row, work) {
+  // Pressing a launch button asks first. It creates a transaction, and the
+  // owner's submit standard applies to anything that writes: a confirmation
+  // window before, visible progress during, a result window after.
+  function askToCreate(row, work) {
     if (checkingMeterId) return;
 
+    setCreating({ row, work });
+  }
+
+  // DR-R001 3.1 and 5: the guard runs first, so a meter iREPS cannot account
+  // for never reaches a worker. Then the work is CREATED - with nobody on it
+  // - and the ITO page allocates it. The same checks run again on the server
+  // when it is allocated.
+  async function createAndOpen(row, work) {
+    if (checkingMeterId) return;
+
+    setCreating(null);
     setCheckingMeterId(row.id);
     setCheckingWork(work);
 
@@ -510,7 +537,10 @@ export default function MetersRegistryPage() {
       const outcome = await checkMeterRegistration(row.id).unwrap();
 
       if (outcome?.success) {
-        navigate(`/operations/ito/${row.id}/${work}`);
+        const made = await makeTheWork(row, work);
+
+        if (made) navigate(`/operations/ito/${row.id}/${work}?trn=${encodeURIComponent(made)}`);
+
         return;
       }
 
@@ -532,6 +562,48 @@ export default function MetersRegistryPage() {
       setCheckingMeterId(null);
       setCheckingWork(null);
     }
+  }
+
+  /**
+   * Writes the transaction and returns its number, or shows why not.
+   *
+   * The registry row carries everything the create needs - the meter, its
+   * premise, its municipality and its ward - so no second read is made for
+   * it. Where the row is short of one of those the request builder refuses
+   * in words the office can act on, because a job that cannot carry its
+   * ward is a job that exists and cannot be found (owner, 3 October 2026).
+   */
+  async function makeTheWork(row, work) {
+    const built = buildItoRequest({
+      meter: meterFromRegistryRow(row),
+      work,
+      atMs: Date.now(),
+      allocating: false,
+    });
+
+    if (!built.ok) {
+      setGuardRefusal({
+        meterId: row.id,
+        meterNo: row.meterNo,
+        message: built.message,
+        checks: [],
+      });
+
+      return null;
+    }
+
+    const result = await createItoTransaction({ request: built.request });
+
+    if (result.ok) return built.id;
+
+    setGuardRefusal({
+      meterId: row.id,
+      meterNo: row.meterNo,
+      message: result.message,
+      checks: result.checks || [],
+    });
+
+    return null;
   }
 
   const filterRegistryRows = useCallback((rows, tableFilters) => {
@@ -1011,7 +1083,7 @@ ${premiseId}`;
         onOpenJob={(row) =>
           navigate(`/registries/trns?meter=${encodeURIComponent(row.meterNo || "")}`)
         }
-        onLaunch={launchIto}
+        onLaunch={askToCreate}
       />
     )
   }] : [])];
@@ -1244,6 +1316,30 @@ ${premiseId}`;
           meterNo={noAccessMeter.meterNo}
           premiseAddress={noAccessMeter.premiseAddress}
           onClose={() => setNoAccessMeter(null)}
+        />
+      ) : null}
+
+      {creating ? (
+        <SubmitWindow
+          title={`Create a ${itoNameFor(creating.work)} on meter ${creating.row.meterNo || NAV_TEXT}?`}
+          lines={[
+            `This writes a ${itoNameFor(creating.work)} against this meter now. It will wait with nobody on it until you allocate it on the next page.`,
+            `ERF ${creating.row.erfNo || NAV_TEXT} · ${creating.row.premiseAddress || NAV_TEXT}`,
+            // It must not promise a delete: deleting a created job is the
+            // next slice of `DR-R001` 5 and is not built. What IS true today
+            // is said instead.
+            "Once it is made, it holds this meter against another of its kind until it is done.",
+          ]}
+          escapeAction={() => setCreating(null)}
+          actions={[
+            {
+              key: "go",
+              label: `Create and allocate`,
+              primary: true,
+              onClick: () => createAndOpen(creating.row, creating.work),
+            },
+            { key: "no", label: "Cancel", onClick: () => setCreating(null) },
+          ]}
         />
       ) : null}
 

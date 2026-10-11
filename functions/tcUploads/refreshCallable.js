@@ -1,18 +1,22 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { getFirestore } from "firebase-admin/firestore";
 
+import {
+  STATES_HOLDING_THE_METER,
+  currentState,
+} from "../meterLifecycle/trnStateMachine.js";
+
 const TC_UPLOADS_COLLECTION = "tc_uploads";
 const TC_ROWS_COLLECTION = "tc_rows";
 const ASTS_COLLECTION = "asts";
 const USERS_COLLECTION = "users";
 
 const TC_ALLOWED_ROLES = ["SPU", "ADM", "MNG", "SPV"];
-const TC_ACTIVE_WORKFLOW_STATES = [
-  "ISSUED",
-  "ACCEPTED",
-  "REASSIGNED",
-  "IN_PROGRESS",
-];
+
+// This file kept its own copy of the list beside `tcUploads/helpers.js`, and
+// two copies of one fact is how a meter comes to be busy on one screen and
+// free on another. Both now read the state machine (`DR-R001` 5.2).
+const TC_ACTIVE_WORKFLOW_STATES = STATES_HOLDING_THE_METER;
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -123,7 +127,9 @@ function getActiveSameOperationLifecycle({ trnType, astData }) {
   const workflowState = normalizeUpper(lifecycle?.workflowState);
 
   if (lifecycleTrnType !== requestedTrnType) return null;
-  if (!TC_ACTIVE_WORKFLOW_STATES.includes(workflowState)) return null;
+  if (!TC_ACTIVE_WORKFLOW_STATES.includes(currentState(workflowState))) {
+    return null;
+  }
 
   return {
     trnId: lifecycle?.trnId || "NAv",
