@@ -1,6 +1,20 @@
 /* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
 import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
 import IrepsTable, { IrepsTableFilterInput } from "../../components/table/IrepsTable";
+// ONE LOOK FOR A CELL YOU CAN PRESS. The chip and its icons used to live in
+// this file, so every other screen that wanted the same thing invented its
+// own - which is what the owner saw on 12 October when he put this page and
+// the ITO monitoring screen side by side. They moved out; nothing here
+// changed but where they come from.
+import DataActionButton, {
+  ErfActionIcon,
+  InstalledActionIcon,
+  MediaActionIcon,
+  MeterActionIcon,
+  PremiseActionIcon,
+  ReportActionIcon,
+  SearchActionIcon,
+} from "../../components/table/DataActionButton";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -261,86 +275,13 @@ function getSortValue(row, key) {
 
 // The register's own pills: anything that opens a window wears the one the
 // TRN Registry uses, and the two actions wear it in the colour of the work.
-function MeterActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <rect x="4" y="3" width="16" height="18" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <rect x="7" y="6.5" width="10" height="5" rx="1" fill="currentColor" opacity=".35" />
-      <circle cx="9" cy="16" r="1.4" fill="currentColor" />
-      <circle cx="15" cy="16" r="1.4" fill="currentColor" />
-    </svg>
-  );
-}
 
-function ErfActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <path d="M4 7.5 10 4.5l4 3 6-3v12l-6 3-4-3-6 3z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
-function DiscoveredActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M15.8 15.8 20 20" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-    </svg>
-  );
-}
 
-function InstalledActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <path d="M12 3v7" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M7.5 10h9v4.5a4.5 4.5 0 0 1-9 0z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M12 19v2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-    </svg>
-  );
-}
 
-function MediaActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <rect x="3" y="6.5" width="18" height="13" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8.5 6.5 10 4h4l1.5 2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
 
-function ReportActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <path d="M6 3h8l4 4v14H6z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M14 3v4h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M9 12h6M9 15.5h6M9 8.5h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
 
-function PremiseActionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" style={styles.actionSvgIcon} aria-hidden="true">
-      <path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <circle cx="12" cy="10" r="2.4" fill="currentColor" />
-    </svg>
-  );
-}
 
-function DataActionButton({ children, onClick, title, icon, compact }) {
-  return (
-    <button
-      type="button"
-      style={compact ? styles.compactDataActionButton : styles.dataActionButton}
-      onClick={onClick}
-      title={title}
-    >
-      <span style={styles.dataActionIconWrap}>{icon}</span>
-      <span>{children}</span>
-    </button>
-  );
-}
 
 // A greyed button says why when you hover it, the way Unallocate does on the
 // TB Register (DR-R001 3.2 and section 6).
@@ -938,7 +879,7 @@ ${premiseId}`;
           compact
           onClick={() => setRegistrationTrnId(row.id)}
           title={`Open the ${REGISTRATIONS[kind].label.toLowerCase()} transaction that created this meter`}
-          icon={kind === "INSTALLED" ? <InstalledActionIcon /> : <DiscoveredActionIcon />}
+          icon={kind === "INSTALLED" ? <InstalledActionIcon /> : <SearchActionIcon />}
         >
           {REGISTRATIONS[kind].label}
         </DataActionButton>
@@ -1375,52 +1316,6 @@ const styles = {
     marginTop: "0.25rem",
   },
   // The TRN Registry's pill, for anything that opens a window.
-  dataActionButton: {
-    minHeight: "2.5rem",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.48rem",
-    border: "1px solid #bfdbfe",
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    padding: "0.38rem 0.62rem",
-    font: "inherit",
-    fontWeight: 850,
-    cursor: "pointer",
-    borderRadius: "0.65rem",
-    textAlign: "left",
-    whiteSpace: "nowrap",
-  },
-  compactDataActionButton: {
-    minHeight: "2.5rem",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.42rem",
-    border: "1px solid #bfdbfe",
-    background: "#f8fbff",
-    color: "#1d4ed8",
-    padding: "0.38rem 0.54rem",
-    font: "inherit",
-    fontWeight: 850,
-    cursor: "pointer",
-    borderRadius: "0.65rem",
-    whiteSpace: "nowrap",
-  },
-  dataActionIconWrap: {
-    width: "1.55rem",
-    height: "1.55rem",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "0 0 auto",
-    borderRadius: "0.45rem",
-    background: "#dbeafe",
-  },
-  actionSvgIcon: {
-    display: "block",
-    width: "1.05rem",
-    height: "1.05rem",
-  },
   // DR-R001 3.3: the No Access number is a button.
   countChip: {
     minHeight: "2.5rem",

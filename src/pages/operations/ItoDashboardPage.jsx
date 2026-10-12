@@ -14,6 +14,18 @@ import { skipToken } from "@reduxjs/toolkit/query";
 import { Link, useNavigate } from "react-router-dom";
 
 import IrepsTable from "../../components/table/IrepsTable";
+// THE SAME CHIP THE METER REGISTRY USES. Owner, 12 October 2026, holding the
+// two screens side by side: "can we be consistent with css". A meter, an ERF
+// and an address are the same three things on both, so they are drawn by the
+// same component - which moved out of the registry page so that was possible.
+import DataActionButton, {
+  AllocateActionIcon,
+  BinActionIcon,
+  ErfActionIcon,
+  MeterActionIcon,
+  PremiseActionIcon,
+  RestoreActionIcon,
+} from "../../components/table/DataActionButton";
 // The windows the registries already open. A row here opens the SAME meter
 // window the TRN Registry opens, and the SAME map the Meter Registry opens -
 // one window for one thing, reached from wherever the office is standing.
@@ -48,7 +60,6 @@ import {
   summariseWorkers,
 } from "./ito-dashboard/itoMonitoring";
 import SubmitWindow from "../../components/submit/SubmitWindow";
-import ItoWorkActions from "../../components/ito/ItoWorkActions";
 import { manageItoWork } from "../../components/ito/manageItoWork";
 import {
   ITO_MANAGE_ACTIONS,
@@ -254,12 +265,13 @@ export default function ItoDashboardPage() {
         // The same window the TRN Registry opens for a meter. One window for
         // one thing, wherever the office is standing.
         render: (row) => (
-          <CellButton
+          <DataActionButton
+            icon={<MeterActionIcon />}
             onClick={() => setMeterTrnId(row.id)}
             title={`Everything iREPS holds about meter ${row.meterNo}`}
           >
             {row.meterNo}
-          </CellButton>
+          </DataActionButton>
         ),
       },
       { key: "letter", label: "Work", filter: "text", sortable: true, value: (row) => row.letter },
@@ -271,14 +283,13 @@ export default function ItoDashboardPage() {
         value: (row) => row.erfNo,
         render: (row) =>
           row.erfId ? (
-            <CellButton
-              onClick={() =>
-                setMapView({ ...row, withPins: false })
-              }
+            <DataActionButton
+              icon={<ErfActionIcon />}
+              onClick={() => setMapView({ ...row, withPins: false })}
               title={`ERF ${row.erfNo} on the map`}
             >
               {row.erfNo}
-            </CellButton>
+            </DataActionButton>
           ) : (
             // No ERF id, no boundary to draw. Said rather than offered as a
             // button that does nothing.
@@ -293,12 +304,13 @@ export default function ItoDashboardPage() {
         value: (row) => row.address,
         render: (row) =>
           row.erfId ? (
-            <CellButton
+            <DataActionButton
+              icon={<PremiseActionIcon />}
               onClick={() => setMapView({ ...row, withPins: true })}
               title="The premise and the meter on the map"
             >
               {row.address}
-            </CellButton>
+            </DataActionButton>
           ) : (
             row.address
           ),
@@ -318,8 +330,9 @@ export default function ItoDashboardPage() {
         sortable: false,
         render: (row) =>
           row.astId && row.work ? (
-            <CellButton
-              strong
+            <DataActionButton
+              compact
+              icon={<AllocateActionIcon />}
               onClick={() =>
                 navigate(
                   `/operations/ito/${row.astId}/${row.work}?trn=${encodeURIComponent(row.id)}`,
@@ -328,7 +341,7 @@ export default function ItoDashboardPage() {
               title={`Allocate this ${row.letter} to a field worker`}
             >
               Allocate
-            </CellButton>
+            </DataActionButton>
           ) : (
             NAV
           ),
@@ -343,13 +356,17 @@ export default function ItoDashboardPage() {
               align: "right",
               sortable: false,
               render: (row) => (
-                <ItoWorkActions
-                  row={row}
-                  actions={["DELETE"]}
-                  busyId={busyId}
-                  role={role}
-                  onAct={ask}
-                />
+                <DataActionButton
+                  compact
+                  tone="remove"
+                  icon={<BinActionIcon />}
+                  busy={busyId === row.id}
+                  disabled={Boolean(busyId) && busyId !== row.id}
+                  onClick={() => ask("DELETE", row)}
+                  title={`Delete the ${row.letter} on meter ${row.meterNo}`}
+                >
+                  Delete
+                </DataActionButton>
               ),
             },
           ]
@@ -378,13 +395,16 @@ export default function ItoDashboardPage() {
               align: "right",
               sortable: false,
               render: (row) => (
-                <ItoWorkActions
-                  row={row}
-                  actions={["RESTORE"]}
-                  busyId={busyId}
-                  role={role}
-                  onAct={ask}
-                />
+                <DataActionButton
+                  compact
+                  icon={<RestoreActionIcon />}
+                  busy={busyId === row.id}
+                  disabled={Boolean(busyId) && busyId !== row.id}
+                  onClick={() => ask("RESTORE", row)}
+                  title={`Restore the ${row.letter} on meter ${row.meterNo}`}
+                >
+                  Restore
+                </DataActionButton>
               ),
             },
           ]
@@ -734,54 +754,7 @@ export default function ItoDashboardPage() {
   );
 }
 
-/**
- * A cell that is a button. `DR-R001` 9.2, owner 12 October 2026.
- *
- * It keeps the cell's text looking like the cell's text - a table where
- * every second column shouts is a table nobody reads - and makes the
- * clickable ones underline on hover, so they are discoverable without being
- * loud. A real button, so the keyboard reaches it.
- */
-function CellButton({ children, onClick, title, strong = false }) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      style={strong ? { ...styles.cellButton, ...styles.cellButtonStrong } : styles.cellButton}
-    >
-      {children}
-    </button>
-  );
-}
-
 const styles = {
-  cellButton: {
-    padding: 0,
-    border: "none",
-    background: "none",
-    font: "inherit",
-    color: "#1d4ed8",
-    textAlign: "inherit",
-    textDecoration: "underline",
-    textDecorationColor: "#bfdbfe",
-    textUnderlineOffset: 3,
-    cursor: "pointer",
-  },
-  cellButtonStrong: {
-    padding: "5px 11px",
-    borderRadius: 8,
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    color: "#0f172a",
-    fontSize: 12,
-    fontWeight: 700,
-    textDecoration: "none",
-    whiteSpace: "nowrap",
-  },
   reasonLabel: {
     display: "block",
     marginTop: 4,

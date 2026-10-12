@@ -378,8 +378,8 @@ test("the bin has a view, so a restore is reachable by a human", async () => {
 
   assert.match(source, /\{ key: "deleted", label: "Deleted", ready: true \}/);
   assert.match(source, /deleted: "only"/);
-  assert.match(source, /actions=\{\["RESTORE"\]\}/);
-  assert.match(source, /actions=\{\["DELETE"\]\}/);
+  assert.match(source, /ask\("RESTORE", row\)/);
+  assert.match(source, /ask\("DELETE", row\)/);
 });
 
 test("it asks before it writes, and says what happened after", async () => {
@@ -543,4 +543,51 @@ test("the Meter column stays put through a horizontal scroll", async () => {
   const waiting = source.slice(source.indexOf('title="Waiting to be given out"'));
 
   assert.match(waiting.slice(0, 600), /stickyFirstColumn/);
+});
+
+test("ONE LOOK FOR A CELL YOU CAN PRESS", async () => {
+  // Owner, 12 October 2026, holding the Meter Registry and the ITO
+  // monitoring screen side by side: "can we be consistent with css".
+  //
+  // He was looking at the same three things - a meter, an ERF, an address -
+  // drawn as blue chips with icons on one screen and bare underlined text on
+  // the other. The component that makes the chip already existed; it lived
+  // INSIDE the registry page, so every other screen had to invent its own.
+  const registry = await read("../src/pages/registries/MetersRegistryPage.jsx");
+  const ito = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  for (const [name, source] of [["registry", registry], ["ito", ito]]) {
+    assert.match(source, /from "\.\.\/\.\.\/components\/table\/DataActionButton"/, name);
+
+    // Neither keeps a copy of the look.
+    assert.doesNotMatch(source, /function DataActionButton/, name);
+    assert.doesNotMatch(source, /dataActionButton: \{/, name);
+    assert.doesNotMatch(source, /actionSvgIcon: \{/, name);
+  }
+
+  // The three cells that are the same thing on both screens use the same
+  // icon on both.
+  for (const icon of ["MeterActionIcon", "ErfActionIcon", "PremiseActionIcon"]) {
+    assert.match(registry, new RegExp(`<${icon} />`), `registry ${icon}`);
+    assert.match(ito, new RegExp(`<${icon} />`), `ito ${icon}`);
+  }
+});
+
+test("the red chip says what it does in its word, not only in its colour", async () => {
+  const chip = await read("../src/components/table/DataActionButton.jsx");
+
+  assert.match(chip, /tone === "remove"/);
+  assert.match(chip, /never stands alone/);
+
+  const ito = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(ito, /tone="remove"/);
+  assert.match(ito, />\s*Delete\s*</, "and the word is there");
+});
+
+test("a row shows its own wait, and the others do not pretend to be ready", async () => {
+  const ito = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(ito, /busy=\{busyId === row\.id\}/);
+  assert.match(ito, /disabled=\{Boolean\(busyId\) && busyId !== row\.id\}/);
 });
