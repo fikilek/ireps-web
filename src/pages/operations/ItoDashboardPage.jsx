@@ -638,7 +638,7 @@ export default function ItoDashboardPage() {
   const ticks = describeTicks(trnTypes);
 
   const totals = useMemo(() => summariseWorkers(visible), [visible]);
-  const aside = useMemo(() => monitoringAside(visible), [visible]);
+  const aside = useMemo(() => monitoringAside(visible, work), [visible, work]);
 
   // The columns' totals over the rows shown. A refusal is not a column -
   // it is something a worker did, so it sits outside the total (`DR-R001` 5.1).

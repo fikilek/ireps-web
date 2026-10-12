@@ -314,3 +314,49 @@ test("the Clear button is drawn only when there is something to clear", async ()
   assert.match(page, /onClick=\{\(\) => setTrnTypes\(\[\]\)\}/);
   assert.doesNotMatch(page, /disabled=\{!ticks\.count\}/, "never a dead control");
 });
+
+test("the screen reconciles its own two numbers", () => {
+  // Owner, 12 October 2026, on TEST: the filter bar read "7 jobs in this
+  // ward" and the figures read "TOTAL 2", side by side, with nothing joining
+  // them. Every number was right and the screen was unreadable.
+  //
+  // Per worker can only draw work a worker HOLDS. Work nobody holds is not
+  // missing - it is in Waiting - so the screen must say so rather than leave
+  // a reader to find five jobs.
+  const rows = [
+    { total: 1, issued: 1, accepted: 0, completed: 0, refused: 0, unaccounted: [] },
+    { total: 1, issued: 1, accepted: 0, completed: 0, refused: 0, unaccounted: [] },
+    { total: 0, issued: 0, accepted: 0, completed: 0, refused: 4, unaccounted: [] },
+  ];
+  const work = new Array(7).fill({});   // the ward's 7 office jobs
+
+  const notes = monitoringAside(rows, work);
+
+  assert.ok(
+    notes.some((n) => n.includes("7 in this ward") && n.includes("2 held") && n.includes("5 waiting")),
+    `expected the reconciliation, got: ${JSON.stringify(notes)}`,
+  );
+
+  // and the refusals are still said
+  assert.ok(notes.some((n) => n.includes("4 refusals")));
+});
+
+test("it says nothing when everything in the ward is held", () => {
+  // A line reading "2 in this ward: 2 held, 0 waiting" is noise. It appears
+  // only when there is something to explain.
+  const rows = [{ total: 2, issued: 2, accepted: 0, completed: 0, refused: 0, unaccounted: [] }];
+
+  const notes = monitoringAside(rows, new Array(2).fill({}));
+
+  assert.ok(!notes.some((n) => n.includes("waiting in the pool")), JSON.stringify(notes));
+});
+
+test("it still works when the ward's work was not handed in", () => {
+  // The old call site passed one argument. It must not throw or invent.
+  const rows = [{ total: 1, issued: 1, accepted: 0, completed: 0, refused: 1, unaccounted: [] }];
+
+  const notes = monitoringAside(rows);
+
+  assert.ok(!notes.some((n) => n.includes("waiting in the pool")));
+  assert.ok(notes.some((n) => n.includes("1 refusal")));
+});

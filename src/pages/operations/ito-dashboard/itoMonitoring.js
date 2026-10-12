@@ -424,13 +424,33 @@ export function describeAge(sinceMs, nowMs) {
  * fault of 11 October: counted in one place, drawn in none, with nothing
  * saying why the numbers would not add up.
  */
-export function monitoringAside(rows) {
+export function monitoringAside(rows, work = null) {
   const list = Array.isArray(rows) ? rows : [];
 
   const refusals = list.reduce((n, row) => n + (Number(row?.refused) || 0), 0);
   const unplaced = Array.from(new Set(list.flatMap((row) => row?.unaccounted || [])));
 
   const notes = [];
+
+  // THE SCREEN RECONCILES ITS OWN TWO NUMBERS. Owner, 12 October 2026, on
+  // TEST: the filter bar read "7 jobs in this ward" and the figures read
+  // "TOTAL 2", side by side, with nothing joining them. Every number was
+  // right and the screen was unreadable - the other five were waiting in the
+  // pool, and a reader had no way to know that.
+  //
+  // Per worker can only show work a worker HOLDS. Work nobody holds is not
+  // missing, it is in Waiting - so it is said here, in words, by the same
+  // rule that says a refusal is said rather than dropped.
+  if (Array.isArray(work) && work.length) {
+    const held = list.reduce((n, row) => n + (Number(row?.total) || 0), 0);
+    const waiting = work.length - held;
+
+    if (waiting > 0) {
+      notes.push(
+        `${work.length} in this ward: ${held} held by a worker, ${waiting} waiting in the pool`,
+      );
+    }
+  }
 
   // A refusal is not a place work sits, so it has no column and is said in
   // words instead of being dropped (`DR-R001` 5.1).
