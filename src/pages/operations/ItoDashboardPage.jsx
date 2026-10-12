@@ -265,6 +265,22 @@ export default function ItoDashboardPage() {
   const [busyId, setBusyId] = useState(null);
   const [outcome, setOutcome] = useState(null);
 
+  /** Open one man's page - or, for work nobody holds, the pool it sits in. */
+  function openWorker(row) {
+    if (row.unheld) {
+      setView("created");
+      return;
+    }
+
+    setWorker({
+      uid: row.uid,
+      name: row.name,
+      role: row.role,
+      provider: row.provider,
+      lastHeard: row.lastHeard,
+    });
+  }
+
   function ask(action, row) {
     setReason("");
     setOutcome(null);
@@ -649,7 +665,30 @@ export default function ItoDashboardPage() {
       value: (row) => row.name,
       render: (row) => (
         <span>
-          <span style={styles.workerName}>{row.name}</span>
+          {/* THE NAME IS THE DOOR, AND IT LOOKS LIKE ONE. It was plain black
+              text that happened to be clickable: nothing on the screen said
+              so, and the owner had to ask where his own page was. A real
+              button, blue and underlined with an arrow, says it standing
+              still - and unlike a clickable row it can be reached by
+              keyboard. */}
+          <button
+            type="button"
+            style={styles.workerOpen}
+            onClick={(event) => {
+              event.stopPropagation();
+              openWorker(row);
+            }}
+            title={
+              row.unheld
+                ? "Open the work nobody is holding"
+                : `Open ${row.name}'s page`
+            }
+          >
+            {row.name}
+            <span aria-hidden="true" style={styles.workerOpenArrow}>
+              ›
+            </span>
+          </button>
           <span style={styles.workerSub}>{row.unheld ? "no holder" : row.provider || row.role}</span>
         </span>
       ),
@@ -836,9 +875,7 @@ export default function ItoDashboardPage() {
             // `DR-R001` 9.3: clicking a field worker opens his page. The row
             // for work NOBODY holds opens the pool instead - there is no
             // person there to have a page.
-            onRowClick={(row) =>
-              row.unheld ? setView("created") : setWorker({ uid: row.uid, name: row.name, role: row.role, provider: row.provider, lastHeard: row.lastHeard })
-            }
+            onRowClick={openWorker}
           />
 
           {/* Counted but given no column — said in words rather than dropped. */}
@@ -848,7 +885,9 @@ export default function ItoDashboardPage() {
             <strong>Oldest waiting</strong> is the oldest job still waiting on that
             worker, read from when it was issued. A job issued before that was
             recorded has no age and reads <strong>NAv</strong> — never 0, which would
-            read as nothing waiting. {totals.workers} workers, {totals.total} jobs.
+            read as nothing waiting. <strong>A worker's name opens his page</strong>,
+            where his jobs are listed one by one and can be taken back off him.{" "}
+            {totals.workers} workers, {totals.total} jobs.
           </p>
         </>
       ) : null}
@@ -1061,6 +1100,23 @@ export default function ItoDashboardPage() {
 }
 
 const styles = {
+  workerOpen: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: 0,
+    border: "none",
+    background: "none",
+    font: "inherit",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#1d4ed8",
+    textDecoration: "underline",
+    textUnderlineOffset: 3,
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  workerOpenArrow: { fontSize: 15, lineHeight: 1 },
   workerPage: { display: "flex", flexDirection: "column", gap: 16 },
   pickedBar: {
     display: "flex",
@@ -1233,7 +1289,6 @@ const styles = {
     textTransform: "uppercase",
     color: "#64748b",
   },
-  workerName: { display: "block", fontWeight: 600, color: "#0f172a" },
   workerSub: { display: "block", fontSize: 11, color: "#64748b" },
   total: { fontSize: 15, fontWeight: 700, color: "#0f172a" },
   rejected: { color: "#A32D2D" },

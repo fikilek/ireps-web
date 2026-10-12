@@ -297,7 +297,18 @@ export default function IrepsTable({
             {current.rows.map((row, index) => (
               <tr
                 key={rowKey(row, index)}
-                style={{ ...(index % 2 ? styles.stripeRow : styles.row), ...rowStyle?.(row) }}
+                // A ROW YOU CAN PRESS CARRIES THE POINTER. That alone is NOT
+                // enough and must never be mistaken for enough: a cursor only
+                // speaks after the mouse is already on the row, so it cannot
+                // tell anyone the row opens something. The owner said it
+                // plainly - "there is nothing visually that shows its a btn".
+                // The thing he can SEE is a real control drawn in the cell;
+                // this only stops the pointer contradicting it.
+                style={{
+                  ...(index % 2 ? styles.stripeRow : styles.row),
+                  ...(onRowClick ? styles.clickableRow : null),
+                  ...rowStyle?.(row),
+                }}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((column) => (
@@ -425,6 +436,7 @@ function Pagination({ page, pageSize, totalPages, totalRows, onPage, onPageSize,
 }
 
 const styles = {
+  clickableRow: { cursor: "pointer" },
   frame: {
     border: `1px solid ${T.border}`,
     borderRadius: T.radius,

@@ -694,9 +694,64 @@ test("ONE ACTION ON HIS PAGE: unallocate", async () => {
 test("clicking work nobody holds opens the pool, not a person", async () => {
   // The per-worker table has a row for jobs with no holder. There is no
   // person there to have a page.
+  //
+  // This pins the RULE, not the line. It first matched the inline
+  // `row.unheld ? setView("created")` and broke the moment that moved into
+  // openWorker - a test that fails on a rename teaches nothing, and gets
+  // deleted by whoever is in a hurry.
   const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
 
-  assert.match(source, /row\.unheld \? setView\("created"\)/);
+  const open = source.match(/function openWorker\(row\) \{[\s\S]*?\n  \}/);
+
+  assert.ok(open, "one well for opening a worker");
+  assert.match(open[0], /row\.unheld/);
+  assert.match(open[0], /setView\("created"\)/);
+  assert.match(open[0], /return;/, "and it stops there - no page for a non-person");
+});
+
+test("a worker's name LOOKS like something you can open", async () => {
+  // Owner, 12 October 2026, shown the per-worker table: *"how will a normal
+  // person realize this is a btn ?"*, then *"there is mouse over. there is
+  // nothing visually that shows its a btn"*.
+  //
+  // A pointer cursor is NOT an affordance. It speaks only once the mouse is
+  // already on the row, so it can never tell anyone the row opens anything.
+  // The name itself has to carry it, standing still.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  const style = source.match(/workerOpen: \{[\s\S]*?\n  \},/);
+
+  assert.ok(style, "the name has a style of its own");
+  assert.match(style[0], /textDecoration: "underline"/, "underlined");
+  assert.match(style[0], /color: "#1d4ed8"/, "and blue - the colour iREPS opens things in");
+
+  // Not colour alone - colour is never the only signal. An arrow too.
+  assert.match(source, /workerOpenArrow/);
+
+  // A real button, so the keyboard reaches it. A clickable <tr> never did.
+  assert.match(source, /<button[\s\S]{0,80}style=\{styles\.workerOpen\}/);
+
+  // And it does not fire the row underneath as well.
+  assert.match(source, /event\.stopPropagation\(\);[\s\S]{0,40}openWorker\(row\);/);
+});
+
+test("the words say it too, for anyone who reads before clicking", async () => {
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /A worker's name opens his page/);
+});
+
+test("a clickable row carries the pointer, and nothing else", async () => {
+  // The shared table is used by about forty screens. It may say "you can
+  // press this" with the cursor; it must NOT paint the row on hover, because
+  // it would have to put the colour back by hand afterwards and would wipe
+  // whatever rowStyle had set - the MREAD registry paints its chosen cycle
+  // row exactly that way.
+  const source = await read("../src/components/table/IrepsTable.jsx");
+
+  assert.match(source, /clickableRow: \{ cursor: "pointer" \}/);
+  assert.doesNotMatch(source, /onMouseEnter/, "no hand-painted hover on the shared row");
+  assert.doesNotMatch(source, /onMouseLeave/);
 });
 
 test("his page says what it does not know", async () => {
