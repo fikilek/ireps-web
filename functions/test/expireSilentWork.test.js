@@ -452,3 +452,49 @@ test("a job that comes back says when it came back", async () => {
   assert.ok(trn.patch["workflow.returnedToCreatedAt"], "the stamp the pool reads");
   assert.equal(trn.patch["workflow.returnedToCreatedAt"], trn.patch["workflow.expiredAt"]);
 });
+
+test("ONE CLOCK, AND IT IS THREE DAYS", async () => {
+  // Owner, 12 October 2026: "lets standardize on 3 days for everything".
+  //
+  // It settled a clash found the day before: `DR-R001` section 8's reminder
+  // ladder unallocated after the fifth reminder - about five and a half hours
+  // - while 5.6 said three days. Two mechanisms that both return the same job
+  // race each other, and the winner depends on which happened to be deployed.
+  //
+  // So the window is declared once, in the machine, and this refuses a second
+  // declaration anywhere in the lifecycle code. `expireSilentWork.js` divides
+  // by a day to say "No answer in 3 days" in words, which is not a window.
+  const { readdir } = await import("node:fs/promises");
+  const dir = new URL("../meterLifecycle/", import.meta.url);
+  const files = await readdir(dir);
+
+  const offenders = [];
+
+  for (const file of files.filter((name) => name.endsWith(".js"))) {
+    if (file === "trnStateMachine.js") continue;
+
+    const source = await readFile(new URL(file, dir), "utf8");
+
+    // A multiple of a day, or seventy-two hours, spelled out.
+    if (/\b[0-9]+\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(source)) {
+      offenders.push(file);
+    }
+
+    if (/\b72\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(source)) offenders.push(file);
+  }
+
+  assert.deepEqual(offenders, [], "the three days are declared in the machine alone");
+
+  // And the machine says it once.
+  const machine = await readFile(
+    new URL("../meterLifecycle/trnStateMachine.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(
+    machine.match(/24 \* 60 \* 60 \* 1000/g).length,
+    1,
+    "one declaration in the machine too",
+  );
+  assert.equal(EXPIRES_AFTER_MS, 3 * 24 * 60 * 60 * 1000);
+});
