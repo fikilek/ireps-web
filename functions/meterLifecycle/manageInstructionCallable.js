@@ -388,6 +388,25 @@ function buildAllocatePatch({
     "assignment.acceptedRejectedUser": null,
     "assignment.rejectReason": "",
 
+    // AND THE CANCEL STAMPS, WHICH THIS FORGOT. Owner, 12 October 2026, on
+    // TEST: a job he took back off a worker and then gave out again could
+    // afterwards be neither accepted nor rejected - "Cancelled TRNs cannot be
+    // accepted or rejected" - while its state plainly read ISSUED and the
+    // worker plainly held it.
+    //
+    // The state had moved on and these had not. A reader that trusts a stamp
+    // over the state then refuses for ever. Clearing the accept/reject stamps
+    // and not these was the whole fault: the patch already knew that a fresh
+    // allocation starts clean.
+    //
+    // The history keeps the record of the cancel. These four fields describe
+    // the CURRENT allocation, and the current allocation was not cancelled.
+    "assignment.cancelledAt": null,
+    "assignment.cancelledByUid": null,
+    "assignment.cancelledByUser": null,
+    "assignment.cancelReason": "",
+    "workflow.returnedToCreatedAt": null,
+
     "workflow.state": TRN_STATES.ISSUED,
     // `DR-R001` 5.6: the three-day clock runs from here, so it is stamped
     // every time a name goes on. A job handed to a second man has waited on

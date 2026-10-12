@@ -62,6 +62,25 @@ const makePayload = (assignment) =>
     allocating: Array.isArray(assignment?.targets) && assignment.targets.length > 0,
   });
 
+const NEWLINE = String.fromCharCode(10);
+
+/** One function's source, from its name to the closing brace at column 0. */
+function functionBody(source, name) {
+  const from = source.indexOf(`function ${name}`);
+
+  if (from < 0) throw new Error(`${name} not found`);
+
+  const lines = source.slice(from).split(NEWLINE);
+  const out = [];
+
+  for (const line of lines) {
+    out.push(line);
+    if (line === "}") break;
+  }
+
+  return out.join(NEWLINE);
+}
+
 test("the button makes a transaction that is CREATED, with nobody on it", () => {
   const trn = makePayload({ instruction, targets: [] });
 
@@ -184,20 +203,28 @@ test("every state gate in the manage callable is the machine's", async () => {
 test("allocating stamps the clock every time a name goes on", async () => {
   // DR-R001 5.6: a job handed to a second man has waited on him since now.
   const source = await read("manageInstructionCallable.js");
-  const patch = source.slice(source.indexOf("function buildAllocatePatch"));
+  // To the END OF THE FUNCTION, not a fixed number of characters. A slice of
+  // the first N chars breaks the moment a comment is added above the code it
+  // is looking for, which is what happened on 12 October when the cancel
+  // stamps were added to this patch.
+  const patch = functionBody(source, "buildAllocatePatch");
 
-  assert.match(patch.slice(0, 1800), /"workflow\.state": TRN_STATES\.ISSUED/);
-  assert.match(patch.slice(0, 1800), /"workflow\.issuedAt": now/);
+  assert.match(patch, /"workflow\.state": TRN_STATES\.ISSUED/);
+  assert.match(patch, /"workflow\.issuedAt": now/);
 });
 
 test("only a reassign counts as a reassignment", async () => {
   // A first allocate that bumped the count would make every job look as
   // though it had been handed on once.
   const source = await read("manageInstructionCallable.js");
-  const patch = source.slice(source.indexOf("function buildAllocatePatch"));
+  // To the END OF THE FUNCTION, not a fixed number of characters. A slice of
+  // the first N chars breaks the moment a comment is added above the code it
+  // is looking for, which is what happened on 12 October when the cancel
+  // stamps were added to this patch.
+  const patch = functionBody(source, "buildAllocatePatch");
 
-  assert.match(patch.slice(0, 2400), /if \(reassigning\) \{/);
-  assert.match(patch.slice(0, 2400), /patch\["workflow\.reassignmentCount"\] = currentCount \+ 1;/);
+  assert.match(patch, /if \(reassigning\) \{/);
+  assert.match(patch, /patch\["workflow\.reassignmentCount"\] = currentCount \+ 1;/);
 });
 
 test("the old words are understood in one place, and placed before use", () => {

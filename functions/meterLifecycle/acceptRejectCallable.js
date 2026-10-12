@@ -491,10 +491,12 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
           const targets = getAssignmentTargets(row.data);
           const astId = getAstId(row.data);
 
-          if (
-            row.data?.workflow?.completedAt ||
-            workflowState === "COMPLETED"
-          ) {
+          // THE STATE IS THE TRUTH, NOT A STAMP BESIDE IT (`DR-R001` 5.2).
+          // This used to read `workflow.completedAt` as well, and the cancel
+          // check below read `assignment.cancelledAt`. Both are stamps that
+          // describe something that HAPPENED; only the state says what the
+          // job IS now.
+          if (workflowState === "COMPLETED") {
             responsePayload = buildFailureResult(
               "TRN_ALREADY_COMPLETED",
               "Completed lifecycle instructions cannot be accepted or rejected",
@@ -508,22 +510,23 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
             return;
           }
 
-          if (
-            row.data?.assignment?.cancelledAt ||
-            workflowState === "CANCELLED"
-          ) {
-            responsePayload = buildFailureResult(
-              "TRN_CANCELLED",
-              "Cancelled TRNs cannot be accepted or rejected",
-              {
-                trnId: row.trnId,
-                trnType,
-                workflowState: workflowState || "NAv",
-              },
-            );
-
-            return;
-          }
+          // THE CANCELLED REFUSAL IS GONE, and this is the fault the owner
+          // found on TEST on 12 October 2026. It read
+          // `assignment.cancelledAt` - a stamp left behind by an earlier
+          // unallocate - so a job taken back and then GIVEN OUT AGAIN could
+          // be neither accepted nor rejected, for ever, while its state read
+          // ISSUED and a worker plainly held it on his phone. Both buttons
+          // refused, because this sits above both.
+          //
+          // There is also no `CANCELLED` state to test for: cancelling
+          // returns a job to `Created` (`DR-R001` 5). A job in `Created` is
+          // refused by the state check below, in the words that actually
+          // help - "Only work that is still Issued can be accepted" - rather
+          // than by a sentence naming a state iREPS no longer has.
+          //
+          // The allocate patch now clears those stamps too, so the data stops
+          // producing this. Both halves are fixed: the writer no longer
+          // leaves the lie, and the reader no longer believes one.
 
           const allowedWorkflowStates =
             getAllowedWorkflowStatesForAction(action);
