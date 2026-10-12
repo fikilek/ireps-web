@@ -30,6 +30,13 @@ import {
 export { ITO_TRN_TYPES };
 
 /** The states a job can be in on this screen. `DR-R001` 5. */
+/**
+ * `DELETED` is a state this screen knows about, and it is the only screen
+ * that does. It has no column in the per-worker table - nobody holds a job
+ * in the bin - and its own view instead (`DR-R001` 5.5, 9.2).
+ */
+export const ITO_DELETED_STATE = "DELETED";
+
 export const ITO_STATES = Object.freeze([
   { key: "CREATED", label: "Created" },
   { key: "ISSUED", label: "Issued" },
@@ -132,17 +139,32 @@ function issuedAtMs(trn) {
  * An empty tick list means every one of them, which is what the filter bar
  * shows when nothing is ticked — not nothing at all.
  */
-export function selectItoWork(trns, { trnTypes = [], states = [] } = {}) {
+export function selectItoWork(
+  trns,
+  { trnTypes = [], states = [], deleted = "exclude" } = {},
+) {
   const wantedTypes = trnTypes.length ? trnTypes.map(upper) : null;
   const wantedStates = states.length ? states.map(upper) : null;
 
   return (Array.isArray(trns) ? trns : []).filter((trn) => {
     if (readOriginChannel(trn) !== "OFFICE") return false;
 
-    // Every reader excludes DELETED (`DR-R001` 5.5). A soft delete is only
-    // safe if each reader knows to skip it, or deleted work quietly
-    // reappears in the numbers.
-    if (readWorkflowState(trn) === "DELETED") return false;
+    // EVERY READER EXCLUDES DELETED (`DR-R001` 5.5), and the one screen that
+    // must see the bin asks for it BY NAME here rather than re-filtering the
+    // raw transactions itself. Raw re-filtering would lose the three things
+    // this function also does - the office-channel narrowing, the ITO-type
+    // narrowing, and nothing-ticked-means-everything - and the two copies
+    // would drift.
+    //
+    //   "exclude" - the default, and what every other view wants
+    //   "only"    - the Deleted view, which is the only way to restore
+    const isDeleted = readWorkflowState(trn) === "DELETED";
+
+    if (deleted === "only") {
+      if (!isDeleted) return false;
+    } else if (isDeleted) {
+      return false;
+    }
 
     const type = readTrnType(trn);
 
@@ -458,4 +480,82 @@ export function describeTicks(trnTypes) {
       : `${letters.slice(0, -1).join(", ")} and ${letters[letters.length - 1]}`;
 
   return { count: letters.length, words, showing: `Showing ${words}.` };
+}
+
+/**
+ * HOW LONG IT HAS BEEN WAITING. `DR-R001` 9.2.
+ *
+ * From when it came BACK to the pool, which is what `workflow.
+ * returnedToCreatedAt` records - written by every move that lands in
+ * `Created`. It is not `issuedAt`: that is when the job was last given OUT,
+ * so a job cancelled after three days would read as having waited three days
+ * when it came back a minute ago. A plausible number covering a fact nobody
+ * held is what `UI-R008` refuses.
+ *
+ * A job made at the button and never allocated has neither stamp. It has
+ * been waiting since it was made, and `metadata.createdAt` is the right
+ * answer for that one - it is not a substitute for anything, it IS when the
+ * waiting began.
+ */
+export function waitingSinceMs(trn) {
+  const candidates = [
+    trn?.returnedToCreatedAt,
+    trn?.workflow?.returnedToCreatedAt,
+    // Never allocated: the record's own birth is when the waiting started.
+    trn?.createdAt,
+    trn?.metadata?.createdAt,
+  ];
+
+  for (const candidate of candidates) {
+    const ms = Date.parse(String(candidate ?? ""));
+
+    if (Number.isFinite(ms)) return ms;
+  }
+
+  return null;
+}
+
+/** One row per job waiting to be given out. `DR-R001` 9.2. */
+export function buildWaitingRows(work, nowMs) {
+  return (Array.isArray(work) ? work : [])
+    .filter(isWaitingToBeGivenOut)
+    .map((trn) => {
+      const refusals = refusalsOn(trn);
+      const last = refusals[refusals.length - 1] || null;
+
+      return {
+        id: String(trn?.trnId || trn?.id || ""),
+        letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
+        meterNo: String(trn?.astNo || NAV),
+        erfNo: String(trn?.erfNo || NAV),
+        address: String(trn?.address || NAV),
+        refusals,
+        // Why it is here rather than with somebody. A job made and never
+        // allocated has nothing to say, and says NAv rather than inventing
+        // a reason it came back.
+        why: last ? `Refused by ${last.name}: ${last.reason}` : NAV,
+        waitingSince: describeAge(waitingSinceMs(trn), nowMs),
+        waitingSinceMs: waitingSinceMs(trn),
+      };
+    })
+    .sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo)));
+}
+
+/** One row per job in the bin, and what it would take to bring it back. */
+export function buildDeletedRows(work, nowMs) {
+  return (Array.isArray(work) ? work : [])
+    .map((trn) => ({
+      id: String(trn?.trnId || trn?.id || ""),
+      letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
+      meterNo: String(trn?.astNo || NAV),
+      erfNo: String(trn?.erfNo || NAV),
+      address: String(trn?.address || NAV),
+      why: text(trn?.deleteReason ?? trn?.workflow?.deleteReason) || NAV,
+      by: text(trn?.deletedByUser ?? trn?.workflow?.deletedByUser) || NAV,
+      binnedFor: describeAge(
+        Date.parse(String(trn?.deletedAt ?? trn?.workflow?.deletedAt ?? "")) || null,
+        nowMs,
+      ),
+    }))
+    .sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo)));
 }

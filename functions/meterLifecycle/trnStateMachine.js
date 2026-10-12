@@ -85,10 +85,24 @@ export const STATES_HOLDING_THE_METER = Object.freeze([
   TRN_STATES.ACCEPTED,
 ]);
 
-/** The two states in which a job is the worker's. `DR-R001` 5.5. */
+/**
+ * What a worker's phone shows. `DR-R001` 5.5.
+ *
+ * Owner, 11 October 2026: *"DELETED must not show in FWRs devices. It will
+ * confuse them."* Said as what it SHOWS rather than what it hides, because a
+ * list of exclusions is a list somebody forgets to add to.
+ *
+ * `COMPLETED` was missing here until 12 October, and that was my overreach
+ * surviving in the code after the rule had been corrected: I had written
+ * that a completed job "has left his hands", which the owner never said -
+ * his own card has a working Completed box. The rule was amended the same
+ * day (1.12.8); this list was not, so for a day the code and the rule
+ * disagreed about the owner's own screen.
+ */
 export const STATES_THE_WORKER_SEES = Object.freeze([
   TRN_STATES.ISSUED,
   TRN_STATES.ACCEPTED,
+  TRN_STATES.COMPLETED,
 ]);
 
 /**
@@ -226,16 +240,42 @@ export function canMoveAs(from, action, role) {
 export const EXPIRES_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 
 export function hasExpired(trn, nowMs) {
-  if (upper(trn?.workflow?.state) !== TRN_STATES.ISSUED) return false;
+  // It PLACES the stored word, like every other reader here. It used to test
+  // the raw value, so a record carrying `REASSIGNED` - which `currentState`
+  // places in `Issued`, and which holds its meter - could never expire,
+  // though those are exactly the records 5.6 exists to clear. Nothing writes
+  // that word any more and the census of 11 October found none, so this is
+  // the principle made consistent rather than a live fault closed.
+  if (currentState(trn?.workflow?.state) !== TRN_STATES.ISSUED) return false;
 
+  return readIssuedAt(trn).expired(nowMs);
+}
+
+/**
+ * The issue time, and WHICH KIND OF NOTHING it is when there isn't one.
+ *
+ * Absent and unreadable are different facts. A `null` issuedAt is a job that
+ * predates the stamp - the rule protects it. A value that is there and cannot
+ * be parsed is a fault in the record, and a sweep that lumps the two together
+ * drops the second silently and reports a clean run.
+ */
+export function readIssuedAt(trn) {
   const raw = trn?.workflow?.issuedAt;
 
-  if (!raw) return false;
+  if (!raw) {
+    return { kind: "absent", ms: null, expired: () => false };
+  }
 
-  const issuedAt = raw instanceof Date ? raw.getTime() : Date.parse(String(raw));
+  const ms = raw instanceof Date ? raw.getTime() : Date.parse(String(raw));
 
-  if (!Number.isFinite(issuedAt)) return false;
-  if (!Number.isFinite(nowMs)) return false;
+  if (!Number.isFinite(ms)) {
+    // A Firestore Timestamp stringifies to "[object Object]" and lands here.
+    return { kind: "unreadable", ms: null, expired: () => false };
+  }
 
-  return nowMs - issuedAt > EXPIRES_AFTER_MS;
+  return {
+    kind: "read",
+    ms,
+    expired: (nowMs) => Number.isFinite(nowMs) && nowMs - ms > EXPIRES_AFTER_MS,
+  };
 }

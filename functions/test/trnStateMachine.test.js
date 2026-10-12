@@ -125,14 +125,25 @@ test("a created job holds its meter, a deleted one lets it go", () => {
   assert.equal(holdsTheMeter("COMPLETED"), false);
 });
 
-test("the worker sees the two states where the job is his", () => {
-  // DR-R001 5.5, owner: "DELETED must not show in FWRs devices."
-  assert.equal(theWorkerSees("ISSUED"), true);
-  assert.equal(theWorkerSees("ACCEPTED"), true);
+test("the worker sees his issued work, his accepted work, and what he finished", () => {
+  // DR-R001 5.5, owner: "DELETED must not show in FWRs devices." His own
+  // card has a working Completed box, so Completed is his too - the
+  // correction of 1.12.8, which this test had been pinning the wrong way
+  // round since the rule was amended.
+  for (const his of ["ISSUED", "ACCEPTED", "COMPLETED"]) {
+    assert.equal(theWorkerSees(his), true, his);
+  }
 
-  for (const hidden of ["CREATED", "DELETED", "COMPLETED"]) {
+  // Nobody holds a created job and a deleted one is in the bin.
+  for (const hidden of ["CREATED", "DELETED"]) {
     assert.equal(theWorkerSees(hidden), false, hidden);
   }
+
+  // An old word is placed before it is tested, so a record written before
+  // the machine still draws on his phone.
+  assert.equal(theWorkerSees("REASSIGNED"), true, "lands in ISSUED");
+  assert.equal(theWorkerSees("IN_PROGRESS"), true, "lands in ACCEPTED");
+  assert.equal(theWorkerSees("REJECTED"), false, "lands in CREATED - not his any more");
 });
 
 test("every old state has somewhere to land", () => {

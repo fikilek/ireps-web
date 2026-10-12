@@ -534,13 +534,25 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
 
         const assignedTo = targets[0] || {};
 
+        // THE STATE IS WHATEVER THE RECORD SAYS, in all four places below.
+        //
+        // A fault of mine from 11 October, found by survey the next morning:
+        // the launch button writes `workflow.state: "CREATED"` on the
+        // transaction and this file then hard-coded `"ISSUED"` into the
+        // meter's marker, the history event and the response. So the records
+        // the delete acts on were exactly the records whose marker said
+        // something the transaction denied - and the registry row copies the
+        // marker, so the launch button drew "!" (issued) for a job nobody
+        // had. Three copies of one fact, one of them a lie (`DR-R001` 5.3).
+        const workflowState = cleanInstructionTrn?.workflow?.state;
+
         tx.create(trnRef, cleanInstructionTrn);
 
         tx.update(astRef, {
           trnActiveLifecycle: buildTrnActiveLifecycle({
             trnId,
             trnType,
-            workflowState: "ISSUED",
+            workflowState,
             outcome: "NAv",
             assignedTo,
             updatedAt: now,
@@ -561,13 +573,18 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
             trnId,
             trnType,
             astId,
-            event: "ISSUED",
-            workflowState: "ISSUED",
+            // The event is what happened; the state is where it landed.
+            // Pressing the button CREATED it; sending from the ITO page in
+            // one act also issued it.
+            event: allocating ? "ISSUED" : "CREATED",
+            workflowState,
             outcome: "NAv",
             actorUid,
             actorName,
             now,
-            note: "Lifecycle instruction issued",
+            note: allocating
+              ? "Lifecycle instruction issued"
+              : "Lifecycle instruction created, waiting to be allocated",
           }),
         );
 
@@ -579,7 +596,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
             buildNotificationRecord({
               trnId,
               trnType,
-              workflowState: "ISSUED",
+              workflowState,
               target,
               actorUid,
               actorName,
@@ -590,12 +607,14 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
 
         responsePayload = buildSuccessResult(
           trnId,
-          "Lifecycle instruction TRN created successfully",
+          allocating
+            ? "Lifecycle instruction TRN created and issued successfully"
+            : "Lifecycle instruction TRN created successfully",
           {
             trnType,
             astId,
             premiseId,
-            workflowState: "ISSUED",
+            workflowState,
           },
         );
       });

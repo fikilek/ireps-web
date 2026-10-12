@@ -79,6 +79,8 @@ import { onMeterLifecycleTrnCallable } from "./meterLifecycle/callables.js";
 import { onCreateMeterLifecycleInstructionCallable } from "./meterLifecycle/instructionCallable.js";
 import { onAcceptRejectLifecycleInstructionCallable } from "./meterLifecycle/acceptRejectCallable.js";
 import { onManageLifecycleInstructionCallable } from "./meterLifecycle/manageInstructionCallable.js";
+// `DR-R001` 5.6: the clock that returns work nobody answered.
+import { onIssuedWorkExpires } from "./meterLifecycle/expireSilentWorkSchedule.js";
 // DR-R001 section 5: the worker opens the form and the office sees him busy.
 import { onStartLifecycleInstructionCallable } from "./meterLifecycle/startExecutionCallable.js";
 // DR-R001 3.1: the Meter Registry asks before it opens the window.
@@ -246,6 +248,7 @@ export {
   onCreateMeterLifecycleInstructionCallable,
   onAcceptRejectLifecycleInstructionCallable,
   onManageLifecycleInstructionCallable,
+  onIssuedWorkExpires,
   onStartLifecycleInstructionCallable,
   onCheckMeterRegistrationCallable,
   onCreateMeterCommissioningCallable,

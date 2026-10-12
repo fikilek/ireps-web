@@ -10,7 +10,14 @@
 //
 // Which transaction is offered when, and how a count is read, live beside this
 // in `itoTransactions.jsx`.
-import { ITO_TRANSACTIONS, itoCountState, readItoCount, openJobForWork } from "./itoTransactions";
+import {
+  ITO_TRANSACTIONS,
+  describeOpenJob,
+  itoCountState,
+  openJobForWork,
+  openJobMark,
+  readItoCount,
+} from "./itoTransactions";
 
 // One glyph per transaction, keyed by the work it stands for. DCN is a broken
 // line and RCN a joined one: opposites in SHAPE, so they are told apart without
@@ -148,11 +155,11 @@ export default function ItoLaunchButtons({ row, busy = false, checkingWork = nul
                   event.stopPropagation();
                   onOpenJob?.(row, openJob);
                 }}
-                title={`A ${transaction.name.toLowerCase()} is already out on this meter — ${openJob.workflowState.toLowerCase()}, with ${openJob.assignedToName}. Open it in the TRN Registry.`}
-                aria-label={`Open the ${transaction.name.toLowerCase()} already out on this meter`}
+                title={describeOpenJob(openJob, transaction)}
+                aria-label={describeOpenJob(openJob, transaction)}
                 style={styles.openJob}
               >
-                {openJob.workflowState === "ISSUED" ? "!" : "•"}
+                {openJobMark(openJob)}
               </button>
             ) : null}
           </span>

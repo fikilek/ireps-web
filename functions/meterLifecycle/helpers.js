@@ -527,6 +527,26 @@ export function validateAssignment(
   return { ok: true };
 }
 
+/**
+ * A REASON, OR NOTHING. `DR-R001` 1.12.9.
+ *
+ * Owner, 30 September 2026: NAv marks a gap, and **a gap must never satisfy
+ * the thing it is a gap in.** One well for every reason field, because there
+ * are now four of them - reject, cancel, delete and restore - and the first
+ * of them learnt this the hard way: `sanitizeAssignment` stores a missing
+ * reason code as `NAv`, and a guard that only asked whether the string was
+ * empty accepted it as an answer.
+ *
+ * It strips case-insensitively, because the same value is stored both as
+ * `NAv` and - through `normalizeUpper` - as `NAV`.
+ */
+export function saidReason(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^NAv$/i, "")
+    .trim();
+}
+
 export function sanitizeAssignment(assignment = {}) {
   return {
     targets: normalizeAssignmentTargets(assignment),

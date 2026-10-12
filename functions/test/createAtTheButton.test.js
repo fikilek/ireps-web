@@ -151,7 +151,10 @@ test("the callable creates when no name was sent, and allocates when one was", a
 test("ALLOCATE is an action the office can take", async () => {
   const source = await read("manageInstructionCallable.js");
 
-  assert.match(source, /MANAGE_ACTIONS = \["ALLOCATE", "REASSIGN", "CANCEL"\]/);
+  assert.match(
+    source,
+    /MANAGE_ACTIONS = \["ALLOCATE", "REASSIGN", "CANCEL", "DELETE", "RESTORE"\]/,
+  );
   assert.match(source, /ALLOCATE: \["allocate"\]/);
   assert.match(source, /CANCEL: \["cancel"\]/);
 });

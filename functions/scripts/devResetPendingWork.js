@@ -191,6 +191,10 @@ async function findPendingTrns(scope) {
 async function findAstsWithPendingLifecycle(scope) {
   const snapshot = await db
     .collection(ASTS_COLLECTION)
+    // A `!=` matches DELETED, so a deleted job used to be reported as pending
+    // work in this script's own dry-run numbers - and this is the script that
+    // sweeps. The marker of a deleted job is removed, so the id test below is
+    // the real guard; this filter stays as it was for everything else.
     .where("trnActiveLifecycle.workflowState", "!=", COMPLETED)
     .get();
 

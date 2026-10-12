@@ -144,8 +144,20 @@ function getOutcomeSuccess(data = {}) {
   return outcome === "SUCCESS";
 }
 
+/**
+ * WHEN THE WORK WAS ISSUED, or nothing.
+ *
+ * It used to fall back to `metadata.createdAt`, which is when the RECORD was
+ * made - not when anybody was asked to do the job. `DR-R001` 9.1 names this
+ * reader and says it must be corrected: an unknown age is not a plausible
+ * one, and `UI-R008` refuses turning one into the other. Since 11 October the
+ * same stamp also drives the three-day expiry (5.6), so a borrowed date here
+ * would make a job look old enough to be sent back.
+ *
+ * A job issued before the stamp existed has no age, and reads `NAv`.
+ */
 function getIssuedAt(data = {}) {
-  return normalizeDateValue(data.workflow?.issuedAt || data.metadata?.createdAt);
+  return normalizeDateValue(data.workflow?.issuedAt);
 }
 
 function getAcceptedAt(data = {}) {
@@ -352,6 +364,10 @@ function normalizeTrnRegistryDoc(docSnap) {
     executionStartedAt: normalizeDateValue(data.workflow?.executionStartedAt),
     completedAt: normalizeDateValue(data.workflow?.completedAt),
     completedByUser: valueOrNav(data.workflow?.completedByUser),
+    deletedAt: normalizeDateValue(data.workflow?.deletedAt),
+    deletedByUser: valueOrNav(data.workflow?.deletedByUser),
+    deleteReason: valueOrNav(data.workflow?.deleteReason),
+    returnedToCreatedAt: normalizeDateValue(data.workflow?.returnedToCreatedAt),
     workflowState: normalizeRegistryCode(getWorkflowState(data)),
   };
 }
@@ -393,6 +409,20 @@ function normalizeTrnDoc(docSnap) {
     // own reason on each job (DR-R001 9.1). It is written to
     // assignment.rejectReason by acceptRejectCallable.
     rejectReason: valueOrNav(data.assignment?.rejectReason),
+
+    // WHAT THE BIN AND THE POOL NEED, and the reason it is named HERE.
+    //
+    // This map names every field it keeps, one at a time. A field the server
+    // writes and this mapper forgets is written correctly and drawn nowhere -
+    // which cost three Credit control numbers on 7 October and the ITO card's
+    // four figures on 11 October. The Deleted view needs the reason, the
+    // person and when; the Waiting view needs when the job came BACK, which
+    // is not when it was issued (`DR-R001` 9.2).
+    deletedAt: normalizeDateValue(data.workflow?.deletedAt),
+    deletedByUser: valueOrNav(data.workflow?.deletedByUser),
+    deleteReason: valueOrNav(data.workflow?.deleteReason),
+    returnedToCreatedAt: normalizeDateValue(data.workflow?.returnedToCreatedAt),
+
     workflowState,
     state: workflowState,
     executionOutcomeCode,
@@ -485,11 +515,36 @@ function buildRegistryTrnsQuery(lmPcode) {
   );
 }
 
+/**
+ * A DELETED JOB IS NOT IN THE REGISTER. `DR-R001` 5.5.
+ *
+ * ONE WELL, and it has to be one: this single query feeds the TRN Registry,
+ * the TRN Registry dashboard, the Anomalies dashboard, the Customer Category
+ * dashboard, the Operational Teams page and the Activity Analytics model.
+ * Filtering in each of the six would be six chances to forget one - and the
+ * owner's rule names the register first: the TRN Registry, the monitoring
+ * screen, every count and every report.
+ *
+ * It is excluded at the ROW, not in the Firestore query. A
+ * `where("workflow.state", "!=", "DELETED")` would need its own index and
+ * would silently drop every field-submitted transaction, because a field form
+ * carries no `workflow` block at all.
+ */
+export function isDeletedTrnRow(row) {
+  return (
+    String(row?.workflowState ?? row?.workflow?.state ?? "")
+      .trim()
+      .toUpperCase() === "DELETED"
+  );
+}
+
 function buildRegistryTrnRows(snapshot) {
   return mergeUniqueDocs(
     [snapshot],
     normalizeTrnRegistryDoc,
-  ).sort(sortRegistryTrns);
+  )
+    .filter((row) => !isDeletedTrnRow(row))
+    .sort(sortRegistryTrns);
 }
 
 function readInitialRegistryTrns(arg, signal) {

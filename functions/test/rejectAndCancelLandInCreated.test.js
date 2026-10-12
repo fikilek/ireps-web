@@ -71,8 +71,13 @@ test("a reassign is still an allocate to somebody else", async () => {
 
   assert.match(source, /REASSIGN: \["cancel", "allocate"\]/);
   assert.match(source, /reassigning: action === "REASSIGN"/);
-  assert.match(source, /: "ALLOCATED"/);
-  assert.match(source, /\? "REASSIGNED"/);
+
+  // The event ladder became one well on 12 October, when DELETE and RESTORE
+  // joined it - five actions in an if-chain is how two of them come to write
+  // the same word.
+  assert.match(source, /ALLOCATE: "ALLOCATED"/);
+  assert.match(source, /REASSIGN: "REASSIGNED"/);
+  assert.match(source, /event: HISTORY_EVENT\[action\]/);
 });
 
 test("the meter's marker names nobody once nobody holds it", async () => {

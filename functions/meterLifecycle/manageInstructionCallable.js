@@ -3,7 +3,9 @@ import * as logger from "firebase-functions/logger";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import {
+  ACTIVE_LCT_WORKFLOW_STATES,
   buildFailureResult,
+  saidReason,
   buildSuccessResult,
   buildTrnActiveLifecycle,
   getActorNameFromRequest,
@@ -13,7 +15,7 @@ import {
 } from "./helpers.js";
 import { TRN_STATES, canMoveAs, currentState } from "./trnStateMachine.js";
 
-const MANAGE_ACTIONS = ["ALLOCATE", "REASSIGN", "CANCEL"];
+const MANAGE_ACTIONS = ["ALLOCATE", "REASSIGN", "CANCEL", "DELETE", "RESTORE"];
 
 /**
  * What each action is, in the machine's own moves. `DR-R001` 5.
@@ -28,6 +30,13 @@ const ACTION_MOVES = {
   ALLOCATE: ["allocate"],
   CANCEL: ["cancel"],
   REASSIGN: ["cancel", "allocate"],
+  // `DR-R001` 5.5: a delete FLAGS, it does not remove - the owner, 11
+  // October 2026: *"lets flag it as DELETED .. lets not delete in firestore
+  // .. lets just flag it"*. And it is reversible, which is the machine's
+  // `create` arrow out of `Deleted`. `finalDelete` stays declared and
+  // unbuilt, so the machine refuses it in words.
+  DELETE: ["delete"],
+  RESTORE: ["create"],
 };
 
 /**
@@ -424,6 +433,77 @@ function buildAllocatePatch({
   return patch;
 }
 
+/**
+ * Putting a job in the bin. `DR-R001` 5.5.
+ *
+ * The record stays and keeps everything hanging off it - its history, its
+ * instruction image, its premise links - so nothing is orphaned. What it
+ * stops doing is holding its meter, and that happens on the ast, not here.
+ *
+ * The delete's own stamps are never cleared by a later restore: the record
+ * should be able to say it was once in the bin, and who put it there. Where
+ * the fields and the history disagree, the history wins (5.7).
+ */
+function buildDeletePatch({ trnData, deleteReason, now, actorUid, actorName }) {
+  return {
+    "workflow.state": TRN_STATES.DELETED,
+    "workflow.deletedAt": now,
+    "workflow.deletedByUid": actorUid,
+    "workflow.deletedByUser": actorName,
+    "workflow.deleteReason": deleteReason,
+
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+
+    assignmentHistory: FieldValue.arrayUnion(
+      buildAssignmentHistoryItem({
+        trnData,
+        action: "DELETE",
+        reason: deleteReason,
+        now,
+        actorUid,
+        actorName,
+      }),
+    ),
+  };
+}
+
+/**
+ * Taking it back out of the bin. `DR-R001` 5.5: `Deleted -> create`.
+ *
+ * It lands in `Created`, which HOLDS the meter again (5.2) - so the caller
+ * must have re-run the duplication check first, because the office may have
+ * issued a replacement while this one sat in the bin.
+ */
+function buildRestorePatch({ trnData, restoreReason, now, actorUid, actorName }) {
+  return {
+    "workflow.state": TRN_STATES.CREATED,
+    ...RETURNED_TO_CREATED(now),
+    "workflow.restoredAt": now,
+    "workflow.restoredByUid": actorUid,
+    "workflow.restoredByUser": actorName,
+
+    // It comes back with nobody on it, whatever it had before.
+    "assignment.targets": [],
+
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+
+    assignmentHistory: FieldValue.arrayUnion(
+      buildAssignmentHistoryItem({
+        trnData,
+        action: "RESTORE",
+        reason: restoreReason,
+        now,
+        actorUid,
+        actorName,
+      }),
+    ),
+  };
+}
+
 function buildCancelPatch({ trnData, cancelReason, now, actorUid, actorName }) {
   return {
     "assignment.cancelledAt": now,
@@ -436,6 +516,7 @@ function buildCancelPatch({ trnData, cancelReason, now, actorUid, actorName }) {
     // the job his and nobody's at once (`DR-R001` 5.1).
     "workflow.state": TRN_STATES.CREATED,
     "assignment.targets": [],
+    ...RETURNED_TO_CREATED(now),
     "workflow.cancelledAt": now,
     "workflow.cancelledByUid": actorUid,
     "workflow.cancelledByUser": actorName,
@@ -575,6 +656,58 @@ function buildNotificationRecord({
   };
 }
 
+/**
+ * What happened, as the history records it. `DR-R001` 5.7.
+ *
+ * The event is what happened; the state is where it landed, and the two are
+ * not the same word. `ALLOCATED` and `REASSIGNED` both land in `Issued`, and
+ * `CANCELLED`, `DELETED` and an expiry all leave the record in a state that
+ * cannot say which of them it was - so only the history can.
+ */
+/**
+ * WHEN THE JOB CAME BACK TO THE POOL. `DR-R001` 9.2.
+ *
+ * The Waiting view has to say how long each job has been waiting, and nothing
+ * recorded it. `workflow.issuedAt` is when it was last GIVEN OUT, so a job
+ * cancelled or expired after three days would read as waiting three days when
+ * it came back a minute ago - a plausible number covering a fact nobody held,
+ * which `UI-R008` refuses. Only the history knew, and nothing reads the
+ * history (there is no reader anywhere in either repo).
+ *
+ * Written by every move that lands in `Created`: a cancel, a restore and an
+ * expiry. A job that has never been issued has none, and reads `NAv`.
+ */
+const RETURNED_TO_CREATED = (now) => ({ "workflow.returnedToCreatedAt": now });
+
+const SUCCESS_WORD = Object.freeze({
+  ALLOCATE: "allocated",
+  REASSIGN: "reassigned",
+  CANCEL: "cancelled",
+  DELETE: "deleted",
+  RESTORE: "restored",
+});
+
+const HISTORY_EVENT = Object.freeze({
+  ALLOCATE: "ALLOCATED",
+  REASSIGN: "REASSIGNED",
+  CANCEL: "CANCELLED",
+  DELETE: "DELETED",
+  RESTORE: "RESTORED",
+});
+
+function historyNote({ action, cancelReason, deleteReason, restoreReason, reason, targetName }) {
+  if (action === "CANCEL") return `Lifecycle instruction cancelled: ${cancelReason}`;
+  if (action === "DELETE") return `Lifecycle instruction deleted: ${deleteReason}`;
+
+  if (action === "RESTORE") {
+    return `Lifecycle instruction restored, waiting to be allocated: ${restoreReason || "NAv"}`;
+  }
+
+  return `Lifecycle instruction ${
+    action === "REASSIGN" ? "reassigned" : "allocated"
+  } to ${targetName || "NAv"}: ${reason || "NAv"}`;
+}
+
 function getTrnType(trnData = {}) {
   return normalizeUpper(trnData?.accessData?.trnType || trnData?.trnType || "");
 }
@@ -620,12 +753,16 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
 
     const action = normalizeUpper(data?.action);
     const trnIds = normalizeTrnIds(data);
-    const reason = String(
-      data?.reason || data?.reassignmentReason || "",
-    ).trim();
-    const cancelReason = String(
-      data?.cancelReason || data?.reason || "",
-    ).trim();
+    // `saidReason` strips `NAv`, so a gap cannot satisfy the thing it is a
+    // gap in (`DR-R001` 1.12.9).
+    const reason = saidReason(data?.reason || data?.reassignmentReason);
+    const cancelReason = saidReason(data?.cancelReason || data?.reason);
+
+    // `DR-R001` 5.1: "A rejection still needs a reason. So does a
+    // cancellation and a deletion." A restore is not on that list, so it may
+    // carry one and is not refused for lacking one.
+    const deleteReason = saidReason(data?.deleteReason || data?.reason);
+    const restoreReason = saidReason(data?.restoreReason || data?.reason);
 
     // What the ITO page fills in as it allocates: why, the words the worker
     // reads, and anything attached (`DR-R001` 3.4). Absent on a reassign.
@@ -673,6 +810,13 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
       return buildFailureResult(
         "CANCEL_REASON_REQUIRED",
         "Cancel reason is required when cancelling lifecycle instructions",
+      );
+    }
+
+    if (action === "DELETE" && !deleteReason) {
+      return buildFailureResult(
+        "DELETE_REASON_REQUIRED",
+        "Say why this work is being deleted.",
       );
     }
 
@@ -724,6 +868,9 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           astRefsById.set(astId, db.collection("asts").doc(astId));
         }
       }
+
+      // One meter and one kind of work may be restored once per call.
+      const restoringLanes = new Map();
 
       const astSnapsById = new Map();
 
@@ -820,6 +967,58 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           }
         }
 
+        // A RESTORE PUTS A JOB BACK ON A METER, so it has to ask the
+        // question a create asks: is one of this kind already out?
+        // `DR-R001` 5.2 - never two of the same kind. The office may have
+        // issued a replacement while this one sat in the bin, and a restore
+        // that wrote over it would leave two live jobs on one meter and
+        // steal the replacement's hold.
+        //
+        // This job itself cannot match: it is DELETED, and the query is a
+        // whitelist of the three states that hold the meter.
+        if (action === "RESTORE") {
+          const already = await tx.get(
+            db
+              .collection("trns")
+              .where("ast.astData.astId", "==", astId)
+              .where("accessData.trnType", "==", trnType)
+              .where("workflow.state", "in", ACTIVE_LCT_WORKFLOW_STATES)
+              .limit(1),
+          );
+
+          if (!already.empty) {
+            responsePayload = buildFailureResult(
+              "ACTIVE_LCT_ALREADY_EXISTS",
+              "This meter already has an open job of this kind, so the deleted one cannot come back. Finish or cancel that one first.",
+              {
+                trnId: row.trnId,
+                trnType,
+                astId,
+                blockingTrnId: already.docs[0].id,
+              },
+            );
+
+            return;
+          }
+
+          // And not twice in one call either. Two restores of the same kind
+          // on one meter would both pass the query above, because neither is
+          // in an active state yet.
+          const lane = `${astId}::${trnType}`;
+
+          if (restoringLanes.has(lane)) {
+            responsePayload = buildFailureResult(
+              "ACTIVE_LCT_ALREADY_EXISTS",
+              "Two deleted jobs of the same kind cannot both come back to one meter. Restore them one at a time.",
+              { trnId: row.trnId, trnType, astId, alsoRestoring: restoringLanes.get(lane) },
+            );
+
+            return;
+          }
+
+          restoringLanes.set(lane, row.trnId);
+        }
+
         row.nextState = check.to;
       }
 
@@ -862,27 +1061,91 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           );
         }
 
-        const existingTargets = normalizeAssignmentTargets(
-          row.data?.assignment?.targets,
-        );
+        if (action === "DELETE") {
+          tx.update(
+            row.ref,
+            buildDeletePatch({
+              trnData: row.data,
+              deleteReason,
+              now,
+              actorUid,
+              actorName,
+            }),
+          );
+        }
+
+        if (action === "RESTORE") {
+          tx.update(
+            row.ref,
+            buildRestorePatch({
+              trnData: row.data,
+              restoreReason,
+              now,
+              actorUid,
+              actorName,
+            }),
+          );
+        }
 
         // After a cancel nobody holds it, so the meter's marker names
         // nobody. The meter is still held - CREATED holds it (5.2) - by a
         // job waiting to be given out rather than by a worker.
         const assignedTo = allocating ? newTargets?.[0] || {} : {};
 
-        tx.update(
-          db.collection("asts").doc(astId),
-          buildAstLifecyclePatch({
-            trnId: row.trnId,
-            trnType,
-            workflowState: nextWorkflowState,
-            assignedTo,
-            now,
-            actorUid,
-            actorName,
-          }),
-        );
+        // THE METER'S MARKER, AND THE ONE CASE WHERE IT IS REMOVED.
+        //
+        // `DR-R001` 5.5: "The meter is released the moment a job is flagged
+        // deleted." `Deleted` is not a job out (5.2), so the marker goes -
+        // the field is REMOVED with `FieldValue.delete()`, which is exactly
+        // what a completed job does (`meterLifecycle/callables.js`). Not
+        // null, not `{}`, and not the job with DELETED stamped on it: the
+        // registry row's copy is made from the marker's PRESENCE, so a
+        // marker left naming a deleted job would keep the Meter Registry's
+        // launch button showing work already out on that meter.
+        //
+        // Nothing writes `registry_meters/{astId}.openJob` directly and
+        // nothing should. Removing the marker is what frees it: the ast
+        // write fires `onMeterUpdated`, which rebuilds the row, and the
+        // rebuild reads no trnId and writes `openJob: null`.
+        if (action === "DELETE") {
+          // ONLY IF IT NAMES THIS JOB, and matched on the id ALONE.
+          //
+          // The marker is a single field, so it may be naming a different
+          // kind of job on the same meter - an inspection, while a
+          // disconnection is deleted - and clearing it blindly would
+          // release that one's hold too.
+          //
+          // Never matched on the marker's state: the state written there is
+          // not always the transaction's own. BGO writes
+          // `WAITING_BATCH_ACCEPTANCE`, which the five states cannot place
+          // at all.
+          const marker = astSnapsById.get(astId)?.data()?.trnActiveLifecycle;
+
+          if (String(marker?.trnId || "").trim() === row.trnId) {
+            tx.update(db.collection("asts").doc(astId), {
+              trnActiveLifecycle: FieldValue.delete(),
+
+              // The stamp is not decoration: `onMeterUpdated` and the
+              // registry rebuild both key off it.
+              "metadata.updatedAt": now,
+              "metadata.updatedByUid": actorUid,
+              "metadata.updatedByUser": actorName,
+            });
+          }
+        } else {
+          tx.update(
+            db.collection("asts").doc(astId),
+            buildAstLifecyclePatch({
+              trnId: row.trnId,
+              trnType,
+              workflowState: nextWorkflowState,
+              assignedTo,
+              now,
+              actorUid,
+              actorName,
+            }),
+          );
+        }
 
         const historyRef = row.ref.collection("history").doc();
 
@@ -895,22 +1158,19 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
             // The event is what happened; the state is where it landed.
             // `ALLOCATED` and `REASSIGNED` both land in ISSUED, and only the
             // history can tell the office which of the two it was.
-            event:
-              action === "CANCEL"
-                ? "CANCELLED"
-                : action === "REASSIGN"
-                  ? "REASSIGNED"
-                  : "ALLOCATED",
+            event: HISTORY_EVENT[action] || "ALLOCATED",
             workflowState: nextWorkflowState,
             actorUid,
             actorName,
             now,
-            note:
-              action === "CANCEL"
-                ? `Lifecycle instruction cancelled: ${cancelReason}`
-                : `Lifecycle instruction ${
-                    action === "REASSIGN" ? "reassigned" : "allocated"
-                  } to ${newTargets?.[0]?.name || "NAv"}: ${reason || "NAv"}`,
+            note: historyNote({
+              action,
+              cancelReason,
+              deleteReason,
+              restoreReason,
+              reason,
+              targetName: newTargets?.[0]?.name,
+            }),
           }),
         );
 
@@ -937,11 +1197,9 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
 
       responsePayload = buildSuccessResult(
         trnIds.length === 1 ? trnIds[0] : "MULTI",
-        action === "CANCEL"
-          ? "Lifecycle instruction cancelled successfully"
-          : `Lifecycle instruction ${
-              action === "REASSIGN" ? "reassigned" : "allocated"
-            } successfully`,
+        SUCCESS_WORD[action]
+          ? `Lifecycle instruction ${SUCCESS_WORD[action]} successfully`
+          : "Lifecycle instruction allocated successfully",
         {
           action,
           trnIds,

@@ -28,15 +28,23 @@ import { NAV, readTrnType } from "./dashboard/operationsSummary";
 import {
   ITO_TRN_LETTERS,
   ITO_TRN_TYPES,
+  buildDeletedRows,
+  buildWaitingRows,
   buildWorkerRows,
   describeAge,
   describeTicks,
-  isWaitingToBeGivenOut,
   monitoringAside,
-  refusalsOn,
   selectItoWork,
   summariseWorkers,
 } from "./ito-dashboard/itoMonitoring";
+import SubmitWindow from "../../components/submit/SubmitWindow";
+import ItoWorkActions from "../../components/ito/ItoWorkActions";
+import { manageItoWork } from "../../components/ito/manageItoWork";
+import {
+  ITO_MANAGE_ACTIONS,
+  buildManageRequest,
+  canManageItoWork,
+} from "../../components/ito/manageItoRequest";
 
 const VIEWS = [
   { key: "worker", label: "Per worker", ready: true },
@@ -44,6 +52,10 @@ const VIEWS = [
   // down a hole - nobody clicked a meter to make it, so no meter click will
   // find it again.
   { key: "created", label: "Waiting", ready: true },
+  // `DR-R001` 5.5: a delete can be restored, and until this view existed
+  // nothing could ask for that - the office had no way to see the bin, so
+  // RESTORE was reachable by no human.
+  { key: "deleted", label: "Deleted", ready: true },
   { key: "area", label: "Per area", ready: false },
   { key: "map", label: "On the map", ready: false },
 ];
@@ -56,7 +68,7 @@ function toggle(list, value) {
 }
 
 export default function ItoDashboardPage() {
-  const { activeWorkbase } = useAuth();
+  const { activeWorkbase, role } = useAuth();
   const lmPcode = getActiveLmPcode(activeWorkbase);
   const lmName = getActiveLmName(activeWorkbase);
 
@@ -124,26 +136,52 @@ export default function ItoDashboardPage() {
   const work = useMemo(() => selectItoWork(trns.data, { trnTypes }), [trns.data, trnTypes]);
 
   // Everything waiting to be given out: made and not yet allocated, refused,
-  // taken back, or expired. They all land in one place (`DR-R001` 5).
-  const waiting = useMemo(
-    () =>
-      work
-        .filter(isWaitingToBeGivenOut)
-        .map((trn) => ({
-          id: String(trn?.trnId || trn?.id || ""),
-          letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
-          meterNo: String(trn?.astNo || NAV),
-          erfNo: String(trn?.erfNo || NAV),
-          address: String(trn?.address || NAV),
-          refusals: refusalsOn(trn),
-          waitingSince: describeAge(
-            Date.parse(String(trn?.lastUpdatedAt || trn?.issuedAt || "")) || null,
-            nowMs,
-          ),
-        }))
-        .sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo))),
-    [work, nowMs],
+  // taken back, or expired. They all land in one place (`DR-R001` 5). The row
+  // is built in the well beside the per-worker rows, so the three views
+  // cannot format one meter three ways.
+  const waiting = useMemo(() => buildWaitingRows(work, nowMs), [work, nowMs]);
+
+  // The bin. It is the ONE reader that asks for deleted work by name
+  // (`DR-R001` 5.5), through the same selector, so it keeps the
+  // office-channel and transaction-type narrowing every other view has.
+  const binned = useMemo(
+    () => selectItoWork(trns.data, { trnTypes, deleted: "only" }),
+    [trns.data, trnTypes],
   );
+
+  const deletedRows = useMemo(() => buildDeletedRows(binned, nowMs), [binned, nowMs]);
+
+  // DR-R001 3.5 and the owner's submit standard: a confirmation window
+  // before, visible progress during, a result window after. It writes a
+  // record, so a single unconfirmed click will not do.
+  const [asking, setAsking] = useState(null);
+  const [reason, setReason] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [outcome, setOutcome] = useState(null);
+
+  function ask(action, row) {
+    setReason("");
+    setOutcome(null);
+    setAsking({ action, row });
+  }
+
+  async function act() {
+    const { action, row } = asking;
+    const built = buildManageRequest({ action, trnId: row?.id, reason });
+
+    if (!built.ok) {
+      setOutcome({ ok: false, wrote: false, message: built.message });
+      return;
+    }
+
+    setAsking(null);
+    setBusyId(row.id);
+
+    const result = await manageItoWork({ request: built.request });
+
+    setBusyId(null);
+    setOutcome({ ...result, action, row });
+  }
 
   const waitingColumns = useMemo(
     () => [
@@ -164,8 +202,64 @@ export default function ItoDashboardPage() {
             : NAV,
       },
       { key: "waitingSince", label: "Waiting", align: "right", sortable: true, value: (row) => row.waitingSince },
+      // Only for somebody who may actually do it. A reader sees the screen
+      // and no column, rather than buttons that refuse (`DR-R001` 5.5).
+      ...(canManageItoWork(role)
+        ? [
+            {
+              key: "actions",
+              label: "",
+              align: "right",
+              sortable: false,
+              render: (row) => (
+                <ItoWorkActions
+                  row={row}
+                  actions={["DELETE"]}
+                  busyId={busyId}
+                  role={role}
+                  onAct={ask}
+                />
+              ),
+            },
+          ]
+        : []),
     ],
-    [],
+    // The column closes over the role and the busy row, so it cannot be
+    // memoised on an empty list - it would go stale the moment a button is
+    // pressed and never show its spinner.
+    [role, busyId],
+  );
+
+  const deletedColumns = useMemo(
+    () => [
+      { key: "meterNo", label: "Meter", filter: "text", sortable: true, minWidth: 140, value: (row) => row.meterNo },
+      { key: "letter", label: "Work", filter: "text", sortable: true, value: (row) => row.letter },
+      { key: "erfNo", label: "ERF", filter: "text", sortable: true, value: (row) => row.erfNo },
+      { key: "address", label: "Address", filter: "text", sortable: true, value: (row) => row.address },
+      { key: "why", label: "Why it was deleted", filter: "text", sortable: true, value: (row) => row.why },
+      { key: "by", label: "By", filter: "text", sortable: true, value: (row) => row.by },
+      { key: "binnedFor", label: "In the bin", align: "right", sortable: true, value: (row) => row.binnedFor },
+      ...(canManageItoWork(role)
+        ? [
+            {
+              key: "actions",
+              label: "",
+              align: "right",
+              sortable: false,
+              render: (row) => (
+                <ItoWorkActions
+                  row={row}
+                  actions={["RESTORE"]}
+                  busyId={busyId}
+                  role={role}
+                  onAct={ask}
+                />
+              ),
+            },
+          ]
+        : []),
+    ],
+    [role, busyId],
   );
 
   const rows = useMemo(
@@ -344,7 +438,29 @@ export default function ItoDashboardPage() {
           <p style={styles.footnote}>
             Everything that came back is here — made and not yet allocated, refused
             by a worker, taken back by the office, or expired after three days of
-            silence. Allocate from the meter, or delete it.
+            silence. Allocate it from the meter, or delete it from this row.{" "}
+            <strong>Waiting</strong> is from when it came back, not from when it was
+            last issued; a job that has never been allocated has waited since it was
+            made.
+          </p>
+        </>
+      ) : view === "deleted" ? (
+        <>
+          <IrepsTable
+            title="In the bin"
+            columns={deletedColumns}
+            rows={deletedRows}
+            rowKey={(row, index) => row.id || `deleted-${index}`}
+            loading={trns.isLoading}
+            emptyText="Nothing has been deleted in this ward."
+            stickyFirstColumn
+          />
+
+          <p style={styles.footnote}>
+            A delete <strong>flags the record, it does not remove it</strong> — so
+            nothing is lost and anything here can be restored. A restored job comes
+            back to <strong>Waiting</strong> with nobody on it, and is refused if the
+            office has since issued another of the same kind on that meter.
           </p>
         </>
       ) : view === "worker" ? (
@@ -391,11 +507,110 @@ export default function ItoDashboardPage() {
           </p>
         </>
       ) : null}
+
+      {asking ? (
+        <SubmitWindow
+          title={`${ITO_MANAGE_ACTIONS[asking.action].verb} the ${
+            asking.row.letter
+          } on meter ${asking.row.meterNo}?`}
+          lines={[
+            asking.action === "DELETE"
+              ? "This flags the transaction as deleted and frees the meter for another job of this kind. Nothing is removed — you can restore it from the Deleted view."
+              : asking.action === "RESTORE"
+                ? "This brings the job back to Waiting, with nobody on it. It is refused if the office has since issued another of the same kind on this meter."
+                : "This takes the work off the worker it is with. It goes back to Waiting, for somebody else.",
+            `ERF ${asking.row.erfNo} · ${asking.row.address}`,
+          ]}
+          escapeAction={() => setAsking(null)}
+          actions={[
+            {
+              key: "go",
+              label: ITO_MANAGE_ACTIONS[asking.action].verb,
+              primary: true,
+              onClick: act,
+            },
+            { key: "no", label: "Cancel", onClick: () => setAsking(null) },
+          ]}
+        >
+          <label style={styles.reasonLabel} htmlFor="ito-manage-reason">
+            {ITO_MANAGE_ACTIONS[asking.action].reasonLabel}
+          </label>
+          <textarea
+            id="ito-manage-reason"
+            style={styles.reason}
+            value={reason}
+            rows={3}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="In your own words"
+          />
+          {outcome && !outcome.ok ? (
+            <p style={styles.reasonProblem}>{outcome.message}</p>
+          ) : null}
+        </SubmitWindow>
+      ) : null}
+
+      {outcome && !asking ? (
+        <SubmitWindow
+          title={
+            outcome.ok
+              ? `${ITO_MANAGE_ACTIONS[outcome.action].verb} — done.`
+              : outcome.wrote === null
+                ? "iREPS could not be reached."
+                : "Not done. Nothing was changed."
+          }
+          tone={outcome.ok ? "info" : "error"}
+          lines={[
+            outcome.ok
+              ? outcome.action === "DELETE"
+                ? `The ${outcome.row.letter} on meter ${outcome.row.meterNo} is in the bin. The meter will take another of its kind. It is in the Deleted view if you want it back.`
+                : outcome.action === "RESTORE"
+                  ? `The ${outcome.row.letter} on meter ${outcome.row.meterNo} is back in Waiting, with nobody on it.`
+                  : `The ${outcome.row.letter} on meter ${outcome.row.meterNo} is back in Waiting.`
+              : outcome.message,
+            // The Meter Registry can show no change at all after a delete:
+            // the meter's marker is a single field, so it may be naming a
+            // different kind of job and the delete correctly leaves it. So
+            // what happened is reported from the TRANSACTION, never from the
+            // meter.
+            outcome.ok ? "Its number: " + (outcome.trnId || NAV) : null,
+            outcome.code && outcome.code !== "NAv" ? `Code: ${outcome.code}` : null,
+          ].filter(Boolean)}
+          escapeAction={() => setOutcome(null)}
+          actions={[
+            { key: "done", label: "Done", primary: true, onClick: () => setOutcome(null) },
+          ]}
+        />
+      ) : null}
     </section>
   );
 }
 
 const styles = {
+  reasonLabel: {
+    display: "block",
+    marginTop: 4,
+    marginBottom: 6,
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#0f172a",
+  },
+  reason: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    fontFamily: "Arial, Helvetica, sans-serif",
+    fontSize: 13,
+    color: "#0f172a",
+    resize: "vertical",
+  },
+  reasonProblem: {
+    margin: "8px 0 0",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#991b1b",
+  },
   page: { display: "flex", flexDirection: "column", gap: 12 },
   head: { display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" },
   eyebrow: {
