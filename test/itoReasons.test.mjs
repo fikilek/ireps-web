@@ -100,14 +100,20 @@ test("no reason chosen is refused in words the office can act on", () => {
   assert.ok(!/undefined|null|error|invalid/i.test(problem), "no jargon in a refusal");
 });
 
-test("only disconnection is settled, and nothing is invented for the rest", () => {
-  // The owner deferred the option lists for every transaction other than
-  // disconnection until its own process is designed. An empty list is the
-  // honest answer; a plausible one would be a decision nobody made.
-  assert.deepEqual(Object.keys(ITO_REASONS_BY_WORK), ["disconnect"]);
+test("all five are settled now, and nothing is invented beyond them", () => {
+  // AMENDED IN PLACE, 13 October 2026. This said "only disconnection is
+  // settled", which was true and is no longer: the owner settled reconnection
+  // and then "after RCN .. do all the other TRNs also". The principle it was
+  // guarding is unchanged and still guarded below - a list iREPS has not been
+  // given is EMPTY, never plausible.
+  assert.deepEqual(
+    Object.keys(ITO_REASONS_BY_WORK).sort(),
+    ["disconnect", "inspect", "read", "reconnect", "remove"],
+  );
 
-  for (const work of ["reconnect", "inspect", "remove", "read"]) {
-    assert.deepEqual(itoReasonsFor(work), []);
+  // Ask for work iREPS does not do and you get nothing, not a guess.
+  for (const unknown of ["commission", "install", "discover", "nonsense"]) {
+    assert.deepEqual(itoReasonsFor(unknown), []);
   }
 
   assert.deepEqual(itoReasonsFor(""), []);
@@ -148,4 +154,75 @@ test("the button, the route and the page agree on one address", async () => {
   assert.match(registry, /\/operations\/ito\/\$\{row\.id\}\/\$\{work\}/);
   assert.ok(!routes.includes("credit-control/"), "the old route is gone");
   assert.ok(!registry.includes("credit-control/"), "the old address is gone");
+});
+
+// ---------------------------------------------------------------------------
+// `DR-R001` 3.4.1, owner 13 October 2026: every transaction's reasons.
+// These pin the CODES, never the words - 3.4 stores a code precisely so the
+// words can be reworded without making old records uncountable, and that is
+// exactly what happened to the disconnection pair on 9 and 13 October.
+// ---------------------------------------------------------------------------
+
+test("every ITO transaction now offers reasons, and none offers none", () => {
+  for (const work of ["disconnect", "reconnect", "inspect", "remove", "read"]) {
+    const list = itoReasonsFor(work);
+
+    assert.ok(list.length >= 2, `${work} offers reasons`);
+    assert.ok(list.some((r) => r.code === "OTHER"), `${work} offers Other`);
+    assert.ok(
+      list.find((r) => r.code === "OTHER").needsExplanation,
+      `${work}'s Other demands its explanation (UI-R006 1.2.0)`,
+    );
+  }
+});
+
+test("the reconnection reasons the owner settled", () => {
+  assert.deepEqual(
+    itoReasonsFor("reconnect").map((r) => r.code),
+    ["PAYMENT_RECEIVED", "CLIENT_INSTRUCTION", "OTHER"],
+  );
+});
+
+test("Client instruction is one word for one thing, across both lanes", () => {
+  // Owner: "lets stick to 'client instruction' for both DCN and RCN". The LM
+  // IS the client, so the same party's instruction must not wear two names.
+  const words = (work) =>
+    itoReasonsFor(work).find((r) => /client/i.test(r.words))?.words;
+
+  assert.equal(words("disconnect"), "Client instruction");
+  assert.equal(words("reconnect"), "Client instruction");
+});
+
+test("...but the two carry DIFFERENT codes, so the counts stay apart", () => {
+  // The office counts a client's disconnection instruction separately from a
+  // client's reconnection instruction. Merging them under one number is a
+  // thing no later rewording could undo.
+  const codeFor = (work) =>
+    itoReasonsFor(work).find((r) => r.words === "Client instruction").code;
+
+  assert.equal(codeFor("disconnect"), "CREDIT_CONTROL_INSTRUCTION");
+  assert.equal(codeFor("reconnect"), "CLIENT_INSTRUCTION");
+  assert.notEqual(codeFor("disconnect"), codeFor("reconnect"));
+});
+
+test("the codes already on the phone are reused, never renumbered", () => {
+  // Inspection, Removal and Meter Reading had real lists in the mobile repo
+  // long before the web had any. Changing a code would make every record
+  // captured under it uncountable.
+  assert.deepEqual(itoReasonsFor("inspect").map((r) => r.code),
+    ["CHECK_ILLEGAL_CONNECTION", "GENERAL_INSPECTION", "OTHER"]);
+
+  assert.deepEqual(itoReasonsFor("remove").map((r) => r.code),
+    ["REMOVE_METER", "REPLACE_METER_STEP_1", "OTHER"]);
+
+  assert.deepEqual(itoReasonsFor("read").map((r) => r.code),
+    ["MONTHLY_METER_READING", "ROUTINE_METER_READING", "VERIFY_METER_READING",
+     "FINAL_METER_READING", "INVESTIGATION_METER_READING", "BULK_METER_READING", "OTHER"]);
+});
+
+test("RECONNECT_METER is gone from the offered list", () => {
+  // It said "Reconnect meter" on a reconnection - the transaction's own name,
+  // not a reason for sending it. Retired from the list; records carrying it
+  // are untouched.
+  assert.ok(!itoReasonsFor("reconnect").some((r) => r.code === "RECONNECT_METER"));
 });
