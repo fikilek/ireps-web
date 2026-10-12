@@ -25,6 +25,7 @@ import DataActionButton, {
   MeterActionIcon,
   PremiseActionIcon,
   RestoreActionIcon,
+  WorkerActionIcon,
 } from "../../components/table/DataActionButton";
 // The windows the registries already open. A row here opens the SAME meter
 // window the TRN Registry opens, and the SAME map the Meter Registry opens -
@@ -665,30 +666,24 @@ export default function ItoDashboardPage() {
       value: (row) => row.name,
       render: (row) => (
         <span>
-          {/* THE NAME IS THE DOOR, AND IT LOOKS LIKE ONE. It was plain black
-              text that happened to be clickable: nothing on the screen said
-              so, and the owner had to ask where his own page was. A real
-              button, blue and underlined with an arrow, says it standing
-              still - and unlike a clickable row it can be reached by
-              keyboard. */}
-          <button
-            type="button"
-            style={styles.workerOpen}
-            onClick={(event) => {
-              event.stopPropagation();
-              openWorker(row);
-            }}
-            title={
-              row.unheld
-                ? "Open the work nobody is holding"
-                : `Open ${row.name}'s page`
-            }
+          {/* THE NAME IS THE DOOR, AND IT IS DRAWN THE WAY EVERY DOOR IN A
+              TABLE IS DRAWN. Owner, 12 October 2026, holding up the Meter
+              Registry's meter chip: *"use this as the standard irepsTable
+              btn"*.
+
+              It was plain black text that happened to be clickable - he could
+              not find his own page and had to ask where it was. My first fix
+              made it blue and underlined, which was a THIRD look invented
+              beside the two he had just finished reducing to one. The chip
+              already existed and already means *press here to open this*. */}
+          <DataActionButton
+            compact
+            icon={<WorkerActionIcon />}
+            onClick={() => openWorker(row)}
+            title={row.unheld ? "Open the work nobody is holding" : `Open ${row.name}'s page`}
           >
             {row.name}
-            <span aria-hidden="true" style={styles.workerOpenArrow}>
-              ›
-            </span>
-          </button>
+          </DataActionButton>
           <span style={styles.workerSub}>{row.unheld ? "no holder" : row.provider || row.role}</span>
         </span>
       ),
@@ -875,7 +870,12 @@ export default function ItoDashboardPage() {
             // `DR-R001` 9.3: clicking a field worker opens his page. The row
             // for work NOBODY holds opens the pool instead - there is no
             // person there to have a page.
-            onRowClick={openWorker}
+            // NO WHOLE-ROW CLICK. Owner: *"why make the whole row clickable?
+            // and not only the FWR?"* A row that silently does something when
+            // pressed anywhere is a control with no edges - you cannot see
+            // where it begins, and a press meant for a number becomes a
+            // navigation. The chip has edges, and they are the ones you can
+            // see.
           />
 
           {/* Counted but given no column — said in words rather than dropped. */}
@@ -885,8 +885,9 @@ export default function ItoDashboardPage() {
             <strong>Oldest waiting</strong> is the oldest job still waiting on that
             worker, read from when it was issued. A job issued before that was
             recorded has no age and reads <strong>NAv</strong> — never 0, which would
-            read as nothing waiting. <strong>A worker's name opens his page</strong>,
-            where his jobs are listed one by one and can be taken back off him.{" "}
+            read as nothing waiting. <strong>Press a worker's name</strong> to open
+            his page, where his jobs are listed one by one and can be taken back
+            off him.{" "}
             {totals.workers} workers, {totals.total} jobs.
           </p>
         </>
@@ -1100,23 +1101,6 @@ export default function ItoDashboardPage() {
 }
 
 const styles = {
-  workerOpen: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
-    padding: 0,
-    border: "none",
-    background: "none",
-    font: "inherit",
-    fontSize: 13,
-    fontWeight: 700,
-    color: "#1d4ed8",
-    textDecoration: "underline",
-    textUnderlineOffset: 3,
-    cursor: "pointer",
-    textAlign: "left",
-  },
-  workerOpenArrow: { fontSize: 15, lineHeight: 1 },
   workerPage: { display: "flex", flexDirection: "column", gap: 16 },
   pickedBar: {
     display: "flex",

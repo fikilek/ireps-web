@@ -69,6 +69,18 @@ export function InstalledActionIcon() {
   );
 }
 
+/** A field worker. Not `AllocateActionIcon`, which is a man with a plus on
+ * him and means *send work to somebody* - a different thing from *this is the
+ * man*. One icon, one meaning. */
+export function WorkerActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.icon} aria-hidden="true">
+      <circle cx="12" cy="7.8" r="3.6" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M5 20a7 7 0 0 1 14 0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Sending work to somebody. */
 export function AllocateActionIcon() {
   return (

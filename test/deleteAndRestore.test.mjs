@@ -719,34 +719,59 @@ test("a worker's name LOOKS like something you can open", async () => {
   // The name itself has to carry it, standing still.
   const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
 
-  const style = source.match(/workerOpen: \{[\s\S]*?\n  \},/);
+  assert.match(source, /<DataActionButton[\s\S]{0,200}openWorker\(row\)/);
+});
 
-  assert.ok(style, "the name has a style of its own");
-  assert.match(style[0], /textDecoration: "underline"/, "underlined");
-  assert.match(style[0], /color: "#1d4ed8"/, "and blue - the colour iREPS opens things in");
+test("and it is drawn the ONE way a pressable cell is drawn", async () => {
+  // *"use this as the standard irepsTable btn"*, holding up the Meter
+  // Registry's meter chip.
+  //
+  // My first fix made the name blue and underlined - a THIRD look, invented
+  // beside the two he had just finished reducing to one. This test exists so
+  // that cannot happen again on this page: a pressable cell here is the
+  // shared chip or it is nothing.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
 
-  // Not colour alone - colour is never the only signal. An arrow too.
-  assert.match(source, /workerOpenArrow/);
+  // No hand-rolled link look anywhere on the page.
+  assert.doesNotMatch(source, /textDecoration: "underline"/);
+  assert.doesNotMatch(source, /workerOpen:/, "the local style is gone, not merely unused");
 
-  // A real button, so the keyboard reaches it. A clickable <tr> never did.
-  assert.match(source, /<button[\s\S]{0,80}style=\{styles\.workerOpen\}/);
+  // The icon means THIS IS THE MAN, not SEND WORK TO SOMEBODY. Two meanings
+  // on one glyph is how a reader learns to distrust the glyph.
+  assert.match(source, /icon=\{<WorkerActionIcon \/>\}/);
 
-  // And it does not fire the row underneath as well.
-  assert.match(source, /event\.stopPropagation\(\);[\s\S]{0,40}openWorker\(row\);/);
+  const chip = await read("../src/components/table/DataActionButton.jsx");
+
+  assert.match(chip, /export function WorkerActionIcon/);
+  assert.match(chip, /a different thing from \*this is the\s*\* man\*/);
+});
+
+test("the whole row is NOT a door", async () => {
+  // Owner: *"why make the whole row clickable? and not only the FWR?"*
+  //
+  // A row that acts when pressed anywhere is a control with no edges: you
+  // cannot see where it starts, and a press meant for a number becomes a
+  // navigation. The chip has edges, and they are visible.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.doesNotMatch(source, /onRowClick=/, "no row on this page opens anything");
+
+  // openWorker survives - the chip calls it. It is the row that goes.
+  assert.match(source, /function openWorker\(row\)/);
 });
 
 test("the words say it too, for anyone who reads before clicking", async () => {
   const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
 
-  assert.match(source, /A worker's name opens his page/);
+  assert.match(source, /Press a worker's name/);
 });
 
 test("a clickable row carries the pointer, and nothing else", async () => {
-  // The shared table is used by about forty screens. It may say "you can
-  // press this" with the cursor; it must NOT paint the row on hover, because
-  // it would have to put the colour back by hand afterwards and would wipe
-  // whatever rowStyle had set - the MREAD registry paints its chosen cycle
-  // row exactly that way.
+  // The shared table is used by about forty screens. Where a row IS still
+  // pressable - the MREAD registry selects a cycle that way - it may say so
+  // with the cursor; it must NOT paint the row on hover, because it would
+  // have to put the colour back by hand afterwards and would wipe whatever
+  // rowStyle had set. MREAD paints its chosen cycle row exactly that way.
   const source = await read("../src/components/table/IrepsTable.jsx");
 
   assert.match(source, /clickableRow: \{ cursor: "pointer" \}/);
