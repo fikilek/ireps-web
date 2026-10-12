@@ -360,3 +360,142 @@ test("it still works when the ward's work was not handed in", () => {
   assert.ok(!notes.some((n) => n.includes("waiting in the pool")));
   assert.ok(notes.some((n) => n.includes("1 refusal")));
 });
+
+/** A job held by one named worker, with a server update time. */
+const heldBy = (uid, name, updatedAt) =>
+  job({
+    assignment: { targets: [{ type: "USER", id: uid, name }] },
+    metadata: updatedAt === null ? {} : { updatedAt },
+  });
+
+test("the worker something last happened to is at the top", () => {
+  // Owner, 12 October 2026: "the one that got updated last must be on top".
+  const rows = buildWorkerRows({
+    trns: [
+      heldBy("u1", "Older", "2026-10-12T08:00:00.000Z"),
+      heldBy("u2", "Newest", "2026-10-12T20:00:00.000Z"),
+      heldBy("u3", "Middle", "2026-10-12T12:00:00.000Z"),
+    ],
+    nowMs: NOW,
+  });
+
+  assert.deepEqual(rows.map((r) => r.name), ["Newest", "Middle", "Older"]);
+});
+
+test("a worker's NEWEST job decides his place, not his oldest", () => {
+  // His row summarises all his work, so it moved when the newest of them did.
+  const rows = buildWorkerRows({
+    trns: [
+      heldBy("u1", "Busy", "2026-10-12T07:00:00.000Z"),
+      heldBy("u1", "Busy", "2026-10-12T22:00:00.000Z"),
+      heldBy("u2", "Quiet", "2026-10-12T10:00:00.000Z"),
+    ],
+    nowMs: NOW,
+  });
+
+  assert.equal(rows[0].name, "Busy");
+});
+
+test("an unreadable time sorts to the BOTTOM, never the top", () => {
+  // `UI-R008`: an unknown is not a recent one. A worker whose records carry
+  // no readable stamp must not be shown as the man something just happened
+  // to - that would be a plausible answer standing in for no answer.
+  const rows = buildWorkerRows({
+    trns: [
+      heldBy("u1", "NoStamp", null),
+      heldBy("u2", "Stamped", "2026-10-12T09:00:00.000Z"),
+    ],
+    nowMs: NOW,
+  });
+
+  assert.deepEqual(rows.map((r) => r.name), ["Stamped", "NoStamp"]);
+});
+
+test("equally recent rows keep a settled order, so the table does not drift", () => {
+  const at = "2026-10-12T10:00:00.000Z";
+  const rows = buildWorkerRows({
+    trns: [heldBy("u1", "Bravo", at), heldBy("u2", "Alpha", at)],
+    nowMs: NOW,
+  });
+
+  assert.deepEqual(rows.map((r) => r.name), ["Alpha", "Bravo"]);
+});
+
+// ---------------------------------------------------------------------------
+// `registry-tables.md` 12B, owner 12 October 2026: "in all iREPS tables ...
+// the latest updated row must go on top". These pin the SHARED table, so the
+// rule reaches every screen rather than this one.
+// ---------------------------------------------------------------------------
+
+test("12B: any table's opening order is newest first", async () => {
+  const { openingOrder } = await import("../src/components/table/irepsTableModel.js");
+
+  const rows = [
+    { id: "old", updatedAt: "2026-10-12T08:00:00.000Z" },
+    { id: "new", updatedAt: "2026-10-12T20:00:00.000Z" },
+    { id: "mid", updatedAt: "2026-10-12T12:00:00.000Z" },
+  ];
+
+  assert.deepEqual(openingOrder(rows).map((r) => r.id), ["new", "mid", "old"]);
+});
+
+test("12B: a row with no readable time goes to the bottom", async () => {
+  const { openingOrder } = await import("../src/components/table/irepsTableModel.js");
+
+  const rows = [
+    { id: "none" },
+    { id: "stamped", updatedAt: "2026-10-12T09:00:00.000Z" },
+    { id: "unreadable", updatedAt: "not a date" },
+  ];
+
+  const order = openingOrder(rows).map((r) => r.id);
+
+  assert.equal(order[0], "stamped");
+  assert.deepEqual(order.slice(1).sort(), ["none", "unreadable"]);
+});
+
+test("12B: a table whose rows carry no time is left exactly as it was", async () => {
+  // Inventing an order would be worse than leaving it (`UI-R008`).
+  const { openingOrder } = await import("../src/components/table/irepsTableModel.js");
+
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }];
+
+  assert.deepEqual(openingOrder(rows), rows, "same array, untouched");
+});
+
+test("12B: equally recent rows keep the order they arrived in", async () => {
+  const { openingOrder } = await import("../src/components/table/irepsTableModel.js");
+
+  const at = "2026-10-12T10:00:00.000Z";
+  const rows = [{ id: "first", updatedAt: at }, { id: "second", updatedAt: at }];
+
+  assert.deepEqual(openingOrder(rows).map((r) => r.id), ["first", "second"]);
+});
+
+test("12B: it reads the shapes iREPS records actually use", async () => {
+  const { rowUpdatedAtMs } = await import("../src/components/table/irepsTableModel.js");
+
+  assert.equal(rowUpdatedAtMs({ lastUpdatedMs: 1000 }), 1000);
+  assert.equal(rowUpdatedAtMs({ updatedAtMs: 2000 }), 2000);
+  assert.equal(rowUpdatedAtMs({ metadata: { updatedAt: "2026-10-12T00:00:00.000Z" } }), Date.parse("2026-10-12T00:00:00.000Z"));
+  assert.equal(rowUpdatedAtMs({ updatedAt: new Date(3000) }), 3000);
+  assert.equal(rowUpdatedAtMs({ updatedAt: { toDate: () => new Date(4000) } }), 4000, "a Firestore Timestamp");
+
+  // and nothing invented where there is nothing
+  assert.equal(rowUpdatedAtMs({}), null);
+  assert.equal(rowUpdatedAtMs({ updatedAt: "" }), null);
+  assert.equal(rowUpdatedAtMs({ updatedAt: "rubbish" }), null);
+  assert.equal(rowUpdatedAtMs(null), null);
+});
+
+test("12B: a reader's own sort wins over the opening order", async () => {
+  // The rule says where the table STARTS, not where it must stay.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, "..", "src/components/table/IrepsTable.jsx"), "utf8");
+
+  assert.match(src, /if \(sort\?\.key\) return sortIrepsTableRows\(filtered, columns, sort\);/);
+  assert.match(src, /return openingOrder\(filtered\);/);
+});

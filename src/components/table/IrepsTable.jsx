@@ -30,6 +30,7 @@ import {
   irepsTableDownloadColumns,
   paginateIrepsTableRows,
   sortIrepsTableRows,
+  openingOrder,
 } from "./irepsTableModel.js";
 
 export default function IrepsTable({
@@ -118,10 +119,24 @@ export default function IrepsTable({
     [rows, columns, filters, searchValue, filterRows, providedFilteredRows],
   );
 
-  const sorted = useMemo(
-    () => sortIrepsTableRows(filtered, columns, sort),
-    [filtered, columns, sort],
-  );
+  // THE LATEST UPDATED ROW GOES ON TOP (`registry-tables.md` 12B, owner
+  // 12 October 2026: *"in all iREPS tables ... the latest updated row must go
+  // on top"*).
+  //
+  // This is the OPENING order only. The moment a reader clicks a column
+  // header, `sort.key` is set and their choice wins - the branch below is
+  // skipped entirely.
+  //
+  // It applies only where a row actually carries a time. A table whose rows
+  // carry none keeps the order it was given, because inventing one would be
+  // worse than leaving it: `UI-R008` refuses a plausible answer in place of
+  // no answer. Such a table is not broken by this rule, it is unaffected, and
+  // the gap is a job to fix in its data.
+  const sorted = useMemo(() => {
+    if (sort?.key) return sortIrepsTableRows(filtered, columns, sort);
+
+    return openingOrder(filtered);
+  }, [filtered, columns, sort]);
 
   const current = paginateIrepsTableRows(sorted, page, pageSize);
   const bands = irepsTableBands(columns, groups);

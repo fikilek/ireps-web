@@ -885,7 +885,10 @@ export default function ItoDashboardPage() {
             <strong>Oldest waiting</strong> is the oldest job still waiting on that
             worker, read from when it was issued. A job issued before that was
             recorded has no age and reads <strong>NAv</strong> — never 0, which would
-            read as nothing waiting. <strong>Press a worker's name</strong> to open
+            read as nothing waiting. <strong>The worker something last happened to
+            is at the top</strong> — issued, accepted, refused or finished, whichever
+            moved most recently; a worker whose records carry no readable time sorts
+            to the bottom, never the top. <strong>Press a worker's name</strong> to open
             his page, where his jobs are listed one by one and can be taken back
             off him.{" "}
             {totals.workers} workers, {totals.total} jobs.

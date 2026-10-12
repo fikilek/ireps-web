@@ -165,3 +165,60 @@ export function irepsTableBands(columns = [], groups = []) {
     }))
     .filter((group) => group.span > 0);
 }
+
+/**
+ * When a row was last changed, in milliseconds, or `null` when nothing on it
+ * says. Read by convention so a table gets 12B without having to opt in: a
+ * row that already carries one of these is ordered by it.
+ */
+export function rowUpdatedAtMs(row) {
+  const candidates = [
+    row?.lastUpdatedMs,
+    row?.updatedAtMs,
+    row?.metadata?.updatedAt,
+    row?.updatedAt,
+  ];
+
+  for (const value of candidates) {
+    if (value === null || value === undefined || value === "") continue;
+
+    if (typeof value === "number") {
+      if (Number.isFinite(value)) return value;
+      continue;
+    }
+
+    const ms =
+      value instanceof Date
+        ? value.getTime()
+        : typeof value?.toDate === "function"
+          ? value.toDate().getTime()
+          : Date.parse(String(value));
+
+    if (Number.isFinite(ms)) return ms;
+  }
+
+  return null;
+}
+
+/**
+ * `registry-tables.md` 12B. Newest first; a row with no readable time goes to
+ * the BOTTOM, never the top, because an unknown time is not a recent one.
+ * Rows that are equally recent keep the order they arrived in, so the table
+ * cannot drift between loads.
+ */
+export function openingOrder(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+
+  if (!list.some((row) => rowUpdatedAtMs(row) !== null)) return list;
+
+  return list
+    .map((row, index) => ({ row, index, at: rowUpdatedAtMs(row) }))
+    .sort((a, b) => {
+      if (a.at === b.at) return a.index - b.index;
+      if (a.at === null) return 1;
+      if (b.at === null) return -1;
+
+      return b.at - a.at;
+    })
+    .map((entry) => entry.row);
+}

@@ -215,6 +215,7 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
         types: new Map(),
         unaccounted: [],
         oldestIssuedMs: null,
+        lastUpdatedMs: null,
       });
     }
 
@@ -233,6 +234,7 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
     types: new Map(),
     unaccounted: [],
     oldestIssuedMs: null,
+    lastUpdatedMs: null,
     unheld: true,
   };
 
@@ -298,6 +300,20 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
         target.oldestIssuedMs = ms;
       }
     }
+
+    // WHEN ANYTHING OF HIS LAST MOVED. Owner, 12 October 2026: "the one that
+    // got updated last must be on top". A worker's row is a summary of his
+    // jobs, so the row changed when the newest of them changed - issued,
+    // accepted, rejected, completed, taken back, any of it.
+    //
+    // ALL of his work counts here, including what he has finished: the
+    // question this answers is "where did something just happen", and a job
+    // completing is something happening.
+    const changed = toMs(trn?.metadata?.updatedAt);
+
+    if (changed !== null && (target.lastUpdatedMs === null || changed > target.lastUpdatedMs)) {
+      target.lastUpdatedMs = changed;
+    }
   }
 
   // A worker who holds nothing but has refused something still gets a row.
@@ -330,6 +346,7 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
       unaccounted: worker.unaccounted,
       oldestWaiting: describeAge(worker.oldestIssuedMs, now),
       oldestWaitingMs: worker.oldestIssuedMs,
+      lastUpdatedMs: worker.lastUpdatedMs,
       lastHeard: describeHeard(toMs(capturedAt), now ?? Date.now()),
       unheld: Boolean(worker.unheld),
     };
@@ -342,7 +359,7 @@ export function buildWorkerRows({ trns, usersById = {}, liveByUid = {}, nowMs } 
   // adding up to the figures above them, and the gap becomes invisible.
   if (unheldUsed) rows.push(toRow(unheld));
 
-  return rows.sort(byMostWaiting);
+  return rows.sort(byLastUpdated);
 }
 
 /** Every refusal written on a job. `DR-R001` 5.7. */
@@ -361,6 +378,33 @@ export function refusalsOn(trn) {
       reason: text(trn?.rejectReason ?? trn?.assignment?.rejectReason) || NAV,
     },
   ];
+}
+
+/**
+ * Newest activity first. Owner, 12 October 2026: *"the one that got updated
+ * last must be on top"*.
+ *
+ * A row whose time cannot be read goes to the BOTTOM, never the top. An
+ * unknown time is not a recent one, and `UI-R008` refuses to let an unknown
+ * sit where a fact belongs - a worker whose records carry no readable stamp
+ * must not be presented as the one something just happened to.
+ *
+ * Where two rows are equally recent - or neither has a time at all - the old
+ * order decides: the man carrying the most work still out, then by name. So
+ * the table stays deterministic rather than drifting between loads.
+ */
+function byLastUpdated(a, b) {
+  const left = Number.isFinite(a?.lastUpdatedMs) ? a.lastUpdatedMs : null;
+  const right = Number.isFinite(b?.lastUpdatedMs) ? b.lastUpdatedMs : null;
+
+  if (left !== right) {
+    if (left === null) return 1;
+    if (right === null) return -1;
+
+    return right - left;
+  }
+
+  return byMostWaiting(a, b);
 }
 
 function byMostWaiting(a, b) {
