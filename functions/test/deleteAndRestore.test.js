@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  OLD_STATE_LANDS_IN,
   TRN_STATES,
   canMove,
   canMoveAs,
@@ -210,4 +211,59 @@ test("the launch button's own create no longer lies about the state", async () =
   assert.match(source, /const workflowState = cleanInstructionTrn\?\.workflow\?\.state;/);
   assert.match(source, /event: allocating \? "ISSUED" : "CREATED"/);
   assert.doesNotMatch(source, /workflowState: "ISSUED"/, "no hard-coded state anywhere");
+});
+
+test("NOTHING WRITES A SIXTH STATE", async () => {
+  // Owner, 12 October 2026: "fix the IN_PROGRESS writer".
+  //
+  // `startExecutionCallable` wrote `IN_PROGRESS` to the transaction and to
+  // the meter's marker. `IN_PROGRESS` is not one of the five, so the
+  // duplication guard - which asks `where("workflow.state","in",[CREATED,
+  // ISSUED,ACCEPTED])` - did not match it: a meter whose job was in progress
+  // read as FREE and would have taken a second job of the same kind.
+  //
+  // It was removed rather than rewritten. It was built for `DR-R001` 1.3.0,
+  // whose rule 1.10.0 then reversed - "there is nothing between accepted and
+  // done... Opening the form reports nothing" - and NO COMMIT IN EITHER
+  // REPOSITORY ever called it. A deployed writer of a state that does not
+  // exist, reachable by nobody, is not something to leave in the tree.
+  const { readdir } = await import("node:fs/promises");
+  const dir = new URL("../meterLifecycle/", import.meta.url);
+
+  const files = await readdir(dir);
+
+  assert.equal(
+    files.includes("startExecutionCallable.js"),
+    false,
+    "the file is gone",
+  );
+
+  const index = await readFile(new URL("../index.js", import.meta.url), "utf8");
+
+  assert.doesNotMatch(index, /onStartLifecycleInstructionCallable/);
+  assert.doesNotMatch(index, /startExecutionCallable/);
+
+  // And no other writer puts the word on a transaction or a meter.
+  for (const file of files.filter((name) => name.endsWith(".js"))) {
+    const source = await readFile(new URL(file, dir), "utf8");
+
+    assert.doesNotMatch(
+      source,
+      /"workflow\.state":\s*"IN_PROGRESS"/,
+      `${file} writes it to the transaction`,
+    );
+    assert.doesNotMatch(
+      source,
+      /workflowState:\s*"IN_PROGRESS"/,
+      `${file} writes it to the marker`,
+    );
+  }
+});
+
+test("the machine still knows the word, because records might", () => {
+  // Removing the WRITER is not the same as forgetting the word. A record
+  // written before today could still carry it, and a reader that could not
+  // place it would read the meter as free - the very fault being closed.
+  assert.equal(OLD_STATE_LANDS_IN.IN_PROGRESS, TRN_STATES.ACCEPTED);
+  assert.equal(holdsTheMeter("IN_PROGRESS"), true);
 });

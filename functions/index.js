@@ -82,7 +82,6 @@ import { onManageLifecycleInstructionCallable } from "./meterLifecycle/manageIns
 // `DR-R001` 5.6: the clock that returns work nobody answered.
 import { onIssuedWorkExpires } from "./meterLifecycle/expireSilentWorkSchedule.js";
 // DR-R001 section 5: the worker opens the form and the office sees him busy.
-import { onStartLifecycleInstructionCallable } from "./meterLifecycle/startExecutionCallable.js";
 // DR-R001 3.1: the Meter Registry asks before it opens the window.
 import { onCheckMeterRegistrationCallable } from "./meterLifecycle/checkRegistrationCallable.js";
 
@@ -249,7 +248,6 @@ export {
   onAcceptRejectLifecycleInstructionCallable,
   onManageLifecycleInstructionCallable,
   onIssuedWorkExpires,
-  onStartLifecycleInstructionCallable,
   onCheckMeterRegistrationCallable,
   onCreateMeterCommissioningCallable,
   onMeterCommissioningTrnCreated,
