@@ -15,6 +15,9 @@
 // creation time standing in for it (`UI-R008`).
 
 import { describeHeard } from "../../../components/ito/itoWorkers.js";
+// ONE WELL for which transaction is which. `DR-R001` 3.2 settles the
+// pairing of a transaction type and the word the ITO page uses for it.
+import { ITO_TRANSACTIONS } from "../../../components/ito/itoTransactions.js";
 import {
   ITO_ACCEPTED_STATES,
   ITO_CREATED_STATES,
@@ -526,19 +529,43 @@ export function buildWaitingRows(work, nowMs) {
       return {
         id: String(trn?.trnId || trn?.id || ""),
         letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
+        trnType: readTrnType(trn),
+        // The work this transaction is, in the word the ITO page's address
+        // uses - so the row can open that page on this very job.
+        work: workFor(readTrnType(trn)),
         meterNo: String(trn?.astNo || NAV),
+        astId: text(trn?.astId),
         erfNo: String(trn?.erfNo || NAV),
+        erfId: text(trn?.erfId),
+        premiseId: text(trn?.premiseId),
+        wardPcode: text(trn?.wardPcode),
+        wardNo: text(trn?.wardNo),
         address: String(trn?.address || NAV),
         refusals,
-        // Why it is here rather than with somebody. A job made and never
-        // allocated has nothing to say, and says NAv rather than inventing
-        // a reason it came back.
-        why: last ? `Refused by ${last.name}: ${last.reason}` : NAV,
+        // WHO refused it and WHY, in two columns rather than one sentence
+        // (owner, 12 October 2026). A job made and never allocated has
+        // nobody and no reason, and says NAv rather than inventing either.
+        rejectedBy: last ? text(last.name) || NAV : NAV,
+        rejectedReason: last ? text(last.reason) || NAV : NAV,
         waitingSince: describeAge(waitingSinceMs(trn), nowMs),
         waitingSinceMs: waitingSinceMs(trn),
       };
     })
     .sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo)));
+}
+
+/**
+ * The ITO page's word for a transaction type, so a row can link to it.
+ *
+ * `DR-R001` 3.2 settles the pairing and `ITO_TRANSACTIONS` holds it, so this
+ * reads that list rather than keeping a second map of five lines beside it.
+ */
+export function workFor(trnType) {
+  const found = ITO_TRANSACTIONS.find(
+    (item) => item.trnType === upper(trnType),
+  );
+
+  return found ? found.work : "";
 }
 
 /** One row per job in the bin, and what it would take to bring it back. */

@@ -6,8 +6,10 @@ import { readFile } from "node:fs/promises";
 import {
   buildDeletedRows,
   buildWaitingRows,
+  isWaitingToBeGivenOut,
   selectItoWork,
   waitingSinceMs,
+  workFor,
 } from "../src/pages/operations/ito-dashboard/itoMonitoring.js";
 import {
   ITO_MANAGE_ACTIONS,
@@ -139,8 +141,12 @@ test("a waiting row says why it is waiting, or NAv", () => {
   const made = rows.find((row) => row.id === "T_CREATED");
   const refused = rows.find((row) => row.id === "REFUSED");
 
-  assert.equal(made.why, "NAv", "a job nobody has refused invents no reason");
-  assert.match(refused.why, /Refused by Kaiser: Dog on the property/);
+  // Owner, 12 October 2026: who refused it and why are two columns, not one
+  // sentence - so each can be filtered and sorted on its own.
+  assert.equal(made.rejectedBy, "NAv", "a job nobody has refused names nobody");
+  assert.equal(made.rejectedReason, "NAv", "and invents no reason");
+  assert.equal(refused.rejectedBy, "Kaiser");
+  assert.equal(refused.rejectedReason, "Dog on the property");
 });
 
 test("a binned row says why, by whom, and for how long", () => {
@@ -393,7 +399,8 @@ test("the action column cannot go stale", async () => {
   const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
   const after = source.slice(source.indexOf("const waitingColumns"));
 
-  assert.match(after.slice(0, 3000), /\[role, busyId\]/);
+  // It closes over the role, the busy row and now the router too.
+  assert.match(after.slice(0, 6000), /\[role, busyId, navigate\]/);
 });
 
 test("the result is reported from the transaction, never from the meter", async () => {
@@ -404,4 +411,136 @@ test("the result is reported from the transaction, never from the meter", async 
 
   assert.match(source, /Its number: /);
   assert.match(source, /never from the\s*\n?\s*\/\/ meter/);
+});
+
+// ===========================================================================
+// The Waiting view made powerful. Owner, 12 October 2026.
+// ===========================================================================
+
+test("the old words for the pool are placed, not mis-filed", async () => {
+  // Owner, finding it on his own screen: "its 4 ...not 6". Two of ward 6's
+  // jobs were stored as REJECTED - which `DR-R001` 5.1 says IS a Created job
+  // - and a reader comparing the literal CREATED left them out of Waiting,
+  // while `columnFor` could not place them either, so they landed in
+  // `unaccounted` on the row of the worker who had refused them.
+  const { ITO_CREATED_STATES } = await import(
+    "../src/pages/operations/dashboard/operationsSummary.js"
+  );
+
+  assert.ok(ITO_CREATED_STATES.includes("CREATED"));
+  assert.ok(ITO_CREATED_STATES.includes("REJECTED"), "a refusal returns it to the pool");
+  assert.ok(ITO_CREATED_STATES.includes("CANCELLED"), "so does the office taking it back");
+
+  // And the one that must NOT be folded in. The owner settled twice that it
+  // has no place in this lane; it has to surface as the fault it would be.
+  assert.equal(ITO_CREATED_STATES.includes("IN_PROGRESS"), false);
+
+  const old = [job("REJECTED"), job("CANCELLED"), job("CREATED")];
+
+  assert.equal(selectItoWork(old).filter(isWaitingToBeGivenOut).length, 3);
+});
+
+test("who refused it and why are two columns", () => {
+  const rows = buildWaitingRows(
+    [
+      job("CREATED", {
+        rejectReason: "Dog on the property",
+        acceptedRejectedUser: "Kaiser",
+      }),
+    ],
+    Date.parse("2026-10-12T12:00:00.000Z"),
+  );
+
+  assert.equal(rows[0].rejectedBy, "Kaiser");
+  assert.equal(rows[0].rejectedReason, "Dog on the property");
+});
+
+test("a waiting row carries what the three windows need", () => {
+  // A field the server writes and a row builder forgets is a button that
+  // cannot open.
+  const rows = buildWaitingRows(
+    [
+      job("CREATED", {
+        astId: "AST_1",
+        erfId: "ERF_1",
+        premiseId: "PRM_1",
+        wardPcode: "ZA5241006",
+        wardNo: "006",
+      }),
+    ],
+    Date.parse("2026-10-12T12:00:00.000Z"),
+  );
+
+  const row = rows[0];
+
+  assert.equal(row.astId, "AST_1", "the meter window and the ITO page need it");
+  assert.equal(row.erfId, "ERF_1", "the map draws the boundary from the id");
+  assert.equal(row.premiseId, "PRM_1", "the premise pin");
+  assert.equal(row.wardPcode, "ZA5241006");
+  assert.equal(row.wardNo, "006");
+});
+
+test("the row knows which page allocates it", () => {
+  // One well: the pairing lives in ITO_TRANSACTIONS (`DR-R001` 3.2), not in
+  // a second map of five lines.
+  assert.equal(workFor("METER_DISCONNECTION"), "disconnect");
+  assert.equal(workFor("METER_RECONNECTION"), "reconnect");
+  assert.equal(workFor("METER_INSPECTION"), "inspect");
+  assert.equal(workFor("METER_REMOVAL"), "remove");
+  assert.equal(workFor("METER_READING"), "read");
+
+  // A transaction the ITO page does not send gets no button rather than a
+  // button to nowhere.
+  assert.equal(workFor("METER_DISCOVERY"), "");
+  assert.equal(workFor(""), "");
+});
+
+test("the Allocate button opens the ITO page on THIS transaction", async () => {
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(
+    source,
+    /\/operations\/ito\/\$\{row\.astId\}\/\$\{row\.work\}\?trn=\$\{encodeURIComponent\(row\.id\)\}/,
+  );
+  // No meter id or no work, no button - rather than a button that cannot open.
+  assert.match(source, /row\.astId && row\.work \?/);
+});
+
+test("the meter and the maps are the windows the registries already open", async () => {
+  // One window for one thing, reached from wherever the office is standing.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /MeterDeepDetailsModal trnId=\{meterTrnId\}/);
+  assert.match(source, /from "\.\.\/registries\/components\/BoundaryMapModal"/);
+  assert.match(source, /from "\.\.\/registries\/components\/MeterDeepDetailsModal"/);
+
+  // The address pins the premise and the meter; the ERF asks about the ERF.
+  assert.match(source, /setMapView\(\{ \.\.\.row, withPins: true \}\)/);
+  assert.match(source, /withPins: false/);
+});
+
+test("nothing is pinned at nowhere", async () => {
+  // A premise or meter with no position gets no pin, and the map shows the
+  // ERF alone - which is the honest answer and a gap worth seeing (UI-R008).
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+  const pins = source.slice(source.indexOf("const mapPins"));
+
+  assert.match(pins.slice(0, 2000), /Number\.isFinite\(premiseLat\) && Number\.isFinite\(premiseLng\)/);
+  assert.match(pins.slice(0, 2000), /Number\.isFinite\(meterLat\) && Number\.isFinite\(meterLng\)/);
+  assert.match(pins.slice(0, 2000), /NOTHING IS PINNED AT NOWHERE/);
+});
+
+test("a cell with nothing behind it is text, not a dead button", async () => {
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  // No ERF id, no boundary to draw - so the ERF and the address stay as text.
+  assert.match(source, /row\.erfId \? \(/);
+});
+
+test("the Meter column stays put through a horizontal scroll", async () => {
+  // It was already switched on; with nine columns it now has something to do.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+  const waiting = source.slice(source.indexOf('title="Waiting to be given out"'));
+
+  assert.match(waiting.slice(0, 600), /stickyFirstColumn/);
 });

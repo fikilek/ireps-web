@@ -439,7 +439,11 @@ function normalizeTrnDoc(docSnap) {
     astId: valueOrNav(data.astId || data.ast?.astData?.astId),
     astNo: valueOrNav(data.ast?.astData?.astNo),
     premiseId: valueOrNav(data.premiseId || data.accessData?.premise?.id),
+    // The ERF's own id and its ward's number, so a row can open the ERF on a
+    // map (`BoundaryMapModal` draws the boundary from the id, not the number).
+    erfId: valueOrNav(data.accessData?.erfId),
     erfNo: valueOrNav(data.accessData?.erfNo),
+    wardNo: getWardNoFromPcode(data.accessData?.parents?.wardPcode),
     address: valueOrNav(data.accessData?.premise?.address),
     statusState: valueOrNav(data.status?.state),
     issuedAt: getIssuedAt(data),

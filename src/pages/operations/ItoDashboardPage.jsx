@@ -10,15 +10,25 @@
 // his submission has not landed. So every row says when he was last heard
 // from, and nothing here claims more than it knows.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { Link, useNavigate } from "react-router-dom";
 
 import IrepsTable from "../../components/table/IrepsTable";
+// The windows the registries already open. A row here opens the SAME meter
+// window the TRN Registry opens, and the SAME map the Meter Registry opens -
+// one window for one thing, reached from wherever the office is standing.
+import BoundaryMapModal from "../registries/components/BoundaryMapModal";
+import MeterDeepDetailsModal from "../registries/components/MeterDeepDetailsModal";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import WardScopeHeader from "../ward-scope/components/WardScopeHeader";
 import { useGetFwrLiveLocationsQuery } from "../../redux/fwrLiveLocationsApi";
 import { useGetTrnsByLmPcodeWardPcodeQuery } from "../../redux/trnsApi";
+import {
+  useGetMeterByIdQuery,
+  useGetPremiseByIdQuery,
+} from "../../redux/creditControlApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
 import {
   getActiveLmName,
@@ -154,6 +164,55 @@ export default function ItoDashboardPage() {
   // DR-R001 3.5 and the owner's submit standard: a confirmation window
   // before, visible progress during, a result window after. It writes a
   // record, so a single unconfirmed click will not do.
+  // The three windows a row can open: the meter, the map, and the ITO page.
+  // `DR-R001` 9.2 - the Waiting view is where the office picks a job up
+  // again, so everything it needs to decide is one click away.
+  const navigate = useNavigate();
+  const [meterTrnId, setMeterTrnId] = useState(null);
+  const [mapView, setMapView] = useState(null);
+
+  // The premise and the meter, for the pins. Read only when a map is open.
+  const { data: pinMeter } = useGetMeterByIdQuery(mapView?.astId || skipToken);
+  const { data: pinPremise } = useGetPremiseByIdQuery(mapView?.premiseId || skipToken);
+
+  const mapPins = useMemo(() => {
+    // `withPins` is false for the ERF button: that one is asked about the
+    // ERF, and pinning the premise and meter on it would answer a different
+    // question.
+    if (!mapView?.withPins) return [];
+
+    const pins = [];
+
+    const premiseLat = Number(pinPremise?.location?.lat ?? pinPremise?.gps?.lat);
+    const premiseLng = Number(pinPremise?.location?.lng ?? pinPremise?.gps?.lng);
+
+    if (Number.isFinite(premiseLat) && Number.isFinite(premiseLng)) {
+      pins.push({
+        kind: "PREMISE",
+        lat: premiseLat,
+        lng: premiseLng,
+        label: pinPremise?.address || mapView?.address || "Premise",
+      });
+    }
+
+    const meterLat = Number(pinMeter?.ast?.location?.gps?.lat ?? pinMeter?.ast?.location?.lat);
+    const meterLng = Number(pinMeter?.ast?.location?.gps?.lng ?? pinMeter?.ast?.location?.lng);
+
+    if (Number.isFinite(meterLat) && Number.isFinite(meterLng)) {
+      pins.push({
+        kind: "METER",
+        lat: meterLat,
+        lng: meterLng,
+        label: pinMeter?.ast?.astData?.astNo || mapView?.meterNo || "Meter",
+      });
+    }
+
+    // NOTHING IS PINNED AT NOWHERE. A premise or a meter with no position
+    // gets no pin, and the map says the ERF alone - which is the honest
+    // answer, and a gap worth seeing (`UI-R008`).
+    return pins;
+  }, [mapView, pinMeter, pinPremise]);
+
   const [asking, setAsking] = useState(null);
   const [reason, setReason] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -185,23 +244,95 @@ export default function ItoDashboardPage() {
 
   const waitingColumns = useMemo(
     () => [
-      { key: "meterNo", label: "Meter", filter: "text", sortable: true, minWidth: 140, value: (row) => row.meterNo },
-      { key: "letter", label: "Work", filter: "text", sortable: true, value: (row) => row.letter },
-      { key: "erfNo", label: "ERF", filter: "text", sortable: true, value: (row) => row.erfNo },
-      { key: "address", label: "Address", filter: "text", sortable: true, value: (row) => row.address },
       {
-        // Why it is here rather than with somebody. A job made and never
-        // allocated has nothing to say, and says NAv rather than inventing
-        // a reason it came back.
-        key: "why",
-        label: "Why it is waiting",
+        key: "meterNo",
+        label: "Meter",
+        filter: "text",
         sortable: true,
-        value: (row) =>
-          row.refusals.length
-            ? `Refused by ${row.refusals[row.refusals.length - 1].name}: ${row.refusals[row.refusals.length - 1].reason}`
-            : NAV,
+        minWidth: 140,
+        value: (row) => row.meterNo,
+        // The same window the TRN Registry opens for a meter. One window for
+        // one thing, wherever the office is standing.
+        render: (row) => (
+          <CellButton
+            onClick={() => setMeterTrnId(row.id)}
+            title={`Everything iREPS holds about meter ${row.meterNo}`}
+          >
+            {row.meterNo}
+          </CellButton>
+        ),
       },
+      { key: "letter", label: "Work", filter: "text", sortable: true, value: (row) => row.letter },
+      {
+        key: "erfNo",
+        label: "ERF",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.erfNo,
+        render: (row) =>
+          row.erfId ? (
+            <CellButton
+              onClick={() =>
+                setMapView({ ...row, withPins: false })
+              }
+              title={`ERF ${row.erfNo} on the map`}
+            >
+              {row.erfNo}
+            </CellButton>
+          ) : (
+            // No ERF id, no boundary to draw. Said rather than offered as a
+            // button that does nothing.
+            row.erfNo
+          ),
+      },
+      {
+        key: "address",
+        label: "Address",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.address,
+        render: (row) =>
+          row.erfId ? (
+            <CellButton
+              onClick={() => setMapView({ ...row, withPins: true })}
+              title="The premise and the meter on the map"
+            >
+              {row.address}
+            </CellButton>
+          ) : (
+            row.address
+          ),
+      },
+      // WHO refused it and WHY, in two columns (owner, 12 October 2026), so
+      // each can be filtered and sorted on its own.
+      { key: "rejectedBy", label: "Rejected by", filter: "text", sortable: true, value: (row) => row.rejectedBy },
+      { key: "rejectedReason", label: "Rejected reason", filter: "text", sortable: true, value: (row) => row.rejectedReason },
       { key: "waitingSince", label: "Waiting", align: "right", sortable: true, value: (row) => row.waitingSince },
+      {
+        // Back to the page that allocates it. The ITO page was built to
+        // allocate a transaction that already exists (`DR-R001` 3.4), which
+        // is exactly what every row here is.
+        key: "ito",
+        label: "ITO page",
+        align: "right",
+        sortable: false,
+        render: (row) =>
+          row.astId && row.work ? (
+            <CellButton
+              strong
+              onClick={() =>
+                navigate(
+                  `/operations/ito/${row.astId}/${row.work}?trn=${encodeURIComponent(row.id)}`,
+                )
+              }
+              title={`Allocate this ${row.letter} to a field worker`}
+            >
+              Allocate
+            </CellButton>
+          ) : (
+            NAV
+          ),
+      },
       // Only for somebody who may actually do it. A reader sees the screen
       // and no column, rather than buttons that refuse (`DR-R001` 5.5).
       ...(canManageItoWork(role)
@@ -224,10 +355,10 @@ export default function ItoDashboardPage() {
           ]
         : []),
     ],
-    // The column closes over the role and the busy row, so it cannot be
-    // memoised on an empty list - it would go stale the moment a button is
-    // pressed and never show its spinner.
-    [role, busyId],
+    // The columns close over the role, the busy row and the three windows'
+    // setters, so they cannot be memoised on an empty list - they would go
+    // stale the moment a button is pressed and never show their spinner.
+    [role, busyId, navigate],
   );
 
   const deletedColumns = useMemo(
@@ -508,6 +639,24 @@ export default function ItoDashboardPage() {
         </>
       ) : null}
 
+      {meterTrnId ? (
+        <MeterDeepDetailsModal trnId={meterTrnId} onClose={() => setMeterTrnId(null)} />
+      ) : null}
+
+      {mapView ? (
+        <BoundaryMapModal
+          key={`${mapView.id}-${mapView.withPins ? "pins" : "erf"}`}
+          mode="ERF"
+          trnId={mapView.id}
+          erfId={mapView.erfId}
+          erfNo={mapView.erfNo}
+          wardPcode={mapView.wardPcode}
+          wardNo={mapView.wardNo}
+          pins={mapPins}
+          onClose={() => setMapView(null)}
+        />
+      ) : null}
+
       {asking ? (
         <SubmitWindow
           title={`${ITO_MANAGE_ACTIONS[asking.action].verb} the ${
@@ -585,7 +734,54 @@ export default function ItoDashboardPage() {
   );
 }
 
+/**
+ * A cell that is a button. `DR-R001` 9.2, owner 12 October 2026.
+ *
+ * It keeps the cell's text looking like the cell's text - a table where
+ * every second column shouts is a table nobody reads - and makes the
+ * clickable ones underline on hover, so they are discoverable without being
+ * loud. A real button, so the keyboard reaches it.
+ */
+function CellButton({ children, onClick, title, strong = false }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      style={strong ? { ...styles.cellButton, ...styles.cellButtonStrong } : styles.cellButton}
+    >
+      {children}
+    </button>
+  );
+}
+
 const styles = {
+  cellButton: {
+    padding: 0,
+    border: "none",
+    background: "none",
+    font: "inherit",
+    color: "#1d4ed8",
+    textAlign: "inherit",
+    textDecoration: "underline",
+    textDecorationColor: "#bfdbfe",
+    textUnderlineOffset: 3,
+    cursor: "pointer",
+  },
+  cellButtonStrong: {
+    padding: "5px 11px",
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: 700,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+  },
   reasonLabel: {
     display: "block",
     marginTop: 4,

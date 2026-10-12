@@ -56,7 +56,26 @@ export const ITO_ISSUED_STATES = Object.freeze(["ISSUED", "REASSIGNED"]);
 export const ITO_ACCEPTED_STATES = Object.freeze(["ACCEPTED"]);
 
 /** A job with nobody on it, waiting to be given out. `DR-R001` 5. */
-export const ITO_CREATED_STATES = Object.freeze(["CREATED"]);
+/**
+ * Waiting in the pool - and the old words that meant the same place.
+ *
+ * `DR-R001` 5.1: a refused job and a withdrawn one both go back to `Created`.
+ * Records written before 11 October rested in `REJECTED` or `CANCELLED`
+ * instead, and a reader comparing the literal `CREATED` left them out of the
+ * Waiting view entirely while `columnFor` could not place them either - so
+ * they landed in `unaccounted` on the row of the worker who had refused them.
+ * The owner found it on his own screen: *"its 4 ...not 6"*.
+ *
+ * The migration of 12 October moved every such record, so this is now belt
+ * and braces. It stays because `startExecutionCallable` is still an
+ * un-migrated writer, and because a reader that cannot place an old word is
+ * a fault waiting for the next one.
+ *
+ * `IN_PROGRESS` is deliberately NOT here. The owner settled twice that it has
+ * no place in this lane, so it must surface in `unaccounted` as the fault it
+ * would be rather than be quietly folded into a state.
+ */
+export const ITO_CREATED_STATES = Object.freeze(["CREATED", "REJECTED", "CANCELLED"]);
 
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 
