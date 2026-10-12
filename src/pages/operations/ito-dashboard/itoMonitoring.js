@@ -18,6 +18,8 @@ import { describeHeard } from "../../../components/ito/itoWorkers.js";
 // ONE WELL for which transaction is which. `DR-R001` 3.2 settles the
 // pairing of a transaction type and the word the ITO page uses for it.
 import { ITO_TRANSACTIONS } from "../../../components/ito/itoTransactions.js";
+// The three days are the machine's, and are never restated (`DR-R001` 5.6).
+import { EXPIRES_AFTER_MS } from "../../../../functions/meterLifecycle/trnStateMachine.js";
 import {
   ITO_ACCEPTED_STATES,
   ITO_CREATED_STATES,
@@ -585,4 +587,126 @@ export function buildDeletedRows(work, nowMs) {
       ),
     }))
     .sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo)));
+}
+
+/**
+ * WHEN THE THREE-DAY CLOCK WILL RETURN A JOB. `DR-R001` 5.6.
+ *
+ * Only a job in `Issued` is on the clock: the owner settled that work a man
+ * has accepted is never taken off him by a timer, because the clock cannot
+ * see that he is standing at the meter.
+ *
+ * And a job with no `workflow.issuedAt` is **never** returned, however old
+ * the record. Most work issued before 10 October 2026 carries none, and an
+ * unknown age is not a long one (`UI-R008`). It says so rather than showing
+ * a number nobody holds.
+ */
+export function describeExpiry(trn, nowMs) {
+  const state = columnFor(readWorkflowState(trn));
+
+  if (state === "accepted") return "not on the clock";
+  if (state !== "issued") return NAV;
+
+  const issuedAt = Date.parse(String(trn?.issuedAt ?? trn?.workflow?.issuedAt ?? ""));
+
+  if (!Number.isFinite(issuedAt)) return "never";
+
+  const left = issuedAt + EXPIRES_AFTER_MS - nowMs;
+
+  if (left <= 0) return "due now";
+
+  const hours = Math.floor(left / (60 * 60 * 1000));
+
+  return hours >= 24 ? `in ${Math.floor(hours / 24)} d` : `in ${hours} h`;
+}
+
+/**
+ * Every job one worker holds. `DR-R001` 9.3.
+ *
+ * HOLDS means `Issued` and `Accepted` - the two states in which the job is
+ * his. His completed work is his too, but it is finished and is not a load;
+ * it is counted at the top of his page rather than listed as something to
+ * act on.
+ */
+export function buildWorkerJobRows(work, uid, nowMs) {
+  const wanted = text(uid);
+
+  if (!wanted) return [];
+
+  return (Array.isArray(work) ? work : [])
+    .filter((trn) => {
+      const holder = holderOf(trn);
+
+      if (!holder || holder.id !== wanted) return false;
+
+      const placed = columnFor(readWorkflowState(trn));
+
+      // His held work - and ALSO anything with his name on it that iREPS
+      // cannot place. Filtering those out would drop a job off his page
+      // silently, which is the fault this screen exists to prevent: a record
+      // nobody can see is a record nobody fixes. It gets a row, keeps its
+      // raw word, and is offered no action.
+      return ["issued", "accepted"].includes(placed) || placed === null;
+    })
+    .map((trn) => {
+      const state = columnFor(readWorkflowState(trn));
+      const issuedAtMs = Date.parse(String(trn?.issuedAt ?? "")) || null;
+
+      return {
+        id: String(trn?.trnId || trn?.id || ""),
+        letter: ITO_TRN_LETTERS[readTrnType(trn)] || NAV,
+        trnType: readTrnType(trn),
+        work: workFor(readTrnType(trn)),
+        meterNo: String(trn?.astNo || NAV),
+        astId: text(trn?.astId),
+        erfNo: String(trn?.erfNo || NAV),
+        erfId: text(trn?.erfId),
+        premiseId: text(trn?.premiseId),
+        wardPcode: text(trn?.wardPcode),
+        wardNo: text(trn?.wardNo),
+        address: String(trn?.address || NAV),
+        // The office's own reason for sending it, in the words it chose.
+        reason:
+          text(trn?.instructionReasonWords) ||
+          text(trn?.assignment?.instruction?.reason?.words) ||
+          NAV,
+        state:
+          state === "issued"
+            ? "Waiting for him"
+            : state === "accepted"
+              ? "He has taken it"
+              : readWorkflowState(trn) || NAV,
+        isIssued: state === "issued",
+        // A state the five cannot place. It is drawn and counted, and no
+        // action is offered on it - the machine would refuse one anyway, and
+        // offering a button that cannot work is worse than offering none.
+        unplaceable: state === null,
+        // How long it has been his. From when it was issued - that IS when it
+        // became his - and NAv when nothing recorded it.
+        heldFor: describeAge(issuedAtMs, nowMs),
+        expires: describeExpiry(trn, nowMs),
+        issuedAtMs,
+      };
+    })
+    .sort((a, b) => {
+      // The oldest first: that is the one the office is here about.
+      if (a.issuedAtMs === b.issuedAtMs) return String(a.meterNo).localeCompare(String(b.meterNo));
+      if (a.issuedAtMs === null) return 1;
+      if (b.issuedAtMs === null) return -1;
+
+      return a.issuedAtMs - b.issuedAtMs;
+    });
+}
+
+/** What he has finished, which is his but is not a load. */
+export function countWorkerCompleted(work, uid) {
+  const wanted = text(uid);
+
+  if (!wanted) return 0;
+
+  return (Array.isArray(work) ? work : []).filter((trn) => {
+    const holder = holderOf(trn);
+
+    return holder && holder.id === wanted && columnFor(readWorkflowState(trn)) === "completed";
+  }).length;
 }

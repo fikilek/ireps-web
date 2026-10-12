@@ -52,6 +52,8 @@ import {
   ITO_TRN_TYPES,
   buildDeletedRows,
   buildWaitingRows,
+  buildWorkerJobRows,
+  countWorkerCompleted,
   buildWorkerRows,
   describeAge,
   describeTicks,
@@ -224,6 +226,40 @@ export default function ItoDashboardPage() {
     return pins;
   }, [mapView, pinMeter, pinPremise]);
 
+  // THE WORKER'S OWN PAGE. `DR-R001` 9.3, the owner 11 October 2026: "a
+  // click on a FWR (Kaiser) must open a 'FWR ITO PAGE' where we can see all
+  // his trns. That's where we can unallocate or delete."
+  //
+  // It is a view of this screen rather than a route of its own, so it keeps
+  // the ward that was chosen above it. Nothing in iREPS loads before a ward.
+  const [worker, setWorker] = useState(null);
+
+  const workerJobs = useMemo(
+    () => buildWorkerJobRows(work, worker?.uid, nowMs),
+    [work, worker, nowMs],
+  );
+
+  const workerCompleted = useMemo(
+    () => countWorkerCompleted(work, worker?.uid),
+    [work, worker],
+  );
+
+  // Which of his jobs the office has ticked. `DR-R001` 9.3: this page is
+  // about one man's LOAD, and the owner's own case for the override is the
+  // bulk one - "he's hit by a car, he's in hospital". That is not one job.
+  const [picked, setPicked] = useState(() => new Set());
+
+  // A tick on a job that has since left his page is a tick on nothing.
+  const pickable = useMemo(
+    () => workerJobs.filter((row) => !row.unplaceable).map((row) => row.id),
+    [workerJobs],
+  );
+
+  const pickedHere = useMemo(
+    () => pickable.filter((id) => picked.has(id)),
+    [pickable, picked],
+  );
+
   const [asking, setAsking] = useState(null);
   const [reason, setReason] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -232,12 +268,23 @@ export default function ItoDashboardPage() {
   function ask(action, row) {
     setReason("");
     setOutcome(null);
-    setAsking({ action, row });
+    setAsking({ action, rows: [row] });
+  }
+
+  /** Everything the office has ticked on his page, in one act. */
+  function askForAll(rows) {
+    setReason("");
+    setOutcome(null);
+    setAsking({ action: "CANCEL", rows });
   }
 
   async function act() {
-    const { action, row } = asking;
-    const built = buildManageRequest({ action, trnId: row?.id, reason });
+    const { action, rows } = asking;
+    const built = buildManageRequest({
+      action,
+      trnIds: rows.map((row) => row.id),
+      reason,
+    });
 
     if (!built.ok) {
       setOutcome({ ok: false, wrote: false, message: built.message });
@@ -245,12 +292,15 @@ export default function ItoDashboardPage() {
     }
 
     setAsking(null);
-    setBusyId(row.id);
+    setBusyId(rows.length === 1 ? rows[0].id : "ALL");
 
     const result = await manageItoWork({ request: built.request });
 
     setBusyId(null);
-    setOutcome({ ...result, action, row });
+    setOutcome({ ...result, action, rows });
+
+    // A tick on a job that has gone is a tick on nothing.
+    if (result.ok) setPicked(new Set());
   }
 
   const waitingColumns = useMemo(
@@ -376,6 +426,144 @@ export default function ItoDashboardPage() {
     // setters, so they cannot be memoised on an empty list - they would go
     // stale the moment a button is pressed and never show their spinner.
     [role, busyId, navigate],
+  );
+
+  const workerJobColumns = useMemo(
+    () => [
+      ...(canManageItoWork(role)
+        ? [
+            {
+              key: "pick",
+              label: "",
+              sortable: false,
+              render: (row) =>
+                row.unplaceable ? null : (
+                  <input
+                    type="checkbox"
+                    checked={picked.has(row.id)}
+                    aria-label={`Choose the ${row.letter} on meter ${row.meterNo}`}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() =>
+                      setPicked((current) => {
+                        const next = new Set(current);
+
+                        if (next.has(row.id)) next.delete(row.id);
+                        else next.add(row.id);
+
+                        return next;
+                      })
+                    }
+                  />
+                ),
+            },
+          ]
+        : []),
+      {
+        key: "meterNo",
+        label: "Meter",
+        filter: "text",
+        sortable: true,
+        minWidth: 140,
+        value: (row) => row.meterNo,
+        render: (row) => (
+          <DataActionButton
+            icon={<MeterActionIcon />}
+            onClick={() => setMeterTrnId(row.id)}
+            title={`Everything iREPS holds about meter ${row.meterNo}`}
+          >
+            {row.meterNo}
+          </DataActionButton>
+        ),
+      },
+      { key: "letter", label: "Work", filter: "text", sortable: true, value: (row) => row.letter },
+      {
+        key: "erfNo",
+        label: "ERF",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.erfNo,
+        render: (row) =>
+          row.erfId ? (
+            <DataActionButton
+              icon={<ErfActionIcon />}
+              onClick={() => setMapView({ ...row, withPins: false })}
+              title={`ERF ${row.erfNo} on the map`}
+            >
+              {row.erfNo}
+            </DataActionButton>
+          ) : (
+            row.erfNo
+          ),
+      },
+      {
+        key: "address",
+        label: "Address",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.address,
+        render: (row) =>
+          row.erfId ? (
+            <DataActionButton
+              icon={<PremiseActionIcon />}
+              onClick={() => setMapView({ ...row, withPins: true })}
+              title="The premise and the meter on the map"
+            >
+              {row.address}
+            </DataActionButton>
+          ) : (
+            row.address
+          ),
+      },
+      // Why the office sent it. Without this the supervisor is deciding
+      // whether to take work off a man without knowing what the work was for.
+      { key: "reason", label: "Why it was sent", filter: "text", sortable: true, value: (row) => row.reason },
+      { key: "state", label: "Where it is", filter: "text", sortable: true, value: (row) => row.state },
+      { key: "heldFor", label: "His since", align: "right", sortable: true, value: (row) => row.heldFor },
+      {
+        // `DR-R001` 5.6. A job he has accepted is not on the clock, and one
+        // issued before the stamp existed never will be - both say so in
+        // words rather than showing a number nobody holds.
+        key: "expires",
+        label: "Goes back",
+        align: "right",
+        sortable: true,
+        value: (row) => row.expires,
+      },
+      ...(canManageItoWork(role)
+        ? [
+            {
+              // ONE ACTION ON THIS PAGE (`DR-R001` 1.15.0, owner 12 October
+              // 2026: "unallocate first, then delete"). There is no Delete
+              // here: a job still with him cannot be deleted, and once it is
+              // unallocated it is in Waiting, which has the Delete already.
+              key: "actions",
+              label: "",
+              align: "right",
+              sortable: false,
+              render: (row) =>
+                row.unplaceable ? (
+                  // iREPS cannot place this job's state, so the machine would
+                  // refuse any move on it. A button that cannot work is worse
+                  // than none.
+                  NAV
+                ) : (
+                  <DataActionButton
+                    compact
+                    tone="remove"
+                    icon={<BinActionIcon />}
+                    busy={busyId === row.id}
+                    disabled={Boolean(busyId) && busyId !== row.id}
+                    onClick={() => ask("CANCEL", row)}
+                    title={`Take the ${row.letter} on meter ${row.meterNo} back off ${worker?.name || "him"}`}
+                  >
+                    Unallocate
+                  </DataActionButton>
+                ),
+            },
+          ]
+        : []),
+    ],
+    [role, busyId, worker, picked],
   );
 
   const deletedColumns = useMemo(
@@ -568,7 +756,7 @@ export default function ItoDashboardPage() {
         </span>
       </div>
 
-      {!ready ? (
+      {worker ? null : !ready ? (
         <p style={styles.notice}>
           {lmPcode
             ? "Choose a ward above to load the monitoring."
@@ -645,6 +833,12 @@ export default function ItoDashboardPage() {
             // The worker's name never scrolls away from his numbers.
             stickyFirstColumn
             onRowsShown={handleRowsShown}
+            // `DR-R001` 9.3: clicking a field worker opens his page. The row
+            // for work NOBODY holds opens the pool instead - there is no
+            // person there to have a page.
+            onRowClick={(row) =>
+              row.unheld ? setView("created") : setWorker({ uid: row.uid, name: row.name, role: row.role, provider: row.provider, lastHeard: row.lastHeard })
+            }
           />
 
           {/* Counted but given no column — said in words rather than dropped. */}
@@ -657,6 +851,89 @@ export default function ItoDashboardPage() {
             read as nothing waiting. {totals.workers} workers, {totals.total} jobs.
           </p>
         </>
+      ) : null}
+
+      {worker ? (
+        <div style={styles.workerPage}>
+          <div style={styles.workerHead}>
+            <div>
+              <button type="button" style={styles.backLink} onClick={() => setWorker(null)}>
+                ← All workers
+              </button>
+              <h2 style={styles.workerPageName}>{worker.name}</h2>
+              <p style={styles.workerSubline}>
+                {worker.role || NAV}
+                {worker.provider ? ` · ${worker.provider}` : ""} · last heard from{" "}
+                <strong>{worker.lastHeard}</strong>
+              </p>
+            </div>
+
+            <div style={styles.workerCounts}>
+              <div style={styles.workerCount}>
+                <p style={styles.workerCountValue}>{workerJobs.length}</p>
+                <p style={styles.workerCountLabel}>he holds</p>
+              </div>
+              <div style={styles.workerCount}>
+                <p style={styles.workerCountValue}>
+                  {workerJobs.filter((job) => job.isIssued).length}
+                </p>
+                <p style={styles.workerCountLabel}>not answered</p>
+              </div>
+              <div style={{ ...styles.workerCount, ...styles.workerCountQuiet }}>
+                <p style={styles.workerCountValue}>{workerCompleted}</p>
+                <p style={styles.workerCountLabel}>finished</p>
+              </div>
+            </div>
+          </div>
+
+          {canManageItoWork(role) && pickedHere.length ? (
+            <div style={styles.pickedBar}>
+              <span style={styles.pickedCount}>
+                <strong>{pickedHere.length}</strong> of {pickable.length} chosen
+              </span>
+              <div style={styles.pickedActions}>
+                <button type="button" style={styles.pickedClear} onClick={() => setPicked(new Set())}>
+                  Clear
+                </button>
+                <DataActionButton
+                  compact
+                  tone="remove"
+                  icon={<BinActionIcon />}
+                  busy={busyId === "ALL"}
+                  onClick={() =>
+                    askForAll(workerJobs.filter((row) => pickedHere.includes(row.id)))
+                  }
+                  title={`Take ${pickedHere.length} jobs back off ${worker.name}`}
+                >
+                  Unallocate {pickedHere.length}
+                </DataActionButton>
+              </div>
+            </div>
+          ) : null}
+
+          <IrepsTable
+            title={`What ${worker.name} is carrying`}
+            columns={workerJobColumns}
+            rows={workerJobs}
+            rowKey={(row, index) => row.id || `job-${index}`}
+            loading={trns.isLoading}
+            emptyText={`${worker.name} is holding nothing in this ward.`}
+            stickyFirstColumn
+          />
+
+          <p style={styles.footnote}>
+            This is what he <strong>holds</strong> — work waiting for his answer and
+            work he has taken. What he has finished is counted above, not listed:
+            it is his, but it is not a load.{" "}
+            <strong>Goes back</strong> is the three-day clock. It runs only on work
+            he has not answered — the clock cannot see that a man is standing at a
+            meter — and a job issued before iREPS recorded that time reads{" "}
+            <strong>never</strong>, because an unknown age is not a long one.{" "}
+            <strong>Unallocate</strong> takes a job off him and puts it back in{" "}
+            <strong>Waiting</strong>, where it can be given to somebody else or
+            deleted.
+          </p>
+        </div>
       ) : null}
 
       {meterTrnId ? (
@@ -679,17 +956,38 @@ export default function ItoDashboardPage() {
 
       {asking ? (
         <SubmitWindow
-          title={`${ITO_MANAGE_ACTIONS[asking.action].verb} the ${
-            asking.row.letter
-          } on meter ${asking.row.meterNo}?`}
+          title={
+            asking.rows.length > 1
+              ? `Take ${asking.rows.length} jobs back off ${worker?.name || "him"}?`
+              : `${ITO_MANAGE_ACTIONS[asking.action].verb} the ${
+                  asking.rows[0].letter
+                } on meter ${asking.rows[0].meterNo}?`
+          }
           lines={[
             asking.action === "DELETE"
               ? "This flags the transaction as deleted and frees the meter for another job of this kind. Nothing is removed — you can restore it from the Deleted view."
               : asking.action === "RESTORE"
                 ? "This brings the job back to Waiting, with nobody on it. It is refused if the office has since issued another of the same kind on this meter."
-                : "This takes the work off the worker it is with. It goes back to Waiting, for somebody else.",
-            `ERF ${asking.row.erfNo} · ${asking.row.address}`,
-          ]}
+                : asking.rows.length > 1
+                  ? "They all go back to Waiting, with nobody on them, and can then be given to somebody else. It is one act: either every one of them comes off him, or none does."
+                  : "This takes the work off the worker it is with. It goes back to Waiting, for somebody else.",
+
+            // HE MAY BE STANDING AT THE METER. iREPS watches the record, not
+            // the work, so it cannot know - and it must say so rather than
+            // let the office find out from him afterwards. Since 12 October
+            // his capture and his photographs survive, which is the half of
+            // this the office most needs to hear.
+            asking.rows.some((row) => !row.isIssued)
+              ? "One of these is work he has already taken. If he is at the meter now, his submission will be refused — but nothing he captured is lost, and the office can give the job back to him."
+              : null,
+
+            asking.rows.length > 1
+              ? asking.rows
+                  .slice(0, 6)
+                  .map((row) => `${row.letter} · ${row.meterNo}`)
+                  .join("   ") + (asking.rows.length > 6 ? `   … and ${asking.rows.length - 6} more` : "")
+              : `ERF ${asking.rows[0].erfNo} · ${asking.rows[0].address}`,
+          ].filter(Boolean)}
           escapeAction={() => setAsking(null)}
           actions={[
             {
@@ -722,7 +1020,9 @@ export default function ItoDashboardPage() {
         <SubmitWindow
           title={
             outcome.ok
-              ? `${ITO_MANAGE_ACTIONS[outcome.action].verb} — done.`
+              ? outcome.rows.length > 1
+                ? `${outcome.rows.length} jobs taken back.`
+                : `${ITO_MANAGE_ACTIONS[outcome.action].verb} — done.`
               : outcome.wrote === null
                 ? "iREPS could not be reached."
                 : "Not done. Nothing was changed."
@@ -730,18 +1030,24 @@ export default function ItoDashboardPage() {
           tone={outcome.ok ? "info" : "error"}
           lines={[
             outcome.ok
-              ? outcome.action === "DELETE"
-                ? `The ${outcome.row.letter} on meter ${outcome.row.meterNo} is in the bin. The meter will take another of its kind. It is in the Deleted view if you want it back.`
-                : outcome.action === "RESTORE"
-                  ? `The ${outcome.row.letter} on meter ${outcome.row.meterNo} is back in Waiting, with nobody on it.`
-                  : `The ${outcome.row.letter} on meter ${outcome.row.meterNo} is back in Waiting.`
-              : outcome.message,
+              ? outcome.rows.length > 1
+                ? `All ${outcome.rows.length} are back in Waiting, with nobody on them.`
+                : outcome.action === "DELETE"
+                  ? `The ${outcome.rows[0].letter} on meter ${outcome.rows[0].meterNo} is in the bin. The meter will take another of its kind. It is in the Deleted view if you want it back.`
+                  : outcome.action === "RESTORE"
+                    ? `The ${outcome.rows[0].letter} on meter ${outcome.rows[0].meterNo} is back in Waiting, with nobody on it.`
+                    : `The ${outcome.rows[0].letter} on meter ${outcome.rows[0].meterNo} is back in Waiting.`
+              : outcome.rows.length > 1
+                ? `${outcome.message} Nothing moved — the office writes them together or not at all.`
+                : outcome.message,
             // The Meter Registry can show no change at all after a delete:
             // the meter's marker is a single field, so it may be naming a
             // different kind of job and the delete correctly leaves it. So
             // what happened is reported from the TRANSACTION, never from the
             // meter.
-            outcome.ok ? "Its number: " + (outcome.trnId || NAV) : null,
+            outcome.ok && outcome.rows.length === 1
+              ? "Its number: " + (outcome.trnId || NAV)
+              : null,
             outcome.code && outcome.code !== "NAv" ? `Code: ${outcome.code}` : null,
           ].filter(Boolean)}
           escapeAction={() => setOutcome(null)}
@@ -755,6 +1061,73 @@ export default function ItoDashboardPage() {
 }
 
 const styles = {
+  workerPage: { display: "flex", flexDirection: "column", gap: 16 },
+  pickedBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    flexWrap: "wrap",
+    padding: "10px 16px",
+    borderRadius: 14,
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+  },
+  pickedCount: { fontSize: 13, color: "#1e3a8a" },
+  pickedActions: { display: "flex", alignItems: "center", gap: 10 },
+  pickedClear: {
+    padding: 0,
+    border: "none",
+    background: "none",
+    font: "inherit",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#1d4ed8",
+    cursor: "pointer",
+  },
+  workerHead: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 20,
+    flexWrap: "wrap",
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 20,
+    padding: "16px 20px",
+  },
+  backLink: {
+    padding: 0,
+    marginBottom: 8,
+    border: "none",
+    background: "none",
+    font: "inherit",
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#1d4ed8",
+    cursor: "pointer",
+  },
+  workerPageName: { margin: 0, fontSize: 24, fontWeight: 400, color: "#0f172a" },
+  workerSubline: { margin: "4px 0 0", fontSize: 13, color: "#475569" },
+  workerCounts: { display: "flex", gap: 10 },
+  workerCount: {
+    minWidth: 96,
+    padding: "10px 14px",
+    borderRadius: 14,
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    textAlign: "center",
+  },
+  // What he has finished steps back: it is not a load.
+  workerCountQuiet: { background: "#ffffff", color: "#94a3b8" },
+  workerCountValue: {
+    margin: 0,
+    fontSize: 22,
+    fontWeight: 800,
+    color: "inherit",
+    fontVariantNumeric: "tabular-nums",
+  },
+  workerCountLabel: { margin: "2px 0 0", fontSize: 12, color: "#64748b" },
   reasonLabel: {
     display: "block",
     marginTop: 4,

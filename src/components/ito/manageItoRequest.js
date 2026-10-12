@@ -112,17 +112,36 @@ export function manageProblem({ action, reason } = {}) {
  * It refuses rather than sending half a request: the server would refuse it
  * anyway, and a refusal the office can read beats a field name.
  */
-export function buildManageRequest({ action, trnId, reason } = {}) {
+export function buildManageRequest({ action, trnId, trnIds, reason } = {}) {
   const key = String(action || "").toUpperCase();
   const move = ITO_MANAGE_ACTIONS[key];
-  const id = String(trnId || "").trim();
 
   if (!move) return { ok: false, message: "That is not something iREPS does to a transaction." };
 
-  if (!id) {
+  // ONE JOB OR HIS WHOLE LOAD, through one call. The office's callable has
+  // always taken a list - up to fifty - and writes them in ONE Firestore
+  // transaction, so a batch is all or nothing: either every job comes back
+  // off him or none does, and the office is never left guessing which.
+  //
+  // `DR-R001` 9.3 and the owner's own case for the override: *"someone
+  // accepts the work, and then he's hit by a car, he's in hospital"*. That is
+  // not one job, and making the office take them back one window at a time is
+  // the hunting this page was built to end.
+  const ids = (Array.isArray(trnIds) ? trnIds : [trnId])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (!ids.length) {
     return {
       ok: false,
       message: "No transaction was named, so nothing has been sent. Refresh the screen and try again.",
+    };
+  }
+
+  if (ids.length > 50) {
+    return {
+      ok: false,
+      message: `${ids.length} jobs is more than iREPS sends at once. Take fifty or fewer.`,
     };
   }
 
@@ -132,9 +151,13 @@ export function buildManageRequest({ action, trnId, reason } = {}) {
 
   return {
     ok: true,
+    count: ids.length,
     request: {
       action: key,
-      trnId: id,
+      // Both, because the server reads the list first and the single id is
+      // what every existing caller sends.
+      trnIds: ids,
+      trnId: ids[0],
       [move.reasonKey]: saidReason(reason) || "NAv",
     },
   };

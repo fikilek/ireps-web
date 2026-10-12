@@ -210,6 +210,9 @@ test("the request carries the action, the transaction and its own reason key", (
   assert.equal(built.ok, true);
   assert.deepEqual(built.request, {
     action: "DELETE",
+    // Both: the server reads the list first, and the single id is what
+    // every existing caller sends.
+    trnIds: ["TRN_MDCN_1_ELC_W_5213"],
     trnId: "TRN_MDCN_1_ELC_W_5213",
     deleteReason: "Wrong meter",
   });
@@ -389,7 +392,7 @@ test("it asks before it writes, and says what happened after", async () => {
 
   assert.match(source, /\{asking \? \(/);
   assert.match(source, /\{outcome && !asking \? \(/);
-  assert.match(source, /setBusyId\(row\.id\)/, "the row shows its own wait");
+  assert.match(source, /setBusyId\(rows\.length === 1 \? rows\[0\]\.id : "ALL"\)/, "the row shows its own wait");
   assert.match(source, /ito-manage-reason/, "and the reason is asked for");
 });
 
@@ -590,4 +593,219 @@ test("a row shows its own wait, and the others do not pretend to be ready", asyn
 
   assert.match(ito, /busy=\{busyId === row\.id\}/);
   assert.match(ito, /disabled=\{Boolean\(busyId\) && busyId !== row\.id\}/);
+});
+
+// ===========================================================================
+// The worker's own page. `DR-R001` 9.3 and 1.15.0.
+// ===========================================================================
+
+const KAISER = "fwr-kaiser";
+
+const his = (state, extra = {}) =>
+  job(state, {
+    targetType: "USER",
+    targetId: KAISER,
+    targetName: "Kaiser Kaiser",
+    ...extra,
+  });
+
+test("his page lists what he HOLDS, and nothing else", async () => {
+  // Issued and Accepted are the two states in which the job is his. His
+  // completed work is his too, but it is finished and is not a load.
+  const { buildWorkerJobRows, countWorkerCompleted } = await import(
+    "../src/pages/operations/ito-dashboard/itoMonitoring.js"
+  );
+
+  const all = [
+    his("ISSUED", { trnId: "A", issuedAt: "2026-10-10T23:45:00.000Z" }),
+    his("ACCEPTED", { trnId: "B" }),
+    his("COMPLETED", { trnId: "C" }),
+    job("ISSUED", { trnId: "SOMEBODY_ELSE", targetType: "USER", targetId: "other", targetName: "Peter" }),
+    job("CREATED", { trnId: "NOBODY" }),
+  ];
+
+  const rows = buildWorkerJobRows(all, KAISER, Date.parse("2026-10-12T12:00:00.000Z"));
+
+  assert.deepEqual(rows.map((row) => row.id).sort(), ["A", "B"]);
+  assert.equal(countWorkerCompleted(all, KAISER), 1, "counted, not listed");
+});
+
+test("the oldest is first, because that is what the office came about", async () => {
+  const { buildWorkerJobRows } = await import(
+    "../src/pages/operations/ito-dashboard/itoMonitoring.js"
+  );
+
+  const rows = buildWorkerJobRows(
+    [
+      his("ISSUED", { trnId: "NEW", issuedAt: "2026-10-12T09:00:00.000Z" }),
+      his("ISSUED", { trnId: "OLD", issuedAt: "2026-10-10T23:45:00.000Z" }),
+      // No issue time at all - it cannot be placed in the order, so it goes
+      // last rather than being treated as the oldest thing on the page.
+      his("ACCEPTED", { trnId: "NOSTAMP" }),
+    ],
+    KAISER,
+    Date.parse("2026-10-12T12:00:00.000Z"),
+  );
+
+  assert.deepEqual(rows.map((row) => row.id), ["OLD", "NEW", "NOSTAMP"]);
+});
+
+test("the three-day clock says what it is doing, in words", async () => {
+  // DR-R001 5.6. Two cases must never read as a number: work he has taken,
+  // which is not on the clock at all, and work with no issue time, which the
+  // clock can never reach.
+  const { describeExpiry } = await import(
+    "../src/pages/operations/ito-dashboard/itoMonitoring.js"
+  );
+
+  const now = Date.parse("2026-10-12T12:00:00.000Z");
+  const ago = (ms) => new Date(now - ms).toISOString();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  assert.equal(
+    describeExpiry({ workflowState: "ACCEPTED", issuedAt: ago(10 * DAY) }, now),
+    "not on the clock",
+    "the clock cannot see that he is standing at the meter",
+  );
+
+  assert.equal(describeExpiry({ workflowState: "ISSUED" }, now), "never");
+  assert.equal(describeExpiry({ workflowState: "ISSUED", issuedAt: null }, now), "never");
+
+  assert.equal(describeExpiry({ workflowState: "ISSUED", issuedAt: ago(1.5 * DAY) }, now), "in 1 d");
+  assert.equal(describeExpiry({ workflowState: "ISSUED", issuedAt: ago(2.9 * DAY) }, now), "in 2 h");
+  assert.equal(describeExpiry({ workflowState: "ISSUED", issuedAt: ago(4 * DAY) }, now), "due now");
+});
+
+test("ONE ACTION ON HIS PAGE: unallocate", async () => {
+  // Owner, 12 October 2026: "unallocate first, then delete" (DR-R001 1.15.0).
+  // A job still with him cannot be deleted, and once unallocated it is in
+  // Waiting - which has the Delete already. No combined act: the two have
+  // different reasons and one press cannot honestly collect both.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+  const block = source.slice(source.indexOf("const workerJobColumns"));
+  const columns = block.slice(0, block.indexOf("const deletedColumns"));
+
+  assert.match(columns, /ask\("CANCEL", row\)/);
+  assert.match(columns, />\s*Unallocate\s*</);
+  assert.doesNotMatch(columns, /ask\("DELETE", row\)/, "no delete on his page");
+  assert.doesNotMatch(columns, />\s*Delete\s*</);
+});
+
+test("clicking work nobody holds opens the pool, not a person", async () => {
+  // The per-worker table has a row for jobs with no holder. There is no
+  // person there to have a page.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /row\.unheld \? setView\("created"\)/);
+});
+
+test("his page says what it does not know", async () => {
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /last heard from/);
+  assert.match(source, /an unknown age is not a long one/);
+  assert.match(source, /it is his, but it is not a load/);
+});
+
+test("his page keeps the ward that was chosen above it", async () => {
+  // It is a view of this screen rather than a route of its own. Nothing in
+  // iREPS loads before a ward (UI-R009 4).
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /It is a view of this screen rather than a route of its own/);
+  assert.doesNotMatch(source, /navigate\(`\/operations\/ito-dashboard\/worker/);
+});
+
+test("his whole load can come off him in one act", async () => {
+  // All three designs reached this independently, and the owner's own case
+  // for the override is the bulk one: "someone accepts the work, and then
+  // he's hit by a car, he's in hospital". That is not one job.
+  const built = buildManageRequest({
+    action: "CANCEL",
+    trnIds: ["A", "B", "C"],
+    reason: "In hospital until Monday",
+  });
+
+  assert.equal(built.ok, true);
+  assert.equal(built.count, 3);
+  assert.deepEqual(built.request.trnIds, ["A", "B", "C"]);
+  assert.equal(built.request.cancelReason, "In hospital until Monday");
+});
+
+test("it is all of them or none of them, and the office is told which", async () => {
+  // The office's callable writes every job in ONE Firestore transaction, so
+  // a batch cannot half-succeed. Saying so is what stops the office guessing.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /either every one of them comes off him, or none does/);
+  assert.match(source, /Nothing moved — the office writes them together or not at all/);
+});
+
+test("fifty is the most that goes at once, and it says so", () => {
+  const tooMany = buildManageRequest({
+    action: "CANCEL",
+    trnIds: Array.from({ length: 51 }, (_, index) => `T${index}`),
+    reason: "x",
+  });
+
+  assert.equal(tooMany.ok, false);
+  assert.match(tooMany.message, /51 jobs is more than iREPS sends at once/);
+});
+
+test("the office is warned when the job is already in his hands", async () => {
+  // iREPS watches the record, not the work, so it cannot know he is at the
+  // meter - and must say so rather than let the office find out from him.
+  // Since 12 October his capture survives, which is the half he most needs.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /work he has already taken/);
+  assert.match(source, /nothing he captured is lost/);
+});
+
+test("a job iREPS cannot place still gets a row on his page", async () => {
+  // Filtering it out would drop a job off his page silently - a record
+  // nobody can see is a record nobody fixes.
+  const { buildWorkerJobRows } = await import(
+    "../src/pages/operations/ito-dashboard/itoMonitoring.js"
+  );
+
+  const rows = buildWorkerJobRows(
+    [his("WAITING_BATCH_ACCEPTANCE", { trnId: "ODD" })],
+    KAISER,
+    Date.parse("2026-10-12T12:00:00.000Z"),
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].unplaceable, true);
+  assert.equal(rows[0].state, "WAITING_BATCH_ACCEPTANCE", "it keeps its own word");
+
+  // And it is offered no action, because the machine would refuse one.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+
+  assert.match(source, /row\.unplaceable \? \(/);
+  assert.match(source, /iREPS cannot place this job's state/);
+});
+
+test("ONE AT A TIME, OR SEVERAL - both, never one instead of the other", async () => {
+  // Owner, 12 October 2026, correcting me when I reported the bulk path as
+  // though it replaced the single one: "the SPV should be able to take one at
+  // a time if they want .. or more then one if required that way".
+  //
+  // So the page carries both, and neither is the exception. A row has its own
+  // Unallocate; ticking several offers one act over all of them.
+  const source = await read("../src/pages/operations/ItoDashboardPage.jsx");
+  const block = source.slice(source.indexOf("const workerJobColumns"));
+  const columns = block.slice(0, block.indexOf("const deletedColumns"));
+
+  // One at a time: the button is on the row.
+  assert.match(columns, /onClick=\{\(\) => ask\("CANCEL", row\)\}/);
+
+  // Several: a tick on the row, and a bar that acts on what is ticked.
+  assert.match(columns, /type="checkbox"/);
+  assert.match(source, /askForAll\(/);
+  assert.match(source, /Unallocate \{pickedHere\.length\}/);
+
+  // And the bar only appears once something is ticked, so the single path is
+  // never cluttered by the other.
+  assert.match(source, /pickedHere\.length \? \(/);
 });
