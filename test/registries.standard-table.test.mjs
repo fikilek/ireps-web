@@ -156,8 +156,23 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,20);
+  assert.equal(table.columns.length,21);
+  assert.equal(table.columns.at(-1).key,"qaState");
   assert.ok(table.columns.some(c=>!c.sortable && c.render));
+});
+
+test("QA column filters all states and exposes decisions only for another worker's Draft or Updated", () => {
+  const table = pageTable("Trns");
+  const column = table.columns.at(-1);
+  for (const state of ["DRAFT", "FAIL", "UPDATED", "PASS"]) {
+    const rows = filter(table, { qaState: state });
+    assert.ok(rows.length); assert.ok(rows.every(row => row.qaState === state));
+    const html = renderToStaticMarkup(column.render(rows[0]));
+    assert.equal(html.includes("<select"), ["DRAFT", "UPDATED"].includes(state));
+    if (state === "PASS") assert.match(html, /Locked/);
+  }
+  const own = { ...table.rows.find(row => row.qaState === "DRAFT"), fieldSubmitter: { uid: "preview-reviewer" } };
+  assert.doesNotMatch(renderToStaticMarkup(column.render(own)), /<select/);
 });
 
 test("FC follows Normalisation, opens the exact transaction and exports all four formats", () => {

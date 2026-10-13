@@ -10,6 +10,7 @@
 // who did the work and the day they did it — and records the repair beside it, never in place of it.
 import { registrationError } from "./registerMeter.js";
 import { resolveRefusedSubmission } from "./refusedSubmissions.js";
+import { assertQaUnlocked } from "../qa/lock.js";
 
 export const REPAIRABLE = Object.freeze({
   READY: "READY",
@@ -346,6 +347,11 @@ export async function repairRegistration({
   };
 
   const result = await db.runTransaction(async (tx) => {
+    const currentTrn = await tx.get(trnRef);
+    assertQaUnlocked(currentTrn.data());
+    if (!currentTrn.exists || JSON.stringify(currentTrn.data()) !== JSON.stringify(trnData)) {
+      throw registrationError("TRN_CHANGED", "The transaction changed during inspection. Inspect it again before repair.");
+    }
     const registration = await registerMeterInTransaction({
       tx,
       db,

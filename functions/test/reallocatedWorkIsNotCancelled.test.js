@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const read = (p) => readFileSync(join(here, "..", p), "utf8");
+const read = (p) => readFileSync(join(here, "..", p), "utf8").replaceAll("\r\n", "\n");
 
 test("allocating clears the cancel stamps, not only the accept/reject ones", () => {
   const src = read("meterLifecycle/manageInstructionCallable.js");

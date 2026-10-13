@@ -1,3 +1,5 @@
+import { fieldCapturedAt, qaEligibility } from "../qa/model.js";
+
 export const normalizeText = (value) => {
   if (value === undefined || value === null) return "NAv";
 
@@ -45,7 +47,7 @@ export const getNormalisationBucket = (trn) => {
 
 export const getUserActivityContribution = (trn) => {
   const counts = {
-    totalTrns: 1,
+    totalTrns: 0,
     noAccessTrns: 0,
 
     meterDiscoveryTrns: 0,
@@ -58,6 +60,8 @@ export const getUserActivityContribution = (trn) => {
     otherTrns: 0,
   };
 
+  if (!qaEligibility(trn).eligible) return counts;
+  counts.totalTrns = 1;
   const trnType = normalizeText(trn?.accessData?.trnType);
 
   if (isNoAccessTrn(trn)) {
@@ -98,7 +102,7 @@ export const getUserActivityContribution = (trn) => {
 };
 
 export const getActivityDate = (trn) => {
-  const iso = trn?.metadata?.updatedAt || trn?.metadata?.createdAt || null;
+  const iso = fieldCapturedAt(trn);
 
   if (!iso) return "NAv";
 

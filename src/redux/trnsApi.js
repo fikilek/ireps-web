@@ -13,6 +13,7 @@ import { registryNoAccessDetails } from "../utils/registryNoAccess.js";
 import { savedRegistryUnits } from "../utils/registryTrnUnits.js";
 import { getFieldComments } from "../utils/fieldComments.js";
 import { db } from "../firebase";
+import { fieldSubmitter, qaState, qaEligibility } from "../../functions/qa/model.js";
 
 const TRNS_COLLECTION = "trns";
 
@@ -181,7 +182,7 @@ function getCancelledAt(data = {}) {
 }
 
 function getCompletedByUser(data = {}) {
-  return valueOrNav(data.workflow?.completedByUser || data.metadata?.updatedByUser);
+  return valueOrNav(fieldSubmitter(data).name);
 }
 
 function getIssuedByUser(data = {}) {
@@ -331,6 +332,12 @@ function normalizeTrnRegistryDoc(docSnap) {
 
   return {
     trnId,
+    qa: data.qa || null,
+    qaState: qaState(data),
+    qaEligibility: qaEligibility(data),
+    fieldSubmitter: fieldSubmitter(data),
+    serviceProviderId: data.serviceProvider?.id || "",
+    lmPcode: data.accessData?.parents?.lmPcode || "",
     trnType: normalizeRegistryCode(data.accessData?.trnType || data.trnType),
     wardPcode: valueOrNav(data.accessData?.parents?.wardPcode),
     wardNo: getWardNoFromPcode(data.accessData?.parents?.wardPcode),

@@ -13,8 +13,11 @@ import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+import { requireActiveRoles, serviceProviderPatch, stampFieldSubmission } from "./auth/authority.js";
+import { assertQaUnlocked } from "./qa/lock.js";
 
 import { onTrnWritten } from "./reports/trnReports.js";
+export { getTrnQaReview, saveTrnQaReview } from "./qa/callables.js";
 
 import { rebuildMeterRegistryRow } from "./registry/meterRegistryRowRebuild.js";
 import { didSavedPremiseAddressChange } from "./registry/savedPremiseUnits.js";
@@ -573,6 +576,7 @@ async function rebuildAccountRegistryForMeterIfExists({ astId, astData } = {}) {
   ------------------------------------------------ */
 
 export const createServiceProvider = onCall(async (request) => {
+  await requireActiveRoles(db, request.auth?.uid, ["SPU", "ADM"]);
   console.log(" ");
   console.log("createServiceProvider ---- START");
 
@@ -681,6 +685,7 @@ export const createServiceProvider = onCall(async (request) => {
 });
 
 export const updateServiceProvider = onCall(async (request) => {
+  const verifiedActor = await requireActiveRoles(db, request.auth?.uid, ["SPU", "ADM", "MNG", "SPV"]);
   console.log(" ");
   console.log(" ");
   console.log("updateServiceProvider ---- START");
@@ -754,9 +759,7 @@ export const updateServiceProvider = onCall(async (request) => {
   /* -------------------------------------------
      4. SANITIZE PATCH
      ------------------------------------------- */
-  const safePatch = {
-    ...patch,
-  };
+  const safePatch = serviceProviderPatch(verifiedActor, spId, patch);
 
   // Backend owns metadata. Client must not write old or new metadata shapes.
   delete safePatch["meta"];
@@ -790,6 +793,7 @@ export const updateServiceProvider = onCall(async (request) => {
 });
 
 export const createAdminUser = onCall(async (request) => {
+  await requireActiveRoles(db, request.auth?.uid, ["SPU"]);
   console.log("createAdminUser ---- START");
   console.log("createAdminUser ---- request", request);
 
@@ -1736,6 +1740,8 @@ export const onMeterDiscoveryCreated = onDocumentCreated(
 
     try {
       const syncResult = await db.runTransaction(async (tx) => {
+        const currentTrn = await tx.get(trnRef);
+        assertQaUnlocked(currentTrn.data());
         const astSnap = await tx.get(astRef);
         const masterSnap = await tx.get(masterRef);
         const salesSnap = await tx.get(salesRef);
@@ -2160,6 +2166,7 @@ function collectMngTreeServiceProviderIds(
 }
 
 export const inviteManagerUser = onCall(async (request) => {
+  await requireActiveRoles(db, request.auth?.uid, ["SPU", "ADM"]);
   const { auth: caller, data } = request;
 
   // 1. AUTH GUARD
@@ -2365,6 +2372,7 @@ export const inviteManagerUser = onCall(async (request) => {
 });
 
 export const inviteSupervisorUser = onCall(async (request) => {
+  await requireActiveRoles(db, request.auth?.uid, ["MNG"]);
   const { auth: caller, data } = request;
 
   // 1. AUTH GUARD
@@ -2594,6 +2602,7 @@ export const inviteSupervisorUser = onCall(async (request) => {
 });
 
 export const inviteAdminUser = onCall(async (request) => {
+  await requireActiveRoles(db, request.auth?.uid, ["SPU"]);
   const { auth: caller, data } = request;
 
   if (!caller) {
@@ -2968,6 +2977,7 @@ export const signupFieldWorker = onCall(async (request) => {
 });
 
 export const authorizeFieldWorker = onCall(async (request) => {
+  await requireActiveRoles(db, request.auth?.uid, ["MNG"]);
   const { auth: caller, data } = request;
 
   // 1. AUTH GUARD
@@ -3406,6 +3416,7 @@ async function completeNoAccessFromAuthorities(payload, { actorUid } = {}) {
 }
 
 export const onMeterDiscoveryCallable = onCall(async (request) => {
+  const fieldActor = await requireActiveRoles(db, request.auth?.uid, ["FWR", "SPV", "MNG", "ADM", "SPU"]);
   try {
     const data = request?.data || {};
     const caller = request.auth;
@@ -3661,6 +3672,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     );
 
     delete safePayload.metadata;
+    stampFieldSubmission(safePayload, fieldActor);
 
     // No Access rules NA-R001 (1.0.0): the SERVER owns the shape of a no access, not the form
     // that happened to send it.
@@ -3782,7 +3794,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           });
 
           // The transaction itself, in the same commit, already carrying what came of it.
-          tx.create(trnRef, { ...finalPayload, derived: result.derived });
+          tx.create(trnRef, { ...stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }), derived: result.derived });
 
           return result;
         });
@@ -5570,6 +5582,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 });
 
 export const onMeterInstallationCallable = onCall(async (request) => {
+  const fieldActor = await requireActiveRoles(db, request.auth?.uid, ["FWR", "SPV", "MNG", "ADM", "SPU"]);
   try {
     const db = getFirestore();
     const data = request?.data || {};
@@ -5687,6 +5700,7 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     );
 
     delete safePayload.metadata;
+    stampFieldSubmission(safePayload, fieldActor);
 
     // GMR-R038 (1.6.0): an installation on a premise that belongs to a batch carries that batch, the
     // same as a discovery. What the worker sent still wins; this only fills the gap.

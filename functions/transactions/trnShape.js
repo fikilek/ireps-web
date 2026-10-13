@@ -64,6 +64,7 @@ export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
   // and an always-empty field reads as "the worker had nothing to say" when the truth is that
   // nobody asked.
   "fieldComment",
+  "qa",
   ...TRN_ROOT_OBJECT_KEYS,
   // The one property named for the work (TR-R001). A no access carries none of them.
   "commissioning",
@@ -92,6 +93,9 @@ export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
  */
 export function stripToDeclaredRoot(payload = {}, { actor = null } = {}) {
   if (!payload || typeof payload !== "object") return payload;
+  // QA is server-owned. Submission/ITO payload shaping never accepts it from
+  // a caller; only the QA operation can write a decision on an existing TRN.
+  delete payload.qa;
 
   const batch = payload.targetedBatchContext;
 

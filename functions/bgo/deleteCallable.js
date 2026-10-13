@@ -381,6 +381,7 @@ export const onDeleteUnacceptedBgoCallable = onCall(async (request) => {
     const bgoRows = bgoTrnDocs.map((doc) => ({
       id: doc.id,
       ref: doc.ref,
+      updateTime: doc.updateTime,
       data: doc.data() || {},
     }));
 
@@ -411,7 +412,7 @@ export const onDeleteUnacceptedBgoCallable = onCall(async (request) => {
     bgoRows.forEach((row) => {
       const trnData = row.data || {};
 
-      if (!isChildTrnStillDeletable(trnData)) {
+      if (trnData.qa?.state || !isChildTrnStillDeletable(trnData)) {
         blockedTrns.push({
           trnId: row.id,
           workflowState: getWorkflowState(trnData),
@@ -492,7 +493,9 @@ export const onDeleteUnacceptedBgoCallable = onCall(async (request) => {
     });
 
     trnRefs.forEach((trnRef) => {
-      writeJobs.push((batch) => batch.delete(trnRef));
+      const checked = bgoRows.find(row => row.ref.path === trnRef.path);
+      // Refuse a stale deletion if acceptance, submission or QA won the race.
+      writeJobs.push((batch) => batch.delete(trnRef, { lastUpdateTime: checked.updateTime }));
     });
 
     tcRowSnaps.forEach((tcRowSnap) => {

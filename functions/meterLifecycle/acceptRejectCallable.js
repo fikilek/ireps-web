@@ -1,4 +1,5 @@
 import { onCall } from "firebase-functions/v2/https";
+import { assertQaUnlocked } from "../qa/lock.js";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
@@ -461,6 +462,7 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         }));
 
         const teamIds = getTargetTeamIdsFromRows(trnRows);
+        trnRows.forEach(row => assertQaUnlocked(row.data));
         const teamMap = new Map();
 
         for (const teamId of teamIds) {

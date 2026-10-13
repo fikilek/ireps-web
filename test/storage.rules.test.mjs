@@ -14,7 +14,7 @@ import {
   uploadBytes,
 } from "firebase/storage";
 
-const PROJECT_ID = "demo-ireps-report-platform";
+const PROJECT_ID = "demo-ireps-qa";
 const OWNER_A = "UserA";
 const OWNER_B = "UserB";
 
@@ -84,6 +84,7 @@ before(async () => {
 
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
+    firestore: { rules: await readFile(new URL("../firestore.rules", import.meta.url), "utf8") },
     storage: { rules },
   });
 });
@@ -96,8 +97,8 @@ beforeEach(async () => {
   await testEnv.clearStorage();
 });
 
-describe("Storage policy: saved reports belong to their owner, other paths keep signed-in access", () => {
-  test("authenticated users retain read/write/delete access to existing non-report Storage paths", async () => {
+describe("Storage policy: report ownership and explicit unreviewed field-upload paths", () => {
+  test("authenticated users retain read/write/delete access to supported unreviewed evidence paths", async () => {
     const userA = storageForAuthenticatedUser(OWNER_A);
     const userB = storageForAuthenticatedUser(OWNER_B);
 
@@ -105,9 +106,9 @@ describe("Storage policy: saved reports belong to their owner, other paths keep 
       "meters/test/file.jpg",
       "premises/test/file.jpg",
       "informal_erfs/test/file.jpg",
-      "trns/test/file.jpg",
-      "data-cleansing/test/file.csv",
-      "future-unknown-path/deep/object.bin",
+      "trns/lifecycle_instructions/file.jpg",
+      "trns/lifecycle_instructions/work/file.jpg",
+      "lifecycleInstructions/work/file.jpg",
     ];
 
     for (const path of paths) {
@@ -116,6 +117,10 @@ describe("Storage policy: saved reports belong to their owner, other paths keep 
       await assertSucceeds(upload(userB, path));
       await assertSucceeds(remove(userA, path));
     }
+  });
+
+  test("unknown upload folders are not implicitly writable", async () => {
+    await assertFails(upload(storageForAuthenticatedUser(OWNER_A), "future-unknown-path/deep/object.bin"));
   });
 
   test("the owner may save, read, list and delete their own generated reports (GMR-R004)", async () => {

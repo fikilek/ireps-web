@@ -1,6 +1,8 @@
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
+import { fieldSubmitter } from "../qa/model.js";
+import { sourceVersion } from "../qa/review.js";
 
 import { rebuildWardRegistryRow } from "../registry/wardBuilder.js";
 
@@ -18,6 +20,8 @@ export const onTrnWritten = onDocumentWritten("trns/{trnId}", async (event) => {
   const before = event.data?.before?.data() || null;
   const after = event.data?.after?.data() || null;
   const trnId = event.params.trnId;
+  // A QA decision changes the updater, not a field visit or its report credit.
+  if (before && after && sourceVersion(before) === sourceVersion(after)) return;
 
   try {
     await syncNoAccessReport(db, before, after, trnId);
@@ -130,8 +134,8 @@ const buildNoAccessRow = (trn, trnId, existingCreatedAt = null) => {
     },
 
     user: {
-      uid: trn?.metadata?.updatedByUid || "NAv",
-      name: trn?.metadata?.updatedByUser || "NAv",
+      uid: fieldSubmitter(trn).uid || "NAv",
+      name: fieldSubmitter(trn).name,
     },
 
     premise: {
@@ -409,8 +413,8 @@ const rebuildAnomalyBucket = async (
 };
 
 const syncUserActivityReport = async (db, before, after) => {
-  const beforeUser = before?.metadata?.updatedByUid || null;
-  const afterUser = after?.metadata?.updatedByUid || null;
+  const beforeUser = before ? fieldSubmitter(before).uid : null;
+  const afterUser = after ? fieldSubmitter(after).uid : null;
 
   const lmBefore = before?.accessData?.parents?.lmPcode || null;
   const lmAfter = after?.accessData?.parents?.lmPcode || null;
@@ -441,7 +445,6 @@ const rebuildUserActivityBucket = async (db, lmPcode, userUid) => {
   const snapshot = await db
     .collection("trns")
     .where("accessData.parents.lmPcode", "==", lmPcode)
-    .where("metadata.updatedByUid", "==", userUid)
     .get();
 
   const counts = {
@@ -460,6 +463,7 @@ const rebuildUserActivityBucket = async (db, lmPcode, userUid) => {
 
   snapshot.forEach((doc) => {
     const trn = doc.data();
+    if (fieldSubmitter(trn).uid !== userUid) return;
     const contribution = getUserActivityContribution(trn);
 
     Object.keys(counts).forEach((key) => {

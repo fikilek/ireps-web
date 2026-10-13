@@ -3597,12 +3597,16 @@ export async function linkFollowUp({
   }
 
   const parentRef = db.collection("trns").doc(parentId);
-  const parentSnap = await parentRef.get();
+  return db.runTransaction(async tx => {
+  const parentSnap = await tx.get(parentRef);
 
   // A parent that is not there is never invented.
   if (!parentSnap.exists) return { linked: false, reason: "PARENT_NOT_FOUND" };
 
   const parent = parentSnap.data() || {};
+  // The child's origin already records this relationship. A passed parent's
+  // approved form must never be changed to add a later reverse link.
+  if (parent.qa?.state === "PASS") return { linked: false, reason: "QA_PASS_LOCKED" };
 
   if (readTrnType(parent) !== parentType) {
     return { linked: false, reason: "PARENT_TYPE_MISMATCH" };
@@ -3624,9 +3628,10 @@ export async function linkFollowUp({
     return { linked: false, reason: "ALREADY_LINKED" };
   }
 
-  await parentRef.update({ [`${field}.${slot}`]: trnId });
+  tx.update(parentRef, { [`${field}.${slot}`]: trnId });
 
   return { linked: true, parentTrnId: parentId, slot, trnId };
+  });
 }
 
 // Kept for the disconnection callers and tests written before 1.1.0.
@@ -3712,11 +3717,13 @@ export async function linkReplacementInstallation({
   installationTrnId,
 }) {
   const removalRef = db.collection("trns").doc(String(removalTrnId || "").trim());
-  const removalSnap = await removalRef.get();
+  const result = await db.runTransaction(async tx => {
+  const removalSnap = await tx.get(removalRef);
 
   if (!removalSnap.exists) return { linked: false, reason: "REMOVAL_NOT_FOUND" };
 
   const removal = removalSnap.data() || {};
+  if (removal.qa?.state === "PASS") return { linked: false, reason: "QA_PASS_LOCKED" };
 
   if (readTrnType(removal) !== "METER_REMOVAL") {
     return { linked: false, reason: "NOT_A_REMOVAL" };
@@ -3725,7 +3732,11 @@ export async function linkReplacementInstallation({
     return { linked: false, reason: "ALREADY_LINKED" };
   }
 
-  await removalRef.update({ "replacement.installationTrnId": installationTrnId });
+  tx.update(removalRef, { "replacement.installationTrnId": installationTrnId });
+  return { linked: true, removal };
+  });
+  if (!result.linked) return result;
+  const { removal } = result;
 
   return linkFollowUp({
     db,

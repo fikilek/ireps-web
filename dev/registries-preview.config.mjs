@@ -13,6 +13,8 @@ export default mergeConfig(base, defineConfig({
       const path = importer?.replaceAll("\\", "/") || "";
       const registry = /\/src\/pages\/registries\//.test(path);
       const meterHistory = path.endsWith("/src/components/mread/MeterHistoryModal.jsx");
+      const ito = path.includes("/src/components/ito/");
+      if (ito && (source === "firebase/functions" || source === "firebase/storage" || source.endsWith("/firebase"))) return fixture;
       if (!registry && !meterHistory) return null;
       return source.includes("/redux/") || source.endsWith("/auth/useAuth") || source.endsWith("/context/GeoContext") || source === "firebase/firestore" || source === "firebase/functions" || source.endsWith("/firebase") || /\/(persistGeneratedReport|generatedReportsClient|generatedReportEmailClient)$/.test(source) ? fixture : null;
     },
