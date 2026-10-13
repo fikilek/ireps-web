@@ -176,6 +176,7 @@ export function rowUpdatedAtMs(row) {
     row?.lastUpdatedMs,
     row?.updatedAtMs,
     row?.metadata?.updatedAt,
+    row?.lastUpdatedAt,
     row?.updatedAt,
   ];
 

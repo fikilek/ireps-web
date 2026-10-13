@@ -14,6 +14,7 @@ import { savedRegistryUnits } from "../utils/registryTrnUnits.js";
 import { getFieldComments } from "../utils/fieldComments.js";
 import { db } from "../firebase";
 import { fieldSubmitter, qaState, qaEligibility } from "../../functions/qa/model.js";
+import { rowUpdatedAtMs } from "../components/table/irepsTableModel.js";
 
 const TRNS_COLLECTION = "trns";
 
@@ -505,10 +506,13 @@ function sortTrns(left, right) {
 }
 
 function sortRegistryTrns(left, right) {
-  const leftCreated = String(left?.createdAt || "");
-  const rightCreated = String(right?.createdAt || "");
-
-  if (leftCreated !== rightCreated) return rightCreated.localeCompare(leftCreated);
+  const leftUpdated = rowUpdatedAtMs(left);
+  const rightUpdated = rowUpdatedAtMs(right);
+  if (leftUpdated !== rightUpdated) {
+    if (leftUpdated === null) return 1;
+    if (rightUpdated === null) return -1;
+    return rightUpdated - leftUpdated;
+  }
 
   return String(left?.trnId || "").localeCompare(String(right?.trnId || ""));
 }

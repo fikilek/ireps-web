@@ -29,6 +29,7 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
 }));
 // FC browser-review cases use local synthetic media supplied by the test runner.
 rowData.forEach((row, index) => {
+  row.lastUpdatedAt = row.updatedAt;
   row.qaState = ["DRAFT", "FAIL", "UPDATED", "PASS"][index % 4];
   row.fieldSubmitter = { uid: "preview-worker", name: "Preview Worker" };
   row.serviceProviderId = "preview-mnc";
@@ -116,7 +117,10 @@ export const httpsCallable = (_functions, name) => {
   };
   if (name === "saveTrnQaReview") return async input => {
     const qa = { ...input, reviewId: input.requestId, reviewedAt: new Date().toISOString(), reviewedByUser: "Preview Reviewer" };
-    decisions.set(input.trnId, qa); return { data: { qa, success: true } };
+    decisions.set(input.trnId, qa);
+    const row = rowData.find(item => item.trnId === input.trnId);
+    row.qa = qa; row.qaState = qa.state; row.lastUpdatedAt = qa.reviewedAt; row.updatedAt = qa.reviewedAt;
+    return { data: { qa, success: true } };
   };
   return previewOnly;
 };
