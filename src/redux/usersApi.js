@@ -1,7 +1,6 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
-  limit as limitQuery,
   onSnapshot,
   query,
 } from "firebase/firestore";
@@ -89,16 +88,17 @@ function sortUsers(left, right) {
   );
 }
 
-function resolveLimit(arg, fallback = 1000) {
-  const value = typeof arg === "number" ? arg : arg?.limit;
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : fallback;
-}
-
-function buildUsersQuery(maxResults) {
+// NO CAP. Owner, 13 October 2026: "why do u need to do limits ? ... get all
+// .. u will never reach even 50".
+//
+// A cap on a directory is a silent truncation: the screens that read this ask
+// "who is there", and a reader cut off at an arbitrary number cannot tell a
+// missing person from an absent one. A worker left out of the directory loses
+// his name, his role and his provider on every screen that looks him up, and
+// nothing says why. These collections are tens of records, not thousands.
+function buildUsersQuery() {
   return query(
     collection(db, USERS_COLLECTION),
-    limitQuery(maxResults),
   );
 }
 
@@ -110,8 +110,7 @@ function buildUserRows(snapshot) {
 }
 
 function readInitialUsers(arg, signal) {
-  const maxResults = resolveLimit(arg, 1000);
-  const usersQuery = buildUsersQuery(maxResults);
+  const usersQuery = buildUsersQuery();
 
   return new Promise((resolve) => {
     let settled = false;
@@ -212,13 +211,12 @@ export const usersApi = createApi({
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
-        const maxResults = resolveLimit(arg, 1000);
         let unsubscribe = null;
 
         try {
           await cacheDataLoaded;
 
-          const usersQuery = buildUsersQuery(maxResults);
+          const usersQuery = buildUsersQuery();
 
           unsubscribe = onSnapshot(
             usersQuery,

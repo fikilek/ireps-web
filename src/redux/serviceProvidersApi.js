@@ -1,7 +1,6 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
-  limit as limitQuery,
   onSnapshot,
   query,
 } from "firebase/firestore";
@@ -31,6 +30,20 @@ function normalizeDateValue(value) {
   return String(value);
 }
 
+function getMncPcodes(serviceProvider = {}) {
+  return asArray(serviceProvider.clients)
+    .filter((client) => {
+      const clientType = String(client?.clientType || "").trim().toUpperCase();
+      const relationshipType = String(client?.relationshipType || "")
+        .trim()
+        .toUpperCase();
+
+      return clientType === "LM" && relationshipType === "MNC";
+    })
+    .map((client) => String(client?.id || "").trim())
+    .filter(Boolean);
+}
+
 function getSubcontractorClient(serviceProvider = {}) {
   return asArray(serviceProvider.clients).find((client) => {
     const clientType = String(client?.clientType || "").trim().toUpperCase();
@@ -50,6 +63,7 @@ function normalizeServiceProviderDoc(docSnap) {
   const owner = data.owner || {};
   const metadata = data.metadata || {};
   const subcClient = getSubcontractorClient(data);
+  const mncPcodes = getMncPcodes(data);
 
   const status = String(valueOrNav(data.status || data.lifecycleStatus)).toUpperCase();
   const name = valueOrNav(
@@ -66,6 +80,12 @@ function normalizeServiceProviderDoc(docSnap) {
     registrationNumber: valueOrNav(profile.registrationNumber),
     ownerName: valueOrNav(owner.name),
     isSubcontractor: Boolean(subcClient),
+    // The municipalities this provider is the MAIN CONTRACTOR for. Flattened
+    // here so no screen has to read `raw.clients` and work the relationship out
+    // again; `components/serviceProviders/providerHierarchy.js` is the one well
+    // that interprets them.
+    mncPcodes,
+    isMainContractor: mncPcodes.length > 0,
     parentServiceProviderId: valueOrNav(subcClient?.id),
     parentServiceProviderName: valueOrNav(subcClient?.name),
     relationshipType: valueOrNav(subcClient?.relationshipType),
@@ -85,16 +105,17 @@ function sortServiceProviders(left, right) {
   );
 }
 
-function resolveLimit(arg, fallback = 500) {
-  const value = typeof arg === "number" ? arg : arg?.limit;
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : fallback;
-}
-
-function buildServiceProvidersQuery(maxResults) {
+// NO CAP. Owner, 13 October 2026: "why do u need to do limits ? ... get all
+// .. u will never reach even 50".
+//
+// A cap on a directory is a silent truncation: the screens that read this ask
+// "who is there", and a reader cut off at an arbitrary number cannot tell a
+// missing person from an absent one. A worker left out of the directory loses
+// his name, his role and his provider on every screen that looks him up, and
+// nothing says why. These collections are tens of records, not thousands.
+function buildServiceProvidersQuery() {
   return query(
     collection(db, SERVICE_PROVIDERS_COLLECTION),
-    limitQuery(maxResults),
   );
 }
 
@@ -103,13 +124,22 @@ function buildServiceProviderRows(snapshot) {
     .map((docSnapshot) => normalizeServiceProviderDoc(docSnapshot))
     .filter(Boolean)
     .filter((serviceProvider) => serviceProvider.status === "ACTIVE")
-    .filter((serviceProvider) => serviceProvider.isSubcontractor)
+    // EVERY ACTIVE PROVIDER, main contractors included. Until 13 October 2026
+    // this also kept `.filter((sp) => sp.isSubcontractor)`, so a stream named
+    // "available service providers" returned SUBCONTRACTORS ONLY and no main
+    // contractor was ever in it. On LIVE, where RSTE is the only provider and
+    // has no subcontractors, it therefore returned an EMPTY LIST - and nothing
+    // said so. No hierarchy can be worked out from a list with every parent
+    // removed, which is why the ITO page could not tell whose worker was whose.
+    //
+    // The BGO pages did want subcontractors only for their allocation targets.
+    // That restriction now lives on those pages, where it applies and can be
+    // seen, instead of being hidden in the stream every other screen reads.
     .sort(sortServiceProviders);
 }
 
 function readInitialServiceProviders(arg, signal) {
-  const maxResults = resolveLimit(arg, 500);
-  const serviceProvidersQuery = buildServiceProvidersQuery(maxResults);
+  const serviceProvidersQuery = buildServiceProvidersQuery();
 
   return new Promise((resolve) => {
     let settled = false;
@@ -185,13 +215,12 @@ export const serviceProvidersApi = createApi({
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
-        const maxResults = resolveLimit(arg, 500);
         let unsubscribe = null;
 
         try {
           await cacheDataLoaded;
 
-          const serviceProvidersQuery = buildServiceProvidersQuery(maxResults);
+          const serviceProvidersQuery = buildServiceProvidersQuery();
 
           unsubscribe = onSnapshot(
             serviceProvidersQuery,

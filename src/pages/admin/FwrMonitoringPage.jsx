@@ -17,6 +17,7 @@ import { useAuth } from "../../auth/useAuth";
 import { useWarehouse } from "@/context/WarehouseContext";
 import { useGetLmBoundaryByIdQuery } from "../../redux/mapLmsApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
+import { familyOf } from "../../components/serviceProviders/providerHierarchy";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import { useGetFwrLiveLocationsQuery } from "../../redux/fwrLiveLocationsApi";
 
@@ -1020,19 +1021,20 @@ export default function FwrMonitoringPage() {
     streamError: liveLocationsStreamError = null,
   } = liveLocationState;
 
+  // Every provider under this manager, at any depth. This read
+  // `parentServiceProviderId` directly until 13 October 2026, which is ONE HOP:
+  // a subcontractor's subcontractor was left out, and its field workers simply
+  // did not appear on the monitoring screen. The hierarchy now comes from
+  // `components/serviceProviders/providerHierarchy.js`, the one well, which
+  // mirrors the server's recursion.
   const childServiceProviderIds = useMemo(() => {
     if (viewerRole !== "MNG" || !viewerServiceProviderId) return new Set();
 
-    return new Set(
-      serviceProviders
-        .filter(
-          (provider) =>
-            cleanId(provider?.parentServiceProviderId) ===
-            viewerServiceProviderId,
-        )
-        .map((provider) => cleanId(provider?.id))
-        .filter(Boolean),
-    );
+    const family = familyOf([viewerServiceProviderId], serviceProviders);
+
+    family.delete(viewerServiceProviderId);
+
+    return family;
   }, [serviceProviders, viewerRole, viewerServiceProviderId]);
 
   const visibleUsers = useMemo(() => {

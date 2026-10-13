@@ -11,6 +11,11 @@
 // shows** — hiding him would be iREPS deciding he is not there, which it
 // cannot know.
 import {
+  mainContractorsHolding,
+  providerMayWorkMunicipality,
+} from "../serviceProviders/providerHierarchy.js";
+
+import {
   ON_THE_MAP_RADIUS_M,
   formatDistance,
   isWithinRadius,
@@ -124,12 +129,30 @@ export function heardIsStale(capturedAtMs, nowMs, staleAfterMs = 15 * 60 * 1000)
  * the owner's rule is not a tidy placeholder but a flag: a gap shown rather
  * than hidden behind a plausible number, and a job to fix.
  */
+/*
+ * WHO MAY BE OFFERED THIS JOB. `DR-R001` 4.
+ *
+ * The hierarchy itself is NOT worked out here - it lives in
+ * `components/serviceProviders/providerHierarchy.js`, the web's one well, which
+ * mirrors the server's recursive `resolveServiceProviderMnc`. A first version of
+ * this filter carried its own one-hop copy; it is gone, because a second reading
+ * of the same fact is how the two come to disagree.
+ *
+ * THE QUESTION IS ABOUT THE METER, NOT THE OFFICE. The job is at a meter, in a
+ * municipality, and whoever holds that municipality may work it. An earlier
+ * version asked it of the signed-in user instead - and for the owner's own
+ * account that returned NOBODY: he is SPU at Smars, which is the platform
+ * operator and not a service provider at all, so no worker could ever match it.
+ * The office user is not the authority on who may work a meter; the contract
+ * recorded against the municipality is.
+ */
 export function buildWorkerChoices({
   users = [],
   liveLocations = [],
   meterPoint = null,
   nowMs = 0,
-  mainContractorId = null,
+  lmPcode = null,
+  serviceProviders = [],
 } = {}) {
   const positionByUid = new Map();
 
@@ -139,8 +162,29 @@ export function buildWorkerChoices({
     if (uid) positionByUid.set(uid, row);
   }
 
+  const mainContractors = mainContractorsHolding(lmPcode, serviceProviders);
+
   const workers = users
     .filter((user) => WORK_MAY_GO_TO.includes(normaliseRole(user?.role)))
+    // The municipality's main contractor and its subcontractors, at any depth,
+    // and nobody else. A worker of another company is not available for this
+    // meter - on TEST, Nki and Lwazi were being offered an Endumeni meter their
+    // companies hold no contract for.
+    //
+    // `null` means the question could not be answered - no municipality on the
+    // record, no provider on the worker, or no main contractor recorded for the
+    // municipality. The worker then STAYS VISIBLE: the office can see him and
+    // the gap is a job to fix, where hiding him would read as "he is not
+    // available" when the truth is that iREPS does not know (`UI-R008`).
+    .filter((user) => {
+      const allowed = providerMayWorkMunicipality({
+        providerId: user?.serviceProviderId || user?.serviceProvider?.id,
+        lmPcode,
+        providers: serviceProviders,
+      });
+
+      return allowed !== false;
+    })
     .map((user) => {
       const uid = String(user?.uid || user?.id || "").trim();
       const live = positionByUid.get(uid) || null;
@@ -155,9 +199,12 @@ export function buildWorkerChoices({
         name: String(user?.displayName || user?.name || user?.email || NAV).trim() || NAV,
         role: normaliseRole(user?.role),
         // A subcontractor's worker is named as one, because the office is
-        // choosing a man, not a company, and should know which it is.
+        // choosing a man, not a company, and should know which it is. Read from
+        // the chain rather than from the office user's own provider: the office
+        // may be neither the main contractor nor a subcontractor, and on LIVE
+        // the main contractor has no subcontractors at all.
         subcontractor: Boolean(
-          mainContractorId && providerId && providerId !== String(mainContractorId),
+          providerId && !mainContractors.has(providerId) && mainContractors.size,
         ),
         point: point && strictNumber(point.latitude) !== null ? point : null,
         metres,

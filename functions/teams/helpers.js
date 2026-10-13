@@ -380,6 +380,68 @@ export function assertUserAllowedInMncHierarchy({
   return true;
 }
 
+/* =====================================================
+   WHO MAY WORK A MUNICIPALITY
+   ===================================================== */
+
+/**
+ * Every main contractor recorded against this municipality.
+ *
+ * An ARRAY, not one, because the data holds more than one: on TEST, three
+ * providers are recorded as main contractor for ZA2157. Reading it as a single
+ * value would silently pick one of the three and shut out two families of
+ * workers who are entitled to the work.
+ */
+export function getServiceProvidersHoldingLm(lmPcode, allServiceProviders = []) {
+  const wanted = normalizeText(lmPcode);
+
+  if (!wanted) return [];
+
+  return normalizeArray(allServiceProviders)
+    .filter((serviceProvider) =>
+      getServiceProviderLmClients(serviceProvider).some(
+        (client) => normalizeText(client?.id) === wanted,
+      ),
+    )
+    .map((serviceProvider) => normalizeText(serviceProvider?.id))
+    .filter(Boolean);
+}
+
+/**
+ * Whether this person's company may work in this municipality: it is a main
+ * contractor there, or it is subcontracted - at any depth - to one that is.
+ *
+ * THREE ANSWERS, not two. `null` means the question could not be answered: no
+ * municipality on the record, no provider on the person, or iREPS records no
+ * main contractor for that municipality at all. The caller must not read that
+ * as a refusal. Refusing on missing data would stop work on a municipality
+ * nobody has been assigned yet and say "this worker is not allowed" when the
+ * truth is that iREPS does not know who holds it (`UI-R008`).
+ */
+export function isUserAllowedInLm({
+  candidateUserDoc = {},
+  lmPcode,
+  allServiceProviders = [],
+}) {
+  const holders = getServiceProvidersHoldingLm(lmPcode, allServiceProviders);
+
+  if (!holders.length) return null;
+
+  const candidateServiceProviderId = getUserServiceProviderId(candidateUserDoc);
+
+  if (!candidateServiceProviderId) return null;
+
+  if (holders.includes(candidateServiceProviderId)) return true;
+
+  const resolved = resolveServiceProviderMnc(
+    candidateServiceProviderId,
+    allServiceProviders,
+    new Set(),
+  );
+
+  return Boolean(resolved?.id && holders.includes(resolved.id));
+}
+
 export function assertTeamEligibleUser(candidateUserDoc = {}) {
   const candidateRole = getUserRole(candidateUserDoc);
 

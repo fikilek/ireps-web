@@ -23,6 +23,7 @@ import { useAuth } from "../../auth/useAuth";
 import { ITO_TRANSACTIONS, readItoCount, allocatingTrnId } from "../../components/ito/itoTransactions";
 import { itoReasonProblem, itoReasonsFor } from "../../components/ito/itoReasons";
 import { buildWorkerChoices } from "../../components/ito/itoWorkers";
+import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import ItoMap from "../../components/ito/ItoMap";
 import { readPoint } from "../../components/ito/geoDistance";
 import ItoWorkerPicker from "../../components/ito/ItoWorkerPicker";
@@ -103,7 +104,7 @@ export default function ItoPage() {
   const { astId, work } = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();
-  const { activeWorkbase, serviceProvider } = useAuth() || {};
+  const { activeWorkbase } = useAuth() || {};
 
   const transaction = useMemo(
     () =>
@@ -125,12 +126,16 @@ export default function ItoPage() {
 
   // Step 5: the meter on the ground, and who can be sent to it.
   const meterPoint = readPoint(meter?.ast?.location?.gps);
+  // The municipality the meter is in. It decides who may be sent to it, so it
+  // is read here with the meter rather than further down the page.
+  const meterLmPcode = String(meter?.accessData?.parents?.lmPcode || "").trim();
   const premiseId = String(meter?.accessData?.premise?.id || "").trim();
   const erfId = String(meter?.accessData?.erfId || "").trim();
 
   const { data: premise } = useGetPremiseByIdQuery(premiseId || skipToken);
   const { data: erfBoundary } = useGetErfBoundaryByIdQuery(erfId || skipToken);
   const { data: usersData, isLoading: usersLoading } = useGetUsersDirectoryQuery({ limit: 1000 });
+  const { data: providersData } = useGetAvailableServiceProvidersQuery();
   const { data: liveData } = useGetFwrLiveLocationsQuery({ limit: 5000 });
 
   // "Heard 40 seconds ago" has to keep counting, or the office reads a number
@@ -196,9 +201,13 @@ export default function ItoPage() {
         liveLocations: liveData?.locations || liveData?.items || liveData || [],
         meterPoint,
         nowMs,
-        mainContractorId: serviceProvider?.id || null,
+        lmPcode: meterLmPcode || null,
+        // Who may work this meter is decided by the municipality it is in:
+        // the main contractor recorded against it, and that contractor's
+        // subcontractors at any depth. Not by who is signed in.
+        serviceProviders: providersData || [],
       }),
-    [usersData, liveData, meterPoint, nowMs, serviceProvider],
+    [usersData, liveData, meterPoint, nowMs, meterLmPcode, providersData],
   );
 
   const [reasonCode, setReasonCode] = useState("");

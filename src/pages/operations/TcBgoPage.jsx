@@ -600,8 +600,14 @@ function enrichTeamsWithMembers(teams = [], usersById = new Map()) {
   });
 }
 
+// Subcontractors only, which is what this list has always held: the stream used
+// to filter them and now returns every active provider, so the restriction is
+// stated here, where it is a BGO decision rather than a hidden property of the
+// data (unchanged behaviour, visible reason).
 function enrichServiceProvidersWithMembers(serviceProviders = [], users = []) {
-  return asArray(serviceProviders).map((serviceProvider) => {
+  return asArray(serviceProviders)
+    .filter((serviceProvider) => serviceProvider?.isSubcontractor)
+    .map((serviceProvider) => {
     const members = asArray(users)
       .filter((user) => user.serviceProviderId === serviceProvider.id)
       .sort((left, right) =>

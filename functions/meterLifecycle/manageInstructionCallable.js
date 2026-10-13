@@ -14,6 +14,10 @@ import {
   validateLifecycleInstructionAssignment,
 } from "./helpers.js";
 import { TRN_STATES, canMoveAs, currentState } from "./trnStateMachine.js";
+import {
+  getServiceProvidersHoldingLm,
+  isUserAllowedInLm,
+} from "../teams/helpers.js";
 
 const MANAGE_ACTIONS = ["ALLOCATE", "REASSIGN", "CANCEL", "DELETE", "RESTORE"];
 
@@ -258,6 +262,102 @@ function getNewTargetsFromRequest(data = {}) {
       data?.newAssignment?.createdFor ||
       {},
   );
+}
+
+/**
+ * WHOSE WORKER MAY BE SENT TO THIS METER. `DR-R001` 4.
+ *
+ * THE LIST ON THE SCREEN IS NOT A GUARD. Until 13 October 2026 this callable
+ * accepted any target that was a non-empty USER, TEAM or SP: it never asked who
+ * the person was. `firestore.rules` is nine lines allowing any signed-in client
+ * to read, so the office page filtering its own dropdown was the whole
+ * mechanism - and a page is not a mechanism. An Endumeni disconnection could be
+ * allocated to a field worker of a company holding no contract for Endumeni,
+ * and the server would write it, notify him and put it on his phone.
+ *
+ * The hierarchy is not worked out here. `functions/teams/helpers.js` already
+ * held it, recursively, for teams; this asks it the municipality's question.
+ *
+ * TWO CHECKS, AND BOTH REFUSE IN WORDS:
+ *
+ *   - the person must be a FIELD WORKER - the owner's decision of 10 October
+ *     2026, that supervisors and managers do not go to the field;
+ *   - his company must hold the municipality, or be subcontracted to one that
+ *     does, at any depth.
+ *
+ * A GAP IS NOT A REFUSAL. Where the municipality is not recorded on the
+ * transaction, the person carries no provider, or iREPS records no main
+ * contractor for that municipality, the allocation is allowed and the gap is
+ * left to show. Refusing would read as "this worker is not allowed" when the
+ * truth is that iREPS does not know, and would stop every allocation on a
+ * municipality nobody has been assigned yet (`UI-R008`).
+ *
+ * TEAM and SP targets are not checked here. They belong to the batch lanes,
+ * which allocate to a company or a team rather than to a man, and their own
+ * rules govern them.
+ */
+async function checkTargetsMayWork({ db, targets, lmPcodes }) {
+  const userTargets = targets.filter((target) => target.type === "USER");
+
+  if (!userTargets.length) return { ok: true };
+
+  const municipalities = [...new Set(lmPcodes.filter(Boolean))];
+
+  if (!municipalities.length) return { ok: true };
+
+  const providersSnap = await db.collection("serviceProviders").get();
+  const allServiceProviders = providersSnap.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Nothing recorded against any of these municipalities: unknown, not empty.
+  const anyHolder = municipalities.some(
+    (lmPcode) => getServiceProvidersHoldingLm(lmPcode, allServiceProviders).length,
+  );
+
+  if (!anyHolder) return { ok: true };
+
+  for (const target of userTargets) {
+    const userSnap = await db.collection("users").doc(target.id).get();
+
+    if (!userSnap.exists) {
+      return {
+        ok: false,
+        code: "TARGET_USER_NOT_FOUND",
+        message: `${target.name} is not an iREPS user.`,
+      };
+    }
+
+    const userDoc = { id: userSnap.id, ...userSnap.data() };
+    const role = normalizeUpper(userDoc?.employment?.role || userDoc?.role || "");
+
+    if (role !== "FWR") {
+      return {
+        ok: false,
+        code: "TARGET_NOT_A_FIELD_WORKER",
+        message: `${target.name} is a ${role || "NAv"}, and individual work goes to a field worker.`,
+      };
+    }
+
+    for (const lmPcode of municipalities) {
+      const allowed = isUserAllowedInLm({
+        candidateUserDoc: userDoc,
+        lmPcode,
+        allServiceProviders,
+      });
+
+      if (allowed === false) {
+        return {
+          ok: false,
+          code: "TARGET_OUTSIDE_MUNICIPALITY_CONTRACT",
+          message: `${target.name} works for a company that holds no contract for ${lmPcode}.`,
+        };
+      }
+    }
+  }
+
+  return { ok: true };
 }
 
 function validateNewTargets(targets = []) {
@@ -823,6 +923,25 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
       }
 
       newTargets = targetsCheck.targets;
+
+      // Who the person is, checked on the server. The screen's list is not a
+      // guard; see `checkTargetsMayWork`.
+      const trnSnapsForCheck = await Promise.all(
+        trnIds.map((trnId) => db.collection("trns").doc(trnId).get()),
+      );
+      const lmPcodes = trnSnapsForCheck
+        .filter((snap) => snap.exists)
+        .map((snap) => String(snap.data()?.accessData?.parents?.lmPcode || "").trim());
+
+      const mayWork = await checkTargetsMayWork({
+        db,
+        targets: newTargets,
+        lmPcodes,
+      });
+
+      if (!mayWork.ok) {
+        return buildFailureResult(mayWork.code, mayWork.message);
+      }
     }
 
     if (action === "CANCEL" && !cancelReason) {

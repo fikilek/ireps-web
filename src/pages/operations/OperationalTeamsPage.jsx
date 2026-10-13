@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
 
 import { useAuth } from "../../auth/useAuth";
+import {
+  familyOf,
+  resolveMainContractor,
+} from "../../components/serviceProviders/providerHierarchy";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import {
   useAddTeamMemberMutation,
@@ -112,35 +116,38 @@ function sortTeamsByUpdatedAt(left, right) {
   return getTeamUpdatedAt(right).localeCompare(getTeamUpdatedAt(left));
 }
 
+// WHO THIS OFFICE USER MAY SEE. The hierarchy itself is not worked out here:
+// it comes from `components/serviceProviders/providerHierarchy.js`, the web's
+// one well, which mirrors the server's recursive `resolveServiceProviderMnc`.
+//
+// This function used to carry its own copy, and that copy walked ONE HOP - it
+// read `parentServiceProviderId` off the actor and then collected providers
+// whose parent was that id. A subcontractor's subcontractor was therefore
+// invisible, which TEST has: Jolinkomo Meters sits under Fouriot, and Lihle
+// Engineering under 474 Tower. The server, asked the same question for the same
+// teams, answered it recursively. Two depths, one fact.
 function buildHierarchyContext({ authContext, serviceProviders }) {
   const role = resolveAuthRole(authContext);
   const actorServiceProvider = resolveActorServiceProvider(authContext);
   const actorServiceProviderId = cleanText(actorServiceProvider?.id);
 
-  const actorSubcontractor = serviceProviders.find(
-    (serviceProvider) => serviceProvider?.id === actorServiceProviderId,
-  );
+  // Walk up to the main contractor at any depth. An actor who IS a main
+  // contractor resolves to itself; one whose chain cannot be followed keeps its
+  // own provider, so it still sees its own people rather than nobody.
+  const resolved = resolveMainContractor(actorServiceProviderId, serviceProviders);
+  const mncServiceProviderId = cleanText(resolved?.id) || actorServiceProviderId;
 
-  const mncServiceProviderId = cleanText(
-    actorSubcontractor?.parentServiceProviderId || actorServiceProviderId,
-  );
-
-  const subcontractorIds = serviceProviders
-    .filter(
-      (serviceProvider) =>
-        cleanText(serviceProvider?.parentServiceProviderId) ===
-        mncServiceProviderId,
-    )
-    .map((serviceProvider) => serviceProvider.id)
-    .filter(Boolean);
+  const family = familyOf([mncServiceProviderId], serviceProviders);
 
   return {
     role,
     actorServiceProviderId,
     mncServiceProviderId,
     allowedServiceProviderIds: [
-      mncServiceProviderId,
-      ...subcontractorIds,
+      // The actor's own provider is always in the list. Without it, an actor
+      // whose chain is broken - a provider missing from the collection, say -
+      // would lose sight of his own team.
+      ...new Set([mncServiceProviderId, actorServiceProviderId, ...family]),
     ].filter(Boolean),
     canSeeAll: role === "SPU" || role === "ADM",
   };

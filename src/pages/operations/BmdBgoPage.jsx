@@ -321,7 +321,12 @@ function buildWardOptions({ availableWards = [], selectedWard = null }) {
 
 function buildTargetOptions({ teams = [], serviceProviders = [], targetType = "TEAM" }) {
   if (targetType === "SP") {
+    // Subcontractors only, which is what this list has always held: the stream
+    // used to filter them and now returns every active provider, so the
+    // restriction is stated here, where it is a BGO decision rather than a
+    // hidden property of the data (unchanged behaviour, visible reason).
     return asArray(serviceProviders)
+      .filter((serviceProvider) => serviceProvider?.isSubcontractor)
       .map((serviceProvider) => ({
         ...serviceProvider,
         type: "SP",

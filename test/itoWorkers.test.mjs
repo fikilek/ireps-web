@@ -200,6 +200,11 @@ test("jobs open is NAv everywhere, because nothing holds it", () => {
   }
 });
 
+// Which company a man belongs to is read from the PROVIDER GRAPH and the
+// meter's municipality, not from whoever is signed in. This test passed
+// `mainContractorId` until 13 October 2026, when that input was removed: asking
+// the office user answered "nobody" for the owner's own account, which is SPU
+// at the platform operator and holds no municipality at all.
 test("a subcontractor's worker is named as one", () => {
   const { all } = buildWorkerChoices({
     users: [
@@ -209,7 +214,19 @@ test("a subcontractor's worker is named as one", () => {
     ],
     meterPoint: METER,
     nowMs: NOW,
-    mainContractorId: "RSTE",
+    lmPcode: "ZA5241",
+    serviceProviders: [
+      {
+        id: "RSTE",
+        name: "RSTE",
+        clients: [{ clientType: "LM", relationshipType: "MNC", id: "ZA5241" }],
+      },
+      {
+        id: "SUBCO",
+        name: "Subco",
+        clients: [{ clientType: "SP", relationshipType: "SUBC", id: "RSTE" }],
+      },
+    ],
   });
 
   const by = Object.fromEntries(all.map((w) => [w.name, w.subcontractor]));
