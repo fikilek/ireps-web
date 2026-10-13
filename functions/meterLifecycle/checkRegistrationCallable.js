@@ -64,9 +64,15 @@ export const onCheckMeterRegistrationCallable = onCall(async (request) => {
       message: error?.message || String(error),
     });
 
+    // SAY WHAT HAPPENED, and do not promise that trying again will help -
+    // nothing here knows whether the cause is a moment's trouble or permanent.
+    // The office is a Manager or a supervisor and is the party who has to
+    // report this, so the detail travels with it rather than being logged
+    // where only an engineer can reach it.
     return buildFailureResult(
-      "UNKNOWN_ERROR",
-      "The meter could not be checked. Try again.",
+      "CHECK_COULD_NOT_RUN",
+      "iREPS could not run its checks on this meter, so nothing has been sent out.",
+      { detail: error?.message || String(error) },
     );
   }
 });

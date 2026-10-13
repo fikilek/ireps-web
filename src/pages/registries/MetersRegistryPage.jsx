@@ -486,17 +486,41 @@ export default function MetersRegistryPage() {
       }
 
       setGuardRefusal({
+        kind: "refused",
         meterId: row.id,
         meterNo: row.meterNo,
         message: outcome?.message,
+        code: outcome?.code || outcome?.data?.code || "",
         checks: outcome?.data?.checks || outcome?.checks || [],
       });
-    } catch {
+    } catch (error) {
+      // KEEP THE ERROR. This was a bare `catch {}` until 13 October 2026: the
+      // office saw "could not be checked ... Try again" over the heading CANNOT
+      // BE WORKED ON YET, which accuses a meter that may be sound, and the
+      // cause was thrown away, so there was nothing to investigate with. The
+      // owner reported exactly that from TEST.
+      //
+      // And "try again" is not offered, because nothing here knows whether the
+      // cause will pass. It says what happened and what to report.
+      const code = String(error?.code || error?.data?.code || "").trim();
+      const detail = String(error?.message || error?.data?.message || "").trim();
+
+      console.error("Meter registration check could not run", {
+        astId: row.id,
+        meterNo: row.meterNo,
+        code: code || null,
+        detail: detail || null,
+        error,
+      });
+
       setGuardRefusal({
+        kind: "unavailable",
         meterId: row.id,
         meterNo: row.meterNo,
-        message:
-          "This meter could not be checked, so nothing has been sent out. Try again.",
+        code,
+        message: detail
+          ? `iREPS could not run its checks on this meter, so nothing has been sent out: ${detail}`
+          : "iREPS could not run its checks on this meter, so nothing has been sent out.",
         checks: [],
       });
     } finally {
@@ -1286,6 +1310,8 @@ ${premiseId}`;
 
       {guardRefusal ? (
         <RegistrationGuardModal
+          kind={guardRefusal.kind}
+          code={guardRefusal.code}
           meterId={guardRefusal.meterId}
           meterNo={guardRefusal.meterNo}
           message={guardRefusal.message}

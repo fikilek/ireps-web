@@ -4,6 +4,21 @@
 // This window says which link is broken, in words, with the meter number and
 // the transaction id somebody needs to fix it. It never says "something went
 // wrong", and it never lets the work through.
+//
+// TWO DIFFERENT THINGS, AND THEY MUST NOT READ THE SAME (13 October 2026).
+//
+//   `refused`     - the check ran and the records do not agree. That is a fact
+//                   about THE METER, and "Cannot be worked on yet" is true.
+//   `unavailable` - the check could not run at all. That is a fact about
+//                   IREPS, and saying it about the meter accuses a meter that
+//                   may be perfectly sound.
+//
+// The owner met the second on TEST: a window headed CANNOT BE WORKED ON YET
+// over the words "This meter could not be checked", with no checks listed and
+// nothing to report. The page had caught the error and thrown it away - a bare
+// `catch {}` with no binding - so there was nothing left to investigate with.
+// Telling somebody to "try again" is advice, and advice about a cause nobody
+// kept is a guess.
 import { useEffect } from "react";
 
 const MODAL_CSS = `
@@ -58,8 +73,13 @@ export default function RegistrationGuardModal({
   meterId,
   message,
   checks = [],
+  // "refused" (the records disagree) or "unavailable" (the check could not
+  // run). See the note at the top: they are not the same thing.
+  kind = "refused",
+  code = "",
   onClose,
 }) {
+  const unavailable = kind === "unavailable";
   useEffect(() => {
     function handleKeyDown(event) {
       if (event.key === "Escape") onClose?.();
@@ -90,7 +110,9 @@ export default function RegistrationGuardModal({
       <div className="guard-modal-card">
         <header className="guard-modal-header">
           <div>
-            <div className="guard-modal-eyebrow">Cannot be worked on yet</div>
+            <div className="guard-modal-eyebrow">
+              {unavailable ? "Could not be checked" : "Cannot be worked on yet"}
+            </div>
             <h2 id="registration-guard-title">{meterNo || meterId}</h2>
           </div>
 
@@ -102,7 +124,9 @@ export default function RegistrationGuardModal({
         <div className="guard-modal-body">
           <p className="guard-modal-message">
             {message ||
-              "iREPS cannot account for this meter, so no work can be sent to it."}
+              (unavailable
+                ? "iREPS could not run its checks on this meter, so nothing has been sent out. This says nothing about the meter itself."
+                : "iREPS cannot account for this meter, so no work can be sent to it.")}
           </p>
 
           {checks.length ? (
@@ -127,8 +151,11 @@ export default function RegistrationGuardModal({
           ) : null}
 
           <div className="guard-modal-foot">
-            Meter {meterNo || "NAv"} · {meterId || "NAv"}. Give these two to
-            whoever fixes it: the work cannot be issued until the records agree.
+            Meter {meterNo || "NAv"} · {meterId || "NAv"}
+            {code ? ` · ${code}` : ""}.{" "}
+            {unavailable
+              ? "Report these: the check itself did not finish, so the fault is in iREPS and not necessarily in this meter."
+              : "Give these two to whoever fixes it: the work cannot be issued until the records agree."}
           </div>
         </div>
       </div>
