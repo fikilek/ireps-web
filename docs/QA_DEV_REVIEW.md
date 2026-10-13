@@ -16,6 +16,9 @@ GitHub main revision and served artifact after deployment.
    photo reason. Pass permits an optional comment and displays a final-lock warning.
 5. After saving, check the decision, reviewer, SAST time and preserved version in
    history. A second reviewer with an old window must refresh. A Pass cannot reopen.
+   The registry defaults to Updated At descending. The QA save stamps Updated At,
+   keeps Created At unchanged, and returns the table to page one. Existing filters
+   and any manually chosen sort remain in effect.
 6. Confirm ITO still follows Created → Issued → Accepted → Completed. Completed
    submits the record to QA Draft; the concluded ITO state remains Completed.
 
@@ -24,6 +27,20 @@ takeover, notifications and continuing-note operations are later milestones.
 Fail remains Fail until correction is implemented; no edit/reset shortcut is exposed.
 
 ## Verification
+
+14 October Updated At correction: the page had explicitly overridden the shared
+latest-update order with Created At. Corrected the page default and registry stream
+ordering; added the Updated At column, date filter and download field. A successful
+QA save resets pagination without changing filters or a chosen sort. A browser
+fixture saved an older page-two TRN and confirmed it became the first row on page
+one, with its original Created At preserved. No real QA decision was made for this
+check. Updated-field lint and the DEV build pass. The broader web run passed 918
+tests with one pre-existing Sales draft test failing on a missing SubmitWindow
+mock; that exact failure also reproduces on unchanged main `91e925c`.
+
+The amendments backend draft remains separate work and is not part of this
+hosting correction. Hosted verification and the source revision are in the
+workspace release ledger.
 
 - Web: `node --experimental-vm-modules --test` over `test` and `src` test files,
   excluding the two emulator-only suites: 684 passed.

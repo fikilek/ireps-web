@@ -41,6 +41,9 @@ export default function IrepsTable({
   rowKey = (row, index) => row?.id ?? index,
   defaultSort = {},
   defaultPageSize = IREPS_TABLE_DEFAULT_PAGE_SIZE,
+  // A successful edit can return its table to page one. Background stream
+  // updates leave the reader's current page alone.
+  resetPageKey,
   emptyText = "No rows match the current filters.",
   loading = false,
   loadingText = "Loading…",
@@ -107,9 +110,9 @@ export default function IrepsTable({
   const filters = controlledFilters ?? internalFilters;
   const setFilters = onFiltersChange ?? setInternalFilters;
   const [sort, setSort] = useState(defaultSort);
-  const [pageState, setPageState] = useState({ page: 1, filters });
-  const page = pageState.filters === filters ? pageState.page : 1;
-  const setPage = (nextPage) => setPageState({ page: nextPage, filters });
+  const [pageState, setPageState] = useState({ page: 1, filters, resetPageKey });
+  const page = pageState.filters === filters && pageState.resetPageKey === resetPageKey ? pageState.page : 1;
+  const setPage = (nextPage) => setPageState({ page: nextPage, filters, resetPageKey });
   const [pageSize, setPageSize] = useState(defaultPageSize);
   const [dateFilterFor, setDateFilterFor] = useState("");
   const [rangeFilterFor, setRangeFilterFor] = useState("");

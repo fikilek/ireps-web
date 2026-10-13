@@ -26,7 +26,7 @@ import { QA_LABELS } from "../../../functions/qa/model.js";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import { isMainContractor, parentIdOf, resolveMainContractor, mncPcodesOf } from "../../components/serviceProviders/providerHierarchy.js";
 
-const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
+const DEFAULT_SORT = { key: "lastUpdatedAt", direction: "desc" };
 
 // A no access reads orange, the whole row (owner, 4 October 2026).
 //
@@ -281,6 +281,7 @@ function getSortValue(row, key) {
   if (key === "wardNo") return Number(row.wardNo);
   if (key === "mediaCount") return Number(row.mediaCount);
   if (key === "createdAt") return getDateMs(row.createdAt);
+  if (key === "lastUpdatedAt") return getDateMs(row.lastUpdatedAt);
 
   return row?.[key] ?? "";
 }
@@ -322,6 +323,7 @@ export default function TrnsRegistryPage() {
   const reviewerRole = profile?.accountStatus === "ACTIVE" && ["MNG", "SPV"].includes(role)
     && isMainContractor(reviewerProvider) && !parentIdOf(reviewerProvider);
   const [selectedQa, setSelectedQa] = useState(null);
+  const [qaSaveCount, setQaSaveCount] = useState(0);
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName =
     activeWorkbase?.name ||
@@ -365,7 +367,9 @@ export default function TrnsRegistryPage() {
       if (EMPTY_TRN_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
     }
     const createdAtFilter = tableFilters.createdAt || EMPTY_DATETIME_FILTER;
+    const updatedAtFilter = tableFilters.lastUpdatedAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
+      if (!matchesDateFilter(row.lastUpdatedAt, updatedAtFilter)) return false;
       if (!matchesSelect(row.qaState || "NOT_ELIGIBLE", filters.qaState)) return false;
       if (!matchesSelect(row.premisePropertyType, filters.premisePropertyType)) return false;
       const mediaFilterIsEmpty = filters.mediaCount === "";
@@ -446,6 +450,7 @@ export default function TrnsRegistryPage() {
         value: (row) => row.createdByUser || "NAv",
       },
       { header: "Created At", value: (row) => formatDateTime(row.createdAt) },
+      { header: "Updated At", value: (row) => formatDateTime(row.lastUpdatedAt) },
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
       { header: "QA", value: row => QA_LABELS[row.qaState] || row.qaEligibility?.label || "NAv" },
       { header: "QA Reviewer", value: row => row.qa?.reviewedByUser || "NAv" },
@@ -885,6 +890,15 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
 
   }, {
+    key: "lastUpdatedAt",
+    label: "Updated At",
+    filter: "date",
+    sortable: true,
+    value: row => getDateMs(row.lastUpdatedAt),
+    sortValue: row => getDateMs(row.lastUpdatedAt),
+    render: row => <>{formatDateTime(row.lastUpdatedAt)}</>,
+    sortEmptyLast: true,
+  }, {
     key: "qaState", label: "QA", filter: "select", filterAllValue: "ALL", sortable: true,
     filterOptions: [...Object.entries(QA_LABELS).map(([value, name]) => ({ value, label: name })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
     value: row => row.qaState || "NOT_ELIGIBLE",
@@ -1063,6 +1077,7 @@ export default function TrnsRegistryPage() {
                 filteredRows={filteredTrnRows}
                 filterRows={filterRegistryRows}
                 defaultSort={DEFAULT_SORT}
+                resetPageKey={qaSaveCount}
                 downloads={{
                   registryName: "TRN Registry",
                   rowsLabel: "TRNs",
@@ -1077,7 +1092,7 @@ export default function TrnsRegistryPage() {
         ) : null}
       </section>
 
-      {selectedQa && <TrnQaModal key={selectedQa.trnId} trnId={selectedQa.trnId} initialAction={selectedQa.action} onClose={() => setSelectedQa(null)} />}
+      {selectedQa && <TrnQaModal key={selectedQa.trnId} trnId={selectedQa.trnId} initialAction={selectedQa.action} onSaved={() => setQaSaveCount(count => count + 1)} onClose={() => setSelectedQa(null)} />}
       {selectedMeterTrnId ? (
         <MeterDeepDetailsModal
           trnId={selectedMeterTrnId}
