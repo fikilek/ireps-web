@@ -407,6 +407,15 @@ function byLastUpdated(a, b) {
   return byMostWaiting(a, b);
 }
 
+/** `ISSUED` reads as `Issued`. The word is iREPS's; only the case is ours. */
+function titleCase(value) {
+  const word = String(value ?? "").trim();
+
+  if (!word) return "";
+
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
 function byMostWaiting(a, b) {
   const waiting = b.issued + b.accepted - (a.issued + a.accepted);
 
@@ -705,12 +714,22 @@ export function buildWorkerJobRows(work, uid, nowMs) {
 
       const placed = columnFor(readWorkflowState(trn));
 
-      // His held work - and ALSO anything with his name on it that iREPS
-      // cannot place. Filtering those out would drop a job off his page
-      // silently, which is the fault this screen exists to prevent: a record
-      // nobody can see is a record nobody fixes. It gets a row, keeps its
-      // raw word, and is offered no action.
-      return ["issued", "accepted"].includes(placed) || placed === null;
+      // EVERYTHING WITH HIS NAME ON IT, finished work included. Owner,
+      // 13 October 2026, on TEST: "2 missing trns. ..for Siya .. 1 INSP and 1
+      // DCN". One of them was his completed disconnection, which this used to
+      // leave out and count only in a tile above the table. A page called
+      // "What Siya is carrying" that silently omits a job is the same fault as
+      // a ward count that does not add up - the arithmetic was right and the
+      // screen could not be read.
+      //
+      // It is safe to list it now because the status column says COMPLETED
+      // rather than describing the job in words of its own, so a reader can
+      // see at a glance which rows are still work and which are history.
+      //
+      // Anything iREPS cannot place is kept too, for the reason it always
+      // was: a record nobody can see is a record nobody fixes. It keeps its
+      // raw word and is offered no action.
+      return ["issued", "accepted", "completed"].includes(placed) || placed === null;
     })
     .map((trn) => {
       const state = columnFor(readWorkflowState(trn));
@@ -734,12 +753,16 @@ export function buildWorkerJobRows(work, uid, nowMs) {
           text(trn?.instructionReasonWords) ||
           text(trn?.assignment?.instruction?.reason?.words) ||
           NAV,
-        state:
-          state === "issued"
-            ? "Waiting for him"
-            : state === "accepted"
-              ? "He has taken it"
-              : readWorkflowState(trn) || NAV,
+        // THE TRANSACTION'S OWN STATUS. Owner, 13 October 2026: "why not use
+        // the TRN STATUS here ?"
+        //
+        // This column used to say "Waiting for him" and "He has taken it" -
+        // a second vocabulary for a fact iREPS already has one word for, and
+        // one that could not be matched against the Issued / Accepted /
+        // Completed headings on the page above it, or against the same four
+        // boxes on the worker's phone. One word, one meaning: the status is
+        // ISSUED, ACCEPTED or COMPLETED, written as iREPS writes it.
+        state: titleCase(readWorkflowState(trn)) || NAV,
         isIssued: state === "issued",
         // A state the five cannot place. It is drawn and counted, and no
         // action is offered on it - the machine would refuse one anyway, and

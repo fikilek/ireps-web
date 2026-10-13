@@ -609,9 +609,16 @@ const his = (state, extra = {}) =>
     ...extra,
   });
 
-test("his page lists what he HOLDS, and nothing else", async () => {
-  // Issued and Accepted are the two states in which the job is his. His
-  // completed work is his too, but it is finished and is not a load.
+test("his page lists EVERYTHING with his name on it in this ward", async () => {
+  // AMENDED 13 October 2026. This said "what he HOLDS, and nothing else", and
+  // the owner found what that cost: looking at Siya's page on TEST he
+  // reported "2 missing trns", one of which was a completed disconnection
+  // that existed, was his, and was counted only in a tile above the table.
+  //
+  // Issued, Accepted and Completed are all listed now. The Status column
+  // carries the difference, so nothing has to be hidden to keep the table
+  // readable - and the "he holds" tile still counts only what is still his
+  // to do.
   const { buildWorkerJobRows, countWorkerCompleted } = await import(
     "../src/pages/operations/ito-dashboard/itoMonitoring.js"
   );
@@ -626,8 +633,21 @@ test("his page lists what he HOLDS, and nothing else", async () => {
 
   const rows = buildWorkerJobRows(all, KAISER, Date.parse("2026-10-12T12:00:00.000Z"));
 
-  assert.deepEqual(rows.map((row) => row.id).sort(), ["A", "B"]);
-  assert.equal(countWorkerCompleted(all, KAISER), 1, "counted, not listed");
+  assert.deepEqual(rows.map((row) => row.id).sort(), ["A", "B", "C"]);
+
+  // Another worker's job and a job nobody holds are still not his.
+  assert.ok(!rows.some((row) => row.id === "SOMEBODY_ELSE"));
+  assert.ok(!rows.some((row) => row.id === "NOBODY"));
+
+  // The states are the transaction's own words, not a description of them.
+  assert.deepEqual(
+    rows.map((row) => row.state).sort(),
+    ["Accepted", "Completed", "Issued"],
+  );
+
+  // And the tile that says what is still his to do excludes the finished one.
+  assert.equal(rows.filter((row) => row.state !== "Completed").length, 2);
+  assert.equal(countWorkerCompleted(all, KAISER), 1);
 });
 
 test("the oldest is first, because that is what the office came about", async () => {
@@ -784,7 +804,12 @@ test("his page says what it does not know", async () => {
 
   assert.match(source, /last heard from/);
   assert.match(source, /an unknown age is not a long one/);
-  assert.match(source, /it is his, but it is not a load/);
+
+  // It used to pin "it is his, but it is not a load" - the sentence that
+  // explained why finished work was counted and not listed. The table lists
+  // it now, so the footnote says what the table actually does.
+  assert.match(source, /Everything with his name on it in this ward/);
+  assert.match(source, /word his phone shows/);
 });
 
 test("his page keeps the ward that was chosen above it", async () => {
@@ -857,7 +882,10 @@ test("a job iREPS cannot place still gets a row on his page", async () => {
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].unplaceable, true);
-  assert.equal(rows[0].state, "WAITING_BATCH_ACCEPTANCE", "it keeps its own word");
+  // It keeps ITS OWN WORD, not one of the five - only the case follows the
+  // others, the same as Issued, Accepted and Completed.
+  assert.equal(rows[0].state, "Waiting_batch_acceptance");
+  assert.match(rows[0].state, /waiting_batch_acceptance/i, "the word itself survives");
 
   // And it is offered no action, because the machine would refuse one.
   const source = await read("../src/pages/operations/ItoDashboardPage.jsx");

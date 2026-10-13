@@ -534,7 +534,7 @@ export default function ItoDashboardPage() {
       // Why the office sent it. Without this the supervisor is deciding
       // whether to take work off a man without knowing what the work was for.
       { key: "reason", label: "Why it was sent", filter: "text", sortable: true, value: (row) => row.reason },
-      { key: "state", label: "Where it is", filter: "text", sortable: true, value: (row) => row.state },
+      { key: "state", label: "Status", filter: "text", sortable: true, value: (row) => row.state },
       { key: "heldFor", label: "His since", align: "right", sortable: true, value: (row) => row.heldFor },
       {
         // `DR-R001` 5.6. A job he has accepted is not on the clock, and one
@@ -913,7 +913,12 @@ export default function ItoDashboardPage() {
 
             <div style={styles.workerCounts}>
               <div style={styles.workerCount}>
-                <p style={styles.workerCountValue}>{workerJobs.length}</p>
+                {/* HOLDS means still his to do. The table lists his finished
+                    work too since 13 October, so counting its rows would make
+                    this tile say he is carrying work he has already done. */}
+                <p style={styles.workerCountValue}>
+                  {workerJobs.filter((job) => job.state !== "Completed").length}
+                </p>
                 <p style={styles.workerCountLabel}>he holds</p>
               </div>
               <div style={styles.workerCount}>
@@ -965,9 +970,12 @@ export default function ItoDashboardPage() {
           />
 
           <p style={styles.footnote}>
-            This is what he <strong>holds</strong> — work waiting for his answer and
-            work he has taken. What he has finished is counted above, not listed:
-            it is his, but it is not a load.{" "}
+            <strong>Everything with his name on it in this ward</strong> — waiting
+            for his answer, taken, and finished. <strong>Status</strong> is the
+            transaction's own, the same word the figures above use and the same
+            word his phone shows. The counts above separate the two: what he{" "}
+            <strong>holds</strong> is still his to do, what he has{" "}
+            <strong>finished</strong> is history.{" "}
             <strong>Goes back</strong> is the three-day clock. It runs only on work
             he has not answered — the clock cannot see that a man is standing at a
             meter — and a job issued before iREPS recorded that time reads{" "}
