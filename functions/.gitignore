@@ -7,3 +7,7 @@ node_modules/
 *firebase-adminsdk*.json
 .env.local
 .env.production.local
+# Scratch probe scripts. A read-only investigation run from this folder so it
+# can reach firebase-admin; never part of the deployed source package.
+_*.mjs
+_*.js
