@@ -2,6 +2,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { assertManagedUser } from "../auth/authority.js";
 
 import {
   assertNotSelfRoleChange,
@@ -76,6 +77,8 @@ export const updateUserCallable = onCall(async (request) => {
 
   const actorRole = getUserRole(actor.userData);
   const previousRole = getUserRole(target.userData);
+  const providers = (await db.collection("serviceProviders").get()).docs.map(doc => ({ ...doc.data(), id: doc.id }));
+  assertManagedUser(actor.userData, target.userData, providers);
 
   assertRoleHierarchy({
     actorRole,
@@ -126,7 +129,15 @@ export const updateUserCallable = onCall(async (request) => {
     await auth.setCustomUserClaims(targetUid, nextClaims);
     authClaimsUpdated = true;
 
-    await target.userRef.update(updateFields);
+    await db.runTransaction(async tx => {
+      const [freshActor, freshTarget, freshProviders] = await Promise.all([
+        tx.get(actor.userRef), tx.get(target.userRef), tx.get(db.collection("serviceProviders")),
+      ]);
+      assertManagedUser(freshActor.data() || {}, freshTarget.data() || {}, freshProviders.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      assertRoleHierarchy({ actorRole: getUserRole(freshActor.data()), targetRole: getUserRole(freshTarget.data()), newRole });
+      if (getUserRole(freshTarget.data()) !== previousRole) throw new HttpsError("aborted", "This person's role changed. Refresh and try again.");
+      tx.update(target.userRef, updateFields);
+    });
   } catch (error) {
     if (authClaimsUpdated) {
       try {

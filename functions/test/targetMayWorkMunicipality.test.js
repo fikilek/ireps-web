@@ -31,7 +31,7 @@ import {
 } from "../teams/helpers.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const read = (p) => readFileSync(join(here, "..", p), "utf8");
+const read = (p) => readFileSync(join(here, "..", p), "utf8").replaceAll("\r\n", "\n");
 
 const ENDUMENI = "ZA5241";
 

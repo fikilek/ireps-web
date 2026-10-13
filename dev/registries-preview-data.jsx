@@ -29,6 +29,10 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
 }));
 // FC browser-review cases use local synthetic media supplied by the test runner.
 rowData.forEach((row, index) => {
+  row.qaState = ["DRAFT", "FAIL", "UPDATED", "PASS"][index % 4];
+  row.fieldSubmitter = { uid: "preview-worker", name: "Preview Worker" };
+  row.serviceProviderId = "preview-mnc";
+  if (["PASS", "FAIL"].includes(row.qaState)) row.qa = { state: row.qaState, reviewedByUser: "Earlier Reviewer", reviewedAt: "2026-10-13T08:00:00Z", reviewId: `review-${index}`, comment: "Fixture decision." };
   row.raw = { ast: { astData: { astNo: row.meterNo } }, accessData: { premise: { address: row.premiseAddress } } };
   if (index === 0) row.raw = { ...row.raw, fieldComment: { text: "The terminal cover needs attention.\nPlease review the attached evidence." }, media: [
     { tag: "fieldCommentPhoto", url: "http://127.0.0.1:5196/fc-fixtures/photo.svg" },
@@ -46,7 +50,8 @@ const empty = [];
 const result = data => ({data, currentData:data, isLoading:false, isFetching:false, isError:false, refetch: async()=>({data})});
 const scoped = arg => typeof arg === "symbol" ? empty : rowData;
 const wards = rowData.map((row,i)=>({...row,wardPcode:i===0?wardPcode:`ZA5241${String(i+2).padStart(3,"0")}`}));
-export const useAuth = () => ({activeWorkbase:{id:"ZA5241",lmPcode:"ZA5241",name:"Preview Municipality"},role:"MNG"});
+export const previewActor = { uid: "preview-reviewer", role: "MNG", profile: { accountStatus: "ACTIVE" }, serviceProvider: { id: "preview-mnc" }, activeWorkbase:{id:"ZA5241",lmPcode:"ZA5241",name:"Preview Municipality"} };
+export const useAuth = () => previewActor;
 export function useGeo() { const [geoState,setGeo] = useState({selectedWard:{pcode:wardPcode,wardPcode,wardNumber:"002"}}); return {geoState,updateGeo:patch=>setGeo(current=>({...current,...patch}))}; }
 export const useGetRegistryWardsByLmQuery = () => result(wards);
 export const useGetWardBoundariesByLmQuery = () => result(empty);
@@ -95,7 +100,26 @@ export const useGetMeterDossierQuery = () => result(null);
 
 const previewOnly = async () => { throw new Error("Preview: backend reporting is disabled. No backend write was made."); };
 export const functions = {};
-export const httpsCallable = () => previewOnly;
+export const storage = {};
+export const ref = (...args) => args;
+export const uploadBytes = previewOnly;
+export const getDownloadURL = previewOnly;
+export const useGetAvailableServiceProvidersQuery = () => result([{ id: "preview-mnc", status: "ACTIVE", clients: [{ id: "ZA5241", name: "Preview Municipality", clientType: "LM", relationshipType: "MNC" }] }]);
+// These responses exist only behind the opt-in fixture Vite configuration.
+const decisions = new Map();
+export const httpsCallable = (_functions, name) => {
+  if (name === "getTrnQaReview") return async ({ trnId, version }) => {
+    const row = rowData.find(r => r.trnId === trnId);
+    const qa = decisions.get(trnId) || row.qa;
+    const snapshot = { accessData: { trnType: "METER_INSPECTION", access: { hasAccess: "yes" }, premise: { address: row.premiseAddress } }, ast: { astData: { astNo: row.meterNo } }, inspection: { meterReading: "1245", meterStatus: "CONNECTED", anomaly: "NONE" }, fieldComment: { text: "Synthetic review fixture. No customer data or backend writes." }, media: [] };
+    return { data: { trnId, state: qa?.state || row.qaState, qa, snapshot, evidence: [], sourceVersion: "fixture-version", previousReviewId: qa?.reviewId || null, submitter: row.fieldSubmitter, mayReview: !version && !qa && ["DRAFT", "UPDATED"].includes(row.qaState), reason: "This version has already been reviewed.", reasons: [{ code: "PHOTO_UNCLEAR", label: "Unclear photo" }, { code: "ILLEGAL_CONNECTION_EVIDENCE", label: "Illegal connection evidence not clearly showing on photo(s)" }, { code: "OTHER", label: "Other" }], history: qa ? [{ ...qa, id: qa.reviewId, sourceVersion: "fixture-version" }] : [] } };
+  };
+  if (name === "saveTrnQaReview") return async input => {
+    const qa = { ...input, reviewId: input.requestId, reviewedAt: new Date().toISOString(), reviewedByUser: "Preview Reviewer" };
+    decisions.set(input.trnId, qa); return { data: { qa, success: true } };
+  };
+  return previewOnly;
+};
 export const persistGeneratedReport = previewOnly;
 export const authorizeGeneratedReportDownload = previewOnly;
 export const sendGeneratedReportEmail = previewOnly;

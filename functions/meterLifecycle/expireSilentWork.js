@@ -195,7 +195,7 @@ export async function expireOne({ db, job, nowMs, now }) {
 
     const data = snap.data() || {};
 
-    if (!hasExpired(data, nowMs)) {
+    if (data.qa?.state || !hasExpired(data, nowMs)) {
       return { trnId: job.trnId, done: false, why: "no longer expired" };
     }
 

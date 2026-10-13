@@ -20,6 +20,11 @@ import TrnReportPreviewModal from "./components/TrnReportPreviewModal";
 import TrnFieldCommentsModal from "./components/TrnFieldCommentsModal";
 import FieldCommentIcon from "./components/FieldCommentIcon";
 import { fieldCommentMediaUrls } from "../../utils/fieldComments.js";
+import TrnQaModal from "./components/TrnQaModal";
+import { qaDate } from "../../utils/qaDisplay.js";
+import { QA_LABELS } from "../../../functions/qa/model.js";
+import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
+import { isMainContractor, parentIdOf, resolveMainContractor, mncPcodesOf } from "../../components/serviceProviders/providerHierarchy.js";
 
 const DEFAULT_SORT = { key: "createdAt", direction: "desc" };
 
@@ -77,6 +82,7 @@ const EMPTY_TRN_FILTERS = {
   anomalyDetail: "",
   normalisation: "",
   createdByUser: "",
+  qaState: "ALL",
 };
 
 const EMPTY_DATETIME_FILTER = {
@@ -310,7 +316,12 @@ function matchesDateFilter(value, filter = EMPTY_DATETIME_FILTER) {
 }
 
 export default function TrnsRegistryPage() {
-  const { activeWorkbase, role } = useAuth();
+  const { activeWorkbase, role, uid, profile, serviceProvider } = useAuth();
+  const { data: providers = [] } = useGetAvailableServiceProvidersQuery();
+  const reviewerProvider = providers.find(item => item.id === serviceProvider?.id);
+  const reviewerRole = profile?.accountStatus === "ACTIVE" && ["MNG", "SPV"].includes(role)
+    && isMainContractor(reviewerProvider) && !parentIdOf(reviewerProvider);
+  const [selectedQa, setSelectedQa] = useState(null);
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
   const activeWorkbaseName =
     activeWorkbase?.name ||
@@ -355,6 +366,7 @@ export default function TrnsRegistryPage() {
     }
     const createdAtFilter = tableFilters.createdAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
+      if (!matchesSelect(row.qaState || "NOT_ELIGIBLE", filters.qaState)) return false;
       if (!matchesSelect(row.premisePropertyType, filters.premisePropertyType)) return false;
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
@@ -435,6 +447,9 @@ export default function TrnsRegistryPage() {
       },
       { header: "Created At", value: (row) => formatDateTime(row.createdAt) },
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
+      { header: "QA", value: row => QA_LABELS[row.qaState] || row.qaEligibility?.label || "NAv" },
+      { header: "QA Reviewer", value: row => row.qa?.reviewedByUser || "NAv" },
+      { header: "QA At", value: row => qaDate(row.qa?.reviewedAt) },
     ],
     [],
   );
@@ -869,6 +884,21 @@ export default function TrnsRegistryPage() {
     },
     sortEmptyLast: true,
 
+  }, {
+    key: "qaState", label: "QA", filter: "select", filterAllValue: "ALL", sortable: true,
+    filterOptions: [...Object.entries(QA_LABELS).map(([value, name]) => ({ value, label: name })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
+    value: row => row.qaState || "NOT_ELIGIBLE",
+    render: row => {
+      const mayReview = reviewerRole && ["DRAFT", "UPDATED"].includes(row.qaState)
+        && row.fieldSubmitter?.uid && row.fieldSubmitter.uid !== uid
+        && mncPcodesOf(reviewerProvider).includes(row.lmPcode)
+        && resolveMainContractor(row.serviceProviderId, providers)?.id === serviceProvider?.id;
+      return <div className="qa-cell"><strong>{row.qaState ? `QA ${QA_LABELS[row.qaState] || "Check required"}${row.qaState === "PASS" ? " · Locked" : ""}` : row.qaEligibility?.label || "Awaiting submission"}</strong>
+        {row.qa && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
+        {mayReview && <select aria-label={`QA decision for ${row.trnId}`} value="" onChange={event => { if (event.target.value) setSelectedQa({ trnId: row.trnId, action: event.target.value }); }}><option value="">Choose QA…</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select>}
+        {row.qaState && <DataActionButton compact haspopup="dialog" title="View QA evidence and decision history" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>Review / history</DataActionButton>}
+      </div>;
+    },
   }];
 
   return (
@@ -878,7 +908,7 @@ export default function TrnsRegistryPage() {
           <h1>TRN Registry</h1>
 
           <p className="muted">
-            Read-only LM-scoped TRN records from the trns collection.
+            Submitted transactions, evidence and quality assurance for this workbase.
           </p>
 
           <Link className="text-link" to="/registries">
@@ -1047,6 +1077,7 @@ export default function TrnsRegistryPage() {
         ) : null}
       </section>
 
+      {selectedQa && <TrnQaModal key={selectedQa.trnId} trnId={selectedQa.trnId} initialAction={selectedQa.action} onClose={() => setSelectedQa(null)} />}
       {selectedMeterTrnId ? (
         <MeterDeepDetailsModal
           trnId={selectedMeterTrnId}

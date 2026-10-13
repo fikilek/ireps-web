@@ -1,4 +1,5 @@
 import { onCall } from "firebase-functions/v2/https";
+import { assertQaUnlocked } from "../qa/lock.js";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
@@ -1017,6 +1018,7 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
       const astRefsById = new Map();
 
       for (const row of rows) {
+        assertQaUnlocked(row.data);
         const astId = getAstId(row.data);
 
         if (astId) {

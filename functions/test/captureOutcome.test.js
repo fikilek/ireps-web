@@ -17,10 +17,11 @@ import {
 const TRN = "TRN_MDIS_1790555986842_ELC_ZA5241006_1755";
 
 // The smallest Firestore that can be written to, and remember it.
-function fakeDb() {
+function fakeDb({ exists = true, qa = null } = {}) {
   const writes = [];
   return {
     writes,
+    runTransaction: body => body({ get: async () => ({ exists, data: () => ({ qa }) }), set: (ref, data, options) => ref.set(data, options) }),
     collection: (name) => ({
       doc: (id) => ({
         set: async (data, options) => {
@@ -92,6 +93,7 @@ test("failing to record a failure never replaces it with a worse one", async () 
   // It is called from the one place that knows the capture is dead. If it threw there, it would take
   // out the log line that was always there and we would know even less than before.
   const angryDb = {
+    runTransaction: async () => { throw new Error("Firestore is having a day"); },
     collection: () => ({
       doc: () => ({
         set: async () => {
@@ -113,6 +115,14 @@ test("nothing is written when there is nothing to write it against", async () =>
   assert.deepEqual(await recordCaptureFailure({ db, trnId: "" }), { recorded: false });
   assert.deepEqual(await recordCaptureFailure({ db: null, trnId: TRN }), { recorded: false });
   assert.equal(db.writes.length, 0);
+});
+
+test("a delayed failure cannot alter a passed record or recreate a deleted record", async () => {
+  for (const fixture of [{ qa: { state: "PASS" } }, { exists: false }]) {
+    const db = fakeDb(fixture);
+    assert.equal((await recordCaptureFailure({ db, trnId: TRN, code: "UNKNOWN" })).recorded, false);
+    assert.equal(db.writes.length, 0);
+  }
 });
 
 // ------------------------------------------------------- every way the capture can die says so

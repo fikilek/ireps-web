@@ -131,10 +131,14 @@ export async function recordCaptureFailure({
   };
 
   try {
-    await db.collection("trns").doc(safeTrnId).set(
-      { derived: { failure } },
-      { merge: true },
-    );
+    const ref = db.collection("trns").doc(safeTrnId);
+    const recorded = await db.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      if (!current.exists || current.data().qa?.state === "PASS") return false;
+      tx.set(ref, { derived: { failure } }, { merge: true });
+      return true;
+    });
+    if (!recorded) return { recorded: false, failure };
 
     logger.error("captureOutcome ---- the capture never became a meter", {
       trnId: safeTrnId,

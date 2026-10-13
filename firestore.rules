@@ -1,9 +1,100 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function active() { return signedIn() && me().get('accountStatus', '') == 'ACTIVE'; }
+    function role() { return me().get('employment', {}).get('role', ''); }
+    function platform() { return active() && role() in ['SPU', 'ADM']; }
+    function office() { return active() && role() in ['SPU', 'ADM', 'MNG', 'SPV']; }
+    function own(uid) { return signedIn() && request.auth.uid == uid; }
+    function changed(before, after, keys) { return after.diff(before).affectedKeys().hasOnly(keys); }
+    function ownMetadata() {
+      return changed(resource.data.get('metadata', {}), request.resource.data.get('metadata', {}),
+        ['updatedAt', 'updatedByUid', 'updatedByUser'])
+        && (request.resource.data.get('metadata', {}) == resource.data.get('metadata', {})
+          || request.resource.data.get('metadata', {}).get('updatedByUid', request.auth.uid) == request.auth.uid);
     }
+    function allowedActiveWorkbase() {
+      let access = request.resource.data.get('access', {});
+      let previous = resource.data.get('access', {});
+      return changed(previous, access, ['activeWorkbase'])
+        && (access.get('activeWorkbase', null) == previous.get('activeWorkbase', null)
+          || (active() && (role() == 'SPU' || access.get('activeWorkbase', null) in previous.get('workbases', []))));
+    }
+    function safeOnboarding() {
+      let before = resource.data.get('onboarding', {});
+      let after = request.resource.data.get('onboarding', {});
+      let steps = after.get('steps', {});
+      let oldSteps = before.get('steps', {});
+      return changed(before, after, ['status', 'steps', 'mustChangePassword'])
+        && (after.get('status', '') == before.get('status', '') || (active() && after.get('status', '') in ['PENDING', 'COMPLETED']))
+        && (after.get('mustChangePassword', false) == before.get('mustChangePassword', false)
+          || (active() && after.get('mustChangePassword', false) == false))
+        && changed(oldSteps, steps, ['emailVerified', 'phoneVerified', 'profileCompleted'])
+        && (steps.get('emailVerified', false) == oldSteps.get('emailVerified', false) || request.auth.token.get('email_verified', false))
+        && (steps.get('phoneVerified', false) == oldSteps.get('phoneVerified', false) || request.auth.token.get('phone_number', '') != '');
+    }
+    match /users/{uid} {
+      allow get: if own(uid) || office();
+      allow list: if office();
+      // Role, company and workbase grants are server-owned. Onboarding UI flags
+      // confer no authority: active account and trusted employment are always required.
+      allow update: if own(uid)
+        && changed(resource.data, request.resource.data, ['profile', 'access', 'onboarding', 'metadata', 'contact'])
+        && changed(resource.data.get('profile', {}), request.resource.data.get('profile', {}), ['name', 'surname', 'displayName', 'phoneNumber', 'email'])
+        && changed(resource.data.get('contact', {}), request.resource.data.get('contact', {}), ['phoneNumber', 'cell'])
+        && allowedActiveWorkbase() && safeOnboarding() && ownMetadata();
+      // Existing platform account administration; no self-activation or grant edits.
+      allow update: if platform() && !own(uid)
+        && changed(resource.data, request.resource.data, ['accountStatus'])
+        && request.resource.data.accountStatus in ['ACTIVE', 'DISABLED']
+        && resource.data.accountStatus in ['ACTIVE', 'DISABLED'];
+      allow create, delete: if false;
+    }
+    match /serviceProviders/{id} {
+      allow read: if active();
+      allow create: if platform();
+      allow update: if platform() || (office() && role() in ['MNG', 'SPV']
+        && me().employment.serviceProvider.id == id
+        && changed(resource.data, request.resource.data, ['profile', 'owner', 'offices', 'metadata']) && ownMetadata());
+      allow delete: if false;
+    }
+    match /trns/{id} {
+      allow read: if active();
+      // All submission/ITO/QA mutations use their authorised server operations.
+      allow write: if false;
+      match /history/{event} { allow read: if office(); allow write: if false; }
+      match /qaHistory/{event} { allow read, write: if false; }
+      match /qaVersions/{version} { allow read, write: if false; }
+    }
+    match /qaEvidenceLocks/{file} { allow read, write: if false; }
+    match /premises/{id} {
+      allow read: if active();
+      allow create, delete: if false;
+      // Descriptive edits do not grant control of meter/visit links or counts.
+      allow update: if active() && resource.data.metadata.createdByUid == request.auth.uid
+        && changed(resource.data, request.resource.data, ['address', 'propertyType', 'units', 'occupancy', 'geometry', 'location', 'metadata'])
+        && ownMetadata();
+    }
+    match /settings/{id} { allow read: if active(); allow write: if platform(); }
+    match /notifications/{id} { allow read: if active(); allow write: if false; }
+    // Explicit inventory of existing readers. New collections/subcollections
+    // acquire no client access automatically. All these writers are server-side.
+    match /{collection}/{id} {
+      allow read: if active() && collection in [
+        'account_master', 'asts', 'batch_erf_overrides', 'bgo_batches',
+        'conlog_sales_atomic', 'conlog_sales_monthly', 'conlog_sales_monthly_lm', 'conlog_sales_monthly_lm_groups',
+        'countries', 'demo_sales_meters', 'districts', 'erfs', 'field_account_data', 'fwr_live_locations',
+        'geo_fences', 'irepsSelectLookups', 'ireps_erfs', 'lms', 'meter_master',
+        'mread_staging', 'mread_staging_cycles', 'provinces', 'refused_submissions',
+        'registry_accounts', 'registry_erfs', 'registry_jobs', 'registry_meters', 'registry_mread',
+        'registry_premises', 'registry_wards', 'registry_workbases',
+        'report_trn_anomaly', 'report_trn_no_access', 'report_trn_normalisation', 'report_trn_user_activity',
+        'sales-all-meters', 'stores', 'tb_rows', 'tb_uploads', 'tc_rows', 'tc_uploads',
+        'team_member_history', 'teams', 'vending_providers'
+      ];
+    }
+    match /{document=**} { allow read, write: if false; }
   }
 }

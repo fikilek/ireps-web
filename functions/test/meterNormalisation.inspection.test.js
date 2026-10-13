@@ -272,6 +272,7 @@ function fakeDb(docs) {
   const updates = [];
   return {
     updates,
+    runTransaction: body => body({ get: ref => ref.get(), update: (ref, patch) => ref.update(patch) }),
     collection: () => ({
       doc: (id) => ({
         get: async () => ({ exists: !!docs[id], data: () => docs[id] }),
