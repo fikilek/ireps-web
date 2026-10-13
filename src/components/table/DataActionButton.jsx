@@ -38,6 +38,16 @@ export function ErfActionIcon() {
   );
 }
 
+/** An administrative area. */
+export function WardActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.icon} aria-hidden="true">
+      <path d="M3.5 6.5 9 4.5l6 2 5.5-2v13l-5.5 2-6-2-5.5 2z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M9 4.5v13M15 6.5v13" stroke="currentColor" strokeWidth="1.5" opacity=".55" />
+    </svg>
+  );
+}
+
 /** A place on the ground. */
 export function PremiseActionIcon() {
   return (
@@ -152,6 +162,8 @@ export default function DataActionButton({
   tone = "open",
   disabled = false,
   busy = false,
+  // A chip that opens a window says so, for a reader who cannot see it open.
+  haspopup = null,
 }) {
   const base = compact ? styles.compact : styles.button;
 
@@ -169,6 +181,7 @@ export default function DataActionButton({
       style={style}
       title={title}
       aria-label={title}
+      aria-haspopup={haspopup || undefined}
       disabled={disabled || busy}
       onClick={(event) => {
         event.stopPropagation();

@@ -1,5 +1,11 @@
 /* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
 import { irepsTableDateRange as getDateFilterRange } from "../../components/table/irepsTableModel.js";
+import DataActionButton, {
+  ErfActionIcon,
+  MediaActionIcon,
+  MeterActionIcon,
+  WardActionIcon,
+} from "../../components/table/DataActionButton";
 import IrepsTable from "../../components/table/IrepsTable";
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -124,116 +130,9 @@ function ReportDocumentIcon() {
   );
 }
 
-function MeterActionIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      style={styles.actionSvgIcon}
-    >
-      <rect
-        x="5"
-        y="3.5"
-        width="14"
-        height="17"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <rect
-        x="8"
-        y="6.5"
-        width="8"
-        height="4"
-        rx="1"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <path
-        d="M9 15.25h6M9 18h3.25"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
-function ErfActionIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      style={styles.actionSvgIcon}
-    >
-      <path
-        d="M5.2 6.6 10.4 3l8.4 3.2-1.7 10.9-7 3.2-5.4-5.2.5-8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m10.4 3-.3 17.3M5.2 6.6l11.9 10.5M18.8 6.2 4.7 15.1"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        opacity="0.55"
-      />
-    </svg>
-  );
-}
 
-function WardActionIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      style={styles.actionSvgIcon}
-    >
-      <path
-        d="M12 21s6-5.3 6-11a6 6 0 1 0-12 0c0 5.7 6 11 6 11Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="10"
-        r="2.25"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
 
-function MediaActionIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      style={styles.mediaSvgIcon}
-    >
-      <path
-        d="M8.25 6.25 9.5 4.5h5l1.25 1.75H18a2 2 0 0 1 2 2v8.25a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8.25a2 2 0 0 1 2-2h2.25Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="12.25"
-        r="3.1"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
 
 // The owner, 3 October 2026: "can we fix createdAt? it's 2 hrs behind."
 //
@@ -589,12 +488,7 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <>{isActionableValue(row.meterNo) ? <button type="button" style={styles.dataActionButton} onClick={() => setSelectedMeterTrnId(row.trnId)} title="Open meter details from this TRN">
-                                    <span style={styles.dataActionIconWrap}>
-                                      <MeterActionIcon />
-                                    </span>
-                                    <span>{row.meterNo}</span>
-                                  </button> : "NAv"}</>;
+      return <>{isActionableValue(row.meterNo) ? <DataActionButton icon={<MeterActionIcon />} title="Open meter details from this TRN" onClick={() => setSelectedMeterTrnId(row.trnId)}>{row.meterNo}</DataActionButton> : "NAv"}</>;
     },
     sortEmptyLast: true,
 
@@ -683,19 +577,14 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <>{isActionableValue(row.erfId) && isActionableValue(row.erfNo) ? <button type="button" style={styles.compactDataActionButton} onClick={() => setSelectedBoundary({
+      return <>{isActionableValue(row.erfId) && isActionableValue(row.erfNo) ? <DataActionButton compact icon={<ErfActionIcon />} title={`Open ERF ${row.erfNo} boundary`} onClick={() => setSelectedBoundary({
           mode: "ERF",
           trnId: row.trnId,
           erfId: row.erfId,
           erfNo: row.erfNo,
           wardPcode: row.wardPcode,
           wardNo: row.wardNo
-        })} title={`Open ERF ${row.erfNo} boundary`}>
-                                    <span style={styles.dataActionIconWrap}>
-                                      <ErfActionIcon />
-                                    </span>
-                                    <span>{row.erfNo}</span>
-                                  </button> : row.erfNo || "NAv"}</>;
+        })}>{row.erfNo}</DataActionButton> : row.erfNo || "NAv"}</>;
     },
     sortEmptyLast: true,
 
@@ -713,19 +602,14 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <>{isActionableValue(row.wardPcode) && isActionableValue(row.wardNo) ? <button type="button" style={styles.compactDataActionButton} onClick={() => setSelectedBoundary({
+      return <>{isActionableValue(row.wardPcode) && isActionableValue(row.wardNo) ? <DataActionButton compact icon={<WardActionIcon />} title={`Open Ward ${row.wardNo} boundary`} onClick={() => setSelectedBoundary({
           mode: "WARD",
           trnId: row.trnId,
           erfId: row.erfId,
           erfNo: row.erfNo,
           wardPcode: row.wardPcode,
           wardNo: row.wardNo
-        })} title={`Open Ward ${row.wardNo} boundary`}>
-                                    <span style={styles.dataActionIconWrap}>
-                                      <WardActionIcon />
-                                    </span>
-                                    <span>{row.wardNo}</span>
-                                  </button> : row.wardNo || "NAv"}</>;
+        })}>{row.wardNo}</DataActionButton> : row.wardNo || "NAv"}</>;
     },
     sortEmptyLast: true,
 
@@ -743,15 +627,10 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <>{Number(row.mediaCount) > 0 ? <button type="button" style={styles.mediaActionButton} onClick={() => setSelectedMediaTrnId(row.trnId)} title={`Open ${formatNumber(row.mediaCount)} media item${Number(row.mediaCount) === 1 ? "" : "s"} from this TRN`} aria-label={`Open ${formatNumber(row.mediaCount)} media item${Number(row.mediaCount) === 1 ? "" : "s"} from TRN ${row.trnId}`}>
-                                    <MediaActionIcon />
-                                    <span style={styles.mediaCountBadge}>
-                                      {formatNumber(row.mediaCount)}
-                                    </span>
-                                  </button> : <span style={styles.mediaUnavailable} title="No media captured for this TRN">
-                                    <MediaActionIcon />
-                                    <span style={styles.mediaCountBadgeMuted}>0</span>
-                                  </span>}</>;
+      // The count IS the chip's word, and a TRN with no media shows the same
+      // chip disabled rather than a differently-shaped grey one: nothing to
+      // open, and it says so without pretending to be a second kind of cell.
+      return <>{Number(row.mediaCount) > 0 ? <DataActionButton compact icon={<MediaActionIcon />} haspopup="dialog" title={`Open ${formatNumber(row.mediaCount)} media item${Number(row.mediaCount) === 1 ? "" : "s"} from TRN ${row.trnId}`} onClick={() => setSelectedMediaTrnId(row.trnId)}>{formatNumber(row.mediaCount)}</DataActionButton> : <DataActionButton compact disabled icon={<MediaActionIcon />} title="No media captured for this TRN">0</DataActionButton>}</>;
     },
     sortEmptyLast: true,
 
@@ -948,9 +827,7 @@ export default function TrnsRegistryPage() {
         ["video", "Video", comments?.videos?.length || 0],
       ].filter(([, , count]) => count > 0);
       return <div style={styles.commentCell}>
-        <button type="button" style={styles.compactDataActionButton} aria-label={`Open field comments for ${row.trnId}`} aria-haspopup="dialog" onClick={() => setSelectedCommentsTrnId(row.trnId)}>
-          <FieldCommentIcon />FC
-        </button>
+        <DataActionButton compact icon={<FieldCommentIcon />} title={`Open field comments for ${row.trnId}`} haspopup="dialog" onClick={() => setSelectedCommentsTrnId(row.trnId)}>FC</DataActionButton>
         <div style={styles.commentAvailability}>
           {available.length ? available.map(([kind, label, count]) => <span key={kind} role="img" aria-label={`${label}: ${count}`} title={`${label}: ${count}`}><FieldCommentIcon kind={kind} /></span>) : <span>NAv</span>}
         </div>
@@ -1280,52 +1157,6 @@ const styles = {
     minWidth: "10rem",
     fontWeight: 800,
   },
-  dataActionButton: {
-    minHeight: "2.5rem",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.48rem",
-    border: "1px solid #bfdbfe",
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    padding: "0.38rem 0.62rem",
-    font: "inherit",
-    fontWeight: 850,
-    cursor: "pointer",
-    borderRadius: "0.65rem",
-    textAlign: "left",
-    whiteSpace: "nowrap",
-  },
-  compactDataActionButton: {
-    minHeight: "2.5rem",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.42rem",
-    border: "1px solid #bfdbfe",
-    background: "#f8fbff",
-    color: "#1d4ed8",
-    padding: "0.38rem 0.54rem",
-    font: "inherit",
-    fontWeight: 850,
-    cursor: "pointer",
-    borderRadius: "0.65rem",
-    whiteSpace: "nowrap",
-  },
-  dataActionIconWrap: {
-    width: "1.55rem",
-    height: "1.55rem",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "0 0 auto",
-    borderRadius: "0.45rem",
-    background: "#dbeafe",
-  },
-  actionSvgIcon: {
-    display: "block",
-    width: "1.05rem",
-    height: "1.05rem",
-  },
   addressCell: {
     minWidth: "15rem",
     maxWidth: "22rem",
@@ -1362,74 +1193,6 @@ const styles = {
     display: "block",
     width: "1.5rem",
     height: "1.5rem",
-  },
-  mediaActionButton: {
-    position: "relative",
-    width: "2.5rem",
-    height: "2.5rem",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: "1px solid #bfdbfe",
-    background: "#eff6ff",
-    color: "#2563eb",
-    padding: 0,
-    font: "inherit",
-    cursor: "pointer",
-    borderRadius: "0.65rem",
-  },
-  mediaSvgIcon: {
-    display: "block",
-    width: "1.45rem",
-    height: "1.45rem",
-  },
-  mediaCountBadge: {
-    position: "absolute",
-    top: "-0.38rem",
-    right: "-0.38rem",
-    minWidth: "1.15rem",
-    height: "1.15rem",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: "2px solid #ffffff",
-    borderRadius: "999px",
-    background: "#2563eb",
-    color: "#ffffff",
-    padding: "0 0.2rem",
-    fontSize: "0.66rem",
-    fontWeight: 900,
-    lineHeight: 1,
-  },
-  mediaUnavailable: {
-    position: "relative",
-    width: "2.5rem",
-    height: "2.5rem",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: "1px solid #e2e8f0",
-    background: "#f8fafc",
-    color: "#94a3b8",
-    borderRadius: "0.65rem",
-  },
-  mediaCountBadgeMuted: {
-    position: "absolute",
-    top: "-0.38rem",
-    right: "-0.38rem",
-    minWidth: "1.15rem",
-    height: "1.15rem",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: "2px solid #ffffff",
-    borderRadius: "999px",
-    background: "#cbd5e1",
-    color: "#475569",
-    padding: "0 0.2rem",
-    fontSize: "0.66rem",
-    fontWeight: 900,
-    lineHeight: 1,
   },
 
 };

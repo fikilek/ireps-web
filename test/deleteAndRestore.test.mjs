@@ -556,16 +556,30 @@ test("ONE LOOK FOR A CELL YOU CAN PRESS", async () => {
   // drawn as blue chips with icons on one screen and bare underlined text on
   // the other. The component that makes the chip already existed; it lived
   // INSIDE the registry page, so every other screen had to invent its own.
+  //
+  // THE TRN REGISTRY JOINED THEM ON 13 OCTOBER 2026. It had a COMPLETE private
+  // copy: the chip's three styles byte-for-byte identical to the shared ones,
+  // and its own drawings of a meter, an ERF and a ward. So the button was the
+  // same and the pictures inside it were not - and its ward was drawn as a map
+  // PIN, which in the shared set means a premise, a place on the ground. One
+  // picture, one meaning, or neither means anything.
   const registry = await read("../src/pages/registries/MetersRegistryPage.jsx");
   const ito = await read("../src/pages/operations/ItoDashboardPage.jsx");
+  const trns = await read("../src/pages/registries/TrnsRegistryPage.jsx");
 
-  for (const [name, source] of [["registry", registry], ["ito", ito]]) {
+  for (const [name, source] of [["registry", registry], ["ito", ito], ["trns", trns]]) {
     assert.match(source, /from "\.\.\/\.\.\/components\/table\/DataActionButton"/, name);
 
     // Neither keeps a copy of the look.
     assert.doesNotMatch(source, /function DataActionButton/, name);
     assert.doesNotMatch(source, /dataActionButton: \{/, name);
     assert.doesNotMatch(source, /actionSvgIcon: \{/, name);
+    assert.doesNotMatch(source, /compactDataActionButton: \{/, name);
+
+    // And no local redrawing of an icon the shared set already has.
+    for (const icon of ["Meter", "Erf", "Ward", "Premise", "Media"]) {
+      assert.doesNotMatch(source, new RegExp("^function " + icon + "ActionIcon\\(", "m"), `${name} ${icon}`);
+    }
   }
 
   // The three cells that are the same thing on both screens use the same
@@ -573,6 +587,11 @@ test("ONE LOOK FOR A CELL YOU CAN PRESS", async () => {
   for (const icon of ["MeterActionIcon", "ErfActionIcon", "PremiseActionIcon"]) {
     assert.match(registry, new RegExp(`<${icon} />`), `registry ${icon}`);
     assert.match(ito, new RegExp(`<${icon} />`), `ito ${icon}`);
+  }
+
+  // A meter is a meter and an ERF is an ERF on the TRN Registry too.
+  for (const icon of ["MeterActionIcon", "ErfActionIcon", "WardActionIcon"]) {
+    assert.match(trns, new RegExp(`<${icon} />`), `trns ${icon}`);
   }
 });
 
