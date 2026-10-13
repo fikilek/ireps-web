@@ -85,7 +85,8 @@ service cloud.firestore {
       allow read: if active() && collection in [
         'account_master', 'asts', 'batch_erf_overrides', 'bgo_batches',
         'conlog_sales_atomic', 'conlog_sales_monthly', 'conlog_sales_monthly_lm', 'conlog_sales_monthly_lm_groups',
-        'countries', 'demo_sales_meters', 'districts', 'erfs', 'field_account_data', 'fwr_live_locations',
+        'countries', 'demo_sales_meters', 'districts', 'districtMunicipalities', 'towns', 'wards',
+        'erfs', 'field_account_data', 'fwr_live_locations',
         'geo_fences', 'irepsSelectLookups', 'ireps_erfs', 'lms', 'meter_master',
         'mread_staging', 'mread_staging_cycles', 'provinces', 'refused_submissions',
         'registry_accounts', 'registry_erfs', 'registry_jobs', 'registry_meters', 'registry_mread',

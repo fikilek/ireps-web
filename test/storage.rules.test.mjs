@@ -109,6 +109,8 @@ describe("Storage policy: report ownership and explicit unreviewed field-upload 
       "trns/lifecycle_instructions/file.jpg",
       "trns/lifecycle_instructions/work/file.jpg",
       "lifecycleInstructions/work/file.jpg",
+      "meters/lifecycle/inspection/file.jpg",
+      "data-cleansing/account-data/premise/file.jpg",
     ];
 
     for (const path of paths) {

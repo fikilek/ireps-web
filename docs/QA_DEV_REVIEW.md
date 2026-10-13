@@ -28,10 +28,13 @@ Fail remains Fail until correction is implemented; no edit/reset shortcut is exp
 - Web: `node --experimental-vm-modules --test` over `test` and `src` test files,
   excluding the two emulator-only suites: 684 passed.
 - Backend: `node --test` over `functions/test`: 1,074 passed, four existing skips.
-- Firestore and Storage emulators: 27 passed, including role/lineage/workbase,
+- Firestore and Storage emulators: 29 passed, including role/lineage/workbase,
   no self-review, forged metadata/authority, exact versions, competing saves,
   idempotent retry, immutable copied evidence, original-file overwrite, Pass locks,
   delayed backend writes, history read boundaries and generated-report ownership.
+  The hosted check found and corrected omitted ward/district/town read permissions;
+  regression checks cover both the web boundary query and mobile geography reads.
+  Current nested phone/office evidence paths and account-data uploads are covered.
 - Changed-file ESLint: no errors, two existing unused-helper warnings.
 - DEV environment verified; Vite build passed. Browser fixture exercised Fail's
   required fields, Pass with optional comment, final-lock feedback and modal layout.
