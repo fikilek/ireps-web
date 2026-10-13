@@ -73,3 +73,26 @@ test("the failure carries something to report", async () => {
   assert.match(callable, /detail: error\?\.message/);
   assert.doesNotMatch(callable, /"UNKNOWN_ERROR"/, "a code with no detail cannot be reported");
 });
+
+test("the window reads the shape the endpoint actually throws", async () => {
+  // Found by an adversarial review of the morning's own fix. The endpoint
+  // rejects with RTK Query's shape - { status, error } - so reading `code` and
+  // `message` left the code and the detail ALWAYS EMPTY, and the window said
+  // no more than the version it replaced.
+  const api = await read("../src/redux/creditControlApi.js");
+  const page = await read("../src/pages/registries/MetersRegistryPage.jsx");
+
+  // this is what it throws
+  assert.match(api, /status: "REGISTRATION_CHECK_FAILED"/);
+  assert.match(api, /error: error\?\.message \|\| String\(error\)/);
+
+  // so this is what the page must read, before anything else
+  const codeRead = page.slice(page.indexOf("const code = String("), page.indexOf("const detail = String("));
+  const detailRead = page.slice(page.indexOf("const detail = String("));
+
+  assert.ok(codeRead.indexOf("error?.status") < codeRead.indexOf("error?.code"), "status first");
+  assert.ok(
+    detailRead.indexOf("error?.error") < detailRead.indexOf("error?.message"),
+    "the endpoint's own `error` field first",
+  );
+});

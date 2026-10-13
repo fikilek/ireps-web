@@ -301,6 +301,42 @@ async function checkTargetsMayWork({ db, targets, lmPcodes }) {
 
   if (!userTargets.length) return { ok: true };
 
+  // THE FIELD-WORKER RULE FIRST, AND ON ITS OWN.
+  //
+  // This check used to live inside the loop below, AFTER two municipality
+  // gates returned early - so a job carrying no municipality, or one in a
+  // municipality iREPS records no contractor for, switched off the FWR rule
+  // as well. The two rules are independent: who may do field work is
+  // `DR-R001` 4 and has nothing to do with which municipality the meter is
+  // in. A gap in one must not excuse the other.
+  const userDocs = new Map();
+
+  for (const target of userTargets) {
+    const userSnap = await db.collection("users").doc(target.id).get();
+
+    if (!userSnap.exists) {
+      return {
+        ok: false,
+        code: "TARGET_USER_NOT_FOUND",
+        message: `${target.name} is not an iREPS user.`,
+      };
+    }
+
+    const userDoc = { id: userSnap.id, ...userSnap.data() };
+
+    userDocs.set(target.id, userDoc);
+
+    const role = normalizeUpper(userDoc?.employment?.role || userDoc?.role || "");
+
+    if (role !== "FWR") {
+      return {
+        ok: false,
+        code: "TARGET_NOT_A_FIELD_WORKER",
+        message: `${target.name} is a ${role || "NAv"}, and individual work goes to a field worker.`,
+      };
+    }
+  }
+
   const municipalities = [...new Set(lmPcodes.filter(Boolean))];
 
   if (!municipalities.length) return { ok: true };
@@ -319,26 +355,7 @@ async function checkTargetsMayWork({ db, targets, lmPcodes }) {
   if (!anyHolder) return { ok: true };
 
   for (const target of userTargets) {
-    const userSnap = await db.collection("users").doc(target.id).get();
-
-    if (!userSnap.exists) {
-      return {
-        ok: false,
-        code: "TARGET_USER_NOT_FOUND",
-        message: `${target.name} is not an iREPS user.`,
-      };
-    }
-
-    const userDoc = { id: userSnap.id, ...userSnap.data() };
-    const role = normalizeUpper(userDoc?.employment?.role || userDoc?.role || "");
-
-    if (role !== "FWR") {
-      return {
-        ok: false,
-        code: "TARGET_NOT_A_FIELD_WORKER",
-        message: `${target.name} is a ${role || "NAv"}, and individual work goes to a field worker.`,
-      };
-    }
+    const userDoc = userDocs.get(target.id);
 
     for (const lmPcode of municipalities) {
       const allowed = isUserAllowedInLm({

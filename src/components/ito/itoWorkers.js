@@ -13,6 +13,7 @@
 import {
   mainContractorsHolding,
   providerMayWorkMunicipality,
+  readId,
 } from "../serviceProviders/providerHierarchy.js";
 
 import {
@@ -190,9 +191,14 @@ export function buildWorkerChoices({
       const live = positionByUid.get(uid) || null;
       const point = live?.location || null;
       const metres = metresBetween(point, meterPoint);
-      const providerId = String(
-        user?.serviceProviderId || user?.serviceProvider?.id || "",
-      ).trim();
+      // THROUGH THE WELL, not String().trim(). `usersApi` writes the literal
+      // word `NAv` when a person's company is not recorded, so a bare read
+      // keeps a GAP as a truthy id - it is in no main contractor's set, and
+      // the flag below then told the office this man works for a
+      // subcontractor on the strength of nothing at all. On LIVE, where the
+      // main contractor has no subcontractors, that label cannot be true of
+      // anybody.
+      const providerId = readId(user?.serviceProviderId || user?.serviceProvider?.id);
 
       return {
         uid,

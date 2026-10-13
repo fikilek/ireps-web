@@ -328,3 +328,105 @@ test("nameOf reads the provider, and says NAv when there is no name", () => {
   assert.equal(nameOf({ profile: { tradingName: "RSTE" } }), "RSTE");
   assert.equal(nameOf({}), "NAv");
 });
+
+/* --------------------------------------- what the adversarial review found */
+
+// Five faults, four of them introduced by this very change and found by an
+// adversarial review before the owner saw them. Each test is the finding.
+
+test("`NAv` on a person's record is a gap, not a company", async () => {
+  // usersApi writes the literal word when employment.serviceProvider.id is
+  // absent. A bare String().trim() keeps it as a truthy id, so it is in no
+  // main contractor's set and the row was labelled "Subcontractor" - the
+  // office told which company a man belongs to on the strength of nothing.
+  const { readId } = await import("../src/components/serviceProviders/providerHierarchy.js");
+
+  assert.equal(readId("NAv"), "");
+  assert.equal(readId("  NAv  "), "");
+  assert.equal(readId(" RSTE "), "RSTE");
+
+  const rows = buildWorkerChoices({
+    users: [
+      { uid: "a", displayName: "Peter", role: "FWR", serviceProviderId: "sLLgXeWF4vh30dh8tpNG" },
+      { uid: "b", displayName: "Siya", role: "FWR", serviceProviderId: "LjOe1cmgvkdejSSpGOed" },
+      // exactly what the stream emits for a person with no company recorded
+      { uid: "c", displayName: "Nobody's man", role: "FWR", serviceProviderId: "NAv" },
+    ],
+    lmPcode: ENDUMENI,
+    serviceProviders: TEST_PROVIDERS,
+  }).all;
+
+  const flag = Object.fromEntries(rows.map((r) => [r.name, r.subcontractor]));
+
+  assert.equal(flag["Peter"], false, "the main contractor's own man");
+  assert.equal(flag["Siya"], true, "a subcontractor's man");
+  assert.equal(flag["Nobody's man"], false, "a gap is never reported as an employer");
+  assert.ok(rows.some((r) => r.name === "Nobody's man"), "and he is still offered");
+});
+
+test("a provider with no parent is never read as having one", () => {
+  // serviceProvidersApi writes "NAv" into parentServiceProviderId.
+  const asTheStreamEmitsIt = [
+    { id: "RSTE", name: "RSTE", parentServiceProviderId: "NAv",
+      clients: [{ clientType: "LM", relationshipType: "MNC", id: ENDUMENI }] },
+    { id: "SUB", name: "Sub", parentServiceProviderId: "RSTE", clients: [] },
+  ];
+
+  assert.equal(parentIdOf(asTheStreamEmitsIt[0]), "");
+  assert.equal(resolveMainContractor("SUB", asTheStreamEmitsIt).id, "RSTE");
+});
+
+test("familyOf admits a provider whose chain PASSES a root, not only one that ends at it", () => {
+  // FwrMonitoringPage passes the VIEWER'S OWN provider. For a manager at a
+  // subcontractor his children's chains run past him to the main contractor
+  // above, so asking for the TOP of the chain returned an empty family and he
+  // lost sight of his own people - worse than the one-hop code it replaced.
+  const graph = [
+    mnc("TOP", "Top", ENDUMENI),
+    sub("MID", "Mid", "TOP"),
+    sub("LOW", "Low", "MID"),
+    sub("LOWER", "Lower", "LOW"),
+    mnc("OTHER", "Other", "ZA9999"),
+    sub("OTHERSUB", "Other sub", "OTHER"),
+  ];
+
+  // a manager at MID sees MID and everything beneath it, and nothing else
+  assert.deepEqual([...familyOf(["MID"], graph)].sort(), ["LOW", "LOWER", "MID"]);
+
+  // a main contractor still sees its whole tree
+  assert.deepEqual([...familyOf(["TOP"], graph)].sort(), ["LOW", "LOWER", "MID", "TOP"]);
+
+  // and nobody else's
+  assert.ok(!familyOf(["MID"], graph).has("OTHERSUB"));
+
+  // the municipality's question is unchanged by the widening, because its
+  // roots ARE main contractors
+  assert.deepEqual(
+    [...familyForMunicipality({ lmPcode: ENDUMENI, providers: graph })].sort(),
+    ["LOW", "LOWER", "MID", "TOP"],
+  );
+});
+
+test("a loop in the chain does not hang familyOf", () => {
+  const loop = [mnc("TOP", "Top", ENDUMENI), sub("A", "A", "B"), sub("B", "B", "A")];
+
+  assert.equal(familyOf(["TOP"], loop).size, 1);
+});
+
+test("the SUBC label is read from the provider, not from being in the list", async () => {
+  // The list held subcontractors only, so being in it meant being one. Since
+  // the stream returns every active provider, that read labelled the MAIN
+  // CONTRACTOR'S OWN STAFF [SUBC].
+  const { readFile } = await import("node:fs/promises");
+  const page = await readFile(
+    new URL("../src/pages/operations/OperationalTeamsPage.jsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    page,
+    /serviceProviders\.some\(\s*\(item\) => item\.id === group\.serviceProviderId,?\s*\)\s*\?\s*"SUBC"/,
+    "being in the list is not what makes a provider a subcontractor",
+  );
+  assert.match(page, /\?\.isSubcontractor\s*\n?\s*\?\s*"SUBC"/);
+});

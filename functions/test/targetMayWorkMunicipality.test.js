@@ -221,3 +221,41 @@ test("the guard does not keep its own copy of the hierarchy", () => {
     "the relationship is interpreted in functions/teams/helpers.js alone",
   );
 });
+
+/* --------------------------------------- what the adversarial review found */
+
+test("the field-worker rule is NOT switched off by a missing municipality", () => {
+  // The role check sat INSIDE the loop below two municipality gates that
+  // return early. So a job carrying no municipality, or one in a municipality
+  // iREPS records no contractor for, let a supervisor be given individual
+  // work. The two rules are independent: who may do field work is DR-R001 4
+  // and has nothing to do with which municipality the meter is in.
+  const src = read("meterLifecycle/manageInstructionCallable.js");
+  const guard = src.match(/async function checkTargetsMayWork\([\s\S]*?\n\}\n/)[0];
+
+  const roleAt = guard.indexOf("TARGET_NOT_A_FIELD_WORKER");
+  const municipalityGate = guard.indexOf("if (!municipalities.length) return { ok: true };");
+  const holderGate = guard.indexOf("if (!anyHolder) return { ok: true };");
+
+  assert.ok(roleAt > 0 && municipalityGate > 0 && holderGate > 0, "all three are present");
+  assert.ok(roleAt < municipalityGate, "the role is asked before the municipality gate");
+  assert.ok(roleAt < holderGate, "and before the holder gate");
+
+  // The target-exists check must be on the same side of the gates, for the
+  // same reason: a target who is not an iREPS user at all is refused whatever
+  // the municipality says.
+  const existsAt = guard.indexOf("TARGET_USER_NOT_FOUND");
+
+  assert.ok(existsAt > 0 && existsAt < municipalityGate, "and so is the target-exists check");
+});
+
+test("each target's record is read once, not twice", () => {
+  // Moving the role check out must not leave the municipality loop fetching
+  // the same user document again.
+  const src = read("meterLifecycle/manageInstructionCallable.js");
+  const guard = src.match(/async function checkTargetsMayWork\([\s\S]*?\n\}\n/)[0];
+  const reads = guard.match(/collection\("users"\)\.doc\(/g) || [];
+
+  assert.equal(reads.length, 1, "one users read, reused through userDocs");
+  assert.ok(guard.includes("userDocs.get(target.id)"));
+});

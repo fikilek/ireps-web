@@ -43,7 +43,22 @@
 
 const NAV = "NAv";
 
-/** A trimmed string, or `""`. `NAv` is a gap, not a value, so it reads `""`. */
+/**
+ * A trimmed string, or `""`. `NAv` is a gap, not a value, so it reads `""`.
+ *
+ * EXPORTED, as of 13 October 2026, because every reader of a stored id needs
+ * it and the one that did not have it got it wrong. `usersApi` writes the
+ * literal word `NAv` into `serviceProviderId` when a person's company is not
+ * recorded, and `serviceProvidersApi` writes it into
+ * `parentServiceProviderId` when a provider has no parent. A reader that keeps
+ * the word treats a GAP AS A COMPANY: truthy, in no holder set, and therefore
+ * reported as somebody's employer. That is the owner's NAv rule broken by the
+ * very field that implements it.
+ */
+export function readId(value) {
+  return id(value);
+}
+
 function id(value) {
   const text = String(value ?? "").trim();
 
@@ -234,31 +249,59 @@ export function providerMayWorkMunicipality({
  * recursion already allows, and the depth the one-hop copies in the pages
  * missed.
  */
-export function familyOf(mainContractorIds, providers = []) {
-  const holders = new Set(
-    (mainContractorIds instanceof Set
-      ? [...mainContractorIds]
-      : asArray(mainContractorIds)
-    )
+export function familyOf(rootIds, providers = []) {
+  const roots = new Set(
+    (rootIds instanceof Set ? [...rootIds] : asArray(rootIds))
       .map((value) => id(value))
       .filter(Boolean),
   );
 
-  if (!holders.size) return new Set();
+  if (!roots.size) return new Set();
 
-  const family = new Set(holders);
+  const family = new Set(roots);
 
   for (const provider of asArray(providers)) {
     const key = id(provider?.id);
 
     if (!key || family.has(key)) continue;
 
-    const resolved = resolveMainContractor(key, providers);
+    // WALK UP AND LOOK FOR A ROOT ON THE WAY, not only at the top.
+    //
+    // This asked `resolveMainContractor(key)` and admitted the provider only
+    // when its MAIN CONTRACTOR was one of the roots. That is right when the
+    // roots ARE main contractors - which is the municipality's question - and
+    // WRONG for every other caller. `FwrMonitoringPage` passes the viewer's
+    // own provider: for a manager at a subcontractor, his children's chains
+    // run past him to the main contractor above, so the top was never his id
+    // and the family came back EMPTY. He lost sight of his own people
+    // entirely - worse than the one-hop version this replaced, which at least
+    // found the generation directly below him.
+    const seen = new Set();
+    let current = parentIdOf(provider);
 
-    if (resolved?.id && holders.has(resolved.id)) family.add(key);
+    while (current && !seen.has(current)) {
+      if (roots.has(current)) {
+        family.add(key);
+        break;
+      }
+
+      seen.add(current);
+
+      const parent = byIdIn(providers, current);
+
+      if (!parent) break;
+
+      current = parentIdOf(parent);
+    }
   }
 
   return family;
+}
+
+function byIdIn(providers, wanted) {
+  const key = id(wanted);
+
+  return asArray(providers).find((provider) => id(provider?.id) === key) || null;
 }
 
 /**

@@ -519,9 +519,18 @@ export default function OperationalTeamsPage() {
                     </span>
                     <span style={styles.spClassification}>
                       [
-                      {serviceProviders.some(
+                      {/*
+                        SUBC comes from the PROVIDER's own record, not from
+                        "it is in the list". The list used to hold
+                        subcontractors only, so being in it meant being one;
+                        since 13 October it holds every active provider, and
+                        this read labelled the MAIN CONTRACTOR'S OWN STAFF
+                        [SUBC]. A provider with no parent is the main
+                        contractor, whatever list it appears in.
+                      */}
+                      {serviceProviders.find(
                         (item) => item.id === group.serviceProviderId,
-                      )
+                      )?.isSubcontractor
                         ? "SUBC"
                         : "MNC"}
                       ]

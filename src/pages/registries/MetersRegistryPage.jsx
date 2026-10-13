@@ -502,8 +502,21 @@ export default function MetersRegistryPage() {
       //
       // And "try again" is not offered, because nothing here knows whether the
       // cause will pass. It says what happened and what to report.
-      const code = String(error?.code || error?.data?.code || "").trim();
-      const detail = String(error?.message || error?.data?.message || "").trim();
+      // READ THE SHAPE THE ENDPOINT ACTUALLY THROWS.
+      //
+      // `creditControlApi.checkMeterRegistration` rejects with
+      // `{ status: "REGISTRATION_CHECK_FAILED", error: "<message>" }`, which is
+      // RTK Query's own error shape - not `code`/`message`. A first version of
+      // this read `error.code` and `error.message`, so the code and the detail
+      // it exists to show were ALWAYS EMPTY and the window said no more than
+      // before. Every shape it can actually meet is read here: that one, a raw
+      // Firebase HttpsError (`code`/`message`), and a plain Error.
+      const code = String(
+        error?.status || error?.code || error?.data?.code || "",
+      ).trim();
+      const detail = String(
+        error?.error || error?.message || error?.data?.message || "",
+      ).trim();
 
       console.error("Meter registration check could not run", {
         astId: row.id,
