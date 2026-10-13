@@ -159,6 +159,18 @@ test("An absent evidence file is preserved as unavailable, with a Fail still pos
   await save(context, { state: "FAIL", reasonCode: "PHOTO_MISSING", comment: "File absent" });
   await assertFails(uploadBytes(ref(env.authenticatedContext("worker").storage(`gs://${bucketName}`), "meters/lifecycle/missing.jpg"), new Uint8Array([1])));
 });
+test("Current nested phone and office evidence paths are copied and permanently protected", async () => {
+  const paths = ["meters/lifecycle/disconnection/dcn.jpg", "meters/lifecycle/inspection/ins.jpg", "trns/lifecycle_instructions/work/office.jpg", "lifecycleInstructions/work/web.jpg"];
+  const storage = env.authenticatedContext("worker").storage(`gs://${bucketName}`);
+  for (const path of paths) await assertSucceeds(uploadBytes(ref(storage, path), new Uint8Array([1, 2, 3])));
+  await db.doc("trns/work").update({ media: paths.map(path => ({ type: "image", url: `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media` })) });
+  const context = await prepare(); assert.equal(context.evidence.length, paths.length);
+  for (const item of context.evidence) {
+    assert.equal(item.available, true); assert.ok(item.preservedUrl);
+    await assertFails(uploadBytes(ref(storage, item.path), new Uint8Array([9])));
+    await assertFails(deleteObject(ref(storage, item.preservedPath)));
+  }
+});
 test("External evidence cannot be mistaken for protected iREPS evidence", async () => {
   await db.doc("trns/work").update({ media: [{ url: "https://example.com/photo.jpg" }] });
   await assert.rejects(prepare(), code("failed-precondition"));
@@ -183,6 +195,15 @@ test("Existing authenticated registry queries work, unauthenticated and inactive
   await assertSucceeds(getDocs(query(collection(client("reviewer"), "trns"), where("accessData.parents.lmPcode", "==", "ZA5241"))));
   await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), "trns/work")));
   await db.doc("users/reviewer").update({ accountStatus: "DISABLED" }); await assertFails(getDoc(doc(client("reviewer"), "trns/work")));
+});
+test("Existing web ward boundaries and mobile geography remain readable without client edits", async () => {
+  for (const name of ["wards", "districtMunicipalities", "towns"]) {
+    await db.doc(`${name}/place`).set({ parents: { localMunicipalityId: "ZA5241" } });
+    await assertSucceeds(getDocs(query(collection(client("reviewer"), name), where("parents.localMunicipalityId", "==", "ZA5241"))));
+    await assertSucceeds(getDoc(doc(client("worker"), name, "place")));
+    await assertFails(updateDoc(doc(client("worker"), name, "place"), { name: "forged" }));
+    await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), name, "place")));
+  }
 });
 test("Existing own-profile onboarding and platform status changes work without allowing self-activation", async () => {
   const own = doc(client("reviewer"), "users/reviewer");

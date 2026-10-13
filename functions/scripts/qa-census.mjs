@@ -17,7 +17,7 @@ console.log(JSON.stringify({ project: "ireps2", collections: collections.map(c =
   eligibility: countBy(trns, t => qaEligibility(t).label), provider: countBy(eligible, t => t.serviceProvider?.id),
   submitterMissing: eligible.filter(t => !fieldSubmitter(t).uid).length,
   captureMissing: eligible.filter(t => !t.metadata?.createdOnDevice).length,
-  mediaPaths: countBy(trns.flatMap(t => Array.isArray(t.media) ? t.media : []), m => { try { const u = new URL(m.url); return u.hostname + ' ' + decodeURIComponent(u.pathname).split('/').slice(0, 7).join('/'); } catch { return 'NO_URL'; } }),
+  mediaPaths: countBy(trns.flatMap(t => Array.isArray(t.media) ? t.media : []), m => { try { const u = new URL(m.url); const path = decodeURIComponent(u.pathname.split('/o/')[1]).split('/'); return `${u.hostname} ${path[0]}/${path[1]} (${path.length} segments)`; } catch { return 'NO_URL'; } }),
   mediaExample: eligible.find(t => t.media?.length)?.media?.slice(0, 1).map(m => ({ keys: Object.keys(m), uriFields: Object.keys(m).filter(k => typeof m[k] === "string" && m[k].startsWith("http")) })),
   reviewers: users.filter(u => ["MNG", "SPV"].includes(u.employment?.role)).map(actor => ({ uid: actor.uid, name: actor.profile?.displayName, role: actor.employment?.role, status: actor.accountStatus, providerId: actor.employment?.serviceProvider?.id,
     allowed: eligible.filter(trn => reviewAccess({ actorUid: actor.uid, actor, providers, trn }).allowed).length,

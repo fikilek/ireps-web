@@ -19,6 +19,7 @@ export function evidenceObjects(trn, bucketName) {
       const path = decodeURIComponent(parts[2]);
       const segments = path.split("/");
       const supported = (segments.length === 3 && ["meters", "premises", "informal_erfs", "lifecycleInstructions"].includes(segments[0]))
+        || (segments.length === 4 && segments[0] === "meters" && segments[1] === "lifecycle")
         || ([3, 4].includes(segments.length) && segments[0] === "trns" && segments[1] === "lifecycle_instructions");
       if (!supported || segments.some(x => !x || x === "." || x === "..")) {
         throw new HttpsError("failed-precondition", "This evidence uses an unsupported storage location. Its evidence needs checking before QA.");
