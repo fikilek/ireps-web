@@ -175,7 +175,7 @@ export async function saveQaReview(db, actorUid, input) {
   const comment = typeof input.comment === "string" ? input.comment.trim() : "";
   if (comment.length > 4000) throw new HttpsError("invalid-argument", "Keep the QA comment within 4,000 characters.");
   const reason = state === "FAIL" ? QA_FAILURE_REASONS.find(item => item.code === input.reasonCode) : null;
-  if (state === "FAIL" && (!reason || !comment)) throw new HttpsError("invalid-argument", "A QA failure requires a reason and a written explanation.");
+  if (state === "FAIL" && !reason) throw new HttpsError("invalid-argument", "A QA failure requires a reason from the failure-reason list.");
   const trnRef = db.doc(`trns/${trnId}`);
   const historyRef = trnRef.collection("qaHistory").doc(requestId);
   return db.runTransaction(async tx => {
@@ -205,7 +205,7 @@ export async function saveQaReview(db, actorUid, input) {
     const now = new Date().toISOString();
     const qa = { state, reviewId: requestId, sourceVersion: currentVersion,
       reasonCode: reason?.code || null, reasonLabel: reason?.label || null, comment,
-      reviewedAt: now, reviewedByUid: actorUid, reviewedByUser: getUserDisplayName(context.actor), ruleVersion: 1,
+      reviewedAt: now, reviewedByUid: actorUid, reviewedByUser: getUserDisplayName(context.actor), ruleVersion: 2,
       ...(trn.qa?.lastAmendment ? { lastAmendment: trn.qa.lastAmendment, amendedByUids: trn.qa.amendedByUids || [] } : {}) };
     const location = { lmPcode: qaText(trn.accessData?.parents?.lmPcode) || null, wardPcode: qaText(trn.accessData?.parents?.wardPcode) || null };
     const notices = state === "FAIL" ? await planQaNotices(tx, db, { context, trn, trnId, eventId: requestId, kind: "RETURNED", at: now }) : [];

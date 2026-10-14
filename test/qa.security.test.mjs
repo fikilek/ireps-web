@@ -235,12 +235,27 @@ test("Pass preserves the exact original, creates one permanent decision, stamps 
   assert.equal(result.qa.reviewedAt, after.metadata.updatedAt);
   await assert.rejects(save(context, { requestId: "second", previousReviewId: "request1" }), code("failed-precondition"));
 });
-test("Fail requires a governed reason and nonblank explanation; illegal-connection evidence is included", async () => {
+test("Fail requires a governed reason but permits an optional explanation in Draft and Updated", async () => {
   const context = await prepare();
-  for (const extra of [{ state: "FAIL" }, { state: "FAIL", reasonCode: "OTHER", comment: "   " }, { state: "FAIL", reasonCode: "forged", comment: "A reason" }]) await assert.rejects(save(context, extra), code("invalid-argument"));
+  for (const extra of [{ state: "FAIL" }, { state: "FAIL", comment: "An explanation alone is insufficient" }, { state: "FAIL", reasonCode: "forged", comment: "A reason" }, { state: "FAIL", reasonCode: "OTHER", comment: "x".repeat(4001) }]) await assert.rejects(save(context, extra), code("invalid-argument"));
   assert.ok(QA_FAILURE_REASONS.some(r => r.code === "ILLEGAL_CONNECTION_EVIDENCE"));
-  const result = await save(context, { state: "FAIL", reasonCode: "ILLEGAL_CONNECTION_EVIDENCE", comment: "Cable connection not visible" });
-  assert.equal(result.qa.reasonLabel, "Illegal connection evidence not clearly showing on photo(s)");
+  for (const state of ["DRAFT", "UPDATED"]) {
+    for (const [index, comment] of [undefined, "", "   ", " Cable connection not visible "].entries()) {
+      await db.doc("trns/work").set(trn({ qa: { state } }));
+      const current = await prepare(), requestId = `optional-${state}-${index}`;
+      const reasonCode = index === 0 ? "OTHER" : "ILLEGAL_CONNECTION_EVIDENCE";
+      const result = await save(current, { requestId, state: "FAIL", reasonCode, comment });
+      assert.equal(result.qa.comment, (comment || "").trim());
+      assert.equal(result.qa.ruleVersion, 2);
+      assert.equal(result.qa.reasonCode, reasonCode);
+      if (index !== 0) assert.equal(result.qa.reasonLabel, "Illegal connection evidence not clearly showing on photo(s)");
+      const saved = (await db.doc("trns/work").get()).data();
+      assert.equal(saved.qa.state, "FAIL");
+      assert.equal(saved.metadata.updatedByUid, "reviewer");
+      assert.equal(saved.metadata.updatedAt, result.qa.reviewedAt);
+      assert.equal((await db.doc(`trns/work/qaHistory/${requestId}`).get()).data().comment, result.qa.comment);
+    }
+  }
 });
 test("Only Draft and Updated may pass or fail; all other state changes are refused", async () => {
   for (const current of ["DRAFT", "UPDATED", "FAIL", "PASS", "BROKEN"]) {

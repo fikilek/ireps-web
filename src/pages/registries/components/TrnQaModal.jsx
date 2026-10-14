@@ -98,7 +98,7 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
     event.preventDefault();
     if (inFlight.current || !context?.mayReview || saved) return;
     if (!["PASS", "FAIL"].includes(action)) { setError("Choose QA Pass or QA Fail."); return; }
-    if (action === "FAIL" && (!reasonCode || !comment.trim())) { setError("Choose a failure reason and explain why the transaction failed."); return; }
+    if (action === "FAIL" && !reasonCode) { setError("Choose a failure reason."); return; }
     const decision = { trnId, sourceVersion: context.sourceVersion, previousReviewId: context.previousReviewId, state: action, reasonCode: action === "FAIL" ? reasonCode : null, comment: comment.trim() };
     const signature = JSON.stringify(decision);
     if (request.current?.signature !== signature) request.current = { signature, id: crypto.randomUUID() };
@@ -134,9 +134,9 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
           <h3>Confirm your decision</h3>
           <label>Decision<select value={action} disabled={saving} required onChange={e => setAction(e.target.value)}><option value="">Choose a decision</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select></label>
           {action === "PASS" && <p className="qa-notice">Pass is final. The submitted form, evidence and decision will be locked. A later problem requires a new transaction.</p>}
-          {action === "FAIL" && <label>Failure reason<select value={reasonCode} disabled={saving} required onChange={e => setReasonCode(e.target.value)}><option value="">Choose a reason</option>{context.reasons.map(item => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>}
-          <label>{action === "FAIL" ? "Explanation (required)" : "Comment (optional)"}<textarea value={comment} disabled={saving} required={action === "FAIL"} maxLength={4000} rows={4} onChange={e => setComment(e.target.value)} /></label>
-          <div className="qa-form-actions"><button type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="qa-confirm" disabled={saving || !action || (action === "FAIL" && (!reasonCode || !comment.trim()))}>{saving ? "Saving QA…" : `Confirm QA ${QA_LABELS[action] || "decision"}`}</button></div>
+          {action === "FAIL" && <label>Failure reason (required)<select value={reasonCode} disabled={saving} required onChange={e => setReasonCode(e.target.value)}><option value="">Choose a reason</option>{context.reasons.map(item => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>}
+          <label>{action === "FAIL" ? "Explanation (optional)" : "Comment (optional)"}<textarea value={comment} disabled={saving} maxLength={4000} rows={4} onChange={e => setComment(e.target.value)} /></label>
+          <div className="qa-form-actions"><button type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="qa-confirm" disabled={saving || !action || (action === "FAIL" && !reasonCode)}>{saving ? "Saving QA…" : `Confirm QA ${QA_LABELS[action] || "decision"}`}</button></div>
         </form>}
         <section className="qa-history"><h3>Decision history</h3>{context.history.length ? context.history.map(item => <article key={item.id}><strong>QA {QA_LABELS[item.state]} · {item.reviewedByUser}</strong><p>{qaDate(item.reviewedAt)}</p>{item.reasonLabel && <p>{item.reasonLabel}</p>}<p className="qa-comment">{item.comment || "No comment."}</p><button type="button" disabled={saving} onClick={() => openVersion(item.sourceVersion)}>View reviewed version</button></article>) : <p>{saved ? "Close and reopen to view the saved history." : "No QA decisions yet."}</p>}</section>
       </>}
