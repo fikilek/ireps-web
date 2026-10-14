@@ -450,7 +450,7 @@ export default function TrnsRegistryPage() {
       },
       { header: "Updated At", value: (row) => formatDateTime(row.lastUpdatedAt) },
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
-      { header: "QA", value: row => QA_LABELS[row.qaState] || row.qaEligibility?.label || "NAv" },
+      { header: "QA Status", value: row => row.qaState || row.qaEligibility?.label || "Awaiting submission" },
       { header: "QA Reviewer", value: row => row.qa?.reviewedByUser || "NAv" },
       { header: "QA At", value: row => qaDate(row.qa?.reviewedAt) },
     ],
@@ -879,8 +879,8 @@ export default function TrnsRegistryPage() {
     render: row => <>{formatDateTime(row.lastUpdatedAt)}</>,
     sortEmptyLast: true,
   }, {
-    key: "qaState", label: "QA", filter: "select", filterAllValue: "ALL", sortable: true,
-    filterOptions: [...Object.entries(QA_LABELS).map(([value, name]) => ({ value, label: name })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
+    key: "qaState", label: "QA Status", filter: "select", filterAllValue: "ALL", sortable: true,
+    filterOptions: [...Object.keys(QA_LABELS).map(value => ({ value, label: value })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
     value: row => row.qaState || "NOT_ELIGIBLE",
     render: row => {
       const mayReview = reviewerRole && ["DRAFT", "UPDATED"].includes(row.qaState)
@@ -888,15 +888,13 @@ export default function TrnsRegistryPage() {
         && !(row.qa?.amendedByUids || []).includes(uid)
         && mncPcodesOf(reviewerProvider).includes(row.lmPcode)
         && resolveMainContractor(row.serviceProviderId, providers)?.id === serviceProvider?.id;
-      return <div className="qa-cell"><div className="qa-cell-details"><strong>{row.qaState ? `QA ${QA_LABELS[row.qaState] || "Check required"}${row.qaState === "PASS" ? " · Locked" : ""}` : row.qaEligibility?.label || "Awaiting submission"}</strong>
-        {["DRAFT", "UPDATED"].includes(row.qaState) && row.qa?.lastAmendment
-          ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
-          : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
-        </div>
+      return <div className="qa-cell"><strong>{row.qaState || row.qaEligibility?.label || "Awaiting submission"}</strong>
         {mayReview && <select aria-label={`QA decision for ${row.trnId}`} value="" onChange={event => { if (event.target.value) setSelectedQa({ trnId: row.trnId, action: event.target.value }); }}><option value="">Choose QA…</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select>}
-        {row.qaState && <DataActionButton compact haspopup="dialog" title="View QA evidence and decision history" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>Review / history</DataActionButton>}
       </div>;
     },
+  }, {
+    key: "qaHistory", label: "QA History", sortable: false,
+    render: row => row.qaState ? <DataActionButton compact haspopup="dialog" title="QA Review / History" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>QA Review / History</DataActionButton> : null,
   }];
 
   return (

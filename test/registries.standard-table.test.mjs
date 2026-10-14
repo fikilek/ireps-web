@@ -156,10 +156,10 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,21);
+  assert.equal(table.columns.length,22);
   assert.equal(table.columns.some(c=>c.key==="createdAt"),false);
   assert.equal(table.downloads.columns.some(c=>c.header==="Created At"),false);
-  assert.equal(table.columns.at(-1).key,"qaState");
+  assert.deepEqual(table.columns.slice(-2).map(column => column.key),["qaState", "qaHistory"]);
   assert.ok(table.columns.some(c=>!c.sortable && c.render));
 });
 
@@ -188,15 +188,20 @@ test("Updated At filtering is independent of the TRN's original creation date", 
   assert.equal(table.filterRows([row], { lastUpdatedAt: { mode: "ALL" } }).length, 1);
 });
 
-test("QA column filters all states and exposes decisions only for another worker's Draft or Updated", () => {
+test("QA Status filters states and restricts decisions while QA History stays separate", () => {
   const table = pageTable("Trns");
-  const column = table.columns.at(-1);
+  const column = table.columns.find(item => item.key === "qaState");
+  const history = table.columns.at(-1);
+  assert.equal(column.label, "QA Status");
+  assert.equal(history.label, "QA History");
   for (const state of ["DRAFT", "FAIL", "UPDATED", "PASS"]) {
     const rows = filter(table, { qaState: state });
     assert.ok(rows.length); assert.ok(rows.every(row => row.qaState === state));
     const html = renderToStaticMarkup(column.render(rows[0]));
     assert.equal(html.includes("<select"), ["DRAFT", "UPDATED"].includes(state));
-    if (state === "PASS") assert.match(html, /Locked/);
+    assert.ok(html.includes(`<strong>${state}</strong>`));
+    assert.doesNotMatch(html, /Earlier Reviewer|Review \/ History|Locked/);
+    assert.match(renderToStaticMarkup(history.render(rows[0])), /QA Review \/ History/);
   }
   const own = { ...table.rows.find(row => row.qaState === "DRAFT"), fieldSubmitter: { uid: "preview-reviewer" } };
   assert.doesNotMatch(renderToStaticMarkup(column.render(own)), /<select/);
@@ -204,8 +209,11 @@ test("QA column filters all states and exposes decisions only for another worker
     reviewedAt: "2026-10-13T08:00:00Z", amendedByUids: ["preview-reviewer"],
     lastAmendment: { byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z" } } };
   const amendedHtml = renderToStaticMarkup(column.render(amended));
-  assert.match(amendedHtml, /Corrected by Correcting Supervisor/);
-  assert.doesNotMatch(amendedHtml, /Previous Reviewer|<select/);
+  assert.doesNotMatch(amendedHtml, /Correcting Supervisor|Previous Reviewer|<select/);
+  const unfinished = { ...own, qaState: null, qaEligibility: { label: "Awaiting submission" } };
+  assert.match(renderToStaticMarkup(column.render(unfinished)), /Awaiting submission/);
+  assert.doesNotMatch(renderToStaticMarkup(column.render(unfinished)), /<select/);
+  assert.equal(renderToStaticMarkup(history.render(unfinished)), "");
 });
 
 test("FC follows Normalisation, opens the exact transaction and exports all four formats", () => {
