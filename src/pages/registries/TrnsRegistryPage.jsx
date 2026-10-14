@@ -280,7 +280,6 @@ function isMissingSortValue(value) {
 function getSortValue(row, key) {
   if (key === "wardNo") return Number(row.wardNo);
   if (key === "mediaCount") return Number(row.mediaCount);
-  if (key === "createdAt") return getDateMs(row.createdAt);
   if (key === "lastUpdatedAt") return getDateMs(row.lastUpdatedAt);
 
   return row?.[key] ?? "";
@@ -366,7 +365,6 @@ export default function TrnsRegistryPage() {
     for (const key of Object.keys(EMPTY_TRN_FILTERS)) {
       if (EMPTY_TRN_FILTERS[key] === "ALL" && !filters[key]) filters[key] = "ALL";
     }
-    const createdAtFilter = tableFilters.createdAt || EMPTY_DATETIME_FILTER;
     const updatedAtFilter = tableFilters.lastUpdatedAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
       if (!matchesDateFilter(row.lastUpdatedAt, updatedAtFilter)) return false;
@@ -375,7 +373,7 @@ export default function TrnsRegistryPage() {
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
-      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && matchesDateFilter(row.createdAt, createdAtFilter);
+      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser);
     });
   }, []);
 
@@ -449,7 +447,6 @@ export default function TrnsRegistryPage() {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
       },
-      { header: "Created At", value: (row) => formatDateTime(row.createdAt) },
       { header: "Updated At", value: (row) => formatDateTime(row.lastUpdatedAt) },
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
       { header: "QA", value: row => QA_LABELS[row.qaState] || row.qaEligibility?.label || "NAv" },
@@ -868,24 +865,6 @@ export default function TrnsRegistryPage() {
     },
     render: row => {
       return <>{row.createdByUser || "NAv"}</>;
-    },
-    sortEmptyLast: true,
-
-  }, {
-    key: "createdAt",
-    label: "Created At",
-    filter: "date",
-    sortable: true,
-    value: row => {
-      const value = getSortValue(row, "createdAt");
-      return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
-    },
-    sortValue: row => {
-      const value = getSortValue(row, "createdAt");
-      return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
-    },
-    render: row => {
-      return <>{formatDateTime(row.createdAt)}</>;
     },
     sortEmptyLast: true,
 
