@@ -64,6 +64,8 @@ export default function IrepsTable({
   // is shared by every registry, so these are switched on one table at a time
   // rather than changing eight at once.
   stickyFirstColumn = false,
+  // Pin a named column even when optional columns appear before it.
+  stickyColumnKey = null,
   topScrollbar = false,
   maxHeight,
   rowStyle,
@@ -74,6 +76,7 @@ export default function IrepsTable({
   const tableRef = useRef(null);
   const syncingRef = useRef(false);
   const [tableWidth, setTableWidth] = useState(0);
+  const pinnedColumnKey = stickyColumnKey ?? (stickyFirstColumn ? columns[0]?.key : null);
 
   // The strip above the table scrolls nothing of its own: it holds a spacer as
   // wide as the table, and the two keep each other in step. The guard stops
@@ -95,13 +98,20 @@ export default function IrepsTable({
 
     if (!table || typeof ResizeObserver === "undefined") return undefined;
 
-    const measure = () => setTableWidth(table.scrollWidth);
+    // The body's vertical scrollbar narrows its viewport. Include that gutter
+    // in the top strip so both horizontal scrollbars reach the same last column.
+    const measure = () => {
+      const body = bodyScrollRef.current;
+      const gutter = body ? body.offsetWidth - body.clientWidth : 0;
+      setTableWidth(table.scrollWidth + gutter);
+    };
 
     measure();
 
     const observer = new ResizeObserver(measure);
 
     observer.observe(table);
+    if (bodyScrollRef.current) observer.observe(bodyScrollRef.current);
 
     return () => observer.disconnect();
   }, [topScrollbar, columns.length]);
@@ -249,7 +259,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, ...(stickyFirstColumn && column === columns[0] ? styles.pinnedHead : null) }}>
+                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, ...(column.key === pinnedColumnKey ? styles.pinnedHead : null) }}>
                   {(column.sortable ?? Boolean(column.filter)) ? (
                     <button
                       type="button"
@@ -271,7 +281,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} style={{ ...styles.filterCell, ...(stickyFirstColumn && column === columns[0] ? styles.pinnedFilter : null) }}>
+                <th key={column.key} style={{ ...styles.filterCell, ...(column.key === pinnedColumnKey ? styles.pinnedFilter : null) }}>
                   {column.renderFilter ? column.renderFilter({ filters, setFilter }) : !column.filter ? null : column.filter === "select" ? (
                     <select
                       aria-label={`Filter ${column.label}`}
@@ -332,7 +342,7 @@ export default function IrepsTable({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    style={{ ...styles.cell, minWidth: column.minWidth, textAlign: column.align || "left", ...column.cellStyle, ...(stickyFirstColumn && column === columns[0] ? styles.pinnedCell : null) }}
+                    style={{ ...styles.cell, minWidth: column.minWidth, textAlign: column.align || "left", ...column.cellStyle, ...(column.key === pinnedColumnKey ? styles.pinnedCell : null) }}
                   >
                     {column.render ? column.render(row, index) : column.value?.(row)}
                   </td>
