@@ -36,3 +36,5 @@
 .qa-cell { display: grid; gap: 6px; min-width: 185px; color: #172033; }
 .qa-cell small { color: #475569; white-space: normal; }
 .qa-cell select { font: inherit; border: 1px solid #94a3b8; border-radius: 6px; padding: 6px; background: #fff; color: #172033; }
+.qa-notifications { margin: 8px 0 16px; padding: 12px 16px; border: 1px solid #c8d7eb; border-radius: 8px; background: #f4f8ff; }
+.qa-notifications summary { cursor: pointer; font-weight: 700; }

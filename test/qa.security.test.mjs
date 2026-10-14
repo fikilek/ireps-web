@@ -13,6 +13,10 @@ import { serviceProviderPatch, assertManagedUser, stampFieldSubmission } from ".
 import { stripToDeclaredRoot } from "../functions/transactions/trnShape.js";
 import { linkFollowUp, linkReplacementInstallation } from "../functions/meterLifecycle/helpers.js";
 import { recordCaptureFailure } from "../functions/meterDiscovery/captureOutcome.js";
+import { discoveryFixture } from "../functions/test/qa.amendmentFixture.js";
+import { getQaAmendment, saveQaAmendment, listQaAmendments } from "../functions/qa/amendments.js";
+import { deliverQaEmail } from "../functions/qa/email.js";
+import { markQaNoticeRead } from "../functions/qa/notifications.js";
 
 const require = createRequire(new URL("../functions/package.json", import.meta.url));
 const { initializeApp, deleteApp } = require("firebase-admin/app");
@@ -47,6 +51,167 @@ beforeEach(async () => {
   batch.set(db.doc("trns/work"), trn()); await batch.commit();
 });
 after(async () => { await env?.cleanup(); await db?.terminate(); if (app) await deleteApp(app); });
+
+async function seedAmendment() {
+  const record = discoveryFixture(bucketName);
+  for (const item of record.media) {
+    const path = decodeURIComponent(new URL(item.url).pathname.split("/o/")[1]);
+    await bucket.file(path).save(Buffer.from("Original evidence"));
+  }
+  await db.doc(`trns/${record.id}`).set(record);
+  await db.doc(`asts/${record.id}`).set({ ast: record.ast, media: record.media, status: record.status, meterType: record.meterType,
+    metadata: record.metadata, counts: { trns: 1 } });
+  return record;
+}
+const amendContext = (id, uid = "worker") => getQaAmendment(db, uid, { trnId: id }, { bucket });
+test("amendment uploads belong to the active author and become immutable evidence", async () => {
+  const record = await seedAmendment();
+  const path = "qa-amendments/worker/amendment-1/new-photo.jpg";
+  const own = env.authenticatedContext("worker").storage(bucketName);
+  const other = env.authenticatedContext("reviewer").storage(bucketName);
+  await assertSucceeds(uploadBytes(ref(own, path), new Uint8Array([1, 2, 3])));
+  await assertFails(uploadBytes(ref(other, path), new Uint8Array([9])));
+  const context = await amendContext(record.id);
+  await amend(context, { fields: { media: [...record.media, { tag: "anomalyPhoto", url: `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media` }] } });
+  await assertFails(uploadBytes(ref(own, path), new Uint8Array([9])));
+  await assertFails(deleteObject(ref(own, path)));
+  await db.doc("users/worker").update({ accountStatus: "DISABLED" });
+  await assertFails(uploadBytes(ref(own, "qa-amendments/worker/amendment-2/another.jpg"), new Uint8Array([1])));
+});
+
+test("reading correction preserves the visit's capture identity, baseline and other cache entries", async () => {
+  const record = await seedAmendment();
+  record.accessData.trnType = "METER_READING";
+  record.ast.astData.meter.type = "conventional";
+  record.meterReading = { reading: "120", readingAt: record.metadata.createdOnDevice, readingGps: record.ast.location.gps };
+  record.media = [{ ...record.media[0], tag: "meterReadingEvidence" }];
+  record.executionOutcome = { outcome: "SUCCESSFUL_READING", success: true, currentReading: 120, previousReading: 100,
+    previousReadingAt: "2026-08-01T07:00:00Z", previousReadingTrnId: "earlier-reading", consumption: 20 };
+  await db.doc(`trns/${record.id}`).set(record);
+  const entry = { reading: "120", readingAt: record.metadata.createdOnDevice, trnId: record.id, source: "METER_READING",
+    capturedByUid: "worker", capturedByName: "Original Worker", previousReading: 100, previousReadingAt: "2026-08-01T07:00:00Z", previousReadingTrnId: "earlier-reading", consumption: 20 };
+  const earlier = { reading: "100", readingAt: "2026-08-01T07:00:00Z", trnId: "earlier-reading", source: "METER_READING" };
+  await db.doc(`asts/${record.id}`).update({ ast: record.ast, mreadings: [entry, earlier] });
+  const context = await amendContext(record.id);
+  const result = await amend(context, { fields: { meterReading: { ...record.meterReading, reading: "125" } } });
+  assert.deepEqual(result.amendment.meterProjection.appliedPaths, ["mreadings"]);
+  const saved = (await db.doc(`asts/${record.id}`).get()).data();
+  assert.deepEqual(saved.mreadings, [{ ...entry, reading: "125", consumption: 25 }, earlier]);
+  const corrected = (await db.doc(`trns/${record.id}`).get()).data();
+  assert.equal(corrected.executionOutcome.previousReading, 100); assert.equal(corrected.executionOutcome.consumption, 25);
+  assert.equal(corrected.metadata.createdByUid, "worker"); assert.equal(saved.counts.trns, 1);
+});
+function amend(context, extras = {}, uid = "worker") {
+  return saveQaAmendment(db, uid, { trnId: context.trnId, sourceVersion: context.sourceVersion,
+    previousReviewId: context.previousReviewId, meterVersion: context.meterVersion, requestId: "amendment-1",
+    fields: { fieldComment: { text: "Corrected field comment" } }, explanation: "Corrected the recorded detail", ...extras }, { bucket });
+}
+test("Draft amendment preserves one TRN, original credit and every earlier version", async () => {
+  const original = await seedAmendment(), context = await amendContext(original.id);
+  const result = await amend(context);
+  const after = (await db.doc(`trns/${original.id}`).get()).data();
+  assert.equal(result.amendment.state, "DRAFT"); assert.equal(after.id, original.id);
+  assert.equal(result.amendment.lmPcode, original.accessData.parents.lmPcode);
+  assert.equal(result.amendment.wardPcode, original.accessData.parents.wardPcode);
+  assert.equal(after.metadata.createdAt, original.metadata.createdAt);
+  assert.equal(after.metadata.createdByUid, "worker"); assert.equal(after.metadata.updatedByUid, "worker");
+  assert.equal(fieldCapturedAt(after), fieldCapturedAt(original));
+  assert.equal((await db.collection(`trns/${original.id}/qaAmendments`).get()).size, 1);
+  assert.equal((await db.collection(`trns/${original.id}/qaVersions`).get()).size, 2);
+  assert.deepEqual((await db.doc(`trns/${original.id}/qaVersions/${context.sourceVersion}`).get()).data().snapshot, original);
+  assert.equal((await amend(context)).idempotent, true);
+  await assert.rejects(amend(context, { explanation: "Different retry" }), code("already-exists"));
+});
+test("Fail to Updated sends one return notice and one review notice, with no self-review", async () => {
+  const original = await seedAmendment(), review = await prepare("reviewer", original.id);
+  await save(review, { trnId: original.id, state: "FAIL", reasonCode: "OTHER", comment: "Correct the comment" });
+  assert.equal((await db.collection("qaNotifications").where("recipientUid", "==", "worker").get()).size, 1);
+  const context = await amendContext(original.id);
+  assert.equal((await amend(context)).amendment.state, "UPDATED");
+  await amend(context);
+  assert.equal((await db.collection("qaNotifications").get()).size, 2);
+  assert.equal((await db.collection("qaEmailOutbox").get()).size, 2);
+  for (const collection of ["qaNotifications", "qaEmailOutbox"]) {
+    for (const doc of (await db.collection(collection).get()).docs) {
+      assert.equal(doc.data().lmPcode, original.accessData.parents.lmPcode);
+      assert.equal(doc.data().wardPcode, original.accessData.parents.wardPcode);
+    }
+  }
+  await assert.rejects(amendContext(original.id), code("permission-denied"));
+  await db.doc("users/worker").set(user("MNG"));
+  assert.equal((await prepare("worker", original.id)).mayReview, false);
+  const nextReview = await prepare("manager", original.id);
+  assert.equal(nextReview.snapshot.fieldComment.text, "Corrected field comment");
+  assert.equal(nextReview.amendments.length, 1);
+  await save(nextReview, { trnId: original.id, requestId: "final-review" }, "manager");
+  await assert.rejects(amendContext(original.id), code("permission-denied"));
+});
+test("MNC supervisor takeover requires evidence the submitter left and a recorded reason", async () => {
+  const original = await seedAmendment();
+  await save(await prepare("manager", original.id), { trnId: original.id, state: "FAIL", reasonCode: "OTHER", comment: "Correct it" }, "manager");
+  await assert.rejects(amendContext(original.id, "reviewer"), code("permission-denied"));
+  await db.doc("users/worker").update({ accountStatus: "DISABLED" });
+  for (const uid of ["manager", "subSupervisor", "stranger"]) await assert.rejects(amendContext(original.id, uid), code("permission-denied"));
+  const context = await amendContext(original.id, "reviewer"); assert.equal(context.takeover, true);
+  await assert.rejects(amend(context, {}, "reviewer"), code("invalid-argument"));
+  await amend(context, { takeoverReason: "Submitter left the company; account disabled" }, "reviewer");
+  assert.equal((await prepare("reviewer", original.id)).mayReview, false);
+});
+test("Old amendments retain newer meter findings and require explicit acknowledgement", async () => {
+  const original = await seedAmendment();
+  await db.doc("trns/later-inspection").set({ ...trn(), ast: original.ast, metadata: { ...original.metadata, createdOnDevice: "2026-09-02T07:00:00Z" } });
+  await db.doc(`asts/${original.id}`).update({ "ast.astData.astManufacturer": "Newer field finding" });
+  const context = await amendContext(original.id), ast = structuredClone(original.ast);
+  ast.astData.astManufacturer = "Corrected original finding";
+  await assert.rejects(amend(context, { fields: { ast } }), error => { assert.equal(error.details.kind, "RETAIN_METER_FACTS"); return true; });
+  await amend(context, { fields: { ast }, retainNewerMeterFacts: true });
+  assert.equal((await db.doc(`asts/${original.id}`).get()).data().ast.astData.astManufacturer, "Newer field finding");
+  assert.equal((await db.doc(`trns/${original.id}`).get()).data().ast.astData.astManufacturer, "Corrected original finding");
+});
+test("Current amendment changes only matching meter fields and never the visit count", async () => {
+  const original = await seedAmendment(), context = await amendContext(original.id), ast = structuredClone(original.ast);
+  ast.astData.astManufacturer = "Corrected manufacturer";
+  await amend(context, { fields: { ast } });
+  const meter = (await db.doc(`asts/${original.id}`).get()).data();
+  assert.equal(meter.ast.astData.astManufacturer, "Corrected manufacturer"); assert.equal(meter.counts.trns, 1);
+  assert.equal(meter.metadata.updatedByUid, "worker");
+});
+test("A concurrent review or amendment prevents a stale save", async () => {
+  const original = await seedAmendment(), context = await amendContext(original.id);
+  const results = await Promise.allSettled([amend(context), amend(context, { requestId: "amendment-2", fields: { fieldComment: { text: "Competing correction" } } })]);
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  const next = await amendContext(original.id);
+  await save(await prepare("reviewer", original.id), { trnId: original.id });
+  await assert.rejects(amend(next, { requestId: "stale" }), code("permission-denied"));
+});
+test("Returned work is scoped; notices are recipient-only and cannot be forged", async () => {
+  const original = await seedAmendment();
+  assert.ok((await listQaAmendments(db, "worker")).items.some(item => item.trnId === original.id));
+  assert.equal((await listQaAmendments(db, "stranger")).items.length, 0);
+  await save(await prepare("reviewer", original.id), { trnId: original.id, state: "FAIL", reasonCode: "OTHER", comment: "Correction" });
+  const notice = (await db.collection("qaNotifications").get()).docs[0];
+  await assertSucceeds(getDoc(doc(client("worker"), "qaNotifications", notice.id)));
+  await assertFails(getDoc(doc(client("reviewer"), "qaNotifications", notice.id)));
+  await assertFails(updateDoc(doc(client("worker"), "qaNotifications", notice.id), { readAt: "forged" }));
+  await assertFails(getDoc(doc(client("worker"), "qaEmailOutbox", notice.id)));
+  await markQaNoticeRead(db, "worker", { id: notice.id });
+  assert.equal((await notice.ref.get()).data().metadata.updatedByUid, "worker");
+});
+test("Concurrent email delivery and retry send once; ambiguous SMTP never resends", async () => {
+  const original = await seedAmendment();
+  await save(await prepare("reviewer", original.id), { trnId: original.id, state: "FAIL", reasonCode: "OTHER", comment: "Correction" });
+  const job = (await db.collection("qaEmailOutbox").get()).docs[0];
+  const auth = { getUser: async () => ({ email: "fixture@example.test", emailVerified: true, disabled: false }) };
+  let calls = 0;
+  const sendMail = async mail => { calls++; assert.match(mail.messageId, /^<qa-/); return { accepted: [mail.to], rejected: [] }; };
+  await Promise.all([deliverQaEmail(db, job.id, { auth, sendMail }), deliverQaEmail(db, job.id, { auth, sendMail })]);
+  assert.equal(calls, 1); assert.equal((await job.ref.get()).data().status, "SENT");
+  await job.ref.update({ status: "PENDING", nextAttemptAt: "2026-01-01" });
+  const ambiguous = async () => { calls++; const error = new Error("Timeout after DATA"); error.command = "DATA"; error.code = "ETIMEDOUT"; throw error; };
+  await deliverQaEmail(db, job.id, { auth, sendMail: ambiguous });
+  await deliverQaEmail(db, job.id, { auth, sendMail: ambiguous });
+  assert.equal(calls, 2); assert.equal((await job.ref.get()).data().status, "UNCERTAIN");
+});
 
 test("Completed hands over to Draft; every historical submitted type is eligible, unfinished ITO is not", () => {
   assert.equal(qaState(trn()), "DRAFT");

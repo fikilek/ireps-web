@@ -120,6 +120,15 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
         {decision && <section className="qa-decision"><h3>Latest decision</h3><p>{decision.reviewedByUser} · {qaDate(decision.reviewedAt)}</p>{decision.reasonLabel && <p><strong>{decision.reasonLabel}</strong></p>}<p className="qa-comment">{decision.comment || "No comment."}</p></section>}
         {version && <p className="qa-notice">Viewing a preserved version. <button type="button" onClick={() => openVersion()}>Return to current review</button></p>}
         <Snapshot snapshot={context.snapshot} evidence={context.evidence} />
+        {!!context.amendments?.length && <section className="qa-history"><h3>Correction history</h3>{context.amendments.map(item => <article key={item.id}>
+          <strong>QA {QA_LABELS[item.previousState]} → {QA_LABELS[item.state]} · {item.byUser}</strong>
+          <p>{qaDate(item.at)}</p><p className="qa-comment">{item.explanation}</p>
+          {item.takeoverReason && <p>Supervisor takeover: {item.takeoverReason}</p>}
+          <p>Changed fields: {item.changedPaths.map(label).join(", ")}</p>
+          {!!item.meterProjection?.retainedPaths?.length && <p>Newer or different meter facts retained: {item.meterProjection.retainedPaths.map(label).join(", ")}</p>}
+          <button type="button" disabled={saving} onClick={() => openVersion(item.beforeVersion)}>Before correction</button>{" "}
+          <button type="button" disabled={saving} onClick={() => openVersion(item.afterVersion)}>After correction</button>
+        </article>)}</section>}
         {!context.mayReview && !version && !saved && <p className="qa-notice">{context.reason}</p>}
         {context.mayReview && !saved && <form className="qa-form" onSubmit={submit}>
           <h3>Confirm your decision</h3>

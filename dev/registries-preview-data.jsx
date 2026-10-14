@@ -101,6 +101,8 @@ export const useGetMeterDossierQuery = () => result(null);
 
 const previewOnly = async () => { throw new Error("Preview: backend reporting is disabled. No backend write was made."); };
 export const functions = {};
+export const db = {};
+export const onSnapshot = (_query, next) => { next({ docs: [] }); return () => {}; };
 export const storage = {};
 export const ref = (...args) => args;
 export const uploadBytes = previewOnly;
@@ -113,7 +115,9 @@ export const httpsCallable = (_functions, name) => {
     const row = rowData.find(r => r.trnId === trnId);
     const qa = decisions.get(trnId) || row.qa;
     const snapshot = { accessData: { trnType: "METER_INSPECTION", access: { hasAccess: "yes" }, premise: { address: row.premiseAddress } }, ast: { astData: { astNo: row.meterNo } }, inspection: { meterReading: "1245", meterStatus: "CONNECTED", anomaly: "NONE" }, fieldComment: { text: "Synthetic review fixture. No customer data or backend writes." }, media: [] };
-    return { data: { trnId, state: qa?.state || row.qaState, qa, snapshot, evidence: [], sourceVersion: "fixture-version", previousReviewId: qa?.reviewId || null, submitter: row.fieldSubmitter, mayReview: !version && !qa && ["DRAFT", "UPDATED"].includes(row.qaState), reason: "This version has already been reviewed.", reasons: [{ code: "PHOTO_UNCLEAR", label: "Unclear photo" }, { code: "ILLEGAL_CONNECTION_EVIDENCE", label: "Illegal connection evidence not clearly showing on photo(s)" }, { code: "OTHER", label: "Other" }], history: qa ? [{ ...qa, id: qa.reviewId, sourceVersion: "fixture-version" }] : [] } };
+    const amendments = row.qaState === "UPDATED" ? [{ id: "fixture-amendment", previousState: "FAIL", state: "UPDATED", byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z", explanation: "Corrected the saved reading after checking the evidence.", takeoverReason: "Original submitter has left; account disabled.", changedPaths: ["inspection.captured.mreading.reading"], meterProjection: { retainedPaths: ["mreadings"] }, beforeVersion: "fixture-before", afterVersion: "fixture-after" }] : [];
+    if (version === "fixture-before") snapshot.inspection.meterReading = "1200";
+    return { data: { amendments, trnId, state: qa?.state || row.qaState, qa, snapshot, evidence: [], sourceVersion: "fixture-version", previousReviewId: qa?.reviewId || null, submitter: row.fieldSubmitter, mayReview: !version && !qa && ["DRAFT", "UPDATED"].includes(row.qaState), reason: "This version has already been reviewed.", reasons: [{ code: "PHOTO_UNCLEAR", label: "Unclear photo" }, { code: "ILLEGAL_CONNECTION_EVIDENCE", label: "Illegal connection evidence not clearly showing on photo(s)" }, { code: "OTHER", label: "Other" }], history: qa ? [{ ...qa, id: qa.reviewId, sourceVersion: "fixture-version" }] : [] } };
   };
   if (name === "saveTrnQaReview") return async input => {
     const qa = { ...input, reviewId: input.requestId, reviewedAt: new Date().toISOString(), reviewedByUser: "Preview Reviewer" };
