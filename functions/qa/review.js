@@ -7,6 +7,7 @@ import {
 } from "../teams/helpers.js";
 import { fieldSubmitter, qaEligibility, qaState, qaText } from "./model.js";
 import { lockEvidence } from "./evidence.js";
+import { planQaNotices, writeQaNotices } from "./notifications.js";
 
 // The catalog is returned by the server; clients do not define a second list.
 export const QA_FAILURE_REASONS = Object.freeze([
@@ -23,7 +24,7 @@ export const QA_FAILURE_REASONS = Object.freeze([
   { code: "OTHER", label: "Other" },
 ]);
 
-function canonical(value) {
+export function canonical(value) {
   if (value === null || typeof value !== "object") return value;
   if (typeof value.toDate === "function") return value.toDate().toISOString();
   if (value instanceof Date) return value.toISOString();
@@ -38,11 +39,11 @@ export function sourceVersion(trn) {
 }
 
 const upper = value => qaText(value).toUpperCase();
-const workbaseIds = user => (Array.isArray(user.access?.workbases) ? user.access.workbases : [])
+export const workbaseIds = user => (Array.isArray(user.access?.workbases) ? user.access.workbases : [])
   .flatMap(wb => typeof wb === "string" ? [wb] : [wb?.id, wb?.pcode, wb?.lmPcode, wb?.localMunicipalityId])
   .map(qaText).filter(Boolean);
 
-export function reviewAccess({ actorUid, actor, providers, trn }) {
+export function reviewAccess({ actorUid, actor, providers, trn }, { checkReviewerConflict = true } = {}) {
   const refuse = reason => ({ allowed: false, reason });
   if (upper(actor.accountStatus) !== "ACTIVE") return refuse("Your account must be active to review transactions.");
   if (!["MNG", "SPV"].includes(upper(getUserRole(actor)))) return refuse("Only managers and main-contractor supervisors may perform QA.");
@@ -62,7 +63,8 @@ export function reviewAccess({ actorUid, actor, providers, trn }) {
   if (mnc?.id !== actorSpId) return refuse("This transaction belongs to another main contractor's work.");
   const submitter = fieldSubmitter(trn);
   if (!submitter.uid) return refuse("The original field submitter is unavailable and needs checking.");
-  if (submitter.uid === actorUid) return refuse("Another authorised reviewer must QA your own submission.");
+  if (checkReviewerConflict && submitter.uid === actorUid) return refuse("Another authorised reviewer must QA your own submission.");
+  if (checkReviewerConflict && (trn.qa?.amendedByUids || []).includes(actorUid)) return refuse("Another authorised reviewer must QA a transaction you amended.");
   const eligibility = qaEligibility(trn);
   if (!eligibility.eligible) return refuse(eligibility.label);
   return { allowed: true, reason: "" };
@@ -87,7 +89,7 @@ function assertReadable({ actorUid, actor, providers, trn }) {
   if (!own && !mncWork) throw new HttpsError("permission-denied", "This transaction is outside your authorised work.");
 }
 
-function cleanId(value, label) {
+export function cleanId(value, label) {
   const text = qaText(value);
   if (!text || text.length > 180 || text.includes("/") || [".", ".."].includes(text)) {
     throw new HttpsError("invalid-argument", `${label} is invalid.`);
@@ -95,7 +97,7 @@ function cleanId(value, label) {
   return text;
 }
 
-async function readContext(reader, db, actorUid, trnId) {
+export async function readContext(reader, db, actorUid, trnId) {
   const [user, providersSnapshot, transaction] = await Promise.all([
     reader.get(db.doc(`users/${actorUid}`)),
     reader.get(db.collection("serviceProviders")),
@@ -113,6 +115,7 @@ export async function getQaReview(db, actorUid, input, { bucket } = {}) {
   const trnId = cleanId(input.trnId, "Transaction ID");
   const context = await readContext({ get: ref => ref.get() }, db, actorUid, trnId);
   const history = await db.doc(`trns/${trnId}`).collection("qaHistory").orderBy("reviewedAt", "desc").get();
+  const amendments = await db.doc(`trns/${trnId}`).collection("qaAmendments").orderBy("at", "desc").get();
   const state = qaState(context.trn);
   const access = reviewAccess(context);
   const mayReview = access.allowed && ["DRAFT", "UPDATED"].includes(state);
@@ -145,8 +148,8 @@ export async function getQaReview(db, actorUid, input, { bucket } = {}) {
         return snapshot;
       });
     }
-  } else if (context.trn.qa?.sourceVersion) {
-    const saved = await db.doc(`trns/${trnId}/qaVersions/${context.trn.qa.sourceVersion}`).get();
+  } else if (context.trn.qa?.lastAmendment || context.trn.qa?.sourceVersion) {
+    const saved = await db.doc(`trns/${trnId}/qaVersions/${context.trn.qa.lastAmendment?.afterVersion || context.trn.qa.sourceVersion}`).get();
     version = saved.exists ? saved.data() : null;
   }
   return {
@@ -159,6 +162,7 @@ export async function getQaReview(db, actorUid, input, { bucket } = {}) {
     submitter: fieldSubmitter(context.trn),
     reasons: QA_FAILURE_REASONS,
     history: history.docs.map(doc => ({ ...doc.data(), id: doc.id })),
+    amendments: amendments.docs.map(doc => ({ ...doc.data(), id: doc.id })),
   };
 }
 
@@ -201,11 +205,14 @@ export async function saveQaReview(db, actorUid, input) {
     const now = new Date().toISOString();
     const qa = { state, reviewId: requestId, sourceVersion: currentVersion,
       reasonCode: reason?.code || null, reasonLabel: reason?.label || null, comment,
-      reviewedAt: now, reviewedByUid: actorUid, reviewedByUser: getUserDisplayName(context.actor), ruleVersion: 1 };
+      reviewedAt: now, reviewedByUid: actorUid, reviewedByUser: getUserDisplayName(context.actor), ruleVersion: 1,
+      ...(trn.qa?.lastAmendment ? { lastAmendment: trn.qa.lastAmendment, amendedByUids: trn.qa.amendedByUids || [] } : {}) };
     const location = { lmPcode: qaText(trn.accessData?.parents?.lmPcode) || null, wardPcode: qaText(trn.accessData?.parents?.wardPcode) || null };
+    const notices = state === "FAIL" ? await planQaNotices(tx, db, { context, trn, trnId, eventId: requestId, kind: "RETURNED", at: now }) : [];
     tx.create(historyRef, { ...qa, action: `QA_${state}`, trnId, ...location, previousState, previousReviewId: trn.qa?.reviewId || null });
     tx.update(trnRef, { qa, "metadata.updatedAt": now, "metadata.updatedByUid": actorUid,
       "metadata.updatedByUser": qa.reviewedByUser });
+    writeQaNotices(tx, db, notices);
     return { success: true, idempotent: false, qa };
   });
 }

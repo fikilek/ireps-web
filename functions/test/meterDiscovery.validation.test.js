@@ -785,12 +785,10 @@ test("Meter Installation keeps its creation pipeline while electricity infrastru
 
   assert.match(installation, /validateMeterCreationPayload\(\{/);
   assert.match(installation, /expectedTrnType: "METER_INSTALLATION"/);
+  const creationValidator = await readFile(new URL("../meterInstallation/creationValidation.js", import.meta.url), "utf8");
+  assert.match(source, /import.*validateMeterCreationPayload.*creationValidation/);
   assert.match(
-    source,
-    /import \{\s*validateMeterInstallationElectricity,\s*\} from "\.\/meterInstallation\/validation\.js";/s,
-  );
-  assert.match(
-    source,
+    creationValidator,
     /validateMeterInstallationElectricity\(\{\s*meter,\s*location: ast\?\.location,\s*media,\s*\}\)/s,
   );
 });

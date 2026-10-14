@@ -200,6 +200,12 @@ test("QA column filters all states and exposes decisions only for another worker
   }
   const own = { ...table.rows.find(row => row.qaState === "DRAFT"), fieldSubmitter: { uid: "preview-reviewer" } };
   assert.doesNotMatch(renderToStaticMarkup(column.render(own)), /<select/);
+  const amended = { ...table.rows.find(row => row.qaState === "UPDATED"), qa: { reviewedByUser: "Previous Reviewer",
+    reviewedAt: "2026-10-13T08:00:00Z", amendedByUids: ["preview-reviewer"],
+    lastAmendment: { byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z" } } };
+  const amendedHtml = renderToStaticMarkup(column.render(amended));
+  assert.match(amendedHtml, /Corrected by Correcting Supervisor/);
+  assert.doesNotMatch(amendedHtml, /Previous Reviewer|<select/);
 });
 
 test("FC follows Normalisation, opens the exact transaction and exports all four formats", () => {

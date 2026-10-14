@@ -67,7 +67,13 @@ service cloud.firestore {
       match /history/{event} { allow read: if office(); allow write: if false; }
       match /qaHistory/{event} { allow read, write: if false; }
       match /qaVersions/{version} { allow read, write: if false; }
+      match /qaAmendments/{event} { allow read, write: if false; }
     }
+    match /qaNotifications/{id} {
+      allow read: if active() && resource.data.recipientUid == request.auth.uid;
+      allow write: if false;
+    }
+    match /qaEmailOutbox/{id} { allow read, write: if false; }
     match /qaEvidenceLocks/{file} { allow read, write: if false; }
     match /premises/{id} {
       allow read: if active();

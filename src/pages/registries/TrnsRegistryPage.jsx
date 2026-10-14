@@ -21,6 +21,7 @@ import TrnFieldCommentsModal from "./components/TrnFieldCommentsModal";
 import FieldCommentIcon from "./components/FieldCommentIcon";
 import { fieldCommentMediaUrls } from "../../utils/fieldComments.js";
 import TrnQaModal from "./components/TrnQaModal";
+import TrnQaNotifications from "./components/TrnQaNotifications";
 import { qaDate } from "../../utils/qaDisplay.js";
 import { QA_LABELS } from "../../../functions/qa/model.js";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
@@ -884,10 +885,13 @@ export default function TrnsRegistryPage() {
     render: row => {
       const mayReview = reviewerRole && ["DRAFT", "UPDATED"].includes(row.qaState)
         && row.fieldSubmitter?.uid && row.fieldSubmitter.uid !== uid
+        && !(row.qa?.amendedByUids || []).includes(uid)
         && mncPcodesOf(reviewerProvider).includes(row.lmPcode)
         && resolveMainContractor(row.serviceProviderId, providers)?.id === serviceProvider?.id;
       return <div className="qa-cell"><strong>{row.qaState ? `QA ${QA_LABELS[row.qaState] || "Check required"}${row.qaState === "PASS" ? " · Locked" : ""}` : row.qaEligibility?.label || "Awaiting submission"}</strong>
-        {row.qa && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
+        {["DRAFT", "UPDATED"].includes(row.qaState) && row.qa?.lastAmendment
+          ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
+          : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
         {mayReview && <select aria-label={`QA decision for ${row.trnId}`} value="" onChange={event => { if (event.target.value) setSelectedQa({ trnId: row.trnId, action: event.target.value }); }}><option value="">Choose QA…</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select>}
         {row.qaState && <DataActionButton compact haspopup="dialog" title="View QA evidence and decision history" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>Review / history</DataActionButton>}
       </div>;
@@ -921,6 +925,7 @@ export default function TrnsRegistryPage() {
         </div>
       </header>
 
+      <TrnQaNotifications uid={uid} onOpen={trnId => setSelectedQa({ trnId, action: "" })} />
       <section className="filter-panel">
         <label>
           Main TRN Type
