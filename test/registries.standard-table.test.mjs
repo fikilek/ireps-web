@@ -200,7 +200,11 @@ test("QA Status filters states and restricts decisions while QA History stays se
     const html = renderToStaticMarkup(column.render(rows[0]));
     assert.equal(html.includes("<select"), ["DRAFT", "UPDATED"].includes(state));
     assert.ok(html.includes(`<strong>${state}</strong>`));
-    assert.doesNotMatch(html, /Earlier Reviewer|Review \/ History|Locked/);
+    assert.doesNotMatch(html, /Review \/ History|Locked/);
+    if (["PASS", "FAIL"].includes(state)) {
+      assert.match(html, /Earlier Reviewer/);
+      assert.match(html, /2026\/10\/13, 10:00:00 SAST/);
+    }
     assert.match(renderToStaticMarkup(history.render(rows[0])), /QA Review \/ History/);
   }
   const own = { ...table.rows.find(row => row.qaState === "DRAFT"), fieldSubmitter: { uid: "preview-reviewer" } };
@@ -209,7 +213,8 @@ test("QA Status filters states and restricts decisions while QA History stays se
     reviewedAt: "2026-10-13T08:00:00Z", amendedByUids: ["preview-reviewer"],
     lastAmendment: { byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z" } } };
   const amendedHtml = renderToStaticMarkup(column.render(amended));
-  assert.doesNotMatch(amendedHtml, /Correcting Supervisor|Previous Reviewer|<select/);
+  assert.match(amendedHtml, /Corrected by Correcting Supervisor/);
+  assert.doesNotMatch(amendedHtml, /Previous Reviewer|<select/);
   const unfinished = { ...own, qaState: null, qaEligibility: { label: "Awaiting submission" } };
   assert.match(renderToStaticMarkup(column.render(unfinished)), /Awaiting submission/);
   assert.doesNotMatch(renderToStaticMarkup(column.render(unfinished)), /<select/);

@@ -888,8 +888,12 @@ export default function TrnsRegistryPage() {
         && !(row.qa?.amendedByUids || []).includes(uid)
         && mncPcodesOf(reviewerProvider).includes(row.lmPcode)
         && resolveMainContractor(row.serviceProviderId, providers)?.id === serviceProvider?.id;
-      return <div className="qa-cell"><strong>{row.qaState || row.qaEligibility?.label || "Awaiting submission"}</strong>
+      return <div className="qa-status-cell"><div className="qa-cell"><strong>{row.qaState || row.qaEligibility?.label || "Awaiting submission"}</strong>
         {mayReview && <select aria-label={`QA decision for ${row.trnId}`} value="" onChange={event => { if (event.target.value) setSelectedQa({ trnId: row.trnId, action: event.target.value }); }}><option value="">Choose QA…</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select>}
+        </div>
+        {["DRAFT", "UPDATED"].includes(row.qaState) && row.qa?.lastAmendment
+          ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
+          : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
       </div>;
     },
   }, {
