@@ -156,7 +156,9 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,22);
+  assert.equal(table.columns.length,21);
+  assert.equal(table.columns.some(c=>c.key==="createdAt"),false);
+  assert.equal(table.downloads.columns.some(c=>c.header==="Created At"),false);
   assert.equal(table.columns.at(-1).key,"qaState");
   assert.ok(table.columns.some(c=>!c.sortable && c.render));
 });
@@ -172,18 +174,17 @@ test("QA on an older TRN makes it the first row without changing Created At", ()
   const updated = table.columns.find(column => column.key === "lastUpdatedAt");
   assert.equal(renderToStaticMarkup(updated.render(older)), "2026-10-14 11:00:00");
   assert.equal(table.downloads.columns.find(column => column.header === "Updated At").value(older), "2026-10-14 11:00:00");
-  assert.equal(table.downloads.columns.find(column => column.header === "Created At").value(older), "2026-09-01 12:00:00");
+  assert.equal(older.createdAt, "2026-09-01T10:00:00Z");
   assert.equal(renderToStaticMarkup(updated.render(unknown)), "NAv");
-  assert.equal(sortIrepsTableRows([older, newer], table.columns, { key: "createdAt", direction: "desc" })[0], newer, "an explicit sort remains available");
+  assert.equal(sortIrepsTableRows([older, newer], table.columns, { key: "lastUpdatedAt", direction: "asc" })[0], newer, "an explicit sort remains available");
 });
 
 test("Updated At filtering is independent of the TRN's original creation date", () => {
   const table = pageTable("Trns");
   const row = { ...table.rows[0], createdAt: "2026-09-01T10:00:00Z", lastUpdatedAt: "2026-10-14T09:00:00Z" };
   const day = date => ({ mode: "CUSTOM", startDate: date, endDate: date });
-  assert.equal(table.filterRows([row], { createdAt: day("2026-09-01"), lastUpdatedAt: day("2026-10-14") }).length, 1);
+  assert.equal(table.filterRows([row], { lastUpdatedAt: day("2026-10-14") }).length, 1);
   assert.equal(table.filterRows([row], { lastUpdatedAt: day("2026-09-01") }).length, 0);
-  assert.equal(table.filterRows([row], { createdAt: day("2026-10-14") }).length, 0);
   assert.equal(table.filterRows([row], { lastUpdatedAt: { mode: "ALL" } }).length, 1);
 });
 

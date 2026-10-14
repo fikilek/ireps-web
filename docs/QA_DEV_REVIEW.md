@@ -19,6 +19,8 @@ GitHub main revision and served artifact after deployment.
    The registry defaults to Updated At descending. The QA save stamps Updated At,
    keeps Created At unchanged, and returns the table to page one. Existing filters
    and any manually chosen sort remain in effect.
+   At the owner's follow-up request, Created At is no longer a registry column or
+   Quick Download field; the original timestamp stays in the record and history.
 6. Confirm ITO still follows Created → Issued → Accepted → Completed. Completed
    submits the record to QA Draft; the concluded ITO state remains Completed.
 
