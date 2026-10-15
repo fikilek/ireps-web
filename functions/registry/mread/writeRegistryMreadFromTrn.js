@@ -1,3 +1,4 @@
+import { isSubmittedState } from "../../meterLifecycle/trnStateMachine.js";
 import * as logger from "firebase-functions/logger";
 
 import {
@@ -79,7 +80,7 @@ export async function writeRegistryMreadFromTrn({
 
   const workflowState = readWorkflowState(trn);
 
-  if (workflowState !== "COMPLETED") {
+  if (!isSubmittedState(workflowState)) {
     throw new Error(
       `WRITE_REGISTRY_MREAD_TRN_NOT_COMPLETED:${safeTrnId}:${workflowState || "UNKNOWN"}`,
     );

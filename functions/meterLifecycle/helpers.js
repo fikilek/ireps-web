@@ -1,3 +1,4 @@
+import { isQaPassLocked } from "../qa/model.js";
 import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import {
   anomalyPhotoRequired,
@@ -3606,7 +3607,7 @@ export async function linkFollowUp({
   const parent = parentSnap.data() || {};
   // The child's origin already records this relationship. A passed parent's
   // approved form must never be changed to add a later reverse link.
-  if (parent.qa?.state === "PASS") return { linked: false, reason: "QA_PASS_LOCKED" };
+  if (isQaPassLocked(parent)) return { linked: false, reason: "QA_PASS_LOCKED" };
 
   if (readTrnType(parent) !== parentType) {
     return { linked: false, reason: "PARENT_TYPE_MISMATCH" };
@@ -3723,7 +3724,7 @@ export async function linkReplacementInstallation({
   if (!removalSnap.exists) return { linked: false, reason: "REMOVAL_NOT_FOUND" };
 
   const removal = removalSnap.data() || {};
-  if (removal.qa?.state === "PASS") return { linked: false, reason: "QA_PASS_LOCKED" };
+  if (isQaPassLocked(removal)) return { linked: false, reason: "QA_PASS_LOCKED" };
 
   if (readTrnType(removal) !== "METER_REMOVAL") {
     return { linked: false, reason: "NOT_A_REMOVAL" };

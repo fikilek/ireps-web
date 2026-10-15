@@ -1,3 +1,4 @@
+import { isSubmittedState } from "../../meterLifecycle/trnStateMachine.js";
 import {
   MREAD_BILLING_READINESS,
   MREAD_OUTCOMES,
@@ -622,7 +623,7 @@ function buildDataQuality({ trnId, source, outcome, meter, premise, reading }) {
   const warnings = [];
 
   if (!trnId || trnId === NAv) missingFields.push("source.trnId");
-  if (source?.workflowState !== "COMPLETED") {
+  if (!isSubmittedState(source?.workflowState)) {
     missingFields.push("source.workflowState");
   }
   if (!isCanonicalMreadOutcome(outcome)) missingFields.push("outcome.outcome");

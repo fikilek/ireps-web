@@ -1,3 +1,7 @@
+import { requireActiveRoles } from "../auth/authority.js";
+import { acceptedSubmission } from "../qa/submissionReceipt.js";
+import { workflowState as canonicalWorkflowState } from "../qa/model.js";
+import { canMove, currentState } from "./trnStateMachine.js";
 import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
 import { meterCountKeyForTrnType, outcomeMeansWorkWasDone } from "../registration/meterCounts.js";
 import { recordRefusedSubmission } from "../registration/refusedSubmissions.js";
@@ -618,6 +622,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     let workErfId = "";
 
     await db.runTransaction(async (tx) => {
+      await requireActiveRoles(db, actorUid, ["FWR", "SPV", "MNG"], tx);
       // ------------------------------------------------------------
       // READS FIRST
       // Firestore transactions must do all reads before writes.
@@ -734,7 +739,11 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           return;
         }
 
-        if (workflowState === "COMPLETED") {
+        if (["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"].includes(workflowState)) {
+          if (!await acceptedSubmission(tx, db, trnId, existingTrn, data, actorUid)) {
+            responsePayload = buildFailureResult("SUBMISSION_RECEIPT_UNCONFIRMED", "This submitted transaction is protected. The queued capture could not be verified; retain it for recovery.", { trnId, workflowState: canonicalWorkflowState(existingTrn) });
+            return;
+          }
           const existingOutcome =
             existingTrn?.executionOutcome?.outcome || "NAv";
 
@@ -753,6 +762,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
                 success: ["SUCCESS", "SUCCESSFUL_READING"].includes(existingOutcome),
               },
               idempotent: true,
+              workflowState: canonicalWorkflowState(existingTrn),
             },
           );
 
@@ -776,7 +786,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         // DR-R001 section 5: the worker accepts the job, opens the form
         // (IN_PROGRESS) and then submits it, so either state can be completed.
-        if (!["ACCEPTED", "IN_PROGRESS"].includes(workflowState)) {
+        if (!canMove(currentState(workflowState), "execute").ok) {
           responsePayload = buildFailureResult(
             "INSTRUCTION_NOT_ACCEPTED",
             "Lifecycle instruction must be accepted before execution can be submitted",
@@ -953,7 +963,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         const trnUpdatePatch = {
           ...(recognisedBatch ? { targetedBatchContext: recognisedBatch } : {}),
-          "workflow.state": "COMPLETED",
+          "workflow.state": canMove(currentState(workflowState), "execute").to,
           "workflow.completedAt": now,
           "workflow.completedByUid": actorUid,
           "workflow.completedByUser": actorName,
@@ -1096,6 +1106,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             trnType,
             astId,
             premiseId,
+            workflowState: "COMPLETED",
             astStatusAfter: statusAfter,
             astStatusChanged: actionCheck.astStatusChanged === true,
             astDataChanged,
@@ -1112,6 +1123,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       // This remains for non-WMS create-style lifecycle submissions.
       // ------------------------------------------------------------
       if (trnSnap.exists) {
+        if (!await acceptedSubmission(tx, db, trnId, trnSnap.data(), data, actorUid)) {
+          responsePayload = buildFailureResult("SUBMISSION_RECEIPT_UNCONFIRMED", "This transaction already exists; the queued capture could not be verified. Retain it for recovery.", { trnId });
+          return;
+        }
         logger.info("onMeterLifecycleTrnCallable -- TRN already exists", {
           trnId,
           trnType,
@@ -1125,6 +1140,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             trnType,
             astId,
             idempotent: true,
+            workflowState: canonicalWorkflowState(trnSnap.data()),
           },
         );
 
@@ -1338,6 +1354,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           trnType,
           astId,
           premiseId,
+          workflowState: "COMPLETED",
           astStatusAfter: statusAfter,
           astStatusChanged: actionCheck.astStatusChanged === true,
           astDataChanged: actionCheck.astDataChanged === true,

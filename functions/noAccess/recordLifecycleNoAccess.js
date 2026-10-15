@@ -1,3 +1,7 @@
+import { requireActiveRoles } from "../auth/authority.js";
+import { acceptedSubmission } from "../qa/submissionReceipt.js";
+import { workflowState } from "../qa/model.js";
+import { canMove, currentState, isSubmittedState } from "../meterLifecycle/trnStateMachine.js";
 import { FieldValue } from "firebase-admin/firestore";
 import { noAccessPremiseMetadata } from "./premiseMetadata.js";
 import { normalizeNoAccessAccessData, assertNoAccessMedia, buildNoAccessLocation, buildNoAccessParentsFromErf, noAccessParentsAreMissing, noAccessError } from "./recordNoAccess.js";
@@ -51,18 +55,19 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
   const astRef = db.doc(`asts/${astId}`);
   const premiseRef = db.doc(`premises/${premiseId}`);
   return db.runTransaction(async (tx) => {
+    await requireActiveRoles(db, actor.uid, ["FWR", "SPV", "MNG"], tx);
     const previous = await tx.get(trnRef);
     const existing = previous.exists ? previous.data() : null;
-    if (existing && (!isOffice || existing.workflow?.state === "COMPLETED")) {
+    if (existing && (!isOffice || isSubmittedState(existing.workflow?.state))) {
       const sameVisit = existing.accessData?.access?.hasAccess === "no" && existing.accessData?.trnType === access.trnType &&
         existing.ast?.astData?.astId === astId && existing.accessData?.premise?.id === premiseId &&
         (existing.metadata?.createdOnDeviceByUid || existing.workflow?.completedByUid || existing.metadata?.createdByUid) === actor.uid;
-      if (!sameVisit) fail("TRN_ALREADY_EXISTS", "This transaction already records different work. Refresh your work orders before starting another visit.");
-      return { success: true, code: "OK", trnId, idempotent: true, message: "No Access is already recorded.", executionOutcome: { outcome: "NO_ACCESS", success: false } };
+      if (!sameVisit || !await acceptedSubmission(tx, db, trnId, existing, data, actor.uid)) fail("TRN_ALREADY_EXISTS", "This transaction already records different work. Refresh your work orders before starting another visit.");
+      return { success: true, code: "OK", trnId, workflowState: workflowState(existing), idempotent: true, message: "No Access is already recorded.", executionOutcome: { outcome: "NO_ACCESS", success: false } };
     }
     if (isOffice && !existing) fail("INSTRUCTION_TRN_NOT_FOUND", "The office instruction no longer exists. Refresh your work orders.");
     if (isOffice && existing.accessData?.trnType !== access.trnType) fail("INVALID_INSTRUCTION_TRN_TYPE", "The visit does not match the issued work type.");
-    if (isOffice && !["ACCEPTED", "IN_PROGRESS"].includes(existing.workflow?.state)) fail("INSTRUCTION_NOT_ACCEPTED", "Accept the office instruction before recording this visit.");
+    if (isOffice && !canMove(currentState(existing.workflow?.state), "execute").ok) fail("INSTRUCTION_NOT_ACCEPTED", "Accept the office instruction before recording this visit.");
     if (isOffice && (existing.ast?.astData?.astId !== astId || existing.accessData?.premise?.id !== premiseId)) fail("INSTRUCTION_ASSET_MISMATCH", "The meter or premise does not match the office instruction.");
 
     const astSnap = await tx.get(astRef);
@@ -132,7 +137,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     }
     if (isOffice) tx.set(trnRef.collection("history").doc(), { event: "COMPLETED", outcome: "NO_ACCESS", trnId,
       trnType: access.trnType, astId, actorUid: actor.uid, actorName: actor.name, at: now });
-    return { success: true, code: "OK", trnId, message: "No Access recorded. Meter state unchanged.",
+    return { success: true, code: "OK", trnId, workflowState: "COMPLETED", message: "No Access recorded. Meter state unchanged.",
       astStatusChanged: false, astDataChanged: false, executionOutcome: { outcome: "NO_ACCESS", success: false } };
   });
 }

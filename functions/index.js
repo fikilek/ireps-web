@@ -1,3 +1,5 @@
+import { acceptedSubmission } from "./qa/submissionReceipt.js";
+import { workflowState as canonicalWorkflowState } from "./qa/model.js";
 import { validateMeterCreationPayload } from './meterInstallation/creationValidation.js';
 import { reconcilePremiseNoAccess, isTransientReconciliationError } from "./noAccess/reconcile.js";
 import { noAccessPremiseMetadata } from "./noAccess/premiseMetadata.js";
@@ -3309,16 +3311,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       // and the three random characters in the old id shape were the only thing making the
       // collision improbable. They are gone, so the comparison has to be real.
       const existingTrn = trnSnap.data() || {};
-      const sameCapture =
-        String(existingTrn?.accessData?.trnType || "").trim() ===
-          String(data?.accessData?.trnType || "").trim() &&
-        String(existingTrn?.accessData?.premise?.id || "").trim() ===
-          String(data?.accessData?.premise?.id || "").trim() &&
-        String(
-          existingTrn?.metadata?.createdOnDeviceByUid ||
-            existingTrn?.metadata?.createdByUid ||
-            "",
-        ).trim() === String(request?.auth?.uid || "").trim();
+      const sameCapture = await acceptedSubmission({ get: ref => ref.get() }, db, data.id, existingTrn, data, caller.uid);
 
       if (!sameCapture) {
         logger.warn("onMeterDiscoveryCallable --different work under an existing TRN id", {
@@ -3335,6 +3328,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
         return buildSuccessResult(
           data.id,
           "TRN already exists and is treated as successful",
+          { idempotent: true, workflowState: canonicalWorkflowState(existingTrn) },
         );
       }
 
@@ -3433,7 +3427,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     );
 
     delete safePayload.metadata;
-    stampFieldSubmission(safePayload, fieldActor);
+    stampFieldSubmission(safePayload, fieldActor, { uid: caller.uid, name: actorName, at: nowIso });
 
     // No Access rules NA-R001 (1.0.0): the SERVER owns the shape of a no access, not the form
     // that happened to send it.
@@ -3536,7 +3530,10 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       try {
         registration = await db.runTransaction(async (tx) => {
           const liveTrnSnap = await tx.get(trnRef);
-          if (liveTrnSnap.exists) return { alreadyExists: true };
+          if (liveTrnSnap.exists) {
+            if (!await acceptedSubmission(tx, db, data.id, liveTrnSnap.data(), data, caller.uid)) throw new HttpsError("failed-precondition", "Existing submission could not be verified; retain the queued capture for recovery.");
+            return { alreadyExists: true };
+          }
 
           const result = await registerMeterInTransaction({
             tx,
@@ -3608,6 +3605,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           const existing = await tx.get(trnRef);
 
           if (existing.exists) {
+            if (!await acceptedSubmission(tx, db, data.id, existing.data(), data, caller.uid)) throw new HttpsError("failed-precondition", "Existing submission could not be verified; retain the queued capture for recovery.");
             // Two senders can reach here with the same work - the background one and the worker
             // tapping Sync. The second must not be told its saved work was refused (RG-R001 s.5),
             // and the batch must not count one visit twice.
@@ -5461,7 +5459,6 @@ export const onMeterInstallationCallable = onCall(async (request) => {
     );
 
     delete safePayload.metadata;
-    stampFieldSubmission(safePayload, fieldActor);
 
     // GMR-R038 (1.6.0): an installation on a premise that belongs to a batch carries that batch, the
     // same as a discovery. What the worker sent still wins; this only fills the gap.
@@ -5490,6 +5487,7 @@ export const onMeterInstallationCallable = onCall(async (request) => {
       actorName,
       nowIso: now,
     });
+    stampFieldSubmission(safePayload, fieldActor, { uid: caller.uid, name: actorName, at: now });
 
     // No Access rules NA-R001 (1.0.0): one shape, whichever form sent it. Meter Installation
     // used to write accessData.access.reason alone, Meter Discovery the same, and the five
@@ -5516,7 +5514,10 @@ export const onMeterInstallationCallable = onCall(async (request) => {
 
       await db.runTransaction(async (tx) => {
         const previous = await tx.get(trnRef);
-        if (previous.exists) return;
+        if (previous.exists) {
+          if (!await acceptedSubmission(tx, db, trnId, previous.data(), data, caller.uid)) throw new HttpsError("failed-precondition", "Existing submission could not be verified; retain the queued capture for recovery.");
+          return;
+        }
         const premiseRef = db.doc(`premises/${finalAccessData.premise.id}`);
         const premiseSnapshot = await tx.get(premiseRef);
         tx.create(trnRef, stripToDeclaredRoot({ ...positioned, meterType: "NA", metadata }, { actor: { uid: caller.uid, name: actorName } }));
@@ -5665,6 +5666,11 @@ export const onMeterInstallationCallable = onCall(async (request) => {
           tx.get(premiseRef),
         ]);
 
+      if (liveTrnSnap.exists) {
+        if (!liveAstSnap.exists || !await acceptedSubmission(tx, db, trnId, liveTrnSnap.data(), data, caller.uid)) throw new HttpsError("failed-precondition", "Existing submission could not be verified; retain the queued capture for recovery.");
+        return { alreadyExists: true };
+      }
+
       if (!livePremiseSnap.exists) {
         throw new HttpsError(
           "failed-precondition",
@@ -5734,10 +5740,6 @@ export const onMeterInstallationCallable = onCall(async (request) => {
             operationTimestamp: masterOperationTimestamp,
           }),
         );
-      }
-
-      if (liveTrnSnap.exists && liveAstSnap.exists) {
-        return { alreadyExists: true };
       }
 
       if (liveAstSnap.exists && liveAstSnap.id !== trnId) {

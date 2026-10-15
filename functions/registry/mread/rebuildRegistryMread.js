@@ -1,3 +1,4 @@
+import { isSubmittedState, SUBMITTED_TRN_STATES } from "../../meterLifecycle/trnStateMachine.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
@@ -17,9 +18,7 @@ function isMreadTrn(data = {}) {
 }
 
 function isCompleted(data = {}) {
-  return String(data?.workflow?.state || data?.workflowState || "")
-    .trim()
-    .toUpperCase() === "COMPLETED";
+  return isSubmittedState(data?.workflow?.state || data?.workflowState);
 }
 
 function requireAdminOrManager(request) {
@@ -57,7 +56,7 @@ export const rebuildRegistryMreadCallable = onCall(async (request) => {
   const snap = await db
     .collection("trns")
     .where("accessData.trnType", "==", "METER_READING")
-    .where("workflow.state", "==", "COMPLETED")
+    .where("workflow.state", "in", SUBMITTED_TRN_STATES)
     .limit(safeLimit)
     .get();
 

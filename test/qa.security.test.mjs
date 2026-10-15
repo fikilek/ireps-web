@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, where, or, onSnapshot } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject, getBytes } from "firebase/storage";
 import { getQaReview, saveQaReview, sourceVersion, QA_FAILURE_REASONS } from "../functions/qa/review.js";
 import { qaState, fieldSubmitter, fieldCapturedAt } from "../functions/qa/model.js";
@@ -16,6 +16,8 @@ import { recordCaptureFailure } from "../functions/meterDiscovery/captureOutcome
 import { discoveryFixture } from "../functions/test/qa.amendmentFixture.js";
 import { getQaAmendment, saveQaAmendment, listQaAmendments } from "../functions/qa/amendments.js";
 import { deliverQaEmail } from "../functions/qa/email.js";
+import { recordLifecycleNoAccess } from "../functions/noAccess/recordLifecycleNoAccess.js";
+import { acceptedSubmission } from "../functions/qa/submissionReceipt.js";
 import { markQaNoticeRead } from "../functions/qa/notifications.js";
 
 const require = createRequire(new URL("../functions/package.json", import.meta.url));
@@ -54,6 +56,7 @@ after(async () => { await env?.cleanup(); await db?.terminate(); if (app) await 
 
 async function seedAmendment() {
   const record = discoveryFixture(bucketName);
+  record.workflow = { state: "COMPLETED", completedAt: record.metadata.createdAt, completedByUid: "worker", completedByUser: "Original Worker" };
   for (const item of record.media) {
     const path = decodeURIComponent(new URL(item.url).pathname.split("/o/")[1]);
     await bucket.file(path).save(Buffer.from("Original evidence"));
@@ -189,6 +192,10 @@ test("Returned work is scoped; notices are recipient-only and cannot be forged",
   assert.ok((await listQaAmendments(db, "worker")).items.some(item => item.trnId === original.id));
   assert.equal((await listQaAmendments(db, "stranger")).items.length, 0);
   await save(await prepare("reviewer", original.id), { trnId: original.id, state: "FAIL", reasonCode: "OTHER", comment: "Correction" });
+  const failed = (await listQaAmendments(db, "worker")).items.find(item => item.trnId === original.id);
+  assert.equal(failed.reviewedByUid, "reviewer");
+  assert.equal(failed.reviewedByUser, "Test SPV");
+  assert.equal(failed.reviewedAt, (await db.doc(`trns/${original.id}`).get()).data().qa.reviewedAt);
   const notice = (await db.collection("qaNotifications").get()).docs[0];
   await assertSucceeds(getDoc(doc(client("worker"), "qaNotifications", notice.id)));
   await assertFails(getDoc(doc(client("reviewer"), "qaNotifications", notice.id)));
@@ -196,6 +203,38 @@ test("Returned work is scoped; notices are recipient-only and cannot be forged",
   await assertFails(getDoc(doc(client("worker"), "qaEmailOutbox", notice.id)));
   await markQaNoticeRead(db, "worker", { id: notice.id });
   assert.equal((await notice.ref.get()).data().metadata.updatedByUid, "worker");
+});
+
+test("Returned-work TRN listener sees reviews without notices; server excludes other owners and non-editable states", async t => {
+  const batch = db.batch();
+  for (const state of ["DRAFT", "FAIL", "PASS", "UPDATED"]) batch.set(db.doc(`trns/${state}`), trn({ id: state, workflow: { ...trn().workflow, state: state === "DRAFT" ? "COMPLETED" : `QA ${state}` } }));
+  const other = trn({ id: "other" }); other.workflow.completedByUid = "reviewer";
+  // A historical creator/device match cannot make this somebody else's submission.
+  other.metadata.createdByUid = "worker";
+  batch.set(db.doc("trns/other"), other);
+  const outside = trn({ id: "outside", serviceProvider: { id: "other" } });
+  batch.set(db.doc("trns/outside"), outside);
+  await batch.commit();
+  const rows = (await listQaAmendments(db, "worker")).items;
+  assert.deepEqual(rows.map(item => item.trnId).sort(), ["DRAFT", "FAIL", "work"]);
+  const source = query(collection(client("worker"), "trns"), or(
+    where("workflow.completedByUid", "==", "worker"), where("metadata.createdOnDeviceByUid", "==", "worker"), where("metadata.createdByUid", "==", "worker")));
+  let initial, changed;
+  const ready = new Promise((resolve, reject) => { initial = { resolve, reject }; });
+  const update = new Promise((resolve, reject) => { changed = { resolve, reject }; });
+  const stop = onSnapshot(source, { includeMetadataChanges: true }, snap => {
+    if (snap.metadata.fromCache) return;
+    initial.resolve();
+    if (snap.docs.some(item => item.id === "FAIL" && item.data().workflow?.state === "QA UPDATED")) changed.resolve();
+  }, error => { initial.reject(error); changed.reject(error); });
+  t.after(stop);
+  await ready;
+  await db.doc("trns/FAIL").update({ "workflow.state": "QA UPDATED" });
+  await update;
+  assert.ok(!(await listQaAmendments(db, "worker")).items.some(item => item.trnId === "FAIL"));
+  assert.equal((await db.collection("qaNotifications").get()).size, 0);
+  await db.doc("users/worker").update({ accountStatus: "DISABLED" });
+  await assert.rejects(listQaAmendments(db, "worker"), code("permission-denied"));
 });
 test("Concurrent email delivery and retry send once; ambiguous SMTP never resends", async () => {
   const original = await seedAmendment();
@@ -226,9 +265,9 @@ test("Pass preserves the exact original, creates one permanent decision, stamps 
   assert.equal(context.mayReview, true); assert.equal((await db.doc("trns/work").get()).data().qa, undefined);
   const result = await save(context, { reviewedByUid: "forged", reviewedAt: "1900-01-01" });
   const after = (await db.doc("trns/work").get()).data();
-  assert.equal(after.qa.state, "PASS"); assert.equal(after.metadata.updatedByUid, "reviewer");
+  assert.equal(after.workflow.state, "QA PASS"); assert.equal(after.qa.state, undefined); assert.equal(after.metadata.updatedByUid, "reviewer");
   assert.equal(after.qa.reviewedByUid, "reviewer"); assert.notEqual(after.qa.reviewedAt, "1900-01-01");
-  assert.deepEqual(after.workflow, before.workflow); assert.equal(sourceVersion(after), sourceVersion(before));
+  assert.deepEqual(after.workflow, { ...before.workflow, state: "QA PASS" }); assert.notEqual(sourceVersion(after), sourceVersion(before));
   assert.deepEqual((await db.doc(`trns/work/qaVersions/${context.sourceVersion}`).get()).data().snapshot, before);
   const history = await db.collection("trns/work/qaHistory").get(); assert.equal(history.size, 1); assert.equal(history.docs[0].data().action, "QA_PASS");
   assert.throws(() => assertQaUnlocked(after), code("failed-precondition"));
@@ -241,7 +280,7 @@ test("Fail requires a governed reason but permits an optional explanation in Dra
   assert.ok(QA_FAILURE_REASONS.some(r => r.code === "ILLEGAL_CONNECTION_EVIDENCE"));
   for (const state of ["DRAFT", "UPDATED"]) {
     for (const [index, comment] of [undefined, "", "   ", " Cable connection not visible "].entries()) {
-      await db.doc("trns/work").set(trn({ qa: { state } }));
+      await db.doc("trns/work").set(trn({ workflow: { ...trn().workflow, state: state === "DRAFT" ? "COMPLETED" : `QA ${state}` } }));
       const current = await prepare(), requestId = `optional-${state}-${index}`;
       const reasonCode = index === 0 ? "OTHER" : "ILLEGAL_CONNECTION_EVIDENCE";
       const result = await save(current, { requestId, state: "FAIL", reasonCode, comment });
@@ -250,7 +289,7 @@ test("Fail requires a governed reason but permits an optional explanation in Dra
       assert.equal(result.qa.reasonCode, reasonCode);
       if (index !== 0) assert.equal(result.qa.reasonLabel, "Illegal connection evidence not clearly showing on photo(s)");
       const saved = (await db.doc("trns/work").get()).data();
-      assert.equal(saved.qa.state, "FAIL");
+      assert.equal(saved.workflow.state, "QA FAIL"); assert.equal(saved.qa.state, undefined);
       assert.equal(saved.metadata.updatedByUid, "reviewer");
       assert.equal(saved.metadata.updatedAt, result.qa.reviewedAt);
       assert.equal((await db.doc(`trns/work/qaHistory/${requestId}`).get()).data().comment, result.qa.comment);
@@ -259,10 +298,10 @@ test("Fail requires a governed reason but permits an optional explanation in Dra
 });
 test("Only Draft and Updated may pass or fail; all other state changes are refused", async () => {
   for (const current of ["DRAFT", "UPDATED", "FAIL", "PASS", "BROKEN"]) {
-    await db.doc("trns/work").set(trn({ qa: { state: current, reviewId: `old-${current}` } }));
+    await db.doc("trns/work").set(trn({ workflow: { ...trn().workflow, state: current === "DRAFT" ? "COMPLETED" : current === "BROKEN" ? "BROKEN" : `QA ${current}` }, qa: { reviewId: `old-${current}` } }));
     const context = await prepare();
     if (["DRAFT", "UPDATED"].includes(current)) { const result = await save(context, { requestId: current }); assert.equal(result.qa.state, "PASS"); }
-    else await assert.rejects(save(context, { requestId: current }), code("failed-precondition"));
+    else await assert.rejects(save(context, { requestId: current }), code(current === "BROKEN" ? "permission-denied" : "failed-precondition"));
   }
   for (const requested of ["DRAFT", "UPDATED", "CREATED", "DELETE", "REOPEN"]) await assert.rejects(save({}, { state: requested }), code("invalid-argument"));
 });
@@ -402,10 +441,80 @@ test("Field worker credit/date survive QA; unknown capture time stays unknown; u
 });
 test("Submission shaping cannot inject QA and governance operations cannot escalate another company", () => {
   assert.equal(stripToDeclaredRoot({ ...trn(), qa: { state: "PASS" } }).qa, undefined);
-  const forged = stampFieldSubmission({ ...trn(), qa: { state: "PASS" }, workflow: { state: "COMPLETED", completedByUid: "somebodyElse" } }, user("FWR", "sub"));
-  assert.deepEqual(forged.workflow, {}); assert.equal(forged.serviceProvider.id, "sub"); assert.equal(forged.qa, undefined); assert.equal(forged.origin.channel, "FIELD");
+  const forged = stampFieldSubmission({ ...trn(), qa: { state: "PASS" }, workflow: { state: "COMPLETED", completedByUid: "somebodyElse" } }, user("FWR", "sub"), { uid: "worker", name: "Original Worker", at: "2026-10-15T12:00:00.000Z" });
+  assert.deepEqual(forged.workflow, { state: "COMPLETED", completedByUid: "worker", completedByUser: "Original Worker", completedAt: "2026-10-15T12:00:00.000Z" }); assert.equal(forged.serviceProvider.id, "sub"); assert.equal(forged.qa, undefined); assert.equal(forged.origin.channel, "FIELD");
   assert.throws(() => serviceProviderPatch(user("FWR"), "mnc", { clients: [] }), code("permission-denied"));
   assert.throws(() => serviceProviderPatch(user("MNG"), "mnc", { clients: [] }), code("permission-denied"));
   assert.throws(() => serviceProviderPatch(user("MNG"), "mnc", { "clients.0.id": "other" }), code("permission-denied"));
   assert.throws(() => assertManagedUser(user("MNG"), user("FWR", "other"), []), code("permission-denied"));
+});
+
+test("v3 correction stamps and immutable after-version survive final review and delayed retries", async () => {
+  const original = await seedAmendment();
+  const first = await prepare("reviewer", original.id);
+  const failInput = { trnId: original.id, requestId: "fail-v3", sourceVersion: first.sourceVersion,
+    previousReviewId: first.previousReviewId, state: "FAIL", reasonCode: "OTHER" };
+  await saveQaReview(db, "reviewer", failInput);
+  const context = await amendContext(original.id);
+  const result = await amend(context);
+  assert.equal(result.workflowState, "QA UPDATED");
+  const updated = (await db.doc(`trns/${original.id}`).get()).data();
+  assert.equal(updated.qa.state, undefined);
+  assert.equal(updated.workflow.completedByUid, "worker");
+  assert.equal(updated.workflow.completedAt, result.amendment.at);
+  assert.equal(sourceVersion(updated), result.amendment.afterVersion);
+  const version = (await db.doc(`trns/${original.id}/qaVersions/${result.amendment.afterVersion}`).get()).data();
+  assert.equal(version.snapshot.workflow.state, "QA UPDATED");
+  assert.equal(sourceVersion(version.snapshot), version.sourceVersion);
+  const beforePassStamp = updated.workflow;
+  const last = await prepare("manager", original.id);
+  await save(last, { trnId: original.id, requestId: "pass-v3" }, "manager");
+  const passed = (await db.doc(`trns/${original.id}`).get()).data();
+  assert.deepEqual(passed.workflow, { ...beforePassStamp, state: "QA PASS" });
+  const retried = await amend(context);
+  assert.equal(retried.idempotent, true);
+  assert.equal(retried.workflowState, "QA PASS");
+  assert.equal(retried.amendment.state, "UPDATED");
+  assert.equal((await saveQaReview(db, "reviewer", failInput)).workflowState, "QA PASS");
+  assert.equal(await acceptedSubmission({ get: ref => ref.get() }, db, original.id, passed, original, "worker"), true);
+  assert.equal(await acceptedSubmission({ get: ref => ref.get() }, db, original.id, passed, { ...original, fieldComment: { text: "Fresh write" } }, "worker"), false);
+  assert.deepEqual((await db.doc(`trns/${original.id}`).get()).data(), passed);
+});
+
+test("No Access completes original instruction once, preserves PASS and refuses a fresh capture", async () => {
+  const id = "TRN_MDCN_1_ELC_ZA5241001_1";
+  await db.doc("ireps_erfs/erf").set({ admin: { localMunicipality: { pcode: "ZA5241" }, ward: { pcode: "ZA5241001" } } });
+  await db.doc("premises/premise").set({ erfId: "erf", address: { strNo: "1", strName: "Test", strType: "Street" }, propertyType: { type: "House" } });
+  await db.doc("asts/meter").set({ accessData: { erfId: "erf", premise: { id: "premise" } },
+    ast: { astData: { astId: "meter", astNo: "123" }, location: { gps: { lat: -28, lng: 30 } } }, status: { state: "CONNECTED" } });
+  const instruction = { ...trn(), id, ast: { astData: { astId: "meter" } },
+    accessData: { ...trn().accessData, trnType: "METER_DISCONNECTION" },
+    assignment: { targets: [{ type: "USER", id: "worker" }] }, workflow: { state: "ACCEPTED" } };
+  await db.doc(`trns/${id}`).set(instruction);
+  const payload = { id, astId: "meter", accessData: { trnType: "METER_DISCONNECTION", erfId: "erf",
+    premise: { id: "premise" }, access: { hasAccess: "no", reasonCode: "Property Locked" } },
+    metadata: { createdOnDevice: "2026-10-15T10:00:00.000Z", createdOnDeviceByUid: "worker" },
+    media: [{ tag: "noAccessPhoto", url: `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/meters%2Fqa-fixture%2Fnoaccess.jpg?alt=media` }] };
+  await bucket.file("meters/qa-fixture/noaccess.jpg").save(Buffer.from("No Access evidence"));
+  const submit = data => recordLifecycleNoAccess({ db, data, actor: { uid: "worker", name: "Original Worker" }, now: "2026-10-15T11:00:00.000Z", isOffice: true });
+  assert.equal((await submit(payload)).workflowState, "COMPLETED");
+  const completed = (await db.doc(`trns/${id}`).get()).data();
+  assert.equal(completed.metadata.createdAt, instruction.metadata.createdAt);
+  await save(await prepare("manager", id), { trnId: id, requestId: "no-access-pass" }, "manager");
+  const passed = (await db.doc(`trns/${id}`).get()).data();
+  assert.equal((await submit(payload)).workflowState, "QA PASS");
+  assert.equal((await submit(payload)).idempotent, true);
+  await assert.rejects(submit({ ...payload, accessData: { ...payload.accessData, access: { hasAccess: "no", reasonCode: "Other", reasonOther: "Different capture" } } }));
+  assert.deepEqual((await db.doc(`trns/${id}`).get()).data(), passed);
+  assert.equal((await db.doc("asts/meter").get()).data().counts.noAccess, 1);
+  await db.doc("users/worker").update({ accountStatus: "DISABLED" });
+  await assert.rejects(submit(payload));
+});
+
+test("Original submitter keeps history visibility after takeover without regaining correction authority", async () => {
+  await db.doc("trns/work").update({ "workflow.completedByUid": "reviewer", "workflow.completedByUser": "Takeover supervisor", "workflow.state": "QA FAIL" });
+  const context = await prepare("worker");
+  assert.equal(context.workflowState, "QA FAIL");
+  assert.equal(context.mayReview, false);
+  await assert.rejects(amendContext("work", "worker"), code("permission-denied"));
 });

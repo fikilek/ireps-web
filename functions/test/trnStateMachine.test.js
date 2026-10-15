@@ -22,8 +22,8 @@ import {
   theWorkerSees,
 } from "../meterLifecycle/trnStateMachine.js";
 
-test("there are five states and no others", () => {
-  assert.deepEqual(TRN_STATE_LIST, ["CREATED", "DELETED", "ISSUED", "ACCEPTED", "COMPLETED"]);
+test("v3 contains eight persisted states; REMOVED remains deferred", () => {
+  assert.deepEqual(TRN_STATE_LIST, ["CREATED", "DELETED", "ISSUED", "ACCEPTED", "COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"]);
 
   for (const gone of ["REJECTED", "CANCELLED", "REASSIGNED", "IN_PROGRESS"]) {
     assert.equal(isTrnState(gone), false, `${gone} is an event, not a state`);
@@ -32,14 +32,17 @@ test("there are five states and no others", () => {
 
 test("each state takes exactly the moves the owner listed", () => {
   const allowed = (state) =>
-    ["allocate", "delete", "create", "finalDelete", "accept", "reject", "cancel", "execute", "expire"]
+    ["allocate", "delete", "create", "finalDelete", "accept", "reject", "cancel", "execute", "expire", "amend", "qaFail", "qaPass"]
       .filter((action) => canMove(state, action).ok || canMove(state, action).code === "MOVE_NOT_BUILT");
 
   assert.deepEqual(allowed("CREATED"), ["allocate", "delete"]);
   assert.deepEqual(allowed("DELETED"), ["create", "finalDelete"]);
   assert.deepEqual(allowed("ISSUED"), ["accept", "reject", "cancel", "expire"]);
   assert.deepEqual(allowed("ACCEPTED"), ["cancel", "execute"]);
-  assert.deepEqual(allowed("COMPLETED"), []);
+  assert.deepEqual(allowed("COMPLETED"), ["amend", "qaFail", "qaPass"]);
+  assert.deepEqual(allowed("QA FAIL"), ["amend"]);
+  assert.deepEqual(allowed("QA UPDATED"), ["qaFail", "qaPass"]);
+  assert.deepEqual(allowed("QA PASS"), []);
 });
 
 test("every move lands where the rule says", () => {
@@ -61,8 +64,8 @@ test("everything that comes back comes back to one place", () => {
   }
 });
 
-test("a completed transaction is finished, and says so", () => {
-  const refused = canMove("COMPLETED", "cancel");
+test("a QA PASS transaction is finished, and says so", () => {
+  const refused = canMove("QA PASS", "cancel");
 
   assert.equal(refused.ok, false);
   assert.match(refused.message, /is finished\. Nothing moves it/);
@@ -205,4 +208,18 @@ test("the meter guard reads the machine's list, not its own", async () => {
   assert.deepEqual(ACTIVE_LCT_WORKFLOW_STATES, ["CREATED", "ISSUED", "ACCEPTED"]);
   assert.equal(ACTIVE_LCT_WORKFLOW_STATES.includes("REASSIGNED"), false);
   assert.equal(ACTIVE_LCT_WORKFLOW_STATES.includes("IN_PROGRESS"), false);
+});
+
+test("QA lifecycle preserves corrections and terminal PASS without operational re-entry", () => {
+  assert.equal(canMove("COMPLETED", "amend").to, "COMPLETED");
+  assert.equal(canMove("COMPLETED", "qaFail").to, "QA FAIL");
+  assert.equal(canMove("QA FAIL", "amend").to, "QA UPDATED");
+  assert.equal(canMove("QA UPDATED", "qaPass").to, "QA PASS");
+  assert.equal(canMove("QA FAIL", "qaPass").ok, false);
+  assert.equal(canMove("QA UPDATED", "amend").ok, false);
+  for (const state of ["QA FAIL", "QA UPDATED", "QA PASS"]) {
+    assert.equal(theWorkerSees(state), true);
+    assert.equal(holdsTheMeter(state), false);
+    for (const action of ["execute", "allocate", "delete", "cancel"]) assert.equal(canMove(state, action).ok, false);
+  }
 });

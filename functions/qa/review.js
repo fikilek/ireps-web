@@ -1,3 +1,4 @@
+import { canMove } from "../meterLifecycle/trnStateMachine.js";
 import { createHash } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
 import {
@@ -5,7 +6,7 @@ import {
   isMncServiceProvider, isSubcServiceProvider, resolveServiceProviderMnc,
   getServiceProviderLmClients,
 } from "../teams/helpers.js";
-import { fieldSubmitter, qaEligibility, qaState, qaText } from "./model.js";
+import { fieldSubmitter, qaEligibility, qaState, qaText, workflowState } from "./model.js";
 import { lockEvidence } from "./evidence.js";
 import { planQaNotices, writeQaNotices } from "./notifications.js";
 
@@ -63,7 +64,7 @@ export function reviewAccess({ actorUid, actor, providers, trn }, { checkReviewe
   if (mnc?.id !== actorSpId) return refuse("This transaction belongs to another main contractor's work.");
   const submitter = fieldSubmitter(trn);
   if (!submitter.uid) return refuse("The original field submitter is unavailable and needs checking.");
-  if (checkReviewerConflict && submitter.uid === actorUid) return refuse("Another authorised reviewer must QA your own submission.");
+  if (checkReviewerConflict && (submitter.uid === actorUid || qaText(trn.metadata?.createdOnDeviceByUid) === actorUid)) return refuse("Another authorised reviewer must QA your own submission.");
   if (checkReviewerConflict && (trn.qa?.amendedByUids || []).includes(actorUid)) return refuse("Another authorised reviewer must QA a transaction you amended.");
   const eligibility = qaEligibility(trn);
   if (!eligibility.eligible) return refuse(eligibility.label);
@@ -74,7 +75,7 @@ function assertReadable({ actorUid, actor, providers, trn }) {
   if (upper(actor.accountStatus) !== "ACTIVE") throw new HttpsError("permission-denied", "An active account is required.");
   const role = upper(getUserRole(actor));
   if (["SPU", "ADM"].includes(role)) return;
-  if (fieldSubmitter(trn).uid === actorUid) return;
+  if (fieldSubmitter(trn).uid === actorUid || qaText(trn.metadata?.createdOnDeviceByUid) === actorUid) return;
   // Review eligibility is narrower than read authority (including self-review).
   const spId = qaText(getUserServiceProviderId(actor));
   const workSpId = qaText(trn.serviceProvider?.id);
@@ -118,7 +119,7 @@ export async function getQaReview(db, actorUid, input, { bucket } = {}) {
   const amendments = await db.doc(`trns/${trnId}`).collection("qaAmendments").orderBy("at", "desc").get();
   const state = qaState(context.trn);
   const access = reviewAccess(context);
-  const mayReview = access.allowed && ["DRAFT", "UPDATED"].includes(state);
+  const mayReview = access.allowed && canMove(workflowState(context.trn), "qaPass").ok;
   const digest = sourceVersion(context.trn);
   let version = null;
   if (input.version) {
@@ -153,10 +154,10 @@ export async function getQaReview(db, actorUid, input, { bucket } = {}) {
     version = saved.exists ? saved.data() : null;
   }
   return {
-    trnId, state, eligibility: qaEligibility(context.trn),
+    trnId, state, workflowState: workflowState(context.trn), eligibility: qaEligibility(context.trn),
     qa: context.trn.qa || null, sourceVersion: sourceVersion(context.trn),
     previousReviewId: context.trn.qa?.reviewId || null,
-    mayReview: mayReview && !input.version, reason: access.reason || (!mayReview ? "This version has already been reviewed." : ""),
+    mayReview: mayReview && !input.version, reason: access.reason || (!workflowState(context.trn) ? "Lifecycle compatibility needs review; no state conversion has been approved for this record." : !mayReview ? "This version has already been reviewed." : ""),
     snapshot: version?.snapshot || context.trn, evidence: version?.evidence || [],
     displayedVersion: version?.sourceVersion || digest,
     submitter: fieldSubmitter(context.trn),
@@ -190,15 +191,16 @@ export async function saveQaReview(db, actorUid, input) {
         || saved.previousReviewId !== (input.previousReviewId || null)) {
         throw new HttpsError("already-exists", "This review request was already used for a different decision.");
       }
-      return { success: true, idempotent: true, qa: saved };
+      return { success: true, idempotent: true, qa: saved, workflowState: workflowState(context.trn) };
     }
     const trn = context.trn;
     const currentVersion = sourceVersion(trn);
-    const previousState = qaState(trn);
+    const previousState = workflowState(trn);
+    const move = canMove(previousState, state === "PASS" ? "qaPass" : "qaFail");
+    if (!move.ok) throw new HttpsError("failed-precondition", move.message);
     if (input.sourceVersion !== currentVersion || (input.previousReviewId || null) !== (trn.qa?.reviewId || null)) {
       throw new HttpsError("aborted", "This transaction changed while you were reviewing it. Close this window and review the current record.");
     }
-    if (!["DRAFT", "UPDATED"].includes(previousState)) throw new HttpsError("failed-precondition", "This version has already been reviewed.");
     const versionRef = trnRef.collection("qaVersions").doc(currentVersion);
     const version = await tx.get(versionRef);
     if (!version.exists || version.data().sourceVersion !== currentVersion) throw new HttpsError("failed-precondition", "Open and inspect the protected review before saving a decision.");
@@ -210,9 +212,10 @@ export async function saveQaReview(db, actorUid, input) {
     const location = { lmPcode: qaText(trn.accessData?.parents?.lmPcode) || null, wardPcode: qaText(trn.accessData?.parents?.wardPcode) || null };
     const notices = state === "FAIL" ? await planQaNotices(tx, db, { context, trn, trnId, eventId: requestId, kind: "RETURNED", at: now }) : [];
     tx.create(historyRef, { ...qa, action: `QA_${state}`, trnId, ...location, previousState, previousReviewId: trn.qa?.reviewId || null });
-    tx.update(trnRef, { qa, "metadata.updatedAt": now, "metadata.updatedByUid": actorUid,
+    const { state: _decisionState, ...decisionFacts } = qa;
+    tx.update(trnRef, { qa: decisionFacts, "workflow.state": move.to, "metadata.updatedAt": now, "metadata.updatedByUid": actorUid,
       "metadata.updatedByUser": qa.reviewedByUser });
     writeQaNotices(tx, db, notices);
-    return { success: true, idempotent: false, qa };
+    return { success: true, idempotent: false, qa, workflowState: move.to };
   });
 }

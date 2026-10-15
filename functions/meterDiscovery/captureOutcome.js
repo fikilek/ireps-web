@@ -1,3 +1,4 @@
+import { isQaPassLocked } from "../qa/model.js";
 // f01: a capture never dies in silence.
 //
 // The phone shows MISSION SUCCESS the moment the transaction is written. Everything that makes the
@@ -134,7 +135,7 @@ export async function recordCaptureFailure({
     const ref = db.collection("trns").doc(safeTrnId);
     const recorded = await db.runTransaction(async tx => {
       const current = await tx.get(ref);
-      if (!current.exists || current.data().qa?.state === "PASS") return false;
+      if (!current.exists || isQaPassLocked(current.data())) return false;
       tx.set(ref, { derived: { failure } }, { merge: true });
       return true;
     });

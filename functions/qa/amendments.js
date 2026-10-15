@@ -1,10 +1,11 @@
+import { canMove } from "../meterLifecycle/trnStateMachine.js";
 import { createHash } from "node:crypto";
 import { FieldPath, Filter } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { getUserRole, getUserDisplayName, getUserServiceProviderId, resolveServiceProviderMnc, getServiceProviderLmClients } from "../teams/helpers.js";
 import { projectMeterDiscoveryAstMedia } from "../meterDiscovery/astMedia.js";
 import { canonical, cleanId, readContext, reviewAccess, sourceVersion, workbaseIds } from "./review.js";
-import { fieldSubmitter, qaEligibility, qaState, qaText } from "./model.js";
+import { fieldSubmitter, qaEligibility, qaState, qaText, workflowState, qaAlias } from "./model.js";
 import { evidenceObjects, lockEvidence } from "./evidence.js";
 import { at, same, changes, buildAmendedRecord, checkAmendedForm } from "./amendmentPolicy.js";
 import { planQaNotices, writeQaNotices } from "./notifications.js";
@@ -16,7 +17,7 @@ export function amendmentAccess(context, submitterUser = null) {
   const { actor, actorUid, providers, trn } = context;
   const denied = reason => ({ allowed: false, takeover: false, reason });
   if (upper(actor.accountStatus) !== "ACTIVE") return denied("An active account is required.");
-  if (!["DRAFT", "FAIL"].includes(qaState(trn))) return denied("Only QA Draft or QA Fail can be amended. QA Pass is final.");
+  if (!canMove(workflowState(trn), "amend").ok) return denied("Only COMPLETED or QA FAIL can be amended. QA Pass is final.");
   if (!qaEligibility(trn).eligible) return denied("Only a submitted result can be amended.");
   const lm = qaText(trn.accessData?.parents?.lmPcode);
   if (!workbaseIds(actor).includes(lm)) return denied("This submission is outside your authorised workbases.");
@@ -76,7 +77,7 @@ export async function getQaAmendment(db, uid, input, { bucket } = {}) {
   }
   const astId = amendmentAstId(context.trn);
   const meter = astId ? await db.doc(`asts/${cleanId(astId, "Meter ID")}`).get() : null;
-  return { trnId, state: qaState(context.trn), snapshot: context.trn, evidence: version.data().evidence,
+  return { trnId, state: qaState(context.trn), workflowState: workflowState(context.trn), snapshot: context.trn, evidence: version.data().evidence,
     sourceVersion: beforeVersion, previousReviewId: context.trn.qa?.reviewId || null,
     meter: meter?.exists ? meter.data() : null, meterVersion: meter?.exists ? digest(meter.data()) : null,
     takeover: context.access.takeover, submitter: fieldSubmitter(context.trn) };
@@ -88,7 +89,7 @@ export async function listQaAmendments(db, uid, input = {}) {
   if (!user.exists || upper(user.data().accountStatus) !== "ACTIVE") throw new HttpsError("permission-denied", "An active account is required.");
   const providers = providerDocs.docs.map(doc => ({ ...doc.data(), id: doc.id }));
   const takeover = input.takeover === true;
-  let query = takeover ? db.collection("trns").where("qa.state", "==", "FAIL")
+  let query = takeover ? db.collection("trns").where(Filter.or(Filter.where("workflow.state", "==", "QA FAIL"), Filter.where("qa.state", "==", "FAIL")))
     : db.collection("trns").where(Filter.or(Filter.where("workflow.completedByUid", "==", uid), Filter.where("metadata.createdOnDeviceByUid", "==", uid), Filter.where("metadata.createdByUid", "==", uid)));
   query = query.orderBy(FieldPath.documentId()).limit(100);
   if (input.cursor) query = query.startAfter(cleanId(input.cursor, "Page cursor"));
@@ -103,7 +104,10 @@ export async function listQaAmendments(db, uid, input = {}) {
     if (!access.allowed || access.takeover !== takeover) continue;
     result.push({ trnId: doc.id, state: qaState(trn), trnType: trn.accessData?.trnType, meterNo: trn.ast?.astData?.astNo || null,
       address: trn.accessData?.premise?.address || null, reason: trn.qa?.reasonLabel || null, comment: trn.qa?.comment || null,
-      reviewedAt: trn.qa?.reviewedAt || null, updatedAt: canonical(trn.metadata?.updatedAt) || null, submitter: fieldSubmitter(trn), takeover });
+      reviewedAt: canonical(trn.qa?.reviewedAt) || null,
+      reviewedByUid: qaText(trn.qa?.reviewedByUid) || null,
+      reviewedByUser: qaText(trn.qa?.reviewedByUser) || null,
+      updatedAt: canonical(trn.metadata?.updatedAt) || null, submitter: fieldSubmitter(trn), takeover });
   }
   return { items: result, nextCursor: docs.size === 100 ? docs.docs.at(-1).id : null };
 }
@@ -130,7 +134,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
   const previous = await eventRef.get();
   if (previous.exists) {
     if (previous.data().byUid !== uid || previous.data().requestHash !== requestHash) throw new HttpsError("already-exists", "This request ID belongs to another amendment.");
-    return { success: true, idempotent: true, amendment: previous.data() };
+    return { success: true, idempotent: true, amendment: { ...previous.data(), state: qaAlias(previous.data().state) || previous.data().state }, workflowState: workflowState(context.trn) };
   }
   assertAllowed(context);
   if (context.access.takeover && !input.takeoverReason) throw new HttpsError("invalid-argument", "Explain the takeover and confirm the submitter has left.");
@@ -153,7 +157,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     const existing = await tx.get(eventRef);
     if (existing.exists) {
       if (existing.data().byUid !== uid || existing.data().requestHash !== requestHash) throw new HttpsError("already-exists", "This request ID belongs to another amendment.");
-      return { success: true, idempotent: true, amendment: existing.data() };
+      return { success: true, idempotent: true, amendment: { ...existing.data(), state: qaAlias(existing.data().state) || existing.data().state }, workflowState: workflowState(fresh.trn) };
     }
     assertAllowed(fresh);
     if (fresh.access.takeover && !input.takeoverReason) throw new HttpsError("invalid-argument", "Explain the takeover and confirm the submitter has left.");
@@ -232,24 +236,28 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     }
     if (projection.retainedPaths.length && !input.retainNewerMeterFacts) throw new HttpsError("failed-precondition", "Newer or different meter facts must be retained. Confirm that this correction applies to the historical transaction only for those fields.", { kind: "RETAIN_METER_FACTS", ...projection });
     const now = nowIso(), byUser = getUserDisplayName(fresh.actor);
+    const move = canMove(workflowState(fresh.trn), "amend");
+    if (!move.ok) throw new HttpsError("failed-precondition", move.message);
+    next.workflow = { ...fresh.trn.workflow, state: move.to, completedAt: now, completedByUid: uid, completedByUser: byUser };
     next.metadata = { ...fresh.trn.metadata, updatedAt: now, updatedByUid: uid, updatedByUser: byUser };
     const afterVersion = sourceVersion(next), newVersionRef = db.doc(`trns/${trnId}/qaVersions/${afterVersion}`);
     const newVersion = await tx.get(newVersionRef);
-    const state = qaState(fresh.trn) === "FAIL" ? "UPDATED" : "DRAFT";
+    const state = move.to;
     const amendment = { id: requestId, trnId, requestHash, beforeVersion: input.sourceVersion, afterVersion,
       lmPcode: qaText(next.accessData?.parents?.lmPcode) || null, wardPcode: qaText(next.accessData?.parents?.wardPcode) || null,
-      previousState: qaState(fresh.trn), state, previousReviewId: input.previousReviewId,
+      previousState: workflowState(fresh.trn), state, previousReviewId: input.previousReviewId,
       byUid: uid, byUser, at: now, explanation: input.explanation, takeoverReason: fresh.access.takeover ? input.takeoverReason : null,
       changedPaths: changed, meterProjection: projection, retainedNewerMeterFacts: input.retainNewerMeterFacts };
     const lastAmendment = { id: requestId, beforeVersion: input.sourceVersion, afterVersion, byUid: uid, byUser, at: now };
-    next.qa = { ...(fresh.trn.qa || {}), state, lastAmendment,
+    const { state: _legacyState, ...qaFacts } = fresh.trn.qa || {};
+    next.qa = { ...qaFacts, lastAmendment,
       amendedByUids: [...new Set([...(fresh.trn.qa?.amendedByUids || []), uid])] };
-    const notices = state === "UPDATED" ? await planQaNotices(tx, db, { context: fresh, trn: next, trnId, eventId: requestId, kind: "UPDATED", at: now }) : [];
+    const notices = qaAlias(state) === "UPDATED" ? await planQaNotices(tx, db, { context: fresh, trn: next, trnId, eventId: requestId, kind: "UPDATED", at: now }) : [];
     if (!newVersion.exists) tx.create(newVersionRef, versionRecord(trnId, next, afterEvidence, uid, now));
     tx.create(eventRef, amendment);
     tx.set(db.doc(`trns/${trnId}`), next);
     if (Object.keys(meterPatch).length) tx.update(meterRef, { ...meterPatch, "metadata.updatedAt": now, "metadata.updatedByUid": uid, "metadata.updatedByUser": byUser });
     writeQaNotices(tx, db, notices);
-    return { success: true, idempotent: false, amendment };
+    return { success: true, idempotent: false, amendment: { ...amendment, state: qaAlias(state) }, workflowState: state };
   });
 }

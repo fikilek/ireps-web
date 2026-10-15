@@ -14,15 +14,18 @@
 // transaction's history (`DR-R001` 5.1). Under the old shape a rejected job
 // sat in REJECTED with the worker's name still on it, so it was his and
 // nobody's at once - his row counted it while the meter treated it as free.
-// One fact, two answers. These five cannot do that.
+// One fact, two answers. The canonical lifecycle prevents that ambiguity.
 
-/** The only five states a transaction may be in. */
+/** Unified TRN Lifecycle v3, QA-R001 section 13. REMOVED is not persisted. */
 export const TRN_STATES = Object.freeze({
   CREATED: "CREATED",
   DELETED: "DELETED",
   ISSUED: "ISSUED",
   ACCEPTED: "ACCEPTED",
   COMPLETED: "COMPLETED",
+  QA_FAIL: "QA FAIL",
+  QA_UPDATED: "QA UPDATED",
+  QA_PASS: "QA PASS",
 });
 
 export const TRN_STATE_LIST = Object.freeze(Object.values(TRN_STATES));
@@ -32,7 +35,7 @@ export const TRN_STATE_LIST = Object.freeze(Object.values(TRN_STATES));
  *
  * Read it as the owner wrote it: CREATED takes delete and allocate, DELETED
  * takes create and final delete, ISSUED takes reject, cancel and accept,
- * ACCEPTED takes cancel and execute, COMPLETED takes nothing.
+ * ACCEPTED takes cancel and execute; submitted work follows the approved QA moves.
  */
 export const TRN_TRANSITIONS = Object.freeze({
   CREATED: Object.freeze({
@@ -56,7 +59,14 @@ export const TRN_TRANSITIONS = Object.freeze({
     execute: TRN_STATES.COMPLETED,
     cancel: TRN_STATES.CREATED,
   }),
-  COMPLETED: Object.freeze({}),
+  COMPLETED: Object.freeze({
+    amend: TRN_STATES.COMPLETED,
+    qaFail: TRN_STATES.QA_FAIL,
+    qaPass: TRN_STATES.QA_PASS,
+  }),
+  [TRN_STATES.QA_FAIL]: Object.freeze({ amend: TRN_STATES.QA_UPDATED }),
+  [TRN_STATES.QA_UPDATED]: Object.freeze({ qaFail: TRN_STATES.QA_FAIL, qaPass: TRN_STATES.QA_PASS }),
+  [TRN_STATES.QA_PASS]: Object.freeze({}),
 });
 
 /**
@@ -103,6 +113,9 @@ export const STATES_THE_WORKER_SEES = Object.freeze([
   TRN_STATES.ISSUED,
   TRN_STATES.ACCEPTED,
   TRN_STATES.COMPLETED,
+  TRN_STATES.QA_FAIL,
+  TRN_STATES.QA_UPDATED,
+  TRN_STATES.QA_PASS,
 ]);
 
 /**
@@ -123,14 +136,14 @@ export const OLD_STATE_LANDS_IN = Object.freeze({
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 
 /**
- * The state a stored value means TODAY, placed on one of the five.
+ * The state a stored value means TODAY, placed on a canonical state.
  *
  * Records written before 11 October 2026 - and the copies of the state kept
  * on the meter and on its registry row - may still carry one of the four old
  * words. A reader that tested them against the five directly would read
  * `REASSIGNED` as "no state" and so read a meter with work out on it as
  * free. This is the one seam where the old words are understood; everything
- * else asks for one of the five.
+ * else asks for a canonical state.
  *
  * Returns "" for a value that cannot be placed - which is a fault to show,
  * not a gap to fill with a plausible state.
@@ -143,7 +156,7 @@ export function currentState(raw) {
   return OLD_STATE_LANDS_IN[state] || "";
 }
 
-/** Is this one of the five? */
+/** Is this a canonical state? */
 export function isTrnState(state) {
   return TRN_STATE_LIST.includes(upper(state));
 }
@@ -172,7 +185,7 @@ export function canMove(from, action) {
   const state = upper(from);
 
   if (!isTrnState(state)) {
-    return { ok: false, code: "UNKNOWN_STATE", message: `${from || "A transaction with no state"} is not one of the five states.` };
+    return { ok: false, code: "UNKNOWN_STATE", message: `${from || "A transaction with no state"} is not a canonical lifecycle state.` };
   }
 
   const moves = TRN_TRANSITIONS[state] || {};
@@ -279,3 +292,9 @@ export function readIssuedAt(trn) {
     expired: (nowMs) => Number.isFinite(nowMs) && nowMs - ms > EXPIRES_AFTER_MS,
   };
 }
+
+/** Submitted fieldwork remains submitted after review; QA is not another visit. */
+export const SUBMITTED_TRN_STATES = Object.freeze([
+  TRN_STATES.COMPLETED, TRN_STATES.QA_FAIL, TRN_STATES.QA_UPDATED, TRN_STATES.QA_PASS,
+]);
+export const isSubmittedState = state => SUBMITTED_TRN_STATES.includes(currentState(state));

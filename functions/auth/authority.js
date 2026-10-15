@@ -46,11 +46,12 @@ export function serviceProviderPatch(actor, spId, patch) {
   return { ...patch };
 }
 
-export function stampFieldSubmission(payload, actor) {
+export function stampFieldSubmission(payload, actor, submission = {}) {
   delete payload.qa;
   // Registration is a field submission. A caller cannot invent office
   // completion/assignment facts to evade the original-submitter check.
-  payload.workflow = {};
+  payload.workflow = { state: "COMPLETED", completedAt: submission.at || null,
+    completedByUid: submission.uid || null, completedByUser: submission.name || null };
   payload.assignment = {};
   payload.origin = { ...(payload.origin || {}), channel: "FIELD" };
   payload.serviceProvider = { ...(actor.employment?.serviceProvider || {}) };
