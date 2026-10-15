@@ -478,6 +478,11 @@ test("v3 correction stamps and immutable after-version survive final review and 
   assert.equal((await saveQaReview(db, "reviewer", failInput)).workflowState, "QA PASS");
   assert.equal(await acceptedSubmission({ get: ref => ref.get() }, db, original.id, passed, original, "worker"), true);
   assert.equal(await acceptedSubmission({ get: ref => ref.get() }, db, original.id, passed, { ...original, fieldComment: { text: "Fresh write" } }, "worker"), false);
+  await assert.rejects(amend(context, { explanation: "Changed replay content" }));
+  const reviews = await db.collection(`trns/${original.id}/qaHistory`).get();
+  const amendments = await db.collection(`trns/${original.id}/qaAmendments`).get();
+  assert.equal(reviews.size, 2);
+  assert.equal(amendments.size, 1);
   assert.deepEqual((await db.doc(`trns/${original.id}`).get()).data(), passed);
 });
 

@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 // The job the office sends. `DR-R001` 3.4, 3.5 and 4.
 //
 // WHAT THESE GUARD. Two things that are permanent and one that is invisible.
@@ -49,7 +50,7 @@ test("the prefixes are the phone's, letter for letter", async () => {
   // Two repositories, one shape. An office disconnection and a field
   // disconnection must carry the same prefix or they are two kinds of work.
   const source = await readFile(
-    new URL("../../ireps-mobile/src/features/trns/trnId.js", import.meta.url),
+    process.env.IREPS_MOBILE_ROOT ? resolve(process.env.IREPS_MOBILE_ROOT, "src/features/trns/trnId.js") : new URL("../../ireps-mobile/src/features/trns/trnId.js", import.meta.url),
     "utf8",
   );
 

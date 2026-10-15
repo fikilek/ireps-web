@@ -37,14 +37,16 @@ test("a different visit under an existing id is refused, not called a success", 
   );
 });
 
-test("the comparison looks at the work, the premise and the worker", () => {
+test("the comparison looks at the work, the premise and the worker", async () => {
+  assert.match(guard, /acceptedSubmission/);
+  const receipt = await readFile(new URL("../qa/submissionReceipt.js", import.meta.url), "utf8");
   for (const [what, pattern] of [
     ["the kind of work", /accessData\?\.trnType/],
     ["the premise", /accessData\?\.premise\?\.id/],
     ["the worker", /createdByUid|createdOnDeviceByUid/],
   ]) {
     assert.match(
-      guard,
+      receipt,
       pattern,
       `${what} must be part of deciding whether this is the same visit`,
     );

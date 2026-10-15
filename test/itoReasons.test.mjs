@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 // Why the office is sending this work: the reason list behind the ITO page.
 // `DR-R001` 3.4, `UI-R006` 1.2.0.
 //
@@ -35,7 +36,7 @@ test("the codes are the ones already written on the phone", async () => {
   // started in the field would be the same reason under two different values,
   // and no report could add them together.
   const source = await readFile(
-    new URL(
+    process.env.IREPS_MOBILE_ROOT ? resolve(process.env.IREPS_MOBILE_ROOT, "src/features/meters/formOptions.js") : new URL(
       "../../ireps-mobile/src/features/meters/formOptions.js",
       import.meta.url,
     ),
