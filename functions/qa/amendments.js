@@ -114,7 +114,7 @@ export async function listQaAmendments(db, uid, input = {}) {
 
 function checkedInput(input) {
   const explanation = qaText(input.explanation), takeoverReason = qaText(input.takeoverReason);
-  if (!explanation || explanation.length > 4000 || takeoverReason.length > 4000) throw new HttpsError("invalid-argument", "Explain the correction in at most 4,000 characters.");
+  if (explanation.length > 4000 || takeoverReason.length > 4000) throw new HttpsError("invalid-argument", "Correction or takeover text cannot exceed 4,000 characters.");
   return { trnId: cleanId(input.trnId, "Transaction ID"), requestId: cleanId(input.requestId, "Amendment request ID"),
     sourceVersion: input.sourceVersion || null, previousReviewId: input.previousReviewId || null,
     meterVersion: input.meterVersion || null, fields: input.fields, explanation, takeoverReason,

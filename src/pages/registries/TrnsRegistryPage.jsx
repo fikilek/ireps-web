@@ -23,11 +23,23 @@ import { fieldCommentMediaUrls } from "../../utils/fieldComments.js";
 import TrnQaModal from "./components/TrnQaModal";
 import TrnQaNotifications from "./components/TrnQaNotifications";
 import { qaDate } from "../../utils/qaDisplay.js";
-import { QA_LABELS } from "../../../functions/qa/model.js";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import { isMainContractor, parentIdOf, resolveMainContractor, mncPcodesOf } from "../../components/serviceProviders/providerHierarchy.js";
 
 const DEFAULT_SORT = { key: "lastUpdatedAt", direction: "desc" };
+
+// Unified TRN Lifecycle v3: only workflow.state determines the QA lifecycle.
+const QA_STATUS_OPTIONS = ["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"];
+function qaLifecycleStatus(row) {
+  const state = String(row?.workflowState || "").trim().toUpperCase();
+  return QA_STATUS_OPTIONS.includes(state) ? state : "NOT_ELIGIBLE";
+}
+function qaLifecycleLabel(row) {
+  const state = qaLifecycleStatus(row);
+  return state === "COMPLETED" ? "Awaiting QA review" :
+    state === "NOT_ELIGIBLE" ? "Awaiting submission / check required" : state;
+}
+
 
 // A no access reads orange, the whole row (owner, 4 October 2026).
 //
@@ -83,6 +95,7 @@ const EMPTY_TRN_FILTERS = {
   anomalyDetail: "",
   normalisation: "",
   createdByUser: "",
+  completedByUser: "",
   qaState: "ALL",
 };
 
@@ -369,12 +382,12 @@ export default function TrnsRegistryPage() {
     const updatedAtFilter = tableFilters.lastUpdatedAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
       if (!matchesDateFilter(row.lastUpdatedAt, updatedAtFilter)) return false;
-      if (!matchesSelect(row.qaState || "NOT_ELIGIBLE", filters.qaState)) return false;
+      if (!matchesSelect(qaLifecycleStatus(row), filters.qaState)) return false;
       if (!matchesSelect(row.premisePropertyType, filters.premisePropertyType)) return false;
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
-      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser);
+      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && includesText(row.completedByUser, filters.completedByUser);
     });
   }, []);
 
@@ -448,9 +461,10 @@ export default function TrnsRegistryPage() {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
       },
+      { header: "Completed By User", value: (row) => row.completedByUser || "NAv" },
       { header: "Updated At", value: (row) => formatDateTime(row.lastUpdatedAt) },
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
-      { header: "QA Status", value: row => row.qaState || row.qaEligibility?.label || "Awaiting submission" },
+      { header: "QA Status", value: row => qaLifecycleLabel(row) },
       { header: "QA Reviewer", value: row => row.qa?.reviewedByUser || "NAv" },
       { header: "QA At", value: row => qaDate(row.qa?.reviewedAt) },
     ],
@@ -870,6 +884,15 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
 
   }, {
+    key: "completedByUser",
+    label: "Completed By User",
+    filter: "text",
+    sortable: true,
+    value: row => row.completedByUser || "NAv",
+    sortValue: row => isMissingSortValue(row.completedByUser) ? null : row.completedByUser,
+    render: row => row.completedByUser || "NAv",
+    sortEmptyLast: true,
+  }, {
     key: "lastUpdatedAt",
     label: "Updated At",
     filter: "date",
@@ -880,25 +903,25 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
   }, {
     key: "qaState", label: "QA Status", filter: "select", filterAllValue: "ALL", sortable: true,
-    filterOptions: [...Object.keys(QA_LABELS).map(value => ({ value, label: value })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
-    value: row => row.qaState || "NOT_ELIGIBLE",
+    filterOptions: [...QA_STATUS_OPTIONS.map(value => ({ value, label: value === "COMPLETED" ? "Awaiting QA review" : value })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
+    value: row => qaLifecycleStatus(row),
     render: row => {
-      const mayReview = reviewerRole && ["DRAFT", "UPDATED"].includes(row.qaState)
+      const mayReview = reviewerRole && ["COMPLETED", "QA UPDATED"].includes(qaLifecycleStatus(row))
         && row.fieldSubmitter?.uid && row.fieldSubmitter.uid !== uid
         && !(row.qa?.amendedByUids || []).includes(uid)
         && mncPcodesOf(reviewerProvider).includes(row.lmPcode)
         && resolveMainContractor(row.serviceProviderId, providers)?.id === serviceProvider?.id;
-      return <div className="qa-status-cell"><div className="qa-cell"><strong>{row.qaState || row.qaEligibility?.label || "Awaiting submission"}</strong>
+      return <div className="qa-status-cell"><div className="qa-cell"><strong>{qaLifecycleLabel(row)}</strong>
         {mayReview && <select aria-label={`QA decision for ${row.trnId}`} value="" onChange={event => { if (event.target.value) setSelectedQa({ trnId: row.trnId, action: event.target.value }); }}><option value="">Choose QA…</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select>}
         </div>
-        {["DRAFT", "UPDATED"].includes(row.qaState) && row.qa?.lastAmendment
+        {["COMPLETED", "QA UPDATED"].includes(qaLifecycleStatus(row)) && row.qa?.lastAmendment
           ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
           : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
       </div>;
     },
   }, {
     key: "qaHistory", label: "QA History", sortable: false,
-    render: row => row.qaState ? <DataActionButton compact haspopup="dialog" title="QA Review / History" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>QA Review / History</DataActionButton> : null,
+    render: row => qaLifecycleStatus(row) !== "NOT_ELIGIBLE" ? <DataActionButton compact haspopup="dialog" title="QA Review / History" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>QA Review / History</DataActionButton> : null,
   }];
 
   return (
