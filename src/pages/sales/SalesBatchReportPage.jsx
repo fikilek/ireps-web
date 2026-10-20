@@ -1,13 +1,13 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import IrepsTable from "../../components/table/IrepsTable";
 
 import { useGetTargetedBatchReportByIdQuery } from "../../redux/salesTargetedBatchApi";
 import SalesBatchMapModal from "./components/SalesBatchMapModal";
 import { useBatchGeofence } from "./components/use-batch-geofence.js";
 import { NO_GEOFENCE_LABEL } from "../operations/targeted-batches/batch-geofence-label.js";
 
-const ALL_FILTER = "ALL";
 const TERMINAL_STREAM_STATES = new Set(["ready", "error"]);
 
 const EMPTY_REPORT = {
@@ -53,16 +53,7 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
 
-function uniqueNonBlank(values = []) {
-  return Array.from(
-    new Set(values.map(cleanText).filter(Boolean)),
-  ).sort((left, right) =>
-    left.localeCompare(right, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    }),
-  );
-}
+
 
 function statusTone(status = "") {
   switch (normalizeUpper(status)) {
@@ -113,17 +104,6 @@ function SummaryCard({ label, value, helper, pendingText }) {
   );
 }
 
-function Th({ children }) {
-  return <th style={styles.th}>{children}</th>;
-}
-
-function Td({ children, colSpan }) {
-  return (
-    <td style={styles.td} colSpan={colSpan}>
-      {children}
-    </td>
-  );
-}
 
 function ComparisonLine({ label, hoverText, children, valueStyle }) {
   return (
@@ -360,12 +340,7 @@ export default function SalesBatchReportPage() {
   const summary = data?.summary || EMPTY_REPORT.summary;
   const sync = data?.sync || EMPTY_REPORT.sync;
 
-  const [searchText, setSearchText] = useState("");
-  const [executionFilter, setExecutionFilter] = useState(ALL_FILTER);
-  const [wardFilter, setWardFilter] = useState(ALL_FILTER);
-  const [meterMatchFilter, setMeterMatchFilter] = useState(ALL_FILTER);
-  const [addressMatchFilter, setAddressMatchFilter] = useState(ALL_FILTER);
-  const [noAccessFilter, setNoAccessFilter] = useState(ALL_FILTER);
+  const [shownRows, setShownRows] = useState([]);
   const [selectedNoAccessRow, setSelectedNoAccessRow] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
   const [selectedMapRow, setSelectedMapRow] = useState(null);
@@ -390,86 +365,274 @@ export default function SalesBatchReportPage() {
       ? "Counting…"
       : "";
 
-  const filterOptions = useMemo(
-    () => ({
-      wards: uniqueNonBlank(rows.map((row) => row.scope.wardLabel)),
-      executions: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"],
-    }),
-    [rows],
+  const columnGroups = useMemo(
+    () => [
+      { key: "sales", label: "Sales row" },
+      { key: "meter", label: "Meter" },
+      { key: "address", label: "Address" },
+      { key: "field", label: "Field work" },
+    ],
+    [],
   );
 
-  const filteredRows = useMemo(() => {
-    const search = normalizeUpper(searchText);
+  const columns = useMemo(
+    () => [
+      {
+        key: "rowNo",
+        label: "Row",
+        group: "sales",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.rowNo || "NAv",
+        sortValue: (row) => Number(row.rowNo) || 0,
+      },
+      {
+        key: "account",
+        label: "Account",
+        group: "sales",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.source?.accountNumber || "",
+        sortValue: (row) => String(row.source?.accountNumber || ""),
+      },
+      {
+        key: "customer",
+        label: "Customer",
+        group: "sales",
+        filter: "text",
+        sortable: true,
+        value: (row) => row.source?.customerName || "",
+        sortValue: (row) => String(row.source?.customerName || ""),
+      },
+      {
+        key: "ward",
+        label: "Ward",
+        group: "sales",
+        filter: "select",
+        sortable: true,
+        value: (row) => row.scope?.wardLabel || "",
+      },
 
-    return rows.filter((row) => {
-      const searchable = normalizeUpper(
-        [
-          row.rowNo,
-          row.source.accountNumber,
-          row.source.customerName,
-          row.scope.wardLabel,
-          row.originalMeter.number,
-          row.fieldMeter.number || "PENDING",
-          row.addresses.original,
-          row.addresses.field || "PENDING",
-          row.source.sgCode,
-          row.source.categoryReason,
-        ].join(" "),
-      );
+      {
+        key: "meter",
+        label: "Meter",
+        group: "meter",
+        filter: "text",
+        sortable: true,
+        // One box searches the number the batch was sent for and the number found.
+        value: (row) =>
+          [row.originalMeter?.number, row.fieldMeter?.number || "PENDING"]
+            .filter(Boolean)
+            .join(" "),
+        sortValue: (row) => String(row.originalMeter?.number || ""),
+        render: (row) => (
+          <div style={styles.comparisonStack}>
+            <ComparisonLine label="O" hoverText="Original Sales Meter Number">
+              {row.originalMeter?.number}
+            </ComparisonLine>
+            <ComparisonLine label="F" hoverText="Field Meter Number">
+              {row.fieldMeter?.canOpenMap ? (
+                <button
+                  type="button"
+                  style={styles.fieldMeterMapButton}
+                  onClick={() => setSelectedMapRow(row)}
+                  title={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                  aria-label={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                >
+                  {row.fieldMeter.number}
+                </button>
+              ) : (
+                "PENDING"
+              )}
+            </ComparisonLine>
+          </div>
+        ),
+      },
 
-      if (search && !searchable.includes(search)) return false;
-      // TB-R054: until the Sales meters are read, a row's status is not known.
-      if (
-        executionFilter !== ALL_FILTER &&
-        (statusPending || row.workStatus !== executionFilter)
-      ) {
-        return false;
-      }
-      if (
-        wardFilter !== ALL_FILTER &&
-        row.scope.wardLabel !== wardFilter
-      ) {
-        return false;
-      }
-      if (
-        meterMatchFilter !== ALL_FILTER &&
-        row.comparison.meterMatch !== meterMatchFilter
-      ) {
-        return false;
-      }
-      if (
-        addressMatchFilter !== ALL_FILTER &&
-        row.comparison.addressMatch !== addressMatchFilter
-      ) {
-        return false;
-      }
-      if (noAccessFilter === "HAS_NA" && row.noAccess.count === 0) {
-        return false;
-      }
-      if (noAccessFilter === "NO_NA" && row.noAccess.count > 0) {
-        return false;
-      }
+      {
+        key: "meterMatch",
+        label: "Meter Match",
+        group: "meter",
+        filter: "select",
+        filterOptions: [
+          { value: "TRUE", label: "TRUE" },
+          { value: "FALSE", label: "FALSE" },
+          { value: "PENDING", label: "PENDING" },
+        ],
+        sortable: true,
+        value: (row) => row.comparison?.meterMatch || "",
+        render: (row) => <Badge value={row.comparison?.meterMatch} />,
+      },
 
-      return true;
-    });
-  }, [
-    rows,
-    searchText,
-    executionFilter,
-    statusPending,
-    wardFilter,
-    meterMatchFilter,
-    addressMatchFilter,
-    noAccessFilter,
-  ]);
+      {
+        key: "address",
+        label: "Address",
+        group: "address",
+        filter: "text",
+        sortable: true,
+        value: (row) =>
+          [row.addresses?.original, row.addresses?.field || "PENDING"]
+            .filter(Boolean)
+            .join(" "),
+        sortValue: (row) => String(row.addresses?.original || ""),
+        render: (row) => (
+          <div
+            style={{
+              ...styles.comparisonStack,
+              ...styles.addressComparisonStack,
+            }}
+          >
+            <ComparisonLine
+              label="O"
+              hoverText="Original Sales Address"
+              valueStyle={styles.addressComparisonValue}
+            >
+              {row.addresses?.original}
+            </ComparisonLine>
+            <ComparisonLine
+              label="F"
+              hoverText="Field Address"
+              valueStyle={styles.addressComparisonValue}
+            >
+              {row.addresses?.field || "PENDING"}
+            </ComparisonLine>
+          </div>
+        ),
+      },
 
-  function clearFilters() {
-    setSearchText("");
-    setExecutionFilter(ALL_FILTER);
-    setWardFilter(ALL_FILTER);
-    setMeterMatchFilter(ALL_FILTER);
-    setAddressMatchFilter(ALL_FILTER);
-    setNoAccessFilter(ALL_FILTER);
+      {
+        key: "addressMatch",
+        label: "Address Match",
+        group: "address",
+        filter: "select",
+        filterOptions: [
+          { value: "TRUE", label: "TRUE" },
+          { value: "FALSE", label: "FALSE" },
+          { value: "PENDING", label: "PENDING" },
+        ],
+        sortable: true,
+        value: (row) => row.comparison?.addressMatch || "",
+        render: (row) => <Badge value={row.comparison?.addressMatch} />,
+      },
+
+      {
+        key: "execution",
+        label: "Execution",
+        group: "field",
+        filter: "select",
+        filterDisabled: statusPending,
+        filterOptions: [
+          { value: "NOT_STARTED", label: "NOT STARTED" },
+          { value: "IN_PROGRESS", label: "IN PROGRESS" },
+          { value: "COMPLETED", label: "COMPLETED" },
+        ],
+        sortable: true,
+        // TB-R054: until the Sales meters are read, a row's status is not known.
+        value: (row) => (statusPending ? "Counting…" : row.workStatus),
+        render: (row) => (
+          <Badge value={statusPending ? "Counting…" : row.workStatus} />
+        ),
+      },
+
+      {
+        key: "premise",
+        label: "Premise",
+        group: "field",
+        filter: "select",
+        sortable: true,
+        value: (row) => row.premise?.status || "",
+        render: (row) => (
+          <>
+            <Badge value={row.premise?.status} />
+            {row.premise?.id ? (
+              <div style={styles.secondaryText}>{row.premise.id}</div>
+            ) : null}
+          </>
+        ),
+      },
+
+      {
+        key: "noAccess",
+        label: "No Access",
+        group: "field",
+        filter: "select",
+        filterOptions: [
+          { value: "HAS_NA", label: "Has No Access" },
+          { value: "NO_NA", label: "No No Access" },
+        ],
+        filterValues: (row) =>
+          Number(row.noAccess?.count) > 0 ? ["HAS_NA"] : ["NO_NA"],
+        sortable: true,
+        value: (row) => String(row.noAccess?.count ?? 0),
+        sortValue: (row) => Number(row.noAccess?.count) || 0,
+        render: (row) => (
+          <button
+            type="button"
+            style={{
+              ...styles.noAccessButton,
+              ...(row.noAccess?.count === 0 ? styles.noAccessButtonDisabled : null),
+            }}
+            disabled={row.noAccess?.count === 0}
+            onClick={() => setSelectedNoAccessRow(row)}
+            title={
+              row.noAccess?.count > 0
+                ? "Open No Access details"
+                : "No No Access attempts"
+            }
+          >
+            {formatNumber(row.noAccess?.count)}
+          </button>
+        ),
+      },
+
+      {
+        key: "lastActivity",
+        label: "Last Activity",
+        group: "field",
+        filter: "date",
+        sortable: true,
+        value: (row) => row.execution?.lastActivityAtMs || null,
+        sortValue: (row) => Number(row.execution?.lastActivityAtMs) || 0,
+        render: (row) => formatDateTime(row.execution?.lastActivityAtMs),
+      },
+
+      {
+        key: "action",
+        label: "Action",
+        group: "field",
+        filter: null,
+        sortable: false,
+        export: false,
+        value: () => "",
+        render: (row) => (
+          <button
+            type="button"
+            style={styles.openButton}
+            onClick={() => setSelectedRow(row)}
+          >
+            Open Row
+          </button>
+        ),
+      },
+    ],
+    [statusPending],
+  );
+
+  function targetedBatchFieldResultsSearchValue(row) {
+    return [
+      row.rowNo,
+      row.source?.accountNumber,
+      row.source?.customerName,
+      row.scope?.wardLabel,
+      row.originalMeter?.number,
+      row.fieldMeter?.number || "PENDING",
+      row.addresses?.original,
+      row.addresses?.field || "PENDING",
+      row.source?.sgCode,
+      row.source?.categoryReason,
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
 
   if (!decodedTbId) {
@@ -615,248 +778,38 @@ export default function SalesBatchReportPage() {
           </div>
 
           <strong style={styles.resultCount}>
-            {formatNumber(filteredRows.length)} of{" "}
-            {formatNumber(rows.length)} shown
+            {formatNumber(shownRows.length)} of {formatNumber(rows.length)} shown
           </strong>
         </div>
 
-        <div style={styles.filters}>
-          <label style={styles.filterField}>
-            <span style={styles.filterLabel}>Search</span>
-            <input
-              type="search"
-              value={searchText}
-              onChange={(event) => setSearchText(event.target.value)}
-              placeholder="Meter, account, customer, address or SG Code"
-              style={styles.filterInput}
-            />
-          </label>
-
-          <label style={styles.filterField}>
-            <span style={styles.filterLabel}>Execution</span>
-            <select
-              value={executionFilter}
-              onChange={(event) => setExecutionFilter(event.target.value)}
-              style={styles.filterInput}
-            >
-              <option value={ALL_FILTER}>All Execution States</option>
-              {filterOptions.executions.map((execution) => (
-                <option key={execution} value={execution}>
-                  {execution.replaceAll("_", " ")}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={styles.filterField}>
-            <span style={styles.filterLabel}>Ward</span>
-            <select
-              value={wardFilter}
-              onChange={(event) => setWardFilter(event.target.value)}
-              style={styles.filterInput}
-            >
-              <option value={ALL_FILTER}>All Wards</option>
-              {filterOptions.wards.map((ward) => (
-                <option key={ward} value={ward}>
-                  {ward}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={styles.filterField}>
-            <span style={styles.filterLabel}>Meter Match</span>
-            <select
-              value={meterMatchFilter}
-              onChange={(event) => setMeterMatchFilter(event.target.value)}
-              style={styles.filterInput}
-            >
-              <option value={ALL_FILTER}>All Meter Matches</option>
-              <option value="TRUE">TRUE</option>
-              <option value="FALSE">FALSE</option>
-              <option value="PENDING">PENDING</option>
-            </select>
-          </label>
-
-          <label style={styles.filterField}>
-            <span style={styles.filterLabel}>Address Match</span>
-            <select
-              value={addressMatchFilter}
-              onChange={(event) => setAddressMatchFilter(event.target.value)}
-              style={styles.filterInput}
-            >
-              <option value={ALL_FILTER}>All Address Matches</option>
-              <option value="TRUE">TRUE</option>
-              <option value="FALSE">FALSE</option>
-              <option value="PENDING">PENDING</option>
-            </select>
-          </label>
-
-          <label style={styles.filterField}>
-            <span style={styles.filterLabel}>No Access</span>
-            <select
-              value={noAccessFilter}
-              onChange={(event) => setNoAccessFilter(event.target.value)}
-              style={styles.filterInput}
-            >
-              <option value={ALL_FILTER}>All Rows</option>
-              <option value="HAS_NA">Has No Access</option>
-              <option value="NO_NA">No No Access</option>
-            </select>
-          </label>
-
-          <button
-            type="button"
-            style={styles.clearButton}
-            onClick={clearFilters}
-          >
-            Clear Filters
-          </button>
-        </div>
-
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <Th>Row</Th>
-                <Th>Account</Th>
-                <Th>Customer</Th>
-                <Th>Ward</Th>
-                <Th>Meter</Th>
-                <Th>Meter Match</Th>
-                <Th>Address</Th>
-                <Th>Address Match</Th>
-                <Th>Execution</Th>
-                <Th>Premise</Th>
-                <Th>No Access</Th>
-                <Th>Last Activity</Th>
-                <Th>Action</Th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {!allReady && rows.length === 0 ? (
-                <tr>
-                  <Td colSpan={13}>
-                    Joining live Sales and field-result records...
-                  </Td>
-                </tr>
-              ) : null}
-
-              {allReady && filteredRows.length === 0 ? (
-                <tr>
-                  <Td colSpan={13}>
-                    {rows.length === 0
-                      ? "No permanent TB rows exist for this Targeted Batch."
-                      : "No TB rows match the selected filters."}
-                  </Td>
-                </tr>
-              ) : null}
-
-              {filteredRows.map((row) => (
-                <tr key={row.id}>
-                  <Td>{row.rowNo || "NAv"}</Td>
-                  <Td>{row.source.accountNumber}</Td>
-                  <Td>{row.source.customerName}</Td>
-                  <Td>{row.scope.wardLabel}</Td>
-                  <Td>
-                    <div style={styles.comparisonStack}>
-                      <ComparisonLine
-                        label="O"
-                        hoverText="Original Sales Meter Number"
-                      >
-                        {row.originalMeter.number}
-                      </ComparisonLine>
-                      <ComparisonLine label="F" hoverText="Field Meter Number">
-                        {row.fieldMeter.canOpenMap ? (
-                          <button
-                            type="button"
-                            style={styles.fieldMeterMapButton}
-                            onClick={() => setSelectedMapRow(row)}
-                            title={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
-                            aria-label={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
-                          >
-                            {row.fieldMeter.number}
-                          </button>
-                        ) : (
-                          "PENDING"
-                        )}
-                      </ComparisonLine>
-                    </div>
-                  </Td>
-                  <Td>
-                    <Badge value={row.comparison.meterMatch} />
-                  </Td>
-                  <Td>
-                    <div
-                      style={{
-                        ...styles.comparisonStack,
-                        ...styles.addressComparisonStack,
-                      }}
-                    >
-                      <ComparisonLine
-                        label="O"
-                        hoverText="Original Sales Address"
-                        valueStyle={styles.addressComparisonValue}
-                      >
-                        {row.addresses.original}
-                      </ComparisonLine>
-                      <ComparisonLine
-                        label="F"
-                        hoverText="Field Address"
-                        valueStyle={styles.addressComparisonValue}
-                      >
-                        {row.addresses.field || "PENDING"}
-                      </ComparisonLine>
-                    </div>
-                  </Td>
-                  <Td>
-                    <Badge value={row.comparison.addressMatch} />
-                  </Td>
-                  <Td>
-                    <Badge value={statusPending ? "Counting…" : row.workStatus} />
-                  </Td>
-                  <Td>
-                    <Badge value={row.premise.status} />
-                    {row.premise.id ? (
-                      <div style={styles.secondaryText}>{row.premise.id}</div>
-                    ) : null}
-                  </Td>
-                  <Td>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.noAccessButton,
-                        ...(row.noAccess.count === 0
-                          ? styles.noAccessButtonDisabled
-                          : null),
-                      }}
-                      disabled={row.noAccess.count === 0}
-                      onClick={() => setSelectedNoAccessRow(row)}
-                      title={
-                        row.noAccess.count > 0
-                          ? "Open No Access details"
-                          : "No No Access attempts"
-                      }
-                    >
-                      {formatNumber(row.noAccess.count)}
-                    </button>
-                  </Td>
-                  <Td>{formatDateTime(row.execution.lastActivityAtMs)}</Td>
-                  <Td>
-                    <button
-                      type="button"
-                      style={styles.openButton}
-                      onClick={() => setSelectedRow(row)}
-                    >
-                      Open Row
-                    </button>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <IrepsTable
+          title="Targeted Batch Field Results"
+          stickyHeader
+          topScrollbar
+          columns={columns}
+          groups={columnGroups}
+          rows={rows}
+          rowKey={(row) => row.id}
+          defaultSort={{ key: "rowNo", direction: "asc" }}
+          defaultPageSize={5}
+          loading={!allReady && rows.length === 0}
+          loadingText="Joining live Sales and field-result records..."
+          emptyText={
+            rows.length === 0
+              ? "No permanent TB rows exist for this Targeted Batch."
+              : "No TB rows match the selected filters."
+          }
+          searchValue={targetedBatchFieldResultsSearchValue}
+          searchLabel="Search all row fields"
+          searchPlaceholder="Meter, account, customer, address, SG Code, reason…"
+          onRowsShown={setShownRows}
+          downloads={{
+            registryName: "Targeted Batch Field Results",
+            rowsLabel: "TB Rows",
+            fileBaseName: `tb_field_results_${batch?.id || "batch"}`,
+            scope: batch?.scope || {},
+          }}
+        />
       </section>
 
       {selectedNoAccessRow ? (
@@ -1073,84 +1026,6 @@ const styles = {
     fontSize: 12,
   },
 
-  filters: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-    gap: 10,
-    padding: 18,
-    background: "#f8fafc",
-    borderBottom: "1px solid #e2e8f0",
-  },
-
-  filterField: {
-    display: "grid",
-    gap: 5,
-  },
-
-  filterLabel: {
-    color: "#475569",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-
-  filterInput: {
-    minHeight: 40,
-    width: "100%",
-    borderRadius: 10,
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    color: "#0f172a",
-    padding: "8px 10px",
-    fontSize: 12,
-    fontWeight: 700,
-    boxSizing: "border-box",
-  },
-
-  clearButton: {
-    minHeight: 40,
-    alignSelf: "end",
-    borderRadius: 10,
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    color: "#334155",
-    padding: "8px 14px",
-    fontSize: 11,
-    fontWeight: 900,
-    cursor: "pointer",
-  },
-
-  tableWrap: {
-    width: "100%",
-    overflowX: "auto",
-  },
-
-  table: {
-    width: "100%",
-    minWidth: 1750,
-    borderCollapse: "collapse",
-  },
-
-  th: {
-    padding: "11px 12px",
-    borderBottom: "1px solid #cbd5e1",
-    background: "#f8fafc",
-    color: "#475569",
-    fontSize: 10,
-    fontWeight: 900,
-    textAlign: "left",
-    textTransform: "uppercase",
-    whiteSpace: "nowrap",
-  },
-
-  td: {
-    padding: "12px",
-    borderBottom: "1px solid #e2e8f0",
-    color: "#334155",
-    fontSize: 11,
-    fontWeight: 700,
-    verticalAlign: "top",
-  },
 
   comparisonStack: {
     display: "grid",
