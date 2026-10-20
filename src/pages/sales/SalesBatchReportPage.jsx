@@ -34,6 +34,20 @@ const EMPTY_REPORT = {
   },
 };
 
+const HCC_COLUMN_OPTIONS = [
+  { key: "rowNo", label: "Row" },
+  { key: "account", label: "Account" },
+  { key: "customer", label: "Customer" },
+  { key: "ward", label: "Ward" },
+];
+
+const DEFAULT_COLUMN_VISIBILITY = {
+  rowNo: false,
+  account: false,
+  customer: false,
+  ward: false,
+};
+
 function cleanText(value) {
   return String(value ?? "").trim();
 }
@@ -344,6 +358,17 @@ export default function SalesBatchReportPage() {
   const [selectedNoAccessRow, setSelectedNoAccessRow] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
   const [selectedMapRow, setSelectedMapRow] = useState(null);
+  const [columnVisibility, setColumnVisibility] = useState(
+    DEFAULT_COLUMN_VISIBILITY,
+  );
+  const [showColumnControls, setShowColumnControls] = useState(false);
+
+  function toggleColumn(columnKey) {
+    setColumnVisibility((current) => ({
+      ...current,
+      [columnKey]: !current[columnKey],
+    }));
+  }
 
   const sourceStatuses = sync?.sources || EMPTY_REPORT.sync.sources;
   const baseReady =
@@ -375,7 +400,7 @@ export default function SalesBatchReportPage() {
     [],
   );
 
-  const columns = useMemo(
+  const allColumns = useMemo(
     () => [
       {
         key: "rowNo",
@@ -618,6 +643,36 @@ export default function SalesBatchReportPage() {
     [statusPending],
   );
 
+  const visibleColumns = useMemo(() => {
+    return allColumns.filter((column) => {
+      if (column.key in columnVisibility) {
+        return Boolean(columnVisibility[column.key]);
+      }
+      return true;
+    });
+  }, [allColumns, columnVisibility]);
+
+  const columnControlsPanel = showColumnControls ? (
+    <div style={styles.columnControls}>
+      <div style={styles.fixedColumnsNote}>
+        Always visible: Meter, Meter Match, Address, Address Match, Execution, Premise, No Access, Last Activity, Action
+      </div>
+
+      <div style={styles.columnToggleGrid}>
+        {HCC_COLUMN_OPTIONS.map((option) => (
+          <label key={option.key} style={styles.columnToggleLabel}>
+            <input
+              type="checkbox"
+              checked={Boolean(columnVisibility[option.key])}
+              onChange={() => toggleColumn(option.key)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
   function targetedBatchFieldResultsSearchValue(row) {
     return [
       row.rowNo,
@@ -786,7 +841,20 @@ export default function SalesBatchReportPage() {
           title="Targeted Batch Field Results"
           stickyHeader
           topScrollbar
-          columns={columns}
+          toolbar={
+            <button
+              type="button"
+              style={styles.columnsButton}
+              onClick={() => setShowColumnControls((current) => !current)}
+              aria-expanded={showColumnControls}
+            >
+              {showColumnControls
+                ? "Hide Column Controls"
+                : "Show Column Controls"}
+            </button>
+          }
+          columnControls={columnControlsPanel}
+          columns={visibleColumns}
           groups={columnGroups}
           rows={rows}
           rowKey={(row) => row.id}
@@ -1317,5 +1385,51 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
     gap: 12,
+  },
+
+  columnsButton: {
+    border: "1px solid #2563eb",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    borderRadius: "0.7rem",
+    padding: "0.55rem 0.75rem",
+    fontWeight: 850,
+    cursor: "pointer",
+  },
+
+  columnControls: {
+    display: "grid",
+    gap: "0.65rem",
+    padding: "0.85rem 1rem",
+    borderTop: "1px solid #e2e8f0",
+    borderBottom: "1px solid #e2e8f0",
+    background: "#f8fafc",
+  },
+
+  fixedColumnsNote: {
+    color: "#64748b",
+    fontSize: "0.76rem",
+    fontWeight: 750,
+  },
+
+  columnToggleGrid: {
+    display: "flex",
+    gap: "0.5rem",
+    flexWrap: "wrap",
+  },
+
+  columnToggleLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    minHeight: "2.1rem",
+    padding: "0.38rem 0.58rem",
+    border: "1px solid #cbd5e1",
+    borderRadius: "0.6rem",
+    background: "#ffffff",
+    color: "#334155",
+    fontSize: "0.78rem",
+    fontWeight: 800,
+    cursor: "pointer",
   },
 };
