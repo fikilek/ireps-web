@@ -413,7 +413,7 @@ function RowDetailsModal({ row, statusPending, onClose }) {
         <h3 style={styles.detailTitle}>Field result</h3>
         <div style={styles.detailGrid}>
           <InfoItem
-            label="Sales State"
+            label="Sales Status"
             value={statusPending ? "Counting…" : row.workStatus}
           />
           <InfoItem
@@ -641,25 +641,6 @@ export default function SalesBatchReportPage() {
       },
 
       {
-        key: "execution",
-        label: "Sales State",
-        group: "field",
-        filter: "select",
-        filterDisabled: statusPending,
-        filterOptions: [
-          { value: "NOT_STARTED", label: "NOT STARTED" },
-          { value: "IN_PROGRESS", label: "IN PROGRESS" },
-          { value: "COMPLETED", label: "COMPLETED" },
-        ],
-        sortable: true,
-        // TB-R054: until the Sales meters are read, a row's status is not known.
-        value: (row) => (statusPending ? "Counting…" : row.workStatus),
-        render: (row) => (
-          <Badge value={statusPending ? "Counting…" : row.workStatus} />
-        ),
-      },
-
-      {
         key: "premise",
         label: "Premise Link",
         group: "field",
@@ -737,6 +718,25 @@ export default function SalesBatchReportPage() {
           >
             Open Row
           </button>
+        ),
+      },
+
+      {
+        key: "execution",
+        label: "Sales Status",
+        group: "field",
+        filter: "select",
+        filterDisabled: statusPending,
+        filterOptions: [
+          { value: "NOT_STARTED", label: "NOT STARTED" },
+          { value: "IN_PROGRESS", label: "IN PROGRESS" },
+          { value: "COMPLETED", label: "COMPLETED" },
+        ],
+        sortable: true,
+        // TB-R054: until the Sales meters are read, a row's status is not known.
+        value: (row) => (statusPending ? "Counting…" : row.workStatus),
+        render: (row) => (
+          <Badge value={statusPending ? "Counting…" : row.workStatus} />
         ),
       },
 
@@ -900,7 +900,7 @@ export default function SalesBatchReportPage() {
   const columnControlsPanel = showColumnControls ? (
     <div style={styles.columnControls}>
       <div style={styles.fixedColumnsNote}>
-        Always visible: Meter, Meter Match, Address, Address Match, Sales State, Premise Link, No Access Attempts, QA Components, QA Final, Last Activity, Action
+        Always visible: Meter, Meter Match, Address, Address Match, Premise Link, No Access Attempts, Last Activity, Action, Sales Status, QA Components, QA Final
       </div>
 
       <div style={styles.columnToggleGrid}>
