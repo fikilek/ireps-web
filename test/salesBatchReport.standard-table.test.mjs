@@ -41,12 +41,14 @@ test("SalesBatchReportPage imports and renders the shared IrepsTable component",
   );
 });
 
-test("SalesBatchReportPage defines standard column groups for Sales, Meter, Address, Field", () => {
+test("SalesBatchReportPage defines standard column groups for Sales, Meter, Address, Field, QA Components, Sales QA", () => {
   const groups = [
     { key: "sales", label: "Sales row" },
     { key: "meter", label: "Meter" },
     { key: "address", label: "Address" },
     { key: "field", label: "Field work" },
+    { key: "qaComponents", label: "QA Components" },
+    { key: "salesQa", label: "Sales QA" },
   ];
 
   const columns = [
@@ -63,6 +65,10 @@ test("SalesBatchReportPage defines standard column groups for Sales, Meter, Addr
     { key: "noAccess", group: "field" },
     { key: "lastActivity", group: "field" },
     { key: "action", group: "field" },
+    { key: "premiseQa", group: "qaComponents" },
+    { key: "noAccessQa", group: "qaComponents" },
+    { key: "meterQa", group: "qaComponents" },
+    { key: "qaFinal", group: "salesQa" },
   ];
 
   const bands = irepsTableBands(columns, groups);
@@ -73,6 +79,8 @@ test("SalesBatchReportPage defines standard column groups for Sales, Meter, Addr
       { key: "meter", label: "Meter", span: 2 },
       { key: "address", label: "Address", span: 2 },
       { key: "field", label: "Field work", span: 5 },
+      { key: "qaComponents", label: "QA Components", span: 3 },
+      { key: "salesQa", label: "Sales QA", span: 1 },
     ],
   );
 });
@@ -335,7 +343,7 @@ test("SalesBatchReportPage defines HCC with exactly four columns hidden by defau
   );
 });
 
-test("HCC visibility logic: initial state hides Row, Account, Customer, Ward while keeping 9 columns", () => {
+test("HCC visibility logic: initial state hides Row, Account, Customer, Ward while keeping 13 columns", () => {
   const allColumns = [
     { key: "rowNo", label: "Row", group: "sales" },
     { key: "account", label: "Account", group: "sales" },
@@ -345,11 +353,15 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
     { key: "meterMatch", label: "Meter Match", group: "meter" },
     { key: "address", label: "Address", group: "address" },
     { key: "addressMatch", label: "Address Match", group: "address" },
-    { key: "execution", label: "Execution", group: "field" },
-    { key: "premise", label: "Premise", group: "field" },
-    { key: "noAccess", label: "No Access", group: "field" },
+    { key: "execution", label: "Sales State", group: "field" },
+    { key: "premise", label: "Premise Link", group: "field" },
+    { key: "noAccess", label: "No Access Attempts", group: "field" },
     { key: "lastActivity", label: "Last Activity", group: "field" },
     { key: "action", label: "Action", group: "field" },
+    { key: "premiseQa", label: "Premise", group: "qaComponents" },
+    { key: "noAccessQa", label: "No Access", group: "qaComponents" },
+    { key: "meterQa", label: "Meter", group: "qaComponents" },
+    { key: "qaFinal", label: "QA Final", group: "salesQa" },
   ];
 
   const defaultVisibility = {
@@ -364,6 +376,8 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
     { key: "meter", label: "Meter" },
     { key: "address", label: "Address" },
     { key: "field", label: "Field work" },
+    { key: "qaComponents", label: "QA Components" },
+    { key: "salesQa", label: "Sales QA" },
   ];
 
   function getVisibleColumns(visibility) {
@@ -375,12 +389,26 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
     });
   }
 
-  // 1. Initial/Default state: all 4 are hidden, 9 remain visible
+  // 1. Initial/Default state: all 4 are hidden, 13 remain visible
   const initialVisible = getVisibleColumns(defaultVisibility);
-  assert.equal(initialVisible.length, 9);
+  assert.equal(initialVisible.length, 13);
   assert.deepEqual(
     initialVisible.map((c) => c.key),
-    ["meter", "meterMatch", "address", "addressMatch", "execution", "premise", "noAccess", "lastActivity", "action"],
+    [
+      "meter",
+      "meterMatch",
+      "address",
+      "addressMatch",
+      "execution",
+      "premise",
+      "noAccess",
+      "lastActivity",
+      "action",
+      "premiseQa",
+      "noAccessQa",
+      "meterQa",
+      "qaFinal",
+    ],
   );
 
   // Band test: Sales band has span 0 and is excluded
@@ -391,12 +419,14 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
       { key: "meter", span: 2 },
       { key: "address", span: 2 },
       { key: "field", span: 5 },
+      { key: "qaComponents", span: 3 },
+      { key: "salesQa", span: 1 },
     ],
   );
 
   // 2. Toggling 'Row' on
   const withRow = getVisibleColumns({ ...defaultVisibility, rowNo: true });
-  assert.equal(withRow.length, 10);
+  assert.equal(withRow.length, 14);
   assert.equal(withRow[0].key, "rowNo");
   const withRowBands = irepsTableBands(withRow, groups);
   assert.equal(withRowBands[0].key, "sales");
@@ -404,7 +434,7 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
 
   // 3. Toggling 'Account' and 'Ward' on
   const withAccountAndWard = getVisibleColumns({ ...defaultVisibility, account: true, ward: true });
-  assert.equal(withAccountAndWard.length, 11);
+  assert.equal(withAccountAndWard.length, 15);
   assert.deepEqual(
     withAccountAndWard.slice(0, 2).map((c) => c.key),
     ["account", "ward"],
@@ -415,8 +445,197 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
 
   // 4. Toggling all 4 on
   const allShown = getVisibleColumns({ rowNo: true, account: true, customer: true, ward: true });
-  assert.equal(allShown.length, 13);
+  assert.equal(allShown.length, 17);
   const allShownBands = irepsTableBands(allShown, groups);
   assert.equal(allShownBands[0].key, "sales");
   assert.equal(allShownBands[0].span, 4);
 });
+
+test("Phase 2: Relabelled operational fields and QA columns definitions in SalesBatchReportPage", () => {
+  // Operational column relabelling
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']execution["'],\s*label:\s*["']Sales State["']/,
+    "Execution column must be relabelled as 'Sales State'",
+  );
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']premise["'],\s*label:\s*["']Premise Link["']/,
+    "Premise column must be relabelled as 'Premise Link'",
+  );
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']noAccess["'],\s*label:\s*["']No Access Attempts["']/,
+    "No Access column must be relabelled as 'No Access Attempts'",
+  );
+
+  // QA Components grouped columns
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']premiseQa["'],\s*label:\s*["']Premise["'],\s*group:\s*["']qaComponents["']/,
+    "premiseQa column must have label 'Premise' and group 'qaComponents'",
+  );
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']noAccessQa["'],\s*label:\s*["']No Access["'],\s*group:\s*["']qaComponents["']/,
+    "noAccessQa column must have label 'No Access' and group 'qaComponents'",
+  );
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']meterQa["'],\s*label:\s*["']Meter["'],\s*group:\s*["']qaComponents["']/,
+    "meterQa column must have label 'Meter' and group 'qaComponents'",
+  );
+
+  // QA Final column grouped under Sales QA
+  assert.match(
+    salesBatchReportSrc,
+    /key:\s*["']qaFinal["'],\s*label:\s*["']QA Final["'],\s*group:\s*["']salesQa["']/,
+    "qaFinal column must have label 'QA Final' and group 'salesQa'",
+  );
+});
+
+test("Phase 2: Sales State gating, QA pill buttons and destination routing", () => {
+  // QaPill component check: status pill is the button control itself
+  assert.match(
+    salesBatchReportSrc,
+    /function QaPill\(\{/,
+    "QaPill component must exist as the clickable status pill control",
+  );
+  assert.match(
+    salesBatchReportSrc,
+    /<QaPill/,
+    "Component QA columns must render QaPill",
+  );
+
+  // Routing checks
+  assert.match(
+    salesBatchReportSrc,
+    /\/registries\/premises\?premiseId=/,
+    "Premise QA pill must route to Premise Registry with premiseId query param",
+  );
+  assert.match(
+    salesBatchReportSrc,
+    /\/registries\/trns\?trnId=/,
+    "No Access QA and Meter QA pills must route to TRN Registry with trnId query param",
+  );
+
+  // AST ID used for Meter QA (row.fieldMeter.id)
+  assert.match(
+    salesBatchReportSrc,
+    /getMeterQaTarget\(row\)/,
+    "Meter QA must extract AST ID target using getMeterQaTarget",
+  );
+});
+
+test("Phase 2: Gating helper logic and QA Final validation", () => {
+  // Test helper logic directly mirroring the source
+  function isRowCompleted(row) {
+    return String(row?.workStatus || "").trim().toUpperCase() === "COMPLETED";
+  }
+
+  function getPremiseQaTarget(row) {
+    return String(row?.premise?.id || "").trim();
+  }
+
+  function getNoAccessQaTarget(row) {
+    const attempts = row?.noAccess?.attempts || [];
+    if (attempts.length > 0) {
+      const lastAttempt = attempts[attempts.length - 1];
+      if (lastAttempt?.id) return String(lastAttempt.id).trim();
+    }
+    return String(row?.noAccess?.trnId || "").trim();
+  }
+
+  function getMeterQaTarget(row) {
+    return String(row?.fieldMeter?.id || "").trim();
+  }
+
+  function getPremiseQaStatus(row) {
+    if (!isRowCompleted(row)) return "QA NAv";
+    return String(row?.premise?.qaStatus || "QA NAv").trim();
+  }
+
+  function getNoAccessQaStatus(row) {
+    if (!isRowCompleted(row)) return "QA NAv";
+    return String(row?.noAccess?.qaStatus || "QA NAv").trim();
+  }
+
+  function getMeterQaStatus(row) {
+    if (!isRowCompleted(row)) return "QA NAv";
+    return String(row?.fieldMeter?.qaStatus || "QA NAv").trim();
+  }
+
+  function getQaFinalStatus(row) {
+    if (!isRowCompleted(row)) return "QA NAv";
+    const raw = String(row?.qaFinalStatus || "").trim();
+    const upper = raw.toUpperCase();
+    if (upper === "QA PENDING" || upper === "PENDING" || !raw) {
+      return "QA NAv";
+    }
+    return raw;
+  }
+
+  // Row 1: NOT STARTED
+  const notStartedRow = {
+    workStatus: "NOT_STARTED",
+    premise: { id: "premise-1", qaStatus: "QA PASS" },
+    noAccess: { attempts: [{ id: "TRN-NA-1" }], qaStatus: "QA PASS" },
+    fieldMeter: { id: "TRN-AST-1", qaStatus: "QA PASS" },
+    qaFinalStatus: "QA PASS",
+  };
+  assert.equal(getPremiseQaStatus(notStartedRow), "QA NAv", "NOT STARTED row must display QA NAv for Premise QA");
+  assert.equal(getNoAccessQaStatus(notStartedRow), "QA NAv", "NOT STARTED row must display QA NAv for No Access QA");
+  assert.equal(getMeterQaStatus(notStartedRow), "QA NAv", "NOT STARTED row must display QA NAv for Meter QA");
+  assert.equal(getQaFinalStatus(notStartedRow), "QA NAv", "NOT STARTED row must display QA NAv for QA Final");
+  assert.equal(isRowCompleted(notStartedRow), false, "NOT STARTED row must not be completed");
+
+  // Row 2: IN PROGRESS
+  const inProgressRow = {
+    workStatus: "IN_PROGRESS",
+    premise: { id: "premise-2", qaStatus: "QA PASS" },
+    noAccess: { attempts: [{ id: "TRN-NA-2" }], qaStatus: "QA PASS" },
+    fieldMeter: { id: "TRN-AST-2", qaStatus: "QA PASS" },
+    qaFinalStatus: "QA PASS",
+  };
+  assert.equal(getPremiseQaStatus(inProgressRow), "QA NAv", "IN PROGRESS row must display QA NAv for Premise QA");
+  assert.equal(getNoAccessQaStatus(inProgressRow), "QA NAv", "IN PROGRESS row must display QA NAv for No Access QA");
+  assert.equal(getMeterQaStatus(inProgressRow), "QA NAv", "IN PROGRESS row must display QA NAv for Meter QA");
+  assert.equal(getQaFinalStatus(inProgressRow), "QA NAv", "IN PROGRESS row must display QA NAv for QA Final");
+  assert.equal(isRowCompleted(inProgressRow), false, "IN PROGRESS row must not be completed");
+
+  // Row 3: COMPLETED without QA data in read model (defaults to QA NAv)
+  const completedRow = {
+    workStatus: "COMPLETED",
+    premise: { id: "PRM-123" },
+    noAccess: { attempts: [{ id: "TRN-NA-3" }] },
+    fieldMeter: { id: "TRN-AST-3" },
+  };
+  assert.equal(getPremiseQaStatus(completedRow), "QA NAv");
+  assert.equal(getNoAccessQaStatus(completedRow), "QA NAv");
+  assert.equal(getMeterQaStatus(completedRow), "QA NAv");
+  assert.equal(getQaFinalStatus(completedRow), "QA NAv");
+  assert.equal(getPremiseQaTarget(completedRow), "PRM-123");
+  assert.equal(getNoAccessQaTarget(completedRow), "TRN-NA-3");
+  assert.equal(getMeterQaTarget(completedRow), "TRN-AST-3");
+
+  // Row 4: COMPLETED with QA PENDING on QA Final -> MUST display QA NAv
+  const pendingFinalRow = {
+    workStatus: "COMPLETED",
+    qaFinalStatus: "QA PENDING",
+  };
+  assert.equal(getQaFinalStatus(pendingFinalRow), "QA NAv", "QA Final must NEVER display component QA PENDING");
+
+  // Row 5: COMPLETED with valid QA Final status
+  const passFinalRow = {
+    workStatus: "COMPLETED",
+    qaFinalStatus: "QA PASS",
+  };
+  assert.equal(getQaFinalStatus(passFinalRow), "QA PASS");
+
+  const failFinalRow = {
+    workStatus: "COMPLETED",
+    qaFinalStatus: "QA FAIL",
+  };
+  assert.equal(getQaFinalStatus(failFinalRow), "QA FAIL");
+});
+

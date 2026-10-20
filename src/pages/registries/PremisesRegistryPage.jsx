@@ -168,7 +168,18 @@ export default function PremisesRegistryPage() {
 
   const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
 
-  const [filters, setFilters] = useState(EMPTY_PREMISE_FILTERS);
+  const [filters, setFilters] = useState(() => {
+    const searchParams =
+      typeof window === "undefined"
+        ? null
+        : new URLSearchParams(window.location.search);
+    const askedPremise =
+      searchParams?.get("premiseId") || searchParams?.get("premise");
+
+    return askedPremise
+      ? { ...EMPTY_PREMISE_FILTERS, addressText: askedPremise }
+      : EMPTY_PREMISE_FILTERS;
+  });
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
