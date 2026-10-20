@@ -347,17 +347,29 @@ export default function TrnsRegistryPage() {
 
   // Arriving from the ITO button's open-job mark: ?meter=<number> opens this
   // register on that meter alone, so the office lands on the job it asked
-  // about rather than on 246 rows.
+  // about rather than on 246 rows. Or arriving from TB QA: ?trnId=<id>.
   const [filters, setFilters] = useState(() => {
-    const asked =
+    const searchParams =
       typeof window === "undefined"
         ? null
-        : new URLSearchParams(window.location.search).get("meter");
+        : new URLSearchParams(window.location.search);
+    const askedTrn = searchParams?.get("trnId") || searchParams?.get("trn");
+    const askedMeter = searchParams?.get("meter");
 
-    return asked ? { ...EMPTY_TRN_FILTERS, meterNo: asked } : EMPTY_TRN_FILTERS;
+    if (askedTrn) {
+      return { ...EMPTY_TRN_FILTERS, trnId: askedTrn };
+    }
+    if (askedMeter) {
+      return { ...EMPTY_TRN_FILTERS, meterNo: askedMeter };
+    }
+    return EMPTY_TRN_FILTERS;
   });
 
-  const [showTrnId, setShowTrnId] = useState(false);
+  const [showTrnId, setShowTrnId] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const searchParams = new URLSearchParams(window.location.search);
+    return Boolean(searchParams.get("trnId") || searchParams.get("trn"));
+  });
   const [selectedMeterTrnId, setSelectedMeterTrnId] = useState(null);
   const [selectedMediaTrnId, setSelectedMediaTrnId] = useState(null);
   const [selectedCommentsTrnId, setSelectedCommentsTrnId] = useState(null);

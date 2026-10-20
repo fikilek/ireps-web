@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import IrepsTable from "../../components/table/IrepsTable";
 
 import { useGetTargetedBatchReportByIdQuery } from "../../redux/salesTargetedBatchApi";
@@ -67,7 +67,73 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
 
+function isRowCompleted(row) {
+  return normalizeUpper(row?.workStatus) === "COMPLETED";
+}
 
+function getPremiseQaTarget(row) {
+  return cleanText(row?.premise?.id);
+}
+
+function getNoAccessQaTarget(row) {
+  const attempts = row?.noAccess?.attempts || [];
+  if (attempts.length > 0) {
+    const lastAttempt = attempts[attempts.length - 1];
+    if (lastAttempt?.id) return cleanText(lastAttempt.id);
+  }
+  return cleanText(row?.noAccess?.trnId);
+}
+
+function getMeterQaTarget(row) {
+  return cleanText(row?.fieldMeter?.id);
+}
+
+function normalizeQaStatus(value) {
+  const clean = cleanText(value);
+  if (!clean) return "QA NAv";
+  const upper = clean.toUpperCase();
+  if (upper === "QA PASS" || upper === "PASS") return "QA PASS";
+  if (upper === "QA FAIL" || upper === "FAIL") return "QA FAIL";
+  if (upper === "QA PENDING" || upper === "PENDING") return "QA PENDING";
+  if (upper === "QA NAV" || upper === "NAV" || upper === "NOT_AVAILABLE") return "QA NAv";
+  return clean;
+}
+
+function getPremiseQaStatus(row) {
+  if (!isRowCompleted(row)) return "QA NAv";
+  const raw = row?.premise?.qaStatus ?? row?.qa?.premiseStatus;
+  return raw ? normalizeQaStatus(raw) : "QA NAv";
+}
+
+function getNoAccessQaStatus(row) {
+  if (!isRowCompleted(row)) return "QA NAv";
+  const raw = row?.noAccess?.qaStatus ?? row?.qa?.noAccessStatus;
+  return raw ? normalizeQaStatus(raw) : "QA NAv";
+}
+
+function getMeterQaStatus(row) {
+  if (!isRowCompleted(row)) return "QA NAv";
+  const raw = row?.fieldMeter?.qaStatus ?? row?.qa?.meterStatus;
+  return raw ? normalizeQaStatus(raw) : "QA NAv";
+}
+
+function getQaFinalStatus(row) {
+  if (!isRowCompleted(row)) return "QA NAv";
+  const raw = row?.qaFinalStatus ?? row?.qa?.finalStatus;
+  if (!raw) return "QA NAv";
+  const normalized = normalizeUpper(raw);
+  if (normalized === "QA PENDING" || normalized === "PENDING") {
+    return "QA NAv";
+  }
+  if (normalized === "QA PASS" || normalized === "PASS") return "QA PASS";
+  if (normalized === "QA FAIL" || normalized === "FAIL") return "QA FAIL";
+  if (normalized === "QA UPDATED" || normalized === "UPDATED") return "QA UPDATED";
+  if (normalized === "COMPLETED") return "COMPLETED";
+  if (normalized === "NOT STARTED" || normalized === "NOT_STARTED") return "NOT STARTED";
+  if (normalized === "IN PROGRESS" || normalized === "IN_PROGRESS") return "IN PROGRESS";
+  if (normalized === "QA NAV" || normalized === "NAV") return "QA NAv";
+  return cleanText(raw);
+}
 
 function statusTone(status = "") {
   switch (normalizeUpper(status)) {
@@ -75,16 +141,47 @@ function statusTone(status = "") {
     case "COMPLETED":
     case "LINKED":
     case "ACCEPTED":
+    case "QA PASS":
+    case "PASS":
       return "success";
     case "FALSE":
     case "FAILED":
     case "REJECTED":
+    case "QA FAIL":
+    case "FAIL":
       return "danger";
     case "IN_PROGRESS":
+    case "QA PENDING":
+    case "PENDING":
+    case "QA UPDATED":
+    case "UPDATED":
       return "warning";
     default:
       return "neutral";
   }
+}
+
+function QaPill({ status, disabled = false, onClick, title, ariaLabel }) {
+  const tone = statusTone(status);
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
+      title={title}
+      aria-label={ariaLabel || title}
+      style={{
+        ...styles.qaPill,
+        ...(tone === "success" ? styles.qaPillSuccess : null),
+        ...(tone === "warning" ? styles.qaPillWarning : null),
+        ...(tone === "danger" ? styles.qaPillDanger : null),
+        ...(disabled ? styles.qaPillDisabled : styles.qaPillEnabled),
+      }}
+    >
+      {status}
+    </button>
+  );
 }
 
 function Badge({ value }) {
@@ -316,7 +413,7 @@ function RowDetailsModal({ row, statusPending, onClose }) {
         <h3 style={styles.detailTitle}>Field result</h3>
         <div style={styles.detailGrid}>
           <InfoItem
-            label="Execution"
+            label="Sales State"
             value={statusPending ? "Counting…" : row.workStatus}
           />
           <InfoItem
@@ -338,6 +435,7 @@ function RowDetailsModal({ row, statusPending, onClose }) {
 }
 
 export default function SalesBatchReportPage() {
+  const navigate = useNavigate();
   const { tbId = "" } = useParams();
   const decodedTbId = decodeURIComponent(tbId);
 
@@ -396,6 +494,8 @@ export default function SalesBatchReportPage() {
       { key: "meter", label: "Meter" },
       { key: "address", label: "Address" },
       { key: "field", label: "Field work" },
+      { key: "qaComponents", label: "QA Components" },
+      { key: "salesQa", label: "Sales QA" },
     ],
     [],
   );
@@ -542,7 +642,7 @@ export default function SalesBatchReportPage() {
 
       {
         key: "execution",
-        label: "Execution",
+        label: "Sales State",
         group: "field",
         filter: "select",
         filterDisabled: statusPending,
@@ -561,7 +661,7 @@ export default function SalesBatchReportPage() {
 
       {
         key: "premise",
-        label: "Premise",
+        label: "Premise Link",
         group: "field",
         filter: "select",
         sortable: true,
@@ -578,7 +678,7 @@ export default function SalesBatchReportPage() {
 
       {
         key: "noAccess",
-        label: "No Access",
+        label: "No Access Attempts",
         group: "field",
         filter: "select",
         filterOptions: [
@@ -639,8 +739,153 @@ export default function SalesBatchReportPage() {
           </button>
         ),
       },
+
+      {
+        key: "premiseQa",
+        label: "Premise",
+        group: "qaComponents",
+        filter: "select",
+        filterOptions: [
+          { value: "QA NAv", label: "QA NAv" },
+          { value: "QA PENDING", label: "QA PENDING" },
+          { value: "QA PASS", label: "QA PASS" },
+          { value: "QA FAIL", label: "QA FAIL" },
+        ],
+        sortable: true,
+        value: (row) => getPremiseQaStatus(row),
+        render: (row) => {
+          const premiseId = getPremiseQaTarget(row);
+          const isCompleted = isRowCompleted(row);
+          const isEnabled = isCompleted && Boolean(premiseId);
+          const status = getPremiseQaStatus(row);
+          const title = isEnabled
+            ? `Open Premise ${premiseId} in Premise Registry`
+            : !isCompleted
+              ? "QA is unavailable until the Sales row is COMPLETED"
+              : "No Premise record linked to this row";
+
+          return (
+            <QaPill
+              status={status}
+              disabled={!isEnabled}
+              title={title}
+              ariaLabel={`Premise QA: ${status}. ${title}`}
+              onClick={() =>
+                navigate(`/registries/premises?premiseId=${encodeURIComponent(premiseId)}`)
+              }
+            />
+          );
+        },
+      },
+
+      {
+        key: "noAccessQa",
+        label: "No Access",
+        group: "qaComponents",
+        filter: "select",
+        filterOptions: [
+          { value: "QA NAv", label: "QA NAv" },
+          { value: "QA PENDING", label: "QA PENDING" },
+          { value: "QA PASS", label: "QA PASS" },
+          { value: "QA FAIL", label: "QA FAIL" },
+        ],
+        sortable: true,
+        value: (row) => getNoAccessQaStatus(row),
+        render: (row) => {
+          const noAccessTrnId = getNoAccessQaTarget(row);
+          const isCompleted = isRowCompleted(row);
+          const isEnabled = isCompleted && Boolean(noAccessTrnId);
+          const status = getNoAccessQaStatus(row);
+          const title = isEnabled
+            ? `Open No Access TRN ${noAccessTrnId} in TRN Registry`
+            : !isCompleted
+              ? "QA is unavailable until the Sales row is COMPLETED"
+              : "No No Access transaction recorded for this row";
+
+          return (
+            <QaPill
+              status={status}
+              disabled={!isEnabled}
+              title={title}
+              ariaLabel={`No Access QA: ${status}. ${title}`}
+              onClick={() =>
+                navigate(`/registries/trns?trnId=${encodeURIComponent(noAccessTrnId)}`)
+              }
+            />
+          );
+        },
+      },
+
+      {
+        key: "meterQa",
+        label: "Meter",
+        group: "qaComponents",
+        filter: "select",
+        filterOptions: [
+          { value: "QA NAv", label: "QA NAv" },
+          { value: "QA PENDING", label: "QA PENDING" },
+          { value: "QA PASS", label: "QA PASS" },
+          { value: "QA FAIL", label: "QA FAIL" },
+        ],
+        sortable: true,
+        value: (row) => getMeterQaStatus(row),
+        render: (row) => {
+          const astId = getMeterQaTarget(row);
+          const isCompleted = isRowCompleted(row);
+          const isEnabled = isCompleted && Boolean(astId);
+          const status = getMeterQaStatus(row);
+          const title = isEnabled
+            ? `Open Meter Discovery TRN ${astId} in TRN Registry`
+            : !isCompleted
+              ? "QA is unavailable until the Sales row is COMPLETED"
+              : "No Meter Discovery TRN (AST ID) available for this row";
+
+          return (
+            <QaPill
+              status={status}
+              disabled={!isEnabled}
+              title={title}
+              ariaLabel={`Meter QA: ${status}. ${title}`}
+              onClick={() =>
+                navigate(`/registries/trns?trnId=${encodeURIComponent(astId)}`)
+              }
+            />
+          );
+        },
+      },
+
+      {
+        key: "qaFinal",
+        label: "QA Final",
+        group: "salesQa",
+        filter: "select",
+        filterOptions: [
+          { value: "QA NAv", label: "QA NAv" },
+          { value: "NOT STARTED", label: "NOT STARTED" },
+          { value: "IN PROGRESS", label: "IN PROGRESS" },
+          { value: "COMPLETED", label: "COMPLETED" },
+          { value: "QA FAIL", label: "QA FAIL" },
+          { value: "QA UPDATED", label: "QA UPDATED" },
+          { value: "QA PASS", label: "QA PASS" },
+        ],
+        sortable: true,
+        value: (row) => getQaFinalStatus(row),
+        render: (row) => {
+          const status = getQaFinalStatus(row);
+          const isCompleted = isRowCompleted(row);
+          const title = !isCompleted
+            ? "QA is unavailable until the Sales row is COMPLETED"
+            : `QA Final: ${status}`;
+
+          return (
+            <span title={title}>
+              <Badge value={status} />
+            </span>
+          );
+        },
+      },
     ],
-    [statusPending],
+    [navigate, statusPending],
   );
 
   const visibleColumns = useMemo(() => {
@@ -655,7 +900,7 @@ export default function SalesBatchReportPage() {
   const columnControlsPanel = showColumnControls ? (
     <div style={styles.columnControls}>
       <div style={styles.fixedColumnsNote}>
-        Always visible: Meter, Meter Match, Address, Address Match, Execution, Premise, No Access, Last Activity, Action
+        Always visible: Meter, Meter Match, Address, Address Match, Sales State, Premise Link, No Access Attempts, QA Components, QA Final, Last Activity, Action
       </div>
 
       <div style={styles.columnToggleGrid}>
@@ -685,6 +930,12 @@ export default function SalesBatchReportPage() {
       row.addresses?.field || "PENDING",
       row.source?.sgCode,
       row.source?.categoryReason,
+      row.premise?.id,
+      row.fieldMeter?.id,
+      getPremiseQaStatus(row),
+      getNoAccessQaStatus(row),
+      getMeterQaStatus(row),
+      getQaFinalStatus(row),
     ]
       .filter(Boolean)
       .join(" ");
@@ -1431,5 +1682,51 @@ const styles = {
     fontSize: "0.78rem",
     fontWeight: 800,
     cursor: "pointer",
+  },
+
+  qaPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "1.9rem",
+    padding: "0.25rem 0.65rem",
+    borderRadius: "9999px",
+    fontSize: "0.74rem",
+    fontWeight: 800,
+    letterSpacing: "0.03em",
+    whiteSpace: "nowrap",
+    border: "1px solid #cbd5e1",
+    background: "#f1f5f9",
+    color: "#475569",
+    cursor: "default",
+    transition: "all 0.15s ease-in-out",
+  },
+
+  qaPillEnabled: {
+    cursor: "pointer",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+  },
+
+  qaPillDisabled: {
+    opacity: 0.6,
+    cursor: "not-allowed",
+  },
+
+  qaPillSuccess: {
+    border: "1px solid #86efac",
+    background: "#f0fdf4",
+    color: "#166534",
+  },
+
+  qaPillWarning: {
+    border: "1px solid #fde047",
+    background: "#fefce8",
+    color: "#854d0e",
+  },
+
+  qaPillDanger: {
+    border: "1px solid #fca5a5",
+    background: "#fef2f2",
+    color: "#991b1b",
   },
 };
