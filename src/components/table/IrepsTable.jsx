@@ -48,6 +48,7 @@ export default function IrepsTable({
   loading = false,
   loadingText = "Loading…",
   toolbar = null,
+  columnControls = null,
   onRowsShown = null,
   filters: controlledFilters,
   onFiltersChange,
@@ -215,6 +216,8 @@ export default function IrepsTable({
           onFullDownload={downloads.onFullDownload ? () => downloads.onFullDownload(sorted) : null}
         />
       </div>
+
+      {columnControls}
 
       {searchValue ? <div style={styles.searchBar}>
         <label style={styles.muted}>

@@ -302,3 +302,121 @@ test("Targeted Batch Field Results filtering and sorting via IrepsTable model", 
   assert.equal(page1.totalPages, 2);
   assert.equal(sampleRows.length, 3);
 });
+
+test("SalesBatchReportPage defines HCC with exactly four columns hidden by default", () => {
+  assert.match(
+    salesBatchReportSrc,
+    /const HCC_COLUMN_OPTIONS = \[\s*\{\s*key:\s*["']rowNo["'],\s*label:\s*["']Row["']\s*\},\s*\{\s*key:\s*["']account["'],\s*label:\s*["']Account["']\s*\},\s*\{\s*key:\s*["']customer["'],\s*label:\s*["']Customer["']\s*\},\s*\{\s*key:\s*["']ward["'],\s*label:\s*["']Ward["']\s*\},?\s*\];/,
+    "HCC must configure exactly Row, Account, Customer, and Ward",
+  );
+
+  assert.match(
+    salesBatchReportSrc,
+    /const DEFAULT_COLUMN_VISIBILITY = \{\s*rowNo:\s*false,\s*account:\s*false,\s*customer:\s*false,\s*ward:\s*false,?\s*\};/,
+    "All four configurable columns must be hidden by default (initially false)",
+  );
+
+  assert.match(
+    salesBatchReportSrc,
+    /showColumnControls\s*\?\s*["']Hide Column Controls["']\s*:\s*["']Show Column Controls["']/,
+    "Toolbar button must display Show Column Controls when closed and Hide Column Controls when open",
+  );
+
+  assert.match(
+    salesBatchReportSrc,
+    /columnControls=\{columnControlsPanel\}/,
+    "IrepsTable must receive columnControlsPanel",
+  );
+
+  assert.match(
+    salesBatchReportSrc,
+    /columns=\{visibleColumns\}/,
+    "IrepsTable must receive visibleColumns based on columnVisibility",
+  );
+});
+
+test("HCC visibility logic: initial state hides Row, Account, Customer, Ward while keeping 9 columns", () => {
+  const allColumns = [
+    { key: "rowNo", label: "Row", group: "sales" },
+    { key: "account", label: "Account", group: "sales" },
+    { key: "customer", label: "Customer", group: "sales" },
+    { key: "ward", label: "Ward", group: "sales" },
+    { key: "meter", label: "Meter", group: "meter" },
+    { key: "meterMatch", label: "Meter Match", group: "meter" },
+    { key: "address", label: "Address", group: "address" },
+    { key: "addressMatch", label: "Address Match", group: "address" },
+    { key: "execution", label: "Execution", group: "field" },
+    { key: "premise", label: "Premise", group: "field" },
+    { key: "noAccess", label: "No Access", group: "field" },
+    { key: "lastActivity", label: "Last Activity", group: "field" },
+    { key: "action", label: "Action", group: "field" },
+  ];
+
+  const defaultVisibility = {
+    rowNo: false,
+    account: false,
+    customer: false,
+    ward: false,
+  };
+
+  const groups = [
+    { key: "sales", label: "Sales row" },
+    { key: "meter", label: "Meter" },
+    { key: "address", label: "Address" },
+    { key: "field", label: "Field work" },
+  ];
+
+  function getVisibleColumns(visibility) {
+    return allColumns.filter((column) => {
+      if (column.key in visibility) {
+        return Boolean(visibility[column.key]);
+      }
+      return true;
+    });
+  }
+
+  // 1. Initial/Default state: all 4 are hidden, 9 remain visible
+  const initialVisible = getVisibleColumns(defaultVisibility);
+  assert.equal(initialVisible.length, 9);
+  assert.deepEqual(
+    initialVisible.map((c) => c.key),
+    ["meter", "meterMatch", "address", "addressMatch", "execution", "premise", "noAccess", "lastActivity", "action"],
+  );
+
+  // Band test: Sales band has span 0 and is excluded
+  const initialBands = irepsTableBands(initialVisible, groups);
+  assert.deepEqual(
+    initialBands.map((b) => ({ key: b.key, span: b.span })),
+    [
+      { key: "meter", span: 2 },
+      { key: "address", span: 2 },
+      { key: "field", span: 5 },
+    ],
+  );
+
+  // 2. Toggling 'Row' on
+  const withRow = getVisibleColumns({ ...defaultVisibility, rowNo: true });
+  assert.equal(withRow.length, 10);
+  assert.equal(withRow[0].key, "rowNo");
+  const withRowBands = irepsTableBands(withRow, groups);
+  assert.equal(withRowBands[0].key, "sales");
+  assert.equal(withRowBands[0].span, 1);
+
+  // 3. Toggling 'Account' and 'Ward' on
+  const withAccountAndWard = getVisibleColumns({ ...defaultVisibility, account: true, ward: true });
+  assert.equal(withAccountAndWard.length, 11);
+  assert.deepEqual(
+    withAccountAndWard.slice(0, 2).map((c) => c.key),
+    ["account", "ward"],
+  );
+  const withAccountAndWardBands = irepsTableBands(withAccountAndWard, groups);
+  assert.equal(withAccountAndWardBands[0].key, "sales");
+  assert.equal(withAccountAndWardBands[0].span, 2);
+
+  // 4. Toggling all 4 on
+  const allShown = getVisibleColumns({ rowNo: true, account: true, customer: true, ward: true });
+  assert.equal(allShown.length, 13);
+  const allShownBands = irepsTableBands(allShown, groups);
+  assert.equal(allShownBands[0].key, "sales");
+  assert.equal(allShownBands[0].span, 4);
+});
