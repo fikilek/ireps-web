@@ -82,6 +82,7 @@ service cloud.firestore {
       allow update: if active() && resource.data.metadata.createdByUid == request.auth.uid
         && changed(resource.data, request.resource.data, ['address', 'propertyType', 'units', 'occupancy', 'geometry', 'location', 'metadata'])
         && ownMetadata();
+      match /qaHistory/{event} { allow read: if active(); allow write: if false; }
     }
     match /settings/{id} { allow read: if active(); allow write: if platform(); }
     match /notifications/{id} { allow read: if active(); allow write: if false; }

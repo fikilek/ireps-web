@@ -20,7 +20,17 @@ import { requireActiveRoles, serviceProviderPatch, stampFieldSubmission } from "
 import { assertQaUnlocked } from "./qa/lock.js";
 
 import { onTrnWritten } from "./reports/trnReports.js";
-export { getTrnQaReview, saveTrnQaReview, getTrnQaAmendment, listTrnQaAmendments, saveTrnQaAmendment, markTrnQaNoticeRead } from "./qa/callables.js";
+export {
+  getTrnQaReview,
+  saveTrnQaReview,
+  getTrnQaAmendment,
+  listTrnQaAmendments,
+  saveTrnQaAmendment,
+  markTrnQaNoticeRead,
+  getPremiseQaReview,
+  savePremiseQaReview,
+  savePremiseCorrection,
+} from "./qa/callables.js";
 export { onQaEmailQueued, retryQaEmails } from "./qa/emailDelivery.js";
 
 import { rebuildMeterRegistryRow } from "./registry/meterRegistryRowRebuild.js";
@@ -31,6 +41,7 @@ import { rebuildMeterRegistryRowCallable } from "./registry/meterCallable.js";
 import { rebuildPremiseRegistryRow } from "./registry/premiseRegistryRowRebuild.js";
 import { rebuildPremiseMeterCounts } from "./registry/premiseMeterCountsRebuild.js";
 import { rebuildPremiseRegistryRowCallable } from "./registry/premiseCallable.js";
+import { invalidatePremiseQaIfSubstantive } from "./qa/premiseQaReview.js";
 
 import { rebuildErfPremiseCount } from "./registry/erfPremiseCountRebuild.js";
 import { rebuildErfMeterCounts } from "./registry/erfMeterCountsRebuild.js";
@@ -1173,6 +1184,17 @@ export const onPremiseUpdated = onDocumentUpdated(
 
     try {
       await rebuildPremiseRegistryRow(premiseId);
+
+      if (dataBefore?.qa?.status === "QA_PASS" || dataBefore?.qa?.status === "QA_FAIL") {
+        await invalidatePremiseQaIfSubstantive(
+          db,
+          dataBefore,
+          dataAfter,
+          premiseId,
+          metadata?.updatedByUid || "SYSTEM",
+          metadata?.updatedByUser || "System",
+        );
+      }
 
       await safeRun(
         "onPremiseUpdated ward registry refresh",

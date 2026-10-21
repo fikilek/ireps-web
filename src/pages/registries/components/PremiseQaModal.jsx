@@ -1,9 +1,15 @@
-/* eslint-disable no-unused-vars -- JSX component tags are consumed by React. */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { qaDate } from "../../../utils/qaDisplay.js";
 import "./PremiseQaModal.css";
 import { PREMISE_QA_REASONS } from "../../../utils/premiseQa.js";
+
+async function callQaBackend(name, payload, options) {
+  const { httpsCallable } = await import("firebase/functions");
+  const { functions } = await import("../../../firebase");
+  const fn = httpsCallable(functions, name, options);
+  return fn(payload);
+}
 
 const label = value => String(value).replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ");
 
@@ -47,6 +53,7 @@ export default function PremiseQaModal({
   premise,
   initialAction = "",
   reviewerRole = true,
+  qaPreview = false,
   onClose,
   onSaved,
 }) {
@@ -58,6 +65,12 @@ export default function PremiseQaModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(null);
+
+  const isSimulated = qaPreview || Boolean(premise?.isSample) || String(premise?.id || "").startsWith("PRM_DEMO_");
+  const premiseId = premise?.premiseId || premise?.id;
+
+  const [context, setContext] = useState(null);
+  const [loadingContext, setLoadingContext] = useState(!isSimulated);
 
   useEffect(() => {
     const element = dialog.current;
@@ -73,9 +86,36 @@ export default function PremiseQaModal({
     };
   }, []);
 
-  const rawQa = saved || premise?.qa;
-  const currentStatus = (saved ? saved.status : premise?.qa?.status) || "QA_PENDING";
+  useEffect(() => {
+    if (isSimulated || !premiseId) return;
+    let disposed = false;
+    setLoadingContext(true);
+    callQaBackend("getPremiseQaReview", { premiseId }, { timeout: 120000 })
+      .then(result => {
+        if (!disposed) {
+          setContext(result.data);
+        }
+      })
+      .catch(e => {
+        if (!disposed) {
+          setError(e.message || "The QA review could not be loaded from the server.");
+        }
+      })
+      .finally(() => {
+        if (!disposed) setLoadingContext(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [isSimulated, premiseId]);
+
+  const rawQa = saved || context?.qa || premise?.qa;
+  const currentStatus = (saved ? saved.status : context?.qa?.status || premise?.qa?.status) || "QA_PENDING";
   const isLocked = currentStatus === "QA_PASS" || currentStatus === "PASS";
+
+  const canReview = isSimulated
+    ? reviewerRole && !isLocked
+    : (context ? context.mayReview && !isLocked : reviewerRole && !isLocked);
 
   // Sample or actual evidence photos
   const mediaList = Array.isArray(premise?.media) && premise.media.length > 0
@@ -146,25 +186,27 @@ export default function PremiseQaModal({
     },
   ];
 
-  const history = saved
+  const displayHistory = saved
     ? [
         {
           eventId: saved.reviewId,
-          action: saved.status === "QA PASS" ? "QA_PASS" : "QA_FAIL",
+          action: (saved.status === "QA PASS" || saved.status === "QA_PASS") ? "QA_PASS" : "QA_FAIL",
           status: saved.status,
           actorName: saved.reviewedByUser,
           timestamp: saved.reviewedAt,
           reasonCode: saved.reasonCode,
           reasonLabel: saved.reasonLabel,
-          comment: saved.comment || "Simulated decision in preview mode.",
+          comment: saved.comment || "Review recorded.",
         },
-        ...initialHistory,
+        ...((context?.history) || (isSimulated ? initialHistory : [])),
       ]
-    : initialHistory;
+    : isSimulated
+      ? initialHistory
+      : (context?.history || []);
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
-    if (inFlight.current || !reviewerRole || isLocked) return;
+    if (inFlight.current || !canReview || isLocked) return;
     if (!["PASS", "FAIL"].includes(action)) {
       setError("Choose QA Pass or QA Fail.");
       return;
@@ -178,32 +220,63 @@ export default function PremiseQaModal({
       return;
     }
 
-    const selectedReason = PREMISE_QA_REASONS.find(r => r.code === reasonCode);
-    const newQaDecision = {
-      status: action === "PASS" ? "QA PASS" : "QA FAIL",
-      reviewId: `REV_SIM_${Date.now()}`,
-      reviewedAt: new Date().toISOString(),
-      reviewedByUser: "Office Reviewer (Simulated MNG)",
-      reasonCode: action === "FAIL" ? reasonCode : null,
-      reasonLabel: action === "FAIL" ? (selectedReason?.label || reasonCode) : null,
-      comment: comment.trim(),
-    };
-
     inFlight.current = true;
     setSaving(true);
     setError("");
 
-    // Simulate fast local UI review (protecting genuine backend data)
-    setTimeout(() => {
-      setSaved(newQaDecision);
-      setSaving(false);
-      inFlight.current = false;
+    if (isSimulated) {
+      const selectedReason = PREMISE_QA_REASONS.find(r => r.code === reasonCode);
+      const newQaDecision = {
+        status: action === "PASS" ? "QA PASS" : "QA FAIL",
+        reviewId: `REV_SIM_${Date.now()}`,
+        reviewedAt: new Date().toISOString(),
+        reviewedByUser: "Office Reviewer (Simulated MNG)",
+        reasonCode: action === "FAIL" ? reasonCode : null,
+        reasonLabel: action === "FAIL" ? (selectedReason?.label || reasonCode) : null,
+        comment: comment.trim(),
+      };
+
+      setTimeout(() => {
+        setSaved(newQaDecision);
+        setSaving(false);
+        inFlight.current = false;
+        onSaved?.({
+          premiseId,
+          qa: newQaDecision,
+        });
+        if (dialog.current) dialog.current.scrollTop = 0;
+      }, 250);
+      return;
+    }
+
+    try {
+      const requestId = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `REV_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+      const payload = {
+        premiseId,
+        requestId,
+        state: action,
+        sourceVersion: context?.sourceVersion || "",
+        reasonCode: action === "FAIL" ? reasonCode : null,
+        comment: comment.trim(),
+      };
+
+      const result = await callQaBackend("savePremiseQaReview", payload);
+      const returnedQa = result.data?.qa;
+      setSaved(returnedQa);
       onSaved?.({
-        premiseId: premise?.id || premise?.premiseId,
-        qa: newQaDecision,
+        premiseId,
+        qa: returnedQa,
       });
       if (dialog.current) dialog.current.scrollTop = 0;
-    }, 250);
+    } catch (err) {
+      setError(err?.message || "The QA decision could not be saved to the server.");
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
   }
 
   const selectedReasonObj = PREMISE_QA_REASONS.find(r => r.code === reasonCode);
@@ -256,8 +329,8 @@ export default function PremiseQaModal({
 
         {saved && (
           <p className="qa-success" role="status">
-            {saved.status} simulated by {saved.reviewedByUser} at {qaDate(saved.reviewedAt)}.
-            {saved.status === "QA PASS" ? " This premise is now marked locked." : " Awaiting field worker correction."}
+            {saved.status} {isSimulated ? "simulated by" : "saved by"} {saved.reviewedByUser} at {qaDate(saved.reviewedAt)}.
+            {(saved.status === "QA PASS" || saved.status === "QA_PASS") ? " This premise is now marked locked." : " Awaiting field worker correction."}
           </p>
         )}
 
@@ -293,7 +366,7 @@ export default function PremiseQaModal({
         </section>
 
         {/* Box 4: Decision Section */}
-        {reviewerRole && !isLocked && !saved ? (
+        {canReview && !saved ? (
           <form className="qa-form" onSubmit={submit}>
             <h3>Decision</h3>
             <label>
@@ -375,9 +448,11 @@ export default function PremiseQaModal({
                 ? `${saved.status} recorded.`
                 : isLocked
                   ? "This premise has passed QA and is locked against mobile edits."
-                  : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL"
-                    ? `QA FAIL: ${premise?.qa?.reasonLabel || selectedReasonObj?.label || "Awaiting field correction"}`
-                    : "Awaiting QA review."}
+                  : context && !context.mayReview
+                    ? (context.reason || "You do not have permission to review this premise.")
+                    : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL"
+                      ? `QA FAIL: ${premise?.qa?.reasonLabel || selectedReasonObj?.label || "Awaiting field correction"}`
+                      : "Awaiting QA review."}
             </p>
           </section>
         )}
@@ -385,18 +460,18 @@ export default function PremiseQaModal({
         {/* Box 5: Decision History */}
         <section className="qa-panel qa-history" aria-labelledby="qa-history-title">
           <h3 id="qa-history-title">Decision History</h3>
-          {history.length ? (
-            history.map((item, idx) => (
-              <article key={item.eventId || idx}>
+          {displayHistory.length ? (
+            displayHistory.map((item, idx) => (
+              <article key={item.eventId || item.id || idx}>
                 <strong>
-                  {item.status || item.action} · {item.actorName || "Office Reviewer"}
+                  {item.status || item.newStatus || item.action} · {item.actorName || item.actorByUser || item.reviewedByUser || "Office Reviewer"}
                 </strong>
                 <p style={{ color: "#64748b", fontSize: "12px", margin: "4px 0" }}>
-                  {qaDate(item.timestamp)}
+                  {qaDate(item.timestamp || item.reviewedAt || item.submittedAt)}
                 </p>
-                {item.reasonLabel && (
+                {(item.reasonLabel || item.reasonCode) && (
                   <p style={{ fontWeight: 600, color: "#991b1b", margin: "4px 0" }}>
-                    {item.reasonLabel}
+                    {item.reasonLabel || item.reasonCode}
                   </p>
                 )}
                 <p className="qa-comment">{item.comment || "No comment."}</p>

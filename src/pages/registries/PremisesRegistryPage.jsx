@@ -816,6 +816,7 @@ export default function PremisesRegistryPage() {
           premise={selectedQa.premise}
           initialAction={selectedQa.action}
           reviewerRole={reviewerRole || qaPreviewMode}
+          qaPreview={qaPreviewMode || Boolean(selectedQa.premise?.isSample) || String(selectedQa.premise?.id || "").startsWith("PRM_DEMO_")}
           onSaved={({ premiseId, qa }) => {
             setLocalQaOverrides(prev => ({
               ...prev,

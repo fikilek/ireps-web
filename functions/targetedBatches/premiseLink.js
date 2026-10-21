@@ -15,6 +15,7 @@ import {
 } from "../salesAllMeters/helpers.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork } from "./batch-work-guard.js";
+import { computePremiseDigest } from "../qa/premiseQaReview.js";
 
 export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 
@@ -901,9 +902,29 @@ export async function createOrLinkTargetedBatchPremise({
       team: allocatedTeam,
     });
 
+    const nowIso = now.toDate().toISOString();
+    const digest = computePremiseDigest(premisePayload);
+    const initialQa = {
+      status: "QA_PENDING",
+      reviewId: null,
+      sourceVersion: digest,
+      reasonCode: null,
+      reasonLabel: null,
+      comment: null,
+      reviewedAt: null,
+      reviewedByUid: null,
+      reviewedByUser: null,
+      resubmissionCount: 0,
+      lastSubmittedAt: nowIso,
+      lastSubmittedByUid: actorUid,
+      lastSubmittedByUser: actorName,
+      ruleVersion: 1,
+    };
+
     if (!premiseSnapshot.exists) {
       transaction.create(premiseRef, {
         ...premisePayload,
+        qa: initialQa,
         targetedBatchContext: canonicalContext,
       });
     } else {
@@ -914,7 +935,7 @@ export async function createOrLinkTargetedBatchPremise({
       // exactly as they are. Before this, picking a premise saved the link and threw the typing away, and
       // any photo taken went to Storage and was never referenced (reviewer, 2026-09-24).
       const premisePatch = {
-        "metadata.updatedAt": now.toDate().toISOString(),
+        "metadata.updatedAt": nowIso,
         "metadata.updatedByUid": actorUid,
         "metadata.updatedByUser": actorName,
       };
@@ -925,6 +946,10 @@ export async function createOrLinkTargetedBatchPremise({
         if (premisePayload?.[field] !== undefined) premisePatch[field] = premisePayload[field];
       }
 
+      if (!premiseSnapshot.data()?.qa?.status) {
+        premisePatch.qa = initialQa;
+      }
+
       transaction.update(premiseRef, premisePatch);
     }
 
@@ -933,18 +958,25 @@ export async function createOrLinkTargetedBatchPremise({
     if (movedFromSnapshot?.exists) {
       transaction.update(movedFromRef, {
         targetedBatchContext: null,
-        "metadata.updatedAt": now.toDate().toISOString(),
+        "metadata.updatedAt": nowIso,
         "metadata.updatedByUid": actorUid,
         "metadata.updatedByUser": actorName,
       });
     }
 
     if (!rowAlreadyLinked) {
+      const existingPremise = premiseSnapshot.exists ? (premiseSnapshot.data() || {}) : null;
+      const effectiveQaStatus = existingPremise?.qa?.status || "QA_PENDING";
       transaction.update(rowRef, {
         "execution.status": "IN_PROGRESS",
         "execution.startedAt": row?.execution?.startedAt || now,
         "execution.completedAt": null,
         "refs.premiseId": premiseRef.id,
+        "qa.premiseStatus": effectiveQaStatus,
+        "qa.premiseReviewedAt": existingPremise?.qa?.reviewedAt || null,
+        "qa.premiseReviewedByUser": existingPremise?.qa?.reviewedByUser || null,
+        "qa.premiseReasonCode": existingPremise?.qa?.reasonCode || null,
+        "qa.premiseReasonLabel": existingPremise?.qa?.reasonLabel || null,
         "metadata.updatedAt": now,
         "metadata.updatedByUid": actorUid,
         "metadata.updatedByUser": actorName,

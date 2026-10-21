@@ -42,6 +42,18 @@ export const buildPremiseRegistryRow = (premiseId, premise = {}) => {
       wardPcode: premise?.parents?.wardPcode || "NAv",
     },
 
+    qa: premise?.qa ? {
+      status: premise.qa.status || "QA_PENDING",
+      reviewedAt: premise.qa.reviewedAt || null,
+      reviewedByUser: premise.qa.reviewedByUser || null,
+      reasonCode: premise.qa.reasonCode || null,
+      reasonLabel: premise.qa.reasonLabel || null,
+      lastSubmittedAt: premise.qa.lastSubmittedAt || null,
+      lastSubmittedByUid: premise.qa.lastSubmittedByUid || null,
+      lastSubmittedByUser: premise.qa.lastSubmittedByUser || null,
+      resubmissionCount: premise.qa.resubmissionCount || 0,
+    } : null,
+
     metadata: {
       createdAt,
       createdByUid,
