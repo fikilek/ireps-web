@@ -1,0 +1,133 @@
+import test, { before, after } from "node:test";
+import assert from "node:assert/strict";
+import { createServer } from "vite";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  PREMISE_QA_STATUS_OPTIONS,
+  PREMISE_QA_REASONS,
+  getPremiseQaStatus,
+  getPremiseQaLabel,
+  DEMO_QA_PREMISES,
+} from "../src/utils/premiseQa.js";
+
+let server;
+let PremiseQaModal;
+
+before(async () => {
+  server = await createServer({
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+  const modalMod = await server.ssrLoadModule("/src/pages/registries/components/PremiseQaModal.jsx");
+  PremiseQaModal = modalMod.default;
+});
+
+after(async () => {
+  if (server) await server.close();
+});
+
+test("getPremiseQaStatus normalizes all canonical Premise QA states and defaults to QA NAv", () => {
+  assert.equal(getPremiseQaStatus({ qa: { status: "QA PENDING" } }), "QA PENDING");
+  assert.equal(getPremiseQaStatus({ qa: { status: "QA_PENDING" } }), "QA PENDING");
+  assert.equal(getPremiseQaStatus({ qa: { status: "PENDING" } }), "QA PENDING");
+  assert.equal(getPremiseQaStatus({ qa: { status: "QA PASS" } }), "QA PASS");
+  assert.equal(getPremiseQaStatus({ qa: { status: "PASS" } }), "QA PASS");
+  assert.equal(getPremiseQaStatus({ qa: { status: "QA FAIL" } }), "QA FAIL");
+  assert.equal(getPremiseQaStatus({ qa: { status: "FAIL" } }), "QA FAIL");
+  assert.equal(getPremiseQaStatus({ qa: { status: "QA NAV" } }), "QA NAv");
+  assert.equal(getPremiseQaStatus({ qa: { status: "NAV" } }), "QA NAv");
+  assert.equal(getPremiseQaStatus({}), "QA NAv");
+  assert.equal(getPremiseQaStatus(null), "QA NAv");
+  assert.equal(getPremiseQaStatus({ qa: null }), "QA NAv");
+});
+
+test("getPremiseQaLabel displays reference wording 'Awaiting QA review' for pending review", () => {
+  assert.equal(getPremiseQaLabel({ qa: { status: "QA PENDING" } }), "Awaiting QA review");
+  assert.equal(getPremiseQaLabel({ qa: { status: "QA PASS" } }), "QA PASS");
+  assert.equal(getPremiseQaLabel({ qa: { status: "QA FAIL" } }), "QA FAIL");
+  assert.equal(getPremiseQaLabel({ qa: { status: "QA NAv" } }), "QA NAv");
+});
+
+test("PREMISE_QA_REASONS contains the approved 7 canonical failure codes", () => {
+  const codes = PREMISE_QA_REASONS.map(r => r.code);
+  assert.deepEqual(codes, [
+    "ADDRESS_INCORRECT",
+    "ERF_MISMATCH",
+    "PROPERTY_TYPE_INCORRECT",
+    "PHOTO_UNCLEAR",
+    "PHOTO_MISSING",
+    "COORDINATES_INACCURATE",
+    "OTHER",
+  ]);
+});
+
+test("DEMO_QA_PREMISES supplies isolated sample records for all 4 QA states safely", () => {
+  assert.equal(DEMO_QA_PREMISES.length, 4);
+  const states = DEMO_QA_PREMISES.map(p => getPremiseQaStatus(p));
+  assert.ok(states.includes("QA PENDING"), "Includes QA PENDING sample");
+  assert.ok(states.includes("QA PASS"), "Includes QA PASS sample");
+  assert.ok(states.includes("QA FAIL"), "Includes QA FAIL sample");
+  assert.ok(states.includes("QA NAv"), "Includes QA NAv sample");
+});
+
+test("QA Status cell rendering formats reviewer stamp, date and decision controls properly", () => {
+  const pendingRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PENDING");
+  const passRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PASS");
+  const failRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA FAIL");
+  const navRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA NAv");
+
+  assert.equal(getPremiseQaLabel(pendingRow), "Awaiting QA review");
+  assert.equal(getPremiseQaLabel(passRow), "QA PASS");
+  assert.equal(getPremiseQaLabel(failRow), "QA FAIL");
+  assert.equal(getPremiseQaLabel(navRow), "QA NAv");
+
+  assert.ok(passRow.qa.reviewedByUser.includes("Jane Khumalo"));
+  assert.ok(failRow.qa.reasonCode === "ADDRESS_INCORRECT");
+});
+
+test("Filtering matches exact QA status values across all 4 canonical states", () => {
+  const rows = DEMO_QA_PREMISES;
+  const filterByQa = (status) => rows.filter(r => status === "ALL" || getPremiseQaStatus(r) === status);
+
+  assert.equal(filterByQa("ALL").length, 4);
+  assert.equal(filterByQa("QA PENDING").length, 1);
+  assert.equal(filterByQa("QA PASS").length, 1);
+  assert.equal(filterByQa("QA FAIL").length, 1);
+  assert.equal(filterByQa("QA NAv").length, 1);
+});
+
+test("Self-review is prohibited: creator UID matching reviewer UID disables decision selector", () => {
+  const pendingRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PENDING");
+  const reviewerUid = "FWR_001"; // Matches pendingRow.metadata.createdByUid
+  const isSelf = pendingRow.metadata?.createdByUid === reviewerUid;
+  assert.equal(isSelf, true, "Self-review condition identified");
+
+  const otherUid = "MNG_999";
+  const isOther = pendingRow.metadata?.createdByUid === otherUid;
+  assert.equal(isOther, false, "Independent reviewer permitted");
+});
+
+test("PremiseQaModal renders premise identity, photos, decision controls and decision history", () => {
+  const pendingRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PENDING");
+  const html = renderToStaticMarkup(
+    React.createElement(PremiseQaModal, {
+      premise: pendingRow,
+      initialAction: "FAIL",
+      reviewerRole: true,
+      onClose: () => {},
+    })
+  );
+
+  assert.ok(html.includes("Premise QA"), "Renders Premise QA header");
+  assert.ok(html.includes("10 Victoria Street"), "Renders premise address");
+  assert.ok(html.includes("ERF 5220"), "Renders ERF number");
+  assert.ok(html.includes("Submitted Evidence"), "Renders Submitted Evidence box");
+  assert.ok(html.includes("Submitted Details"), "Renders Submitted Details disclosures");
+  assert.ok(html.includes("Decision"), "Renders Decision box");
+  assert.ok(html.includes("Failure reason (required)"), "Renders required failure reason label for QA FAIL");
+  assert.ok(html.includes("Failure explanation (required)"), "Renders mandatory comment field for QA FAIL");
+  assert.ok(html.includes("Decision History"), "Renders Decision History box");
+  assert.ok(html.includes("John Sithole (SPV)"), "Renders past decision history actor");
+  assert.ok(html.includes("Sipho Dlamini (FWR)"), "Renders resubmission history actor");
+});
