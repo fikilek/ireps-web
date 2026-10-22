@@ -67,7 +67,7 @@ export default function IrepsTable({
   stickyFirstColumn = false,
   // Pin a named column even when optional columns appear before it.
   stickyColumnKey = null,
-  topScrollbar = false,
+  topScrollbar = true,
   maxHeight,
   rowStyle,
   onRowClick,

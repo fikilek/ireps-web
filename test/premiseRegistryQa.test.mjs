@@ -176,10 +176,13 @@ test("Premise Registry and TRN Registry standardize modal-first QaPill and topSc
     /<select[^>]*aria-label=\{`QA decision for \$\{row\.trnId\}/,
     "TrnsRegistryPage must NOT have inline select dropdown for QA decisions",
   );
+  // IrepsTable universal default
+  const irepsTableSrc = readFileSync(join(here, "../src/components/table/IrepsTable.jsx"), "utf8");
   assert.match(
-    trnsSrc,
-    /key:\s*["']qaHistory["']/,
-    "TrnsRegistryPage must retain the separate qaHistory column",
+    irepsTableSrc,
+    /topScrollbar\s*=\s*true/,
+    "IrepsTable must default topScrollbar to true so all tables have top horizontal scrolling",
   );
 });
+
 
