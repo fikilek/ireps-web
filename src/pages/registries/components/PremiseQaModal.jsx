@@ -275,10 +275,6 @@ export default function PremiseQaModal({
       setError("Choose a failure reason.");
       return;
     }
-    if (action === "FAIL" && !comment.trim()) {
-      setError("Please provide a mandatory comment explaining the reason for QA failure.");
-      return;
-    }
 
     inFlight.current = true;
     setSaving(true);
@@ -475,11 +471,11 @@ export default function PremiseQaModal({
             )}
 
             <label>
-              {action === "FAIL" ? "Failure explanation (required)" : "Comment (optional)"}
+              {action === "FAIL" ? "Failure explanation (optional)" : "Comment (optional)"}
               <textarea
                 value={comment}
                 disabled={saving}
-                required={action === "FAIL"}
+                required={false}
                 maxLength={4000}
                 rows={4}
                 placeholder={

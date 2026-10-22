@@ -126,7 +126,7 @@ test("PremiseQaModal renders premise identity, photos, decision controls and dec
   assert.ok(html.includes("Submitted Details"), "Renders Submitted Details disclosures");
   assert.ok(html.includes("Decision"), "Renders Decision box");
   assert.ok(html.includes("Failure reason (required)"), "Renders required failure reason label for QA FAIL");
-  assert.ok(html.includes("Failure explanation (required)"), "Renders mandatory comment field for QA FAIL");
+  assert.ok(html.includes("Failure explanation (optional)"), "Renders optional comment field for QA FAIL");
   assert.ok(html.includes("Decision History"), "Renders Decision History box");
   assert.ok(html.includes("John Sithole (SPV)"), "Renders past decision history actor");
   assert.ok(html.includes("Sipho Dlamini (FWR)"), "Renders resubmission history actor");

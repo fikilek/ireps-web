@@ -256,13 +256,6 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
     );
   }
 
-  if (state === "FAIL" && !comment) {
-    throw new HttpsError(
-      "invalid-argument",
-      "A QA failure requires an explanatory comment.",
-    );
-  }
-
   const premiseRef = db.doc(`premises/${premiseId}`);
   const historyRef = premiseRef.collection("qaHistory").doc(requestId);
   const registryRef = db.doc(`registry_premises/${premiseId}`);
