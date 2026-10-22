@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX tags are consumed by React; this ESLint profile does not track them. */
 import { irepsTableDateRange as getUpdatedAtFilterRange } from "../../components/table/irepsTableModel.js";
 import DataActionButton from "../../components/table/DataActionButton";
+import QaPill from "../../components/table/QaPill";
 import IrepsTable from "../../components/table/IrepsTable";
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -548,26 +549,18 @@ export default function PremisesRegistryPage() {
         const isSelf = submitterUid && submitterUid === uid;
         const mayReview = (reviewerRole || qaPreviewMode) && isPending && !isSelf;
 
+        const isEligible = status !== "QA NAv";
+
         return (
           <div className="qa-status-cell">
-            <div className="qa-cell">
-              <strong>{getPremiseQaLabel(row)}</strong>
-              {mayReview && (
-                <select
-                  aria-label={`QA decision for premise ${row.premiseId || row.id}`}
-                  value=""
-                  onChange={event => {
-                    if (event.target.value) {
-                      setSelectedQa({ premise: row, action: event.target.value });
-                    }
-                  }}
-                >
-                  <option value="">Choose QA…</option>
-                  <option value="PASS">QA Pass</option>
-                  <option value="FAIL">QA Fail</option>
-                </select>
-              )}
-            </div>
+            <QaPill
+              status={status}
+              label={getPremiseQaLabel(row)}
+              disabled={!isEligible}
+              onClick={isEligible ? () => setSelectedQa({ premise: row, action: "" }) : undefined}
+              title={isEligible ? `Open QA Review for premise ${row.premiseId || row.id}` : "No QA review available"}
+              ariaLabel={`QA Status: ${getPremiseQaLabel(row)}`}
+            />
             {isPending && row.qa?.resubmissionCount > 0 && row.qa?.lastSubmittedByUser ? (
               <small>
                 Corrected by {row.qa.lastSubmittedByUser}
@@ -798,6 +791,7 @@ export default function PremisesRegistryPage() {
               filteredRows={filteredPremiseRows}
               filterRows={filterRegistryRows}
               defaultSort={DEFAULT_SORT}
+              topScrollbar
               downloads={{
                 registryName: "Premise Registry",
                 rowsLabel: "premises",

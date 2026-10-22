@@ -7,6 +7,7 @@ import DataActionButton, {
   WardActionIcon,
 } from "../../components/table/DataActionButton";
 import IrepsTable from "../../components/table/IrepsTable";
+import QaPill from "../../components/table/QaPill";
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -918,18 +919,23 @@ export default function TrnsRegistryPage() {
     filterOptions: [...QA_STATUS_OPTIONS.map(value => ({ value, label: value === "COMPLETED" ? "Awaiting QA review" : value })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
     value: row => qaLifecycleStatus(row),
     render: row => {
-      const mayReview = reviewerRole && ["COMPLETED", "QA UPDATED"].includes(qaLifecycleStatus(row))
-        && row.fieldSubmitter?.uid && row.fieldSubmitter.uid !== uid
-        && !(row.qa?.amendedByUids || []).includes(uid)
-        && mncPcodesOf(reviewerProvider).includes(row.lmPcode)
-        && resolveMainContractor(row.serviceProviderId, providers)?.id === serviceProvider?.id;
-      return <div className="qa-status-cell"><div className="qa-cell"><strong>{qaLifecycleLabel(row)}</strong>
-        {mayReview && <select aria-label={`QA decision for ${row.trnId}`} value="" onChange={event => { if (event.target.value) setSelectedQa({ trnId: row.trnId, action: event.target.value }); }}><option value="">Choose QA…</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select>}
+      const status = qaLifecycleStatus(row);
+      const isEligible = status !== "NOT_ELIGIBLE";
+      return (
+        <div className="qa-status-cell">
+          <QaPill
+            status={status}
+            label={qaLifecycleLabel(row)}
+            disabled={!isEligible}
+            onClick={isEligible ? () => setSelectedQa({ trnId: row.trnId, action: "" }) : undefined}
+            title={isEligible ? `Open QA Review for ${row.trnId}` : "Not eligible for QA review"}
+            ariaLabel={`QA Status: ${qaLifecycleLabel(row)}`}
+          />
+          {["COMPLETED", "QA UPDATED"].includes(status) && row.qa?.lastAmendment
+            ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
+            : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
         </div>
-        {["COMPLETED", "QA UPDATED"].includes(qaLifecycleStatus(row)) && row.qa?.lastAmendment
-          ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
-          : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
-      </div>;
+      );
     },
   }, {
     key: "qaHistory", label: "QA History", sortable: false,
