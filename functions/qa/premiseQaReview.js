@@ -129,27 +129,35 @@ export function premiseReviewAccess({ actorUid, actor, providers, premise }, { c
 }
 
 // Project Premise QA result onto linked Targeted Batch row with rigorous bidirectional validation
-export async function projectPremiseQaToTbRow(tx, db, premiseId, premise, qaState, reviewerDetails = {}) {
+export async function readPremiseQaTbRow(tx, db, premiseId, premise) {
   const tbContext = premise?.targetedBatchContext;
   if (!tbContext || !tbContext.tbId || !tbContext.rowId) {
-    return { projected: false, reason: "NO_TB_CONTEXT" };
+    return { canProject: false, reason: "NO_TB_CONTEXT" };
   }
 
   const rowRef = db.collection("tb_rows").doc(tbContext.rowId);
   const rowSnap = await tx.get(rowRef);
 
   if (!rowSnap.exists) {
-    return { projected: false, reason: "ROW_NOT_FOUND" };
+    return { canProject: false, reason: "ROW_NOT_FOUND" };
   }
 
   const row = rowSnap.data() || {};
 
   // Safeguard: Verify row's refs.premiseId matches this premiseId and tbId matches
   if (row.refs?.premiseId !== premiseId) {
-    return { projected: false, reason: "ROW_PREMISE_ID_MISMATCH" };
+    return { canProject: false, reason: "ROW_PREMISE_ID_MISMATCH" };
   }
   if (row.tbId !== tbContext.tbId) {
-    return { projected: false, reason: "ROW_TB_ID_MISMATCH" };
+    return { canProject: false, reason: "ROW_TB_ID_MISMATCH" };
+  }
+
+  return { canProject: true, rowRef, rowId: tbContext.rowId };
+}
+
+export function applyPremiseQaTbRowProjection(tx, tbRowPlan, qaState, reviewerDetails = {}) {
+  if (!tbRowPlan?.canProject || !tbRowPlan?.rowRef) {
+    return { projected: false, reason: tbRowPlan?.reason || "CANNOT_PROJECT" };
   }
 
   const nowIso = new Date().toISOString();
@@ -164,8 +172,13 @@ export async function projectPremiseQaToTbRow(tx, db, premiseId, premise, qaStat
     "metadata.updatedByUser": reviewerDetails.reviewedByUser || "SYSTEM",
   };
 
-  tx.update(rowRef, updateData);
-  return { projected: true, rowId: tbContext.rowId };
+  tx.update(tbRowPlan.rowRef, updateData);
+  return { projected: true, rowId: tbRowPlan.rowId };
+}
+
+export async function projectPremiseQaToTbRow(tx, db, premiseId, premise, qaState, reviewerDetails = {}) {
+  const plan = await readPremiseQaTbRow(tx, db, premiseId, premise);
+  return applyPremiseQaTbRowProjection(tx, plan, qaState, reviewerDetails);
 }
 
 // Fetch Premise QA review context
@@ -279,6 +292,9 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
     const providers = providersSnap.docs.map((doc) => ({ ...doc.data(), id: doc.id }));
     const premise = premiseSnap.data();
 
+    // Read TB row before any writes to adhere to Firestore transaction requirement (all reads before writes)
+    const tbRowPlan = await readPremiseQaTbRow(tx, db, premiseId, premise);
+
     // Idempotency: check if requestId was already processed
     if (historySnap.exists) {
       const saved = historySnap.data();
@@ -385,7 +401,7 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
     );
 
     // 4. Project onto linked Targeted Batch row (under linkage guards)
-    await projectPremiseQaToTbRow(tx, db, premiseId, premise, qaStateName, {
+    applyPremiseQaTbRowProjection(tx, tbRowPlan, qaStateName, {
       reviewedAt: nowIso,
       reviewedByUser: reviewerDisplayName,
       reviewedByUid: actorUid,
@@ -429,6 +445,9 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
 
     const actor = userSnap.data();
     const premise = premiseSnap.data();
+
+    // Read TB row before any writes to adhere to Firestore transaction requirement (all reads before writes)
+    const tbRowPlan = await readPremiseQaTbRow(tx, db, premiseId, premise);
 
     // Authority check: user must be the creator, last submitter, or an authorized FWR/SPV
     const creatorUid = qaText(premise.metadata?.createdByUid);
@@ -533,7 +552,7 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
     );
 
     // 4. Update TB row projection
-    await projectPremiseQaToTbRow(tx, db, premiseId, premise, "QA_PENDING", {
+    applyPremiseQaTbRowProjection(tx, tbRowPlan, "QA_PENDING", {
       reviewedAt: null,
       reviewedByUser: null,
       reviewedByUid: actorUid,
