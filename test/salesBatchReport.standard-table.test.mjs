@@ -644,3 +644,36 @@ test("Phase 2: Gating helper logic and QA Final validation", () => {
   assert.equal(getQaFinalStatus(failFinalRow), "QA FAIL");
 });
 
+test("Phase 2: Default sort by lastActivity descending and read model QA projection", async () => {
+  assert.match(
+    salesBatchReportSrc,
+    /defaultSort=\{\{\s*key:\s*["']lastActivity["'],\s*direction:\s*["']desc["']\s*\}\}/,
+    "Targeted Batch Field Results must default to sorting by lastActivity descending",
+  );
+
+  const { normalizeTargetedBatchReportRow } = await import(
+    "../src/pages/sales/models/salesTargetedBatchReadModel.js"
+  );
+
+  const sampleNormalized = normalizeTargetedBatchReportRow({
+    row: {
+      id: "tb_row_123",
+      rowNo: 4,
+      qa: { premiseStatus: "QA_PENDING", reviewedAt: null },
+      tbRefs: { fieldWork: { premiseId: "PRM_001" } },
+    },
+  });
+
+  assert.equal(
+    sampleNormalized.qa?.premiseStatus,
+    "QA_PENDING",
+    "normalizeTargetedBatchReportRow must preserve the qa object",
+  );
+  assert.equal(
+    sampleNormalized.premise?.qaStatus,
+    "QA_PENDING",
+    "normalizeTargetedBatchReportRow must project qaStatus onto the premise object",
+  );
+});
+
+
