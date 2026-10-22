@@ -494,7 +494,7 @@ export default function PremiseQaModal({
               <button
                 type="submit"
                 className="qa-confirm"
-                disabled={saving || !action || (action === "FAIL" && (!reasonCode || !comment.trim()))}
+                disabled={saving || !action || (action === "FAIL" && !reasonCode)}
               >
                 {saving
                   ? "Saving QA…"
