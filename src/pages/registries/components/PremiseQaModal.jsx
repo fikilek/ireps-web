@@ -319,7 +319,7 @@ export default function PremiseQaModal({
             <span>{propertyDetails.propertyType} · {propertyDetails.propertyName}</span>
             <span>{propertyDetails.occupancyStatus}</span>
             <strong>
-              {saved ? saved.status : (currentStatus === "QA_PASS" || currentStatus === "QA PASS") ? "QA PASS · Locked" : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL" ? "QA FAIL" : "Awaiting QA review"}
+              {saved ? saved.status : (currentStatus === "QA_PASS" || currentStatus === "QA PASS") ? "QA PASS · Locked" : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL" ? "QA FAIL" : "QA PENDING"}
             </strong>
             <span>
               Submitted by {premise?.metadata?.createdByUser || premise?.createdByUser || "Sipho Dlamini (FWR)"}
@@ -452,7 +452,7 @@ export default function PremiseQaModal({
                     ? (context.reason || "You do not have permission to review this premise.")
                     : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL"
                       ? `QA FAIL: ${premise?.qa?.reasonLabel || selectedReasonObj?.label || "Awaiting field correction"}`
-                      : "Awaiting QA review."}
+                      : "QA PENDING."}
             </p>
           </section>
         )}
