@@ -534,7 +534,7 @@ export default function PremisesRegistryPage() {
       sortable: true,
       filterOptions: [
         { value: "ALL", label: "ALL" },
-        { value: "QA PENDING", label: "Awaiting QA review" },
+        { value: "QA PENDING", label: "QA PENDING" },
         { value: "QA PASS", label: "QA PASS" },
         { value: "QA FAIL", label: "QA FAIL" },
         { value: "QA NAv", label: "QA NAv" },

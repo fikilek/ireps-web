@@ -27,9 +27,7 @@ export function getPremiseQaStatus(row) {
 }
 
 export function getPremiseQaLabel(row) {
-  const status = getPremiseQaStatus(row);
-  if (status === "QA PENDING") return "Awaiting QA review";
-  return status;
+  return getPremiseQaStatus(row);
 }
 
 // Isolated sample preview records to demonstrate all 4 states safely without altering real Firestore data

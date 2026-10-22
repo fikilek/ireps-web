@@ -42,8 +42,8 @@ test("getPremiseQaStatus normalizes all canonical Premise QA states and defaults
   assert.equal(getPremiseQaStatus({ qa: null }), "QA NAv");
 });
 
-test("getPremiseQaLabel displays reference wording 'Awaiting QA review' for pending review", () => {
-  assert.equal(getPremiseQaLabel({ qa: { status: "QA PENDING" } }), "Awaiting QA review");
+test("getPremiseQaLabel displays authoritative 'QA PENDING' for pending review", () => {
+  assert.equal(getPremiseQaLabel({ qa: { status: "QA PENDING" } }), "QA PENDING");
   assert.equal(getPremiseQaLabel({ qa: { status: "QA PASS" } }), "QA PASS");
   assert.equal(getPremiseQaLabel({ qa: { status: "QA FAIL" } }), "QA FAIL");
   assert.equal(getPremiseQaLabel({ qa: { status: "QA NAv" } }), "QA NAv");
@@ -77,7 +77,7 @@ test("QA Status cell rendering formats reviewer stamp, date and decision control
   const failRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA FAIL");
   const navRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA NAv");
 
-  assert.equal(getPremiseQaLabel(pendingRow), "Awaiting QA review");
+  assert.equal(getPremiseQaLabel(pendingRow), "QA PENDING");
   assert.equal(getPremiseQaLabel(passRow), "QA PASS");
   assert.equal(getPremiseQaLabel(failRow), "QA FAIL");
   assert.equal(getPremiseQaLabel(navRow), "QA NAv");
