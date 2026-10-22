@@ -469,9 +469,13 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
 
     const actor = userSnap.data();
     const premise = premiseSnap.data();
+    const effectivePremise = {
+      ...premise,
+      targetedBatchContext: premise.targetedBatchContext || payload.targetedBatchContext || null,
+    };
 
     // Read TB row before any writes to adhere to Firestore transaction requirement (all reads before writes)
-    const tbRowPlan = await readPremiseQaTbRow(tx, db, premiseId, premise);
+    const tbRowPlan = await readPremiseQaTbRow(tx, db, premiseId, effectivePremise);
 
     // Authority check: user must be the creator, last submitter, or an authorized FWR/SPV
     const creatorUid = qaText(premise.metadata?.createdByUid);
@@ -549,6 +553,7 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
       ...(payload.occupancy ? { occupancy: payload.occupancy } : {}),
       ...(payload.geometry ? { geometry: payload.geometry } : {}),
       ...(payload.media ? { media: payload.media } : {}),
+      ...(payload.context ? { context: payload.context } : {}),
       qa: resetQa,
       "metadata.updatedAt": nowIso,
       "metadata.updatedByUid": actorUid,
@@ -559,6 +564,11 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
     tx.set(
       registryRef,
       {
+        ...(payload.address ? { address: payload.address } : {}),
+        ...(payload.propertyType ? { propertyType: payload.propertyType } : {}),
+        ...(payload.occupancy ? { occupancy: payload.occupancy } : {}),
+        ...(payload.geometry ? { geometry: payload.geometry } : {}),
+        ...(payload.context ? { context: payload.context } : {}),
         qa: {
           status: "QA_PENDING",
           reviewedAt: null,
