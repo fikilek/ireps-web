@@ -118,20 +118,49 @@ export default function PremiseQaModal({
     if (isSimulated || !premiseId) return;
     let disposed = false;
     setLoadingContext(true);
-    callQaBackend("getPremiseQaReview", { premiseId }, { timeout: 120000 })
-      .then(result => {
-        if (!disposed) {
-          setContext(result.data);
+
+    const loadReview = async () => {
+      let backendData = null;
+      let loadErr = null;
+      try {
+        const result = await callQaBackend("getPremiseQaReview", { premiseId }, { timeout: 120000 });
+        backendData = result.data;
+      } catch (e) {
+        loadErr = e;
+      }
+
+      // If media is not already returned or if backend call failed, load directly from Firestore
+      if (!backendData?.media?.length) {
+        try {
+          const { doc, getDoc } = await import("firebase/firestore");
+          const { db } = await import("../../../firebase");
+          const snap = await getDoc(doc(db, "premises", premiseId));
+          if (snap.exists()) {
+            const raw = snap.data();
+            const fallbackMedia = Array.isArray(raw?.media) ? raw.media : [];
+            backendData = {
+              ...(backendData || {}),
+              media: fallbackMedia,
+              premise: { ...(backendData?.premise || {}), ...raw },
+            };
+          }
+        } catch {
+          // Ignore fallback errors and proceed with whatever backendData or error exists
         }
-      })
-      .catch(e => {
-        if (!disposed) {
-          setError(e.message || "The QA review could not be loaded from the server.");
+      }
+
+      if (!disposed) {
+        if (backendData) {
+          setContext(backendData);
+        } else if (loadErr) {
+          setError(loadErr.message || "The QA review could not be loaded from the server.");
         }
-      })
-      .finally(() => {
-        if (!disposed) setLoadingContext(false);
-      });
+        setLoadingContext(false);
+      }
+    };
+
+    loadReview();
+
     return () => {
       disposed = true;
     };
