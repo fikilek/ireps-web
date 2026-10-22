@@ -131,3 +131,55 @@ test("PremiseQaModal renders premise identity, photos, decision controls and dec
   assert.ok(html.includes("John Sithole (SPV)"), "Renders past decision history actor");
   assert.ok(html.includes("Sipho Dlamini (FWR)"), "Renders resubmission history actor");
 });
+
+test("Premise Registry and TRN Registry standardize modal-first QaPill and topScrollbar", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { join } = await import("node:path");
+
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  const premisesSrc = readFileSync(join(here, "../src/pages/registries/PremisesRegistryPage.jsx"), "utf8");
+  const trnsSrc = readFileSync(join(here, "../src/pages/registries/TrnsRegistryPage.jsx"), "utf8");
+
+  // Premise Registry topScrollbar
+  assert.match(
+    premisesSrc,
+    /<IrepsTable[\s\S]*?topScrollbar/,
+    "PremisesRegistryPage must pass topScrollbar to IrepsTable",
+  );
+
+  // Premise Registry QaPill and no inline select
+  assert.match(
+    premisesSrc,
+    /<QaPill\s+status=\{status\}/,
+    "PremisesRegistryPage must render QaPill for QA Status column",
+  );
+  assert.doesNotMatch(
+    premisesSrc,
+    /<select[^>]*aria-label=\{`QA decision for premise/,
+    "PremisesRegistryPage must NOT have inline select dropdown for QA decisions",
+  );
+  assert.match(
+    premisesSrc,
+    /key:\s*["']qaHistory["']/,
+    "PremisesRegistryPage must retain the separate qaHistory column",
+  );
+
+  // TRN Registry QaPill and no inline select
+  assert.match(
+    trnsSrc,
+    /<QaPill\s+status=\{status\}/,
+    "TrnsRegistryPage must render QaPill for QA Status column",
+  );
+  assert.doesNotMatch(
+    trnsSrc,
+    /<select[^>]*aria-label=\{`QA decision for \$\{row\.trnId\}/,
+    "TrnsRegistryPage must NOT have inline select dropdown for QA decisions",
+  );
+  assert.match(
+    trnsSrc,
+    /key:\s*["']qaHistory["']/,
+    "TrnsRegistryPage must retain the separate qaHistory column",
+  );
+});
+
