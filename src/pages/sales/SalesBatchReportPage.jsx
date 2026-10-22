@@ -100,9 +100,10 @@ function normalizeQaStatus(value) {
 }
 
 function getPremiseQaStatus(row) {
-  if (!isRowCompleted(row)) return "QA NAv";
   const raw = row?.premise?.qaStatus ?? row?.qa?.premiseStatus;
-  return raw ? normalizeQaStatus(raw) : "QA NAv";
+  if (raw) return normalizeQaStatus(raw);
+  if (!isRowCompleted(row)) return "QA NAv";
+  return "QA NAv";
 }
 
 function getNoAccessQaStatus(row) {
@@ -1109,7 +1110,7 @@ export default function SalesBatchReportPage() {
           groups={columnGroups}
           rows={rows}
           rowKey={(row) => row.id}
-          defaultSort={{ key: "rowNo", direction: "asc" }}
+          defaultSort={{ key: "lastActivity", direction: "desc" }}
           defaultPageSize={5}
           loading={!allReady && rows.length === 0}
           loadingText="Joining live Sales and field-result records..."
