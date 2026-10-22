@@ -13,6 +13,20 @@ async function callQaBackend(name, payload, options) {
 
 const label = value => String(value).replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ");
 
+function formatPhotoTag(tag, index) {
+  if (!tag) return `Photograph ${index + 1}`;
+  const map = {
+    propertyAdrPhoto: "Property Address Photo",
+    propertyTypePhoto: "Property Type Photo",
+    propertyBoundaryPhoto: "Property Boundary & Gate Photo",
+    boundaryPhoto: "Property Boundary Photo",
+    facadePhoto: "Front Facade Photo",
+    gatePhoto: "Gate Photo",
+  };
+  if (map[tag]) return map[tag];
+  return label(tag).replace(/\bphoto\b/i, "Photo");
+}
+
 function Fields({ value }) {
   if (value === null || value === undefined || value === "") return <span>NAv</span>;
   if (typeof value !== "object") return <span>{String(value)}</span>;
@@ -32,12 +46,26 @@ function Fields({ value }) {
 
 function Evidence({ item, index }) {
   const [failed, setFailed] = useState(false);
-  const name = label(item.tag || `Evidence ${index + 1}`);
+  const name = formatPhotoTag(item.tag, index);
+  const gps = item.gps?.lat && item.gps?.lng ? `${item.gps.lat.toFixed(5)}, ${item.gps.lng.toFixed(5)}` : null;
+  const createdDate = item.created?.at ? qaDate(item.created.at) : null;
+  const createdBy = item.created?.byUser || null;
+
   return (
     <figure className="qa-evidence-item">
-      <figcaption>{name}</figcaption>
+      <figcaption>
+        <strong>{name}</strong>
+        {gps || createdDate ? (
+          <small className="qa-photo-meta" style={{ display: "block", fontSize: "0.72rem", color: "#64748b", marginTop: "2px" }}>
+            {gps ? `GPS: ${gps}` : null}
+            {gps && createdDate ? " · " : null}
+            {createdDate ? createdDate : null}
+            {createdBy ? ` by ${createdBy}` : null}
+          </small>
+        ) : null}
+      </figcaption>
       {failed || !item.url ? (
-        <p role="status" style={{ padding: "16px", color: "#64748b", textAlign: "center" }}>
+        <p role="status" style={{ padding: "24px 16px", color: "#64748b", textAlign: "center", background: "#f8fafc", borderRadius: "6px" }}>
           Evidence unavailable
         </p>
       ) : (
@@ -117,37 +145,40 @@ export default function PremiseQaModal({
     ? reviewerRole && !isLocked
     : (context ? context.mayReview && !isLocked : reviewerRole && !isLocked);
 
-  // Sample or actual evidence photos
-  const mediaList = Array.isArray(premise?.media) && premise.media.length > 0
-    ? premise.media
-    : [
-        {
-          tag: "Front Facade & Street Number",
-          url: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22400%22%20height%3D%22260%22%20viewBox%3D%220%200%20400%20260%22%3E%3Crect%20fill%3D%22%23e2e8f0%22%20width%3D%22400%22%20height%3D%22260%22%2F%3E%3Ctext%20fill%3D%22%23475569%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20font-weight%3D%22600%22%20x%3D%2250%25%22%20y%3D%2250%25%22%20text-anchor%3D%22middle%22%3EPremise%20Front%20Facade%20Evidence%3C%2Ftext%3E%3C%2Fsvg%3E",
-        },
-        {
-          tag: "Property Boundary & Gate",
-          url: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22400%22%20height%3D%22260%22%20viewBox%3D%220%200%20400%20260%22%3E%3Crect%20fill%3D%22%23f1f5f9%22%20width%3D%22400%22%20height%3D%22260%22%2F%3E%3Ctext%20fill%3D%22%2364748b%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20font-weight%3D%22600%22%20x%3D%2250%25%22%20y%3D%2250%25%22%20text-anchor%3D%22middle%22%3EBoundary%20%26%20Gate%20Evidence%3C%2Ftext%3E%3C%2Fsvg%3E",
-        },
-      ];
+  const fullPremise = context?.premise || premise;
+  const resolvedMedia = context?.media || context?.premise?.media || premise?.media;
+  const mediaList = Array.isArray(resolvedMedia) && resolvedMedia.length > 0
+    ? resolvedMedia
+    : (isSimulated
+        ? [
+            {
+              tag: "Front Facade & Street Number",
+              url: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22400%22%20height%3D%22260%22%20viewBox%3D%220%200%20400%20260%22%3E%3Crect%20fill%3D%22%23e2e8f0%22%20width%3D%22400%22%20height%3D%22260%22%2F%3E%3Ctext%20fill%3D%22%23475569%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20font-weight%3D%22600%22%20x%3D%2250%25%22%20y%3D%2250%25%22%20text-anchor%3D%22middle%22%3EPremise%20Front%20Facade%20Evidence%3C%2Ftext%3E%3C%2Fsvg%3E",
+            },
+            {
+              tag: "Property Boundary & Gate",
+              url: "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22400%22%20height%3D%22260%22%20viewBox%3D%220%200%20400%20260%22%3E%3Crect%20fill%3D%22%23f1f5f9%22%20width%3D%22400%22%20height%3D%22260%22%2F%3E%3Ctext%20fill%3D%22%2364748b%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20font-weight%3D%22600%22%20x%3D%2250%25%22%20y%3D%2250%25%22%20text-anchor%3D%22middle%22%3EBoundary%20%26%20Gate%20Evidence%3C%2Ftext%3E%3C%2Fsvg%3E",
+            },
+          ]
+        : []);
 
   // Address details object for disclosures
   const addressDetails = {
-    addressText: premise?.addressText || premise?.address?.formatted || "NAv",
-    streetNumber: premise?.address?.strNo || premise?.strNo || "12",
-    streetName: premise?.address?.strName || premise?.strName || "Victoria",
-    streetType: premise?.address?.strType || premise?.strType || "Street",
-    suburb: premise?.address?.suburb || premise?.suburb || "Central",
-    latitude: premise?.geometry?.location?.lat ?? premise?.latitude ?? -28.15632,
-    longitude: premise?.geometry?.location?.lng ?? premise?.longitude ?? 30.33421,
+    addressText: fullPremise?.addressText || fullPremise?.address?.formatted || premise?.addressText || "NAv",
+    streetNumber: fullPremise?.address?.strNo || fullPremise?.strNo || premise?.strNo || "NAv",
+    streetName: fullPremise?.address?.strName || fullPremise?.strName || premise?.strName || "NAv",
+    streetType: fullPremise?.address?.strType || fullPremise?.strType || premise?.strType || "NAv",
+    suburb: fullPremise?.address?.suburb || fullPremise?.suburb || premise?.suburb || "NAv",
+    latitude: fullPremise?.geometry?.location?.lat ?? fullPremise?.latitude ?? premise?.latitude ?? null,
+    longitude: fullPremise?.geometry?.location?.lng ?? fullPremise?.longitude ?? premise?.longitude ?? null,
   };
 
   const propertyDetails = {
-    propertyType: premise?.propertyTypeType || premise?.propertyType?.type || "Residential",
-    propertyName: premise?.propertyTypeName || premise?.propertyType?.name || "Single Residential",
-    unitNo: premise?.unitNo || "NAv",
-    unitName: premise?.unitName || "NAv",
-    occupancyStatus: premise?.occupancyStatus || premise?.occupancy?.status || "Occupied",
+    propertyType: fullPremise?.propertyTypeType || fullPremise?.propertyType?.type || premise?.propertyTypeType || "NAv",
+    propertyName: fullPremise?.propertyTypeName || fullPremise?.propertyType?.name || premise?.propertyTypeName || "NAv",
+    unitNo: fullPremise?.unitNo || premise?.unitNo || "NAv",
+    unitName: fullPremise?.unitName || premise?.unitName || "NAv",
+    occupancyStatus: fullPremise?.occupancyStatus || fullPremise?.occupancy?.status || premise?.occupancyStatus || "NAv",
   };
 
   const targetedBatchContext = premise?.targetedBatchContext || {
@@ -337,17 +368,23 @@ export default function PremiseQaModal({
         {/* Box 2: Submitted Evidence */}
         <section className="qa-panel" aria-labelledby="qa-evidence-title">
           <h3 id="qa-evidence-title">Submitted Evidence</h3>
-          <div className="qa-evidence-grid">
-            {mediaList.map((item, index) => (
-              <Evidence key={`${item.tag}-${index}`} item={item} index={index} />
-            ))}
-          </div>
+          {mediaList.length > 0 ? (
+            <div className="qa-evidence-grid">
+              {mediaList.map((item, index) => (
+                <Evidence key={`${item.tag || "photo"}-${index}`} item={item} index={index} />
+              ))}
+            </div>
+          ) : (
+            <p role="status" style={{ padding: "20px", color: "#64748b", textAlign: "center", background: "#f8fafc", borderRadius: "8px" }}>
+              {loadingContext ? "Loading premise photographs..." : "No photographs attached to this premise."}
+            </p>
+          )}
         </section>
 
         {/* Box 3: Submitted Details (Disclosures) */}
         <section className="qa-panel" aria-labelledby="qa-details-title">
           <h3 id="qa-details-title">Submitted Details</h3>
-          <details open>
+          <details>
             <summary>Address & Location</summary>
             <Fields value={addressDetails} />
           </details>

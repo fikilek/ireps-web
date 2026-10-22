@@ -375,3 +375,55 @@ test("Historical records without QA are preserved without inadvertent enrollment
   );
   assert.equal(res.invalidated, false, "Historical premises stay unenrolled in QA");
 });
+
+test("getPremiseQaReview returns media photographs and full premise context", async () => {
+  const { getPremiseQaReview } = await import("../functions/qa/premiseQaReview.js");
+
+  const mockDb = {
+    doc: (path) => ({
+      get: async () => {
+        if (path === "users/USER_MNG") {
+          return {
+            exists: true,
+            data: () => ({
+              accountStatus: "ACTIVE",
+              employment: { role: "MNG" },
+              access: { workbases: ["KZN241"] },
+            }),
+          };
+        }
+        if (path === "premises/PRM_TEST_PHOTOS") {
+          return {
+            exists: true,
+            data: () => ({
+              id: "PRM_TEST_PHOTOS",
+              parents: { lmPcode: "KZN241" },
+              media: [
+                { tag: "propertyAdrPhoto", url: "https://example.com/addr.jpg" },
+                { tag: "propertyTypePhoto", url: "https://example.com/type.jpg" },
+              ],
+              address: { strNo: "42", strName: "Main", strType: "Rd" },
+              propertyType: { type: "Residential", name: "House" },
+              qa: { status: "QA_PENDING" },
+              metadata: { createdByUid: "FWR_OTHER" },
+            }),
+          };
+        }
+        return { exists: false };
+      },
+    }),
+    collection: (path) => ({
+      get: async () => ({ docs: [] }),
+      orderBy: () => ({ get: async () => ({ docs: [] }) }),
+    }),
+  };
+
+  const res = await getPremiseQaReview(mockDb, "USER_MNG", { premiseId: "PRM_TEST_PHOTOS" });
+  assert.equal(res.premiseId, "PRM_TEST_PHOTOS");
+  assert.equal(res.media.length, 2, "Returns both media items");
+  assert.equal(res.media[0].tag, "propertyAdrPhoto");
+  assert.equal(res.media[1].tag, "propertyTypePhoto");
+  assert.ok(res.premise, "Returns premise details object");
+  assert.equal(res.premise.propertyType.name, "House");
+});
+
