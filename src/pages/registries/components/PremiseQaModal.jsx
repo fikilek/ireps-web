@@ -289,7 +289,7 @@ export default function PremiseQaModal({
         reviewedByUser: "Office Reviewer (Simulated MNG)",
         reasonCode: action === "FAIL" ? reasonCode : null,
         reasonLabel: action === "FAIL" ? (selectedReason?.label || reasonCode) : null,
-        comment: comment.trim(),
+        comment: comment.trim() || (action === "FAIL" ? (selectedReason?.label || reasonCode || "QA Fail") : ""),
       };
 
       setTimeout(() => {
@@ -316,7 +316,7 @@ export default function PremiseQaModal({
         state: action,
         sourceVersion: context?.sourceVersion || "",
         reasonCode: action === "FAIL" ? reasonCode : null,
-        comment: comment.trim(),
+        comment: comment.trim() || (action === "FAIL" ? (selectedReasonObj?.label || reasonCode || "QA Fail") : ""),
       };
 
       const result = await callQaBackend("savePremiseQaReview", payload);
