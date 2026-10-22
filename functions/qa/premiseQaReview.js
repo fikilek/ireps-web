@@ -152,7 +152,28 @@ export async function readPremiseQaTbRow(tx, db, premiseId, premise) {
     return { canProject: false, reason: "ROW_TB_ID_MISMATCH" };
   }
 
-  return { canProject: true, rowRef, rowId: tbContext.rowId };
+  return { canProject: true, rowRef, rowId: tbContext.rowId, row };
+}
+
+export function calculateTbQaStatus(premiseStatus, meterStatus) {
+  const norm = (s) => String(s || "").trim().toUpperCase().replace(/ /g, "_");
+  const p = norm(premiseStatus);
+  const m = norm(meterStatus);
+
+  if (p === "QA_FAIL" || m === "QA_FAIL") {
+    return "QA_FAIL";
+  }
+  if (p === "QA_PASS" && m === "QA_PASS") {
+    return "QA_PASS";
+  }
+  if (
+    (p === "QA_PENDING" && m === "QA_PENDING") ||
+    (p === "QA_PASS" && m === "QA_PENDING") ||
+    (p === "QA_PENDING" && m === "QA_PASS")
+  ) {
+    return "QA_PENDING";
+  }
+  return "QA_NAv";
 }
 
 export function applyPremiseQaTbRowProjection(tx, tbRowPlan, qaState, reviewerDetails = {}) {
@@ -161,19 +182,22 @@ export function applyPremiseQaTbRowProjection(tx, tbRowPlan, qaState, reviewerDe
   }
 
   const nowIso = new Date().toISOString();
+  const calculatedTbStatus = calculateTbQaStatus(qaState, tbRowPlan.row?.qa?.meterStatus);
+
   const updateData = {
     "qa.premiseStatus": qaState,
     "qa.premiseReviewedAt": reviewerDetails.reviewedAt || null,
     "qa.premiseReviewedByUser": reviewerDetails.reviewedByUser || null,
     "qa.premiseReasonCode": reviewerDetails.reasonCode || null,
     "qa.premiseReasonLabel": reviewerDetails.reasonLabel || null,
+    "qa.tbStatus": calculatedTbStatus,
     "metadata.updatedAt": nowIso,
     "metadata.updatedByUid": reviewerDetails.reviewedByUid || "SYSTEM",
     "metadata.updatedByUser": reviewerDetails.reviewedByUser || "SYSTEM",
   };
 
   tx.update(tbRowPlan.rowRef, updateData);
-  return { projected: true, rowId: tbRowPlan.rowId };
+  return { projected: true, rowId: tbRowPlan.rowId, tbStatus: calculatedTbStatus };
 }
 
 export async function projectPremiseQaToTbRow(tx, db, premiseId, premise, qaState, reviewerDetails = {}) {
