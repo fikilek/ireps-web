@@ -130,6 +130,44 @@ test("PremiseQaModal renders premise identity, photos, decision controls and dec
   assert.ok(html.includes("Decision History"), "Renders Decision History box");
   assert.ok(html.includes("John Sithole (SPV)"), "Renders past decision history actor");
   assert.ok(html.includes("Sipho Dlamini (FWR)"), "Renders resubmission history actor");
+  assert.ok(!html.includes("<details open"), "All Submitted Details disclosures must start closed by default");
+});
+
+test("PremiseQaModal renders real premise media with human-readable tags and metadata", () => {
+  const premiseWithPhotos = {
+    id: "PRM_002",
+    addressText: "25 Nelson Mandela Ave",
+    erfNo: "8801",
+    media: [
+      {
+        tag: "propertyAdrPhoto",
+        url: "https://example.com/addr.jpg",
+        gps: { lat: -28.1515, lng: 30.2513 },
+        created: { at: "2026-10-22T01:11:47Z", byUser: "Simo Phemba" },
+      },
+      {
+        tag: "propertyTypePhoto",
+        url: "https://example.com/type.jpg",
+      },
+    ],
+    qa: { status: "QA_PENDING" },
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(PremiseQaModal, {
+      premise: premiseWithPhotos,
+      reviewerRole: true,
+      qaPreview: false,
+      onClose: () => {},
+    })
+  );
+
+  assert.ok(html.includes("Property Address Photo"), "Formats propertyAdrPhoto tag to human-readable label");
+  assert.ok(html.includes("Property Type Photo"), "Formats propertyTypePhoto tag to human-readable label");
+  assert.ok(html.includes("https://example.com/addr.jpg"), "Renders photo link url");
+  assert.ok(html.includes("-28.15150, 30.25130"), "Renders photo GPS coordinates");
+  assert.ok(html.includes("Simo Phemba"), "Renders photo submitter name");
+  assert.ok(!html.includes("<details open"), "Submitted Details are closed by default");
 });
 
 test("Premise Registry and TRN Registry standardize modal-first QaPill and topScrollbar", async () => {
