@@ -78,10 +78,9 @@ service cloud.firestore {
     match /premises/{id} {
       allow read: if active();
       allow create, delete: if false;
-      // Descriptive edits do not grant control of meter/visit links or counts.
-      allow update: if active() && resource.data.metadata.createdByUid == request.auth.uid
-        && changed(resource.data, request.resource.data, ['address', 'propertyType', 'units', 'occupancy', 'geometry', 'location', 'metadata'])
-        && ownMetadata();
+      // Business changes go through the authenticated Cloud Function so it can
+      // validate, prevent stale overwrites, stamp QA_PENDING and write history.
+      allow update: if false;
       match /qaHistory/{event} { allow read: if active(); allow write: if false; }
     }
     match /settings/{id} { allow read: if active(); allow write: if platform(); }

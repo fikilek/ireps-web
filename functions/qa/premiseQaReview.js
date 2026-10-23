@@ -155,8 +155,9 @@ export async function readPremiseQaTbRow(tx, db, premiseId, premise) {
   return { canProject: true, rowRef, rowId: tbContext.rowId, row };
 }
 
-export function calculateTbQaStatus(premiseStatus, meterStatus) {
+export function calculateTbQaStatus(premiseStatus, meterStatus, executionStatus = null) {
   const norm = (s) => String(s || "").trim().toUpperCase().replace(/ /g, "_");
+  if (norm(executionStatus) !== "COMPLETED") return "QA_NAv";
   const p = norm(premiseStatus);
   const m = norm(meterStatus);
 
@@ -182,7 +183,7 @@ export function applyPremiseQaTbRowProjection(tx, tbRowPlan, qaState, reviewerDe
   }
 
   const nowIso = new Date().toISOString();
-  const calculatedTbStatus = calculateTbQaStatus(qaState, tbRowPlan.row?.qa?.meterStatus);
+  const calculatedTbStatus = calculateTbQaStatus(qaState, tbRowPlan.row?.qa?.meterStatus, tbRowPlan.row?.execution?.status);
 
   const updateData = {
     "qa.premiseStatus": qaState,
@@ -450,6 +451,8 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
   const premiseId = cleanId(input.premiseId, "Premise ID");
   const payload = input.payload || {};
   const explanation = typeof input.explanation === "string" ? input.explanation.trim() : "";
+  const requestId = cleanId(input.requestId, "Request ID");
+  const expectedSourceVersion = qaText(input.sourceVersion);
 
   const premiseRef = db.doc(`premises/${premiseId}`);
   const registryRef = db.doc(`registry_premises/${premiseId}`);
@@ -483,13 +486,19 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
     const actorRole = upper(getUserRole(actor));
 
     if (
-      actorUid !== creatorUid &&
-      actorUid !== lastSubmitterUid &&
       !["FWR", "SPV", "MNG", "SPU", "ADM"].includes(actorRole)
     ) {
       throw new HttpsError("permission-denied", "You are not authorized to correct this premise.");
     }
 
+    const historyRef = premiseRef.collection("qaHistory").doc(`SUBMIT_${requestId}`);
+    const historySnap = await tx.get(historyRef);
+    if (historySnap.exists) {
+      return { success: true, idempotent: true, premiseId, qa: premise.qa };
+    }
+    if (!expectedSourceVersion || expectedSourceVersion !== qaText(premise.qa?.sourceVersion)) {
+      throw new HttpsError("failed-precondition", "This Premise has changed. Reopen the latest Premise before saving.", { currentPremise: premise });
+    }
     const nowIso = new Date().toISOString();
     const actorDisplayName = getUserDisplayName(actor);
 
@@ -505,7 +514,6 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
 
     const newDigest = computePremiseDigest(updatedSubstantive);
     const resubmissionCount = (premise.qa?.resubmissionCount || 0) + 1;
-    const resubmissionId = `RESUB_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
     const resetQa = {
       status: "QA_PENDING",
@@ -524,12 +532,11 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
       ruleVersion: 1,
     };
 
-    const historyRef = premiseRef.collection("qaHistory").doc(resubmissionId);
     const historyEntry = {
-      eventId: resubmissionId,
+      eventId: `SUBMIT_${requestId}`,
       premiseId,
-      action: "QA_RESUBMISSION",
-      previousStatus: premise.qa?.status || "QA_FAIL",
+      action: "PREMISE_SUBMITTED",
+      previousStatus: premise.qa?.status || null,
       newStatus: "QA_PENDING",
       sourceVersion: newDigest,
       reasonCode: null,
@@ -539,6 +546,7 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
       actorName: actorDisplayName,
       actorRole,
       timestamp: nowIso,
+      requestId,
       lmPcode: premise.parents?.lmPcode || null,
       wardPcode: premise.parents?.wardPcode || null,
     };

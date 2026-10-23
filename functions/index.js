@@ -41,7 +41,7 @@ import { rebuildMeterRegistryRowCallable } from "./registry/meterCallable.js";
 import { rebuildPremiseRegistryRow } from "./registry/premiseRegistryRowRebuild.js";
 import { rebuildPremiseMeterCounts } from "./registry/premiseMeterCountsRebuild.js";
 import { rebuildPremiseRegistryRowCallable } from "./registry/premiseCallable.js";
-import { invalidatePremiseQaIfSubstantive } from "./qa/premiseQaReview.js";
+import { computePremiseDigest, invalidatePremiseQaIfSubstantive } from "./qa/premiseQaReview.js";
 
 import { rebuildErfPremiseCount } from "./registry/erfPremiseCountRebuild.js";
 import { rebuildErfMeterCounts } from "./registry/erfMeterCountsRebuild.js";
@@ -5283,6 +5283,17 @@ export const onPremiseCreateCallable = onCall(async (request) => {
         : [],
     };
 
+    if (!isTargetedBatchPremise) {
+      const sourceVersion = computePremiseDigest(finalPayload);
+      finalPayload.qa = {
+        status: "QA_PENDING", reviewId: null, sourceVersion,
+        reasonCode: null, reasonLabel: null, comment: null,
+        reviewedAt: null, reviewedByUid: null, reviewedByUser: null,
+        resubmissionCount: 0, lastSubmittedAt: now,
+        lastSubmittedByUid: caller.uid, lastSubmittedByUser: actorName, ruleVersion: 1,
+      };
+    }
+
     logger.info("⏱️ onPremiseCreateCallable -- payload normalized", {
       premiseId,
       elapsedSeconds: ((Date.now() - normalizeStartedAtMs) / 1000).toFixed(2),
@@ -5312,7 +5323,19 @@ export const onPremiseCreateCallable = onCall(async (request) => {
         replacesPremiseId: targetedBatchReplacesPremiseId,
       });
     } else {
-      await premiseRef.set(finalPayload);
+      const sourceVersion = finalPayload.qa.sourceVersion;
+      const historyRef = premiseRef.collection("qaHistory").doc(`SUBMIT_${premiseId}`);
+      const batch = db.batch();
+      batch.set(premiseRef, finalPayload);
+      batch.create(historyRef, {
+        eventId: `SUBMIT_${premiseId}`, premiseId, action: "PREMISE_SUBMITTED",
+        previousStatus: null, newStatus: "QA_PENDING", sourceVersion,
+        reasonCode: null, reasonLabel: null, comment: null,
+        actorUid: caller.uid, actorName, actorRole: "FWR", timestamp: now,
+        requestId: premiseId, lmPcode: finalPayload.parents?.lmPcode || null,
+        wardPcode: finalPayload.parents?.wardPcode || null,
+      });
+      await batch.commit();
     }
 
     logger.info("⏱️ onPremiseCreateCallable -- premise set complete", {
