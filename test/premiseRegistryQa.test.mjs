@@ -202,6 +202,11 @@ test("Premise Registry and TRN Registry standardize modal-first QaPill and topSc
     /key:\s*["']qaHistory["']/,
     "PremisesRegistryPage must retain the separate qaHistory column",
   );
+  assert.match(
+    premisesSrc,
+    /<DataActionButton[\s\S]*?title=["']QA History["'][\s\S]*?>\s*QA History\s*<\/DataActionButton>/,
+    "PremisesRegistryPage qaHistory column button must strictly say 'QA History'",
+  );
 
   // TRN Registry QaPill and no inline select
   assert.match(
@@ -221,6 +226,26 @@ test("Premise Registry and TRN Registry standardize modal-first QaPill and topSc
     /topScrollbar\s*=\s*true/,
     "IrepsTable must default topScrollbar to true so all tables have top horizontal scrolling",
   );
+});
+
+test("PremiseQaModal in history mode strictly renders Premise QA History, Premise Details and Decision History", () => {
+  const pendingRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PENDING");
+  const html = renderToStaticMarkup(
+    React.createElement(PremiseQaModal, {
+      premise: pendingRow,
+      mode: "history",
+      reviewerRole: true,
+      onClose: () => {},
+    })
+  );
+
+  assert.ok(html.includes("Premise QA History"), "Header must be strictly 'Premise QA History'");
+  assert.ok(!html.includes("<h2 id=\"qa-premise-title\">Premise QA</h2>"), "Must not display standard Premise QA review header");
+  assert.ok(html.includes("Premise Details"), "Must render Premise Details box");
+  assert.ok(html.includes("Decision History"), "Must render Decision History box");
+  assert.ok(!html.includes("Submitted Evidence"), "Must NOT render Submitted Evidence box in history mode");
+  assert.ok(!html.includes("Submitted Details"), "Must NOT render Submitted Details disclosures in history mode");
+  assert.ok(!html.includes("<h3>Decision</h3>"), "Must NOT render Decision review box in history mode");
 });
 
 

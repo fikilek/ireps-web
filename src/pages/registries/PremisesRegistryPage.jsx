@@ -557,7 +557,7 @@ export default function PremisesRegistryPage() {
               status={status}
               label={getPremiseQaLabel(row)}
               disabled={!isEligible}
-              onClick={isEligible ? () => setSelectedQa({ premise: row, action: "" }) : undefined}
+              onClick={isEligible ? () => setSelectedQa({ premise: row, action: "", mode: "review" }) : undefined}
               title={isEligible ? `Open QA Review for premise ${row.premiseId || row.id}` : "No QA review available"}
               ariaLabel={`QA Status: ${getPremiseQaLabel(row)}`}
             />
@@ -588,10 +588,10 @@ export default function PremisesRegistryPage() {
           <DataActionButton
             compact
             haspopup="dialog"
-            title="QA Review / History"
-            onClick={() => setSelectedQa({ premise: row, action: "" })}
+            title="QA History"
+            onClick={() => setSelectedQa({ premise: row, action: "", mode: "history" })}
           >
-            QA Review / History
+            QA History
           </DataActionButton>
         ) : null;
       },
@@ -806,9 +806,10 @@ export default function PremisesRegistryPage() {
 
       {selectedQa && (
         <PremiseQaModal
-          key={selectedQa.premise?.id || selectedQa.premise?.premiseId}
+          key={`${selectedQa.premise?.id || selectedQa.premise?.premiseId}_${selectedQa.mode || "review"}`}
           premise={selectedQa.premise}
           initialAction={selectedQa.action}
+          mode={selectedQa.mode || "review"}
           reviewerRole={reviewerRole || qaPreviewMode}
           qaPreview={qaPreviewMode || Boolean(selectedQa.premise?.isSample) || String(selectedQa.premise?.id || "").startsWith("PRM_DEMO_")}
           onSaved={({ premiseId, qa }) => {

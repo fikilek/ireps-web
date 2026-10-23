@@ -77,11 +77,23 @@ function Evidence({ item, index }) {
   );
 }
 
+function generateRequestId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `REV_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function generateSimReviewId() {
+  return `REV_SIM_${Date.now()}`;
+}
+
 export default function PremiseQaModal({
   premise,
   initialAction = "",
   reviewerRole = true,
   qaPreview = false,
+  mode = "review",
   onClose,
   onSaved,
 }) {
@@ -98,7 +110,7 @@ export default function PremiseQaModal({
   const premiseId = premise?.premiseId || premise?.id;
 
   const [context, setContext] = useState(null);
-  const [loadingContext, setLoadingContext] = useState(!isSimulated);
+  const [loadingContext, setLoadingContext] = useState(!isSimulated && Boolean(premiseId));
 
   useEffect(() => {
     const element = dialog.current;
@@ -117,7 +129,6 @@ export default function PremiseQaModal({
   useEffect(() => {
     if (isSimulated || !premiseId) return;
     let disposed = false;
-    setLoadingContext(true);
 
     const loadReview = async () => {
       let backendData = null;
@@ -166,7 +177,6 @@ export default function PremiseQaModal({
     };
   }, [isSimulated, premiseId]);
 
-  const rawQa = saved || context?.qa || premise?.qa;
   const currentStatus = (saved ? saved.status : context?.qa?.status || premise?.qa?.status) || "QA_PENDING";
   const isLocked = currentStatus === "QA_PASS" || currentStatus === "PASS";
 
@@ -284,7 +294,7 @@ export default function PremiseQaModal({
       const selectedReason = PREMISE_QA_REASONS.find(r => r.code === reasonCode);
       const newQaDecision = {
         status: action === "PASS" ? "QA PASS" : "QA FAIL",
-        reviewId: `REV_SIM_${Date.now()}`,
+        reviewId: generateSimReviewId(),
         reviewedAt: new Date().toISOString(),
         reviewedByUser: "Office Reviewer (Simulated MNG)",
         reasonCode: action === "FAIL" ? reasonCode : null,
@@ -306,9 +316,7 @@ export default function PremiseQaModal({
     }
 
     try {
-      const requestId = typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `REV_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const requestId = generateRequestId();
 
       const payload = {
         premiseId,
@@ -349,7 +357,7 @@ export default function PremiseQaModal({
     >
       <header>
         <div>
-          <h2 id="qa-premise-title">Premise QA</h2>
+          <h2 id="qa-premise-title">{mode === "history" ? "Premise QA History" : "Premise QA"}</h2>
           <p className="qa-premise-id">
             {premise?.premiseId || premise?.id || "PRM_01J9X8K2M4N5P6Q7R8S9T0V1W2"}
           </p>
@@ -383,143 +391,147 @@ export default function PremiseQaModal({
           </div>
         </section>
 
-        {saved && (
-          <p className="qa-success" role="status">
-            {saved.status} {isSimulated ? "simulated by" : "saved by"} {saved.reviewedByUser} at {qaDate(saved.reviewedAt)}.
-            {(saved.status === "QA PASS" || saved.status === "QA_PASS") ? " This premise is now marked locked." : " Awaiting field worker correction."}
-          </p>
-        )}
-
-        {/* Box 2: Submitted Evidence */}
-        <section className="qa-panel" aria-labelledby="qa-evidence-title">
-          <h3 id="qa-evidence-title">Submitted Evidence</h3>
-          {mediaList.length > 0 ? (
-            <div className="qa-evidence-grid">
-              {mediaList.map((item, index) => (
-                <Evidence key={`${item.tag || "photo"}-${index}`} item={item} index={index} />
-              ))}
-            </div>
-          ) : (
-            <p role="status" style={{ padding: "20px", color: "#64748b", textAlign: "center", background: "#f8fafc", borderRadius: "8px" }}>
-              {loadingContext ? "Loading premise photographs..." : "No photographs attached to this premise."}
-            </p>
-          )}
-        </section>
-
-        {/* Box 3: Submitted Details (Disclosures) */}
-        <section className="qa-panel" aria-labelledby="qa-details-title">
-          <h3 id="qa-details-title">Submitted Details</h3>
-          <details>
-            <summary>Address & Location</summary>
-            <Fields value={addressDetails} />
-          </details>
-          <details>
-            <summary>Property & Occupancy</summary>
-            <Fields value={propertyDetails} />
-          </details>
-          <details>
-            <summary>Targeted Batch Context</summary>
-            <Fields value={targetedBatchContext} />
-          </details>
-          <details>
-            <summary>Services & Linked Meters</summary>
-            <Fields value={servicesDetails} />
-          </details>
-        </section>
-
-        {/* Box 4: Decision Section */}
-        {canReview && !saved ? (
-          <form className="qa-form" onSubmit={submit}>
-            <h3>Decision</h3>
-            <label>
-              Decision
-              <select
-                value={action}
-                disabled={saving}
-                required
-                onChange={e => setAction(e.target.value)}
-              >
-                <option value="">Choose a decision</option>
-                <option value="PASS">QA Pass</option>
-                <option value="FAIL">QA Fail</option>
-              </select>
-            </label>
-
-            {action === "PASS" && (
-              <p className="qa-notice">
-                Pass is final. The premise attributes and evidence will be locked. Subsequent substantive field edits require re-review.
+        {mode !== "history" && (
+          <>
+            {saved && (
+              <p className="qa-success" role="status">
+                {saved.status} {isSimulated ? "simulated by" : "saved by"} {saved.reviewedByUser} at {qaDate(saved.reviewedAt)}.
+                {(saved.status === "QA PASS" || saved.status === "QA_PASS") ? " This premise is now marked locked." : " Awaiting field worker correction."}
               </p>
             )}
 
-            {action === "FAIL" && (
-              <label>
-                Failure reason (required)
-                <select
-                  value={reasonCode}
-                  disabled={saving}
-                  required
-                  onChange={e => setReasonCode(e.target.value)}
-                >
-                  <option value="">Choose a failure reason</option>
-                  {PREMISE_QA_REASONS.map(item => (
-                    <option key={item.code} value={item.code}>
-                      {item.label}
-                    </option>
+            {/* Box 2: Submitted Evidence */}
+            <section className="qa-panel" aria-labelledby="qa-evidence-title">
+              <h3 id="qa-evidence-title">Submitted Evidence</h3>
+              {mediaList.length > 0 ? (
+                <div className="qa-evidence-grid">
+                  {mediaList.map((item, index) => (
+                    <Evidence key={`${item.tag || "photo"}-${index}`} item={item} index={index} />
                   ))}
-                </select>
-              </label>
+                </div>
+              ) : (
+                <p role="status" style={{ padding: "20px", color: "#64748b", textAlign: "center", background: "#f8fafc", borderRadius: "8px" }}>
+                  {loadingContext ? "Loading premise photographs..." : "No photographs attached to this premise."}
+                </p>
+              )}
+            </section>
+
+            {/* Box 3: Submitted Details (Disclosures) */}
+            <section className="qa-panel" aria-labelledby="qa-details-title">
+              <h3 id="qa-details-title">Submitted Details</h3>
+              <details>
+                <summary>Address & Location</summary>
+                <Fields value={addressDetails} />
+              </details>
+              <details>
+                <summary>Property & Occupancy</summary>
+                <Fields value={propertyDetails} />
+              </details>
+              <details>
+                <summary>Targeted Batch Context</summary>
+                <Fields value={targetedBatchContext} />
+              </details>
+              <details>
+                <summary>Services & Linked Meters</summary>
+                <Fields value={servicesDetails} />
+              </details>
+            </section>
+
+            {/* Box 4: Decision Section */}
+            {canReview && !saved ? (
+              <form className="qa-form" onSubmit={submit}>
+                <h3>Decision</h3>
+                <label>
+                  Decision
+                  <select
+                    value={action}
+                    disabled={saving}
+                    required
+                    onChange={e => setAction(e.target.value)}
+                  >
+                    <option value="">Choose a decision</option>
+                    <option value="PASS">QA Pass</option>
+                    <option value="FAIL">QA Fail</option>
+                  </select>
+                </label>
+
+                {action === "PASS" && (
+                  <p className="qa-notice">
+                    Pass is final. The premise attributes and evidence will be locked. Subsequent substantive field edits require re-review.
+                  </p>
+                )}
+
+                {action === "FAIL" && (
+                  <label>
+                    Failure reason (required)
+                    <select
+                      value={reasonCode}
+                      disabled={saving}
+                      required
+                      onChange={e => setReasonCode(e.target.value)}
+                    >
+                      <option value="">Choose a failure reason</option>
+                      {PREMISE_QA_REASONS.map(item => (
+                        <option key={item.code} value={item.code}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <label>
+                  {action === "FAIL" ? "Failure explanation (optional)" : "Comment (optional)"}
+                  <textarea
+                    value={comment}
+                    disabled={saving}
+                    required={false}
+                    maxLength={4000}
+                    rows={4}
+                    placeholder={
+                      action === "FAIL"
+                        ? "State clearly what needs correction by the field worker..."
+                        : "Add any reviewer notes..."
+                    }
+                    onChange={e => setComment(e.target.value)}
+                  />
+                </label>
+
+                <div className="qa-form-actions">
+                  <button type="button" onClick={onClose} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="qa-confirm"
+                    disabled={saving || !action || (action === "FAIL" && !reasonCode)}
+                  >
+                    {saving
+                      ? "Saving QA…"
+                      : `Confirm QA ${action === "PASS" ? "Pass" : action === "FAIL" ? "Fail" : "decision"}`}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <section className="qa-panel">
+                <h3>Decision</h3>
+                <p>
+                  {saved
+                    ? `${saved.status} recorded.`
+                    : isLocked
+                      ? "This premise has passed QA and is locked against mobile edits."
+                      : context && !context.mayReview
+                        ? (context.reason || "You do not have permission to review this premise.")
+                        : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL"
+                          ? `QA FAIL: ${premise?.qa?.reasonLabel || selectedReasonObj?.label || "Awaiting field correction"}`
+                          : "QA PENDING."}
+                </p>
+              </section>
             )}
-
-            <label>
-              {action === "FAIL" ? "Failure explanation (optional)" : "Comment (optional)"}
-              <textarea
-                value={comment}
-                disabled={saving}
-                required={false}
-                maxLength={4000}
-                rows={4}
-                placeholder={
-                  action === "FAIL"
-                    ? "State clearly what needs correction by the field worker..."
-                    : "Add any reviewer notes..."
-                }
-                onChange={e => setComment(e.target.value)}
-              />
-            </label>
-
-            <div className="qa-form-actions">
-              <button type="button" onClick={onClose} disabled={saving}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="qa-confirm"
-                disabled={saving || !action || (action === "FAIL" && !reasonCode)}
-              >
-                {saving
-                  ? "Saving QA…"
-                  : `Confirm QA ${action === "PASS" ? "Pass" : action === "FAIL" ? "Fail" : "decision"}`}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <section className="qa-panel">
-            <h3>Decision</h3>
-            <p>
-              {saved
-                ? `${saved.status} recorded.`
-                : isLocked
-                  ? "This premise has passed QA and is locked against mobile edits."
-                  : context && !context.mayReview
-                    ? (context.reason || "You do not have permission to review this premise.")
-                    : currentStatus === "QA_FAIL" || currentStatus === "QA FAIL"
-                      ? `QA FAIL: ${premise?.qa?.reasonLabel || selectedReasonObj?.label || "Awaiting field correction"}`
-                      : "QA PENDING."}
-            </p>
-          </section>
+          </>
         )}
 
-        {/* Box 5: Decision History */}
+        {/* Box: Decision History */}
         <section className="qa-panel qa-history" aria-labelledby="qa-history-title">
           <h3 id="qa-history-title">Decision History</h3>
           {displayHistory.length ? (
@@ -554,4 +566,8 @@ export default function PremiseQaModal({
 
   const canPortal = typeof document !== "undefined" && document?.body?.nodeType === 1;
   return canPortal ? createPortal(modal, document.body) : modal;
+}
+
+export function PremiseQaHistoryModal(props) {
+  return <PremiseQaModal {...props} mode="history" />;
 }
