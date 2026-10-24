@@ -2,6 +2,7 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db } from "../firebase";
+import { getPremiseUpdatedByUser } from "../utils/premiseQa.js";
 
 const PREMISE_REGISTRY_COLLECTION = "registry_premises";
 const PREMISE_REGISTRY_WARD_FIELD = "parents.wardPcode";
@@ -78,7 +79,7 @@ function normalizePremiseRegistryRow(id, data) {
     meterCount: safeNumber(counts?.totalMeters),
 
     createdByUser: data?.metadata?.createdByUser || "NAv",
-    updatedByUser: data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
+    updatedByUser: getPremiseUpdatedByUser(data),
     updatedAt: serializeRegistryDateValue(data?.metadata?.updatedAt || data?.metadata?.createdAt),
 
     qa: data?.qa || null,
