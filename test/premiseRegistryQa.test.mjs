@@ -8,6 +8,7 @@ import {
   PREMISE_QA_REASONS,
   getPremiseQaStatus,
   getPremiseQaLabel,
+  getPremiseUpdatedByUser,
   DEMO_QA_PREMISES,
 } from "../src/utils/premiseQa.js";
 
@@ -47,6 +48,54 @@ test("getPremiseQaLabel displays authoritative 'QA PENDING' for pending review",
   assert.equal(getPremiseQaLabel({ qa: { status: "QA PASS" } }), "QA PASS");
   assert.equal(getPremiseQaLabel({ qa: { status: "QA FAIL" } }), "QA FAIL");
   assert.equal(getPremiseQaLabel({ qa: { status: "QA NAv" } }), "QA NAv");
+});
+
+test("Updated By User shows the QA reviewer for PASS/FAIL and the latest submitter for PENDING", () => {
+  const failRow = {
+    metadata: { updatedByUser: "Premise Registry Sync", createdByUser: "Original creator" },
+    qa: {
+      status: "QA_FAIL",
+      reviewedByUser: "QA Reviewer",
+      lastSubmittedByUser: "Fieldworker",
+    },
+  };
+  assert.equal(getPremiseUpdatedByUser(failRow), "QA Reviewer");
+
+  const passRow = {
+    metadata: { updatedByUser: "Premise Registry Sync", createdByUser: "Original creator" },
+    qa: {
+      status: "QA_PASS",
+      reviewedByUser: "QA Approver",
+      lastSubmittedByUser: "Fieldworker",
+    },
+  };
+  assert.equal(getPremiseUpdatedByUser(passRow), "QA Approver");
+
+  const pendingRow = {
+    metadata: { updatedByUser: "Premise Registry Sync", createdByUser: "Original creator" },
+    qa: {
+      status: "QA_PENDING",
+      lastSubmittedByUser: "Latest Fieldworker",
+    },
+  };
+  assert.equal(getPremiseUpdatedByUser(pendingRow), "Latest Fieldworker");
+});
+
+test("Updated By User avoids falsely attributing a reviewed row to its previous submitter", () => {
+  const legacyFailRow = {
+    metadata: { updatedByUser: "Premise Registry Sync", createdByUser: "Original creator" },
+    qa: {
+      status: "QA_FAIL",
+      lastSubmittedByUser: "Previous Fieldworker",
+    },
+  };
+  assert.equal(getPremiseUpdatedByUser(legacyFailRow), "NAv");
+
+  const legacyPendingRow = {
+    metadata: { updatedByUser: "Real Metadata User", createdByUser: "Original creator" },
+    qa: { status: "QA_PENDING" },
+  };
+  assert.equal(getPremiseUpdatedByUser(legacyPendingRow), "Real Metadata User");
 });
 
 test("PREMISE_QA_REASONS contains the approved 7 canonical failure codes", () => {
