@@ -78,7 +78,7 @@ function normalizePremiseRegistryRow(id, data) {
     meterCount: safeNumber(counts?.totalMeters),
 
     createdByUser: data?.metadata?.createdByUser || "NAv",
-    updatedByUser: data?.qa?.lastSubmittedByUser || data?.metadata?.createdByUser || "NAv",
+    updatedByUser: data?.metadata?.updatedByUser || data?.metadata?.createdByUser || "NAv",
     updatedAt: serializeRegistryDateValue(data?.metadata?.updatedAt || data?.metadata?.createdAt),
 
     qa: data?.qa || null,

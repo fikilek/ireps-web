@@ -147,7 +147,7 @@ function getSortValue(row, key) {
   if (key === "waterMeterCount") return row.waterMeterCount || 0;
   if (key === "meterCount") return row.meterCount || 0;
   if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
-  if (key === "updatedByUser") return row.updatedByUser || "";
+  if (key === "updatedByUser") return row.metadata?.updatedByUser || row.updatedByUser || "";
   if (key === "qaStatus") return getPremiseQaStatus(row);
 
   return "";
@@ -294,7 +294,7 @@ export default function PremisesRegistryPage() {
         includesText(getCountText(row.electricityMeterCount), activeFilters.electricityMeterCount) &&
         includesText(getCountText(row.waterMeterCount), activeFilters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), activeFilters.meterCount) &&
-        includesText(row.updatedByUser, activeFilters.updatedByUser) &&
+        includesText(row.metadata?.updatedByUser || row.updatedByUser, activeFilters.updatedByUser) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
@@ -365,7 +365,7 @@ export default function PremisesRegistryPage() {
       },
       {
         header: "Updated By User",
-        value: (row) => row.updatedByUser || "NAv",
+        value: (row) => row.metadata?.updatedByUser || row.updatedByUser || "NAv",
       },
       {
         header: "QA Status",
@@ -539,10 +539,10 @@ export default function PremisesRegistryPage() {
       label: "Updated By User",
       filter: "text",
       sortable: true,
-      value: row => row.updatedByUser || "NAv",
+      value: row => row.metadata?.updatedByUser || row.updatedByUser || "NAv",
       sortValue: row => getSortValue(row, "updatedByUser"),
       render: row => {
-        return <>{row.updatedByUser || "NAv"}</>;
+        return <>{row.metadata?.updatedByUser || row.updatedByUser || "NAv"}</>;
       },
     },
     {
