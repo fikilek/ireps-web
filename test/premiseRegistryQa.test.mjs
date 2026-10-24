@@ -204,6 +204,16 @@ test("Premise Registry and TRN Registry standardize modal-first QaPill and topSc
   );
   assert.match(
     premisesSrc,
+    /key:\s*["']updatedByUser["'][\s\S]*?label:\s*["']Updated By User["']/,
+    "PremisesRegistryPage must have dedicated 'Updated By User' column",
+  );
+  assert.doesNotMatch(
+    premisesSrc,
+    /<div className="qa-status-cell">[\s\S]*?<small>/,
+    "PremisesRegistryPage QA Status cell must not contain secondary small text or timestamps",
+  );
+  assert.match(
+    premisesSrc,
     /<DataActionButton[\s\S]*?title=["']QA History["'][\s\S]*?>\s*QA History\s*<\/DataActionButton>/,
     "PremisesRegistryPage qaHistory column button must strictly say 'QA History'",
   );
@@ -246,6 +256,29 @@ test("PremiseQaModal in history mode strictly renders Premise QA History, Premis
   assert.ok(!html.includes("Submitted Evidence"), "Must NOT render Submitted Evidence box in history mode");
   assert.ok(!html.includes("Submitted Details"), "Must NOT render Submitted Details disclosures in history mode");
   assert.ok(!html.includes("<h3>Decision</h3>"), "Must NOT render Decision review box in history mode");
+});
+
+test("Premise Registry features dedicated 'Updated By User' column and clean QA Status pill", () => {
+  const pendingRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PENDING");
+  assert.equal(
+    pendingRow.metadata?.updatedByUser,
+    "Simo Phemba",
+    "Demo pending premise has updatedByUser attributed from metadata.updatedByUser",
+  );
+
+  const passRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA PASS");
+  assert.equal(
+    passRow.metadata?.updatedByUser,
+    "Jane Khumalo (MNG)",
+    "Demo pass premise has updatedByUser attributed from metadata.updatedByUser",
+  );
+
+  const failRow = DEMO_QA_PREMISES.find(p => getPremiseQaStatus(p) === "QA FAIL");
+  assert.equal(
+    failRow.metadata?.updatedByUser,
+    "John Sithole (SPV)",
+    "Demo fail premise has updatedByUser attributed from metadata.updatedByUser",
+  );
 });
 
 

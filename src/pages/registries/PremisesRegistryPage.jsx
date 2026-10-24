@@ -39,6 +39,7 @@ const EMPTY_PREMISE_FILTERS = {
   electricityMeterCount: "",
   waterMeterCount: "",
   meterCount: "",
+  updatedByUser: "",
   qaStatus: "ALL",
 };
 
@@ -146,6 +147,7 @@ function getSortValue(row, key) {
   if (key === "waterMeterCount") return row.waterMeterCount || 0;
   if (key === "meterCount") return row.meterCount || 0;
   if (key === "updatedAt") return getUpdatedAtMs(row.updatedAt);
+  if (key === "updatedByUser") return row.metadata?.updatedByUser || row.updatedByUser || "";
   if (key === "qaStatus") return getPremiseQaStatus(row);
 
   return "";
@@ -292,6 +294,7 @@ export default function PremisesRegistryPage() {
         includesText(getCountText(row.electricityMeterCount), activeFilters.electricityMeterCount) &&
         includesText(getCountText(row.waterMeterCount), activeFilters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), activeFilters.meterCount) &&
+        includesText(row.metadata?.updatedByUser || row.updatedByUser, activeFilters.updatedByUser) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
@@ -359,6 +362,10 @@ export default function PremisesRegistryPage() {
       {
         header: "updatedAt",
         value: (row) => formatUpdatedAt(row.updatedAt),
+      },
+      {
+        header: "Updated By User",
+        value: (row) => row.metadata?.updatedByUser || row.updatedByUser || "NAv",
       },
       {
         header: "QA Status",
@@ -528,6 +535,17 @@ export default function PremisesRegistryPage() {
       },
     },
     {
+      key: "updatedByUser",
+      label: "Updated By User",
+      filter: "text",
+      sortable: true,
+      value: row => row.metadata?.updatedByUser || row.updatedByUser || "NAv",
+      sortValue: row => getSortValue(row, "updatedByUser"),
+      render: row => {
+        return <>{row.metadata?.updatedByUser || row.updatedByUser || "NAv"}</>;
+      },
+    },
+    {
       key: "qaStatus",
       label: "QA Status",
       filter: "select",
@@ -544,11 +562,6 @@ export default function PremisesRegistryPage() {
       sortValue: row => getPremiseQaStatus(row),
       render: row => {
         const status = getPremiseQaStatus(row);
-        const isPending = status === "QA PENDING";
-        const submitterUid = row.metadata?.createdByUid || row.qa?.lastSubmittedByUid;
-        const isSelf = submitterUid && submitterUid === uid;
-        const mayReview = (reviewerRole || qaPreviewMode) && isPending && !isSelf;
-
         const isEligible = status !== "QA NAv";
 
         return (
@@ -561,19 +574,6 @@ export default function PremisesRegistryPage() {
               title={isEligible ? `Open QA Review for premise ${row.premiseId || row.id}` : "No QA review available"}
               ariaLabel={`QA Status: ${getPremiseQaLabel(row)}`}
             />
-            {isPending && row.qa?.resubmissionCount > 0 && row.qa?.lastSubmittedByUser ? (
-              <small>
-                Corrected by {row.qa.lastSubmittedByUser}
-                <br />
-                {qaDate(row.qa.lastSubmittedAt)}
-              </small>
-            ) : row.qa?.reviewedByUser ? (
-              <small>
-                {row.qa.reviewedByUser}
-                <br />
-                {qaDate(row.qa.reviewedAt)}
-              </small>
-            ) : null}
           </div>
         );
       },

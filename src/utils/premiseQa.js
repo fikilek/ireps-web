@@ -46,7 +46,8 @@ export const DEMO_QA_PREMISES = [
     meterCount: 1,
     updatedAt: "2026-10-21T06:30:00Z",
     createdByUser: "Sipho Dlamini (FWR)",
-    metadata: { createdByUid: "FWR_001", createdByUser: "Sipho Dlamini (FWR)" },
+    updatedByUser: "Simo Phemba",
+    metadata: { createdByUid: "FWR_001", createdByUser: "Sipho Dlamini (FWR)", updatedByUser: "Simo Phemba" },
     qa: {
       status: "QA PENDING",
       lastSubmittedAt: "2026-10-21T06:30:00Z",
@@ -69,7 +70,8 @@ export const DEMO_QA_PREMISES = [
     meterCount: 2,
     updatedAt: "2026-10-20T14:20:00Z",
     createdByUser: "Sipho Dlamini (FWR)",
-    metadata: { createdByUid: "FWR_001", createdByUser: "Sipho Dlamini (FWR)" },
+    updatedByUser: "Jane Khumalo (MNG)",
+    metadata: { createdByUid: "FWR_001", createdByUser: "Sipho Dlamini (FWR)", updatedByUser: "Jane Khumalo (MNG)" },
     qa: {
       status: "QA PASS",
       reviewedAt: "2026-10-20T15:10:00Z",
@@ -92,7 +94,8 @@ export const DEMO_QA_PREMISES = [
     meterCount: 2,
     updatedAt: "2026-10-19T10:00:00Z",
     createdByUser: "Thabo Molefe (FWR)",
-    metadata: { createdByUid: "FWR_002", createdByUser: "Thabo Molefe (FWR)" },
+    updatedByUser: "John Sithole (SPV)",
+    metadata: { createdByUid: "FWR_002", createdByUser: "Thabo Molefe (FWR)", updatedByUser: "John Sithole (SPV)" },
     qa: {
       status: "QA FAIL",
       reviewedAt: "2026-10-19T11:45:00Z",
@@ -117,7 +120,8 @@ export const DEMO_QA_PREMISES = [
     meterCount: 0,
     updatedAt: "2026-10-18T08:00:00Z",
     createdByUser: "Historical Import",
-    metadata: { createdByUid: "OFFICE_IMPORT", createdByUser: "Office System" },
+    updatedByUser: "Office System",
+    metadata: { createdByUid: "OFFICE_IMPORT", createdByUser: "Office System", updatedByUser: "Office System" },
     qa: null, // Evaluates to "QA NAv"
   },
 ];
