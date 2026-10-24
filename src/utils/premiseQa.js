@@ -30,6 +30,32 @@ export function getPremiseQaLabel(row) {
   return getPremiseQaStatus(row);
 }
 
+/**
+ * Resolve the human updater for the Premise Registry.
+ * A completed QA decision is the latest meaningful user action for PASS/FAIL rows;
+ * for PENDING rows, the latest field submission is the relevant user action.
+ * Registry rebuilds can stamp metadata.updatedByUser as "Premise Registry Sync",
+ * so use the explicit QA actor stamps rather than showing that system label as a user.
+ */
+export function getPremiseUpdatedByUser(row) {
+  const status = getPremiseQaStatus(row);
+  const metadata = row?.metadata || {};
+  const qa = row?.qa || {};
+  const rawMetadataUpdater = typeof metadata.updatedByUser === "string"
+    ? metadata.updatedByUser.trim()
+    : "";
+  const metadataUpdater = rawMetadataUpdater
+    && rawMetadataUpdater.toLowerCase() !== "premise registry sync"
+    ? rawMetadataUpdater
+    : null;
+
+  if (status === "QA PASS" || status === "QA FAIL") {
+    return qa.reviewedByUser || metadataUpdater || "NAv";
+  }
+
+  return qa.lastSubmittedByUser || metadataUpdater || metadata.createdByUser || "NAv";
+}
+
 // Isolated sample preview records to demonstrate all 4 states safely without altering real Firestore data
 export const DEMO_QA_PREMISES = [
   {
