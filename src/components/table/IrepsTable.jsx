@@ -587,7 +587,7 @@ const styles = {
   pinnedHead: {
     position: "sticky",
     left: 0,
-    zIndex: 1,
+    zIndex: 3,
     background: T.headBackground,
     borderRight: `1px solid ${T.border}`,
     boxShadow: "2px 0 4px -2px rgba(15,23,42,0.18)",
@@ -595,7 +595,7 @@ const styles = {
   pinnedFilter: {
     position: "sticky",
     left: 0,
-    zIndex: 1,
+    zIndex: 3,
     background: T.filterRowBackground,
     borderRight: `1px solid ${T.border}`,
     boxShadow: "2px 0 4px -2px rgba(15,23,42,0.18)",
@@ -666,7 +666,7 @@ const styles = {
   cell: {
     padding: T.cellPadding,
     borderBottom: `1px solid ${T.border}`,
-    verticalAlign: "top",
+    verticalAlign: "middle",
   },
 
   muted: { color: T.mutedText, fontSize: T.fontSize },

@@ -52,6 +52,7 @@ export const buildPremiseRegistryRow = (premiseId, premise = {}) => {
       lastSubmittedByUid: premise.qa.lastSubmittedByUid || null,
       lastSubmittedByUser: premise.qa.lastSubmittedByUser || null,
       resubmissionCount: premise.qa.resubmissionCount || 0,
+      historyCount: premise.qa.historyCount || 0,
     } : null,
 
     metadata: {

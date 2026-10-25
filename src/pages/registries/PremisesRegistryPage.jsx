@@ -26,6 +26,7 @@ import {
   getPremiseQaLabel,
   getPremiseUpdatedByUser,
   formatQaStatusDate,
+  getPremiseHistoryCount,
   DEMO_QA_PREMISES,
 } from "../../utils/premiseQa.js";
 import PremiseQaModal from "./components/PremiseQaModal";
@@ -618,15 +619,43 @@ export default function PremisesRegistryPage() {
       sortable: false,
       render: row => {
         const status = getPremiseQaStatus(row);
+        const historyCount = getPremiseHistoryCount(row);
         return status !== "QA NAv" ? (
-          <DataActionButton
-            compact
-            haspopup="dialog"
-            title="QA History"
-            onClick={() => setSelectedQa({ premise: row, action: "", mode: "history" })}
-          >
-            QA History
-          </DataActionButton>
+          <div style={{ position: "relative", display: "inline-block" }} title={`${historyCount} QA history event${historyCount === 1 ? "" : "s"}`}>
+            <DataActionButton
+              compact
+              haspopup="dialog"
+              title="QA History"
+              onClick={() => setSelectedQa({ premise: row, action: "", mode: "history" })}
+            >
+              QA History
+            </DataActionButton>
+            <span
+              style={{
+                position: "absolute",
+                top: "-7px",
+                right: "-7px",
+                background: "#1d4ed8",
+                color: "#ffffff",
+                borderRadius: "999px",
+                fontSize: "10px",
+                fontWeight: 700,
+                minWidth: "16px",
+                height: "16px",
+                lineHeight: "16px",
+                textAlign: "center",
+                padding: "0 4px",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                pointerEvents: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              aria-label={`${historyCount} history events`}
+            >
+              {historyCount}
+            </span>
+          </div>
         ) : null;
       },
     },
@@ -826,6 +855,7 @@ export default function PremisesRegistryPage() {
               filterRows={filterRegistryRows}
               defaultSort={DEFAULT_SORT}
               topScrollbar
+              stickyFirstColumn
               downloads={{
                 registryName: "Premise Registry",
                 rowsLabel: "premises",

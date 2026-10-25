@@ -45,6 +45,17 @@ export function formatQaStatusDate(value) {
   });
 }
 
+export function getPremiseHistoryCount(row) {
+  if (!row) return 0;
+  if (typeof row.qa?.historyCount === "number") return row.qa.historyCount;
+  if (typeof row.historyCount === "number") return row.historyCount;
+  if (Array.isArray(row.qaHistory)) return row.qaHistory.length;
+  const resubmissions = Number(row.qa?.resubmissionCount) || 0;
+  const reviews = row.qa?.reviewedByUser || row.qa?.reviewedAt ? 1 : 0;
+  const initial = (row.qa?.status && row.qa?.status !== "QA_NAV" && row.qa?.status !== "QA NAv") ? 1 : 0;
+  return initial + resubmissions + reviews;
+}
+
 export function getPremiseUpdatedByUser(row) {
   if (!row) return "NAv";
   const status = getPremiseQaStatus(row);

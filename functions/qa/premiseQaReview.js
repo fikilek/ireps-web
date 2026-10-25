@@ -357,7 +357,7 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
     const reviewerRole = upper(getUserRole(actor));
 
     const qaStateName = `QA_${state}`;
-    const previousStatus = premise.qa?.status || "QA_PENDING";
+    const historyCount = (premise.qa?.historyCount || 0) + 1;
 
     const updatedQa = {
       status: qaStateName,
@@ -370,6 +370,7 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
       reviewedByUid: actorUid,
       reviewedByUser: reviewerDisplayName,
       resubmissionCount: premise.qa?.resubmissionCount || 0,
+      historyCount,
       lastSubmittedAt: premise.qa?.lastSubmittedAt || premise.metadata?.createdAt || nowIso,
       lastSubmittedByUid: premise.qa?.lastSubmittedByUid || premise.metadata?.createdByUid || actorUid,
       lastSubmittedByUser: premise.qa?.lastSubmittedByUser || premise.metadata?.createdByUser || reviewerDisplayName,
@@ -415,6 +416,7 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
           reviewedByUser: reviewerDisplayName,
           reasonCode: reason?.code || null,
           reasonLabel: reason?.label || null,
+          historyCount,
         },
         metadata: {
           updatedAt: nowIso,
@@ -514,6 +516,7 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
 
     const newDigest = computePremiseDigest(updatedSubstantive);
     const resubmissionCount = (premise.qa?.resubmissionCount || 0) + 1;
+    const historyCount = (premise.qa?.historyCount || 0) + 1;
 
     const resetQa = {
       status: "QA_PENDING",
@@ -526,6 +529,7 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
       reviewedByUid: null,
       reviewedByUser: null,
       resubmissionCount,
+      historyCount,
       lastSubmittedAt: nowIso,
       lastSubmittedByUid: actorUid,
       lastSubmittedByUser: actorDisplayName,
@@ -587,6 +591,7 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
           lastSubmittedByUid: actorUid,
           lastSubmittedByUser: actorDisplayName,
           resubmissionCount: resubmissionCount,
+          historyCount,
         },
         metadata: {
           updatedAt: nowIso,

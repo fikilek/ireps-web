@@ -1,8 +1,13 @@
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { createServer } from "vite";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+
+const here = fileURLToPath(new URL(".", import.meta.url));
 import {
   PREMISE_QA_STATUS_OPTIONS,
   PREMISE_QA_REASONS,
@@ -10,6 +15,7 @@ import {
   getPremiseQaLabel,
   getPremiseUpdatedByUser,
   formatQaStatusDate,
+  getPremiseHistoryCount,
   DEMO_QA_PREMISES,
 } from "../src/utils/premiseQa.js";
 
@@ -349,5 +355,58 @@ test("formatQaStatusDate formats clean date without actor name or seconds", () =
   assert.strictEqual(formatted, "2026/10/25, 06:45");
   assert.strictEqual(formatQaStatusDate(null), null);
   assert.strictEqual(formatQaStatusDate("NAv"), null);
+});
+
+test("IrepsTable vertically centers all rows and supports stickyFirstColumn", () => {
+  const irepsTableSrc = readFileSync(join(here, "../src/components/table/IrepsTable.jsx"), "utf8");
+  assert.match(
+    irepsTableSrc,
+    /cell:\s*\{[\s\S]*?verticalAlign:\s*["']middle["']/,
+    "IrepsTable must vertically center table cell contents by default",
+  );
+  assert.match(
+    irepsTableSrc,
+    /stickyFirstColumn/,
+    "IrepsTable must support stickyFirstColumn prop",
+  );
+
+  const premisesSrc = readFileSync(join(here, "../src/pages/registries/PremisesRegistryPage.jsx"), "utf8");
+  assert.match(
+    premisesSrc,
+    /<IrepsTable[\s\S]*?stickyFirstColumn/,
+    "PremisesRegistryPage must set stickyFirstColumn on IrepsTable",
+  );
+});
+
+test("getPremiseHistoryCount calculates event counts accurately and PremisesRegistryPage renders badge", () => {
+  // Test with explicit historyCount
+  assert.strictEqual(getPremiseHistoryCount({ qa: { historyCount: 5 } }), 5);
+
+  // Test fallback with initial submission only
+  assert.strictEqual(getPremiseHistoryCount({ qa: { status: "QA_PENDING", resubmissionCount: 0 } }), 1);
+
+  // Test fallback with 2 resubmissions and reviewed
+  assert.strictEqual(getPremiseHistoryCount({ qa: { status: "QA_PASS", resubmissionCount: 2, reviewedAt: "2026-10-25T00:00:00Z" } }), 4);
+
+  const premisesSrc = readFileSync(join(here, "../src/pages/registries/PremisesRegistryPage.jsx"), "utf8");
+  assert.match(
+    premisesSrc,
+    /getPremiseHistoryCount\(row\)/,
+    "PremisesRegistryPage must calculate historyCount for each row",
+  );
+  assert.match(
+    premisesSrc,
+    /aria-label=\{`\$\{historyCount\} history events`\}/,
+    "PremisesRegistryPage must render badge with accessible label",
+  );
+});
+
+test("PremiseQaModal displays spinner when loading history and auto-closes on review submit", () => {
+  const modalSrc = readFileSync(join(here, "../src/pages/registries/components/PremiseQaModal.jsx"), "utf8");
+  const modalCss = readFileSync(join(here, "../src/pages/registries/components/PremiseQaModal.css"), "utf8");
+
+  assert.match(modalCss, /\.qa-spinner/, "PremiseQaModal.css must define .qa-spinner styling");
+  assert.match(modalSrc, /loadingContext[\s\S]*?qa-spinner/, "PremiseQaModal must render spinner when loadingContext is true");
+  assert.match(modalSrc, /async function submit[\s\S]*?onClose\?\.\(\)/, "PremiseQaModal must auto-close after successfully saving review");
 });
 

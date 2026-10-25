@@ -310,7 +310,7 @@ export default function PremiseQaModal({
           premiseId,
           qa: newQaDecision,
         });
-        if (dialog.current) dialog.current.scrollTop = 0;
+        onClose?.();
       }, 250);
       return;
     }
@@ -334,7 +334,7 @@ export default function PremiseQaModal({
         premiseId,
         qa: returnedQa,
       });
-      if (dialog.current) dialog.current.scrollTop = 0;
+      onClose?.();
     } catch (err) {
       setError(err?.message || "The QA decision could not be saved to the server.");
     } finally {
@@ -534,7 +534,12 @@ export default function PremiseQaModal({
         {/* Box: Decision History */}
         <section className="qa-panel qa-history" aria-labelledby="qa-history-title">
           <h3 id="qa-history-title">Decision History</h3>
-          {displayHistory.length ? (
+          {loadingContext ? (
+            <div className="qa-loading-history" style={{ padding: "24px 16px", textAlign: "center", color: "#64748b" }}>
+              <div className="qa-spinner" aria-hidden="true" />
+              <p style={{ margin: 0, fontSize: "13px" }}>Loading decision history...</p>
+            </div>
+          ) : displayHistory.length ? (
             displayHistory.map((item, idx) => (
               <article key={item.eventId || item.id || idx}>
                 <strong>
