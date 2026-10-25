@@ -248,4 +248,25 @@ test("PremiseQaModal in history mode strictly renders Premise QA History, Premis
   assert.ok(!html.includes("<h3>Decision</h3>"), "Must NOT render Decision review box in history mode");
 });
 
+test("Premise Registry includes Created By User and Completed By User columns aligning with TRN Registry", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { join } = await import("node:path");
+
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  const premisesSrc = readFileSync(join(here, "../src/pages/registries/PremisesRegistryPage.jsx"), "utf8");
+
+  assert.match(
+    premisesSrc,
+    /key:\s*["']createdByUser["'][\s\S]*?label:\s*["']Created By User["']/,
+    "PremisesRegistryPage must define Created By User column",
+  );
+  assert.match(
+    premisesSrc,
+    /key:\s*["']completedByUser["'][\s\S]*?label:\s*["']Completed By User["']/,
+    "PremisesRegistryPage must define Completed By User column",
+  );
+});
+
+
 

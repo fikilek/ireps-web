@@ -39,6 +39,8 @@ const EMPTY_PREMISE_FILTERS = {
   electricityMeterCount: "",
   waterMeterCount: "",
   meterCount: "",
+  createdByUser: "",
+  completedByUser: "",
   qaStatus: "ALL",
 };
 
@@ -292,6 +294,8 @@ export default function PremisesRegistryPage() {
         includesText(getCountText(row.electricityMeterCount), activeFilters.electricityMeterCount) &&
         includesText(getCountText(row.waterMeterCount), activeFilters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), activeFilters.meterCount) &&
+        includesText(row.createdByUser, activeFilters.createdByUser) &&
+        includesText(row.completedByUser, activeFilters.completedByUser) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
@@ -355,6 +359,14 @@ export default function PremisesRegistryPage() {
       {
         header: "Total Meters",
         value: (row) => row.meterCount || 0,
+      },
+      {
+        header: "Created By User",
+        value: (row) => row.createdByUser || "",
+      },
+      {
+        header: "Completed By User",
+        value: (row) => row.completedByUser || "",
       },
       {
         header: "updatedAt",
@@ -514,6 +526,28 @@ export default function PremisesRegistryPage() {
       sortValue: row => getSortValue(row, "meterCount"),
       render: row => {
         return <>{formatNumber(row.meterCount)}</>;
+      },
+    },
+    {
+      key: "createdByUser",
+      label: "Created By User",
+      filter: "text",
+      sortable: true,
+      value: row => getSortValue(row, "createdByUser"),
+      sortValue: row => getSortValue(row, "createdByUser"),
+      render: row => {
+        return <>{row.createdByUser || ""}</>;
+      },
+    },
+    {
+      key: "completedByUser",
+      label: "Completed By User",
+      filter: "text",
+      sortable: true,
+      value: row => getSortValue(row, "completedByUser"),
+      sortValue: row => getSortValue(row, "completedByUser"),
+      render: row => {
+        return <>{row.completedByUser || ""}</>;
       },
     },
     {
