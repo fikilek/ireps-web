@@ -58,9 +58,9 @@ export const buildPremiseRegistryRow = (premiseId, premise = {}) => {
       createdAt,
       createdByUid,
       createdByUser,
-      updatedAt: new Date().toISOString(),
-      updatedByUid: "SYSTEM",
-      updatedByUser: "Premise Registry Sync",
+      updatedAt: premise?.metadata?.updatedAt || createdAt || new Date().toISOString(),
+      updatedByUid: premise?.metadata?.updatedByUid || createdByUid || "SYSTEM",
+      updatedByUser: premise?.metadata?.updatedByUser || createdByUser || "NAv",
     },
   };
 };

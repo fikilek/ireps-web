@@ -40,7 +40,7 @@ const EMPTY_PREMISE_FILTERS = {
   waterMeterCount: "",
   meterCount: "",
   createdByUser: "",
-  completedByUser: "",
+  updatedByUser: "",
   qaStatus: "ALL",
 };
 
@@ -295,7 +295,7 @@ export default function PremisesRegistryPage() {
         includesText(getCountText(row.waterMeterCount), activeFilters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), activeFilters.meterCount) &&
         includesText(row.createdByUser, activeFilters.createdByUser) &&
-        includesText(row.completedByUser, activeFilters.completedByUser) &&
+        includesText(row.updatedByUser, activeFilters.updatedByUser) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
@@ -365,8 +365,8 @@ export default function PremisesRegistryPage() {
         value: (row) => row.createdByUser || "",
       },
       {
-        header: "Completed By User",
-        value: (row) => row.completedByUser || "",
+        header: "Updated By User",
+        value: (row) => row.updatedByUser || "",
       },
       {
         header: "updatedAt",
@@ -540,14 +540,14 @@ export default function PremisesRegistryPage() {
       },
     },
     {
-      key: "completedByUser",
-      label: "Completed By User",
+      key: "updatedByUser",
+      label: "Updated By User",
       filter: "text",
       sortable: true,
-      value: row => getSortValue(row, "completedByUser"),
-      sortValue: row => getSortValue(row, "completedByUser"),
+      value: row => getSortValue(row, "updatedByUser"),
+      sortValue: row => getSortValue(row, "updatedByUser"),
       render: row => {
-        return <>{row.completedByUser || ""}</>;
+        return <>{row.updatedByUser || ""}</>;
       },
     },
     {

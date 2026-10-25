@@ -21,15 +21,10 @@ export const rebuildPremiseMeterCounts = async (premiseId) => {
   const waterMeters = waterSnap.data().count || 0;
   const totalMeters = electricityMeters + waterMeters;
 
-  const now = new Date().toISOString();
-
   await db.collection("registry_premises").doc(premiseId).update({
     "counts.electricityMeters": electricityMeters,
     "counts.waterMeters": waterMeters,
     "counts.totalMeters": totalMeters,
-    "metadata.updatedAt": now,
-    "metadata.updatedByUid": "SYSTEM",
-    "metadata.updatedByUser": "Premise Meter Count Sync",
   });
 
   return {
