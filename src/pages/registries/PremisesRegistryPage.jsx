@@ -256,9 +256,13 @@ export default function PremisesRegistryPage() {
   // Combine rows: in preview mode, demo premises are included to demonstrate all 4 QA states safely
   const premiseRows = useMemo(() => {
     const baseRows = qaPreviewMode ? [...DEMO_QA_PREMISES, ...rawPremiseRows] : rawPremiseRows;
-    if (Object.keys(localQaOverrides).length === 0) return baseRows;
+    if (!qaPreviewMode || Object.keys(localQaOverrides).length === 0) return baseRows;
 
     return baseRows.map(row => {
+      // Local overrides are strictly for demo/preview premises and must never block live streaming
+      const isDemo = Boolean(row.isSample) || String(row.id || "").startsWith("PRM_DEMO_") || String(row.premiseId || "").startsWith("PRM_DEMO_");
+      if (!isDemo) return row;
+
       const override = localQaOverrides[row.id] || localQaOverrides[row.premiseId];
       if (!override) return row;
       return {
@@ -848,10 +852,12 @@ export default function PremisesRegistryPage() {
           reviewerRole={reviewerRole || qaPreviewMode}
           qaPreview={qaPreviewMode || Boolean(selectedQa.premise?.isSample) || String(selectedQa.premise?.id || "").startsWith("PRM_DEMO_")}
           onSaved={({ premiseId, qa }) => {
-            setLocalQaOverrides(prev => ({
-              ...prev,
-              [premiseId]: qa,
-            }));
+            if (qaPreviewMode) {
+              setLocalQaOverrides(prev => ({
+                ...prev,
+                [premiseId]: qa,
+              }));
+            }
           }}
           onClose={() => setSelectedQa(null)}
         />

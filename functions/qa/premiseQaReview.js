@@ -583,6 +583,10 @@ export async function savePremiseCorrection(db, actorUid, input = {}) {
           reviewedByUser: null,
           reasonCode: null,
           reasonLabel: null,
+          lastSubmittedAt: nowIso,
+          lastSubmittedByUid: actorUid,
+          lastSubmittedByUser: actorDisplayName,
+          resubmissionCount: resubmissionCount,
         },
         metadata: {
           updatedAt: nowIso,

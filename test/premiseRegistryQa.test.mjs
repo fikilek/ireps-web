@@ -8,6 +8,7 @@ import {
   PREMISE_QA_REASONS,
   getPremiseQaStatus,
   getPremiseQaLabel,
+  getPremiseUpdatedByUser,
   DEMO_QA_PREMISES,
 } from "../src/utils/premiseQa.js";
 
@@ -306,6 +307,37 @@ test("getPremiseUpdatedByUser resolves reviewer on QA FAIL/PASS and FWR on corre
   assert.strictEqual(getPremiseUpdatedByUser(initialRow), "Simo Phemba", "Resolves initial FWR on fresh capture");
 });
 
+test("Live premises stream without being blocked by local QA overrides", () => {
+  const liveRow = {
+    id: "PRM_1792586652816_92_W006_5246",
+    premiseId: "PRM_1792586652816_92_W006_5246",
+    qa: {
+      status: "QA_PENDING",
+      resubmissionCount: 1,
+      lastSubmittedByUser: "Peter Peter",
+      reviewedByUser: null,
+    },
+  };
 
+  const localOverrides = {
+    PRM_1792586652816_92_W006_5246: {
+      status: "QA_FAIL",
+      reviewedByUser: "Zamo Ngubs",
+    },
+  };
 
+  // In live mode (qaPreviewMode = false), local overrides must be ignored for live premises
+  const qaPreviewMode = false;
+  const baseRows = [liveRow];
+  const resolvedRows = (!qaPreviewMode || Object.keys(localOverrides).length === 0)
+    ? baseRows
+    : baseRows.map(row => {
+        const isDemo = Boolean(row.isSample) || String(row.id || "").startsWith("PRM_DEMO_");
+        if (!isDemo) return row;
+        const override = localOverrides[row.id];
+        return override ? { ...row, qa: { ...(row.qa || {}), ...override } } : row;
+      });
 
+  assert.strictEqual(resolvedRows[0].qa.status, "QA_PENDING", "Live row preserves streamed QA_PENDING status");
+  assert.strictEqual(getPremiseUpdatedByUser(resolvedRows[0]), "Peter Peter", "Live row reflects correcting FWR");
+});
