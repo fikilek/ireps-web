@@ -6,11 +6,9 @@ import {
   getUserServiceProviderId,
   isMncServiceProvider,
   isSubcServiceProvider,
-  resolveServiceProviderMnc,
   getServiceProviderLmClients,
 } from "../teams/helpers.js";
 import { qaText } from "./model.js";
-import { rebuildPremiseRegistryRow } from "../registry/premiseRegistryRowRebuild.js";
 
 // Canonical Premise QA Failure Reasons catalog
 export const PREMISE_QA_FAILURE_REASONS = Object.freeze([
@@ -357,6 +355,7 @@ export async function savePremiseQaReview(db, actorUid, input = {}) {
     const reviewerRole = upper(getUserRole(actor));
 
     const qaStateName = `QA_${state}`;
+    const previousStatus = premise.qa?.status || null;
     const historyCount = (premise.qa?.historyCount || 0) + 1;
 
     const updatedQa = {

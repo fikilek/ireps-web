@@ -399,3 +399,17 @@ test("PremiseQaModal displays spinner when loading history and auto-closes on re
   assert.match(modalSrc, /async function submit[\s\S]*?onClose\?\.\(\)/, "PremiseQaModal must auto-close after successfully saving review");
 });
 
+test("savePremiseQaReview defines previousStatus and historyCount accurately", () => {
+  const backendSrc = readFileSync(join(here, "../functions/qa/premiseQaReview.js"), "utf8");
+  assert.match(
+    backendSrc,
+    /const previousStatus = premise\.qa\?\.status/,
+    "savePremiseQaReview must define previousStatus before writing historyEntry",
+  );
+  assert.match(
+    backendSrc,
+    /previousStatus,[\s\S]*?newStatus: qaStateName/,
+    "historyEntry must record previousStatus and newStatus without reference errors",
+  );
+});
+
