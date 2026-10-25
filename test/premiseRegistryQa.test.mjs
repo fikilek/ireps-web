@@ -413,3 +413,18 @@ test("savePremiseQaReview defines previousStatus and historyCount accurately", (
   );
 });
 
+test("applyPremiseQaTbRowProjection synchronizes qaPassRows and qaFailRows on parent tb_uploads document", () => {
+  const backendSrc = readFileSync(join(here, "../functions/qa/premiseQaReview.js"), "utf8");
+  assert.match(
+    backendSrc,
+    /"counts\.qaPassRows": qaPassRows/,
+    "applyPremiseQaTbRowProjection must update counts.qaPassRows on tb_uploads",
+  );
+  assert.match(
+    backendSrc,
+    /"counts\.qaFailRows": qaFailRows/,
+    "applyPremiseQaTbRowProjection must update counts.qaFailRows on tb_uploads",
+  );
+});
+
+

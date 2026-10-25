@@ -134,7 +134,12 @@ export async function readPremiseQaTbRow(tx, db, premiseId, premise) {
   }
 
   const rowRef = db.collection("tb_rows").doc(tbContext.rowId);
-  const rowSnap = await tx.get(rowRef);
+  const parentRef = db.collection("tb_uploads").doc(tbContext.tbId);
+  const [rowSnap, parentSnap, tbRowsSnap] = await Promise.all([
+    tx.get(rowRef),
+    tx.get(parentRef),
+    tx.get(db.collection("tb_rows").where("tbId", "==", tbContext.tbId)),
+  ]);
 
   if (!rowSnap.exists) {
     return { canProject: false, reason: "ROW_NOT_FOUND" };
@@ -150,7 +155,14 @@ export async function readPremiseQaTbRow(tx, db, premiseId, premise) {
     return { canProject: false, reason: "ROW_TB_ID_MISMATCH" };
   }
 
-  return { canProject: true, rowRef, rowId: tbContext.rowId, row };
+  return {
+    canProject: true,
+    rowRef,
+    rowId: tbContext.rowId,
+    row,
+    parentRef: parentSnap.exists ? parentRef : null,
+    tbRows: tbRowsSnap.docs.map((doc) => ({ ...doc.data(), id: doc.id })),
+  };
 }
 
 export function calculateTbQaStatus(premiseStatus, meterStatus, executionStatus = null) {
@@ -196,6 +208,35 @@ export function applyPremiseQaTbRowProjection(tx, tbRowPlan, qaState, reviewerDe
   };
 
   tx.update(tbRowPlan.rowRef, updateData);
+
+  if (tbRowPlan.parentRef && Array.isArray(tbRowPlan.tbRows)) {
+    const norm = (s) => String(s || "").trim().toUpperCase().replace(/ /g, "_");
+    let qaPassRows = 0;
+    let qaFailRows = 0;
+
+    for (const r of tbRowPlan.tbRows) {
+      const isThisRow = r.id === tbRowPlan.rowId;
+      const pStatus = norm(isThisRow ? qaState : r.qa?.premiseStatus);
+      const mStatus = norm(isThisRow ? tbRowPlan.row?.qa?.meterStatus : r.qa?.meterStatus);
+      const execStatus = norm(isThisRow ? tbRowPlan.row?.execution?.status : r.execution?.status);
+      const tbStatus = norm(isThisRow ? calculatedTbStatus : r.qa?.tbStatus);
+
+      if (tbStatus === "QA_FAIL" || pStatus === "QA_FAIL" || mStatus === "QA_FAIL") {
+        qaFailRows += 1;
+      } else if (execStatus === "COMPLETED") {
+        if (tbStatus === "QA_PASS" || (pStatus === "QA_PASS" && mStatus === "QA_PASS")) {
+          qaPassRows += 1;
+        }
+      }
+    }
+
+    tx.update(tbRowPlan.parentRef, {
+      "counts.qaPassRows": qaPassRows,
+      "counts.qaFailRows": qaFailRows,
+      "metadata.updatedAt": nowIso,
+    });
+  }
+
   return { projected: true, rowId: tbRowPlan.rowId, tbStatus: calculatedTbStatus };
 }
 

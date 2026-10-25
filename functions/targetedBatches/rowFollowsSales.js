@@ -27,7 +27,7 @@ const rowOutcome = plan => plan.rowOutcome || OUTCOME_BY_FIND[plan.findType] || 
 const tbRefOutcomeLabel = plan => plan.outcomeLabel || "Meter Discovered";
 export const DECISIONS = Object.freeze({ NONE: "NONE", CLOSE: "CLOSE", REMOVE: "REMOVE", LOG: "LOG" });
 export const REMOVAL_REASONS = Object.freeze({ ANOTHER_TEAM: "FOUND_BY_ANOTHER_TEAM", UNALLOCATED: "FOUND_WHILE_UNALLOCATED" });
-export const COUNT_KEYS = Object.freeze(["totalRows", "acceptedRows", "rejectedRows", "allocatableRows", "allocatedRows", "unallocatedRows", "executionStartedRows", "completedRows"]);
+export const COUNT_KEYS = Object.freeze(["totalRows", "acceptedRows", "rejectedRows", "allocatableRows", "allocatedRows", "unallocatedRows", "executionStartedRows", "completedRows", "qaPassRows", "qaFailRows"]);
 export const ROW_REMOVED_EVENT = "TARGETED_BATCH_ROW_REMOVED";
 export const ROW_CLOSED_EVENT = "TARGETED_BATCH_ROW_CLOSED";
 export const BATCH_DELETED_EVENT = "TARGETED_BATCH_DELETED";
@@ -67,6 +67,7 @@ export async function readRowsTakenOut({ db, read, tbId }) {
 
 // ---------------------------------------------------------------- the batch (TB-R053 section 4, copied from the clean-up planner)
 export function countRows(rows) {
+  const norm = s => String(s ?? "").trim().toUpperCase().replace(/ /g, "_");
   return {
     totalRows: rows.length,
     acceptedRows: rows.filter(r => r.decision?.status === "ACCEPT").length,
@@ -76,6 +77,8 @@ export function countRows(rows) {
     unallocatedRows: rows.filter(r => r.allocation?.allocatable === true && r.allocation?.status !== "ALLOCATED").length,
     executionStartedRows: rows.filter(r => (r.execution?.status || "NOT_STARTED") !== "NOT_STARTED").length,
     completedRows: rows.filter(r => r.execution?.status === "COMPLETED").length,
+    qaPassRows: rows.filter(r => norm(r.execution?.status) === "COMPLETED" && (norm(r.qa?.tbStatus) === "QA_PASS" || (norm(r.qa?.premiseStatus) === "QA_PASS" && norm(r.qa?.meterStatus) === "QA_PASS"))).length,
+    qaFailRows: rows.filter(r => norm(r.qa?.tbStatus) === "QA_FAIL" || norm(r.qa?.premiseStatus) === "QA_FAIL" || norm(r.qa?.meterStatus) === "QA_FAIL").length,
   };
 }
 // Section 14 completion target, as premiseLink.js getTargetedBatchCompletionTarget.
