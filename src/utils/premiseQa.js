@@ -30,6 +30,21 @@ export function getPremiseQaLabel(row) {
   return getPremiseQaStatus(row);
 }
 
+export function formatQaStatusDate(value) {
+  if (!value || value === "NAv") return null;
+  const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-ZA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 export function getPremiseUpdatedByUser(row) {
   if (!row) return "NAv";
   const status = getPremiseQaStatus(row);

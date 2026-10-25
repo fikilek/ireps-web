@@ -25,6 +25,7 @@ import {
   getPremiseQaStatus,
   getPremiseQaLabel,
   getPremiseUpdatedByUser,
+  formatQaStatusDate,
   DEMO_QA_PREMISES,
 } from "../../utils/premiseQa.js";
 import PremiseQaModal from "./components/PremiseQaModal";
@@ -600,19 +601,13 @@ export default function PremisesRegistryPage() {
               title={isEligible ? `Open QA Review for premise ${row.premiseId || row.id}` : "No QA review available"}
               ariaLabel={`QA Status: ${getPremiseQaLabel(row)}`}
             />
-            {isPending && row.qa?.resubmissionCount > 0 && row.qa?.lastSubmittedByUser ? (
-              <small>
-                Corrected by {row.qa.lastSubmittedByUser}
-                <br />
-                {qaDate(row.qa.lastSubmittedAt)}
-              </small>
-            ) : row.qa?.reviewedByUser ? (
-              <small>
-                {row.qa.reviewedByUser}
-                <br />
-                {qaDate(row.qa.reviewedAt)}
-              </small>
-            ) : null}
+            {(() => {
+              const dateVal = isPending
+                ? (row.qa?.resubmissionCount > 0 ? row.qa?.lastSubmittedAt : null)
+                : row.qa?.reviewedAt;
+              const dateStr = formatQaStatusDate(dateVal);
+              return dateStr ? <small>{dateStr}</small> : null;
+            })()}
           </div>
         );
       },

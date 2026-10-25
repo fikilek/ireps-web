@@ -9,6 +9,7 @@ import {
   getPremiseQaStatus,
   getPremiseQaLabel,
   getPremiseUpdatedByUser,
+  formatQaStatusDate,
   DEMO_QA_PREMISES,
 } from "../src/utils/premiseQa.js";
 
@@ -341,3 +342,12 @@ test("Live premises stream without being blocked by local QA overrides", () => {
   assert.strictEqual(resolvedRows[0].qa.status, "QA_PENDING", "Live row preserves streamed QA_PENDING status");
   assert.strictEqual(getPremiseUpdatedByUser(resolvedRows[0]), "Peter Peter", "Live row reflects correcting FWR");
 });
+
+test("formatQaStatusDate formats clean date without actor name or seconds", () => {
+  const dateIso = "2026-10-25T04:45:26.000Z"; // 06:45:26 SAST
+  const formatted = formatQaStatusDate(dateIso);
+  assert.strictEqual(formatted, "2026/10/25, 06:45");
+  assert.strictEqual(formatQaStatusDate(null), null);
+  assert.strictEqual(formatQaStatusDate("NAv"), null);
+});
+
