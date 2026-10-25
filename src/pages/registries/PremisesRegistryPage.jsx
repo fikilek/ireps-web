@@ -27,7 +27,6 @@ import {
   getPremiseUpdatedByUser,
   formatQaStatusDate,
   getPremiseHistoryCount,
-  DEMO_QA_PREMISES,
 } from "../../utils/premiseQa.js";
 import PremiseQaModal from "./components/PremiseQaModal";
 import "./components/PremiseQaModal.css";
@@ -220,14 +219,7 @@ export default function PremisesRegistryPage() {
       : EMPTY_PREMISE_FILTERS;
   });
 
-  const [qaPreviewMode, setQaPreviewMode] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const searchParams = new URLSearchParams(window.location.search);
-    return searchParams.get("qaPreview") === "true" || searchParams.get("preview") === "qa";
-  });
-
   const [selectedQa, setSelectedQa] = useState(null);
-  const [localQaOverrides, setLocalQaOverrides] = useState({});
 
   const activeLmPcode = getActiveLmPcode(activeWorkbase);
 
@@ -255,27 +247,8 @@ export default function PremisesRegistryPage() {
     error,
   } = useGetRegistryPremisesByWardQuery(effectiveSelectedWardPcode || skipToken);
 
-  // Combine rows: in preview mode, demo premises are included to demonstrate all 4 QA states safely
-  const premiseRows = useMemo(() => {
-    const baseRows = qaPreviewMode ? [...DEMO_QA_PREMISES, ...rawPremiseRows] : rawPremiseRows;
-    if (!qaPreviewMode || Object.keys(localQaOverrides).length === 0) return baseRows;
-
-    return baseRows.map(row => {
-      // Local overrides are strictly for demo/preview premises and must never block live streaming
-      const isDemo = Boolean(row.isSample) || String(row.id || "").startsWith("PRM_DEMO_") || String(row.premiseId || "").startsWith("PRM_DEMO_");
-      if (!isDemo) return row;
-
-      const override = localQaOverrides[row.id] || localQaOverrides[row.premiseId];
-      if (!override) return row;
-      return {
-        ...row,
-        qa: {
-          ...(row.qa || {}),
-          ...override,
-        },
-      };
-    });
-  }, [qaPreviewMode, rawPremiseRows, localQaOverrides]);
+  // Pure live streaming directly from Firestore
+  const premiseRows = rawPremiseRows;
 
   const filterRegistryRows = useCallback((rows, tableFilters) => {
     const activeFilters = {
@@ -588,7 +561,7 @@ export default function PremisesRegistryPage() {
         const isPending = status === "QA PENDING";
         const submitterUid = row.metadata?.createdByUid || row.qa?.lastSubmittedByUid;
         const isSelf = submitterUid && submitterUid === uid;
-        const mayReview = (reviewerRole || qaPreviewMode) && isPending && !isSelf;
+        const mayReview = reviewerRole && isPending && !isSelf;
 
         const isEligible = status !== "QA NAv";
 
@@ -685,30 +658,6 @@ export default function PremisesRegistryPage() {
         </div>
       </header>
 
-      {qaPreviewMode && (
-        <section className="qa-preview-banner" role="status">
-          <div>
-            <strong>QA Preview Mode Active:</strong> Displaying isolated sample premises to safely demonstrate{" "}
-            <code>QA NAv</code>, <code>QA PENDING</code>, <code>QA PASS</code> and <code>QA FAIL</code>. Live documents are untouched.
-          </div>
-          <button
-            type="button"
-            onClick={() => setQaPreviewMode(false)}
-            style={{
-              padding: "4px 8px",
-              fontSize: "12px",
-              cursor: "pointer",
-              borderRadius: "4px",
-              border: "1px solid #d97706",
-              background: "#fff",
-              color: "#92400e",
-            }}
-          >
-            Exit Preview
-          </button>
-        </section>
-      )}
-
       <section className="filter-panel">
         <label>
           Ward
@@ -726,37 +675,6 @@ export default function PremisesRegistryPage() {
             ))}
           </select>
         </label>
-
-        <button
-          type="button"
-          role="switch"
-          aria-label="Toggle QA Preview Samples"
-          aria-checked={qaPreviewMode}
-          title={qaPreviewMode ? "Hide QA Preview Samples" : "Show QA Preview Samples"}
-          onClick={() => setQaPreviewMode(current => !current)}
-          style={{
-            ...styles.columnVisibilityToggle,
-            background: qaPreviewMode ? "#eff6ff" : "#f8fafc",
-            borderColor: qaPreviewMode ? "#bfdbfe" : "#e2e8f0",
-            color: qaPreviewMode ? "#1d4ed8" : "#475569",
-          }}
-        >
-          <span>QA Preview</span>
-          <span
-            aria-hidden="true"
-            style={{
-              ...styles.visibilityTrack,
-              background: qaPreviewMode ? "#2563eb" : "#94a3b8",
-            }}
-          >
-            <span
-              style={{
-                ...styles.visibilityThumb,
-                transform: qaPreviewMode ? "translateX(12px)" : "translateX(0)",
-              }}
-            />
-          </span>
-        </button>
 
         <div className="filter-summary">
           <strong>{getWardLabel(selectedWard)}</strong>
@@ -807,16 +725,16 @@ export default function PremisesRegistryPage() {
       </section>
 
       <section className="table-panel">
-        {!effectiveSelectedWardPcode && !qaPreviewMode ? (
+        {!effectiveSelectedWardPcode ? (
           <div className="empty-state">
             <h2>Select a ward</h2>
             <p className="muted">
-              Premise Registry is ward-scoped for clean operational browsing. Or toggle QA Preview above to inspect sample QA states.
+              Premise Registry is ward-scoped for clean operational browsing.
             </p>
           </div>
         ) : null}
 
-        {error && !qaPreviewMode ? (
+        {error ? (
           <div className="empty-state error-box">
             <h2>Could not load premise registry</h2>
             <p className="muted">
@@ -825,7 +743,7 @@ export default function PremisesRegistryPage() {
           </div>
         ) : null}
 
-        {isLoading && !qaPreviewMode ? (
+        {isLoading ? (
           <div className="empty-state">
             <h2>Loading premise registry...</h2>
             <p className="muted">Opening Firestore stream.</p>
@@ -844,7 +762,7 @@ export default function PremisesRegistryPage() {
         {premiseRows.length > 0 ? (
           <div className="table-wrap">
             <IrepsTable
-              key={`${activeLmPcode}:${effectiveSelectedWardPcode}:${qaPreviewMode}`}
+              key={`${activeLmPcode}:${effectiveSelectedWardPcode}`}
               title="Premises Registry"
               rows={premiseRows}
               columns={registryColumns}
@@ -874,16 +792,7 @@ export default function PremisesRegistryPage() {
           premise={selectedQa.premise}
           initialAction={selectedQa.action}
           mode={selectedQa.mode || "review"}
-          reviewerRole={reviewerRole || qaPreviewMode}
-          qaPreview={qaPreviewMode || Boolean(selectedQa.premise?.isSample) || String(selectedQa.premise?.id || "").startsWith("PRM_DEMO_")}
-          onSaved={({ premiseId, qa }) => {
-            if (qaPreviewMode) {
-              setLocalQaOverrides(prev => ({
-                ...prev,
-                [premiseId]: qa,
-              }));
-            }
-          }}
+          reviewerRole={reviewerRole}
           onClose={() => setSelectedQa(null)}
         />
       )}
@@ -905,40 +814,5 @@ const styles = {
   smallMuted: {
     fontSize: "0.72rem",
     marginTop: "0.25rem",
-  },
-
-  columnVisibilityToggle: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
-    alignSelf: "end",
-    flex: "0 0 auto",
-    width: "auto",
-    minHeight: "34px",
-    padding: "6px 10px 6px 12px",
-    border: "1px solid",
-    borderRadius: "999px",
-    fontFamily: "inherit",
-    fontSize: "12px",
-    fontWeight: 700,
-    whiteSpace: "nowrap",
-    cursor: "pointer",
-  },
-  visibilityTrack: {
-    display: "inline-flex",
-    alignItems: "center",
-    width: "30px",
-    height: "18px",
-    padding: "3px",
-    boxSizing: "border-box",
-    borderRadius: "999px",
-  },
-  visibilityThumb: {
-    width: "12px",
-    height: "12px",
-    borderRadius: "50%",
-    background: "#ffffff",
-    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.18)",
   },
 };
