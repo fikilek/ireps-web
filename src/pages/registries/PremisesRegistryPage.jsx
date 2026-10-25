@@ -24,6 +24,7 @@ import {
   PREMISE_QA_STATUS_OPTIONS,
   getPremiseQaStatus,
   getPremiseQaLabel,
+  getPremiseUpdatedByUser,
   DEMO_QA_PREMISES,
 } from "../../utils/premiseQa.js";
 import PremiseQaModal from "./components/PremiseQaModal";
@@ -295,7 +296,7 @@ export default function PremisesRegistryPage() {
         includesText(getCountText(row.waterMeterCount), activeFilters.waterMeterCount) &&
         includesText(getCountText(row.meterCount), activeFilters.meterCount) &&
         includesText(row.createdByUser, activeFilters.createdByUser) &&
-        includesText(row.updatedByUser, activeFilters.updatedByUser) &&
+        includesText(getPremiseUpdatedByUser(row), activeFilters.updatedByUser) &&
         matchesUpdatedAtFilter(row.updatedAt, updatedAtFilter)
       );
     });
@@ -366,7 +367,7 @@ export default function PremisesRegistryPage() {
       },
       {
         header: "Updated By User",
-        value: (row) => row.updatedByUser || "",
+        value: (row) => getPremiseUpdatedByUser(row),
       },
       {
         header: "updatedAt",
@@ -544,10 +545,10 @@ export default function PremisesRegistryPage() {
       label: "Updated By User",
       filter: "text",
       sortable: true,
-      value: row => getSortValue(row, "updatedByUser"),
-      sortValue: row => getSortValue(row, "updatedByUser"),
+      value: row => getPremiseUpdatedByUser(row),
+      sortValue: row => getPremiseUpdatedByUser(row),
       render: row => {
-        return <>{row.updatedByUser || ""}</>;
+        return <>{getPremiseUpdatedByUser(row)}</>;
       },
     },
     {

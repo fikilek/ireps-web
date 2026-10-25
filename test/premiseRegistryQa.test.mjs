@@ -268,5 +268,44 @@ test("Premise Registry includes Created By User and Updated By User columns alig
   );
 });
 
+test("getPremiseUpdatedByUser resolves reviewer on QA FAIL/PASS and FWR on correction/creation", async () => {
+  const { getPremiseUpdatedByUser } = await import("../src/utils/premiseQa.js");
+
+  // Case 1: QA FAIL reviewed by Zamo Ngubs
+  const qaFailRow = {
+    createdByUser: "Simo Phemba",
+    qa: {
+      status: "QA_FAIL",
+      reviewedByUser: "Zamo Ngubs",
+      lastSubmittedByUser: "Simo Phemba",
+    },
+  };
+  assert.strictEqual(getPremiseUpdatedByUser(qaFailRow), "Zamo Ngubs", "Resolves reviewer name on QA FAIL");
+
+  // Case 2: QA PENDING corrected by Peter Peter
+  const correctedRow = {
+    createdByUser: "Simo Phemba",
+    qa: {
+      status: "QA_PENDING",
+      resubmissionCount: 1,
+      lastSubmittedByUser: "Peter Peter",
+      reviewedByUser: "Zamo Ngubs",
+    },
+  };
+  assert.strictEqual(getPremiseUpdatedByUser(correctedRow), "Peter Peter", "Resolves correcting FWR name on resubmission");
+
+  // Case 3: Initial capture by Simo Phemba
+  const initialRow = {
+    createdByUser: "Simo Phemba",
+    qa: {
+      status: "QA_PENDING",
+      resubmissionCount: 0,
+      lastSubmittedByUser: "Simo Phemba",
+    },
+  };
+  assert.strictEqual(getPremiseUpdatedByUser(initialRow), "Simo Phemba", "Resolves initial FWR on fresh capture");
+});
+
+
 
 

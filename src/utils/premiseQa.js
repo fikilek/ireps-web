@@ -30,6 +30,19 @@ export function getPremiseQaLabel(row) {
   return getPremiseQaStatus(row);
 }
 
+export function getPremiseUpdatedByUser(row) {
+  if (!row) return "NAv";
+  const status = getPremiseQaStatus(row);
+  const isPending = status === "QA PENDING";
+  if (isPending && row.qa?.resubmissionCount > 0 && row.qa?.lastSubmittedByUser) {
+    return row.qa.lastSubmittedByUser;
+  }
+  if (row.qa?.reviewedByUser) {
+    return row.qa.reviewedByUser;
+  }
+  return row.qa?.lastSubmittedByUser || row.createdByUser || row.metadata?.createdByUser || "NAv";
+}
+
 // Isolated sample preview records to demonstrate all 4 states safely without altering real Firestore data
 export const DEMO_QA_PREMISES = [
   {
