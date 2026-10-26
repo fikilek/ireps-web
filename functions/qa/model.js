@@ -1,6 +1,6 @@
 import { currentState, TRN_STATES } from "../meterLifecycle/trnStateMachine.js";
 // QA-R001: shared, side-effect-free readings used by the server and registry.
-export const QA_LABELS = Object.freeze({ DRAFT: "Draft", PASS: "Pass", FAIL: "Fail", UPDATED: "Updated" });
+export const QA_LABELS = Object.freeze({ DRAFT: "Draft", PASS: "Pass", FAIL: "Fail" });
 export const qaText = value => {
   const text = String(value ?? "").trim();
   return text.toUpperCase() === "NAV" ? "" : text;
@@ -21,9 +21,9 @@ export function qaEligibility(trn = {}) {
   const stage = qaText(trn.workflow?.state).toUpperCase();
   const access = qaText(trn.accessData?.access?.hasAccess).toLowerCase();
   if (stage === "DELETED") return { eligible: false, label: "Deleted" };
-  if (stage && !["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"].includes(stage)) return { eligible: false, label: "Awaiting submission" };
+  if (stage && !["COMPLETED", "QA FAIL", "QA PASS"].includes(stage)) return { eligible: false, label: "Awaiting submission" };
   if (!qaText(trn.accessData?.trnType)) return { eligible: false, label: "Transaction type unavailable" };
-  if (["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"].includes(stage) && ["yes", "no"].includes(access)) return { eligible: true, label: "Submitted" };
+  if (["COMPLETED", "QA FAIL", "QA PASS"].includes(stage) && ["yes", "no"].includes(access)) return { eligible: true, label: "Submitted" };
   const office = qaText(trn.origin?.channel || trn.workflow?.createdMode).toUpperCase() === "OFFICE";
   if (!office && ["yes", "no"].includes(access)) return { eligible: true, label: "Submitted" };
   return { eligible: false, label: "Submission needs checking" };
@@ -48,7 +48,7 @@ export function fieldCapturedAt(trn = {}) {
 
 // Legacy response/UI aliases are derived values, never an independent writer.
 export function qaAlias(state) {
-  return ({ COMPLETED: "DRAFT", "QA FAIL": "FAIL", "QA UPDATED": "UPDATED", "QA PASS": "PASS" })[state] || "";
+  return ({ COMPLETED: "DRAFT", "QA FAIL": "FAIL", "QA PASS": "PASS" })[state] || "";
 }
 
 export function workflowState(trn = {}) {

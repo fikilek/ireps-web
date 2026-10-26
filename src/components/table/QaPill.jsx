@@ -22,8 +22,6 @@ export function qaStatusTone(status = "") {
     case "IN_PROGRESS":
     case "QA PENDING":
     case "PENDING":
-    case "QA UPDATED":
-    case "UPDATED":
       return "warning";
     default:
       return "neutral";

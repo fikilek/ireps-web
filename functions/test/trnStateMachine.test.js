@@ -22,8 +22,8 @@ import {
   theWorkerSees,
 } from "../meterLifecycle/trnStateMachine.js";
 
-test("v3 contains eight persisted states; REMOVED remains deferred", () => {
-  assert.deepEqual(TRN_STATE_LIST, ["CREATED", "DELETED", "ISSUED", "ACCEPTED", "COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"]);
+test("v3 contains seven persisted states; REMOVED remains deferred", () => {
+  assert.deepEqual(TRN_STATE_LIST, ["CREATED", "DELETED", "ISSUED", "ACCEPTED", "COMPLETED", "QA FAIL", "QA PASS"]);
 
   for (const gone of ["REJECTED", "CANCELLED", "REASSIGNED", "IN_PROGRESS"]) {
     assert.equal(isTrnState(gone), false, `${gone} is an event, not a state`);
@@ -41,7 +41,6 @@ test("each state takes exactly the moves the owner listed", () => {
   assert.deepEqual(allowed("ACCEPTED"), ["cancel", "execute"]);
   assert.deepEqual(allowed("COMPLETED"), ["amend", "qaFail", "qaPass"]);
   assert.deepEqual(allowed("QA FAIL"), ["amend"]);
-  assert.deepEqual(allowed("QA UPDATED"), ["qaFail", "qaPass"]);
   assert.deepEqual(allowed("QA PASS"), []);
 });
 
@@ -213,11 +212,10 @@ test("the meter guard reads the machine's list, not its own", async () => {
 test("QA lifecycle preserves corrections and terminal PASS without operational re-entry", () => {
   assert.equal(canMove("COMPLETED", "amend").to, "COMPLETED");
   assert.equal(canMove("COMPLETED", "qaFail").to, "QA FAIL");
-  assert.equal(canMove("QA FAIL", "amend").to, "QA UPDATED");
-  assert.equal(canMove("QA UPDATED", "qaPass").to, "QA PASS");
+  assert.equal(canMove("QA FAIL", "amend").to, "COMPLETED");
+  assert.equal(canMove("COMPLETED", "qaPass").to, "QA PASS");
   assert.equal(canMove("QA FAIL", "qaPass").ok, false);
-  assert.equal(canMove("QA UPDATED", "amend").ok, false);
-  for (const state of ["QA FAIL", "QA UPDATED", "QA PASS"]) {
+  for (const state of ["QA FAIL", "QA PASS"]) {
     assert.equal(theWorkerSees(state), true);
     assert.equal(holdsTheMeter(state), false);
     for (const action of ["execute", "allocate", "delete", "cancel"]) assert.equal(canMove(state, action).ok, false);

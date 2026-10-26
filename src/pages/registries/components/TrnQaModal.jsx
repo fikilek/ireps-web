@@ -10,6 +10,7 @@ import "./TrnQaModal.css";
 const readReview = httpsCallable(functions, "getTrnQaReview", { timeout: 120000 });
 const saveReview = httpsCallable(functions, "saveTrnQaReview");
 const label = value => String(value).replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ");
+const workflowStateLabel = state => ({ "COMPLETED": "Completed", "QA FAIL": "QA Fail", "QA PASS": "QA Pass" })[state] || state || "NAv";
 
 function Fields({ value }) {
   if (value === null || value === undefined || value === "") return <span>NAv</span>;
@@ -138,7 +139,7 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
         <section className="qa-panel qa-history" aria-labelledby="qa-history-title"><h3 id="qa-history-title">Decision History</h3>
           {history.map(item => <article key={item.id}><strong>QA {QA_LABELS[item.state]} · {item.reviewedByUser}</strong><p>{qaDate(item.reviewedAt)}</p>{item.reasonLabel && <p>{item.reasonLabel}</p>}<p className="qa-comment">{item.comment || "No comment."}</p><button type="button" disabled={saving} onClick={() => openVersion(item.sourceVersion)}>View reviewed version</button></article>)}
           {!!context.amendments?.length && <><h4>Correction history</h4>{context.amendments.map(item => <article key={item.id}>
-            <strong>QA {QA_LABELS[item.previousState]} → {QA_LABELS[item.state]} · {item.byUser}</strong>
+            <strong>{workflowStateLabel(item.previousState)} → {workflowStateLabel(item.state)} · {item.byUser}</strong>
             <p>{qaDate(item.at)}</p><p className="qa-comment">{item.explanation}</p>
             {item.takeoverReason && <p>Supervisor takeover: {item.takeoverReason}</p>}
             <p>Changed fields: {item.changedPaths.map(label).join(", ")}</p>

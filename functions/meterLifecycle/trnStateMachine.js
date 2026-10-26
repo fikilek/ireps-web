@@ -24,7 +24,6 @@ export const TRN_STATES = Object.freeze({
   ACCEPTED: "ACCEPTED",
   COMPLETED: "COMPLETED",
   QA_FAIL: "QA FAIL",
-  QA_UPDATED: "QA UPDATED",
   QA_PASS: "QA PASS",
 });
 
@@ -64,8 +63,7 @@ export const TRN_TRANSITIONS = Object.freeze({
     qaFail: TRN_STATES.QA_FAIL,
     qaPass: TRN_STATES.QA_PASS,
   }),
-  [TRN_STATES.QA_FAIL]: Object.freeze({ amend: TRN_STATES.QA_UPDATED }),
-  [TRN_STATES.QA_UPDATED]: Object.freeze({ qaFail: TRN_STATES.QA_FAIL, qaPass: TRN_STATES.QA_PASS }),
+  [TRN_STATES.QA_FAIL]: Object.freeze({ amend: TRN_STATES.COMPLETED }),
   [TRN_STATES.QA_PASS]: Object.freeze({}),
 });
 
@@ -114,7 +112,6 @@ export const STATES_THE_WORKER_SEES = Object.freeze([
   TRN_STATES.ACCEPTED,
   TRN_STATES.COMPLETED,
   TRN_STATES.QA_FAIL,
-  TRN_STATES.QA_UPDATED,
   TRN_STATES.QA_PASS,
 ]);
 
@@ -295,6 +292,6 @@ export function readIssuedAt(trn) {
 
 /** Submitted fieldwork remains submitted after review; QA is not another visit. */
 export const SUBMITTED_TRN_STATES = Object.freeze([
-  TRN_STATES.COMPLETED, TRN_STATES.QA_FAIL, TRN_STATES.QA_UPDATED, TRN_STATES.QA_PASS,
+  TRN_STATES.COMPLETED, TRN_STATES.QA_FAIL, TRN_STATES.QA_PASS,
 ]);
 export const isSubmittedState = state => SUBMITTED_TRN_STATES.includes(currentState(state));

@@ -739,7 +739,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           return;
         }
 
-        if (["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"].includes(workflowState)) {
+        if (["COMPLETED", "QA FAIL", "QA PASS"].includes(workflowState)) {
           if (!await acceptedSubmission(tx, db, trnId, existingTrn, data, actorUid)) {
             responsePayload = buildFailureResult("SUBMISSION_RECEIPT_UNCONFIRMED", "This submitted transaction is protected. The queued capture could not be verified; retain it for recovery.", { trnId, workflowState: canonicalWorkflowState(existingTrn) });
             return;

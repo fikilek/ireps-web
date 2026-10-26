@@ -225,11 +225,11 @@ test("Returned-work TRN listener sees reviews without notices; server excludes o
   const stop = onSnapshot(source, { includeMetadataChanges: true }, snap => {
     if (snap.metadata.fromCache) return;
     initial.resolve();
-    if (snap.docs.some(item => item.id === "FAIL" && item.data().workflow?.state === "QA UPDATED")) changed.resolve();
+    if (snap.docs.some(item => item.id === "FAIL" && item.data().workflow?.state === "COMPLETED")) changed.resolve();
   }, error => { initial.reject(error); changed.reject(error); });
   t.after(stop);
   await ready;
-  await db.doc("trns/FAIL").update({ "workflow.state": "QA UPDATED" });
+  await db.doc("trns/FAIL").update({ "workflow.state": "COMPLETED" });
   await update;
   assert.ok(!(await listQaAmendments(db, "worker")).items.some(item => item.trnId === "FAIL"));
   assert.equal((await db.collection("qaNotifications").get()).size, 0);
@@ -457,14 +457,14 @@ test("v3 correction stamps and immutable after-version survive final review and 
   await saveQaReview(db, "reviewer", failInput);
   const context = await amendContext(original.id);
   const result = await amend(context);
-  assert.equal(result.workflowState, "QA UPDATED");
+  assert.equal(result.workflowState, "COMPLETED");
   const updated = (await db.doc(`trns/${original.id}`).get()).data();
   assert.equal(updated.qa.state, undefined);
   assert.equal(updated.workflow.completedByUid, "worker");
   assert.equal(updated.workflow.completedAt, result.amendment.at);
   assert.equal(sourceVersion(updated), result.amendment.afterVersion);
   const version = (await db.doc(`trns/${original.id}/qaVersions/${result.amendment.afterVersion}`).get()).data();
-  assert.equal(version.snapshot.workflow.state, "QA UPDATED");
+  assert.equal(version.snapshot.workflow.state, "COMPLETED");
   assert.equal(sourceVersion(version.snapshot), version.sourceVersion);
   const beforePassStamp = updated.workflow;
   const last = await prepare("manager", original.id);
@@ -474,7 +474,7 @@ test("v3 correction stamps and immutable after-version survive final review and 
   const retried = await amend(context);
   assert.equal(retried.idempotent, true);
   assert.equal(retried.workflowState, "QA PASS");
-  assert.equal(retried.amendment.state, "UPDATED");
+  assert.equal(retried.amendment.state, "DRAFT");
   assert.equal((await saveQaReview(db, "reviewer", failInput)).workflowState, "QA PASS");
   assert.equal(await acceptedSubmission({ get: ref => ref.get() }, db, original.id, passed, original, "worker"), true);
   assert.equal(await acceptedSubmission({ get: ref => ref.get() }, db, original.id, passed, { ...original, fieldComment: { text: "Fresh write" } }, "worker"), false);

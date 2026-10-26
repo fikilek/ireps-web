@@ -156,7 +156,7 @@ test("TRN has no column groups and hides TRN ID by default", () => {
   const bands=irepsTableBands(table.columns,table.groups);
   assert.deepEqual(bands,[]);
   assert.equal(table.columns.some(c=>c.key==="trnId"),false);
-  assert.equal(table.columns.length,22);
+  assert.equal(table.columns.length, 23);
   assert.equal(table.columns.some(c=>c.key==="createdAt"),false);
   assert.equal(table.downloads.columns.some(c=>c.header==="Created At"),false);
   assert.deepEqual(table.columns.slice(-2).map(column => column.key),["qaState", "qaHistory"]);
@@ -194,30 +194,27 @@ test("QA Status filters states and restricts decisions while QA History stays se
   const history = table.columns.at(-1);
   assert.equal(column.label, "QA Status");
   assert.equal(history.label, "QA History");
-  for (const state of ["DRAFT", "FAIL", "UPDATED", "PASS"]) {
+  for (const state of ["COMPLETED", "QA FAIL", "QA PASS"]) {
     const rows = filter(table, { qaState: state });
-    assert.ok(rows.length); assert.ok(rows.every(row => row.qaState === state));
+    assert.ok(rows.length); assert.ok(rows.every(row => row.workflowState === state));
     const html = renderToStaticMarkup(column.render(rows[0]));
-    assert.equal(html.includes("<select"), ["DRAFT", "UPDATED"].includes(state));
-    assert.ok(html.includes(`<strong>${state}</strong>`));
+    assert.match(html, /qa-status-cell/);
     assert.doesNotMatch(html, /Review \/ History|Locked/);
-    if (["PASS", "FAIL"].includes(state)) {
+    if (["QA PASS", "QA FAIL"].includes(state)) {
       assert.match(html, /Earlier Reviewer/);
       assert.match(html, /2026\/10\/13, 10:00:00 SAST/);
     }
     assert.match(renderToStaticMarkup(history.render(rows[0])), /QA Review \/ History/);
   }
-  const own = { ...table.rows.find(row => row.qaState === "DRAFT"), fieldSubmitter: { uid: "preview-reviewer" } };
-  assert.doesNotMatch(renderToStaticMarkup(column.render(own)), /<select/);
-  const amended = { ...table.rows.find(row => row.qaState === "UPDATED"), qa: { reviewedByUser: "Previous Reviewer",
+  const amended = { ...table.rows.find(row => row.workflowState === "COMPLETED"), qa: { reviewedByUser: "Previous Reviewer",
     reviewedAt: "2026-10-13T08:00:00Z", amendedByUids: ["preview-reviewer"],
     lastAmendment: { byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z" } } };
   const amendedHtml = renderToStaticMarkup(column.render(amended));
   assert.match(amendedHtml, /Corrected by Correcting Supervisor/);
-  assert.doesNotMatch(amendedHtml, /Previous Reviewer|<select/);
-  const unfinished = { ...own, qaState: null, qaEligibility: { label: "Awaiting submission" } };
-  assert.match(renderToStaticMarkup(column.render(unfinished)), /Awaiting submission/);
-  assert.doesNotMatch(renderToStaticMarkup(column.render(unfinished)), /<select/);
+  assert.doesNotMatch(amendedHtml, /Previous Reviewer/);
+  const unfinished = { ...table.rows[0], workflowState: "ISSUED" };
+  const unfinishedHtml = renderToStaticMarkup(column.render(unfinished));
+  assert.match(unfinishedHtml, /Awaiting submission \/ check required/);
   assert.equal(renderToStaticMarkup(history.render(unfinished)), "");
 });
 

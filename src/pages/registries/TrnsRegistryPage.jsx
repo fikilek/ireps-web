@@ -30,7 +30,7 @@ import { isMainContractor, parentIdOf, resolveMainContractor, mncPcodesOf } from
 const DEFAULT_SORT = { key: "lastUpdatedAt", direction: "desc" };
 
 // Unified TRN Lifecycle v3: only workflow.state determines the QA lifecycle.
-const QA_STATUS_OPTIONS = ["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"];
+const QA_STATUS_OPTIONS = ["COMPLETED", "QA FAIL", "QA PASS"];
 function qaLifecycleStatus(row) {
   const state = String(row?.workflowState || "").trim().toUpperCase();
   return QA_STATUS_OPTIONS.includes(state) ? state : "NOT_ELIGIBLE";
@@ -931,7 +931,7 @@ export default function TrnsRegistryPage() {
             title={isEligible ? `Open QA Review for ${row.trnId}` : "Not eligible for QA review"}
             ariaLabel={`QA Status: ${qaLifecycleLabel(row)}`}
           />
-          {["COMPLETED", "QA UPDATED"].includes(status) && row.qa?.lastAmendment
+          {status === "COMPLETED" && row.qa?.lastAmendment
             ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
             : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
         </div>

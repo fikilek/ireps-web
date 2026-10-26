@@ -1,4 +1,4 @@
-import { canMove } from "../meterLifecycle/trnStateMachine.js";
+import { canMove, TRN_STATES } from "../meterLifecycle/trnStateMachine.js";
 import { createHash } from "node:crypto";
 import { FieldPath, Filter } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -252,7 +252,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     const { state: _legacyState, ...qaFacts } = fresh.trn.qa || {};
     next.qa = { ...qaFacts, lastAmendment,
       amendedByUids: [...new Set([...(fresh.trn.qa?.amendedByUids || []), uid])] };
-    const notices = qaAlias(state) === "UPDATED" ? await planQaNotices(tx, db, { context: fresh, trn: next, trnId, eventId: requestId, kind: "UPDATED", at: now }) : [];
+    const notices = workflowState(fresh.trn) === TRN_STATES.QA_FAIL ? await planQaNotices(tx, db, { context: fresh, trn: next, trnId, eventId: requestId, kind: "UPDATED", at: now }) : [];
     if (!newVersion.exists) tx.create(newVersionRef, versionRecord(trnId, next, afterEvidence, uid, now));
     tx.create(eventRef, amendment);
     tx.set(db.doc(`trns/${trnId}`), next);

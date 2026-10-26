@@ -6,12 +6,10 @@ import { workflowState } from "../qa/model.js";
 const record = () => ({ ...discoveryFixture(), workflow: { state: "COMPLETED", completedByUid: "worker" } });
 
 test("Unresolved legacy and contradictory lifecycle fields cannot authorize fresh transitions", () => {
-  for (const state of ["COMPLETED", "QA FAIL", "QA UPDATED", "QA PASS"]) {
+  for (const state of ["COMPLETED", "QA FAIL", "QA PASS"]) {
     assert.equal(workflowState({ workflow: { state } }), state);
   }
   assert.equal(workflowState({ workflow: { state: "COMPLETED" }, qa: { state: "FAIL" } }), "");
-  assert.equal(workflowState({ workflow: { state: "QA FAIL" }, qa: { state: "UPDATED" } }), "");
-  assert.equal(workflowState({ workflow: { state: "QA UPDATED" }, qa: { state: "PASS" } }), "");
   assert.equal(workflowState({ qa: { state: "DRAFT" } }), "");
 });
 

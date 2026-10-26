@@ -30,10 +30,11 @@ const rowData = Array.from({ length: 12 }, (_, i) => ({
 // FC browser-review cases use local synthetic media supplied by the test runner.
 rowData.forEach((row, index) => {
   row.lastUpdatedAt = row.updatedAt;
-  row.qaState = ["DRAFT", "FAIL", "UPDATED", "PASS"][index % 4];
+  row.workflowState = ["COMPLETED", "QA FAIL", "QA PASS"][index % 3];
+  row.qaState = row.workflowState;
   row.fieldSubmitter = { uid: "preview-worker", name: "Preview Worker" };
   row.serviceProviderId = "preview-mnc";
-  if (["PASS", "FAIL"].includes(row.qaState)) row.qa = { state: row.qaState, reviewedByUser: "Earlier Reviewer", reviewedAt: "2026-10-13T08:00:00Z", reviewId: `review-${index}`, comment: "Fixture decision." };
+  if (["QA PASS", "QA FAIL"].includes(row.workflowState)) row.qa = { state: row.workflowState === "QA PASS" ? "PASS" : "FAIL", reviewedByUser: "Earlier Reviewer", reviewedAt: "2026-10-13T08:00:00Z", reviewId: `review-${index}`, comment: "Fixture decision." };
   row.raw = { ast: { astData: { astNo: row.meterNo } }, accessData: { premise: { address: row.premiseAddress } } };
   if (index === 0) row.raw = { ...row.raw, fieldComment: { text: "The terminal cover needs attention.\nPlease review the attached evidence." }, media: [
     { tag: "fieldCommentPhoto", url: "http://127.0.0.1:5196/fc-fixtures/photo.svg" },
@@ -115,9 +116,9 @@ export const httpsCallable = (_functions, name) => {
     const row = rowData.find(r => r.trnId === trnId);
     const qa = decisions.get(trnId) || row.qa;
     const snapshot = { accessData: { trnType: "METER_INSPECTION", access: { hasAccess: "yes" }, premise: { address: row.premiseAddress } }, ast: { astData: { astNo: row.meterNo } }, inspection: { meterReading: "1245", meterStatus: "CONNECTED", anomaly: "NONE" }, fieldComment: { text: "Synthetic review fixture. No customer data or backend writes." }, media: [] };
-    const amendments = row.qaState === "UPDATED" ? [{ id: "fixture-amendment", previousState: "FAIL", state: "UPDATED", byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z", explanation: "Corrected the saved reading after checking the evidence.", takeoverReason: "Original submitter has left; account disabled.", changedPaths: ["inspection.captured.mreading.reading"], meterProjection: { retainedPaths: ["mreadings"] }, beforeVersion: "fixture-before", afterVersion: "fixture-after" }] : [];
+    const amendments = (row.workflowState === "COMPLETED" && row.trnId === "TRN-0") ? [{ id: "fixture-amendment", previousState: "QA FAIL", state: "COMPLETED", byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z", explanation: "Corrected the saved reading after checking the evidence.", takeoverReason: "Original submitter has left; account disabled.", changedPaths: ["inspection.captured.mreading.reading"], meterProjection: { retainedPaths: ["mreadings"] }, beforeVersion: "fixture-before", afterVersion: "fixture-after" }] : [];
     if (version === "fixture-before") snapshot.inspection.meterReading = "1200";
-    return { data: { amendments, trnId, state: qa?.state || row.qaState, qa, snapshot, evidence: [], sourceVersion: "fixture-version", previousReviewId: qa?.reviewId || null, submitter: row.fieldSubmitter, mayReview: !version && !qa && ["DRAFT", "UPDATED"].includes(row.qaState), reason: "This version has already been reviewed.", reasons: [{ code: "PHOTO_UNCLEAR", label: "Unclear photo" }, { code: "ILLEGAL_CONNECTION_EVIDENCE", label: "Illegal connection evidence not clearly showing on photo(s)" }, { code: "OTHER", label: "Other" }], history: qa ? [{ ...qa, id: qa.reviewId, sourceVersion: "fixture-version" }] : [] } };
+    return { data: { amendments, trnId, state: qa?.state || row.qaState, qa, snapshot, evidence: [], sourceVersion: "fixture-version", previousReviewId: qa?.reviewId || null, submitter: row.fieldSubmitter, mayReview: !version && !qa && row.workflowState === "COMPLETED", reason: "This version has already been reviewed.", reasons: [{ code: "PHOTO_UNCLEAR", label: "Unclear photo" }, { code: "ILLEGAL_CONNECTION_EVIDENCE", label: "Illegal connection evidence not clearly showing on photo(s)" }, { code: "OTHER", label: "Other" }], history: qa ? [{ ...qa, id: qa.reviewId, sourceVersion: "fixture-version" }] : [] } };
   };
   if (name === "saveTrnQaReview") return async input => {
     const qa = { ...input, reviewId: input.requestId, reviewedAt: new Date().toISOString(), reviewedByUser: "Preview Reviewer" };
