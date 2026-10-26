@@ -132,26 +132,32 @@ export default function TrnQaModal({
         <section className="qa-panel" aria-labelledby="qa-meter-title"><h3 id="qa-meter-title">Meter Details</h3><div className="qa-summary"><strong>{context.snapshot.ast?.astData?.astNo || "NAv"}</strong><span>{context.snapshot.accessData?.premise?.address || "NAv"}</span><span>{context.snapshot.accessData?.trnType || "NAv"}</span><strong>QA {QA_LABELS[decision?.state || context.state] || "Not eligible"}{decision?.state === "PASS" ? " · Locked" : ""}</strong><span>Submitted by {context.submitter.name}</span></div></section>
         {saved && <p className="qa-success" role="status">QA {QA_LABELS[saved.state]} saved by {saved.reviewedByUser} at {qaDate(saved.reviewedAt)}.{saved.state === "PASS" ? " This transaction is now permanently locked." : " It is awaiting correction."}</p>}
         {version && <p className="qa-notice">Viewing a preserved version. <button type="button" onClick={() => openVersion()}>Return to current review</button></p>}
-        <Snapshot snapshot={context.snapshot} evidence={context.evidence} />
-        {mode !== "history" && context.mayReview && !saved && <form className="qa-form" onSubmit={submit}>
-          <h3>Decision</h3>
-          <label>Decision<select value={action} disabled={saving} required onChange={e => setAction(e.target.value)}><option value="">Choose a decision</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select></label>
-          {action === "PASS" && <p className="qa-notice">Pass is final. The submitted form, evidence and decision will be locked. A later problem requires a new transaction.</p>}
-          {action === "FAIL" && <label>Failure reason (required)<select value={reasonCode} disabled={saving} required onChange={e => setReasonCode(e.target.value)}><option value="">Choose a reason</option>{context.reasons.map(item => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>}
-          <label>{action === "FAIL" ? "Explanation (optional)" : "Comment (optional)"}<textarea value={comment} disabled={saving} maxLength={4000} rows={4} onChange={e => setComment(e.target.value)} /></label>
-          <div className="qa-form-actions"><button type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="qa-confirm" disabled={saving || !action || (action === "FAIL" && !reasonCode)}>{saving ? "Saving QA…" : `Confirm QA ${QA_LABELS[action] || "decision"}`}</button></div>
-        </form>}
-        {mode !== "history" && (!context.mayReview || saved) && <section className="qa-panel"><h3>Decision</h3><p>{saved ? `QA ${QA_LABELS[saved.state]} saved.` : version ? "Viewing a preserved version." : context.reason}</p></section>}
+        {mode !== "history" && (
+          <>
+            <Snapshot snapshot={context.snapshot} evidence={context.evidence} />
+            {context.mayReview && !saved && <form className="qa-form" onSubmit={submit}>
+              <h3>Decision</h3>
+              <label>Decision<select value={action} disabled={saving} required onChange={e => setAction(e.target.value)}><option value="">Choose a decision</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select></label>
+              {action === "PASS" && <p className="qa-notice">Pass is final. The submitted form, evidence and decision will be locked. A later problem requires a new transaction.</p>}
+              {action === "FAIL" && <label>Failure reason (required)<select value={reasonCode} disabled={saving} required onChange={e => setReasonCode(e.target.value)}><option value="">Choose a reason</option>{context.reasons.map(item => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>}
+              <label>{action === "FAIL" ? "Explanation (optional)" : "Comment (optional)"}<textarea value={comment} disabled={saving} maxLength={4000} rows={4} onChange={e => setComment(e.target.value)} /></label>
+              <div className="qa-form-actions"><button type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="qa-confirm" disabled={saving || !action || (action === "FAIL" && !reasonCode)}>{saving ? "Saving QA…" : `Confirm QA ${QA_LABELS[action] || "decision"}`}</button></div>
+            </form>}
+            {(!context.mayReview || saved) && <section className="qa-panel"><h3>Decision</h3><p>{saved ? `QA ${QA_LABELS[saved.state]} saved.` : version ? "Viewing a preserved version." : context.reason}</p></section>}
+          </>
+        )}
         <section className="qa-panel qa-history" aria-labelledby="qa-history-title"><h3 id="qa-history-title">Decision History</h3>
-          {history.map(item => <article key={item.id}><strong>QA {QA_LABELS[item.state]} · {item.reviewedByUser}</strong><p>{qaDate(item.reviewedAt)}</p>{item.reasonLabel && <p>{item.reasonLabel}</p>}<p className="qa-comment">{item.comment || "No comment."}</p><button type="button" disabled={saving} onClick={() => openVersion(item.sourceVersion)}>View reviewed version</button></article>)}
+          {history.map(item => <article key={item.id}><strong>QA {QA_LABELS[item.state]} · {item.reviewedByUser}</strong><p>{qaDate(item.reviewedAt)}</p>{item.reasonLabel && <p>{item.reasonLabel}</p>}<p className="qa-comment">{item.comment || "No comment."}</p>{mode !== "history" && <button type="button" disabled={saving} onClick={() => openVersion(item.sourceVersion)}>View reviewed version</button>}</article>)}
           {!!context.amendments?.length && <><h4>Correction history</h4>{context.amendments.map(item => <article key={item.id}>
             <strong>{workflowStateLabel(item.previousState)} → {workflowStateLabel(item.state)} · {item.byUser}</strong>
             <p>{qaDate(item.at)}</p><p className="qa-comment">{item.explanation}</p>
             {item.takeoverReason && <p>Supervisor takeover: {item.takeoverReason}</p>}
             <p>Changed fields: {item.changedPaths.map(label).join(", ")}</p>
             {!!item.meterProjection?.retainedPaths?.length && <p>Newer or different meter facts retained: {item.meterProjection.retainedPaths.map(label).join(", ")}</p>}
-            <button type="button" disabled={saving} onClick={() => openVersion(item.beforeVersion)}>Before correction</button>{" "}
-            <button type="button" disabled={saving} onClick={() => openVersion(item.afterVersion)}>After correction</button>
+            {mode !== "history" && <>
+              <button type="button" disabled={saving} onClick={() => openVersion(item.beforeVersion)}>Before correction</button>{" "}
+              <button type="button" disabled={saving} onClick={() => openVersion(item.afterVersion)}>After correction</button>
+            </>}
           </article>)}</>}
         </section>
       </>}

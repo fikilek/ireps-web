@@ -80,9 +80,9 @@ test("TrnsRegistryPage standardizes columns with Premise Registry", () => {
   assert.match(trnsSrc, /mode:\s*["']review["']/);
 });
 
-test("TrnQaModal source supports mode='history' and hides decision form", () => {
+test("TrnQaModal source supports mode='history' and hides form data, evidence and decision form", () => {
   const modalSrc = readFileSync(join(here, "../src/pages/registries/components/TrnQaModal.jsx"), "utf8");
   assert.match(modalSrc, /mode === "history" \? "TRN QA History" : "TRN QA"/);
-  assert.match(modalSrc, /mode !== "history" && context\.mayReview/);
+  assert.match(modalSrc, /\{mode !== "history" && \(\s*<>\s*<Snapshot/);
   assert.match(modalSrc, /export function TrnQaHistoryModal/);
 });
