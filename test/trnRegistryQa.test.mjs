@@ -75,6 +75,10 @@ test("TrnsRegistryPage standardizes columns with Premise Registry", () => {
   assert.match(trnsSrc, /getTrnHistoryCount\(row\)/);
   assert.match(trnsSrc, /style=\{\{[\s\S]*?position:\s*["']absolute["'][\s\S]*?background:\s*["']#1d4ed8["']/);
 
+  // QA Status and QA History columns share identical width
+  assert.match(trnsSrc, /key:\s*["']qaState["'][\s\S]*?minWidth:\s*["']10\.5rem["']/);
+  assert.match(trnsSrc, /key:\s*["']qaHistory["'][\s\S]*?minWidth:\s*["']10\.5rem["']/);
+
   // Modal support for mode='review' and mode='history'
   assert.match(trnsSrc, /mode:\s*["']history["']/);
   assert.match(trnsSrc, /mode:\s*["']review["']/);

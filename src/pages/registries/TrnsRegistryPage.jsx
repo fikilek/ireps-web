@@ -43,7 +43,7 @@ function qaLifecycleStatus(row) {
 }
 function qaLifecycleLabel(row) {
   const state = qaLifecycleStatus(row);
-  return state === "COMPLETED" ? "Awaiting QA review" :
+  return state === "COMPLETED" ? "QA PENDING" :
     state === "NOT_ELIGIBLE" ? "Awaiting submission / check required" : state;
 }
 
@@ -925,17 +925,20 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
   }, {
     key: "qaState", label: "QA Status", filter: "select", filterAllValue: "ALL", sortable: true,
+    minWidth: "10.5rem",
+    cellStyle: styles.qaCell,
     filterOptions: [
       { value: "ALL", label: "ALL" },
-      { value: "COMPLETED", label: "Awaiting QA review" },
+      { value: "COMPLETED", label: "QA PENDING" },
       { value: "QA PASS", label: "QA PASS" },
       { value: "QA FAIL", label: "QA FAIL" },
       { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" },
     ],
     value: row => qaLifecycleStatus(row),
     render: row => {
-      const status = qaLifecycleStatus(row);
-      const isEligible = status !== "NOT_ELIGIBLE";
+      const rawStatus = qaLifecycleStatus(row);
+      const status = rawStatus === "COMPLETED" ? "QA PENDING" : rawStatus;
+      const isEligible = rawStatus !== "NOT_ELIGIBLE";
       return (
         <div className="qa-status-cell">
           <QaPill
@@ -946,7 +949,7 @@ export default function TrnsRegistryPage() {
             title={isEligible ? `Open QA Review for ${row.trnId}` : "Not eligible for QA review"}
             ariaLabel={`QA Status: ${qaLifecycleLabel(row)}`}
           />
-          {status === "COMPLETED" && row.qa?.lastAmendment
+          {rawStatus === "COMPLETED" && row.qa?.lastAmendment
             ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
             : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
         </div>
@@ -954,6 +957,8 @@ export default function TrnsRegistryPage() {
     },
   }, {
     key: "qaHistory", label: "QA History", sortable: false,
+    minWidth: "10.5rem",
+    cellStyle: styles.qaCell,
     render: row => {
       const isEligible = qaLifecycleStatus(row) !== "NOT_ELIGIBLE";
       if (!isEligible) return null;
@@ -1309,6 +1314,10 @@ const styles = {
     minWidth: "12rem",
     maxWidth: "20rem",
     whiteSpace: "normal",
+  },
+  qaCell: {
+    minWidth: "10.5rem",
+    width: "10.5rem",
   },
   commentCell: { display: "grid", gap: "8px", justifyItems: "start", minWidth: "7.5rem" },
   commentAvailability: { display: "flex", gap: "7px", color: "#64748b", fontSize: "12px" },
