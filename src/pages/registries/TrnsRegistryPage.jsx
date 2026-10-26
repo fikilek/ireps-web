@@ -24,6 +24,12 @@ import { fieldCommentMediaUrls } from "../../utils/fieldComments.js";
 import TrnQaModal from "./components/TrnQaModal";
 import TrnQaNotifications from "./components/TrnQaNotifications";
 import { qaDate } from "../../utils/qaDisplay.js";
+import {
+  getTrnUpdatedByUser,
+  getTrnHistoryCount,
+  formatQaStatusDate,
+  TRN_QA_STATUS_OPTIONS,
+} from "../../utils/trnQa.js";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 import { isMainContractor, parentIdOf, resolveMainContractor, mncPcodesOf } from "../../components/serviceProviders/providerHierarchy.js";
 
@@ -96,6 +102,7 @@ const EMPTY_TRN_FILTERS = {
   anomalyDetail: "",
   normalisation: "",
   createdByUser: "",
+  updatedByUser: "",
   completedByUser: "",
   qaState: "ALL",
 };
@@ -400,7 +407,7 @@ export default function TrnsRegistryPage() {
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
-      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && includesText(row.completedByUser, filters.completedByUser);
+      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && (includesText(getTrnUpdatedByUser(row), filters.updatedByUser || filters.completedByUser) || includesText(row.completedByUser, filters.updatedByUser || filters.completedByUser));
     });
   }, []);
 
@@ -474,8 +481,10 @@ export default function TrnsRegistryPage() {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
       },
+      { header: "Updated By User", value: (row) => getTrnUpdatedByUser(row) },
       { header: "Completed By User", value: (row) => row.completedByUser || "NAv" },
       { header: "Updated At", value: (row) => formatDateTime(row.lastUpdatedAt) },
+      { header: "updatedAt", value: (row) => formatDateTime(row.lastUpdatedAt) },
       { header: "TRN ID", value: (row) => row.trnId || "NAv" },
       { header: "QA Status", value: row => qaLifecycleLabel(row) },
       { header: "QA Reviewer", value: row => row.qa?.reviewedByUser || "NAv" },
@@ -897,17 +906,17 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
 
   }, {
-    key: "completedByUser",
-    label: "Completed By User",
+    key: "updatedByUser",
+    label: "Updated By User",
     filter: "text",
     sortable: true,
-    value: row => row.completedByUser || "NAv",
-    sortValue: row => isMissingSortValue(row.completedByUser) ? null : row.completedByUser,
-    render: row => row.completedByUser || "NAv",
+    value: row => getTrnUpdatedByUser(row),
+    sortValue: row => isMissingSortValue(getTrnUpdatedByUser(row)) ? null : getTrnUpdatedByUser(row),
+    render: row => <>{getTrnUpdatedByUser(row)}</>,
     sortEmptyLast: true,
   }, {
     key: "lastUpdatedAt",
-    label: "Updated At",
+    label: "updatedAt",
     filter: "date",
     sortable: true,
     value: row => getDateMs(row.lastUpdatedAt),
@@ -916,7 +925,13 @@ export default function TrnsRegistryPage() {
     sortEmptyLast: true,
   }, {
     key: "qaState", label: "QA Status", filter: "select", filterAllValue: "ALL", sortable: true,
-    filterOptions: [...QA_STATUS_OPTIONS.map(value => ({ value, label: value === "COMPLETED" ? "Awaiting QA review" : value })), { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" }],
+    filterOptions: [
+      { value: "ALL", label: "ALL" },
+      { value: "COMPLETED", label: "Awaiting QA review" },
+      { value: "QA PASS", label: "QA PASS" },
+      { value: "QA FAIL", label: "QA FAIL" },
+      { value: "NOT_ELIGIBLE", label: "Awaiting submission / check required" },
+    ],
     value: row => qaLifecycleStatus(row),
     render: row => {
       const status = qaLifecycleStatus(row);
@@ -927,7 +942,7 @@ export default function TrnsRegistryPage() {
             status={status}
             label={qaLifecycleLabel(row)}
             disabled={!isEligible}
-            onClick={isEligible ? () => setSelectedQa({ trnId: row.trnId, action: "" }) : undefined}
+            onClick={isEligible ? () => setSelectedQa({ trnId: row.trnId, action: "", mode: "review" }) : undefined}
             title={isEligible ? `Open QA Review for ${row.trnId}` : "Not eligible for QA review"}
             ariaLabel={`QA Status: ${qaLifecycleLabel(row)}`}
           />
@@ -939,7 +954,48 @@ export default function TrnsRegistryPage() {
     },
   }, {
     key: "qaHistory", label: "QA History", sortable: false,
-    render: row => qaLifecycleStatus(row) !== "NOT_ELIGIBLE" ? <DataActionButton compact haspopup="dialog" title="QA Review / History" onClick={() => setSelectedQa({ trnId: row.trnId, action: "" })}>QA Review / History</DataActionButton> : null,
+    render: row => {
+      const isEligible = qaLifecycleStatus(row) !== "NOT_ELIGIBLE";
+      if (!isEligible) return null;
+      const historyCount = getTrnHistoryCount(row);
+      return (
+        <div style={{ position: "relative", display: "inline-block" }} title={`${historyCount} QA history event${historyCount === 1 ? "" : "s"}`}>
+          <DataActionButton
+            compact
+            haspopup="dialog"
+            title="QA Review / History"
+            onClick={() => setSelectedQa({ trnId: row.trnId, action: "", mode: "history" })}
+          >
+            QA History
+          </DataActionButton>
+          <span
+            style={{
+              position: "absolute",
+              top: "-7px",
+              right: "-7px",
+              background: "#1d4ed8",
+              color: "#ffffff",
+              borderRadius: "9999px",
+              fontSize: "10px",
+              fontWeight: 700,
+              minWidth: "16px",
+              height: "16px",
+              lineHeight: "16px",
+              textAlign: "center",
+              padding: "0 4px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+              pointerEvents: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            aria-label={`${historyCount} history events`}
+          >
+            {historyCount}
+          </span>
+        </div>
+      );
+    },
   }];
 
   return (
@@ -1124,7 +1180,16 @@ export default function TrnsRegistryPage() {
         ) : null}
       </section>
 
-      {selectedQa && <TrnQaModal key={selectedQa.trnId} trnId={selectedQa.trnId} initialAction={selectedQa.action} onSaved={() => setQaSaveCount(count => count + 1)} onClose={() => setSelectedQa(null)} />}
+      {selectedQa && (
+        <TrnQaModal
+          key={`${selectedQa.trnId}-${selectedQa.mode || "review"}`}
+          trnId={selectedQa.trnId}
+          mode={selectedQa.mode || "review"}
+          initialAction={selectedQa.action}
+          onSaved={() => setQaSaveCount(count => count + 1)}
+          onClose={() => setSelectedQa(null)}
+        />
+      )}
       {selectedMeterTrnId ? (
         <MeterDeepDetailsModal
           trnId={selectedMeterTrnId}

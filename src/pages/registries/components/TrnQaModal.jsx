@@ -62,7 +62,13 @@ function Snapshot({ snapshot, evidence }) {
   </>;
 }
 
-export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved }) {
+export default function TrnQaModal({
+  trnId,
+  initialAction = "",
+  mode = "review",
+  onClose,
+  onSaved,
+}) {
   const dialog = useRef(null);
   const inFlight = useRef(false);
   const request = useRef(null);
@@ -118,7 +124,7 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
     ? [{ ...saved, id: saved.reviewId }, ...(context?.history || []).filter(item => item.id !== saved.reviewId)]
     : context?.history || [];
   return createPortal(<dialog ref={dialog} className="trn-qa-modal" aria-labelledby="qa-title" onCancel={event => { event.preventDefault(); if (!inFlight.current) onClose(); }}>
-    <header><div><h2 id="qa-title">Transaction QA</h2><p className="qa-trn-id">{trnId}</p></div><button type="button" onClick={onClose} disabled={saving}>Close</button></header>
+    <header><div><h2 id="qa-title">{mode === "history" ? "TRN QA History" : "TRN QA"}</h2><p className="qa-trn-id">{trnId}</p></div><button type="button" onClick={onClose} disabled={saving}>Close</button></header>
     <div className="qa-body" aria-busy={loading || saving}>
       {loading && <p role="status">Loading and protecting the submitted evidence…</p>}
       {error && <div className="qa-error" role="alert"><p>{error}</p><button type="button" disabled={saving} onClick={() => openVersion()}>Read current record again</button></div>}
@@ -127,7 +133,7 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
         {saved && <p className="qa-success" role="status">QA {QA_LABELS[saved.state]} saved by {saved.reviewedByUser} at {qaDate(saved.reviewedAt)}.{saved.state === "PASS" ? " This transaction is now permanently locked." : " It is awaiting correction."}</p>}
         {version && <p className="qa-notice">Viewing a preserved version. <button type="button" onClick={() => openVersion()}>Return to current review</button></p>}
         <Snapshot snapshot={context.snapshot} evidence={context.evidence} />
-        {context.mayReview && !saved && <form className="qa-form" onSubmit={submit}>
+        {mode !== "history" && context.mayReview && !saved && <form className="qa-form" onSubmit={submit}>
           <h3>Decision</h3>
           <label>Decision<select value={action} disabled={saving} required onChange={e => setAction(e.target.value)}><option value="">Choose a decision</option><option value="PASS">QA Pass</option><option value="FAIL">QA Fail</option></select></label>
           {action === "PASS" && <p className="qa-notice">Pass is final. The submitted form, evidence and decision will be locked. A later problem requires a new transaction.</p>}
@@ -135,7 +141,7 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
           <label>{action === "FAIL" ? "Explanation (optional)" : "Comment (optional)"}<textarea value={comment} disabled={saving} maxLength={4000} rows={4} onChange={e => setComment(e.target.value)} /></label>
           <div className="qa-form-actions"><button type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="qa-confirm" disabled={saving || !action || (action === "FAIL" && !reasonCode)}>{saving ? "Saving QA…" : `Confirm QA ${QA_LABELS[action] || "decision"}`}</button></div>
         </form>}
-        {(!context.mayReview || saved) && <section className="qa-panel"><h3>Decision</h3><p>{saved ? `QA ${QA_LABELS[saved.state]} saved.` : version ? "Viewing a preserved version." : context.reason}</p></section>}
+        {mode !== "history" && (!context.mayReview || saved) && <section className="qa-panel"><h3>Decision</h3><p>{saved ? `QA ${QA_LABELS[saved.state]} saved.` : version ? "Viewing a preserved version." : context.reason}</p></section>}
         <section className="qa-panel qa-history" aria-labelledby="qa-history-title"><h3 id="qa-history-title">Decision History</h3>
           {history.map(item => <article key={item.id}><strong>QA {QA_LABELS[item.state]} · {item.reviewedByUser}</strong><p>{qaDate(item.reviewedAt)}</p>{item.reasonLabel && <p>{item.reasonLabel}</p>}<p className="qa-comment">{item.comment || "No comment."}</p><button type="button" disabled={saving} onClick={() => openVersion(item.sourceVersion)}>View reviewed version</button></article>)}
           {!!context.amendments?.length && <><h4>Correction history</h4>{context.amendments.map(item => <article key={item.id}>
@@ -151,4 +157,8 @@ export default function TrnQaModal({ trnId, initialAction = "", onClose, onSaved
       </>}
     </div>
   </dialog>, document.body);
+}
+
+export function TrnQaHistoryModal(props) {
+  return <TrnQaModal {...props} mode="history" />;
 }
