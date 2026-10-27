@@ -201,16 +201,16 @@ test("QA Status filters states and restricts decisions while QA History stays se
     assert.match(html, /qa-status-cell/);
     assert.doesNotMatch(html, /Review \/ History|Locked/);
     if (["QA PASS", "QA FAIL"].includes(state)) {
-      assert.match(html, /Earlier Reviewer/);
-      assert.match(html, /2026\/10\/13, 10:00:00 SAST/);
+      assert.match(html, /2026\/10\/13, 10:00/);
+      assert.doesNotMatch(html, /Earlier Reviewer/);
     }
-    assert.match(renderToStaticMarkup(history.render(rows[0])), /QA Review \/ History/);
+    assert.match(renderToStaticMarkup(history.render(rows[0])), /QA History/);
   }
   const amended = { ...table.rows.find(row => row.workflowState === "COMPLETED"), qa: { reviewedByUser: "Previous Reviewer",
     reviewedAt: "2026-10-13T08:00:00Z", amendedByUids: ["preview-reviewer"],
     lastAmendment: { byUser: "Correcting Supervisor", at: "2026-10-14T08:00:00Z" } } };
   const amendedHtml = renderToStaticMarkup(column.render(amended));
-  assert.match(amendedHtml, /Corrected by Correcting Supervisor/);
+  assert.match(amendedHtml, /2026\/10\/14, 10:00/);
   assert.doesNotMatch(amendedHtml, /Previous Reviewer/);
   const unfinished = { ...table.rows[0], workflowState: "ISSUED" };
   const unfinishedHtml = renderToStaticMarkup(column.render(unfinished));

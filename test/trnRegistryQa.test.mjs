@@ -83,6 +83,10 @@ test("TrnsRegistryPage standardizes columns with Premise Registry", () => {
   // Modal support for mode='review' and mode='history'
   assert.match(trnsSrc, /mode:\s*["']history["']/);
   assert.match(trnsSrc, /mode:\s*["']review["']/);
+
+  // Date under QA pill uses formatQaStatusDate and does not render user name
+  assert.match(trnsSrc, /formatQaStatusDate\(dateVal\)/);
+  assert.doesNotMatch(trnsSrc, /row\.qa\?\.reviewedByUser\s*&&\s*<small>/);
 });
 
 test("TrnQaModal source supports mode='history' and hides form data, evidence and decision form", () => {
@@ -90,4 +94,8 @@ test("TrnQaModal source supports mode='history' and hides form data, evidence an
   assert.match(modalSrc, /mode === "history" \? "TRN QA History" : "TRN QA"/);
   assert.match(modalSrc, /\{mode !== "history" && \(\s*<>\s*<Snapshot/);
   assert.match(modalSrc, /export function TrnQaHistoryModal/);
+
+  // Closes modal upon successful submit
+  assert.match(modalSrc, /onClose\?\.?\(\)/);
 });
+

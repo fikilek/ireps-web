@@ -114,7 +114,12 @@ export default function TrnQaModal({
     const signature = JSON.stringify(decision);
     if (request.current?.signature !== signature) request.current = { signature, id: crypto.randomUUID() };
     inFlight.current = true; setSaving(true); setError("");
-    try { const result = await saveReview({ ...decision, requestId: request.current.id }); setSaved(result.data.qa); dialog.current.scrollTop = 0; onSaved?.(); }
+    try {
+      const result = await saveReview({ ...decision, requestId: request.current.id });
+      setSaved(result.data.qa);
+      onSaved?.();
+      onClose?.();
+    }
     catch (e) { setError(e.message || "The QA decision could not be saved. Retry with the same decision if the result is uncertain."); }
     finally { inFlight.current = false; setSaving(false); }
   }

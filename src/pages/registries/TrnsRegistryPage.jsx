@@ -952,9 +952,13 @@ export default function TrnsRegistryPage() {
             title={isEligible ? `Open QA Review for ${row.trnId}` : "Awaiting submission / check required"}
             ariaLabel={`QA Status: ${qaLifecycleLabel(row)}${!isEligible ? " - Awaiting submission / check required" : ""}`}
           />
-          {rawStatus === "COMPLETED" && row.qa?.lastAmendment
-            ? <small>Corrected by {row.qa.lastAmendment.byUser}<br />{qaDate(row.qa.lastAmendment.at)}</small>
-            : row.qa?.reviewedByUser && <small>{row.qa.reviewedByUser}<br />{qaDate(row.qa.reviewedAt)}</small>}
+          {(() => {
+            const dateVal = rawStatus === "COMPLETED"
+              ? (row.qa?.lastAmendment?.at || (row.qa?.resubmissionCount > 0 ? row.qa?.lastSubmittedAt : null) || row.qa?.reviewedAt)
+              : row.qa?.reviewedAt;
+            const dateStr = formatQaStatusDate(dateVal);
+            return dateStr ? <small>{dateStr}</small> : null;
+          })()}
         </div>
       );
     },
