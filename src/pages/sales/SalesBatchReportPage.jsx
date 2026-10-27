@@ -85,7 +85,7 @@ function getNoAccessQaTarget(row) {
 }
 
 function getMeterQaTarget(row) {
-  return cleanText(row?.fieldMeter?.id);
+  return cleanText(row?.fieldMeter?.id || row?.refs?.meterId || row?.refs?.trnId);
 }
 
 function normalizeQaStatus(value) {
@@ -561,9 +561,24 @@ export default function SalesBatchReportPage() {
                 <button
                   type="button"
                   style={styles.fieldMeterMapButton}
-                  onClick={() => setSelectedMapRow(row)}
-                  title={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
-                  aria-label={`Open Batch Map for Field Meter ${row.fieldMeter.number}`}
+                  onClick={() => {
+                    const trnTarget = getMeterQaTarget(row);
+                    if (trnTarget) {
+                      navigate(`/registries/trns?trnId=${encodeURIComponent(trnTarget)}`);
+                    } else {
+                      setSelectedMapRow(row);
+                    }
+                  }}
+                  title={
+                    getMeterQaTarget(row)
+                      ? `Open Meter Discovery TRN ${getMeterQaTarget(row)} in TRN Registry`
+                      : `Open Batch Map for Field Meter ${row.fieldMeter.number}`
+                  }
+                  aria-label={
+                    getMeterQaTarget(row)
+                      ? `Open Meter Discovery TRN ${getMeterQaTarget(row)} in TRN Registry`
+                      : `Open Batch Map for Field Meter ${row.fieldMeter.number}`
+                  }
                 >
                   {row.fieldMeter.number}
                 </button>

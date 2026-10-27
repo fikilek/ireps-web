@@ -9,6 +9,7 @@ import { fieldSubmitter, qaEligibility, qaState, qaText, workflowState, qaAlias 
 import { evidenceObjects, lockEvidence } from "./evidence.js";
 import { at, same, changes, buildAmendedRecord, checkAmendedForm } from "./amendmentPolicy.js";
 import { planQaNotices, writeQaNotices } from "./notifications.js";
+import { projectMeterQaToTbRows } from "./meterQaProjection.js";
 
 const digest = value => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 const nowIso = () => new Date().toISOString();
@@ -255,6 +256,13 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     if (!newVersion.exists) tx.create(newVersionRef, versionRecord(trnId, next, afterEvidence, uid, now));
     tx.create(eventRef, amendment);
     tx.set(db.doc(`trns/${trnId}`), next);
+    await projectMeterQaToTbRows(tx, db, trnId, next, "QA_PENDING", {
+      reviewedAt: now,
+      reviewedByUser: byUser,
+      reviewedByUid: uid,
+      reasonCode: null,
+      reasonLabel: null,
+    });
     if (meterRef && meter && Object.keys(meterPatch).length) {
       const historyRef = meterRef.collection("history").doc();
       tx.set(historyRef, {

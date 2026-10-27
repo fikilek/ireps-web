@@ -14,6 +14,7 @@ import { LAST_ACTIVITY_KINDS, laterActivityPatch } from "./lastActivity.js";
 import { resolveSalesTargetedBatchMembership, exactSalesTbRef, inspectSalesTbRefsIntegrity, classifySalesWorkStatus, timestampMillis, nonblank } from "../salesAllMeters/sales-batch-policy.js";
 import { buildSalesAllMetersOperationalMetadataPatch } from "../salesAllMeters/helpers.js";
 import { teamOnDate, isBatchTrn } from "../teams/field-work-summary.js";
+import { calculateTbQaStatus } from "../qa/premiseQaReview.js";
 
 export const RULE = "TB-R056";
 export const RULES_VERSION = "1.3.56";
@@ -355,6 +356,8 @@ export function buildRowFollowsSalesWrites(plan, facts, { ts, now, serverTime })
       { op: "update", path: `tb_rows/${plan.rowId}`, data: { "execution.status": "COMPLETED", "execution.startedAt": fields.execution.startedAt, "execution.completedAt": fields.execution.completedAt, "execution.outcome": fields.execution.outcome,
         "execution.foundMeterNo": fields.execution.foundMeterNo,
         "refs.premiseId": fields.refs.premiseId, "refs.meterId": fields.refs.meterId, "refs.trnId": fields.refs.trnId,
+        "qa.meterStatus": "QA_PENDING",
+        "qa.tbStatus": calculateTbQaStatus(row?.qa?.premiseStatus, "QA_PENDING", "COMPLETED"),
         // As a batch completion names the capturer: the worker who made the find.
         "metadata.updatedAt": at, "metadata.updatedByUid": finder.uid, "metadata.updatedByUser": finder.user } },
       { op: "update", path: salesPath, data: { tbRefs: tbRefsAfter, ...salesMeta } },

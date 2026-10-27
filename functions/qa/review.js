@@ -9,6 +9,7 @@ import {
 import { fieldSubmitter, qaEligibility, qaState, qaText, workflowState } from "./model.js";
 import { lockEvidence } from "./evidence.js";
 import { planQaNotices, writeQaNotices } from "./notifications.js";
+import { projectMeterQaToTbRows } from "./meterQaProjection.js";
 
 // The catalog is returned by the server; clients do not define a second list.
 export const QA_FAILURE_REASONS = Object.freeze([
@@ -216,6 +217,13 @@ export async function saveQaReview(db, actorUid, input) {
     tx.update(trnRef, { qa: decisionFacts, "workflow.state": move.to, "metadata.updatedAt": now, "metadata.updatedByUid": actorUid,
       "metadata.updatedByUser": qa.reviewedByUser });
     writeQaNotices(tx, db, notices);
+    await projectMeterQaToTbRows(tx, db, trnId, trn, `QA_${state}`, {
+      reviewedAt: now,
+      reviewedByUser: qa.reviewedByUser,
+      reasonCode: reason?.code || null,
+      reasonLabel: reason?.label || null,
+      reviewedByUid: actorUid,
+    });
     return { success: true, idempotent: false, qa, workflowState: move.to };
   });
 }

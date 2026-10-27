@@ -15,7 +15,7 @@ import {
 } from "../salesAllMeters/helpers.js";
 // Targeted Batch rules TB-R059 (1.3.60): work on a meter in another team's allocated batch is refused.
 import { checkBatchWork } from "./batch-work-guard.js";
-import { computePremiseDigest } from "../qa/premiseQaReview.js";
+import { computePremiseDigest, calculateTbQaStatus } from "../qa/premiseQaReview.js";
 
 export const TARGETED_BATCH_PREMISE_SOURCE_MODULE = "SALES_TARGETED_BATCH";
 
@@ -1866,6 +1866,8 @@ export async function completeTargetedBatchMeterDiscoveryInTransaction({
     "refs.premiseId": premiseId,
     "refs.meterId": astId,
     "refs.trnId": trnId,
+    "qa.meterStatus": "QA_PENDING",
+    "qa.tbStatus": calculateTbQaStatus(row?.qa?.premiseStatus, "QA_PENDING", "COMPLETED"),
     "metadata.updatedAt": now,
     "metadata.updatedByUid": actorUid,
     "metadata.updatedByUser": actorName,

@@ -42,6 +42,7 @@ import {
   closedRowFields, closedTbRef, executionFallback, millis, parentAfter, parentPatch,
   parentState, plainRow, rowState, rowStatus, statusOf, storedCounts, trnMark,
 } from "./rowFollowsSales.js";
+import { calculateTbQaStatus } from "../qa/premiseQaReview.js";
 
 export const RULE = "TB-R063";
 export const RULES_VERSION = "1.3.66";
@@ -319,6 +320,8 @@ export function buildDifferentMeterAtErfWrites(plan, facts, { ts, now, serverTim
       // TB-R064 (1.3.67): the number found, on the row itself.
       "execution.foundMeterNo": fields.execution.foundMeterNo,
       "refs.premiseId": fields.refs.premiseId, "refs.meterId": fields.refs.meterId, "refs.trnId": fields.refs.trnId,
+      "qa.meterStatus": "QA_PENDING",
+      "qa.tbStatus": calculateTbQaStatus(row?.qa?.premiseStatus, "QA_PENDING", "COMPLETED"),
       "metadata.updatedAt": at, "metadata.updatedByUid": finder.uid, "metadata.updatedByUser": finder.user } },
     { op: "update", path: salesPath, data: { [FIELD]: record, tbRefs: tbRefsAfter, ...salesMeta } },
   ];

@@ -1246,6 +1246,7 @@ export function normalizeTargetedBatchReportRow({
       point: null,
       hasMeter: Boolean(fieldMeterId || fieldMeterNumber),
       canOpenMap: Boolean(fieldMeterId && fieldMeterNumber),
+      qaStatus: row?.qa?.meterStatus || (fieldMeterId && (String(row?.execution?.status || "").toUpperCase() === "COMPLETED" || String(row?.status || "").toUpperCase() === "COMPLETED") ? "QA_PENDING" : null),
       linkSource: fieldMeterId
         ? cleanText(fieldWork?.meterId)
           ? "sales.tbRefs.fieldWork.meterId"
