@@ -125,11 +125,15 @@ test("projectMeterQaToTbRows updates linked tb_rows with QA status and recalcula
   const row1Update = updates.find((u) => u.path === "tb_rows/ROW_1");
   assert.equal(row1Update.data["qa.meterStatus"], "QA_PASS");
   assert.equal(row1Update.data["qa.tbStatus"], "QA_PENDING");
+  assert.equal(row1Update.data["qa.finalStatus"], "QA_PENDING");
+  assert.equal(row1Update.data.qaFinalStatus, "QA_PENDING");
   assert.equal(row1Update.data["qa.meterReviewedByUser"], "Zamo Ngubs");
 
   // ROW_2 had premiseStatus: QA_PASS and now meterStatus: QA_PASS -> tbStatus: QA_PASS
   const row2Update = updates.find((u) => u.path === "tb_rows/ROW_2");
   assert.equal(row2Update.data["qa.meterStatus"], "QA_PASS");
   assert.equal(row2Update.data["qa.tbStatus"], "QA_PASS");
+  assert.equal(row2Update.data["qa.finalStatus"], "QA_PASS");
+  assert.equal(row2Update.data.qaFinalStatus, "QA_PASS");
 });
 

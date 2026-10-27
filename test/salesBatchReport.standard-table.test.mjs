@@ -572,11 +572,21 @@ test("Phase 2: Gating helper logic and QA Final validation", () => {
 
   function getQaFinalStatus(row) {
     if (!isRowCompleted(row)) return "QA NAv";
-    const raw = String(row?.qaFinalStatus || "").trim();
-    const upper = raw.toUpperCase();
+    const raw = String(row?.qaFinalStatus ?? row?.qa?.finalStatus ?? row?.qa?.tbStatus ?? "").trim();
+    if (!raw) {
+      const premise = String(getPremiseQaStatus(row)).toUpperCase().replace(/_/g, " ");
+      const meter = String(getMeterQaStatus(row)).toUpperCase().replace(/_/g, " ");
+      const noAccess = String(getNoAccessQaStatus(row)).toUpperCase().replace(/_/g, " ");
+      if (premise === "QA FAIL" || meter === "QA FAIL" || noAccess === "QA FAIL") return "QA FAIL";
+      if (premise === "QA PASS" && meter === "QA PASS") return "QA PASS";
+      return "QA NAv";
+    }
+    const upper = raw.toUpperCase().replace(/_/g, " ");
     if (upper === "QA PENDING" || upper === "PENDING" || !raw) {
       return "QA NAv";
     }
+    if (upper === "QA PASS" || upper === "PASS") return "QA PASS";
+    if (upper === "QA FAIL" || upper === "FAIL") return "QA FAIL";
     return raw;
   }
 
@@ -636,6 +646,21 @@ test("Phase 2: Gating helper logic and QA Final validation", () => {
     qaFinalStatus: "QA PASS",
   };
   assert.equal(getQaFinalStatus(passFinalRow), "QA PASS");
+
+  // Row 6: COMPLETED with qa.tbStatus: QA_PASS (from backend projection)
+  const tbStatusPassRow = {
+    workStatus: "COMPLETED",
+    qa: { tbStatus: "QA_PASS" },
+  };
+  assert.equal(getQaFinalStatus(tbStatusPassRow), "QA PASS");
+
+  // Row 7: COMPLETED with component fallback (premise QA PASS + meter QA PASS)
+  const componentPassRow = {
+    workStatus: "COMPLETED",
+    premise: { id: "PRM-1", qaStatus: "QA PASS" },
+    fieldMeter: { id: "TRN-1", qaStatus: "QA PASS" },
+  };
+  assert.equal(getQaFinalStatus(componentPassRow), "QA PASS");
 
   const failFinalRow = {
     workStatus: "COMPLETED",

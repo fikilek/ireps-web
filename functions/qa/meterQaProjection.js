@@ -64,6 +64,8 @@ export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {})
       "qa.meterReasonCode": reviewerDetails.reasonCode || null,
       "qa.meterReasonLabel": reviewerDetails.reasonLabel || null,
       "qa.tbStatus": calculatedTbStatus,
+      "qa.finalStatus": calculatedTbStatus,
+      qaFinalStatus: calculatedTbStatus,
       "metadata.updatedAt": nowIso,
       "metadata.updatedByUid": reviewerDetails.reviewedByUid || "SYSTEM",
       "metadata.updatedByUser": reviewerDetails.reviewedByUser || "SYSTEM",

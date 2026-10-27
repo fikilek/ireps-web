@@ -120,9 +120,21 @@ function getMeterQaStatus(row) {
 
 function getQaFinalStatus(row) {
   if (!isRowCompleted(row)) return "QA NAv";
-  const raw = row?.qaFinalStatus ?? row?.qa?.finalStatus;
-  if (!raw) return "QA NAv";
-  const normalized = normalizeUpper(raw);
+  const raw = row?.qaFinalStatus ?? row?.qa?.finalStatus ?? row?.qa?.tbStatus;
+  if (!raw) {
+    const premise = normalizeUpper(getPremiseQaStatus(row)).replace(/_/g, " ");
+    const meter = normalizeUpper(getMeterQaStatus(row)).replace(/_/g, " ");
+    const noAccess = normalizeUpper(getNoAccessQaStatus(row)).replace(/_/g, " ");
+
+    if (premise === "QA FAIL" || meter === "QA FAIL" || noAccess === "QA FAIL") {
+      return "QA FAIL";
+    }
+    if (premise === "QA PASS" && meter === "QA PASS") {
+      return "QA PASS";
+    }
+    return "QA NAv";
+  }
+  const normalized = normalizeUpper(raw).replace(/_/g, " ");
   if (normalized === "QA PENDING" || normalized === "PENDING") {
     return "QA NAv";
   }
