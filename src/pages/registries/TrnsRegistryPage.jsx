@@ -38,7 +38,7 @@ const DEFAULT_SORT = { key: "lastUpdatedAt", direction: "desc" };
 // Unified TRN Lifecycle v3: only workflow.state determines the QA lifecycle.
 const QA_STATUS_OPTIONS = ["COMPLETED", "QA FAIL", "QA PASS"];
 function qaLifecycleStatus(row) {
-  const state = String(row?.workflowState || "").trim().toUpperCase();
+  const state = String(row?.workflowState || row?.workflow?.state || "").trim().toUpperCase();
   return QA_STATUS_OPTIONS.includes(state) ? state : "NOT_ELIGIBLE";
 }
 function qaLifecycleLabel(row) {

@@ -10,7 +10,8 @@ export const TRN_QA_STATUS_OPTIONS = [
 export function getTrnUpdatedByUser(row = {}) {
   if (!row) return "NAv";
   if (row.qa?.lastAmendment?.byUser) return row.qa.lastAmendment.byUser;
-  if (["QA PASS", "QA FAIL"].includes(row.workflowState) && row.qa?.reviewedByUser) {
+  const state = String(row.workflowState || row.workflow?.state || "").trim().toUpperCase();
+  if (["QA PASS", "QA FAIL"].includes(state) && row.qa?.reviewedByUser) {
     return row.qa.reviewedByUser;
   }
   return row.updatedByUser || row.completedByUser || row.metadata?.updatedByUser || row.createdByUser || "NAv";
