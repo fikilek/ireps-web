@@ -262,7 +262,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, ...(column.key === pinnedColumnKey ? styles.pinnedHead : null) }}>
+                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? styles.pinnedHead : null), ...column.headerStyle }}>
                   {(column.sortable ?? Boolean(column.filter)) ? (
                     <button
                       type="button"
@@ -284,7 +284,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} style={{ ...styles.filterCell, ...(column.key === pinnedColumnKey ? styles.pinnedFilter : null) }}>
+                <th key={column.key} style={{ ...styles.filterCell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? styles.pinnedFilter : null), ...column.headerStyle }}>
                   {column.renderFilter ? column.renderFilter({ filters, setFilter }) : !column.filter ? null : column.filter === "select" ? (
                     <select
                       aria-label={`Filter ${column.label}`}
@@ -345,7 +345,7 @@ export default function IrepsTable({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    style={{ ...styles.cell, minWidth: column.minWidth, textAlign: column.align || "left", ...column.cellStyle, ...(column.key === pinnedColumnKey ? styles.pinnedCell : null) }}
+                    style={{ ...styles.cell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, textAlign: column.align || "left", ...column.cellStyle, ...(column.key === pinnedColumnKey ? styles.pinnedCell : null) }}
                   >
                     {column.render ? column.render(row, index) : column.value?.(row)}
                   </td>

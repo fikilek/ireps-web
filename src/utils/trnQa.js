@@ -37,8 +37,9 @@ export function getTrnHistoryCount(row = {}) {
   if (typeof row.historyCount === "number") return row.historyCount;
   if (Array.isArray(row.qaHistory)) return row.qaHistory.length;
   if (Array.isArray(row.qa?.history)) return row.qa.history.length;
-  const resubmissions = Number(row.qa?.resubmissionCount) || (row.qa?.lastAmendment ? 1 : 0);
-  const reviews = row.qa?.reviewedByUser || row.qa?.reviewedAt ? 1 : 0;
-  const initial = (row.workflowState && ["COMPLETED", "QA FAIL", "QA PASS"].includes(row.workflowState)) ? 1 : 0;
-  return Math.max(initial, initial + resubmissions + reviews);
+  const amendments = Array.isArray(row.qa?.amendments)
+    ? row.qa.amendments.length
+    : (row.qa?.lastAmendment ? 1 : 0);
+  const reviews = (row.qa?.reviewedByUser || row.qa?.reviewedAt) ? 1 : 0;
+  return amendments + reviews;
 }

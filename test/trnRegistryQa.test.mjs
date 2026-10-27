@@ -56,8 +56,8 @@ test("getTrnHistoryCount accurately counts timeline events", () => {
   assert.equal(getTrnHistoryCount({ qa: { historyCount: 3 } }), 3);
   assert.equal(getTrnHistoryCount({ historyCount: 2 }), 2);
   assert.equal(getTrnHistoryCount({ qaHistory: [{}, {}] }), 2);
-  assert.equal(getTrnHistoryCount({ workflowState: "COMPLETED" }), 1);
-  assert.equal(getTrnHistoryCount({ workflowState: "QA PASS", qa: { reviewedByUser: "Supervisor" } }), 2);
+  assert.equal(getTrnHistoryCount({ workflowState: "COMPLETED" }), 0);
+  assert.equal(getTrnHistoryCount({ workflowState: "QA PASS", qa: { reviewedByUser: "Supervisor" } }), 1);
   assert.equal(getTrnHistoryCount(null), 0);
 });
 
@@ -71,13 +71,14 @@ test("TrnsRegistryPage standardizes columns with Premise Registry", () => {
   assert.match(trnsSrc, /key:\s*["']qaState["'],\s*label:\s*["']QA Status["']/);
   assert.match(trnsSrc, /key:\s*["']qaHistory["'],\s*label:\s*["']QA History["']/);
 
-  // Badge count on QA History button
+  // Badge count on QA History button only when historyCount > 0
   assert.match(trnsSrc, /getTrnHistoryCount\(row\)/);
+  assert.match(trnsSrc, /historyCount > 0 && \(/);
   assert.match(trnsSrc, /style=\{\{[\s\S]*?position:\s*["']absolute["'][\s\S]*?background:\s*["']#1d4ed8["']/);
 
   // QA Status and QA History columns share identical width
-  assert.match(trnsSrc, /key:\s*["']qaState["'][\s\S]*?minWidth:\s*["']10\.5rem["']/);
-  assert.match(trnsSrc, /key:\s*["']qaHistory["'][\s\S]*?minWidth:\s*["']10\.5rem["']/);
+  assert.match(trnsSrc, /key:\s*["']qaState["'][\s\S]*?minWidth:\s*["']8\.5rem["']/);
+  assert.match(trnsSrc, /key:\s*["']qaHistory["'][\s\S]*?minWidth:\s*["']8\.5rem["']/);
 
   // Modal support for mode='review' and mode='history'
   assert.match(trnsSrc, /mode:\s*["']history["']/);
