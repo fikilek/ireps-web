@@ -227,14 +227,13 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
         const oldMedia = projectMeterDiscoveryAstMedia(fresh.trn.media), nextMedia = projectMeterDiscoveryAstMedia(next.media);
         if (!same(oldMedia, nextMedia)) candidates.push(["media", oldMedia, nextMedia]);
       }
-      for (const [path, oldValue, value] of candidates) {
-        if ((!registration && !beforeCheck) || projection.laterEventIds.length || !same(at(meter, path), oldValue) || value === undefined) projection.retainedPaths.push(path);
-        else { meterPatch[path] = value; projection.appliedPaths.push(path); }
+      for (const [path, _oldValue, value] of candidates) {
+        if (value !== undefined) {
+          meterPatch[path] = value;
+          projection.appliedPaths.push(path);
+        }
       }
-    } else if (meterRef && changed.some(path => path.startsWith("ast.") || path.startsWith("inspection."))) {
-      projection.retainedPaths.push("meter record unavailable");
     }
-    if (projection.retainedPaths.length && !input.retainNewerMeterFacts) throw new HttpsError("failed-precondition", "Newer or different meter facts must be retained. Confirm that this correction applies to the historical transaction only for those fields.", { kind: "RETAIN_METER_FACTS", ...projection });
     const now = nowIso(), byUser = getUserDisplayName(fresh.actor);
     const move = canMove(workflowState(fresh.trn), "amend");
     if (!move.ok) throw new HttpsError("failed-precondition", move.message);
@@ -247,7 +246,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
       lmPcode: qaText(next.accessData?.parents?.lmPcode) || null, wardPcode: qaText(next.accessData?.parents?.wardPcode) || null,
       previousState: workflowState(fresh.trn), state, previousReviewId: input.previousReviewId,
       byUid: uid, byUser, at: now, explanation: input.explanation, takeoverReason: fresh.access.takeover ? input.takeoverReason : null,
-      changedPaths: changed, meterProjection: projection, retainedNewerMeterFacts: input.retainNewerMeterFacts };
+      changedPaths: changed, meterProjection: projection, retainedNewerMeterFacts: true };
     const lastAmendment = { id: requestId, beforeVersion: input.sourceVersion, afterVersion, byUid: uid, byUser, at: now };
     const { state: _legacyState, ...qaFacts } = fresh.trn.qa || {};
     next.qa = { ...qaFacts, lastAmendment,
@@ -256,7 +255,19 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     if (!newVersion.exists) tx.create(newVersionRef, versionRecord(trnId, next, afterEvidence, uid, now));
     tx.create(eventRef, amendment);
     tx.set(db.doc(`trns/${trnId}`), next);
-    if (Object.keys(meterPatch).length) tx.update(meterRef, { ...meterPatch, "metadata.updatedAt": now, "metadata.updatedByUid": uid, "metadata.updatedByUser": byUser });
+    if (meterRef && meter && Object.keys(meterPatch).length) {
+      const historyRef = meterRef.collection("history").doc();
+      tx.set(historyRef, {
+        ...meter,
+        historyRecordedAt: now,
+        historyRecordedByUid: uid,
+        historyRecordedByUser: byUser,
+        historyReason: "QA_AMENDMENT",
+        trnId,
+        requestId,
+      });
+      tx.update(meterRef, { ...meterPatch, "metadata.updatedAt": now, "metadata.updatedByUid": uid, "metadata.updatedByUser": byUser });
+    }
     writeQaNotices(tx, db, notices);
     return { success: true, idempotent: false, amendment: { ...amendment, state: qaAlias(state) }, workflowState: state };
   });
