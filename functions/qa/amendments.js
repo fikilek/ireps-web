@@ -9,7 +9,7 @@ import { fieldSubmitter, qaEligibility, qaState, qaText, workflowState, qaAlias 
 import { evidenceObjects, lockEvidence } from "./evidence.js";
 import { at, same, changes, buildAmendedRecord, checkAmendedForm } from "./amendmentPolicy.js";
 import { planQaNotices, writeQaNotices } from "./notifications.js";
-import { projectMeterQaToTbRows } from "./meterQaProjection.js";
+import { readMeterQaTbRowPlan, applyMeterQaTbRowWrites } from "./meterQaProjection.js";
 
 const digest = value => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 const nowIso = () => new Date().toISOString();
@@ -242,6 +242,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     next.metadata = { ...fresh.trn.metadata, updatedAt: now, updatedByUid: uid, updatedByUser: byUser };
     const afterVersion = sourceVersion(next), newVersionRef = db.doc(`trns/${trnId}/qaVersions/${afterVersion}`);
     const newVersion = await tx.get(newVersionRef);
+    const tbPlan = await readMeterQaTbRowPlan(tx, db, trnId, next);
     const state = move.to;
     const amendment = { id: requestId, trnId, requestHash, beforeVersion: input.sourceVersion, afterVersion,
       lmPcode: qaText(next.accessData?.parents?.lmPcode) || null, wardPcode: qaText(next.accessData?.parents?.wardPcode) || null,
@@ -256,7 +257,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     if (!newVersion.exists) tx.create(newVersionRef, versionRecord(trnId, next, afterEvidence, uid, now));
     tx.create(eventRef, amendment);
     tx.set(db.doc(`trns/${trnId}`), next);
-    await projectMeterQaToTbRows(tx, db, trnId, next, "QA_PENDING", {
+    applyMeterQaTbRowWrites(tx, tbPlan, "QA_PENDING", {
       reviewedAt: now,
       reviewedByUser: byUser,
       reviewedByUid: uid,

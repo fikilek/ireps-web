@@ -1,6 +1,67 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectMeterQaToTbRows } from "../functions/qa/meterQaProjection.js";
+import {
+  projectMeterQaToTbRows,
+  readMeterQaTbRowPlan,
+  applyMeterQaTbRowWrites,
+} from "../functions/qa/meterQaProjection.js";
+
+test("readMeterQaTbRowPlan and applyMeterQaTbRowWrites separate reads from writes", async () => {
+  let readCount = 0;
+  const updates = [];
+  const fakeTx = {
+    get: async (target) => {
+      readCount++;
+      if (target.path === "tb_rows/ROW_1") {
+        return {
+          id: "ROW_1",
+          exists: true,
+          data: () => ({
+            id: "ROW_1",
+            execution: { status: "COMPLETED" },
+            qa: { premiseStatus: "QA_PASS" },
+          }),
+          ref: { path: "tb_rows/ROW_1" },
+        };
+      }
+      return { docs: [] };
+    },
+    update: (ref, data) => {
+      updates.push({ path: ref.path, data });
+    },
+  };
+
+  const fakeDb = {
+    doc: (path) => ({ path }),
+    collection: (name) => ({
+      where: (queryField, op, value) => ({ queryField, op, value }),
+    }),
+  };
+
+  // Phase 1: Pure reads
+  const plan = await readMeterQaTbRowPlan(
+    fakeTx,
+    fakeDb,
+    "TRN_MDIS_123",
+    { targetedBatchContext: { rowId: "ROW_1" } }
+  );
+
+  assert.equal(plan.rows.length, 1);
+  assert.equal(updates.length, 0, "No writes during read phase");
+  assert.ok(readCount > 0, "Reads performed during read phase");
+
+  // Phase 2: Pure writes
+  const writeResult = applyMeterQaTbRowWrites(fakeTx, plan, "QA_PASS", {
+    reviewedByUser: "Zamo Ngubs",
+    reviewedByUid: "UID_1",
+  });
+
+  assert.equal(writeResult.projectedCount, 1);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].path, "tb_rows/ROW_1");
+  assert.equal(updates[0].data["qa.meterStatus"], "QA_PASS");
+  assert.equal(updates[0].data["qa.tbStatus"], "QA_PASS");
+});
 
 test("projectMeterQaToTbRows updates linked tb_rows with QA status and recalculates tbStatus", async () => {
   const updates = [];
@@ -71,3 +132,4 @@ test("projectMeterQaToTbRows updates linked tb_rows with QA status and recalcula
   assert.equal(row2Update.data["qa.meterStatus"], "QA_PASS");
   assert.equal(row2Update.data["qa.tbStatus"], "QA_PASS");
 });
+

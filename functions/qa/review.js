@@ -9,7 +9,7 @@ import {
 import { fieldSubmitter, qaEligibility, qaState, qaText, workflowState } from "./model.js";
 import { lockEvidence } from "./evidence.js";
 import { planQaNotices, writeQaNotices } from "./notifications.js";
-import { projectMeterQaToTbRows } from "./meterQaProjection.js";
+import { readMeterQaTbRowPlan, applyMeterQaTbRowWrites } from "./meterQaProjection.js";
 
 // The catalog is returned by the server; clients do not define a second list.
 export const QA_FAILURE_REASONS = Object.freeze([
@@ -205,6 +205,7 @@ export async function saveQaReview(db, actorUid, input) {
     const versionRef = trnRef.collection("qaVersions").doc(currentVersion);
     const version = await tx.get(versionRef);
     if (!version.exists || version.data().sourceVersion !== currentVersion) throw new HttpsError("failed-precondition", "Open and inspect the protected review before saving a decision.");
+    const tbPlan = await readMeterQaTbRowPlan(tx, db, trnId, trn);
     const now = new Date().toISOString();
     const qa = { state, reviewId: requestId, sourceVersion: currentVersion,
       reasonCode: reason?.code || null, reasonLabel: reason?.label || null, comment,
@@ -217,7 +218,7 @@ export async function saveQaReview(db, actorUid, input) {
     tx.update(trnRef, { qa: decisionFacts, "workflow.state": move.to, "metadata.updatedAt": now, "metadata.updatedByUid": actorUid,
       "metadata.updatedByUser": qa.reviewedByUser });
     writeQaNotices(tx, db, notices);
-    await projectMeterQaToTbRows(tx, db, trnId, trn, `QA_${state}`, {
+    applyMeterQaTbRowWrites(tx, tbPlan, `QA_${state}`, {
       reviewedAt: now,
       reviewedByUser: qa.reviewedByUser,
       reasonCode: reason?.code || null,
