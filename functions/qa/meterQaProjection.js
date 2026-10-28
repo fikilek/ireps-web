@@ -3,12 +3,12 @@ import { calculateTbQaStatus } from "./premiseQaReview.js";
 const cleanText = (value) => String(value ?? "").trim();
 
 /**
- * Reads all linked tb_rows for a Meter TRN BEFORE any transaction writes.
+ * Reads all linked tb_rows for a Meter TRN and their parent batches BEFORE any transaction writes.
  * Must be called in the READ phase of the Firestore transaction.
  */
 export async function readMeterQaTbRowPlan(tx, db, trnId, trn) {
   const cleanTrnId = cleanText(trnId);
-  if (!cleanTrnId) return { rows: [] };
+  if (!cleanTrnId) return { rows: [], batchPlans: [] };
 
   const rowDocsMap = new Map();
 
@@ -37,11 +37,41 @@ export async function readMeterQaTbRowPlan(tx, db, trnId, trn) {
     rowDocsMap.set(doc.id, { ref: doc.ref, data: doc.data() || {} })
   );
 
-  return { rows: Array.from(rowDocsMap.values()) };
+  const rows = Array.from(rowDocsMap.values());
+  if (rows.length === 0) {
+    return { rows: [], batchPlans: [] };
+  }
+
+  // Collect unique tbIds to read parent batch docs and all sibling rows in the READ phase
+  const uniqueTbIds = [
+    ...new Set(
+      rows
+        .map((r) => cleanText(r.data?.tbId))
+        .filter(Boolean)
+    ),
+  ];
+
+  const batchPlans = await Promise.all(
+    uniqueTbIds.map(async (tbId) => {
+      const parentRef = db.doc(`tb_uploads/${tbId}`);
+      const [parentSnap, tbRowsSnap] = await Promise.all([
+        tx.get(parentRef),
+        tx.get(db.collection("tb_rows").where("tbId", "==", tbId)),
+      ]);
+      return {
+        tbId,
+        parentRef: parentSnap.exists ? parentRef : null,
+        tbRows: tbRowsSnap.docs.map((doc) => ({ ...doc.data(), id: doc.id })),
+      };
+    })
+  );
+
+  return { rows, batchPlans };
 }
 
 /**
- * Applies QA status updates to tb_rows planned during the read phase.
+ * Applies QA status updates to tb_rows planned during the read phase
+ * and updates parent batch qaPassRows and qaFailRows counts.
  * Called in the WRITE phase of the Firestore transaction.
  */
 export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {}) {
@@ -50,12 +80,19 @@ export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {})
   const nowIso = new Date().toISOString();
   const normQaState = String(qaState || "QA_PENDING").trim().toUpperCase().replace(/ /g, "_");
 
+  const updatedRowIds = new Set();
+  const calculatedTbStatusByRowId = new Map();
+
   for (const { ref, data: row } of plan.rows) {
+    const rowId = ref.id;
+    updatedRowIds.add(rowId);
+
     const calculatedTbStatus = calculateTbQaStatus(
       row.qa?.premiseStatus,
       normQaState,
       row.execution?.status
     );
+    calculatedTbStatusByRowId.set(rowId, calculatedTbStatus);
 
     const updateData = {
       "qa.meterStatus": normQaState,
@@ -74,6 +111,44 @@ export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {})
     tx.update(ref, updateData);
   }
 
+  // Update parent batches' qaPassRows and qaFailRows counts
+  if (Array.isArray(plan.batchPlans)) {
+    const norm = (s) => String(s || "").trim().toUpperCase().replace(/ /g, "_");
+
+    for (const batchPlan of plan.batchPlans) {
+      if (!batchPlan.parentRef || !Array.isArray(batchPlan.tbRows)) continue;
+
+      let qaPassRows = 0;
+      let qaFailRows = 0;
+
+      for (const r of batchPlan.tbRows) {
+        const isThisRow = updatedRowIds.has(r.id);
+        const pStatus = norm(r.qa?.premiseStatus);
+        const mStatus = norm(isThisRow ? normQaState : r.qa?.meterStatus);
+        const execStatus = norm(r.execution?.status);
+        const tbStatus = norm(
+          isThisRow
+            ? calculatedTbStatusByRowId.get(r.id)
+            : (r.qa?.tbStatus || calculateTbQaStatus(pStatus, mStatus, execStatus))
+        );
+
+        if (tbStatus === "QA_FAIL" || pStatus === "QA_FAIL" || mStatus === "QA_FAIL") {
+          qaFailRows += 1;
+        } else if (execStatus === "COMPLETED") {
+          if (tbStatus === "QA_PASS" || (pStatus === "QA_PASS" && mStatus === "QA_PASS")) {
+            qaPassRows += 1;
+          }
+        }
+      }
+
+      tx.update(batchPlan.parentRef, {
+        "counts.qaPassRows": qaPassRows,
+        "counts.qaFailRows": qaFailRows,
+        "metadata.updatedAt": nowIso,
+      });
+    }
+  }
+
   return { projectedCount: plan.rows.length };
 }
 
@@ -85,3 +160,4 @@ export async function projectMeterQaToTbRows(tx, db, trnId, trn, qaState, review
   const plan = await readMeterQaTbRowPlan(tx, db, trnId, trn);
   return applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails);
 }
+
