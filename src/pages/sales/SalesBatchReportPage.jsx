@@ -91,11 +91,11 @@ function getMeterQaTarget(row) {
 function normalizeQaStatus(value) {
   const clean = cleanText(value);
   if (!clean) return "QA NAv";
-  const upper = clean.toUpperCase();
+  const upper = clean.toUpperCase().replace(/_/g, " ");
   if (upper === "QA PASS" || upper === "PASS") return "QA PASS";
   if (upper === "QA FAIL" || upper === "FAIL") return "QA FAIL";
   if (upper === "QA PENDING" || upper === "PENDING") return "QA PENDING";
-  if (upper === "QA NAV" || upper === "NAV" || upper === "NOT_AVAILABLE") return "QA NAv";
+  if (upper === "QA NAV" || upper === "NAV" || upper === "NOT AVAILABLE" || upper === "NOT_AVAILABLE") return "QA NAv";
   return clean;
 }
 
@@ -149,7 +149,8 @@ function getQaFinalStatus(row) {
 }
 
 function statusTone(status = "") {
-  switch (normalizeUpper(status)) {
+  const normalized = normalizeUpper(status).replace(/_/g, " ");
+  switch (normalized) {
     case "TRUE":
     case "COMPLETED":
     case "LINKED":
@@ -163,7 +164,7 @@ function statusTone(status = "") {
     case "QA FAIL":
     case "FAIL":
       return "danger";
-    case "IN_PROGRESS":
+    case "IN PROGRESS":
     case "QA PENDING":
     case "PENDING":
     case "QA UPDATED":
@@ -1736,7 +1737,7 @@ const styles = {
   },
 
   qaPillDisabled: {
-    opacity: 0.6,
+    opacity: 0.9,
     cursor: "not-allowed",
   },
 

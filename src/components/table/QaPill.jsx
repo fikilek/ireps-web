@@ -5,7 +5,8 @@ function normalizeUpper(value = "") {
 }
 
 export function qaStatusTone(status = "") {
-  switch (normalizeUpper(status)) {
+  const normalized = normalizeUpper(status).replace(/_/g, " ");
+  switch (normalized) {
     case "TRUE":
     case "COMPLETED":
     case "LINKED":
@@ -19,7 +20,7 @@ export function qaStatusTone(status = "") {
     case "QA FAIL":
     case "FAIL":
       return "danger";
-    case "IN_PROGRESS":
+    case "IN PROGRESS":
     case "QA PENDING":
     case "PENDING":
       return "warning";
@@ -51,7 +52,7 @@ const styles = {
     boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
   },
   qaPillDisabled: {
-    opacity: 0.6,
+    opacity: 0.9,
     cursor: "not-allowed",
   },
   qaPillSuccess: {
