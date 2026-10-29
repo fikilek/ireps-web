@@ -311,17 +311,17 @@ test("Targeted Batch Field Results filtering and sorting via IrepsTable model", 
   assert.equal(sampleRows.length, 3);
 });
 
-test("SalesBatchReportPage defines HCC with exactly four columns hidden by default", () => {
+test("SalesBatchReportPage defines HCC with five columns hidden by default, including No Access QA, and stickyFirstColumn", () => {
   assert.match(
     salesBatchReportSrc,
-    /const HCC_COLUMN_OPTIONS = \[\s*\{\s*key:\s*["']rowNo["'],\s*label:\s*["']Row["']\s*\},\s*\{\s*key:\s*["']account["'],\s*label:\s*["']Account["']\s*\},\s*\{\s*key:\s*["']customer["'],\s*label:\s*["']Customer["']\s*\},\s*\{\s*key:\s*["']ward["'],\s*label:\s*["']Ward["']\s*\},?\s*\];/,
-    "HCC must configure exactly Row, Account, Customer, and Ward",
+    /const HCC_COLUMN_OPTIONS = \[\s*\{\s*key:\s*["']rowNo["'],\s*label:\s*["']Row["']\s*\},\s*\{\s*key:\s*["']account["'],\s*label:\s*["']Account["']\s*\},\s*\{\s*key:\s*["']customer["'],\s*label:\s*["']Customer["']\s*\},\s*\{\s*key:\s*["']ward["'],\s*label:\s*["']Ward["']\s*\},\s*\{\s*key:\s*["']noAccessQa["'],\s*label:\s*["']No Access QA["']\s*\},?\s*\];/,
+    "HCC must configure Row, Account, Customer, Ward, and No Access QA",
   );
 
   assert.match(
     salesBatchReportSrc,
-    /const DEFAULT_COLUMN_VISIBILITY = \{\s*rowNo:\s*false,\s*account:\s*false,\s*customer:\s*false,\s*ward:\s*false,?\s*\};/,
-    "All four configurable columns must be hidden by default (initially false)",
+    /const DEFAULT_COLUMN_VISIBILITY = \{\s*rowNo:\s*false,\s*account:\s*false,\s*customer:\s*false,\s*ward:\s*false,\s*noAccessQa:\s*false,?\s*\};/,
+    "All five configurable columns must be hidden by default (initially false)",
   );
 
   assert.match(
@@ -341,9 +341,15 @@ test("SalesBatchReportPage defines HCC with exactly four columns hidden by defau
     /columns=\{visibleColumns\}/,
     "IrepsTable must receive visibleColumns based on columnVisibility",
   );
+
+  assert.match(
+    salesBatchReportSrc,
+    /<IrepsTable[\s\S]*?stickyFirstColumn/,
+    "IrepsTable must have stickyFirstColumn enabled for horizontal scroll pinning",
+  );
 });
 
-test("HCC visibility logic: initial state hides Row, Account, Customer, Ward while keeping 13 columns", () => {
+test("HCC visibility logic: initial state hides Row, Account, Customer, Ward, No Access QA while keeping 12 columns", () => {
   const allColumns = [
     { key: "rowNo", label: "Row", group: "sales" },
     { key: "account", label: "Account", group: "sales" },
@@ -369,6 +375,7 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
     account: false,
     customer: false,
     ward: false,
+    noAccessQa: false,
   };
 
   const groups = [
@@ -389,9 +396,9 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
     });
   }
 
-  // 1. Initial/Default state: all 4 are hidden, 13 remain visible
+  // 1. Initial/Default state: all 5 are hidden, 12 remain visible
   const initialVisible = getVisibleColumns(defaultVisibility);
-  assert.equal(initialVisible.length, 13);
+  assert.equal(initialVisible.length, 12);
   assert.deepEqual(
     initialVisible.map((c) => c.key),
     [
@@ -405,13 +412,12 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
       "action",
       "execution",
       "premiseQa",
-      "noAccessQa",
       "meterQa",
       "qaFinal",
     ],
   );
 
-  // Band test: Sales band has span 0 and is excluded
+  // Band test: Sales band has span 0 and is excluded; QA Components has span 2 (premiseQa, meterQa)
   const initialBands = irepsTableBands(initialVisible, groups);
   assert.deepEqual(
     initialBands.map((b) => ({ key: b.key, span: b.span })),
@@ -419,22 +425,30 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
       { key: "meter", span: 2 },
       { key: "address", span: 2 },
       { key: "field", span: 5 },
-      { key: "qaComponents", span: 3 },
+      { key: "qaComponents", span: 2 },
       { key: "salesQa", span: 1 },
     ],
   );
 
   // 2. Toggling 'Row' on
   const withRow = getVisibleColumns({ ...defaultVisibility, rowNo: true });
-  assert.equal(withRow.length, 14);
+  assert.equal(withRow.length, 13);
   assert.equal(withRow[0].key, "rowNo");
   const withRowBands = irepsTableBands(withRow, groups);
   assert.equal(withRowBands[0].key, "sales");
   assert.equal(withRowBands[0].span, 1);
 
-  // 3. Toggling 'Account' and 'Ward' on
+  // 3. Toggling 'No Access QA' on
+  const withNoAccessQa = getVisibleColumns({ ...defaultVisibility, noAccessQa: true });
+  assert.equal(withNoAccessQa.length, 13);
+  assert.ok(withNoAccessQa.some((c) => c.key === "noAccessQa"));
+  const withNoAccessQaBands = irepsTableBands(withNoAccessQa, groups);
+  const qaBand = withNoAccessQaBands.find((b) => b.key === "qaComponents");
+  assert.equal(qaBand.span, 3);
+
+  // 4. Toggling 'Account' and 'Ward' on
   const withAccountAndWard = getVisibleColumns({ ...defaultVisibility, account: true, ward: true });
-  assert.equal(withAccountAndWard.length, 15);
+  assert.equal(withAccountAndWard.length, 14);
   assert.deepEqual(
     withAccountAndWard.slice(0, 2).map((c) => c.key),
     ["account", "ward"],
@@ -443,12 +457,20 @@ test("HCC visibility logic: initial state hides Row, Account, Customer, Ward whi
   assert.equal(withAccountAndWardBands[0].key, "sales");
   assert.equal(withAccountAndWardBands[0].span, 2);
 
-  // 4. Toggling all 4 on
-  const allShown = getVisibleColumns({ rowNo: true, account: true, customer: true, ward: true });
+  // 5. Toggling all 5 on
+  const allShown = getVisibleColumns({
+    rowNo: true,
+    account: true,
+    customer: true,
+    ward: true,
+    noAccessQa: true,
+  });
   assert.equal(allShown.length, 17);
   const allShownBands = irepsTableBands(allShown, groups);
   assert.equal(allShownBands[0].key, "sales");
   assert.equal(allShownBands[0].span, 4);
+  const allShownQaBand = allShownBands.find((b) => b.key === "qaComponents");
+  assert.equal(allShownQaBand.span, 3);
 });
 
 test("Phase 2: Relabelled operational fields and QA columns definitions in SalesBatchReportPage", () => {
