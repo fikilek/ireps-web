@@ -39,6 +39,7 @@ const HCC_COLUMN_OPTIONS = [
   { key: "account", label: "Account" },
   { key: "customer", label: "Customer" },
   { key: "ward", label: "Ward" },
+  { key: "noAccessQa", label: "No Access QA" },
 ];
 
 const DEFAULT_COLUMN_VISIBILITY = {
@@ -46,6 +47,7 @@ const DEFAULT_COLUMN_VISIBILITY = {
   account: false,
   customer: false,
   ward: false,
+  noAccessQa: false,
 };
 
 function cleanText(value) {
@@ -929,7 +931,7 @@ export default function SalesBatchReportPage() {
   const columnControlsPanel = showColumnControls ? (
     <div style={styles.columnControls}>
       <div style={styles.fixedColumnsNote}>
-        Always visible: Meter, Meter Match, Address, Address Match, Premise Link, No Access Attempts, Last Activity, Action, Sales Status, QA Components, QA Final
+        Always visible: Meter, Meter Match, Address, Address Match, Premise Link, No Access Attempts, Last Activity, Action, Sales Status, Premise QA, Meter QA, QA Final
       </div>
 
       <div style={styles.columnToggleGrid}>
@@ -1120,6 +1122,7 @@ export default function SalesBatchReportPage() {
         <IrepsTable
           title="Targeted Batch Field Results"
           stickyHeader
+          stickyFirstColumn
           topScrollbar
           toolbar={
             <button
