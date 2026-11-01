@@ -96,3 +96,19 @@ export async function assessSalesBatch({ db, request, codec }) {
 export const assessSalesTargetedBatchCallable = onCall({ secrets: [salesBatchProofKey], timeoutSeconds: 180, memory: "1GiB" }, async request => {
   try { return await assessSalesBatch({ db: getFirestore(), request, codec: createProofCodec(salesBatchProofKey.value()) }); } catch (error) { return callableFailure(error); }
 });
+
+export const saveSalesTargetedBatchGeofenceCallable = onCall({ secrets: [salesBatchProofKey], timeoutSeconds: 180, memory: "1GiB" }, async request => {
+  try {
+    return await createSalesBatchGeofence({
+      db: getFirestore(),
+      request,
+      codec: createProofCodec(salesBatchProofKey.value()),
+      name: request.data?.name,
+      description: request.data?.description,
+      parents: request.data?.parents,
+      rawPoints: request.data?.rawPoints || request.data?.points || [],
+    });
+  } catch (error) {
+    return callableFailure(error);
+  }
+});

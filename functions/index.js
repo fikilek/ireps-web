@@ -17,6 +17,22 @@ import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { requireActiveRoles, serviceProviderPatch, stampFieldSubmission } from "./auth/authority.js";
+import {
+  looksLikeEmail,
+  mayChangeEmailOf,
+  normaliseEmail,
+} from "./auth/emailChange.js";
+
+import {
+  METER_VISIBILITY,
+  SALES_LINK_SKIP_REASONS,
+  AST_VISIBILITY_OUTCOMES,
+  METER_VISIBILITY_SYSTEM_ACTOR,
+  deriveMeterVisibility,
+  planBlankSalesLink,
+  applySalesLink,
+  planAstVisibilitySync,
+} from "./meterVisibility/helpers.js";
 import { assertQaUnlocked } from "./qa/lock.js";
 
 import { onTrnWritten } from "./reports/trnReports.js";
@@ -117,7 +133,9 @@ export { getFieldWorkSummaryCallable } from "./teams/fieldWorkSummaryCallable.js
 export { getBatchStatsCallable } from "./targetedBatches/batchStatsCallable.js";
 // Targeted Batch rules TB-R060 (1.3.60): a supervisor or manager takes a meter out of a batch.
 export { onTakeMeterOutOfBatchCallable } from "./targetedBatches/takeOutOfBatchCallable.js";
-export { assessSalesTargetedBatchCallable } from "./targetedBatches/sales-batch-geofence.js";
+export { assessSalesTargetedBatchCallable, saveSalesTargetedBatchGeofenceCallable } from "./targetedBatches/sales-batch-geofence.js";
+export { getElectricityPopulationCallable } from "./dashboard/electricityPopulation.js";
+export { getSalesGovernedMonths } from "./salesGovernance/callable.js";
 // Targeted Batch rules TB-R056 (1.3.52, 1.3.56): a batch row follows its Sales meter when the meter becomes VISIBLE.
 // When a batch's allocation or acceptance changes, the rule runs again for its VISIBLE meters whose rows are still open.
 export { onSalesMeterVisibleBatchRow, onTargetedBatchStateRowFollowsSales } from "./targetedBatches/rowFollowsSalesTrigger.js";
@@ -190,6 +208,8 @@ import {
   validateExistingMeterMaster,
   classifyOperationalAstChange,
   buildOperationalAstUpdate,
+  buildBackEndSalesLinkFields,
+  buildBackEndSalesLinkUpdate,
 } from "./meterMaster/helpers.js";
 import {
   SALES_ALL_METERS_OUTCOMES,
@@ -1404,6 +1424,48 @@ async function syncSalesAllMetersFromMaster({
   };
 }
 
+// MV-R001 section 3: bring the field record's copy in line with the meter master. The
+// field record's update rebuilds its Meter Registry row through onMeterUpdated.
+async function syncAstVisibilityFromMaster({ normalizedMeterNo, sourceWriter }) {
+  const masterRef = db.collection("meter_master").doc(normalizedMeterNo);
+
+  const result = await db.runTransaction(async (tx) => {
+    const masterSnap = await tx.get(masterRef);
+    if (!masterSnap.exists) return { outcome: "MASTER_MISSING" };
+
+    const masterData = masterSnap.data() || {};
+    const astId = String(masterData?.refs?.asts?.id ?? "").trim();
+    if (!astId) return { outcome: "NO_FIELD_LINK" };
+
+    const astRef = db.collection("asts").doc(astId);
+    const astSnap = await tx.get(astRef);
+    const plan = planAstVisibilitySync({
+      masterId: normalizedMeterNo,
+      astData: astSnap.exists ? astSnap.data() || {} : null,
+      desiredVisibility: deriveMasterVisibility(masterData),
+      isoNow: new Date().toISOString(),
+      timestampNow: Timestamp.now(),
+    });
+
+    if (plan.outcome === AST_VISIBILITY_OUTCOMES.UPDATED) {
+      tx.update(astRef, plan.patch);
+    }
+    return { outcome: plan.outcome, astId };
+  });
+
+  if (
+    result.outcome === AST_VISIBILITY_OUTCOMES.AST_MISSING ||
+    result.outcome === AST_VISIBILITY_OUTCOMES.AST_MASTER_MISMATCH
+  ) {
+    logger.warn("syncAstVisibilityFromMaster ---- field record not updated", {
+      normalizedMeterNo,
+      sourceWriter,
+      ...result,
+    });
+  }
+  return result;
+}
+
 export const onMeterDiscoveryCreated = onDocumentCreated(
   "trns/{trnId}",
   async (event) => {
@@ -2549,6 +2611,148 @@ export const onMeterMasterUpdated = onDocumentUpdated(
   },
 );
 
+export const onSalesAllMetersCreated = onDocumentCreated(
+  "sales-all-meters/{meterId}",
+  async (event) => {
+    const meterId = event.params.meterId;
+    const salesData = event.data?.data() || {};
+    const sourceWriter = "onSalesAllMetersCreated";
+    const masterRef = db.collection("meter_master").doc(meterId);
+
+    try {
+      const linkResult = await db.runTransaction(async (tx) => {
+        const masterSnap = await tx.get(masterRef);
+        if (!masterSnap.exists) return { outcome: "NO_METER_MASTER" };
+
+        const masterData = masterSnap.data() || {};
+        const validation = validateExistingMeterMaster({
+          masterId: meterId,
+          existing: masterData,
+          incomingLmPcode: masterData?.lmPcode,
+          incomingMeterType: masterData?.meterType,
+          sourceWriter,
+        });
+        if (validation.classification === METER_MASTER_CLASSIFICATIONS.CONFLICT) {
+          throw new MeterMasterConflictError(validation.conflict);
+        }
+
+        // Not found in the field: a Sales-only meter stays Invisible and needs no work here.
+        if (!String(masterData?.refs?.asts?.id ?? "").trim()) {
+          return { outcome: "NO_FIELD_LINK" };
+        }
+
+        const plan = planBlankSalesLink({
+          masterId: meterId,
+          master: masterData,
+          salesExists: true,
+          salesData,
+          masterLmPcode: masterData.lmPcode,
+          masterMeterType: masterData.meterType,
+        });
+        if (!plan.link) return { outcome: plan.reason };
+
+        tx.update(
+          masterRef,
+          buildBackEndSalesLinkUpdate({
+            salesLink: plan.link,
+            actorUid: METER_VISIBILITY_SYSTEM_ACTOR.uid,
+            actorUser: METER_VISIBILITY_SYSTEM_ACTOR.user,
+            operationTimestamp: Timestamp.now(),
+          }),
+        );
+        return { outcome: "SALES_LINK_SET" };
+      });
+
+      if (linkResult.outcome !== SALES_LINK_SKIP_REASONS.LINK_ALREADY_SET) {
+        if (
+          linkResult.outcome !== "SALES_LINK_SET" &&
+          linkResult.outcome !== "NO_METER_MASTER" &&
+          linkResult.outcome !== "NO_FIELD_LINK"
+        ) {
+          logger.warn("onSalesAllMetersCreated ---- Sales link not set", {
+            meterId,
+            reason: linkResult.outcome,
+          });
+        }
+        return { success: true, ...linkResult };
+      }
+
+      const salesSyncResult = await db.runTransaction(async (tx) => {
+        const salesRef = db.collection("sales-all-meters").doc(meterId);
+        const masterSnap = await tx.get(masterRef);
+        const salesSnap = await tx.get(salesRef);
+        if (!masterSnap.exists) return { outcome: "NO_METER_MASTER" };
+        return syncSalesAllMetersFromMaster({
+          tx,
+          normalizedMeterNo: meterId,
+          masterData: masterSnap.data(),
+          salesSnap,
+          sourceWriter,
+          reportConflict: true,
+        });
+      });
+      const astSyncResult = await syncAstVisibilityFromMaster({
+        normalizedMeterNo: meterId,
+        sourceWriter,
+      });
+
+      logger.log("onSalesAllMetersCreated ---- copies checked", {
+        meterId,
+        salesAllMetersOutcome: salesSyncResult.outcome,
+        astOutcome: astSyncResult.outcome,
+      });
+      return { success: true, sales: salesSyncResult, ast: astSyncResult };
+    } catch (error) {
+      if (error instanceof MeterMasterConflictError) {
+        logger.error("onSalesAllMetersCreated ---- governed conflict", {
+          meterId,
+          conflictCode: error.conflict?.conflictCode,
+          message: error.conflict?.message,
+        });
+        return { success: false, outcome: "CONFLICT" };
+      }
+      logger.error("onSalesAllMetersCreated ---- FATAL ERROR:", error);
+      throw error;
+    }
+  },
+);
+
+// AU-R001 2: a person signing up is not signed in yet, so they may not read the service provider
+// records. This hands out only what the signup picker needs: the active providers, id and trading
+// name, nothing else.
+export const listSignupServiceProviders = onCall(async () => {
+  try {
+    const snapshot = await db.collection("serviceProviders").get();
+
+    const serviceProviders = snapshot.docs
+      .map((doc) => {
+        const data = doc.data() || {};
+
+        return {
+          id: doc.id,
+          name: String(data?.profile?.tradingName || "").trim(),
+          status: String(data?.status || "").toUpperCase(),
+        };
+      })
+      .filter((sp) => sp.status === "ACTIVE" && sp.name)
+      .map(({ id, name }) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    logger.log("listSignupServiceProviders ---- served", {
+      count: serviceProviders.length,
+    });
+
+    return { serviceProviders };
+  } catch (error) {
+    logger.error("listSignupServiceProviders Error:", error);
+
+    throw new HttpsError(
+      "internal",
+      "Could not load the service providers.",
+    );
+  }
+});
+
 export const signupFieldWorker = onCall(async (request) => {
   const { data } = request;
 
@@ -2759,6 +2963,271 @@ export const signupFieldWorker = onCall(async (request) => {
       error.message || "Could not complete field worker signup.",
     );
   }
+});
+
+// AU-R001 11.2: the office changes somebody else's sign-in email at once. The sign-in email and the
+// iREPS record change together, and nothing else about the person does.
+export const changeUserEmail = onCall(async (request) => {
+  const { auth: caller, data } = request;
+
+  if (!caller) {
+    throw new HttpsError("unauthenticated", "Sign in first.");
+  }
+
+  const targetUid = String(data?.uid || "").trim();
+  const newEmail = normaliseEmail(data?.email);
+
+  if (!targetUid) {
+    throw new HttpsError("invalid-argument", "Choose the person first.");
+  }
+
+  if (!looksLikeEmail(newEmail)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "That does not look like an email address.",
+    );
+  }
+
+  const [callerSnap, targetSnap] = await Promise.all([
+    db.collection("users").doc(caller.uid).get(),
+    db.collection("users").doc(targetUid).get(),
+  ]);
+
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "That person was not found.");
+  }
+
+  const callerData = callerSnap.exists ? callerSnap.data() || {} : {};
+  const targetData = targetSnap.data() || {};
+
+  // A stopped account changes nobody's email.
+  if (String(callerData?.accountStatus || "").toUpperCase() === "DISABLED") {
+    throw new HttpsError(
+      "permission-denied",
+      "You may only change the email of people you manage.",
+    );
+  }
+
+  let managerServiceProviderIds = [];
+
+  if (String(callerData?.employment?.role || "").trim() === "MNG") {
+    const callerServiceProviderId = String(
+      callerData?.employment?.serviceProvider?.id || "",
+    ).trim();
+
+    if (callerServiceProviderId) {
+      const spSnapshot = await db.collection("serviceProviders").get();
+      const allServiceProviders = spSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      managerServiceProviderIds = collectMngTreeServiceProviderIds(
+        callerServiceProviderId,
+        allServiceProviders,
+        new Set(),
+      );
+    }
+  }
+
+  const permission = mayChangeEmailOf({
+    callerUid: caller.uid,
+    caller: callerData,
+    targetUid,
+    target: targetData,
+    managerServiceProviderIds,
+  });
+
+  if (!permission.allowed) {
+    throw new HttpsError(
+      "permission-denied",
+      permission.reason === "own"
+        ? "Change your own email from Account Settings."
+        : "You may only change the email of people you manage.",
+    );
+  }
+
+  const targetAuth = await auth.getUser(targetUid);
+  const oldEmail = normaliseEmail(targetAuth.email);
+
+  if (oldEmail === newEmail) {
+    throw new HttpsError(
+      "failed-precondition",
+      "That is already their sign-in email.",
+    );
+  }
+
+  try {
+    const holder = await auth.getUserByEmail(newEmail);
+
+    if (holder.uid !== targetUid) {
+      throw new HttpsError(
+        "already-exists",
+        "Another iREPS account uses that email.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    if (error?.code !== "auth/user-not-found") {
+      throw new HttpsError("internal", error.message);
+    }
+  }
+
+  // The sign-in first: if it is refused, the record is left as it was and still agrees with it.
+  try {
+    await auth.updateUser(targetUid, { email: newEmail });
+  } catch (error) {
+    if (error?.code === "auth/email-already-exists") {
+      throw new HttpsError(
+        "already-exists",
+        "Another iREPS account uses that email.",
+      );
+    }
+
+    if (error?.code === "auth/invalid-email") {
+      throw new HttpsError(
+        "invalid-argument",
+        "That does not look like an email address.",
+      );
+    }
+
+    logger.error("changeUserEmail ---- sign-in email not changed", {
+      targetUid,
+      code: error?.code,
+    });
+    throw new HttpsError(
+      "internal",
+      "The sign-in email was not changed. Try again.",
+    );
+  }
+
+  const callerName =
+    String(callerData?.profile?.displayName || "").trim() ||
+    caller.token?.email ||
+    caller.uid;
+  const now = new Date().toISOString();
+
+  // From here the sign-in email HAS changed, so nothing below may report the change as failed.
+  // AU-R001 11.2: a lasting record of who changed whose email, from what to what.
+  const recordFields = {
+    "profile.email": newEmail,
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": caller.uid,
+    "metadata.updatedByUser": callerName,
+  };
+
+  let recordFollowed = false;
+
+  for (let attempt = 0; attempt < 2 && !recordFollowed; attempt += 1) {
+    try {
+      await db.collection("users").doc(targetUid).update(recordFields);
+      recordFollowed = true;
+    } catch (error) {
+      logger.error("changeUserEmail ---- record did not follow", {
+        targetUid,
+        attempt,
+        code: error?.code,
+      });
+    }
+  }
+
+  try {
+    await db
+      .collection("users")
+      .doc(targetUid)
+      .collection("emailChanges")
+      .add({
+        how: "OFFICE",
+        oldSignInEmail: oldEmail,
+        newSignInEmail: newEmail,
+        recordEmailBefore: normaliseEmail(targetData?.profile?.email),
+        byUid: caller.uid,
+        byUser: callerName,
+        at: now,
+        recordFollowed,
+      });
+  } catch (error) {
+    logger.error("changeUserEmail ---- change not recorded", {
+      targetUid,
+      code: error?.code,
+    });
+  }
+
+  logger.log("changeUserEmail ---- changed", {
+    targetUid,
+    byUid: caller.uid,
+    recordFollowed,
+  });
+
+  // If the record did not follow, it catches up the next time the person opens the phone app
+  // (syncSignInEmail), because the sign-in email is the truth.
+  return { uid: targetUid, oldEmail, newEmail, recordFollowed };
+});
+
+// AU-R001 11: when the sign-in email and the record differ, the sign-in email is the truth. The
+// phone asks; the back end reads the sign-in email itself, so nobody can write another one in.
+export const syncSignInEmail = onCall(async (request) => {
+  const { auth: caller } = request;
+
+  if (!caller) {
+    throw new HttpsError("unauthenticated", "Sign in first.");
+  }
+
+  const signInEmail = normaliseEmail((await auth.getUser(caller.uid)).email);
+
+  if (!signInEmail) {
+    return { email: null, changed: false };
+  }
+
+  const userRef = db.collection("users").doc(caller.uid);
+  const userSnap = await userRef.get();
+
+  if (!userSnap.exists) {
+    return { email: signInEmail, changed: false };
+  }
+
+  const record = userSnap.data() || {};
+  const recordEmail = normaliseEmail(record?.profile?.email);
+
+  if (recordEmail === signInEmail) {
+    return { email: signInEmail, changed: false };
+  }
+
+  const now = new Date().toISOString();
+  const byUser = String(record?.profile?.displayName || "").trim() || signInEmail;
+
+  await userRef.update({
+    "profile.email": signInEmail,
+    "metadata.updatedAt": now,
+    "metadata.updatedByUid": caller.uid,
+    "metadata.updatedByUser": byUser,
+  });
+
+  // The address the record held is kept, not lost: somebody may have typed their correct email into
+  // the old Account Settings while their sign-in still had the wrong one.
+  try {
+    await userRef.collection("emailChanges").add({
+      how: "SYNC",
+      oldSignInEmail: signInEmail,
+      newSignInEmail: signInEmail,
+      recordEmailBefore: recordEmail,
+      byUid: caller.uid,
+      byUser,
+      at: now,
+      recordFollowed: true,
+    });
+  } catch (error) {
+    logger.error("syncSignInEmail ---- change not recorded", {
+      uid: caller.uid,
+      code: error?.code,
+    });
+  }
+
+  logger.log("syncSignInEmail ---- record follows the sign-in email", {
+    uid: caller.uid,
+  });
+
+  return { email: signInEmail, changed: true };
 });
 
 export const authorizeFieldWorker = onCall(async (request) => {

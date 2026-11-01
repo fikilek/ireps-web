@@ -54,12 +54,22 @@ export function isFirestoreTimestamp(value) {
 }
 
 export function normalizeMeterNo(value) {
-  const normalized = String(value ?? "").replace(/\s+/g, "").toUpperCase();
-  if (!normalized) throw new TypeError("Meter number normalizes to an empty value");
-  if (!/^[A-Z0-9]+$/.test(normalized)) {
+  const withoutSpaces = String(value ?? "").replace(/\s+/g, "");
+  if (!withoutSpaces) throw new TypeError("Meter number normalizes to an empty value");
+  if (!/^[A-Za-z0-9]+$/.test(withoutSpaces)) {
     throw new TypeError("Meter number must contain only letters and digits");
   }
-  return normalized;
+  return withoutSpaces.toUpperCase();
+}
+
+// MV-R001 section 8: the worker is told why a meter number is refused; nothing is removed quietly.
+export function describeMeterNumberProblem(value) {
+  const withoutSpaces = String(value ?? "").replace(/\s+/g, "");
+  if (!withoutSpaces) return "Meter number is required.";
+  if (!/^[A-Za-z0-9]+$/.test(withoutSpaces)) {
+    return "Meter number may only contain letters and digits. Remove dashes, slashes, dots or other symbols.";
+  }
+  return null;
 }
 
 const text = (value) => String(value ?? "").trim();
@@ -110,7 +120,7 @@ export function buildMeterMasterUpdateMetadata({ actorUid, actorUser, operationT
 }
 
 export function buildCanonicalFieldOnlyMeterMaster({
-  lmPcode, meterNoRaw, meterType, astId, actorUid, actorUser, operationTimestamp,
+  lmPcode, meterNoRaw, meterType, astId, actorUid, actorUser, operationTimestamp, salesLink = null,
 }) {
   const canonicalLmPcode = text(lmPcode).toUpperCase();
   const canonicalMeterType = text(meterType).toLowerCase();
@@ -124,7 +134,12 @@ export function buildCanonicalFieldOnlyMeterMaster({
     meterType: canonicalMeterType,
     customerNo: "",
     accountNo: "",
-    refs: { asts: { id: canonicalAstId }, sales: { id: "", provider: "" } },
+    refs: {
+      asts: { id: canonicalAstId },
+      sales: salesLink
+        ? { id: text(salesLink.id), provider: text(salesLink.provider) }
+        : { id: "", provider: "" },
+    },
     metadata: buildMeterMasterCreateMetadata({ actorUid, actorUser, operationTimestamp }),
   };
 }
@@ -290,6 +305,21 @@ export function buildOperationalAstUpdate({ astId, actorUid, actorUser, operatio
   if (!canonicalAstId) throw new TypeError("An AST ID is required for Meter Master update");
   return {
     "refs.asts.id": canonicalAstId,
+    ...buildMeterMasterUpdateMetadata({ actorUid, actorUser, operationTimestamp }),
+  };
+}
+
+// Schema MM-002.10.1 (0.2.5): the back end fills a blank Sales link; it never changes a set one.
+export function buildBackEndSalesLinkFields(salesLink) {
+  const id = text(salesLink?.id);
+  const provider = text(salesLink?.provider);
+  if (!id || !provider) throw new TypeError("A Sales link needs an id and a provider");
+  return { "refs.sales.id": id, "refs.sales.provider": provider };
+}
+
+export function buildBackEndSalesLinkUpdate({ salesLink, actorUid, actorUser, operationTimestamp }) {
+  return {
+    ...buildBackEndSalesLinkFields(salesLink),
     ...buildMeterMasterUpdateMetadata({ actorUid, actorUser, operationTimestamp }),
   };
 }
