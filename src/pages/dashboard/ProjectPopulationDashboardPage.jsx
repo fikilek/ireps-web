@@ -367,24 +367,24 @@ export default function ProjectPopulationDashboardPage() {
               </div>
             </div>
 
-            <div className="meter-status-legend">
-              <div className="meter-status-legend__row">
-                <div className="meter-status-legend__category">
-                  <span className="meter-status-legend__dot" style={{ background: "#2563eb" }} />
+            <div className="meter-pop-legend">
+              <div className="meter-pop-legend__row">
+                <div className="meter-pop-legend__category">
+                  <span className="meter-pop-legend__dot" style={{ background: "#2563eb" }} />
                   <span>Normal</span>
                 </div>
-                <div className="meter-status-legend__values">
+                <div className="meter-pop-legend__values">
                   <strong>{formatNumber(normal)}</strong>
                   <span>{formatPercent(normal, onList)}</span>
                 </div>
               </div>
 
-              <div className="meter-status-legend__row">
-                <div className="meter-status-legend__category">
-                  <span className="meter-status-legend__dot" style={{ background: "#f97316" }} />
+              <div className="meter-pop-legend__row">
+                <div className="meter-pop-legend__category">
+                  <span className="meter-pop-legend__dot" style={{ background: "#f97316" }} />
                   <span>Targeted (CAT 1–8)</span>
                 </div>
-                <div className="meter-status-legend__values">
+                <div className="meter-pop-legend__values">
                   <strong style={{ color: "#ea580c" }}>{formatNumber(targeted)}</strong>
                   <span>{formatPercent(targeted, onList)}</span>
                 </div>
