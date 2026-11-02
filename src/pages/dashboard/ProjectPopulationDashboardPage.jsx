@@ -1,495 +1,458 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-import { useMemo, useState } from "react";
+// Electricity Meter Population rules EMP-R001 v1.3.0
+// Real-time streaming from pre-aggregated summary rollups in report_electricity_population.
+import { useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
-import { useGetSalesCategoryViewQuery, useGetSalesGovernanceQuery, useSalesReadScope } from "../../redux/salesApi";
+import { useGetElectricityPopulationByLmQuery } from "../../redux/reportElectricityPopulationApi";
+import { getActiveLmPcode, getActiveWorkbaseName } from "../sales/salesUtils";
 import {
+  EMD_COLORS,
+  EMD_HELP_STORIES,
   formatNumber,
-  getActiveLmPcode,
-  getActiveWorkbaseName,
-} from "../sales/salesUtils";
-import { buildSalesPopulationReadModel } from "../sales/models/salesPopulationModel";
+  formatPercent,
+  formatMonthLabel,
+  pickActiveMonth,
+} from "./models/electricityMeterPopulationModel";
 
 import "./ProjectPopulationDashboardPage.css";
 
-function formatPercent(value) {
-  if (!Number.isFinite(value)) return "0.0%";
-  return `${value.toFixed(1)}%`;
-}
-
-function formatAxisNumber(value) {
-  if (!Number.isFinite(value)) return "0";
-  if (value >= 1000) {
-    const thousands = value / 1000;
-    return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
-  }
-  return formatNumber(value);
-}
-
-function formatSnapshotDate(value = new Date()) {
-  return new Intl.DateTimeFormat("en-ZA", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(value);
-}
-
-function formatDateTime(value) {
-  if (!value) return "Live now";
-
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "Live now";
-
-  return new Intl.DateTimeFormat("en-ZA", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function Icon({ name }) {
-  const common = {
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: "1.8",
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    "aria-hidden": "true",
-  };
-
-  if (name === "population") {
-    return (
-      <svg {...common}>
-        <circle cx="9" cy="8" r="3" />
-        <circle cx="17" cy="9" r="2.5" />
-        <circle cx="4" cy="10" r="2" />
-        <path d="M3 20c.5-3.4 2.4-5.2 6-5.2s5.5 1.8 6 5.2" />
-        <path d="M14 14.5c3.6-.4 6 1.4 6.7 4.7" />
-      </svg>
-    );
-  }
-
-  if (name === "gps") {
-    return (
-      <svg {...common}>
-        <path d="M12 21s6-5.3 6-11A6 6 0 0 0 6 10c0 5.7 6 11 6 11Z" />
-        <circle cx="12" cy="10" r="2.4" />
-        <path d="M5 21h14" />
-      </svg>
-    );
-  }
-
-  if (name === "noGps") {
-    return (
-      <svg {...common}>
-        <path d="M5 16a9 9 0 0 1 12.7-8" />
-        <path d="M8 18a6 6 0 0 1 7.4-7.3" />
-        <path d="M11 20a3 3 0 0 1 2.3-3" />
-        <path d="M3 3l18 18" />
-      </svg>
-    );
-  }
-
-  if (name === "target") {
-    return (
-      <svg {...common}>
-        <circle cx="12" cy="12" r="8" />
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-      </svg>
-    );
-  }
-
-  if (name === "calendar") {
-    return (
-      <svg {...common}>
-        <rect x="3" y="5" width="18" height="16" rx="2" />
-        <path d="M7 2v6M17 2v6M3 10h18" />
-      </svg>
-    );
-  }
-
-  if (name === "filter") {
-    return (
-      <svg {...common}>
-        <path d="M4 5h16l-6.4 7.2V19l-3.2 1v-7.8L4 5Z" />
-      </svg>
-    );
-  }
-
-  if (name === "note") {
-    return (
-      <svg {...common}>
-        <rect x="5" y="3" width="14" height="18" rx="2" />
-        <path d="M9 8h6M9 12h6M9 16h4" />
-      </svg>
-    );
-  }
-
-  return null;
-}
-
-function KpiCard({ label, value, detail, tone, icon }) {
+function HelpButton({ storyKey, onOpen, title }) {
   return (
-    <article className={`population-exec-kpi population-exec-kpi--${tone}`}>
-      <div className="population-exec-kpi__icon">
-        <Icon name={icon} />
-      </div>
-      <div className="population-exec-kpi__copy">
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{detail}</small>
-      </div>
-      <div className="population-exec-kpi__ghost">
-        <Icon name={icon} />
-      </div>
+    <button
+      type="button"
+      className="emp-help-btn"
+      onClick={() => onOpen(storyKey)}
+      title={title || "Learn more"}
+      aria-label={title || "Learn more"}
+    >
+      ?
+    </button>
+  );
+}
+
+function KpiCard({ label, value, detail, variant = "", storyKey, onHelp }) {
+  return (
+    <article className={`emp-kpi ${variant ? `emp-kpi--${variant}` : ""}`}>
+      <span className="emp-kpi__label">{label}</span>
+      <strong className="emp-kpi__value">{value}</strong>
+      <span className="emp-kpi__detail">{detail}</span>
+      {storyKey && <HelpButton storyKey={storyKey} onOpen={onHelp} title={`Learn about ${label}`} />}
     </article>
   );
 }
 
-function ClipboardIllustration() {
-  return (
-    <svg
-      className="population-notes-illustration"
-      viewBox="0 0 190 145"
-      aria-hidden="true"
-    >
-      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M38 116c-13-16-17-36-8-54M45 117c-3-25 5-45 23-61M153 117c14-19 16-40 5-58M145 116c5-22-1-42-18-60" opacity=".18" strokeWidth="3" />
-        <rect x="66" y="30" width="72" height="94" rx="8" opacity=".5" strokeWidth="5" />
-        <path d="M84 30v-8h36v8" opacity=".55" strokeWidth="5" />
-        <rect x="78" y="50" width="12" height="12" rx="2" opacity=".6" strokeWidth="3" />
-        <rect x="78" y="72" width="12" height="12" rx="2" opacity=".6" strokeWidth="3" />
-        <rect x="78" y="94" width="12" height="12" rx="2" opacity=".6" strokeWidth="3" />
-        <path d="m81 56 3 3 5-7M81 78l3 3 5-7M81 100l3 3 5-7" opacity=".8" strokeWidth="2.5" />
-        <path d="M100 56h24M100 78h24M100 100h18" opacity=".35" strokeWidth="3" />
-        <path d="m140 43 13-18 8 6-13 18-9 5 1-11Z" opacity=".75" strokeWidth="3" />
-      </g>
-    </svg>
-  );
-}
+function Donut({ normal, targeted, total, onHelp }) {
+  const onList = normal + targeted;
+  const normalDeg = onList > 0 ? (normal / onList) * 360 : 290;
+  const background = onList > 0
+    ? `conic-gradient(${EMD_COLORS.normal} 0deg ${normalDeg - 1}deg, #ffffff ${normalDeg - 1}deg ${normalDeg}deg, ${EMD_COLORS.targeted} ${normalDeg}deg 360deg)`
+    : "#e2e8f0";
 
-function LoadingState() {
   return (
-    <section className="population-state-card" aria-live="polite" aria-busy="true">
-      <div className="population-spinner" aria-hidden="true" />
-      <div>
-        <h2>Loading Project Population...</h2>
-        <p>Connecting to the live Sales stream for the active workbase.</p>
+    <section className="emp-card">
+      <div className="emp-card-header">
+        <h2>Normal vs targeted</h2>
       </div>
+
+      <div className="emp-donut-box">
+        <div
+          className="emp-donut"
+          style={{ background }}
+          role="img"
+          aria-label={`Normal ${formatNumber(normal)}, targeted ${formatNumber(targeted)} on Prepaid Sales`}
+        >
+          <div className="emp-donut__hole">
+            <strong>{formatNumber(total)}</strong>
+            <span>on Prepaid Sales</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="emp-rows">
+        <div className="emp-row">
+          <i style={{ background: EMD_COLORS.normal }} aria-hidden="true" />
+          <span>Normal</span>
+          <strong>{formatNumber(normal)}</strong>
+          <span className="emp-muted">{formatPercent(normal, onList)}</span>
+        </div>
+        <div className="emp-row">
+          <i style={{ background: EMD_COLORS.targeted }} aria-hidden="true" />
+          <span>Targeted (CAT 1–8)</span>
+          <strong style={{ color: EMD_COLORS.targeted }}>{formatNumber(targeted)}</strong>
+          <span className="emp-muted">{formatPercent(targeted, onList)}</span>
+        </div>
+      </div>
+
+      <HelpButton storyKey="card-donut" onOpen={onHelp} title="Learn about Normal vs Targeted" />
     </section>
   );
 }
 
-export default function ProjectPopulationDashboardPage() {
-  const [monthSelection, setMonthSelection] = useState({});
-  const { activeWorkbase } = useAuth();
-  const activeLmPcode = getActiveLmPcode(activeWorkbase);
-  const readScope = useSalesReadScope(activeLmPcode);
-  const scopeKey = JSON.stringify(readScope);
-  const selectedMonth = monthSelection.scope === scopeKey ? monthSelection.month : undefined;
-  const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
+function SplitBar({ title, scope, parts }) {
+  const total = parts.reduce((sum, part) => sum + part.value, 0);
 
-  const {
-    data: salesRows = [],
-    isLoading,
-    isFetching,
-    error,
-    categoryMonth,
-  } = useGetSalesCategoryViewQuery(activeLmPcode ? { lmPcode: activeLmPcode, month: selectedMonth } : skipToken);
-
-  const { currentData: governance, error: governanceError, isLoading: governanceLoading, isFetching: governanceFetching } = useGetSalesGovernanceQuery(activeLmPcode ? { lmPcode: activeLmPcode } : skipToken);
-  const population = useMemo(() => buildSalesPopulationReadModel({
-    snapshots: governance?.snapshots, month: categoryMonth, lmPcode: activeLmPcode, salesRows,
-  }), [governance, categoryMonth, activeLmPcode, salesRows]);
-  const monthPicker = <label>Population month <input type="month" value={categoryMonth || ""} onChange={event => setMonthSelection({ scope: scopeKey, month: event.target.value })} /></label>;
-
-  if (!activeLmPcode) {
-    return (
-      <div className="population-dashboard-page population-dashboard-page--executive">
-        <section className="population-state-card">
-          <div>
-            <h2>No active workbase selected</h2>
-            <p>Select an active workbase before opening Project Population.</p>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
-  if (isLoading || governanceLoading) {
-    return (
-      <div className="population-dashboard-page population-dashboard-page--executive">
-        <LoadingState />
-      </div>
-    );
-  }
-
-  if (error || governanceError || population.status !== "ready") {
-    return (
-      <div className="population-dashboard-page population-dashboard-page--executive">
-        <section className="population-state-card population-state-card--error">
-          <div>
-            <h2>Population {population.status === "invalid" ? "evidence invalid" : "unavailable"}</h2>
-            {monthPicker}
-            <p>{error ? "Sales attributes could not be read." : governanceError ? "Verified population evidence could not be read." : population.error}</p>
-            <p>Membership totals are withheld until the selected snapshot is available. This page does not complete Stage 11 acceptance.</p>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
-  const scopeDenominator = Math.max(1, population.total);
-  const gpsScopeWidth = (population.withGps / scopeDenominator) * 100;
-  const nonGpsScopeWidth = (population.withoutGps / scopeDenominator) * 100;
-  const normalScopeWidth = (population.normalPopulation / scopeDenominator) * 100;
-  const targetScopeWidth = (population.fieldTarget / scopeDenominator) * 100;
   return (
-    <div className="population-dashboard-page population-dashboard-page--executive">
-      <header className="population-exec-header">
+    <div className="emp-split">
+      <div className="emp-split__head">
+        <span className="emp-split__title">{title}</span>
+        {scope && <span className="emp-split__scope">{scope}</span>}
+      </div>
+
+      <div
+        className="emp-split__bar"
+        role="img"
+        aria-label={`${title}: ${parts.map((p) => `${p.label} ${formatNumber(p.value)}`).join(", ")}`}
+      >
+        {parts.map((part) => {
+          const shareWidth = total > 0 ? (part.value / total) * 100 : 0;
+          return (
+            <span
+              key={part.label}
+              className="emp-split__segment"
+              style={{ width: `${shareWidth}%`, background: part.color }}
+              title={`${part.label}: ${formatNumber(part.value)} (${formatPercent(part.value, total)})`}
+            />
+          );
+        })}
+      </div>
+
+      <div className="emp-split__legend">
+        {parts.map((part) => (
+          <span key={part.label} className="emp-legend">
+            <i style={{ background: part.color }} aria-hidden="true" />
+            {part.label} <strong>{formatNumber(part.value)}</strong>
+            <span className="emp-muted">{formatPercent(part.value, total)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HelpModal({ activeStoryKey, onClose }) {
+  if (!activeStoryKey) return null;
+  const story = EMD_HELP_STORIES[activeStoryKey];
+  if (!story) return null;
+
+  return (
+    <div className="emp-modal-overlay open" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="emp-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div className="emp-modal-header">
+          <span className="emp-modal-badge">{story.badge}</span>
+          <button type="button" className="emp-modal-close" onClick={onClose} aria-label="Close modal">
+            &times;
+          </button>
+        </div>
+        <h3 className="emp-modal-title" id="modal-title">{story.title}</h3>
+        <div
+          className="emp-modal-body"
+          dangerouslySetInnerHTML={{ __html: story.body }}
+        />
+        <div className="emp-modal-footer">
+          <span>iREPS Intelligence</span>
+          <a
+            href="#academy"
+            className="emp-modal-academy"
+            onClick={(e) => {
+              e.preventDefault();
+              alert("iREPS Academy course integration coming soon!");
+            }}
+          >
+            Open in iREPS Academy &rarr;
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectPopulationDashboardPage() {
+  const { activeWorkbase } = useAuth();
+  const lmPcode = getActiveLmPcode(activeWorkbase);
+  const workbaseName = getActiveWorkbaseName(activeWorkbase);
+
+  const [requestedMonth, setRequestedMonth] = useState("");
+  const [activeStoryKey, setActiveStoryKey] = useState(null);
+
+  // Real-time streaming from pre-aggregated rollup collection
+  const {
+    data: months = [],
+    isLoading,
+    isError,
+  } = useGetElectricityPopulationByLmQuery(lmPcode ? lmPcode : skipToken);
+
+  const activeMonthKey = useMemo(() => pickActiveMonth(months, requestedMonth), [months, requestedMonth]);
+
+  const activePopulation = useMemo(() => {
+    return months.find((m) => m.month === activeMonthKey) || months.at(-1) || null;
+  }, [months, activeMonthKey]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") setActiveStoryKey(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  if (!lmPcode) {
+    return (
+      <div className="emp-page-container">
+        <header className="emp-header">
+          <div>
+            <p className="emp-eyebrow">Dashboard · Workbase Required</p>
+            <h1>Electricity Meter Population</h1>
+            <p className="emp-sub">Please select an active local municipality from the navigation bar.</p>
+          </div>
+        </header>
+      </div>
+    );
+  }
+
+  const pop = activePopulation;
+
+  return (
+    <div className="emp-page-container">
+      {/* HEADER */}
+      <header className="emp-header">
         <div>
-          <p className="population-exec-eyebrow">Dashboard v1 Â· Population Overview</p>
-          <h2>Dashboard v1 â€” Population Overview</h2>
-          <p>
-            Live project population, GPS readiness and field-discovery scope for {activeWorkbaseName}.
+          <p className="emp-eyebrow">Dashboard · {workbaseName} ({lmPcode})</p>
+          <h1>Electricity Meter Population</h1>
+          <p className="emp-sub">
+            {pop ? `Electricity meters for ${pop.monthLabel}: from prepaid sales and found in the field` : "Loading electricity meters…"}
           </p>
         </div>
 
-        <div className="population-exec-header__controls" aria-label="Population snapshot scope">
-          <div className="population-exec-date-control">
-            <Icon name="calendar" />
-            {monthPicker}
+        {/* MONTH SCRUBBER / SELECTOR */}
+        {months.length > 0 && (
+          <div className="emp-months">
+            <span className="emp-months__label">Vending File Month</span>
+            <div className="emp-months__buttons" role="group" aria-label="Month selection">
+              {months.map((m, index) => {
+                const isSelected = m.month === activeMonthKey;
+                const isLatest = index === months.length - 1;
+                return (
+                  <button
+                    key={m.month}
+                    type="button"
+                    className={`emp-month ${isSelected ? "emp-month--on" : ""}`}
+                    onClick={() => setRequestedMonth(m.month)}
+                  >
+                    {m.monthLabel}
+                    {isLatest && <span className="emp-month__tag">Latest</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="population-exec-filter-control" title="Full active LM Sales population">
-            <Icon name="filter" />
-            <span>All Sales</span>
-          </div>
-        </div>
+        )}
       </header>
 
-      <section className="population-state-card" aria-label="Population evidence and Sales coverage">
-        <div><h2>Supplier population — {categoryMonth}</h2>
-          <p>{population.total} verified members. Sales documents: {population.availableDocuments} ({formatPercent(population.documentCoverage)} coverage). Missing documents: {population.missingDocuments}.</p>
-          <p>GPS unknown: {population.gpsUnknown}. Exact-month category unavailable: {population.categoryUnavailable}. Unknown attributes are excluded from readiness groups.</p>
-          <p>Monthly movement analysis and full Stage 11 acceptance remain pending.</p>
-          {governanceFetching && <p>Refreshing population evidence…</p>}
-        </div>
-      </section>
+      {/* TOP 5 MASTER KPIS */}
+      {pop && (
+        <section className="emp-kpis" aria-label="Electricity meters movement this month">
+          <KpiCard
+            variant="total"
+            label="Total meters"
+            value={formatNumber(pop.totalMeters)}
+            detail="Prepaid sales + found in field"
+            storyKey="kpi-total"
+            onHelp={setActiveStoryKey}
+          />
 
-      {population.total === 0 ? (
-        <section className="population-state-card">
-          <div>
-            <h2>No Sales population found</h2>
-            <p>No Sales records were returned for {activeLmPcode}.</p>
-          </div>
+          <KpiCard
+            label="Unchanged"
+            value={pop.movements.unchanged != null ? formatNumber(pop.movements.unchanged) : "Data pending"}
+            detail="Active continuing from previous month"
+            storyKey="kpi-unchanged"
+            onHelp={setActiveStoryKey}
+          />
+
+          <KpiCard
+            label="New"
+            value={pop.movements.newMeters != null ? formatNumber(pop.movements.newMeters) : "Data pending"}
+            detail="First-time installed on the network"
+            storyKey="kpi-new"
+            onHelp={setActiveStoryKey}
+          />
+
+          <KpiCard
+            label="Replacements"
+            value={pop.movements.replacements != null ? formatNumber(pop.movements.replacements) : "Data pending"}
+            detail="Installed replacing existing meters"
+            storyKey="kpi-replacements"
+            onHelp={setActiveStoryKey}
+          />
+
+          <KpiCard
+            variant="removed"
+            label="Removed / Out of Service"
+            value={pop.movements.removed != null ? formatNumber(pop.movements.removed) : "0"}
+            detail="Decommissioned · not in total"
+            storyKey="kpi-removed"
+            onHelp={setActiveStoryKey}
+          />
         </section>
-      ) : (
-        <>
-          <section className="population-exec-kpis" aria-label="Population KPIs">
-            <KpiCard
-              label="Total Population"
-              value={formatNumber(population.total)}
-              detail="Total project Sales meters"
-              tone="blue"
-              icon="population"
-            />
-            <KpiCard
-              label="With GPS"
-              value={formatNumber(population.withGps)}
-              detail={`${formatPercent(population.gpsCoverage)} of total population`}
-              tone="teal"
-              icon="gps"
-            />
-            <KpiCard
-              label="Without GPS"
-              value={formatNumber(population.withoutGps)}
-              detail={`${formatPercent(population.withoutGpsShare)} of total population`}
-              tone="orange"
-              icon="noGps"
-            />
-            <KpiCard
-              label="Field Target"
-              value={formatNumber(population.fieldTarget)}
-              detail={`${formatPercent(population.fieldTargetShare)} of total population`}
-              tone="blue"
-              icon="target"
-            />
-          </section>
-
-          <section className="population-exec-main-grid">
-            <article className="population-exec-panel population-exec-panel--split">
-              <div className="population-exec-panel__title">
-                <h3>Population Split</h3>
-                <span className="population-info-dot" title="GPS availability across the full project population">i</span>
-              </div>
-
-              <div className="population-exec-donut-wrap">
-                <div
-                  className="population-exec-donut"
-                  style={{ background: `conic-gradient(#0f9f95 0deg ${population.gpsCoverage * 3.6}deg, #f97316 ${population.gpsCoverage * 3.6}deg ${(population.gpsCoverage + population.withoutGpsShare) * 3.6}deg, #cbd5e1 ${(population.gpsCoverage + population.withoutGpsShare) * 3.6}deg 360deg)` }}
-                  role="img"
-                  aria-label={`${formatPercent(population.gpsCoverage)} with GPS and ${formatPercent(population.withoutGpsShare)} without GPS`}
-                >
-                  <span className="population-exec-donut__percent population-exec-donut__percent--gps">
-                    {formatPercent(population.gpsCoverage)}
-                  </span>
-                  <span className="population-exec-donut__percent population-exec-donut__percent--non-gps">
-                    {formatPercent(population.withoutGpsShare)}
-                  </span>
-                  <div className="population-exec-donut__center">
-                    <strong>{formatNumber(population.total)}</strong>
-                    <span>Total Population</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="population-exec-split-legend">
-                <div>
-                  <span className="population-exec-swatch population-exec-swatch--gps" />
-                  <div>
-                    <strong>With GPS</strong>
-                    <small>{formatNumber(population.withGps)} ({formatPercent(population.gpsCoverage)})</small>
-                  </div>
-                </div>
-                <div>
-                  <span className="population-exec-swatch population-exec-swatch--non-gps" />
-                  <div>
-                    <strong>Without GPS</strong>
-                    <small>{formatNumber(population.withoutGps)} ({formatPercent(population.withoutGpsShare)})</small>
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <article className="population-exec-panel population-exec-panel--scope">
-              <div className="population-exec-panel__title">
-                <h3>Project Scope</h3>
-                <span className="population-info-dot" title="Two distributions across the same total Sales population">i</span>
-              </div>
-
-              <div className="population-exec-scope-total">
-                <span>Total Project Population</span>
-                <strong>{formatNumber(population.total)}</strong>
-              </div>
-
-              <div className="population-exec-scope-comparison">
-                <div className="population-exec-scope-row">
-                  <div className="population-exec-scope-row__heading">
-                    <strong>GPS Distribution</strong>
-                    <span>Same {formatNumber(population.total)}-meter scale</span>
-                  </div>
-
-                  <div
-                    className="population-exec-scope-bar population-exec-scope-bar--comparison"
-                    role="img"
-                    aria-label={`${formatNumber(population.withGps)} with GPS and ${formatNumber(population.withoutGps)} without GPS`}
-                  >
-                    <span
-                      className="population-exec-scope-bar__gps"
-                      style={{ width: `${gpsScopeWidth}%` }}
-                    />
-                    <span
-                      className="population-exec-scope-bar__non-gps"
-                      style={{ width: `${nonGpsScopeWidth}%` }}
-                    />
-                  </div>
-
-                  <div className="population-exec-scope-row__legend">
-                    <div>
-                      <span><i className="population-exec-dot population-exec-dot--gps" />With GPS</span>
-                      <strong>{formatNumber(population.withGps)}</strong>
-                      <b>{formatPercent(population.gpsCoverage)}</b>
-                    </div>
-                    <div>
-                      <span><i className="population-exec-dot population-exec-dot--non-gps" />Without GPS</span>
-                      <strong>{formatNumber(population.withoutGps)}</strong>
-                      <b>{formatPercent(population.withoutGpsShare)}</b>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="population-exec-scope-row">
-                  <div className="population-exec-scope-row__heading">
-                    <strong>Sales Category Distribution</strong>
-                    <span>Normal vs all CATs excluding Normal</span>
-                  </div>
-
-                  <div
-                    className="population-exec-scope-bar population-exec-scope-bar--comparison"
-                    role="img"
-                    aria-label={`${formatNumber(population.normalPopulation)} Normal and ${formatNumber(population.fieldTarget)} All Categories excluding Normal`}
-                  >
-                    <span
-                      className="population-exec-scope-bar__normal"
-                      style={{ width: `${normalScopeWidth}%` }}
-                    />
-                    <span
-                      className="population-exec-scope-bar__target"
-                      style={{ width: `${targetScopeWidth}%` }}
-                    />
-                  </div>
-
-                  <div className="population-exec-scope-row__legend">
-                    <div>
-                      <span><i className="population-exec-dot population-exec-dot--normal" />Normal</span>
-                      <strong>{formatNumber(population.normalPopulation)}</strong>
-                      <b>{formatPercent(population.normalShare)}</b>
-                    </div>
-                    <div>
-                      <span><i className="population-exec-dot population-exec-dot--target" />All Categories</span>
-                      <strong>{formatNumber(population.fieldTarget)}</strong>
-                      <b>{formatPercent(population.fieldTargetShare)}</b>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="population-exec-axis population-exec-axis--shared" aria-hidden="true">
-                <span>0</span>
-                <span>{formatAxisNumber(population.scopeTickOne)}</span>
-                <span>{formatAxisNumber(population.scopeTickTwo)}</span>
-                <span>{formatAxisNumber(population.scopeTickThree)}</span>
-                <span>{formatAxisNumber(population.scopeAxisMax)}</span>
-              </div>
-
-              <p className="population-exec-scope-note">
-                Both bars use the same end-to-end Sales population scale. Field Target includes only members with a valid non-Normal category for this month. Unavailable attributes remain outside the coloured groups.
-              </p>
-            </article>
-            <article className="population-exec-panel population-exec-panel--notes">
-              <div className="population-exec-notes-title">
-                <span className="population-exec-notes-icon"><Icon name="note" /></span>
-                <h3>Key Notes</h3>
-              </div>
-
-              <ul className="population-exec-notes-list">
-                <li><strong>{formatNumber(population.total)}</strong> total project meters</li>
-                <li><strong>{formatNumber(population.withGps)}</strong> GPS-enabled</li>
-                <li><strong>{formatNumber(population.withoutGps)}</strong> without usable GPS</li>
-                <li><strong>{formatNumber(population.fieldTarget)}</strong> field-discovery target</li>
-              </ul>
-
-              <div className="population-exec-notes-target">
-                Field Target = available categories - Normal ({formatNumber(population.categoryAvailable)} - {formatNumber(population.normalPopulation)} = {formatNumber(population.fieldTarget)}).
-              </div>
-
-              <ClipboardIllustration />
-            </article>
-          </section>
-
-          <footer className="population-exec-footer">
-            <span className={`population-live-dot${isFetching ? " population-live-dot--syncing" : ""}`} aria-hidden="true" />
-            <span>
-              Last updated: {formatDateTime(population.latestUpdate)} Â· {isFetching ? "Syncing live Sales" : "Live Sales"} Â· {activeLmPcode}
-            </span>
-          </footer>
-        </>
       )}
+
+      {/* MAIN 3-PANEL GRID */}
+      {pop && (
+        <div className="emp-main">
+          {/* PANEL 1: DONUT (NORMAL VS TARGETED ONLY) */}
+          <Donut
+            normal={pop.normal}
+            targeted={pop.targeted}
+            total={pop.onList}
+            onHelp={setActiveStoryKey}
+          />
+
+          {/* PANEL 2: PROJECT SCOPE (3 SPLIT BARS) */}
+          <section className="emp-card">
+            <div className="emp-scope-head">
+              <div>
+                <h2>Project scope</h2>
+                <span className="emp-muted">Total population</span>
+              </div>
+              <strong className="emp-scope-total">{formatNumber(pop.totalMeters)}</strong>
+            </div>
+
+            {/* Split Bar 1: Prepaid Sales vs Found in Field */}
+            <SplitBar
+              title="Prepaid sales vs found in the field"
+              parts={[
+                { label: "Prepaid sales", value: pop.onList, color: EMD_COLORS.onList },
+                { label: "Found in the field", value: pop.foundInField, color: EMD_COLORS.foundInField },
+              ]}
+            />
+
+            {/* Split Bar 2: Normal vs Targeted */}
+            <SplitBar
+              title="Normal vs targeted"
+              scope="Meters on prepaid sales list"
+              parts={[
+                { label: "Normal", value: pop.normal, color: EMD_COLORS.normal },
+                { label: "Targeted", value: pop.targeted, color: EMD_COLORS.targeted },
+              ]}
+            />
+
+            {/* Split Bar 3: Targeted GPS vs Non-GPS */}
+            <SplitBar
+              title="GPS vs no GPS"
+              scope="Targeted meters (CAT 1–8)"
+              parts={[
+                { label: "Targeted with GPS", value: pop.targetedWithGps, color: EMD_COLORS.gps },
+                { label: "Targeted without GPS", value: pop.targetedWithoutGps, color: EMD_COLORS.noGps },
+              ]}
+            />
+
+            <HelpButton storyKey="card-scope" onOpen={setActiveStoryKey} title="Learn about Project Scope" />
+          </section>
+
+          {/* PANEL 3: KEY NOTES - STRUCTURED BY RELATIONSHIPS */}
+          <aside className="emp-card">
+            <div className="emp-card-header">
+              <h2>Key notes</h2>
+            </div>
+
+            <div className="emp-notes-groups">
+              {/* Group 1: Population Source */}
+              <div className="emp-note-group">
+                <div className="emp-note-group__title">
+                  <span>1. Population Source</span>
+                  <span className="emp-note-group__badge">Total Base</span>
+                </div>
+                <dl>
+                  <div className="emp-note-row">
+                    <dt><i style={{ background: EMD_COLORS.onList }} />Prepaid Sales</dt>
+                    <dd>
+                      <strong>{formatNumber(pop.onList)}</strong>
+                      <span className="share">{formatPercent(pop.onList, pop.totalMeters)}</span>
+                    </dd>
+                  </div>
+                  <div className="emp-note-row">
+                    <dt><i style={{ background: EMD_COLORS.foundInField }} />Found in Field</dt>
+                    <dd>
+                      <strong>{formatNumber(pop.foundInField)}</strong>
+                      <span className="share">{formatPercent(pop.foundInField, pop.totalMeters)}</span>
+                    </dd>
+                  </div>
+                  <div className="emp-note-row" style={{ marginTop: 4, paddingTop: 4, borderTop: "1px dashed #cbd5e1" }}>
+                    <dt><strong>Total Project Meters</strong></dt>
+                    <dd>
+                      <strong style={{ color: "var(--emp-accent)" }}>{formatNumber(pop.totalMeters)}</strong>
+                      <span className="share">100%</span>
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* Group 2: Field Operations Scope */}
+              <div className="emp-note-group">
+                <div className="emp-note-group__title">
+                  <span>2. Operations Scope</span>
+                  <span className="emp-note-group__badge">Prepaid Sales</span>
+                </div>
+                <dl>
+                  <div className="emp-note-row">
+                    <dt><i style={{ background: EMD_COLORS.normal }} />Normal (Not Inspected)</dt>
+                    <dd>
+                      <strong>{formatNumber(pop.normal)}</strong>
+                      <span className="share">{formatPercent(pop.normal, pop.onList)}</span>
+                    </dd>
+                  </div>
+                  <div className="emp-note-row">
+                    <dt><i style={{ background: EMD_COLORS.targeted }} />Targeted (CAT 1–8)</dt>
+                    <dd>
+                      <strong style={{ color: EMD_COLORS.targeted }}>{formatNumber(pop.targeted)}</strong>
+                      <span className="share">{formatPercent(pop.targeted, pop.onList)}</span>
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* Group 3: Targeted GPS Dispatch */}
+              <div className="emp-note-group">
+                <div className="emp-note-group__title">
+                  <span>3. Target GPS Breakdown</span>
+                  <span className="emp-note-group__badge">Field Target</span>
+                </div>
+                <dl>
+                  <div className="emp-note-row">
+                    <dt><i style={{ background: EMD_COLORS.gps }} />Targeted with GPS</dt>
+                    <dd>
+                      <strong>{formatNumber(pop.targetedWithGps)}</strong>
+                      <span className="share">{formatPercent(pop.targetedWithGps, pop.targeted)}</span>
+                    </dd>
+                  </div>
+                  <div className="emp-note-row">
+                    <dt><i style={{ background: EMD_COLORS.noGps }} />Targeted without GPS</dt>
+                    <dd>
+                      <strong>{formatNumber(pop.targetedWithoutGps)}</strong>
+                      <span className="share">{formatPercent(pop.targetedWithoutGps, pop.targeted)}</span>
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+
+            <HelpButton storyKey="card-notes" onOpen={setActiveStoryKey} title="Learn about Key Notes" />
+          </aside>
+        </div>
+      )}
+
+      {/* FOOTER */}
+      <footer className="emp-footer">
+        <span>Sales records and field records · {workbaseName}</span>
+        <span>·</span>
+        <span>Prepaid sales stream active</span>
+        <span>·</span>
+        <span>Real-time sync</span>
+      </footer>
+
+      {/* EDUCATIONAL STORY MODAL */}
+      <HelpModal activeStoryKey={activeStoryKey} onClose={() => setActiveStoryKey(null)} />
     </div>
   );
 }

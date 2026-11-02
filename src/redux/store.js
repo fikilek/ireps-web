@@ -13,6 +13,7 @@ import { registryAccountsApi } from "./registryAccountsApi";
 import { reportAnomalyApi } from "./reportAnomalyApi";
 import { reportNoAccessApi } from "./reportNoAccessApi";
 import { reportNormalisationApi } from "./reportNormalisationApi";
+import { reportElectricityPopulationApi } from "./reportElectricityPopulationApi";
 import { mapLmsApi } from "./mapLmsApi";
 import { mapWardsApi } from "./mapWardsApi";
 import { mapGeofencesApi } from "./mapGeofencesApi";
@@ -51,6 +52,7 @@ export const store = configureStore({
     [reportNoAccessApi.reducerPath]: reportNoAccessApi.reducer,
     [reportAnomalyApi.reducerPath]: reportAnomalyApi.reducer,
     [reportNormalisationApi.reducerPath]: reportNormalisationApi.reducer,
+    [reportElectricityPopulationApi.reducerPath]: reportElectricityPopulationApi.reducer,
 
     [mapLmsApi.reducerPath]: mapLmsApi.reducer,
     [mapWardsApi.reducerPath]: mapWardsApi.reducer,
@@ -86,6 +88,7 @@ export const store = configureStore({
       .concat(reportNoAccessApi.middleware)
       .concat(reportAnomalyApi.middleware)
       .concat(reportNormalisationApi.middleware)
+      .concat(reportElectricityPopulationApi.middleware)
       .concat(mapLmsApi.middleware)
       .concat(mapWardsApi.middleware)
       .concat(mapGeofencesApi.middleware)

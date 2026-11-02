@@ -120,12 +120,57 @@ export async function getElectricityPopulation({ db, request }) {
   const months = listPopulationMonths(salesRows).map((month) =>
     buildElectricityPopulation({ salesRows, fieldMeters: meters, month }));
   const latestMs = salesRows.reduce((latest, row) => Math.max(latest, row.updatedAtMs), 0);
+  const nowIso = new Date().toISOString();
+  const salesUpdatedIso = latestMs ? new Date(latestMs).toISOString() : null;
+
+  try {
+    const batch = db.batch();
+    for (const m of months) {
+      const docRef = db.collection("report_electricity_population").doc(`${lmPcode}_${m.month}`);
+      batch.set(
+        docRef,
+        {
+          id: `${lmPcode}_${m.month}`,
+          lmPcode,
+          month: m.month,
+          totalMeters: m.total || 0,
+          sources: {
+            onList: m.onList || 0,
+            foundInField: m.foundInField || 0,
+            onListShare: m.onListShare || 0,
+            foundInFieldShare: m.foundInFieldShare || 0,
+          },
+          categories: {
+            normal: m.normal || 0,
+            targeted: m.targeted || 0,
+            normalShare: m.normalShare || 0,
+            targetedShare: m.targetedShare || 0,
+          },
+          targetedGps: {
+            withGps: m.withGps || 0,
+            withoutGps: m.withoutGps || 0,
+            withGpsShare: m.withGpsShare || 0,
+            withoutGpsShare: m.withoutGpsShare || 0,
+          },
+          metadata: {
+            generatedAt: nowIso,
+            updatedAt: nowIso,
+            salesUpdatedAt: salesUpdatedIso,
+          },
+        },
+        { merge: true },
+      );
+    }
+    await batch.commit();
+  } catch (error) {
+    console.error("[electricityPopulation] Failed to persist rollup batch:", error);
+  }
 
   return {
     success: true,
     lmPcode,
-    generatedAt: new Date().toISOString(),
-    salesUpdatedAt: latestMs ? new Date(latestMs).toISOString() : null,
+    generatedAt: nowIso,
+    salesUpdatedAt: salesUpdatedIso,
     salesRecords: salesRows.length,
     fieldMeters: meters.length,
     months,
@@ -134,6 +179,6 @@ export async function getElectricityPopulation({ db, request }) {
 }
 
 export const getElectricityPopulationCallable = onCall(
-  { timeoutSeconds: 120, memory: "1GiB" },
+  { timeoutSeconds: 300, memory: "1GiB" },
   (request) => getElectricityPopulation({ db: getFirestore(), request }),
 );
