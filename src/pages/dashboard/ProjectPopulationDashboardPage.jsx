@@ -1,458 +1,694 @@
 /* eslint-disable no-unused-vars -- JSX component tags are reported as unused by this project ESLint config. */
-// Electricity Meter Population rules EMP-R001 v1.3.0
-// Real-time streaming from pre-aggregated summary rollups in report_electricity_population.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetElectricityPopulationByLmQuery } from "../../redux/reportElectricityPopulationApi";
-import { getActiveLmPcode, getActiveWorkbaseName } from "../sales/salesUtils";
 import {
-  EMD_COLORS,
   EMD_HELP_STORIES,
   formatNumber,
   formatPercent,
-  formatMonthLabel,
+  normalizeElectricityPopulationDoc,
   pickActiveMonth,
-} from "./models/electricityMeterPopulationModel";
+} from "./models/electricityMeterPopulationModel.js";
 
 import "./ProjectPopulationDashboardPage.css";
 
-function HelpButton({ storyKey, onOpen, title }) {
+function getActiveLmPcode(activeWorkbase) {
   return (
-    <button
-      type="button"
-      className="emp-help-btn"
-      onClick={() => onOpen(storyKey)}
-      title={title || "Learn more"}
-      aria-label={title || "Learn more"}
-    >
-      ?
-    </button>
+    activeWorkbase?.lmPcode ||
+    activeWorkbase?.pcode ||
+    activeWorkbase?.id ||
+    activeWorkbase?.localMunicipalityId ||
+    null
   );
 }
 
-function KpiCard({ label, value, detail, variant = "", storyKey, onHelp }) {
+function getActiveWorkbaseName(activeWorkbase) {
   return (
-    <article className={`emp-kpi ${variant ? `emp-kpi--${variant}` : ""}`}>
-      <span className="emp-kpi__label">{label}</span>
-      <strong className="emp-kpi__value">{value}</strong>
-      <span className="emp-kpi__detail">{detail}</span>
-      {storyKey && <HelpButton storyKey={storyKey} onOpen={onHelp} title={`Learn about ${label}`} />}
+    activeWorkbase?.name ||
+    activeWorkbase?.lmName ||
+    activeWorkbase?.id ||
+    activeWorkbase?.pcode ||
+    "NAv"
+  );
+}
+
+function Icon({ name }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.8",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": "true",
+  };
+
+  if (name === "meter") {
+    return (
+      <svg {...common}>
+        <rect x="4" y="3" width="16" height="18" rx="3" />
+        <path d="M8 15h8" />
+        <path d="M9 10a3 3 0 0 1 6 0" />
+        <path d="M12 10l2-2" />
+      </svg>
+    );
+  }
+
+  if (name === "status" || name === "check") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8 12 2.5 2.5L16.5 8.5" />
+      </svg>
+    );
+  }
+
+  if (name === "plus" || name === "new") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 8v8M8 12h8" />
+      </svg>
+    );
+  }
+
+  if (name === "refresh" || name === "replacement") {
+    return (
+      <svg {...common}>
+        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+        <path d="M16 16h5v5" />
+      </svg>
+    );
+  }
+
+  if (name === "removed" || name === "trash") {
+    return (
+      <svg {...common}>
+        <path d="M3 6h18" />
+        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        <line x1="10" x2="10" y1="11" y2="17" />
+        <line x1="14" x2="14" y1="11" y2="17" />
+      </svg>
+    );
+  }
+
+  return null;
+}
+
+function KpiCard({ label, value, detail, tone, icon, onHelp }) {
+  return (
+    <article className={`meter-exec-kpi meter-exec-kpi--${tone}`}>
+      <div className="meter-exec-kpi__icon">
+        <Icon name={icon} />
+      </div>
+      <div className="meter-exec-kpi__copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{detail}</small>
+      </div>
+      <Icon name={icon} />
+      {onHelp && (
+        <button
+          type="button"
+          className="meter-info-dot meter-info-dot--kpi"
+          onClick={onHelp}
+          title={`Learn about ${label}`}
+          aria-label={`Learn about ${label}`}
+        >
+          i
+        </button>
+      )}
     </article>
   );
 }
 
-function Donut({ normal, targeted, total, onHelp }) {
-  const onList = normal + targeted;
-  const normalDeg = onList > 0 ? (normal / onList) * 360 : 290;
-  const background = onList > 0
-    ? `conic-gradient(${EMD_COLORS.normal} 0deg ${normalDeg - 1}deg, #ffffff ${normalDeg - 1}deg ${normalDeg}deg, ${EMD_COLORS.targeted} ${normalDeg}deg 360deg)`
-    : "#e2e8f0";
-
-  return (
-    <section className="emp-card">
-      <div className="emp-card-header">
-        <h2>Normal vs targeted</h2>
-      </div>
-
-      <div className="emp-donut-box">
-        <div
-          className="emp-donut"
-          style={{ background }}
-          role="img"
-          aria-label={`Normal ${formatNumber(normal)}, targeted ${formatNumber(targeted)} on Prepaid Sales`}
-        >
-          <div className="emp-donut__hole">
-            <strong>{formatNumber(total)}</strong>
-            <span>on Prepaid Sales</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="emp-rows">
-        <div className="emp-row">
-          <i style={{ background: EMD_COLORS.normal }} aria-hidden="true" />
-          <span>Normal</span>
-          <strong>{formatNumber(normal)}</strong>
-          <span className="emp-muted">{formatPercent(normal, onList)}</span>
-        </div>
-        <div className="emp-row">
-          <i style={{ background: EMD_COLORS.targeted }} aria-hidden="true" />
-          <span>Targeted (CAT 1–8)</span>
-          <strong style={{ color: EMD_COLORS.targeted }}>{formatNumber(targeted)}</strong>
-          <span className="emp-muted">{formatPercent(targeted, onList)}</span>
-        </div>
-      </div>
-
-      <HelpButton storyKey="card-donut" onOpen={onHelp} title="Learn about Normal vs Targeted" />
-    </section>
-  );
-}
-
-function SplitBar({ title, scope, parts }) {
-  const total = parts.reduce((sum, part) => sum + part.value, 0);
-
-  return (
-    <div className="emp-split">
-      <div className="emp-split__head">
-        <span className="emp-split__title">{title}</span>
-        {scope && <span className="emp-split__scope">{scope}</span>}
-      </div>
-
-      <div
-        className="emp-split__bar"
-        role="img"
-        aria-label={`${title}: ${parts.map((p) => `${p.label} ${formatNumber(p.value)}`).join(", ")}`}
-      >
-        {parts.map((part) => {
-          const shareWidth = total > 0 ? (part.value / total) * 100 : 0;
-          return (
-            <span
-              key={part.label}
-              className="emp-split__segment"
-              style={{ width: `${shareWidth}%`, background: part.color }}
-              title={`${part.label}: ${formatNumber(part.value)} (${formatPercent(part.value, total)})`}
-            />
-          );
-        })}
-      </div>
-
-      <div className="emp-split__legend">
-        {parts.map((part) => (
-          <span key={part.label} className="emp-legend">
-            <i style={{ background: part.color }} aria-hidden="true" />
-            {part.label} <strong>{formatNumber(part.value)}</strong>
-            <span className="emp-muted">{formatPercent(part.value, total)}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HelpModal({ activeStoryKey, onClose }) {
-  if (!activeStoryKey) return null;
-  const story = EMD_HELP_STORIES[activeStoryKey];
-  if (!story) return null;
-
-  return (
-    <div className="emp-modal-overlay open" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="emp-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <div className="emp-modal-header">
-          <span className="emp-modal-badge">{story.badge}</span>
-          <button type="button" className="emp-modal-close" onClick={onClose} aria-label="Close modal">
-            &times;
-          </button>
-        </div>
-        <h3 className="emp-modal-title" id="modal-title">{story.title}</h3>
-        <div
-          className="emp-modal-body"
-          dangerouslySetInnerHTML={{ __html: story.body }}
-        />
-        <div className="emp-modal-footer">
-          <span>iREPS Intelligence</span>
-          <a
-            href="#academy"
-            className="emp-modal-academy"
-            onClick={(e) => {
-              e.preventDefault();
-              alert("iREPS Academy course integration coming soon!");
-            }}
-          >
-            Open in iREPS Academy &rarr;
-          </a>
-        </div>
-      </div>
-    </div>
-  );
+function buildDonutGradient(normalCount, targetedCount) {
+  const total = normalCount + targetedCount;
+  if (!total || total <= 0) {
+    return "conic-gradient(#e2e8f0 0deg 360deg)";
+  }
+  const normDeg = (normalCount / total) * 360;
+  return `conic-gradient(#2563eb 0deg ${normDeg}deg, #ffffff ${normDeg}deg ${normDeg + 0.75}deg, #f97316 ${normDeg + 0.75}deg 360deg)`;
 }
 
 export default function ProjectPopulationDashboardPage() {
   const { activeWorkbase } = useAuth();
-  const lmPcode = getActiveLmPcode(activeWorkbase);
-  const workbaseName = getActiveWorkbaseName(activeWorkbase);
+  const activeLmPcode = getActiveLmPcode(activeWorkbase);
+  const activeWorkbaseName = getActiveWorkbaseName(activeWorkbase);
 
-  const [requestedMonth, setRequestedMonth] = useState("");
-  const [activeStoryKey, setActiveStoryKey] = useState(null);
-
-  // Real-time streaming from pre-aggregated rollup collection
   const {
-    data: months = [],
+    data: rawMonths = [],
     isLoading,
-    isError,
-  } = useGetElectricityPopulationByLmQuery(lmPcode ? lmPcode : skipToken);
+    isFetching,
+    error,
+  } = useGetElectricityPopulationByLmQuery(activeLmPcode || skipToken);
 
-  const activeMonthKey = useMemo(() => pickActiveMonth(months, requestedMonth), [months, requestedMonth]);
+  const sortedMonths = useMemo(() => {
+    return [...rawMonths].sort((a, b) => String(a.month).localeCompare(String(b.month)));
+  }, [rawMonths]);
 
-  const activePopulation = useMemo(() => {
-    return months.find((m) => m.month === activeMonthKey) || months.at(-1) || null;
-  }, [months, activeMonthKey]);
+  const [selectedMonthKey, setSelectedMonthKey] = useState("");
 
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") setActiveStoryKey(null);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  const activeMonthKey = useMemo(() => {
+    return pickActiveMonth(sortedMonths, selectedMonthKey);
+  }, [sortedMonths, selectedMonthKey]);
 
-  if (!lmPcode) {
+  const currentMonthData = useMemo(() => {
+    const found = sortedMonths.find((m) => m.month === activeMonthKey);
+    return found ? normalizeElectricityPopulationDoc(found) : null;
+  }, [sortedMonths, activeMonthKey]);
+
+  // Modal Help Dialog State
+  const [activeHelpKey, setActiveHelpKey] = useState(null);
+
+  const activeHelpStory = activeHelpKey ? EMD_HELP_STORIES[activeHelpKey] : null;
+
+  if (!activeLmPcode) {
     return (
-      <div className="emp-page-container">
-        <header className="emp-header">
+      <div className="meter-dashboard-page meter-dashboard-page--executive">
+        <section className="meter-state-card meter-state-card--warning">
           <div>
-            <p className="emp-eyebrow">Dashboard · Workbase Required</p>
-            <h1>Electricity Meter Population</h1>
-            <p className="emp-sub">Please select an active local municipality from the navigation bar.</p>
+            <h2>No Active Workbase</h2>
+            <p>Select an active workbase before opening the Electricity Meter Population Dashboard.</p>
           </div>
-        </header>
+        </section>
       </div>
     );
   }
 
-  const pop = activePopulation;
+  if (isLoading) {
+    return (
+      <div className="meter-dashboard-page meter-dashboard-page--executive">
+        <section className="meter-state-card" aria-live="polite" aria-busy="true">
+          <div className="meter-spinner" aria-hidden="true" />
+          <div>
+            <h2>Loading Electricity Meter Population...</h2>
+            <p>Connecting to the live materialized population stream for {activeLmPcode}.</p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="meter-dashboard-page meter-dashboard-page--executive">
+        <section className="meter-state-card meter-state-card--error">
+          <div>
+            <h2>Could Not Load Population Stream</h2>
+            <p>
+              The streaming population records could not be loaded for {activeLmPcode}. Please ensure security rules
+              permit access and retry.
+            </p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (!currentMonthData) {
+    return (
+      <div className="meter-dashboard-page meter-dashboard-page--executive">
+        <section className="meter-state-card meter-state-card--warning">
+          <div>
+            <h2>No Population Records Found</h2>
+            <p>
+              No monthly population rollups exist for municipality {activeLmPcode} ({activeWorkbaseName}).
+            </p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  const {
+    totalMeters,
+    onList,
+    foundInField,
+    onListShare,
+    foundInFieldShare,
+    normal,
+    targeted,
+    normalShare,
+    targetedShare,
+    targetedWithGps,
+    targetedWithoutGps,
+    withGpsShare,
+    withoutGpsShare,
+    movements,
+    monthLabel,
+  } = currentMonthData;
+
+  const donutGradient = buildDonutGradient(normal, targeted);
 
   return (
-    <div className="emp-page-container">
-      {/* HEADER */}
-      <header className="emp-header">
+    <div className="meter-dashboard-page meter-dashboard-page--executive">
+      {/* EXECUTIVE HEADER */}
+      <section className="meter-exec-header">
         <div>
-          <p className="emp-eyebrow">Dashboard · {workbaseName} ({lmPcode})</p>
-          <h1>Electricity Meter Population</h1>
-          <p className="emp-sub">
-            {pop ? `Electricity meters for ${pop.monthLabel}: from prepaid sales and found in the field` : "Loading electricity meters…"}
+          <p className="meter-exec-eyebrow">DASHBOARD · {activeWorkbaseName} ({activeLmPcode})</p>
+          <h2>Electricity Meter Population</h2>
+          <p>
+            Electricity meters for {monthLabel || activeMonthKey}: from prepaid sales and found in the field.
           </p>
         </div>
 
-        {/* MONTH SCRUBBER / SELECTOR */}
-        {months.length > 0 && (
-          <div className="emp-months">
-            <span className="emp-months__label">Vending File Month</span>
-            <div className="emp-months__buttons" role="group" aria-label="Month selection">
-              {months.map((m, index) => {
-                const isSelected = m.month === activeMonthKey;
-                const isLatest = index === months.length - 1;
-                return (
-                  <button
-                    key={m.month}
-                    type="button"
-                    className={`emp-month ${isSelected ? "emp-month--on" : ""}`}
-                    onClick={() => setRequestedMonth(m.month)}
-                  >
-                    {m.monthLabel}
-                    {isLatest && <span className="emp-month__tag">Latest</span>}
-                  </button>
-                );
-              })}
+        <div className="meter-exec-header__controls">
+          {sortedMonths.length > 1 && (
+            <div className="meter-exec-month-strip">
+              <span className="meter-exec-month-strip__label">Vending Month:</span>
+              <div className="meter-exec-month-buttons">
+                {sortedMonths.map((m) => {
+                  const isSelected = m.month === activeMonthKey;
+                  const isLatest = m.month === sortedMonths.at(-1)?.month;
+                  return (
+                    <button
+                      key={m.month}
+                      type="button"
+                      className={`meter-exec-month-btn ${isSelected ? "meter-exec-month-btn--active" : ""}`}
+                      onClick={() => setSelectedMonthKey(m.month)}
+                    >
+                      <span>{m.monthLabel || m.month}</span>
+                      {isLatest && <span className="meter-exec-month-badge">Latest</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="meter-exec-snapshot">
+            <span className="meter-live-dot" aria-hidden="true" />
+            <strong>{isFetching ? "Streaming" : "Live Stream"}</strong>
+          </div>
+          <div className="meter-exec-workbase">{activeLmPcode}</div>
+        </div>
+      </section>
+
+      {/* TOP KPI CARDS (UNIFIED EXECUTIVE 5-CARD GRID) */}
+      <section className="meter-exec-kpis--5">
+        <KpiCard
+          label="Total Meters"
+          value={formatNumber(totalMeters)}
+          detail="Prepaid sales + found in field"
+          tone="blue"
+          icon="meter"
+          onHelp={() => setActiveHelpKey("kpi-total")}
+        />
+        <KpiCard
+          label="Unchanged"
+          value={movements.unchanged != null ? formatNumber(movements.unchanged) : "0"}
+          detail="Active continuing from previous month"
+          tone="teal"
+          icon="status"
+          onHelp={() => setActiveHelpKey("kpi-unchanged")}
+        />
+        <KpiCard
+          label="New"
+          value={movements.newMeters != null ? formatNumber(movements.newMeters) : "0"}
+          detail="First-time installed on the network"
+          tone="blue"
+          icon="plus"
+          onHelp={() => setActiveHelpKey("kpi-new")}
+        />
+        <KpiCard
+          label="Replacements"
+          value={movements.replacements != null ? formatNumber(movements.replacements) : "0"}
+          detail="Installed replacing existing meters"
+          tone="purple"
+          icon="replacement"
+          onHelp={() => setActiveHelpKey("kpi-replacements")}
+        />
+        <KpiCard
+          label="Removed / Out of Service"
+          value={movements.removed != null ? formatNumber(movements.removed) : "0"}
+          detail="Decommissioned · not in total"
+          tone="red"
+          icon="removed"
+          onHelp={() => setActiveHelpKey("kpi-removed")}
+        />
+      </section>
+
+      {/* MAIN 3-PANEL EXECUTIVE GRID */}
+      <section className="meter-exec-main-grid">
+        {/* PANEL 1: DONUT BREAKDOWN (NORMAL VS TARGETED) */}
+        <article className="meter-exec-panel">
+          <div className="meter-exec-panel__title">
+            <div>
+              <h3>Normal vs Targeted</h3>
+              <span>Prepaid sales operational split</span>
+            </div>
+            <button
+              type="button"
+              className="meter-info-dot"
+              onClick={() => setActiveHelpKey("card-donut")}
+              title="Learn about Normal vs Targeted"
+              aria-label="Learn about Normal vs Targeted"
+            >
+              i
+            </button>
+          </div>
+
+          <div className="meter-status-layout">
+            <div
+              className="meter-status-donut"
+              style={{ background: donutGradient }}
+              aria-label="Normal vs Targeted breakdown"
+            >
+              <div className="meter-status-donut__center">
+                <strong>{formatNumber(onList)}</strong>
+                <span>On Prepaid Sales</span>
+              </div>
+            </div>
+
+            <div className="meter-status-legend">
+              <div className="meter-status-legend__row">
+                <div className="meter-status-legend__category">
+                  <span className="meter-status-legend__dot" style={{ background: "#2563eb" }} />
+                  <span>Normal</span>
+                </div>
+                <div className="meter-status-legend__values">
+                  <strong>{formatNumber(normal)}</strong>
+                  <span>{formatPercent(normal, onList)}</span>
+                </div>
+              </div>
+
+              <div className="meter-status-legend__row">
+                <div className="meter-status-legend__category">
+                  <span className="meter-status-legend__dot" style={{ background: "#f97316" }} />
+                  <span>Targeted (CAT 1–8)</span>
+                </div>
+                <div className="meter-status-legend__values">
+                  <strong style={{ color: "#ea580c" }}>{formatNumber(targeted)}</strong>
+                  <span>{formatPercent(targeted, onList)}</span>
+                </div>
+              </div>
             </div>
           </div>
-        )}
-      </header>
+        </article>
 
-      {/* TOP 5 MASTER KPIS */}
-      {pop && (
-        <section className="emp-kpis" aria-label="Electricity meters movement this month">
-          <KpiCard
-            variant="total"
-            label="Total meters"
-            value={formatNumber(pop.totalMeters)}
-            detail="Prepaid sales + found in field"
-            storyKey="kpi-total"
-            onHelp={setActiveStoryKey}
-          />
+        {/* PANEL 2: PROJECT SCOPE SPLIT BARS */}
+        <article className="meter-exec-panel">
+          <div className="meter-exec-panel__title">
+            <div>
+              <h3>Project Scope</h3>
+              <span>Total population and targeted profile</span>
+            </div>
+            <button
+              type="button"
+              className="meter-info-dot"
+              onClick={() => setActiveHelpKey("card-scope")}
+              title="Learn about Project Scope"
+              aria-label="Learn about Project Scope"
+            >
+              i
+            </button>
+          </div>
 
-          <KpiCard
-            label="Unchanged"
-            value={pop.movements.unchanged != null ? formatNumber(pop.movements.unchanged) : "Data pending"}
-            detail="Active continuing from previous month"
-            storyKey="kpi-unchanged"
-            onHelp={setActiveStoryKey}
-          />
+          <div className="meter-scope-total-callout">
+            <span>Total Population</span>
+            <strong>{formatNumber(totalMeters)}</strong>
+          </div>
 
-          <KpiCard
-            label="New"
-            value={pop.movements.newMeters != null ? formatNumber(pop.movements.newMeters) : "Data pending"}
-            detail="First-time installed on the network"
-            storyKey="kpi-new"
-            onHelp={setActiveStoryKey}
-          />
+          {/* BAR 1: PREPAID SALES VS FOUND IN FIELD */}
+          <div className="meter-scope-block">
+            <div className="meter-scope-block__head">
+              <span className="meter-scope-block__title">Prepaid sales vs found in the field</span>
+              <span className="meter-scope-block__sub">Source of meters</span>
+            </div>
+            <div className="meter-scope-bar" role="img" aria-label="Prepaid sales vs found in the field">
+              <span
+                className="meter-scope-bar__seg"
+                style={{
+                  width: `${onListShare}%`,
+                  background: "#008300",
+                }}
+                title={`Prepaid Sales: ${formatNumber(onList)} (${formatPercent(onList, totalMeters)})`}
+              />
+              <span
+                className="meter-scope-bar__seg"
+                style={{
+                  width: `${foundInFieldShare}%`,
+                  background: "#eda100",
+                }}
+                title={`Found in Field: ${formatNumber(foundInField)} (${formatPercent(foundInField, totalMeters)})`}
+              />
+            </div>
+            <div className="meter-scope-legend">
+              <span className="meter-scope-legend__item">
+                <i className="meter-scope-legend__dot" style={{ background: "#008300" }} />
+                Prepaid sales <strong>{formatNumber(onList)}</strong> ({formatPercent(onList, totalMeters)})
+              </span>
+              <span className="meter-scope-legend__item">
+                <i className="meter-scope-legend__dot" style={{ background: "#eda100" }} />
+                Found in field <strong>{formatNumber(foundInField)}</strong> ({formatPercent(foundInField, totalMeters)})
+              </span>
+            </div>
+          </div>
 
-          <KpiCard
-            label="Replacements"
-            value={pop.movements.replacements != null ? formatNumber(pop.movements.replacements) : "Data pending"}
-            detail="Installed replacing existing meters"
-            storyKey="kpi-replacements"
-            onHelp={setActiveStoryKey}
-          />
+          {/* BAR 2: NORMAL VS TARGETED */}
+          <div className="meter-scope-block">
+            <div className="meter-scope-block__head">
+              <span className="meter-scope-block__title">Normal vs targeted</span>
+              <span className="meter-scope-block__sub">Meters on prepaid sales list</span>
+            </div>
+            <div className="meter-scope-bar" role="img" aria-label="Normal vs Targeted meters">
+              <span
+                className="meter-scope-bar__seg"
+                style={{
+                  width: `${normalShare}%`,
+                  background: "#2563eb",
+                }}
+                title={`Normal: ${formatNumber(normal)} (${formatPercent(normal, onList)})`}
+              />
+              <span
+                className="meter-scope-bar__seg"
+                style={{
+                  width: `${targetedShare}%`,
+                  background: "#f97316",
+                }}
+                title={`Targeted: ${formatNumber(targeted)} (${formatPercent(targeted, onList)})`}
+              />
+            </div>
+            <div className="meter-scope-legend">
+              <span className="meter-scope-legend__item">
+                <i className="meter-scope-legend__dot" style={{ background: "#2563eb" }} />
+                Normal <strong>{formatNumber(normal)}</strong> ({formatPercent(normal, onList)})
+              </span>
+              <span className="meter-scope-legend__item">
+                <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
+                Targeted <strong>{formatNumber(targeted)}</strong> ({formatPercent(targeted, onList)})
+              </span>
+            </div>
+          </div>
 
-          <KpiCard
-            variant="removed"
-            label="Removed / Out of Service"
-            value={pop.movements.removed != null ? formatNumber(pop.movements.removed) : "0"}
-            detail="Decommissioned · not in total"
-            storyKey="kpi-removed"
-            onHelp={setActiveStoryKey}
-          />
-        </section>
-      )}
+          {/* BAR 3: GPS VS NO GPS (TARGETED) */}
+          <div className="meter-scope-block">
+            <div className="meter-scope-block__head">
+              <span className="meter-scope-block__title">GPS vs no GPS</span>
+              <span className="meter-scope-block__sub">Targeted meters (CAT 1–8)</span>
+            </div>
+            <div className="meter-scope-bar" role="img" aria-label="Targeted GPS vs no GPS">
+              <span
+                className="meter-scope-bar__seg"
+                style={{
+                  width: `${withGpsShare}%`,
+                  background: "#10b981",
+                }}
+                title={`Targeted with GPS: ${formatNumber(targetedWithGps)} (${formatPercent(targetedWithGps, targeted)})`}
+              />
+              <span
+                className="meter-scope-bar__seg"
+                style={{
+                  width: `${withoutGpsShare}%`,
+                  background: "#7c3aed",
+                }}
+                title={`Targeted without GPS: ${formatNumber(targetedWithoutGps)} (${formatPercent(targetedWithoutGps, targeted)})`}
+              />
+            </div>
+            <div className="meter-scope-legend">
+              <span className="meter-scope-legend__item">
+                <i className="meter-scope-legend__dot" style={{ background: "#10b981" }} />
+                Targeted with GPS <strong>{formatNumber(targetedWithGps)}</strong> ({formatPercent(targetedWithGps, targeted)})
+              </span>
+              <span className="meter-scope-legend__item">
+                <i className="meter-scope-legend__dot" style={{ background: "#7c3aed" }} />
+                Targeted without GPS <strong>{formatNumber(targetedWithoutGps)}</strong> ({formatPercent(targetedWithoutGps, targeted)})
+              </span>
+            </div>
+          </div>
+        </article>
 
-      {/* MAIN 3-PANEL GRID */}
-      {pop && (
-        <div className="emp-main">
-          {/* PANEL 1: DONUT (NORMAL VS TARGETED ONLY) */}
-          <Donut
-            normal={pop.normal}
-            targeted={pop.targeted}
-            total={pop.onList}
-            onHelp={setActiveStoryKey}
-          />
+        {/* PANEL 3: KEY NOTES */}
+        <article className="meter-exec-panel">
+          <div className="meter-exec-panel__title">
+            <div>
+              <h3>Key Notes</h3>
+              <span>Mathematical proofs & scope</span>
+            </div>
+            <button
+              type="button"
+              className="meter-info-dot"
+              onClick={() => setActiveHelpKey("card-notes")}
+              title="Learn about Key Notes"
+              aria-label="Learn about Key Notes"
+            >
+              i
+            </button>
+          </div>
 
-          {/* PANEL 2: PROJECT SCOPE (3 SPLIT BARS) */}
-          <section className="emp-card">
-            <div className="emp-scope-head">
-              <div>
-                <h2>Project scope</h2>
-                <span className="emp-muted">Total population</span>
+          <div className="meter-key-notes-list">
+            {/* GROUP 1: POPULATION SOURCE */}
+            <div className="meter-note-group">
+              <div className="meter-note-group__title">
+                <span>1. Population Source</span>
+                <span className="meter-note-group__badge">Total Base</span>
               </div>
-              <strong className="emp-scope-total">{formatNumber(pop.totalMeters)}</strong>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#008300" }} />
+                  Prepaid Sales
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatNumber(onList)}</strong>
+                  <span>{formatPercent(onList, totalMeters)}</span>
+                </div>
+              </div>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#eda100" }} />
+                  Found in Field
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatNumber(foundInField)}</strong>
+                  <span>{formatPercent(foundInField, totalMeters)}</span>
+                </div>
+              </div>
+              <div className="meter-note-row meter-note-row--total">
+                <span className="meter-note-row__label">
+                  <strong>Total Project Meters</strong>
+                </span>
+                <div className="meter-note-row__values">
+                  <strong style={{ color: "#135bd8" }}>{formatNumber(totalMeters)}</strong>
+                  <span style={{ fontWeight: 800 }}>100%</span>
+                </div>
+              </div>
             </div>
 
-            {/* Split Bar 1: Prepaid Sales vs Found in Field */}
-            <SplitBar
-              title="Prepaid sales vs found in the field"
-              parts={[
-                { label: "Prepaid sales", value: pop.onList, color: EMD_COLORS.onList },
-                { label: "Found in the field", value: pop.foundInField, color: EMD_COLORS.foundInField },
-              ]}
-            />
-
-            {/* Split Bar 2: Normal vs Targeted */}
-            <SplitBar
-              title="Normal vs targeted"
-              scope="Meters on prepaid sales list"
-              parts={[
-                { label: "Normal", value: pop.normal, color: EMD_COLORS.normal },
-                { label: "Targeted", value: pop.targeted, color: EMD_COLORS.targeted },
-              ]}
-            />
-
-            {/* Split Bar 3: Targeted GPS vs Non-GPS */}
-            <SplitBar
-              title="GPS vs no GPS"
-              scope="Targeted meters (CAT 1–8)"
-              parts={[
-                { label: "Targeted with GPS", value: pop.targetedWithGps, color: EMD_COLORS.gps },
-                { label: "Targeted without GPS", value: pop.targetedWithoutGps, color: EMD_COLORS.noGps },
-              ]}
-            />
-
-            <HelpButton storyKey="card-scope" onOpen={setActiveStoryKey} title="Learn about Project Scope" />
-          </section>
-
-          {/* PANEL 3: KEY NOTES - STRUCTURED BY RELATIONSHIPS */}
-          <aside className="emp-card">
-            <div className="emp-card-header">
-              <h2>Key notes</h2>
-            </div>
-
-            <div className="emp-notes-groups">
-              {/* Group 1: Population Source */}
-              <div className="emp-note-group">
-                <div className="emp-note-group__title">
-                  <span>1. Population Source</span>
-                  <span className="emp-note-group__badge">Total Base</span>
-                </div>
-                <dl>
-                  <div className="emp-note-row">
-                    <dt><i style={{ background: EMD_COLORS.onList }} />Prepaid Sales</dt>
-                    <dd>
-                      <strong>{formatNumber(pop.onList)}</strong>
-                      <span className="share">{formatPercent(pop.onList, pop.totalMeters)}</span>
-                    </dd>
-                  </div>
-                  <div className="emp-note-row">
-                    <dt><i style={{ background: EMD_COLORS.foundInField }} />Found in Field</dt>
-                    <dd>
-                      <strong>{formatNumber(pop.foundInField)}</strong>
-                      <span className="share">{formatPercent(pop.foundInField, pop.totalMeters)}</span>
-                    </dd>
-                  </div>
-                  <div className="emp-note-row" style={{ marginTop: 4, paddingTop: 4, borderTop: "1px dashed #cbd5e1" }}>
-                    <dt><strong>Total Project Meters</strong></dt>
-                    <dd>
-                      <strong style={{ color: "var(--emp-accent)" }}>{formatNumber(pop.totalMeters)}</strong>
-                      <span className="share">100%</span>
-                    </dd>
-                  </div>
-                </dl>
+            {/* GROUP 2: OPERATIONS SCOPE */}
+            <div className="meter-note-group">
+              <div className="meter-note-group__title">
+                <span>2. Operations Scope</span>
+                <span className="meter-note-group__badge">Prepaid Sales</span>
               </div>
-
-              {/* Group 2: Field Operations Scope */}
-              <div className="emp-note-group">
-                <div className="emp-note-group__title">
-                  <span>2. Operations Scope</span>
-                  <span className="emp-note-group__badge">Prepaid Sales</span>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#2563eb" }} />
+                  Normal (Not Inspected)
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatNumber(normal)}</strong>
+                  <span>{formatPercent(normal, onList)}</span>
                 </div>
-                <dl>
-                  <div className="emp-note-row">
-                    <dt><i style={{ background: EMD_COLORS.normal }} />Normal (Not Inspected)</dt>
-                    <dd>
-                      <strong>{formatNumber(pop.normal)}</strong>
-                      <span className="share">{formatPercent(pop.normal, pop.onList)}</span>
-                    </dd>
-                  </div>
-                  <div className="emp-note-row">
-                    <dt><i style={{ background: EMD_COLORS.targeted }} />Targeted (CAT 1–8)</dt>
-                    <dd>
-                      <strong style={{ color: EMD_COLORS.targeted }}>{formatNumber(pop.targeted)}</strong>
-                      <span className="share">{formatPercent(pop.targeted, pop.onList)}</span>
-                    </dd>
-                  </div>
-                </dl>
               </div>
-
-              {/* Group 3: Targeted GPS Dispatch */}
-              <div className="emp-note-group">
-                <div className="emp-note-group__title">
-                  <span>3. Target GPS Breakdown</span>
-                  <span className="emp-note-group__badge">Field Target</span>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
+                  Targeted (CAT 1–8)
+                </span>
+                <div className="meter-note-row__values">
+                  <strong style={{ color: "#ea580c" }}>{formatNumber(targeted)}</strong>
+                  <span>{formatPercent(targeted, onList)}</span>
                 </div>
-                <dl>
-                  <div className="emp-note-row">
-                    <dt><i style={{ background: EMD_COLORS.gps }} />Targeted with GPS</dt>
-                    <dd>
-                      <strong>{formatNumber(pop.targetedWithGps)}</strong>
-                      <span className="share">{formatPercent(pop.targetedWithGps, pop.targeted)}</span>
-                    </dd>
-                  </div>
-                  <div className="emp-note-row">
-                    <dt><i style={{ background: EMD_COLORS.noGps }} />Targeted without GPS</dt>
-                    <dd>
-                      <strong>{formatNumber(pop.targetedWithoutGps)}</strong>
-                      <span className="share">{formatPercent(pop.targetedWithoutGps, pop.targeted)}</span>
-                    </dd>
-                  </div>
-                </dl>
               </div>
             </div>
 
-            <HelpButton storyKey="card-notes" onOpen={setActiveStoryKey} title="Learn about Key Notes" />
-          </aside>
-        </div>
-      )}
+            {/* GROUP 3: TARGETED GPS */}
+            <div className="meter-note-group">
+              <div className="meter-note-group__title">
+                <span>3. Target GPS Breakdown</span>
+                <span className="meter-note-group__badge">Field Target</span>
+              </div>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#10b981" }} />
+                  Targeted with GPS
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatNumber(targetedWithGps)}</strong>
+                  <span>{formatPercent(targetedWithGps, targeted)}</span>
+                </div>
+              </div>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#7c3aed" }} />
+                  Targeted without GPS
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatNumber(targetedWithoutGps)}</strong>
+                  <span>{formatPercent(targetedWithoutGps, targeted)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
 
       {/* FOOTER */}
-      <footer className="emp-footer">
-        <span>Sales records and field records · {workbaseName}</span>
+      <footer className="meter-exec-footer">
+        <span>Sales records and field records · {activeWorkbaseName}</span>
         <span>·</span>
         <span>Prepaid sales stream active</span>
         <span>·</span>
         <span>Real-time sync</span>
       </footer>
 
-      {/* EDUCATIONAL STORY MODAL */}
-      <HelpModal activeStoryKey={activeStoryKey} onClose={() => setActiveStoryKey(null)} />
+      {/* ACADEMY STORY HELP MODAL */}
+      <div
+        className={`meter-modal-overlay ${activeHelpStory ? "meter-modal-overlay--open" : ""}`}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setActiveHelpKey(null);
+        }}
+      >
+        {activeHelpStory && (
+          <div className="meter-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <div className="meter-modal-header">
+              <span className="meter-modal-badge">{activeHelpStory.badge}</span>
+              <button
+                type="button"
+                className="meter-modal-close"
+                onClick={() => setActiveHelpKey(null)}
+                aria-label="Close modal"
+              >
+                &times;
+              </button>
+            </div>
+            <h3 className="meter-modal-title" id="modal-title">{activeHelpStory.title}</h3>
+            <div
+              className="meter-modal-body"
+              dangerouslySetInnerHTML={{ __html: activeHelpStory.body }}
+            />
+            <div className="meter-modal-footer">
+              <span>iREPS Intelligence</span>
+              <a
+                href="#academy"
+                className="meter-modal-academy"
+                onClick={(e) => {
+                  e.preventDefault();
+                  alert("iREPS Academy course integration coming soon!");
+                }}
+              >
+                Open in iREPS Academy &rarr;
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
