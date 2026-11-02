@@ -427,26 +427,38 @@ export default function ProjectPopulationDashboardPage() {
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${onListShare}%`,
-                  background: "#008300",
+                  background: "linear-gradient(90deg, #0f9f95, #0db0a4)",
                 }}
                 title={`Prepaid Sales: ${formatNumber(onList)} (${formatPercent(onList, totalMeters)})`}
-              />
+              >
+                {onListShare >= 14 && (
+                  <span className="meter-scope-bar__label">
+                    {formatNumber(onList)} ({formatPercent(onList, totalMeters)})
+                  </span>
+                )}
+              </span>
               <span
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${foundInFieldShare}%`,
-                  background: "#eda100",
+                  background: "linear-gradient(90deg, #f97316, #ff8a35)",
                 }}
                 title={`Found in Field: ${formatNumber(foundInField)} (${formatPercent(foundInField, totalMeters)})`}
-              />
+              >
+                {foundInFieldShare >= 14 && (
+                  <span className="meter-scope-bar__label">
+                    {formatNumber(foundInField)} ({formatPercent(foundInField, totalMeters)})
+                  </span>
+                )}
+              </span>
             </div>
             <div className="meter-scope-legend">
               <span className="meter-scope-legend__item">
-                <i className="meter-scope-legend__dot" style={{ background: "#008300" }} />
+                <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
                 Prepaid sales <strong>{formatNumber(onList)}</strong> ({formatPercent(onList, totalMeters)})
               </span>
               <span className="meter-scope-legend__item">
-                <i className="meter-scope-legend__dot" style={{ background: "#eda100" }} />
+                <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
                 Found in field <strong>{formatNumber(foundInField)}</strong> ({formatPercent(foundInField, totalMeters)})
               </span>
             </div>
@@ -463,18 +475,30 @@ export default function ProjectPopulationDashboardPage() {
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${normalShare}%`,
-                  background: "#2563eb",
+                  background: "linear-gradient(90deg, #2563eb, #3b82f6)",
                 }}
                 title={`Normal: ${formatNumber(normal)} (${formatPercent(normal, onList)})`}
-              />
+              >
+                {normalShare >= 14 && (
+                  <span className="meter-scope-bar__label">
+                    {formatNumber(normal)} ({formatPercent(normal, onList)})
+                  </span>
+                )}
+              </span>
               <span
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${targetedShare}%`,
-                  background: "#f97316",
+                  background: "linear-gradient(90deg, #f97316, #ff8a35)",
                 }}
                 title={`Targeted: ${formatNumber(targeted)} (${formatPercent(targeted, onList)})`}
-              />
+              >
+                {targetedShare >= 14 && (
+                  <span className="meter-scope-bar__label">
+                    {formatNumber(targeted)} ({formatPercent(targeted, onList)})
+                  </span>
+                )}
+              </span>
             </div>
             <div className="meter-scope-legend">
               <span className="meter-scope-legend__item">
@@ -499,22 +523,34 @@ export default function ProjectPopulationDashboardPage() {
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${withGpsShare}%`,
-                  background: "#10b981",
+                  background: "linear-gradient(90deg, #0f9f95, #14b8a6)",
                 }}
                 title={`Targeted with GPS: ${formatNumber(targetedWithGps)} (${formatPercent(targetedWithGps, targeted)})`}
-              />
+              >
+                {withGpsShare >= 14 && (
+                  <span className="meter-scope-bar__label">
+                    {formatNumber(targetedWithGps)} ({formatPercent(targetedWithGps, targeted)})
+                  </span>
+                )}
+              </span>
               <span
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${withoutGpsShare}%`,
-                  background: "#7c3aed",
+                  background: "linear-gradient(90deg, #7c3aed, #8b5cf6)",
                 }}
                 title={`Targeted without GPS: ${formatNumber(targetedWithoutGps)} (${formatPercent(targetedWithoutGps, targeted)})`}
-              />
+              >
+                {withoutGpsShare >= 14 && (
+                  <span className="meter-scope-bar__label">
+                    {formatNumber(targetedWithoutGps)} ({formatPercent(targetedWithoutGps, targeted)})
+                  </span>
+                )}
+              </span>
             </div>
             <div className="meter-scope-legend">
               <span className="meter-scope-legend__item">
-                <i className="meter-scope-legend__dot" style={{ background: "#10b981" }} />
+                <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
                 Targeted with GPS <strong>{formatNumber(targetedWithGps)}</strong> ({formatPercent(targetedWithGps, targeted)})
               </span>
               <span className="meter-scope-legend__item">
@@ -552,7 +588,7 @@ export default function ProjectPopulationDashboardPage() {
               </div>
               <div className="meter-note-row">
                 <span className="meter-note-row__label">
-                  <i className="meter-scope-legend__dot" style={{ background: "#008300" }} />
+                  <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
                   Prepaid Sales
                 </span>
                 <div className="meter-note-row__values">
@@ -562,7 +598,7 @@ export default function ProjectPopulationDashboardPage() {
               </div>
               <div className="meter-note-row">
                 <span className="meter-note-row__label">
-                  <i className="meter-scope-legend__dot" style={{ background: "#eda100" }} />
+                  <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
                   Found in Field
                 </span>
                 <div className="meter-note-row__values">
