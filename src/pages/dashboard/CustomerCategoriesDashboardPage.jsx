@@ -15,6 +15,7 @@ import {
   formatNumber,
   getActiveLmPcode,
   getActiveWorkbaseName,
+  getDashboardEyebrow,
   getMonthLabel,
 } from "../sales/salesUtils";
 import {
@@ -1277,7 +1278,7 @@ export default function CustomerCategoriesDashboardPage() {
     <div className="customer-categories-dashboard-page">
       <header className="customer-categories-header">
         <div>
-          <p className="customer-categories-eyebrow">Dashboard · Customer Categories</p>
+          <p className="customer-categories-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Customer Categories Dashboard</h2>
           {monthPicker}
           <p>{model.categoryAvailableCount} of {salesRows.length} records have a valid {categoryMonth} category; {model.categoryUnavailableCount} unavailable.</p>

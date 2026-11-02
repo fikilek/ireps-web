@@ -6,6 +6,7 @@ import { useAuth } from "../../auth/useAuth";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetRegistryTrnsByLmPcodeQuery } from "../../redux/trnsApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
+import { getDashboardEyebrow } from "../sales/salesUtils";
 
 import "./AnomaliesDashboardPage.css";
 
@@ -909,7 +910,7 @@ export default function AnomaliesDashboardPage() {
     <div className="anomaly-dashboard-page">
       <section className="anomaly-header">
         <div>
-          <p className="anomaly-eyebrow">Dashboard · Anomalies</p>
+          <p className="anomaly-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Anomalies Dashboard</h2>
           <p>
             Live anomaly visibility from Meter Discovery TRNs only for {activeWorkbaseName}.

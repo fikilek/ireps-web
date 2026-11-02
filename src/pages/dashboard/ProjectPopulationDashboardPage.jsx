@@ -11,6 +11,7 @@ import {
   normalizeElectricityPopulationDoc,
   pickActiveMonth,
 } from "./models/electricityMeterPopulationModel.js";
+import { getDashboardEyebrow } from "../sales/salesUtils";
 
 import "./ProjectPopulationDashboardPage.css";
 
@@ -251,7 +252,7 @@ export default function ProjectPopulationDashboardPage() {
       {/* EXECUTIVE HEADER */}
       <section className="meter-exec-header">
         <div>
-          <p className="meter-exec-eyebrow">DASHBOARD · {activeWorkbaseName} ({activeLmPcode})</p>
+          <p className="meter-exec-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Electricity Meter Population</h2>
           <p>
             Electricity meters for {monthLabel || activeMonthKey}: from prepaid sales and found in the field.

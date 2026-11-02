@@ -14,6 +14,7 @@ import {
   formatNumber,
   getActiveLmPcode,
   getActiveWorkbaseName,
+  getDashboardEyebrow,
   getMonthLabel,
 } from "../sales/salesUtils";
 import { buildCustomerCategoryDashboardModel } from "./customerCategoryDashboardModel";
@@ -1206,7 +1207,7 @@ export default function CustomerCategoryDashboardPage() {
     <div className="customer-category-detail-page">
       <header className="customer-category-detail-header">
         <div>
-          <p className="customer-category-detail-eyebrow">Dashboard · Customer Categories · {model.shortCode}</p>
+          <p className="customer-category-detail-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <div className="customer-category-detail-title-row">
             <h2>{model.shortCode} Dashboard</h2>
             {monthPicker}

@@ -6,6 +6,7 @@ import { useAuth } from "../../auth/useAuth";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetRegistryTrnsByLmPcodeQuery } from "../../redux/trnsApi";
 import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
+import { getDashboardEyebrow } from "../sales/salesUtils";
 
 import "./TrnRegistryDashboardPage.css";
 
@@ -1010,7 +1011,7 @@ export default function TrnRegistryDashboardPage() {
     <div className="trn-dashboard-page">
       <section className="trn-exec-header">
         <div>
-          <p className="trn-exec-eyebrow">Dashboard v1</p>
+          <p className="trn-exec-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>TRN Registry</h2>
           <p>
             Live TRN production, daily field trends, type mix and production leaders for{" "}

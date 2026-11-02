@@ -64,6 +64,27 @@ export function getActiveWorkbaseName(activeWorkbase) {
   );
 }
 
+export function formatMunicipalityName(name) {
+  if (!name || typeof name !== "string") return "";
+  const cleaned = name
+    .replace(/\s+(LM|Local Municipality)$/i, "")
+    .trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export function getDashboardEyebrow(activeWorkbase) {
+  const pcode = getActiveLmPcode(activeWorkbase) || "ZA5241";
+  const rawName = getActiveWorkbaseName(activeWorkbase);
+  const municipality = (rawName && rawName !== "NAv")
+    ? formatMunicipalityName(rawName)
+    : "Endumeni";
+  return `DASHBOARD · ${municipality} (${pcode})`;
+}
+
 export function formatNumber(value) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue)

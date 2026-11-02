@@ -5,6 +5,7 @@ import { skipToken } from "@reduxjs/toolkit/query";
 import { useAuth } from "../../auth/useAuth";
 import { useGetRegistryMetersByLmQuery } from "../../redux/registryMetersApi";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+import { getDashboardEyebrow } from "../sales/salesUtils";
 
 import "./MetersRegistryDashboardPage.css";
 
@@ -459,7 +460,7 @@ export default function MetersRegistryDashboardPage() {
     <div className="meter-dashboard-page meter-dashboard-page--executive">
       <section className="meter-exec-header">
         <div>
-          <p className="meter-exec-eyebrow">Dashboard v1</p>
+          <p className="meter-exec-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Meters Registry</h2>
           <p>
             Live meter registry snapshot for {activeWorkbaseName}. All values below

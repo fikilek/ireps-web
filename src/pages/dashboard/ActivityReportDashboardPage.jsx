@@ -6,6 +6,7 @@ import {
   filterDashboardUserRows,
 } from "../reports/activityAnalyticsModel";
 import useActivityAnalytics from "../reports/useActivityAnalytics";
+import { getDashboardEyebrow } from "../sales/salesUtils";
 
 import "./ActivityReportDashboardPage.css";
 
@@ -466,7 +467,7 @@ export default function ActivityReportDashboardPage() {
     <section className="activity-dashboard-page">
       <header className="activity-exec-header">
         <div>
-          <p className="activity-exec-eyebrow">Dashboard · Activity Report</p>
+          <p className="activity-exec-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Activity Report</h2>
           <p>Live user, service-provider, team and TRN production activity for {activeWorkbaseName}.</p>
         </div>

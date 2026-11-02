@@ -10,6 +10,7 @@ import {
   isNormalCustomerCategory,
   toCustomerCategoryKey,
 } from "./customerCategoriesDashboardModel.js";
+import { formatMunicipalityName, getDashboardEyebrow } from "../sales/salesUtils.js";
 
 const buildCustomerCategoriesDashboardModel = (rows, month = "2026-06") => buildSelectedMonth(rows, month);
 
@@ -234,4 +235,25 @@ test("recovery tracker exposes only the authoritative June snapshot and no fake 
     assert.equal(month.fieldTarget, null);
     assert.ok(month.categories.every((category) => category.count === null));
   }
+});
+
+test("formatMunicipalityName and getDashboardEyebrow format standard header eyebrow", () => {
+  assert.equal(formatMunicipalityName("ENDUMENI"), "Endumeni");
+  assert.equal(formatMunicipalityName("ENDUMENI LM"), "Endumeni");
+  assert.equal(formatMunicipalityName("Endumeni Local Municipality"), "Endumeni");
+  assert.equal(formatMunicipalityName("Newcastle"), "Newcastle");
+  assert.equal(formatMunicipalityName(""), "");
+
+  assert.equal(
+    getDashboardEyebrow({ name: "ENDUMENI LM", pcode: "ZA5241" }),
+    "DASHBOARD · Endumeni (ZA5241)",
+  );
+  assert.equal(
+    getDashboardEyebrow({ name: "Endumeni", lmPcode: "ZA5241" }),
+    "DASHBOARD · Endumeni (ZA5241)",
+  );
+  assert.equal(
+    getDashboardEyebrow(null),
+    "DASHBOARD · Endumeni (ZA5241)",
+  );
 });
