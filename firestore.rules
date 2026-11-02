@@ -97,7 +97,7 @@ service cloud.firestore {
         'mread_staging', 'mread_staging_cycles', 'provinces', 'refused_submissions',
         'registry_accounts', 'registry_erfs', 'registry_jobs', 'registry_meters', 'registry_mread',
         'registry_premises', 'registry_wards', 'registry_workbases',
-        'report_trn_anomaly', 'report_trn_no_access', 'report_trn_normalisation', 'report_trn_user_activity',
+        'report_electricity_population', 'report_trn_anomaly', 'report_trn_no_access', 'report_trn_normalisation', 'report_trn_user_activity',
         'sales-all-meters', 'stores', 'tb_rows', 'tb_uploads', 'tc_rows', 'tc_uploads',
         'team_member_history', 'teams', 'vending_providers'
       ];
