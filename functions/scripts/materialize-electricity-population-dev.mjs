@@ -1,136 +1,189 @@
-import admin from "firebase-admin";
+import fs from "node:fs";
+import path from "node:path";
+import { initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 
 const projectId = process.env.FIREBASE_PROJECT_ID || "ireps2";
-admin.initializeApp({ projectId });
-const db = admin.firestore();
+initializeApp({ projectId });
+const db = getFirestore();
 
 const LM_PCODE = "ZA5241";
 const MONTHS = ["2026-06", "2026-07", "2026-08"];
 const COLLECTION_NAME = "report_electricity_population";
+const PIPELINE_MILESTONE_DIR =
+  "C:\\dev\\ireps-pipeline-sales\\output\\logs\\three_month_milestone__20260905";
+
+function formatMonthLabel(monthKey) {
+  const [yearStr, monthStr] = String(monthKey || "").split("-");
+  const year = Number(yearStr);
+  const monthNumber = Number(monthStr);
+  if (!year || !monthNumber) return monthKey;
+  return new Intl.DateTimeFormat("en-ZA", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+}
+
+function loadSupplierMembersByMonth() {
+  const result = {};
+  for (const m of MONTHS) {
+    const filePath = path.join(PIPELINE_MILESTONE_DIR, `membership_evidence__${m}.json`);
+    if (fs.existsSync(filePath)) {
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      result[m] = new Set(parsed.members || []);
+    }
+  }
+  return result;
+}
 
 async function materializeRollups() {
-  console.log(`Starting Electricity Meter Population materialization on ${projectId} for ${LM_PCODE}...`);
+  console.log(
+    `Starting Electricity Meter Population (Original Vending v1.1.0) materialization on ${projectId} for ${LM_PCODE}...`,
+  );
 
-  const [salesSnap, astSnap] = await Promise.all([
-    db.collection("sales-all-meters")
-      .where("lmPcode", "==", LM_PCODE)
-      .select("monthlyCategories", "hasUsableGps", "HasUsableGps")
-      .get(),
-    db.collection("asts")
-      .where("accessData.parents.lmPcode", "==", LM_PCODE)
-      .get(),
-  ]);
+  const supplierMembersByMonth = loadSupplierMembersByMonth();
 
-  console.log(`Loaded ${salesSnap.size} sales records and ${astSnap.size} field assets.`);
+  const salesSnap = await db
+    .collection("sales-all-meters")
+    .where("lmPcode", "==", LM_PCODE)
+    .select("monthlyCategories", "monthlySalesC", "monthlyUnits", "previousMeterNumber")
+    .get();
 
-  // Field meters map: meterNo -> earliest foundMonth
-  const fieldMeters = new Map();
-  for (const doc of astSnap.docs) {
-    const d = doc.data();
-    if (String(d.meterType || "").toLowerCase() !== "electricity") continue;
-    const mid = String(d.master?.id || "").trim();
-    if (!mid) continue;
-    let foundMonth = "2026-06";
-    if (d.metadata?.createdAt) {
-      const dt = d.metadata.createdAt.toDate ? d.metadata.createdAt.toDate() : new Date(d.metadata.createdAt);
-      foundMonth = dt.toISOString().slice(0, 7);
-    }
-    const cur = fieldMeters.get(mid);
-    if (!cur || foundMonth < cur) fieldMeters.set(mid, foundMonth);
+  console.log(`Loaded ${salesSnap.size} sales-all-meters records.`);
+
+  const docsById = new Map();
+  for (const doc of salesSnap.docs) {
+    docsById.set(doc.id, doc.data());
   }
 
-  const monthMeters = { "2026-06": new Set(), "2026-07": new Set(), "2026-08": new Set() };
-  const monthData = {};
-
+  // Fallback if membership_evidence file is absent for any month: use classified meters
   for (const m of MONTHS) {
-    monthData[m] = {
-      onList: 0,
-      normal: 0,
-      targeted: 0,
-      targetedWithGps: 0,
-      targetedWithoutGps: 0,
-      foundInField: 0,
+    if (!supplierMembersByMonth[m] || supplierMembersByMonth[m].size === 0) {
+      const fallbackSet = new Set();
+      for (const [mid, d] of docsById.entries()) {
+        if (d.monthlyCategories?.[m]) fallbackSet.add(mid);
+      }
+      supplierMembersByMonth[m] = fallbackSet;
+    }
+  }
+
+  // Compute month-to-month movements on the supplier vending list using PreviousMeterNumber for replacements
+  const movementsByMonth = {};
+  for (let i = 0; i < MONTHS.length; i++) {
+    const m = MONTHS[i];
+    const currentSet = supplierMembersByMonth[m];
+    if (i === 0) {
+      movementsByMonth[m] = {
+        unchanged: currentSet.size,
+        new: 0,
+        replacements: 0,
+        removed: 0,
+      };
+      continue;
+    }
+    const prevSet = supplierMembersByMonth[MONTHS[i - 1]];
+    let unchanged = 0;
+    const entered = [];
+    for (const mid of currentSet) {
+      if (prevSet.has(mid)) {
+        unchanged++;
+      } else {
+        entered.push(mid);
+      }
+    }
+    const exitedSet = new Set();
+    for (const mid of prevSet) {
+      if (!currentSet.has(mid)) exitedSet.add(mid);
+    }
+
+    // A newly entered supplier meter is a replacement if its previousMeterNumber is in the prior baseline
+    let replacements = 0;
+    const matchedPredecessors = new Set();
+    for (const mid of entered) {
+      const d = docsById.get(mid) || {};
+      const prevNo = String(d.previousMeterNumber || "").trim();
+      const prevNorm = prevNo.replace(/^0+/, "");
+      let matched = null;
+      if (prevNo && exitedSet.has(prevNo) && !matchedPredecessors.has(prevNo)) {
+        matched = prevNo;
+      } else if (prevNorm) {
+        for (const exId of exitedSet) {
+          if (exId.replace(/^0+/, "") === prevNorm && !matchedPredecessors.has(exId)) {
+            matched = exId;
+            break;
+          }
+        }
+      }
+      if (matched) {
+        replacements++;
+        matchedPredecessors.add(matched);
+      }
+    }
+
+    const newCount = entered.length - replacements;
+    const removedCount = exitedSet.size - replacements;
+
+    movementsByMonth[m] = {
+      unchanged,
+      new: newCount,
+      replacements,
+      removed: removedCount,
     };
   }
-
-  for (const doc of salesSnap.docs) {
-    const mid = doc.id;
-    const d = doc.data();
-    const monthlyCats = d.monthlyCategories || {};
-    const hasGps = d.hasUsableGps === true || d.HasUsableGps === true;
-
-    for (const m of MONTHS) {
-      const catEntry = monthlyCats[m];
-      if (!catEntry) continue;
-      monthMeters[m].add(mid);
-      monthData[m].onList++;
-
-      const cat = String(catEntry.leakageCategory || "").trim();
-      const isNorm = cat.toUpperCase().startsWith("NORMAL");
-      const isTarg = /^CAT\s*[1-8]/i.test(cat);
-
-      if (isNorm) {
-        monthData[m].normal++;
-      } else if (isTarg) {
-        monthData[m].targeted++;
-        if (hasGps) monthData[m].targetedWithGps++;
-        else monthData[m].targetedWithoutGps++;
-      }
-    }
-  }
-
-  // Calculate unlisted field meters
-  for (const m of MONTHS) {
-    const list = monthMeters[m];
-    let found = 0;
-    for (const [fMid, fMonth] of fieldMeters.entries()) {
-      if (fMonth <= m && !list.has(fMid)) {
-        found++;
-      }
-    }
-    monthData[m].foundInField = found;
-  }
-
-  // Movements
-  const m06 = monthMeters["2026-06"];
-  const m07 = monthMeters["2026-07"];
-  const m08 = monthMeters["2026-08"];
-
-  const movements = {
-    "2026-06": { unchanged: monthData["2026-06"].onList, new: 0, replacements: 0, removed: 0 },
-    "2026-07": {
-      unchanged: [...m07].filter((x) => m06.has(x)).length,
-      new: [...m07].filter((x) => !m06.has(x)).length,
-      replacements: 0,
-      removed: [...m06].filter((x) => !m07.has(x)).length,
-    },
-    "2026-08": {
-      unchanged: [...m08].filter((x) => m07.has(x)).length,
-      new: [...m08].filter((x) => !m07.has(x)).length,
-      replacements: 0,
-      removed: [...m07].filter((x) => !m08.has(x)).length,
-    },
-  };
 
   const nowIso = new Date().toISOString();
   const batch = db.batch();
 
   for (const m of MONTHS) {
-    const stats = monthData[m];
-    const onList = stats.onList;
-    const foundInField = stats.foundInField;
-    const totalMeters = onList + foundInField;
-    const normal = stats.normal;
-    const targeted = stats.targeted;
-    const targetedWithGps = stats.targetedWithGps;
-    const targetedWithoutGps = stats.targetedWithoutGps;
+    const activeMembers = supplierMembersByMonth[m];
+    const totalMeters = activeMembers.size;
 
-    const onListShare = totalMeters > 0 ? Number(((onList / totalMeters) * 100).toFixed(1)) : 0;
-    const foundInFieldShare = totalMeters > 0 ? Number(((foundInField / totalMeters) * 100).toFixed(1)) : 0;
-    const normalShare = onList > 0 ? Number(((normal / onList) * 100).toFixed(1)) : 0;
-    const targetedShare = onList > 0 ? Number(((targeted / onList) * 100).toFixed(1)) : 0;
-    const withGpsShare = targeted > 0 ? Number(((targetedWithGps / targeted) * 100).toFixed(1)) : 0;
-    const withoutGpsShare = targeted > 0 ? Number(((targetedWithoutGps / targeted) * 100).toFixed(1)) : 0;
+    let buying = 0;
+    let notBuying = 0;
+    let salesTotalC = 0;
+    let unitsTotalNum = 0;
+
+    for (const mid of activeMembers) {
+      const d = docsById.get(mid) || {};
+      const amountC = Number(d.monthlySalesC?.[m] || 0);
+      const units = Number(d.monthlyUnits?.[m] || 0);
+      if (amountC > 0) {
+        buying++;
+        salesTotalC += amountC;
+      } else {
+        notBuying++;
+      }
+      if (Number.isFinite(units) && units > 0) {
+        unitsTotalNum += units;
+      }
+    }
+
+    const unitsTotal = Number(unitsTotalNum.toFixed(1));
+    const buyingShare = totalMeters > 0 ? Number(((buying / totalMeters) * 100).toFixed(1)) : 0;
+    const notBuyingShare =
+      totalMeters > 0 ? Number(((notBuying / totalMeters) * 100).toFixed(1)) : 0;
+    const avgSalesPerBuyingMeterC = buying > 0 ? Math.round(salesTotalC / buying) : 0;
+    const avgUnitsPerBuyingMeter =
+      buying > 0 ? Number((unitsTotal / buying).toFixed(1)) : 0;
+
+    let normal = 0;
+    let targeted = 0;
+    for (const d of docsById.values()) {
+      const catEntry = d.monthlyCategories?.[m];
+      if (!catEntry) continue;
+      const cat = String(catEntry.leakageCategory || "").trim();
+      if (cat.toUpperCase().startsWith("NORMAL")) {
+        normal++;
+      } else if (/^CAT\s*[1-8]/i.test(cat)) {
+        targeted++;
+      }
+    }
+    const classifiedTotal = normal + targeted;
+    const normalShare =
+      classifiedTotal > 0 ? Number(((normal / classifiedTotal) * 100).toFixed(1)) : 0;
+    const targetedShare =
+      classifiedTotal > 0 ? Number(((targeted / classifiedTotal) * 100).toFixed(1)) : 0;
 
     const docId = `${LM_PCODE}_${m}`;
     const docRef = db.collection(COLLECTION_NAME).doc(docId);
@@ -139,36 +192,37 @@ async function materializeRollups() {
       id: docId,
       lmPcode: LM_PCODE,
       month: m,
+      monthLabel: formatMonthLabel(m),
       totalMeters,
-      sources: {
-        onList,
-        foundInField,
-        onListShare,
-        foundInFieldShare,
+      movements: movementsByMonth[m],
+      purchases: {
+        buying,
+        notBuying,
+        buyingShare,
+        notBuyingShare,
+        salesTotalC,
+        unitsTotal,
+        avgSalesPerBuyingMeterC,
+        avgUnitsPerBuyingMeter,
       },
       categories: {
+        classifiedTotal,
         normal,
         targeted,
         normalShare,
         targetedShare,
       },
-      targetedGps: {
-        withGps: targetedWithGps,
-        withoutGps: targetedWithoutGps,
-        withGpsShare,
-        withoutGpsShare,
-      },
-      movements: movements[m],
       metadata: {
         generatedAt: nowIso,
         updatedAt: nowIso,
         salesUpdatedAt: nowIso,
-        source: "sales-all-meters + asts canonical materializer",
+        schemaVersion: "1.1.0",
+        source: "sales-all-meters + governed supplier vending snapshots",
       },
     };
 
     console.log(`Setting document ${docId}:`, JSON.stringify(docPayload, null, 2));
-    batch.set(docRef, docPayload, { merge: true });
+    batch.set(docRef, docPayload);
   }
 
   await batch.commit();

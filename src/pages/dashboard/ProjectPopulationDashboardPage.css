@@ -507,19 +507,31 @@
 }
 
 /* SCOPE BARS (MIDDLE PANEL) */
+.meter-vending-callout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .meter-vending-callout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .meter-scope-total-callout {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 0.9rem;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.65rem 0.85rem;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 0.65rem;
-  margin-bottom: 1.15rem;
 }
 
 .meter-scope-total-callout span {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 800;
   color: var(--md-muted);
   text-transform: uppercase;
@@ -527,10 +539,18 @@
 }
 
 .meter-scope-total-callout strong {
-  font-size: 1.35rem;
+  font-size: 1.25rem;
   font-weight: 900;
   color: var(--md-blue);
   letter-spacing: -0.02em;
+  margin-top: 0.15rem;
+}
+
+.meter-scope-total-callout small {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--md-muted);
+  margin-top: 0.1rem;
 }
 
 .meter-scope-block {

@@ -6,8 +6,10 @@ import { useAuth } from "../../auth/useAuth";
 import { useGetElectricityPopulationByLmQuery } from "../../redux/reportElectricityPopulationApi";
 import {
   EMD_HELP_STORIES,
+  formatCurrencyRands,
   formatNumber,
   formatPercent,
+  formatUnitsKwh,
   normalizeElectricityPopulationDoc,
   pickActiveMonth,
 } from "./models/electricityMeterPopulationModel.js";
@@ -128,13 +130,13 @@ function KpiCard({ label, value, detail, tone, icon, onHelp }) {
   );
 }
 
-function buildDonutGradient(normalCount, targetedCount) {
-  const total = normalCount + targetedCount;
+function buildBuyingDonutGradient(buyingCount, notBuyingCount) {
+  const total = buyingCount + notBuyingCount;
   if (!total || total <= 0) {
     return "conic-gradient(#e2e8f0 0deg 360deg)";
   }
-  const normDeg = (normalCount / total) * 360;
-  return `conic-gradient(#2563eb 0deg ${normDeg}deg, #ffffff ${normDeg}deg ${normDeg + 0.75}deg, #f97316 ${normDeg + 0.75}deg 360deg)`;
+  const buyingDeg = (buyingCount / total) * 360;
+  return `conic-gradient(#0f9f95 0deg ${buyingDeg}deg, #ffffff ${buyingDeg}deg ${buyingDeg + 0.75}deg, #f97316 ${buyingDeg + 0.75}deg 360deg)`;
 }
 
 export default function ProjectPopulationDashboardPage() {
@@ -164,9 +166,7 @@ export default function ProjectPopulationDashboardPage() {
     return found ? normalizeElectricityPopulationDoc(found) : null;
   }, [sortedMonths, activeMonthKey]);
 
-  // Modal Help Dialog State
   const [activeHelpKey, setActiveHelpKey] = useState(null);
-
   const activeHelpStory = activeHelpKey ? EMD_HELP_STORIES[activeHelpKey] : null;
 
   if (!activeLmPcode) {
@@ -229,23 +229,24 @@ export default function ProjectPopulationDashboardPage() {
 
   const {
     totalMeters,
-    onList,
-    foundInField,
-    onListShare,
-    foundInFieldShare,
+    buying,
+    notBuying,
+    buyingShare,
+    notBuyingShare,
+    salesTotalC,
+    unitsTotal,
+    avgSalesPerBuyingMeterC,
+    avgUnitsPerBuyingMeter,
+    classifiedTotal,
     normal,
     targeted,
     normalShare,
     targetedShare,
-    targetedWithGps,
-    targetedWithoutGps,
-    withGpsShare,
-    withoutGpsShare,
     movements,
     monthLabel,
   } = currentMonthData;
 
-  const donutGradient = buildDonutGradient(normal, targeted);
+  const donutGradient = buildBuyingDonutGradient(buying, notBuying);
 
   return (
     <div className="meter-dashboard-page meter-dashboard-page--executive">
@@ -255,7 +256,7 @@ export default function ProjectPopulationDashboardPage() {
           <p className="meter-exec-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Electricity Meter Population</h2>
           <p>
-            Electricity meters for {monthLabel || activeMonthKey}: from prepaid sales and found in the field.
+            Original Contour vending population &amp; token purchase activity for {monthLabel || activeMonthKey}.
           </p>
         </div>
 
@@ -296,7 +297,7 @@ export default function ProjectPopulationDashboardPage() {
         <KpiCard
           label="Total Meters"
           value={formatNumber(totalMeters)}
-          detail="Prepaid sales + found in field"
+          detail="Active on Contour vending list"
           tone="blue"
           icon="meter"
           onHelp={() => setActiveHelpKey("kpi-total")}
@@ -304,7 +305,7 @@ export default function ProjectPopulationDashboardPage() {
         <KpiCard
           label="Unchanged"
           value={movements.unchanged != null ? formatNumber(movements.unchanged) : "0"}
-          detail="Active continuing from previous month"
+          detail="Continuing from previous month"
           tone="teal"
           icon="status"
           onHelp={() => setActiveHelpKey("kpi-unchanged")}
@@ -312,7 +313,7 @@ export default function ProjectPopulationDashboardPage() {
         <KpiCard
           label="New"
           value={movements.newMeters != null ? formatNumber(movements.newMeters) : "0"}
-          detail="First-time installed on the network"
+          detail="Newly added on vending list"
           tone="blue"
           icon="plus"
           onHelp={() => setActiveHelpKey("kpi-new")}
@@ -320,7 +321,7 @@ export default function ProjectPopulationDashboardPage() {
         <KpiCard
           label="Replacements"
           value={movements.replacements != null ? formatNumber(movements.replacements) : "0"}
-          detail="Installed replacing existing meters"
+          detail="Replaced old meters on list"
           tone="purple"
           icon="replacement"
           onHelp={() => setActiveHelpKey("kpi-replacements")}
@@ -328,7 +329,7 @@ export default function ProjectPopulationDashboardPage() {
         <KpiCard
           label="Removed / Out of Service"
           value={movements.removed != null ? formatNumber(movements.removed) : "0"}
-          detail="Decommissioned · not in total"
+          detail="Dropped from list · not in total"
           tone="red"
           icon="removed"
           onHelp={() => setActiveHelpKey("kpi-removed")}
@@ -337,19 +338,19 @@ export default function ProjectPopulationDashboardPage() {
 
       {/* MAIN 3-PANEL EXECUTIVE GRID */}
       <section className="meter-exec-main-grid">
-        {/* PANEL 1: DONUT BREAKDOWN (NORMAL VS TARGETED) */}
+        {/* PANEL 1: DONUT BREAKDOWN (BUYING VS NOT BUYING) */}
         <article className="meter-exec-panel">
           <div className="meter-exec-panel__title">
             <div>
-              <h3>Normal vs Targeted</h3>
-              <span>Prepaid sales operational split</span>
+              <h3>Buying vs Not Buying</h3>
+              <span>Monthly token purchase split (Contour list)</span>
             </div>
             <button
               type="button"
               className="meter-info-dot"
               onClick={() => setActiveHelpKey("card-donut")}
-              title="Learn about Normal vs Targeted"
-              aria-label="Learn about Normal vs Targeted"
+              title="Learn about Buying vs Not Buying"
+              aria-label="Learn about Buying vs Not Buying"
             >
               i
             </button>
@@ -359,95 +360,106 @@ export default function ProjectPopulationDashboardPage() {
             <div
               className="meter-status-donut"
               style={{ background: donutGradient }}
-              aria-label="Normal vs Targeted breakdown"
+              aria-label="Buying vs Not Buying breakdown"
             >
               <div className="meter-status-donut__center">
-                <strong>{formatNumber(onList)}</strong>
-                <span>On Prepaid Sales</span>
+                <strong>{formatNumber(totalMeters)}</strong>
+                <span>On Contour List</span>
               </div>
             </div>
 
             <div className="meter-pop-legend">
               <div className="meter-pop-legend__row">
                 <div className="meter-pop-legend__category">
-                  <span className="meter-pop-legend__dot" style={{ background: "#2563eb" }} />
-                  <span>Normal</span>
+                  <span className="meter-pop-legend__dot" style={{ background: "#0f9f95" }} />
+                  <span>Buying (&gt; R 0)</span>
                 </div>
                 <div className="meter-pop-legend__values">
-                  <strong>{formatNumber(normal)}</strong>
-                  <span>{formatPercent(normal, onList)}</span>
+                  <strong style={{ color: "#0f9f95" }}>{formatNumber(buying)}</strong>
+                  <span>{formatPercent(buying, totalMeters)}</span>
                 </div>
               </div>
 
-              <div className="meter-pop-legend__row">
+              <div
+                className="meter-pop-legend__row"
+                style={{ borderColor: "#fed7aa", background: "#fff7ed" }}
+              >
                 <div className="meter-pop-legend__category">
                   <span className="meter-pop-legend__dot" style={{ background: "#f97316" }} />
-                  <span>Targeted (CAT 1–8)</span>
+                  <span>Not Buying (R 0)</span>
                 </div>
                 <div className="meter-pop-legend__values">
-                  <strong style={{ color: "#ea580c" }}>{formatNumber(targeted)}</strong>
-                  <span>{formatPercent(targeted, onList)}</span>
+                  <strong style={{ color: "#ea580c" }}>{formatNumber(notBuying)}</strong>
+                  <span>{formatPercent(notBuying, totalMeters)}</span>
                 </div>
               </div>
             </div>
           </div>
         </article>
 
-        {/* PANEL 2: PROJECT SCOPE SPLIT BARS */}
+        {/* PANEL 2: VENDING & TARGETING PROFILE (CALLOUTS + 2 SPLIT BARS) */}
         <article className="meter-exec-panel">
           <div className="meter-exec-panel__title">
             <div>
-              <h3>Project Scope</h3>
-              <span>Total population and targeted profile</span>
+              <h3>Vending &amp; Targeting Profile</h3>
+              <span>Monthly revenue, units &amp; leakage classification</span>
             </div>
             <button
               type="button"
               className="meter-info-dot"
               onClick={() => setActiveHelpKey("card-scope")}
-              title="Learn about Project Scope"
-              aria-label="Learn about Project Scope"
+              title="Learn about Vending & Targeting Profile"
+              aria-label="Learn about Vending & Targeting Profile"
             >
               i
             </button>
           </div>
 
-          <div className="meter-scope-total-callout">
-            <span>Total Population</span>
-            <strong>{formatNumber(totalMeters)}</strong>
+          <div className="meter-vending-callout-grid">
+            <div className="meter-scope-total-callout">
+              <span>Monthly Token Purchases</span>
+              <strong>{formatCurrencyRands(salesTotalC)}</strong>
+              <small>Avg {formatCurrencyRands(avgSalesPerBuyingMeterC)} per buying meter</small>
+            </div>
+            <div className="meter-scope-total-callout">
+              <span>Energy Units Purchased</span>
+              <strong style={{ color: "#0f9f95" }}>{formatUnitsKwh(unitsTotal)}</strong>
+              <small>Avg {formatUnitsKwh(avgUnitsPerBuyingMeter)} per buying meter</small>
+            </div>
           </div>
 
-          {/* BAR 1: PREPAID SALES VS FOUND IN FIELD */}
+          {/* BAR 1: BUYING VS NOT BUYING */}
           <div className="meter-scope-block">
             <div className="meter-scope-block__head">
-              <span className="meter-scope-block__title">Prepaid sales vs found in the field</span>
-              <span className="meter-scope-block__sub">Source of meters</span>
+              <span className="meter-scope-block__title">Buying vs not buying (R 0)</span>
+              <span className="meter-scope-block__sub">Monthly purchase activity</span>
             </div>
-            <div className="meter-scope-bar" role="img" aria-label="Prepaid sales vs found in the field">
+            <div className="meter-scope-bar" role="img" aria-label="Buying vs not buying meters">
               <span
                 className="meter-scope-bar__seg"
                 style={{
-                  width: `${onListShare}%`,
+                  width: `${buyingShare}%`,
                   background: "linear-gradient(90deg, #0f9f95, #0db0a4)",
                 }}
-                title={`Prepaid Sales: ${formatNumber(onList)} (${formatPercent(onList, totalMeters)})`}
+                title={`Buying (> R 0): ${formatNumber(buying)} (${formatPercent(buying, totalMeters)})`}
               >
-                {onListShare >= 14 && (
+                {buyingShare >= 14 && (
                   <span className="meter-scope-bar__label">
-                    {formatNumber(onList)} ({formatPercent(onList, totalMeters)})
+                    {formatNumber(buying)} ({formatPercent(buying, totalMeters)})
                   </span>
                 )}
               </span>
               <span
                 className="meter-scope-bar__seg"
                 style={{
-                  width: `${foundInFieldShare}%`,
+                  width: `${notBuyingShare}%`,
                   background: "linear-gradient(90deg, #f97316, #ff8a35)",
                 }}
-                title={`Found in Field: ${formatNumber(foundInField)} (${formatPercent(foundInField, totalMeters)})`}
+                title={`Not Buying (R 0): ${formatNumber(notBuying)} (${formatPercent(notBuying, totalMeters)})`}
               >
-                {foundInFieldShare >= 14 && (
+                {notBuyingShare >= 14 && (
                   <span className="meter-scope-bar__label">
-                    {formatNumber(foundInField)} ({formatPercent(foundInField, totalMeters)})
+                    {formatNumber(notBuying)} ({formatPercent(notBuying, totalMeters)})
                   </span>
                 )}
               </span>
@@ -455,11 +467,11 @@ export default function ProjectPopulationDashboardPage() {
             <div className="meter-scope-legend">
               <span className="meter-scope-legend__item">
                 <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
-                Prepaid sales <strong>{formatNumber(onList)}</strong> ({formatPercent(onList, totalMeters)})
+                Buying (&gt; R 0) <strong>{formatNumber(buying)}</strong> ({formatPercent(buying, totalMeters)})
               </span>
               <span className="meter-scope-legend__item">
                 <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
-                Found in field <strong>{formatNumber(foundInField)}</strong> ({formatPercent(foundInField, totalMeters)})
+                Not Buying (R 0) <strong>{formatNumber(notBuying)}</strong> ({formatPercent(notBuying, totalMeters)})
               </span>
             </div>
           </div>
@@ -467,8 +479,8 @@ export default function ProjectPopulationDashboardPage() {
           {/* BAR 2: NORMAL VS TARGETED */}
           <div className="meter-scope-block">
             <div className="meter-scope-block__head">
-              <span className="meter-scope-block__title">Normal vs targeted</span>
-              <span className="meter-scope-block__sub">Meters on prepaid sales list</span>
+              <span className="meter-scope-block__title">Normal vs targeted (CAT 1–8)</span>
+              <span className="meter-scope-block__sub">Mpilo 30-month purchase analysis</span>
             </div>
             <div className="meter-scope-bar" role="img" aria-label="Normal vs Targeted meters">
               <span
@@ -477,11 +489,11 @@ export default function ProjectPopulationDashboardPage() {
                   width: `${normalShare}%`,
                   background: "linear-gradient(90deg, #2563eb, #3b82f6)",
                 }}
-                title={`Normal: ${formatNumber(normal)} (${formatPercent(normal, onList)})`}
+                title={`Normal: ${formatNumber(normal)} (${formatPercent(normal, classifiedTotal)})`}
               >
                 {normalShare >= 14 && (
                   <span className="meter-scope-bar__label">
-                    {formatNumber(normal)} ({formatPercent(normal, onList)})
+                    {formatNumber(normal)} ({formatPercent(normal, classifiedTotal)})
                   </span>
                 )}
               </span>
@@ -489,13 +501,13 @@ export default function ProjectPopulationDashboardPage() {
                 className="meter-scope-bar__seg"
                 style={{
                   width: `${targetedShare}%`,
-                  background: "linear-gradient(90deg, #f97316, #ff8a35)",
+                  background: "linear-gradient(90deg, #ea580c, #f97316)",
                 }}
-                title={`Targeted: ${formatNumber(targeted)} (${formatPercent(targeted, onList)})`}
+                title={`Targeted: ${formatNumber(targeted)} (${formatPercent(targeted, classifiedTotal)})`}
               >
                 {targetedShare >= 14 && (
                   <span className="meter-scope-bar__label">
-                    {formatNumber(targeted)} ({formatPercent(targeted, onList)})
+                    {formatNumber(targeted)} ({formatPercent(targeted, classifiedTotal)})
                   </span>
                 )}
               </span>
@@ -503,112 +515,64 @@ export default function ProjectPopulationDashboardPage() {
             <div className="meter-scope-legend">
               <span className="meter-scope-legend__item">
                 <i className="meter-scope-legend__dot" style={{ background: "#2563eb" }} />
-                Normal <strong>{formatNumber(normal)}</strong> ({formatPercent(normal, onList)})
+                Normal <strong>{formatNumber(normal)}</strong> ({formatPercent(normal, classifiedTotal)})
               </span>
               <span className="meter-scope-legend__item">
                 <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
-                Targeted <strong>{formatNumber(targeted)}</strong> ({formatPercent(targeted, onList)})
-              </span>
-            </div>
-          </div>
-
-          {/* BAR 3: GPS VS NO GPS (TARGETED) */}
-          <div className="meter-scope-block">
-            <div className="meter-scope-block__head">
-              <span className="meter-scope-block__title">GPS vs no GPS</span>
-              <span className="meter-scope-block__sub">Targeted meters (CAT 1–8)</span>
-            </div>
-            <div className="meter-scope-bar" role="img" aria-label="Targeted GPS vs no GPS">
-              <span
-                className="meter-scope-bar__seg"
-                style={{
-                  width: `${withGpsShare}%`,
-                  background: "linear-gradient(90deg, #0f9f95, #14b8a6)",
-                }}
-                title={`Targeted with GPS: ${formatNumber(targetedWithGps)} (${formatPercent(targetedWithGps, targeted)})`}
-              >
-                {withGpsShare >= 14 && (
-                  <span className="meter-scope-bar__label">
-                    {formatNumber(targetedWithGps)} ({formatPercent(targetedWithGps, targeted)})
-                  </span>
-                )}
-              </span>
-              <span
-                className="meter-scope-bar__seg"
-                style={{
-                  width: `${withoutGpsShare}%`,
-                  background: "linear-gradient(90deg, #7c3aed, #8b5cf6)",
-                }}
-                title={`Targeted without GPS: ${formatNumber(targetedWithoutGps)} (${formatPercent(targetedWithoutGps, targeted)})`}
-              >
-                {withoutGpsShare >= 14 && (
-                  <span className="meter-scope-bar__label">
-                    {formatNumber(targetedWithoutGps)} ({formatPercent(targetedWithoutGps, targeted)})
-                  </span>
-                )}
-              </span>
-            </div>
-            <div className="meter-scope-legend">
-              <span className="meter-scope-legend__item">
-                <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
-                Targeted with GPS <strong>{formatNumber(targetedWithGps)}</strong> ({formatPercent(targetedWithGps, targeted)})
-              </span>
-              <span className="meter-scope-legend__item">
-                <i className="meter-scope-legend__dot" style={{ background: "#7c3aed" }} />
-                Targeted without GPS <strong>{formatNumber(targetedWithoutGps)}</strong> ({formatPercent(targetedWithoutGps, targeted)})
+                Targeted (CAT 1–8) <strong>{formatNumber(targeted)}</strong> ({formatPercent(targeted, classifiedTotal)})
               </span>
             </div>
           </div>
         </article>
 
-        {/* PANEL 3: KEY NOTES */}
+        {/* PANEL 3: MONTHLY VENDING SUMMARY */}
         <article className="meter-exec-panel">
           <div className="meter-exec-panel__title">
             <div>
-              <h3>Key Notes</h3>
-              <span>Mathematical proofs & scope</span>
+              <h3>Monthly Vending Summary</h3>
+              <span>Original Contour &amp; Mpilo source figures</span>
             </div>
             <button
               type="button"
               className="meter-info-dot"
               onClick={() => setActiveHelpKey("card-notes")}
-              title="Learn about Key Notes"
-              aria-label="Learn about Key Notes"
+              title="Learn about Monthly Vending Summary"
+              aria-label="Learn about Monthly Vending Summary"
             >
               i
             </button>
           </div>
 
           <div className="meter-key-notes-list">
-            {/* GROUP 1: POPULATION SOURCE */}
+            {/* GROUP 1: MONTHLY PURCHASE ACTIVITY */}
             <div className="meter-note-group">
               <div className="meter-note-group__title">
-                <span>1. Population Source</span>
-                <span className="meter-note-group__badge">Total Base</span>
+                <span>1. Monthly Purchase Activity</span>
+                <span className="meter-note-group__badge">Contour List</span>
               </div>
               <div className="meter-note-row">
                 <span className="meter-note-row__label">
                   <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
-                  Prepaid Sales
+                  Buying Meters (&gt; R 0)
                 </span>
                 <div className="meter-note-row__values">
-                  <strong>{formatNumber(onList)}</strong>
-                  <span>{formatPercent(onList, totalMeters)}</span>
+                  <strong>{formatNumber(buying)}</strong>
+                  <span>{formatPercent(buying, totalMeters)}</span>
                 </div>
               </div>
               <div className="meter-note-row">
                 <span className="meter-note-row__label">
                   <i className="meter-scope-legend__dot" style={{ background: "#f97316" }} />
-                  Found in Field
+                  Not Buying (R 0 in Month)
                 </span>
                 <div className="meter-note-row__values">
-                  <strong>{formatNumber(foundInField)}</strong>
-                  <span>{formatPercent(foundInField, totalMeters)}</span>
+                  <strong style={{ color: "#ea580c" }}>{formatNumber(notBuying)}</strong>
+                  <span>{formatPercent(notBuying, totalMeters)}</span>
                 </div>
               </div>
               <div className="meter-note-row meter-note-row--total">
                 <span className="meter-note-row__label">
-                  <strong>Total Project Meters</strong>
+                  <strong>Total Supplier List Meters</strong>
                 </span>
                 <div className="meter-note-row__values">
                   <strong style={{ color: "#135bd8" }}>{formatNumber(totalMeters)}</strong>
@@ -617,20 +581,54 @@ export default function ProjectPopulationDashboardPage() {
               </div>
             </div>
 
-            {/* GROUP 2: OPERATIONS SCOPE */}
+            {/* GROUP 2: TOKEN REVENUE & UNITS */}
             <div className="meter-note-group">
               <div className="meter-note-group__title">
-                <span>2. Operations Scope</span>
-                <span className="meter-note-group__badge">Prepaid Sales</span>
+                <span>2. Token Revenue &amp; Units</span>
+                <span className="meter-note-group__badge">Purchases</span>
+              </div>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#135bd8" }} />
+                  Total Token Purchases
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatCurrencyRands(salesTotalC)}</strong>
+                </div>
+              </div>
+              <div className="meter-note-row">
+                <span className="meter-note-row__label">
+                  <i className="meter-scope-legend__dot" style={{ background: "#0f9f95" }} />
+                  Total Units Purchased
+                </span>
+                <div className="meter-note-row__values">
+                  <strong>{formatUnitsKwh(unitsTotal)}</strong>
+                </div>
+              </div>
+              <div className="meter-note-row meter-note-row--total">
+                <span className="meter-note-row__label">Avg per Buying Meter</span>
+                <div className="meter-note-row__values">
+                  <strong>
+                    {formatCurrencyRands(avgSalesPerBuyingMeterC)} · {formatUnitsKwh(avgUnitsPerBuyingMeter)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* GROUP 3: MPILO CATEGORY SPLIT */}
+            <div className="meter-note-group">
+              <div className="meter-note-group__title">
+                <span>3. Mpilo Category Split</span>
+                <span className="meter-note-group__badge">{formatNumber(classifiedTotal)} Classified</span>
               </div>
               <div className="meter-note-row">
                 <span className="meter-note-row__label">
                   <i className="meter-scope-legend__dot" style={{ background: "#2563eb" }} />
-                  Normal (Not Inspected)
+                  Normal Buyers
                 </span>
                 <div className="meter-note-row__values">
                   <strong>{formatNumber(normal)}</strong>
-                  <span>{formatPercent(normal, onList)}</span>
+                  <span>{formatPercent(normal, classifiedTotal)}</span>
                 </div>
               </div>
               <div className="meter-note-row">
@@ -640,35 +638,7 @@ export default function ProjectPopulationDashboardPage() {
                 </span>
                 <div className="meter-note-row__values">
                   <strong style={{ color: "#ea580c" }}>{formatNumber(targeted)}</strong>
-                  <span>{formatPercent(targeted, onList)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* GROUP 3: TARGETED GPS */}
-            <div className="meter-note-group">
-              <div className="meter-note-group__title">
-                <span>3. Target GPS Breakdown</span>
-                <span className="meter-note-group__badge">Field Target</span>
-              </div>
-              <div className="meter-note-row">
-                <span className="meter-note-row__label">
-                  <i className="meter-scope-legend__dot" style={{ background: "#10b981" }} />
-                  Targeted with GPS
-                </span>
-                <div className="meter-note-row__values">
-                  <strong>{formatNumber(targetedWithGps)}</strong>
-                  <span>{formatPercent(targetedWithGps, targeted)}</span>
-                </div>
-              </div>
-              <div className="meter-note-row">
-                <span className="meter-note-row__label">
-                  <i className="meter-scope-legend__dot" style={{ background: "#7c3aed" }} />
-                  Targeted without GPS
-                </span>
-                <div className="meter-note-row__values">
-                  <strong>{formatNumber(targetedWithoutGps)}</strong>
-                  <span>{formatPercent(targetedWithoutGps, targeted)}</span>
+                  <span>{formatPercent(targeted, classifiedTotal)}</span>
                 </div>
               </div>
             </div>
@@ -678,7 +648,7 @@ export default function ProjectPopulationDashboardPage() {
 
       {/* FOOTER */}
       <footer className="meter-exec-footer">
-        <span>Sales records and field records · {activeWorkbaseName}</span>
+        <span>Original Contour &amp; Mpilo Vending Files · {activeWorkbaseName}</span>
         <span>·</span>
         <span>Prepaid sales stream active</span>
         <span>·</span>
