@@ -249,14 +249,14 @@ export default function ProjectPopulationDashboardPage() {
   const donutGradient = buildBuyingDonutGradient(buying, notBuying);
 
   return (
-    <div className="meter-dashboard-page meter-dashboard-page--executive">
+    <div className="meter-dashboard-page meter-dashboard-page--executive meter-dashboard-page--emp">
       {/* EXECUTIVE HEADER */}
       <section className="meter-exec-header">
         <div>
           <p className="meter-exec-eyebrow">{getDashboardEyebrow(activeWorkbase)}</p>
           <h2>Electricity Meter Population</h2>
           <p>
-            Original Contour vending population &amp; token purchase activity for {monthLabel || activeMonthKey}.
+            Original monthly vending population &amp; token purchase activity for {monthLabel || activeMonthKey}.
           </p>
         </div>
 
@@ -297,7 +297,7 @@ export default function ProjectPopulationDashboardPage() {
         <KpiCard
           label="Total Meters"
           value={formatNumber(totalMeters)}
-          detail="Active on Contour vending list"
+          detail="Active on monthly vending list"
           tone="blue"
           icon="meter"
           onHelp={() => setActiveHelpKey("kpi-total")}
@@ -343,7 +343,7 @@ export default function ProjectPopulationDashboardPage() {
           <div className="meter-exec-panel__title">
             <div>
               <h3>Buying vs Not Buying</h3>
-              <span>Monthly token purchase split (Contour list)</span>
+              <span>Monthly token purchase split</span>
             </div>
             <button
               type="button"
@@ -364,7 +364,7 @@ export default function ProjectPopulationDashboardPage() {
             >
               <div className="meter-status-donut__center">
                 <strong>{formatNumber(totalMeters)}</strong>
-                <span>On Contour List</span>
+                <span>On Vending List</span>
               </div>
             </div>
 
@@ -467,7 +467,7 @@ export default function ProjectPopulationDashboardPage() {
           <div className="meter-scope-block">
             <div className="meter-scope-block__head">
               <span className="meter-scope-block__title">Normal vs targeted (CAT 1–8)</span>
-              <span className="meter-scope-block__sub">Mpilo 30-month purchase analysis</span>
+              <span className="meter-scope-block__sub">30-month purchase classification</span>
             </div>
             <div className="meter-scope-bar" role="img" aria-label="Normal vs Targeted meters">
               <span
@@ -517,7 +517,7 @@ export default function ProjectPopulationDashboardPage() {
           <div className="meter-exec-panel__title">
             <div>
               <h3>Monthly Vending Summary</h3>
-              <span>Original Contour &amp; Mpilo source figures</span>
+              <span>Original monthly vending figures</span>
             </div>
             <button
               type="button"
@@ -535,7 +535,7 @@ export default function ProjectPopulationDashboardPage() {
             <div className="meter-note-group">
               <div className="meter-note-group__title">
                 <span>1. Monthly Purchase Activity</span>
-                <span className="meter-note-group__badge">Contour List</span>
+                <span className="meter-note-group__badge">Vending List</span>
               </div>
               <div className="meter-note-row">
                 <span className="meter-note-row__label">
@@ -602,10 +602,10 @@ export default function ProjectPopulationDashboardPage() {
               </div>
             </div>
 
-            {/* GROUP 3: MPILO CATEGORY SPLIT */}
+            {/* GROUP 3: CATEGORY SPLIT */}
             <div className="meter-note-group">
               <div className="meter-note-group__title">
-                <span>3. Mpilo Category Split</span>
+                <span>3. Category Split</span>
                 <span className="meter-note-group__badge">{formatNumber(classifiedTotal)} Classified</span>
               </div>
               <div className="meter-note-row">
@@ -635,7 +635,7 @@ export default function ProjectPopulationDashboardPage() {
 
       {/* FOOTER */}
       <footer className="meter-exec-footer">
-        <span>Original Contour &amp; Mpilo Vending Files · {activeWorkbaseName}</span>
+        <span>Original Monthly Vending Files · {activeWorkbaseName}</span>
         <span>·</span>
         <span>Prepaid sales stream active</span>
         <span>·</span>

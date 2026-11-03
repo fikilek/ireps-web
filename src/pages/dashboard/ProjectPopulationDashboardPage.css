@@ -178,31 +178,31 @@
 }
 
 /* TOP KPI CARDS (UNIFORM 5-CARD EXECUTIVE GRID) */
-.meter-exec-kpis--5 {
+.meter-dashboard-page--emp .meter-exec-kpis--5 {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 0.85rem;
   margin-bottom: 1rem;
 }
 
 @media (max-width: 1200px) {
-  .meter-exec-kpis--5 {
+  .meter-dashboard-page--emp .meter-exec-kpis--5 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
-  .meter-exec-kpis--5 {
+  .meter-dashboard-page--emp .meter-exec-kpis--5 {
     grid-template-columns: 1fr;
   }
 }
 
-.meter-exec-kpi {
+.meter-dashboard-page--emp .meter-exec-kpi {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 126px;
-  padding: 1rem 1.15rem;
+  min-height: 118px;
+  padding: 0.85rem 0.9rem;
   overflow: hidden;
   border: 1px solid var(--md-border);
   border-radius: 0.9rem;
@@ -210,131 +210,135 @@
   box-shadow: 0 5px 16px rgba(15, 23, 42, 0.055);
 }
 
-.meter-exec-kpi > svg {
+.meter-dashboard-page--emp .meter-exec-kpi > svg {
   position: absolute;
-  right: 0.8rem;
+  right: 0.65rem;
   bottom: 0.2rem;
-  width: 3.15rem;
-  height: 3.15rem;
-  opacity: 0.08;
+  width: 2.75rem;
+  height: 2.75rem;
+  opacity: 0.07;
   pointer-events: none;
 }
 
-.meter-exec-kpi__icon {
+.meter-dashboard-page--emp .meter-exec-kpi__icon {
   display: grid;
-  width: 3.6rem;
-  height: 3.6rem;
+  width: 2.75rem;
+  height: 2.75rem;
   flex: 0 0 auto;
   place-items: center;
-  margin-right: 0.85rem;
+  margin-right: 0.65rem;
   border-radius: 50%;
   background: var(--md-blue-soft);
   color: var(--md-blue);
 }
 
-.meter-exec-kpi__icon svg {
-  width: 1.85rem;
-  height: 1.85rem;
+.meter-dashboard-page--emp .meter-exec-kpi__icon svg {
+  width: 1.4rem;
+  height: 1.4rem;
 }
 
-.meter-exec-kpi__copy {
+.meter-dashboard-page--emp .meter-exec-kpi__copy {
   min-width: 0;
   flex: 1 1 auto;
 }
 
-.meter-exec-kpi__copy > span {
+.meter-dashboard-page--emp .meter-exec-kpi__copy > span {
   display: block;
   color: #263650;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
+  line-height: 1.2;
   font-weight: 750;
   letter-spacing: 0.01em;
+  padding-right: 1.35rem;
 }
 
-.meter-exec-kpi__copy > strong {
+.meter-dashboard-page--emp .meter-exec-kpi__copy > strong {
   display: block;
-  margin-top: 0.1rem;
+  margin-top: 0.15rem;
   color: var(--md-blue);
-  font-size: clamp(1.8rem, 2.5vw, 2.4rem);
-  line-height: 1.05;
-  letter-spacing: -0.04em;
+  font-size: clamp(1.3rem, 1.55vw, 1.7rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
   font-weight: 900;
+  white-space: nowrap;
 }
 
-.meter-exec-kpi__copy > small {
+.meter-dashboard-page--emp .meter-exec-kpi__copy > small {
   display: block;
-  margin-top: 0.3rem;
+  margin-top: 0.25rem;
   color: var(--md-muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
   font-weight: 650;
 }
 
 /* KPI COLOR TONES */
-.meter-exec-kpi--blue .meter-exec-kpi__icon {
+.meter-dashboard-page--emp .meter-exec-kpi--blue .meter-exec-kpi__icon {
   background: var(--md-blue-soft);
   color: var(--md-blue);
 }
-.meter-exec-kpi--blue .meter-exec-kpi__copy > strong,
-.meter-exec-kpi--blue > svg {
+.meter-dashboard-page--emp .meter-exec-kpi--blue .meter-exec-kpi__copy > strong,
+.meter-dashboard-page--emp .meter-exec-kpi--blue > svg {
   color: var(--md-blue);
 }
 
-.meter-exec-kpi--teal .meter-exec-kpi__icon {
+.meter-dashboard-page--emp .meter-exec-kpi--teal .meter-exec-kpi__icon {
   background: var(--md-teal-soft);
   color: var(--md-teal);
 }
-.meter-exec-kpi--teal .meter-exec-kpi__copy > strong,
-.meter-exec-kpi--teal > svg {
+.meter-dashboard-page--emp .meter-exec-kpi--teal .meter-exec-kpi__copy > strong,
+.meter-dashboard-page--emp .meter-exec-kpi--teal > svg {
   color: var(--md-teal);
 }
 
-.meter-exec-kpi--orange .meter-exec-kpi__icon {
+.meter-dashboard-page--emp .meter-exec-kpi--orange .meter-exec-kpi__icon {
   background: var(--md-orange-soft);
   color: var(--md-orange);
 }
-.meter-exec-kpi--orange .meter-exec-kpi__copy > strong,
-.meter-exec-kpi--orange > svg {
+.meter-dashboard-page--emp .meter-exec-kpi--orange .meter-exec-kpi__copy > strong,
+.meter-dashboard-page--emp .meter-exec-kpi--orange > svg {
   color: var(--md-orange);
 }
 
-.meter-exec-kpi--purple .meter-exec-kpi__icon {
+.meter-dashboard-page--emp .meter-exec-kpi--purple .meter-exec-kpi__icon {
   background: var(--md-purple-soft);
   color: var(--md-purple);
 }
-.meter-exec-kpi--purple .meter-exec-kpi__copy > strong,
-.meter-exec-kpi--purple > svg {
+.meter-dashboard-page--emp .meter-exec-kpi--purple .meter-exec-kpi__copy > strong,
+.meter-dashboard-page--emp .meter-exec-kpi--purple > svg {
   color: var(--md-purple);
 }
 
-.meter-exec-kpi--red .meter-exec-kpi__icon {
+.meter-dashboard-page--emp .meter-exec-kpi--red .meter-exec-kpi__icon {
   background: var(--md-red-soft);
   color: var(--md-red);
 }
-.meter-exec-kpi--red .meter-exec-kpi__copy > strong,
-.meter-exec-kpi--red > svg {
+.meter-dashboard-page--emp .meter-exec-kpi--red .meter-exec-kpi__copy > strong,
+.meter-dashboard-page--emp .meter-exec-kpi--red > svg {
   color: var(--md-red);
 }
 
-.meter-info-dot--kpi {
+.meter-dashboard-page--emp .meter-info-dot--kpi {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  top: 0.65rem;
+  right: 0.65rem;
 }
 
 /* MAIN CONTENT GRID */
-.meter-exec-main-grid {
+.meter-dashboard-page--emp .meter-exec-main-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 0.95fr) minmax(360px, 1.25fr) minmax(310px, 0.95fr);
+  grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.2fr) minmax(300px, 1fr);
   gap: 1rem;
   margin-bottom: 1rem;
 }
 
 @media (max-width: 1050px) {
-  .meter-exec-main-grid {
+  .meter-dashboard-page--emp .meter-exec-main-grid {
     grid-template-columns: 1fr;
   }
 }
 
-.meter-exec-panel {
+.meter-dashboard-page--emp .meter-exec-panel {
   min-width: 0;
   padding: 1.15rem 1.25rem;
   border: 1px solid var(--md-border);
@@ -343,7 +347,7 @@
   box-shadow: 0 5px 16px rgba(15, 23, 42, 0.045);
 }
 
-.meter-exec-panel__title {
+.meter-dashboard-page--emp .meter-exec-panel__title {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -353,7 +357,7 @@
   border-bottom: 1px solid #f1f5f9;
 }
 
-.meter-exec-panel__title h3 {
+.meter-dashboard-page--emp .meter-exec-panel__title h3 {
   margin: 0;
   color: #15213a;
   font-size: 1.08rem;
@@ -361,7 +365,7 @@
   line-height: 1.15;
 }
 
-.meter-exec-panel__title > div > span {
+.meter-dashboard-page--emp .meter-exec-panel__title > div > span {
   display: block;
   margin-top: 0.2rem;
   color: var(--md-muted);
@@ -370,7 +374,7 @@
 }
 
 /* CLEAN CIRCULAR INFO BUTTON (i) */
-.meter-info-dot {
+.meter-dashboard-page--emp .meter-info-dot {
   display: inline-grid;
   width: 1.35rem;
   height: 1.35rem;
@@ -387,23 +391,23 @@
   line-height: 1;
 }
 
-.meter-info-dot:hover {
+.meter-dashboard-page--emp .meter-info-dot:hover {
   border-color: var(--md-blue);
   color: var(--md-blue);
   background: var(--md-blue-soft);
 }
 
 /* DONUT CHART PANEL */
-.meter-status-layout {
+.meter-dashboard-page--emp .meter-status-layout {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-height: 320px;
+  min-height: 300px;
   justify-content: center;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
-.meter-status-donut {
+.meter-dashboard-page--emp .meter-status-donut {
   position: relative;
   width: 190px;
   height: 190px;
@@ -413,7 +417,11 @@
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
 }
 
-.meter-status-donut__center {
+.meter-dashboard-page--emp .meter-status-donut::after {
+  display: none;
+}
+
+.meter-dashboard-page--emp .meter-status-donut__center {
   width: 132px;
   height: 132px;
   background: #ffffff;
@@ -427,15 +435,15 @@
   padding: 0.5rem;
 }
 
-.meter-status-donut__center strong {
-  font-size: 1.55rem;
+.meter-dashboard-page--emp .meter-status-donut__center strong {
+  font-size: 1.5rem;
   font-weight: 900;
   color: var(--md-ink);
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
 
-.meter-status-donut__center span {
+.meter-dashboard-page--emp .meter-status-donut__center span {
   font-size: 0.68rem;
   font-weight: 800;
   color: var(--md-muted);

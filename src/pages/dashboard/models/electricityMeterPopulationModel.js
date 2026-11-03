@@ -186,11 +186,11 @@ export const EMD_HELP_STORIES = Object.freeze({
   "card-scope": {
     badge: "Vending & Targeting",
     title: "Vending & Targeting Profile",
-    body: "<p>Summarizes monthly token purchase revenue and kWh consumption alongside two operational bars:</p><p><strong>Bar 1 (Buying vs Not Buying):</strong> Shows the proportion of active vending list meters purchasing tokens (&gt; R 0) vs zero-purchase meters (R 0) in the selected month.</p><p><strong>Bar 2 (Normal vs Targeted CAT 1–8):</strong> Shows Mpilo's 30-month purchase analysis split between Normal buyers and Targeted revenue-protection candidates (CAT 1–8).</p>",
+    body: "<p>Summarizes monthly token purchase activity alongside the 30-month purchase classification:</p><p><strong>Bar 1 (Buying vs Not Buying):</strong> Shows the proportion of active vending list meters purchasing tokens (&gt; R 0) vs zero-purchase meters (R 0) in the selected month.</p><p><strong>Bar 2 (Normal vs Targeted CAT 1–8):</strong> Shows the 30-month purchase analysis split between Normal buyers and Targeted revenue-protection candidates (CAT 1–8).</p>",
   },
   "card-notes": {
     badge: "Monthly Summary",
     title: "Monthly Vending Summary",
-    body: "<p>Presents the exact source figures from the monthly supplier vending and classification workbooks:</p><p><strong>1. Monthly Purchase Activity:</strong> Buying (&gt; R 0) + Not Buying (R 0) = Total Supplier List Meters.</p><p><strong>2. Token Revenue &amp; Units:</strong> Total Rands, total kWh, and average spend/kWh per buying meter.</p><p><strong>3. Mpilo Category Split:</strong> Normal Buyers + Targeted (CAT 1–8) = Classified Total.</p>",
+    body: "<p>Presents the exact source figures from the monthly supplier vending and classification workbooks:</p><p><strong>1. Monthly Purchase Activity:</strong> Buying (&gt; R 0) + Not Buying (R 0) = Total Supplier List Meters.</p><p><strong>2. Token Revenue &amp; Units:</strong> Total Rands, total kWh, and average spend/kWh per buying meter.</p><p><strong>3. Category Split:</strong> Normal Buyers + Targeted (CAT 1–8) = Classified Total.</p>",
   },
 });
