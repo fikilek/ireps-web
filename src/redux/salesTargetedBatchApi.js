@@ -1,5 +1,5 @@
 import { NEARBY_LIMIT, NEARBY_LAYERS, nearbyQuerySpec, nearbyErfLinkedPlan, nearbyLayerRecords } from "../features/maps/sales-batch-nearby.js";
-import { classifySalesWorkStatus } from "../../functions/salesAllMeters/sales-batch-policy.js";
+import { classifySalesWorkStatus, newestSalesCategoryMonth } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
@@ -19,10 +19,11 @@ import { projectSalesCategoryMonth } from "../pages/sales/models/salesCategoryMo
 import { useMemo } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useSalesReadScope, isSalesReadScopeCurrent, registerSalesSessionCleanup } from "./salesApi";
-import { getDefaultSalesMonth } from "../pages/sales/models/salesMonthModel.js";
+
 
 export function projectSalesMapForMonth(rows, month) {
-  return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, { ...projectSalesCategoryMonth(row, month), salesWorkStatus: classifySalesWorkStatus(row) }]));
+  const effectiveMonth = month === undefined ? newestSalesCategoryMonth(Object.values(rows || {})) : month;
+  return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, { ...projectSalesCategoryMonth(row, effectiveMonth ?? newestSalesCategoryMonth(row)), salesWorkStatus: classifySalesWorkStatus(row) }]));
 }
 
 // RTK owns cache lifetime; account changes also end these read-only listeners.
@@ -2535,7 +2536,7 @@ export const salesTargetedBatchApi = createApi({
 function useScopedTargetedBatchRead(endpoint, query, options) {
   const readScope = useSalesReadScope(typeof query === "object" ? query?.lmPcode : undefined);
   const scopeKey = readScope ? JSON.stringify([readScope, typeof query === "object" ? { lmPcode: query?.lmPcode, tbId: query?.tbId } : query]) : "";
-  const defaultMonth = useMemo(() => { void scopeKey; return getDefaultSalesMonth(); }, [scopeKey]);
+  const defaultMonth = useMemo(() => { void scopeKey; return undefined; }, [scopeKey]);
   const month = query && typeof query === "object" && query.month !== undefined ? query.month : defaultMonth;
   const enabled = readScope && query !== skipToken && !options?.skip;
   const result = salesTargetedBatchApi[endpoint](enabled ? { ...readScope, query, month } : skipToken, options);

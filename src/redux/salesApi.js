@@ -1,11 +1,11 @@
-import { classifySalesWorkStatus, hasUsableSalesGps, coordinateNumber, salesSiteMeter } from "../../functions/salesAllMeters/sales-batch-policy.js";
+import { classifySalesWorkStatus, hasUsableSalesGps, coordinateNumber, newestSalesCategoryMonth, salesSiteMeter } from "../../functions/salesAllMeters/sales-batch-policy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 import { db, functions } from "../firebase";
 import { httpsCallable } from "firebase/functions";
 import { useMemo, useSyncExternalStore } from "react";
-import { getDefaultSalesMonth } from "../pages/sales/models/salesMonthModel.js";
+
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useAuth } from "../auth/useAuth";
 import { inspectSalesTbRefsIntegrity } from "../pages/sales/models/salesTbRefsIntegrityModel";
@@ -911,7 +911,7 @@ export function useGetSalesCategoryViewQuery(scope, options) {
   const raw = useGetSalesByLmPcodeQuery(scope, options);
   const readScope = useSalesReadScope(scope?.lmPcode);
   const scopeKey = readScope ? JSON.stringify(readScope) : "";
-  const defaultMonth = useMemo(() => { void scopeKey; return getDefaultSalesMonth(); }, [scopeKey]);
+  const defaultMonth = useMemo(() => { void scopeKey; return newestSalesCategoryMonth(raw.currentData || []); }, [scopeKey, raw.currentData]);
   const month = scope?.month === undefined ? defaultMonth : scope.month;
   const rows = useMemo(() => raw.currentData?.map(row => projectSalesCategoryMonth(row, month)), [raw.currentData, month]);
   return { ...raw, data: rows, currentData: rows, categoryMonth: month };

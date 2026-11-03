@@ -67,6 +67,9 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   assert.equal(projected.then, undefined);
   assert.equal(projected.ONE.categoryAvailable, true);
   assert.equal(projected.TWO.leakageCategory, null);
+  const autoProjected = projectSalesMapForMonth({ ONE: { monthlyCategories: { "2026-08": { leakageCategory: "CAT1", riskTier: "High", riskScore: 1 } } }, TWO: { leakageCategory: "legacy" } }, undefined);
+  assert.equal(autoProjected.ONE.categoryMonth, "2026-08");
+  assert.equal(autoProjected.ONE.leakageCategory, "CAT1");
   const lifetimes = [];
   const results = [];
   for (const [endpointName, query] of [["getTargetedBatchDashboard", { lmPcode: "ZA5241" }], ["getTargetedBatchReportById", "TB"]]) {

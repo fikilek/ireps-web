@@ -33,4 +33,9 @@ test("overview and detail both bind URL month to model/read and preserve it in n
     assert.match(source, /salesCategorySearch\(categoryMonth\)/);
     assert.match(source, /!monthSelection.valid/);
   }
+  for (const operationalPath of ["../PrepaidSales.jsx", "../../operations/GeoFencesPage.jsx"]) {
+    const source = await readFile(new URL(operationalPath, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /type="month"/);
+    assert.doesNotMatch(source, /Category month|Sales category month/);
+  }
 });

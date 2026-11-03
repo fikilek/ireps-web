@@ -109,6 +109,11 @@ test("raw normalization preserves empty/sparse commercial maps and nested metada
   view.refetch();
   assert.equal(refetchCount, 1);
   assert.equal(api.useGetSalesCategoryViewQuery({ lmPcode: "ZA5241", month: "2026-06" }).categoryMonth, "2026-06");
+  const rowAug = api.normalizeSalesRow("0002", { monthlyCategories: { "2026-08": { leakageCategory: "CAT1 - Zero Purchaser", riskTier: "High Risk", riskScore: 3 } } });
+  state.raw = { currentData: { rows: [row, rowAug] }, refetch: () => ++refetchCount };
+  const autoView = api.useGetSalesCategoryViewQuery({ lmPcode: "ZA5241" });
+  assert.equal(autoView.categoryMonth, "2026-08");
+  assert.equal(autoView.currentData[1].leakageCategory, "CAT1 - Zero Purchaser");
   assert.equal(state.governanceCalls, 0);
   api.setSalesReadSession(null);
 });
