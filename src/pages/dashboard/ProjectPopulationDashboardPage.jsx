@@ -397,12 +397,12 @@ export default function ProjectPopulationDashboardPage() {
           </div>
         </article>
 
-        {/* PANEL 2: VENDING & TARGETING PROFILE (CALLOUTS + 2 SPLIT BARS) */}
+        {/* PANEL 2: VENDING & TARGETING PROFILE (2 SPLIT BARS) */}
         <article className="meter-exec-panel">
           <div className="meter-exec-panel__title">
             <div>
               <h3>Vending &amp; Targeting Profile</h3>
-              <span>Monthly revenue, units &amp; leakage classification</span>
+              <span>Monthly purchase split &amp; leakage classification</span>
             </div>
             <button
               type="button"
@@ -413,19 +413,6 @@ export default function ProjectPopulationDashboardPage() {
             >
               i
             </button>
-          </div>
-
-          <div className="meter-vending-callout-grid">
-            <div className="meter-scope-total-callout">
-              <span>Monthly Token Purchases</span>
-              <strong>{formatCurrencyRands(salesTotalC)}</strong>
-              <small>Avg {formatCurrencyRands(avgSalesPerBuyingMeterC)} per buying meter</small>
-            </div>
-            <div className="meter-scope-total-callout">
-              <span>Energy Units Purchased</span>
-              <strong style={{ color: "#0f9f95" }}>{formatUnitsKwh(unitsTotal)}</strong>
-              <small>Avg {formatUnitsKwh(avgUnitsPerBuyingMeter)} per buying meter</small>
-            </div>
           </div>
 
           {/* BAR 1: BUYING VS NOT BUYING */}
