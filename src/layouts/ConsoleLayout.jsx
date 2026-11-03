@@ -105,11 +105,6 @@ const navSections = [
             path: "/sales/reporting",
             allowedRoles: MANAGEMENT_ROLES,
           },
-          {
-            label: "Sales Stats",
-            path: "/sales/stats",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
         ],
       },
       {

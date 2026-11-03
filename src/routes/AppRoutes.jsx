@@ -74,7 +74,6 @@ import BatchesGeofencesPage from "../pages/sales/BatchesGeofencesPage";
 import SalesReportingPage from "../pages/sales/SalesReportingPage";
 import SalesBatchReportPage from "../pages/sales/SalesBatchReportPage";
 import SalesBatchMapPage from "../pages/sales/SalesBatchMapPage";
-import SalesStatsPage from "../pages/sales/SalesStatsPage";
 import GeoFencesPage from "../pages/operations/GeoFencesPage";
 
 const ALL_OPERATIONAL_ROLES = ["SPU", "ADM", "MNG", "SPV", "FWR"];
@@ -243,15 +242,6 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <SalesBatchReportPage />
-              </RoleRoute>
-            }
-          />
-
-          <Route
-            path="/sales/stats"
-            element={
-              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <SalesStatsPage />
               </RoleRoute>
             }
           />

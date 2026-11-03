@@ -69,7 +69,7 @@ test("all three operational Sales join endpoints run synchronously with zero gov
   assert.equal(projected.TWO.leakageCategory, null);
   const lifetimes = [];
   const results = [];
-  for (const [endpointName, query] of [["getTargetedBatchDashboard", { lmPcode: "ZA5241" }], ["getTargetedBatchReportById", "TB"], ["getSalesOperationalStatsByLm", "ZA5241"]]) {
+  for (const [endpointName, query] of [["getTargetedBatchDashboard", { lmPcode: "ZA5241" }], ["getTargetedBatchReportById", "TB"]]) {
     const endpoint = salesTargetedBatchApi.definitions[endpointName];
     const scope = { uid: "A", session: 1, month: "2026-08", query };
     const state = endpoint.queryFn(scope).data;
@@ -82,12 +82,13 @@ test("all three operational Sales join endpoints run synchronously with zero gov
     if (text.includes('tb_rows')) listener.next({ docs: [{ id: "ROW", data: () => ({ tbId: "TB", salesAllMeterId: "METER" }) }] });
   }
   const salesListeners = listeners.filter(listener => JSON.stringify(listener.query).includes('sales-all-meters'));
-  assert.equal(salesListeners.length, 3);
+  assert.equal(salesListeners.length, 2);
   for (const listener of salesListeners) {
     listener.next({ docs: [{ id: "METER", data: () => ({ lmPcode: "ZA5241", monthlyCategories: {} }) }] });
     listener.error({ code: "permission-denied", message: "denied" });
   }
-  assert.equal(results[2].rows[0].analytics.categoryState.status, "read-error");
+  assert.equal(results[0].sync.sources.sales, "error");
+  assert.equal(results[1].sync.sources.sales, "error");
   assert.equal(governanceCalls, 0);
   current = false;
   for (const cleanup of cleanups) cleanup();
