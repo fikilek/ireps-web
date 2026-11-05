@@ -54,6 +54,9 @@ import TcUploadDetailsPage from "../pages/operations/TcUploadDetailsPage";
 import TcBgoPage from "../pages/operations/TcBgoPage";
 import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
 import BgoDashboardPage from "../pages/operations/BgoDashboardPage";
+import MdBgoRegisterPage from "../pages/operations/MdBgoRegisterPage";
+import MdBgoPlanningPage from "../pages/operations/MdBgoPlanningPage";
+import MdBgoAllocationPage from "../pages/operations/MdBgoAllocationPage";
 import BmdBgoPage from "../pages/operations/BmdBgoPage";
 import MdBgoRowsPage from "../pages/operations/MdBgoRowsPage";
 import TcBgoDashboardPage from "../pages/operations/TcBgoDashboardPage";
@@ -581,7 +584,25 @@ export default function AppRoutes() {
             path="/operations/bgo"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <BmdBgoPage />
+                <MdBgoRegisterPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/bgo/plan"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MdBgoPlanningPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/bgo/allocation"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MdBgoAllocationPage />
               </RoleRoute>
             }
           />

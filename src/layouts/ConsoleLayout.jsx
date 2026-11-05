@@ -252,7 +252,7 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "MD BGO",
+            label: "MD BGO Register",
             path: "/operations/bgo",
             allowedRoles: MANAGEMENT_ROLES,
           },

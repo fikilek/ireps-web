@@ -1114,18 +1114,21 @@ export default function BmdBgoPage() {
   return (
     <section style={styles.page}>
       <div style={styles.backRow}>
-        <Link to="/operations" style={styles.backLink}>
-          ← Operations Overview
+        <Link to="/operations/bgo" style={styles.backLink}>
+          ← Back to MD BGO Register
         </Link>
-        <Link to="/operations/geo-fences" style={styles.backLink}>
-          Geo-Fences
+        <Link to="/operations/bgo/plan" style={styles.backLink}>
+          Plan & Create Map
+        </Link>
+        <Link to="/operations/bgo-dashboard" style={styles.backLink}>
+          BGO Dashboard
         </Link>
       </div>
 
       <div style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>Operations / MD BGO</p>
-          <h2 style={styles.title}>Bulk Meter Discovery BGO</h2>
+          <p style={styles.eyebrow}>Operations / MD BGO Allocation</p>
+          <h2 style={styles.title}>MD BGO Allocation Board</h2>
           <p style={styles.subtitle}>
             Select a ward, then drag a TEAM/SP target onto existing geofence
             groups. MD BGO creates bgo_batches only; meter discovery TRNs are
