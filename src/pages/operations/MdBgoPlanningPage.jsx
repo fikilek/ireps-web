@@ -16,6 +16,13 @@ import {
 } from "../../redux/geofencesApi";
 import { useCreateBgoMutation } from "../../redux/bgoApi";
 
+import {
+  getGeoFencePath,
+  geofenceLabelPoint,
+  toUsableLatLng,
+  fitMapToGeoFence,
+} from "./geofence-map-helpers";
+
 import { polygonFromPoints, strictlyInside } from "../../../functions/geofences/sales-batch-geometry.js";
 import {
   composeGeofenceName,
@@ -90,13 +97,16 @@ function geoJsonPolygonToGooglePaths(geometry) {
 }
 
 function fitMapToBounds(map, paths = []) {
-  if (!map || !window.google?.maps || paths.length === 0) return;
+  if (!map || !window.google?.maps || !Array.isArray(paths) || paths.length === 0) return;
   const bounds = new window.google.maps.LatLngBounds();
   let count = 0;
   paths.forEach((ring) => {
-    ring.forEach((pt) => {
-      if (Number.isFinite(pt?.lat) && Number.isFinite(pt?.lng)) {
-        bounds.extend(pt);
+    const pts = Array.isArray(ring) ? ring : [ring];
+    pts.forEach((pt) => {
+      const lat = Number(pt?.lat ?? pt?.latitude);
+      const lng = Number(pt?.lng ?? pt?.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        bounds.extend({ lat, lng });
         count++;
       }
     });
@@ -463,42 +473,91 @@ function MdBgoMapInner({
     if (!map || !window.google?.maps) return;
     clearMapObjects(geofencePolygonsRef);
 
-        if (Boolean(selectedWardPcode) && showGeofencesLayer && geofences.length > 0) {
-      const polys = [];
-      geofences.forEach((gf) => {
-        const geom = parseGeometry(gf.geometry) || gf.geometry?.points || gf.points || gf;
-        const paths = geoJsonPolygonToGooglePaths(geom);
-        if (paths.length > 0) {
-          const isSelected = gf.id === selectedGeofenceId;
-          const poly = new window.google.maps.Polygon({
-            paths,
-            strokeColor: isSelected ? "#dc2626" : "#7c3aed",
-            strokeOpacity: 0.95,
-            strokeWeight: isSelected ? 4 : 2,
-            fillColor: isSelected ? "#ef4444" : "#8b5cf6",
-            fillOpacity: isSelected ? 0.35 : 0.18,
-            clickable: !isDrawing,
-            zIndex: isSelected ? 70 : 50,
-          });
+    if (!selectedWardPcode || geofences.length === 0) return;
 
-          if (!isDrawing) {
-            poly.addListener("click", () => {
-              if (typeof onSelectGeofence === "function") {
-                onSelectGeofence(gf.id);
-              }
-            });
-          }
+    // Filter which geofences to display based on layer toggle and selected geofence:
+    // If showGeofencesLayer is true: render ALL geofences in the ward.
+    // If showGeofencesLayer is false: render ONLY the selected geofence (if one is selected in dropdown).
+    const fencesToRender = showGeofencesLayer
+      ? geofences
+      : selectedGeofenceId
+        ? geofences.filter((gf) => gf.id === selectedGeofenceId)
+        : [];
 
-          poly.setMap(map);
-          polys.push(poly);
+    if (fencesToRender.length === 0) return;
 
-          if (isSelected) {
-            fitMapToBounds(map, paths);
-          }
+    const mapObjects = [];
+    fencesToRender.forEach((gf) => {
+      // 1. Primary path from getGeoFencePath (supports iREPS geometry.points [{latitude, longitude, order}])
+      const pointPath = getGeoFencePath(gf);
+      let paths = [];
+
+      if (Array.isArray(pointPath) && pointPath.length >= 3) {
+        paths = [pointPath];
+      } else {
+        // 2. Fallback to GeoJSON geometry coordinates
+        const geom = parseGeometry(gf.geometry) || gf;
+        if (geom && (geom.type === "Polygon" || geom.type === "MultiPolygon")) {
+          paths = geoJsonPolygonToGooglePaths(geom);
         }
-      });
-      geofencePolygonsRef.current = polys;
-    }
+      }
+
+      if (paths.length > 0) {
+        const isSelected = gf.id === selectedGeofenceId;
+        const poly = new window.google.maps.Polygon({
+          paths,
+          strokeColor: isSelected ? "#dc2626" : "#7c3aed",
+          strokeOpacity: 0.95,
+          strokeWeight: isSelected ? 4 : 2,
+          fillColor: isSelected ? "#ef4444" : "#8b5cf6",
+          fillOpacity: isSelected ? 0.35 : 0.18,
+          clickable: !isDrawing,
+          zIndex: isSelected ? 70 : 50,
+        });
+
+        if (!isDrawing) {
+          poly.addListener("click", () => {
+            if (typeof onSelectGeofence === "function") {
+              onSelectGeofence(gf.id);
+            }
+          });
+        }
+
+        poly.setMap(map);
+        mapObjects.push(poly);
+
+        // Geofence Name Label marker
+        const labelPoint = geofenceLabelPoint(gf);
+        if (labelPoint) {
+          const labelMarker = new window.google.maps.Marker({
+            position: labelPoint,
+            map,
+            title: gf.name || gf.id,
+            label: {
+              text: String(gf.name || gf.id),
+              className: "ireps-geofence-label",
+              color: isSelected ? "#b91c1c" : "#6d28d9",
+              fontWeight: "600",
+              fontSize: "11px",
+            },
+            icon: {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 1,
+              fillOpacity: 0,
+              strokeOpacity: 0,
+            },
+            clickable: false,
+            zIndex: isSelected ? 75 : 55,
+          });
+          mapObjects.push(labelMarker);
+        }
+
+        if (isSelected) {
+          fitMapToBounds(map, paths);
+        }
+      }
+    });
+    geofencePolygonsRef.current = mapObjects;
 
     return () => clearMapObjects(geofencePolygonsRef);
   }, [map, selectedWardPcode, geofences, selectedGeofenceId, showGeofencesLayer, isDrawing, onSelectGeofence]);
@@ -733,6 +792,37 @@ export default function MdBgoPlanningPage() {
     setDrawWard(null);
     setFormError("");
   }
+
+  const handleSelectGeofence = useCallback(
+    (geofenceId) => {
+      setSelectedGeofenceId(geofenceId);
+      if (!geofenceId) {
+        setSavedGeofenceLanding(null);
+        return;
+      }
+      const found = displayGeofences.find((g) => g.id === geofenceId);
+      if (found) {
+        setSavedGeofenceLanding({
+          id: found.id,
+          name: found.name,
+          wardNumber,
+          wardPcode: selectedWardPcode,
+          erfCount: found.counts?.erfs ?? found.erfCount ?? 0,
+          premiseCount: found.counts?.premises ?? found.premiseCount ?? 0,
+          meterCount: found.counts?.meters ?? found.meterCount ?? 0,
+          points: found.geometry?.points || found.points || [],
+        });
+      } else {
+        setSavedGeofenceLanding(null);
+      }
+    },
+    [displayGeofences, wardNumber, selectedWardPcode],
+  );
+
+  const handleCloseLanding = useCallback(() => {
+    setSavedGeofenceLanding(null);
+    setSelectedGeofenceId("");
+  }, []);
 
   // Evaluate ERFs inside drawn polygon
   const evaluatedGeometry = useMemo(() => {
@@ -1020,7 +1110,7 @@ export default function MdBgoPlanningPage() {
             Geofence
             <select
               value={selectedGeofenceId}
-              onChange={(e) => setSelectedGeofenceId(e.target.value)}
+              onChange={(e) => handleSelectGeofence(e.target.value)}
               style={styles.select}
               disabled={!selectedWardPcode}
             >
@@ -1143,7 +1233,7 @@ export default function MdBgoPlanningPage() {
             <button
               type="button"
               style={styles.landingDismissButton}
-              onClick={() => setSavedGeofenceLanding(null)}
+              onClick={handleCloseLanding}
               title="Dismiss"
             >
               ×
@@ -1208,7 +1298,7 @@ export default function MdBgoPlanningPage() {
                 meters={wardMeters}
                 geofences={displayGeofences}
                 selectedGeofenceId={selectedGeofenceId}
-                onSelectGeofence={setSelectedGeofenceId}
+                onSelectGeofence={handleSelectGeofence}
                 showWardBoundariesLayer={showWardBoundariesLayer}
                 showErfsLayer={showErfsLayer}
                 showPremisesLayer={showPremisesLayer}
