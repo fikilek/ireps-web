@@ -324,3 +324,32 @@ test("MD BGO Planning Map renders iREPS geofences via getGeoFencePath and manage
   assert.match(content, /handleSelectGeofence/, "Must provide unified handleSelectGeofence");
   assert.match(content, /onSelectGeofence=\{handleSelectGeofence\}/, "Map inner must receive handleSelectGeofence");
 });
+
+test("MD BGO Planning Map enforces 3-tier ERF -> Premise -> Meter asset chain metrics (MD-BGO-R010 v1.7.0)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // 1. Linking helper functions
+  assert.match(content, /function getPremiseErfId/, "Must define getPremiseErfId helper");
+  assert.match(content, /function getMeterPremiseId/, "Must define getMeterPremiseId helper");
+  assert.match(content, /function getMeterErfId/, "Must define getMeterErfId helper");
+  assert.match(content, /function evaluateGeofenceAssetChain/, "Must define evaluateGeofenceAssetChain evaluator");
+
+  // 2. Query loading trigger on selection or drawing
+  assert.match(content, /shouldLoadPremises\s*=\s*Boolean\([^)]*selectedGeofenceId/, "Premises must load when geofence is selected");
+  assert.match(content, /shouldLoadMeters\s*=\s*Boolean\([^)]*selectedGeofenceId/, "Meters must load when geofence is selected");
+
+  // 3. Live 3-tier evaluation during drawing
+  assert.match(content, /premisesInside/, "Must compute premisesInside during drawing");
+  assert.match(content, /metersInside/, "Must compute metersInside during drawing");
+  assert.match(content, /Inside:\s*\$\{count\}\s*ERF.*Premises.*Meters/, "Drawing bar must report ERFs, Premises, and Meters");
+
+  // 4. Landing panel 3-tier stat grid
+  assert.match(content, /activeLandingCounts\.erfCount/, "Must display erfCount in landing card");
+  assert.match(content, /activeLandingCounts\.premiseCount/, "Must display premiseCount in landing card");
+  assert.match(content, /activeLandingCounts\.meterCount/, "Must display meterCount in landing card");
+  assert.match(content, /statGrid/, "Must render 3-tier statGrid layout");
+  assert.match(content, /Enclosed parcels/, "Must describe enclosed parcels");
+  assert.match(content, /Linked to ERFs/, "Must describe premises linked to ERFs");
+  assert.match(content, /On premises/, "Must describe meters on premises");
+});
