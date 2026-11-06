@@ -463,7 +463,7 @@ function MdBgoMapInner({
     if (!map || !window.google?.maps) return;
     clearMapObjects(geofencePolygonsRef);
 
-    if (Boolean(selectedWardPcode) && showGeofencesLayer && geofences.length > 0) {
+        if (Boolean(selectedWardPcode) && showGeofencesLayer && geofences.length > 0) {
       const polys = [];
       geofences.forEach((gf) => {
         const geom = parseGeometry(gf.geometry) || gf.geometry?.points || gf.points || gf;
@@ -473,10 +473,10 @@ function MdBgoMapInner({
           const poly = new window.google.maps.Polygon({
             paths,
             strokeColor: isSelected ? "#dc2626" : "#7c3aed",
-            strokeOpacity: 0.9,
-            strokeWeight: isSelected ? 3.5 : 2,
+            strokeOpacity: 0.95,
+            strokeWeight: isSelected ? 4 : 2,
             fillColor: isSelected ? "#ef4444" : "#8b5cf6",
-            fillOpacity: isSelected ? 0.25 : 0.14,
+            fillOpacity: isSelected ? 0.35 : 0.18,
             clickable: !isDrawing,
             zIndex: isSelected ? 70 : 50,
           });
@@ -491,6 +491,10 @@ function MdBgoMapInner({
 
           poly.setMap(map);
           polys.push(poly);
+
+          if (isSelected) {
+            fitMapToBounds(map, paths);
+          }
         }
       });
       geofencePolygonsRef.current = polys;
@@ -666,9 +670,35 @@ export default function MdBgoPlanningPage() {
 
   // Existing Geofences for selected ward
   const { data: wardGeofences = [] } = useGetGeoFencesByWardQuery(
-    selectedWardPcode,
-    { skip: !selectedWardPcode },
+    { lmPcode, wardPcode: selectedWardPcode },
+    { skip: !lmPcode || !selectedWardPcode },
   );
+
+  // Immediate zero-latency display: merges live Firestore geofences with newly completed geofence
+  const displayGeofences = useMemo(() => {
+    const list = [...wardGeofences];
+    if (savedGeofenceLanding && savedGeofenceLanding.points?.length >= 3) {
+      const exists = list.some(
+        (g) => g.id === savedGeofenceLanding.id || g.name === savedGeofenceLanding.name
+      );
+      if (!exists) {
+        list.unshift({
+          id: savedGeofenceLanding.id || `gf-${Date.now()}`,
+          name: savedGeofenceLanding.name,
+          geometry: {
+            type: "Polygon",
+            points: savedGeofenceLanding.points,
+          },
+          counts: {
+            erfs: savedGeofenceLanding.erfCount,
+            premises: savedGeofenceLanding.premiseCount,
+            meters: savedGeofenceLanding.meterCount,
+          },
+        });
+      }
+    }
+    return list;
+  }, [wardGeofences, savedGeofenceLanding]);
 
   const [selectedGeofenceId, setSelectedGeofenceId] = useState(
     searchParams.get("focusGeofenceId") || "",
@@ -832,7 +862,10 @@ export default function MdBgoPlanningPage() {
       const result = await createGeoFence(fencePayload).unwrap();
       const savedGeofenceId = result?.geofenceId || result?.id || "";
 
-      // 1. Terminate drawing mode completely (clears vertices, removes red cancel button & toolbar, unlocks ward)
+      // 1. Ensure geofences layer is active so it immediately shows on the map
+      setShowGeofencesLayer(true);
+
+      // 2. Terminate drawing mode completely (clears vertices, removes red cancel button & toolbar, unlocks ward)
       handleClearDrawing();
 
       // 2. Select the newly saved geofence
@@ -849,6 +882,7 @@ export default function MdBgoPlanningPage() {
         erfCount: erfsInside.length,
         premiseCount: wardPremises.length,
         meterCount: wardMeters.length,
+        points: [...drawingPoints],
       });
 
       // 4. Close confirm modal
@@ -950,7 +984,7 @@ export default function MdBgoPlanningPage() {
           <p style={styles.eyebrow}>Operations / MD BGO Planning Map</p>
           <h2 style={styles.title}>MD BGO Ward Planning Map</h2>
           <p style={styles.subtitle}>
-            Explore the municipal boundaries and wards. Select a ward to activate ERFs, premises, meters, and draw geofences up to 30 ERFs.
+            Explore the municipal boundaries and wards. Select a ward to activate ERFs, premises, meters, and draw geofences up to 60 ERFs.
           </p>
         </div>
       </div>
@@ -992,7 +1026,7 @@ export default function MdBgoPlanningPage() {
               disabled={!selectedWardPcode}
             >
               <option value="">All geofences in ward</option>
-              {wardGeofences.map((gf) => (
+              {displayGeofences.map((gf) => (
                 <option key={gf.id} value={gf.id}>
                   {gf.name}
                 </option>
@@ -1002,7 +1036,7 @@ export default function MdBgoPlanningPage() {
 
           {selectedWardPcode ? (
             <div style={styles.erfCountBadge}>
-              Ward {wardNumber}: {wardGeofences.length} Geofence{wardGeofences.length === 1 ? "" : "s"}
+              Ward {wardNumber}: {displayGeofences.length} Geofence{displayGeofences.length === 1 ? "" : "s"}
               {showErfsLayer || isDrawing ? ` · ${isErfsLoading ? "Loading ERFs…" : wardErfs.length + " ERFs"}` : ""}
               {showPremisesLayer ? ` · ${isPremisesLoading ? "Loading Premises…" : wardPremises.length + " Premises"}` : ""}
               {showMetersLayer ? ` · ${isMetersLoading ? "Loading Meters…" : wardMeters.length + " Meters"}` : ""}
@@ -1173,7 +1207,7 @@ export default function MdBgoPlanningPage() {
                 erfs={wardErfs}
                 premises={wardPremises}
                 meters={wardMeters}
-                geofences={wardGeofences}
+                geofences={displayGeofences}
                 selectedGeofenceId={selectedGeofenceId}
                 onSelectGeofence={setSelectedGeofenceId}
                 showWardBoundariesLayer={showWardBoundariesLayer}
@@ -1290,7 +1324,7 @@ export default function MdBgoPlanningPage() {
                   <span style={{ ...styles.legendDot, background: "#8b5cf6" }} />
                   <span style={styles.layerLabelText}>Geofences (this Ward)</span>
                   <strong style={styles.layerCount}>
-                    {selectedWardPcode ? wardGeofences.length : "—"}
+                    {selectedWardPcode ? displayGeofences.length : "—"}
                   </strong>
                 </label>
 
