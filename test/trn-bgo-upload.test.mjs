@@ -175,7 +175,7 @@ test("TrnBgoUploadPage defines handleDownloadSampleCsv to prevent runtime Refere
   );
 });
 
-test("TrnBgoUploadPage defines duplicate and eligible diagnostic flag columns", () => {
+test("TrnBgoUploadPage defines Found?, duplicate and eligible diagnostic flag columns", () => {
   const uploadPagePath = path.join(
     repoRoot,
     "src/pages/operations/TrnBgoUploadPage.jsx",
@@ -184,12 +184,22 @@ test("TrnBgoUploadPage defines duplicate and eligible diagnostic flag columns", 
 
   assert.match(
     content,
-    /key:\s*"duplicate"/,
-    "TrnBgoUploadPage must define duplicate column",
+    /key:\s*"foundInAsts"[\s\S]*?label:\s*"Found\?"[\s\S]*?value:\s*\(r\)\s*=>\s*\(r\.foundInAsts\s*\?\s*"True"\s*:\s*"False"\)/,
+    "TrnBgoUploadPage must define Found? column with True/False row values",
   );
   assert.match(
     content,
-    /key:\s*"eligible"/,
-    "TrnBgoUploadPage must define eligible column",
+    /key:\s*"duplicate"[\s\S]*?label:\s*"duplicate"[\s\S]*?value:\s*\(r\)\s*=>\s*\(r\.isDuplicate\s*\?\s*"True"\s*:\s*"False"\)/,
+    "TrnBgoUploadPage must define duplicate column with True/False row values",
+  );
+  assert.match(
+    content,
+    /key:\s*"eligible"[\s\S]*?label:\s*"eligible"[\s\S]*?value:\s*\(r\)\s*=>\s*\(r\.isEligible\s*\?\s*"True"\s*:\s*"False"\)/,
+    "TrnBgoUploadPage must define eligible column with True/False row values",
+  );
+  assert.equal(
+    content.includes('label: "LM Match"'),
+    false,
+    "LM Match column must remain removed",
   );
 });

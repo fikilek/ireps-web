@@ -544,27 +544,22 @@ export default function TrnBgoUploadPage() {
       },
       {
         key: "foundInAsts",
-        label: "In ASTS?",
-        width: 120,
+        label: "Found?",
+        width: 100,
         filter: "select",
         sortable: true,
-        value: (r) => (r.foundInAsts ? "EXISTS" : "NOT FOUND"),
+        value: (r) => (r.foundInAsts ? "True" : "False"),
         sortValue: (r) => (r.foundInAsts ? 1 : 0),
         render: (r) => (
           <span
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "2px 8px",
-              borderRadius: 6,
-              fontSize: 11,
-              fontWeight: 800,
-              background: r.foundInAsts ? "#ecfdf5" : "#fef2f2",
-              color: r.foundInAsts ? "#047857" : "#b91c1c",
-              border: `1px solid ${r.foundInAsts ? "#a7f3d0" : "#fecaca"}`,
+              fontFamily: "monospace",
+              fontWeight: 700,
+              fontSize: 12,
+              color: r.foundInAsts ? "#047857" : "#dc2626",
             }}
           >
-            {r.foundInAsts ? "✓ EXISTS" : "✗ NOT FOUND"}
+            {r.foundInAsts ? "True" : "False"}
           </span>
         ),
       },
@@ -574,7 +569,7 @@ export default function TrnBgoUploadPage() {
         width: 110,
         filter: "select",
         sortable: true,
-        value: (r) => String(Boolean(r.isDuplicate)),
+        value: (r) => (r.isDuplicate ? "True" : "False"),
         sortValue: (r) => (r.isDuplicate ? 1 : 0),
         render: (r) => (
           <span
@@ -585,7 +580,7 @@ export default function TrnBgoUploadPage() {
               color: r.isDuplicate ? "#b45309" : "#64748b",
             }}
           >
-            {String(Boolean(r.isDuplicate))}
+            {r.isDuplicate ? "True" : "False"}
           </span>
         ),
       },
@@ -595,7 +590,7 @@ export default function TrnBgoUploadPage() {
         width: 110,
         filter: "select",
         sortable: true,
-        value: (r) => String(Boolean(r.isEligible)),
+        value: (r) => (r.isEligible ? "True" : "False"),
         sortValue: (r) => (r.isEligible ? 1 : 0),
         render: (r) => (
           <span
@@ -606,7 +601,7 @@ export default function TrnBgoUploadPage() {
               color: r.isEligible ? "#047857" : "#dc2626",
             }}
           >
-            {String(Boolean(r.isEligible))}
+            {r.isEligible ? "True" : "False"}
           </span>
         ),
       },
