@@ -65,6 +65,22 @@ test("TRN BGO routes are registered in AppRoutes", () => {
   );
 });
 
+test("TRN BGO Register streams tc_uploads so all existing TRN batches display", () => {
+  const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
+  const content = fs.readFileSync(registerPath, "utf8");
+
+  assert.match(
+    content,
+    /useGetTcUploadsQuery/,
+    "Must stream tc_uploads to display all existing candidate and active TRN batches",
+  );
+  assert.match(
+    content,
+    /useDeleteTcUploadMutation/,
+    "Must support deleting unaccepted/staged TC uploads",
+  );
+});
+
 test("TRN BGO Register table layout conforms to specification", () => {
   const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
   const content = fs.readFileSync(registerPath, "utf8");
@@ -72,13 +88,13 @@ test("TRN BGO Register table layout conforms to specification", () => {
   // Verify mandatory columns
   assert.match(content, /label="Batch ID"/, "Must have Batch ID column");
   assert.match(content, /label="TRN Type"/, "Must have TRN Type column");
+  assert.match(content, /label="File Name"/, "Must have File Name column");
   assert.match(content, /<Th>BGO Rows<\/Th>/, "Must have BGO Rows column");
-  assert.match(content, /label="Allocation"/, "Must have Allocation column");
-  assert.match(content, /label="Allocated To"/, "Must have Allocated To column");
+  assert.match(content, /<Th>Allocation<\/Th>/, "Must have Allocation column");
+  assert.match(content, /label="BGO Status"/, "Must have BGO Status column");
+  assert.match(content, /label="Ready Meters"/, "Must have Ready Meters column");
   assert.match(content, /label="Total Meters"/, "Must have Total Meters column");
-  assert.match(content, /label="Ward"/, "Must have Ward column");
-  assert.match(content, /label="Geofence"/, "Must have Geofence column");
-  assert.match(content, /label="Created By"/, "Must have Created By column");
+  assert.match(content, /label="LM"/, "Must have LM column");
   assert.match(content, /<Th>Delete BGO<\/Th>/, "Must have Delete BGO column");
 
   // Verify top buttons
@@ -96,21 +112,5 @@ test("TRN BGO Register table layout conforms to specification", () => {
     content,
     /TRN BGO Dashboard/,
     "Must have 'TRN BGO Dashboard' action button",
-  );
-});
-
-test("TRN BGO Register enforces strict category isolation from BMD batches", () => {
-  const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
-  const content = fs.readFileSync(registerPath, "utf8");
-
-  assert.match(
-    content,
-    /function isTrnBatch/,
-    "Must define isTrnBatch filter function",
-  );
-  assert.match(
-    content,
-    /batchMode !== "BMD" && opType !== "METER_DISCOVERY"/,
-    "Must strictly exclude BMD / METER_DISCOVERY batches per MD-BGO-R011 and TRN-BGO-R003",
   );
 });

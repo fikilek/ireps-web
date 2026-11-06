@@ -5,9 +5,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import {
-  useGetBgoBatchesByLmQuery,
-  useDeleteUnacceptedBgoMutation,
-} from "../../redux/bgoApi";
+  useGetTcUploadsQuery,
+  useDeleteTcUploadMutation,
+} from "../../redux/tcApi";
+import { useGetBgoBatchesByLmQuery } from "../../redux/bgoApi";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 
@@ -54,85 +55,42 @@ function resolveWorkbase(auth = {}, geoState = {}) {
   };
 }
 
-function getWardLabel(batch = {}) {
-  const wardName = batch?.scope?.wardName;
-  const wardPcode = batch?.scope?.wardPcode || "";
-  const match = wardPcode.match(/(\d{1,3})$/);
-  const wardNo = match ? String(Number(match[1])) : "";
-
-  if (wardNo) return `Ward ${wardNo}`;
-  return wardName || "NAv";
-}
-
-function getWardNoFormatted(batch = {}) {
-  const wardPcode = batch?.scope?.wardPcode || "";
-  const match = wardPcode.match(/(\d{1,3})$/);
-  if (!match) return "NAv";
-  return match[1].padStart(3, "0");
-}
-
-function getBatchMeterCount(batch = {}) {
-  const count =
-    batch?.summary?.meterCount ??
-    batch?.summary?.totalRows ??
-    batch?.derivedExecutionSummary?.totalChildTrns ??
-    batch?.batchReleaseSummary?.totalRows ??
-    batch?.raw?.summary?.meterCount ??
-    batch?.raw?.worklist?.meterRefs?.length ??
-    batch?.raw?.refs?.trnIds?.length ??
-    0;
-  return Number(count) || 0;
-}
-
-function isTrnBatch(batch = {}) {
-  const batchMode = String(
-    batch?.batchMode || batch?.raw?.bgo?.batchMode || batch?.bgo?.batchMode || "",
-  ).toUpperCase();
-  const opType = String(
-    batch?.operationType || batch?.trnType || batch?.raw?.operationType || "",
-  ).toUpperCase();
-  return batchMode !== "BMD" && opType !== "METER_DISCOVERY";
-}
-
-function getTrnTypeInfo(batch = {}) {
-  const opType = String(
-    batch?.operationType ||
-      batch?.sourceUpload?.trnType ||
-      batch?.assignment?.instruction?.code ||
-      batch?.trnType ||
-      "",
-  ).toUpperCase();
+function getTrnTypeInfo(trnTypeRaw = "") {
+  const opType = String(trnTypeRaw || "").toUpperCase();
 
   if (opType.includes("DISCONNECT") || opType === "MDCN") {
-    return { label: "Disconnection", code: "MDCN", bg: "#fef2f2", text: "#b91c1c", border: "#fecaca" };
+    return { label: "Meter Disconnection", code: "MDCN", bg: "#fef2f2", text: "#b91c1c", border: "#fecaca" };
   }
   if (opType.includes("RECONNECT") || opType === "MRCN") {
-    return { label: "Reconnection", code: "MRCN", bg: "#ecfdf5", text: "#047857", border: "#a7f3d0" };
+    return { label: "Meter Reconnection", code: "MRCN", bg: "#ecfdf5", text: "#047857", border: "#a7f3d0" };
   }
   if (opType.includes("INSPECT") || opType === "MINS") {
-    return { label: "Inspection", code: "MINS", bg: "#f5f3ff", text: "#6d28d9", border: "#ddd6fe" };
+    return { label: "Meter Inspection", code: "MINS", bg: "#f5f3ff", text: "#6d28d9", border: "#ddd6fe" };
   }
   if (opType.includes("READ") || opType === "MRDG") {
-    return { label: "Reading", code: "MRDG", bg: "#f0f9ff", text: "#0369a1", border: "#bae6fd" };
+    return { label: "Meter Reading", code: "MRDG", bg: "#f0f9ff", text: "#0369a1", border: "#bae6fd" };
   }
   if (opType.includes("REMOV") || opType === "MREM") {
-    return { label: "Removal", code: "MREM", bg: "#fff7ed", text: "#c2410c", border: "#fed7aa" };
+    return { label: "Meter Removal", code: "MREM", bg: "#fff7ed", text: "#c2410c", border: "#fed7aa" };
   }
   return { label: opType || "Transaction", code: "TRN", bg: "#f8fafc", text: "#334155", border: "#e2e8f0" };
 }
 
-function getAllocationStatus(batch = {}) {
-  const workflowState = String(
-    batch?.workflowState || batch?.raw?.workflow?.state || "",
-  ).toUpperCase();
-  const targetId = String(
-    batch?.targetId || batch?.target?.id || batch?.raw?.bgo?.targetId || "",
-  ).trim();
-
-  if (workflowState === "COMPLETED") return "COMPLETED";
-  if (workflowState === "IN_PROGRESS") return "IN_PROGRESS";
-  if (workflowState === "ALLOCATED" || (targetId && workflowState === "ISSUED")) return "ALLOCATED";
-  return "READY_FOR_ALLOCATION";
+function getBgoStatusBadge(statusRaw = "") {
+  const status = String(statusRaw || "").toUpperCase();
+  if (status === "READY_FOR_BGO") {
+    return { label: "READY FOR BGO", bg: "#ecfdf5", text: "#047857", border: "#a7f3d0" };
+  }
+  if (status === "USED" || status === "ALLOCATED") {
+    return { label: "ALLOCATED", bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" };
+  }
+  if (status === "PARTIALLY_USED") {
+    return { label: "PARTIAL ALLOCATION", bg: "#fef3c7", text: "#b45309", border: "#fde68a" };
+  }
+  if (status === "NOT_READY") {
+    return { label: "NOT READY", bg: "#fef2f2", text: "#b91c1c", border: "#fecaca" };
+  }
+  return { label: status || "STAGED", bg: "#f1f5f9", text: "#475569", border: "#cbd5e1" };
 }
 
 function compareTableValues(left, right) {
@@ -272,16 +230,14 @@ export default function TrnBgoRegisterPage() {
     [auth, geoState],
   );
 
+  // Stream existing TRN uploads directly from tc_uploads (mirroring BGO Dashboard stream)
   const {
-    data: allBatches = [],
-    isLoading: isBatchesLoading,
-    error: batchesLoadError,
-  } = useGetBgoBatchesByLmQuery(
-    { lmPcode },
-    { skip: !lmPcode },
-  );
+    data: uploads = [],
+    isLoading: isUploadsLoading,
+    error: uploadsError,
+  } = useGetTcUploadsQuery({ limit: 500 });
 
-  const [deleteBgo, { isLoading: isDeletingBgo }] = useDeleteUnacceptedBgoMutation();
+  const [deleteTcUpload, { isLoading: isDeletingUpload }] = useDeleteTcUploadMutation();
 
   // Selection ticks
   const [tickedBatchIds, setTickedBatchIds] = useState(new Set());
@@ -303,134 +259,107 @@ export default function TrnBgoRegisterPage() {
   // Table filters & sorting
   const [batchIdFilter, setBatchIdFilter] = useState("");
   const [trnTypeFilter, setTrnTypeFilter] = useState("");
-  const [allocationFilter, setAllocationFilter] = useState("");
-  const [allocatedToFilter, setAllocatedToFilter] = useState("");
-  const [totalFilter, setTotalFilter] = useState("");
-  const [wardFilter, setWardFilter] = useState("");
-  const [geofenceFilter, setGeofenceFilter] = useState("");
-  const [createdByFilter, setCreatedByFilter] = useState("");
+  const [fileFilter, setFileFilter] = useState("");
+  const [bgoStatusFilter, setBgoStatusFilter] = useState("");
+  const [lmFilter, setLmFilter] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "createdAt", direction: "desc" });
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(5);
+  const [pageSize, setPageSize] = useState(10);
 
   const resetToFirstPage = () => setCurrentPage(1);
 
-  // Filter only TRN batches (strict category isolation per MD-BGO-R011 and TRN-BGO-R003)
-  const trnBatches = useMemo(() => {
-    return allBatches.filter(isTrnBatch);
-  }, [allBatches]);
-
-  // Summary KPIs
+  // Summary KPIs across existing TRN candidate batches
   const summary = useMemo(() => {
-    let ready = 0;
+    let readyForBgo = 0;
     let allocated = 0;
     let inProgress = 0;
-    let completed = 0;
+    let totalMeters = 0;
 
-    trnBatches.forEach((batch) => {
-      const status = getAllocationStatus(batch);
-      if (status === "READY_FOR_ALLOCATION") ready += 1;
-      else if (status === "ALLOCATED") allocated += 1;
-      else if (status === "IN_PROGRESS") inProgress += 1;
-      else if (status === "COMPLETED") completed += 1;
+    uploads.forEach((item) => {
+      const bgoStatus = String(item.bgoStatus || "").toUpperCase();
+      const readyRows = Number(item.readyRows || 0);
+      const totalRows = Number(item.totalRows || 0);
+
+      totalMeters += totalRows;
+
+      if (bgoStatus === "USED" || bgoStatus === "ALLOCATED") {
+        allocated += 1;
+      } else if (bgoStatus === "READY_FOR_BGO" || readyRows > 0) {
+        readyForBgo += 1;
+      } else if (bgoStatus === "PARTIALLY_USED") {
+        allocated += 1;
+      } else {
+        inProgress += 1;
+      }
     });
 
     return {
-      totalBatches: trnBatches.length,
-      readyForAllocation: ready,
+      totalBatches: uploads.length,
+      readyForAllocation: readyForBgo,
       allocated,
       inProgress,
-      completed,
+      totalMeters,
     };
-  }, [trnBatches]);
+  }, [uploads]);
 
-  // Unique dropdown options
-  const wardFilterOptions = useMemo(() => {
-    const set = new Set();
-    trnBatches.forEach((b) => {
-      const wardNo = getWardNoFormatted(b);
-      if (wardNo && wardNo !== "NAv") set.add(wardNo);
-    });
-    return Array.from(set).sort();
-  }, [trnBatches]);
-
+  // Dropdown options
   const trnTypeFilterOptions = useMemo(() => {
     const set = new Set();
-    trnBatches.forEach((b) => {
-      const info = getTrnTypeInfo(b);
+    uploads.forEach((b) => {
+      const info = getTrnTypeInfo(b.trnType);
       if (info.label) set.add(info.label);
     });
     return Array.from(set).sort();
-  }, [trnBatches]);
+  }, [uploads]);
 
-  const allocatedToOptions = useMemo(() => {
+  const lmFilterOptions = useMemo(() => {
     const set = new Set();
-    trnBatches.forEach((b) => {
-      const target = b?.targetName || b?.target?.name || "";
-      if (target) set.add(target);
+    uploads.forEach((b) => {
+      if (b.lmPcode && b.lmPcode !== "NAv") set.add(b.lmPcode);
     });
     return Array.from(set).sort();
-  }, [trnBatches]);
+  }, [uploads]);
 
   // Filtered rows
   const filteredBatches = useMemo(() => {
-    return trnBatches.filter((batch) => {
+    return uploads.filter((batch) => {
       if (batchIdFilter) {
         const id = String(batch.id || "").toLowerCase();
         if (!id.includes(batchIdFilter.toLowerCase())) return false;
       }
 
       if (trnTypeFilter) {
-        const info = getTrnTypeInfo(batch);
+        const info = getTrnTypeInfo(batch.trnType);
         if (info.label !== trnTypeFilter) return false;
       }
 
-      if (allocationFilter) {
-        const status = getAllocationStatus(batch);
-        if (allocationFilter === "ALLOCATED" && status !== "ALLOCATED" && status !== "IN_PROGRESS" && status !== "COMPLETED") return false;
-        if (allocationFilter === "NOT ALLOCATED" && status !== "READY_FOR_ALLOCATION") return false;
+      if (fileFilter) {
+        const file = String(batch.fileName || "").toLowerCase();
+        if (!file.includes(fileFilter.toLowerCase())) return false;
       }
 
-      if (allocatedToFilter) {
-        const target = String(batch?.targetName || batch?.target?.name || "").toLowerCase();
-        if (target !== allocatedToFilter.toLowerCase()) return false;
+      if (bgoStatusFilter) {
+        const bgoStatus = String(batch.bgoStatus || "").toUpperCase();
+        if (bgoStatusFilter === "READY_FOR_BGO" && bgoStatus !== "READY_FOR_BGO" && !(Number(batch.readyRows) > 0)) {
+          return false;
+        }
+        if (bgoStatusFilter === "ALLOCATED" && bgoStatus !== "USED" && bgoStatus !== "PARTIALLY_USED") {
+          return false;
+        }
+        if (bgoStatusFilter === "NOT_READY" && bgoStatus !== "NOT_READY") {
+          return false;
+        }
       }
 
-      if (totalFilter) {
-        const total = String(getBatchMeterCount(batch));
-        if (!total.includes(totalFilter)) return false;
-      }
-
-      if (wardFilter) {
-        const wardNo = getWardNoFormatted(batch);
-        if (wardNo !== wardFilter) return false;
-      }
-
-      if (geofenceFilter) {
-        const gf = String(batch?.geofenceName || batch?.geofenceRef?.name || "").toLowerCase();
-        if (!gf.includes(geofenceFilter.toLowerCase())) return false;
-      }
-
-      if (createdByFilter) {
-        const creator = String(batch?.metadata?.createdByUser || batch?.createdByUser || "").toLowerCase();
-        if (!creator.includes(createdByFilter.toLowerCase())) return false;
+      if (lmFilter) {
+        if (batch.lmPcode !== lmFilter) return false;
       }
 
       return true;
     });
-  }, [
-    trnBatches,
-    batchIdFilter,
-    trnTypeFilter,
-    allocationFilter,
-    allocatedToFilter,
-    totalFilter,
-    wardFilter,
-    geofenceFilter,
-    createdByFilter,
-  ]);
+  }, [uploads, batchIdFilter, trnTypeFilter, fileFilter, bgoStatusFilter, lmFilter]);
 
   // Sort
   const sortedBatches = useMemo(() => {
@@ -440,14 +369,13 @@ export default function TrnBgoRegisterPage() {
 
     list.sort((left, right) => {
       if (key === "batchId") return compareTableValues(left.id, right.id) * factor;
-      if (key === "trnType") return compareTableValues(getTrnTypeInfo(left).label, getTrnTypeInfo(right).label) * factor;
-      if (key === "allocation") return compareTableValues(getAllocationStatus(left), getAllocationStatus(right)) * factor;
-      if (key === "allocatedTo") return compareTableValues(left?.targetName || left?.target?.name, right?.targetName || right?.target?.name) * factor;
-      if (key === "total") return (getBatchMeterCount(left) - getBatchMeterCount(right)) * factor;
-      if (key === "ward") return compareTableValues(getWardNoFormatted(left), getWardNoFormatted(right)) * factor;
-      if (key === "geofence") return compareTableValues(left?.geofenceName || left?.geofenceRef?.name, right?.geofenceName || right?.geofenceRef?.name) * factor;
-      if (key === "createdBy") return compareTableValues(left?.metadata?.createdByUser || left?.createdByUser, right?.metadata?.createdByUser || right?.createdByUser) * factor;
-      return compareTableValues(left?.metadata?.createdAt, right?.metadata?.createdAt) * factor;
+      if (key === "trnType") return compareTableValues(getTrnTypeInfo(left.trnType).label, getTrnTypeInfo(right.trnType).label) * factor;
+      if (key === "fileName") return compareTableValues(left.fileName, right.fileName) * factor;
+      if (key === "status") return compareTableValues(left.bgoStatus, right.bgoStatus) * factor;
+      if (key === "readyRows") return (Number(left.readyRows || 0) - Number(right.readyRows || 0)) * factor;
+      if (key === "totalRows") return (Number(left.totalRows || 0) - Number(right.totalRows || 0)) * factor;
+      if (key === "lmPcode") return compareTableValues(left.lmPcode, right.lmPcode) * factor;
+      return compareTableValues(left.metadata?.createdAt, right.metadata?.createdAt) * factor;
     });
 
     return list;
@@ -486,9 +414,8 @@ export default function TrnBgoRegisterPage() {
     if (!deleteCandidate) return;
     setDeleteError("");
     try {
-      const result = await deleteBgo({
-        bgoBatchId: deleteCandidate.id,
-        tcId: deleteCandidate.tcId || deleteCandidate?.refs?.tcUploadId || "",
+      const result = await deleteTcUpload({
+        tcId: deleteCandidate.id,
       }).unwrap();
 
       if (result?.success) {
@@ -519,10 +446,7 @@ export default function TrnBgoRegisterPage() {
         <div style={styles.headerActions}>
           <Link
             to="/operations/trn-bgo/upload"
-            style={{
-              ...styles.primaryButton,
-              ...(!lmPcode ? styles.disabledButton : null),
-            }}
+            style={styles.primaryButton}
           >
             Upload & Create TRN BGO
           </Link>
@@ -535,7 +459,7 @@ export default function TrnBgoRegisterPage() {
           </Link>
 
           <Link
-            to="/operations/trn-bgo/dashboard"
+            to="/operations/bgo-dashboard"
             style={styles.secondaryLinkButton}
           >
             TRN BGO Dashboard
@@ -554,15 +478,9 @@ export default function TrnBgoRegisterPage() {
         </div>
       </div>
 
-      {!lmPcode ? (
+      {uploadsError ? (
         <div style={styles.errorNotice}>
-          Activate a Local Municipality workbase before managing TRN BGO batches.
-        </div>
-      ) : null}
-
-      {batchesLoadError ? (
-        <div style={styles.errorNotice}>
-          Failed to load TRN BGO Batches: {batchesLoadError?.data?.message || batchesLoadError?.message}
+          Failed to load TRN BGO batches: {uploadsError?.data?.message || uploadsError?.message}
         </div>
       ) : null}
 
@@ -572,7 +490,7 @@ export default function TrnBgoRegisterPage() {
         </div>
       ) : null}
 
-      {isBatchesLoading ? (
+      {isUploadsLoading ? (
         <div style={styles.loadingNotice}>Loading TRN BGO Batches...</div>
       ) : (
         <>
@@ -580,7 +498,7 @@ export default function TrnBgoRegisterPage() {
             <SummaryCard label="Total Batches" value={summary.totalBatches} />
             <SummaryCard label="Ready for Allocation" value={summary.readyForAllocation} />
             <SummaryCard label="Allocated" value={summary.allocated} />
-            <SummaryCard label="In Progress" value={summary.inProgress} />
+            <SummaryCard label="Total Meters" value={summary.totalMeters} />
           </div>
 
           <div style={styles.panel}>
@@ -588,7 +506,7 @@ export default function TrnBgoRegisterPage() {
               <div>
                 <h3 style={styles.panelTitle}>Permanent Transaction Batches</h3>
                 <p style={styles.panelSubtitle}>
-                  Permanent batches loaded from bgo_batches for {lmName} ({lmPcode}).
+                  Permanent batches loaded from Firestore tc_uploads and bgo_batches.
                 </p>
               </div>
 
@@ -625,40 +543,35 @@ export default function TrnBgoRegisterPage() {
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
-                    <Th>BGO Rows</Th>
                     <SortableTh
-                      label="Allocation"
-                      sortKey="allocation"
+                      label="File Name"
+                      sortKey="fileName"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <Th>BGO Rows</Th>
+                    <Th>Allocation</Th>
+                    <SortableTh
+                      label="BGO Status"
+                      sortKey="status"
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
                     <SortableTh
-                      label="Allocated To"
-                      sortKey="allocatedTo"
+                      label="Ready Meters"
+                      sortKey="readyRows"
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
                     <SortableTh
                       label="Total Meters"
-                      sortKey="total"
+                      sortKey="totalRows"
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
                     <SortableTh
-                      label="Ward"
-                      sortKey="ward"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Geofence"
-                      sortKey="geofence"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Created By"
-                      sortKey="createdBy"
+                      label="LM"
+                      sortKey="lmPcode"
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
@@ -700,97 +613,56 @@ export default function TrnBgoRegisterPage() {
                         ))}
                       </select>
                     </th>
+                    <th style={styles.filterHeaderCell}>
+                      <input
+                        type="text"
+                        value={fileFilter}
+                        onChange={(e) => {
+                          setFileFilter(e.target.value);
+                          resetToFirstPage();
+                        }}
+                        placeholder="Filter File"
+                        style={styles.columnFilterInput}
+                        aria-label="Filter File"
+                      />
+                    </th>
+                    <th style={styles.filterHeaderCell} />
                     <th style={styles.filterHeaderCell} />
                     <th style={styles.filterHeaderCell}>
                       <select
-                        value={allocationFilter}
+                        value={bgoStatusFilter}
                         onChange={(e) => {
-                          setAllocationFilter(e.target.value);
+                          setBgoStatusFilter(e.target.value);
                           resetToFirstPage();
                         }}
                         style={styles.columnFilterInput}
-                        aria-label="Filter Allocation"
+                        aria-label="Filter BGO Status"
                       >
                         <option value="">All</option>
-                        <option value="NOT ALLOCATED">Not Allocated</option>
+                        <option value="READY_FOR_BGO">Ready for BGO</option>
                         <option value="ALLOCATED">Allocated</option>
+                        <option value="NOT_READY">Not Ready</option>
                       </select>
                     </th>
+                    <th style={styles.filterHeaderCell} />
+                    <th style={styles.filterHeaderCell} />
                     <th style={styles.filterHeaderCell}>
                       <select
-                        value={allocatedToFilter}
+                        value={lmFilter}
                         onChange={(e) => {
-                          setAllocatedToFilter(e.target.value);
+                          setLmFilter(e.target.value);
                           resetToFirstPage();
                         }}
                         style={styles.columnFilterInput}
-                        aria-label="Filter Allocated To"
+                        aria-label="Filter LM"
                       >
-                        <option value="">All</option>
-                        {allocatedToOptions.map((opt) => (
+                        <option value="">All LMs</option>
+                        {lmFilterOptions.map((opt) => (
                           <option key={opt} value={opt}>
                             {opt}
                           </option>
                         ))}
                       </select>
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={totalFilter}
-                        onChange={(e) => {
-                          setTotalFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Total"
-                      />
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <select
-                        value={wardFilter}
-                        onChange={(e) => {
-                          setWardFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Ward"
-                      >
-                        <option value="">All Wards</option>
-                        {wardFilterOptions.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        value={geofenceFilter}
-                        onChange={(e) => {
-                          setGeofenceFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter Geofence"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Geofence"
-                      />
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        value={createdByFilter}
-                        onChange={(e) => {
-                          setCreatedByFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter Created By"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Created By"
-                      />
                     </th>
                     <th style={styles.filterHeaderCell} />
                   </tr>
@@ -800,25 +672,18 @@ export default function TrnBgoRegisterPage() {
                   {sortedBatches.length === 0 ? (
                     <tr>
                       <Td colSpan={12}>
-                        {trnBatches.length === 0
-                          ? "No permanent TRN BGO Batches were found for this Local Municipality."
+                        {uploads.length === 0
+                          ? "No permanent TRN BGO Batches were found."
                           : "No permanent TRN BGO Batches match the selected filters."}
                       </Td>
                     </tr>
                   ) : null}
 
                   {pagedBatches.map((batch) => {
-                    const status = getAllocationStatus(batch);
-                    const isAllocated = status === "ALLOCATED" || status === "IN_PROGRESS" || status === "COMPLETED";
                     const isTicked = tickedBatchIds.has(batch.id);
-                    const targetName = batch?.targetName || batch?.target?.name || "";
-                    const totalMeters = getBatchMeterCount(batch);
-                    const wardNo = getWardNoFormatted(batch);
-                    const wardPcode = batch?.scope?.wardPcode || "NAv";
-                    const geofenceName = batch?.geofenceName || batch?.geofenceRef?.name || "NAv";
-                    const createdBy = batch?.metadata?.createdByUser || batch?.createdByUser || "NAv";
-                    const canDelete = status === "READY_FOR_ALLOCATION" || status === "ALLOCATED";
-                    const trnType = getTrnTypeInfo(batch);
+                    const trnType = getTrnTypeInfo(batch.trnType);
+                    const bgoStatus = getBgoStatusBadge(batch.bgoStatus);
+                    const canAllocate = Number(batch.readyRows || 0) > 0 || batch.bgoStatus === "READY_FOR_BGO";
 
                     return (
                       <tr key={batch.id}>
@@ -833,9 +698,9 @@ export default function TrnBgoRegisterPage() {
 
                         <Td>
                           <Link
-                            to={`/operations/geo-fences?focusGeofenceId=${encodeURIComponent(batch.geofenceId || batch.geofenceRef?.id || "")}`}
+                            to={`/operations/tc-uploads/${batch.id}/bgo`}
                             style={styles.mapLinkButton}
-                            title="View Geofence Map"
+                            title="View BGO Geofences"
                           >
                             <svg
                               width="17"
@@ -878,8 +743,14 @@ export default function TrnBgoRegisterPage() {
                         </Td>
 
                         <Td>
+                          <div style={styles.fileNameCell} title={batch.fileName}>
+                            {batch.fileName}
+                          </div>
+                        </Td>
+
+                        <Td>
                           <Link
-                            to={`/operations/trn-bgo-rows?batchId=${encodeURIComponent(batch.id)}&wardPcode=${encodeURIComponent(wardPcode)}&lmPcode=${encodeURIComponent(lmPcode)}`}
+                            to={`/operations/tc-uploads/${batch.id}`}
                             style={styles.rowLinkButton}
                           >
                             BGO Rows
@@ -887,60 +758,56 @@ export default function TrnBgoRegisterPage() {
                         </Td>
 
                         <Td>
-                          {isAllocated ? (
-                            <Link
-                              to={`/operations/trn-bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
-                              style={styles.unallocateButton}
-                              title="View or modify allocation on Allocation Board"
-                            >
-                              Unallocate
-                            </Link>
-                          ) : (
-                            <Link
-                              to={`/operations/trn-bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
-                              style={styles.rowLinkButton}
-                              title="Allocate this batch on Allocation Board"
-                            >
-                              Allocate
-                            </Link>
-                          )}
+                          <Link
+                            to={`/operations/tc-uploads/${batch.id}/bgo`}
+                            style={{
+                              ...styles.allocateButton,
+                              ...(!canAllocate ? styles.disabledButton : null),
+                            }}
+                            title={canAllocate ? "Open BGO allocation" : "No ready rows available for BGO"}
+                          >
+                            Allocate
+                          </Link>
                         </Td>
 
                         <Td>
-                          {targetName ? (
-                            <div style={styles.strongCell}>{targetName}</div>
-                          ) : null}
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 8px",
+                              borderRadius: 6,
+                              fontSize: 11,
+                              fontWeight: 800,
+                              background: bgoStatus.bg,
+                              color: bgoStatus.text,
+                              border: `1px solid ${bgoStatus.border}`,
+                            }}
+                          >
+                            {bgoStatus.label}
+                          </span>
                         </Td>
 
                         <Td>
-                          <strong style={styles.totalCell}>{formatNumber(totalMeters)}</strong>
+                          <strong style={styles.readyCell}>{formatNumber(batch.readyRows)}</strong>
                         </Td>
 
                         <Td>
-                          <div style={styles.strongCell}>{wardNo}</div>
-                          <div style={styles.mutedCell}>{wardPcode}</div>
+                          <strong style={styles.totalCell}>{formatNumber(batch.totalRows)}</strong>
                         </Td>
 
                         <Td>
-                          <div style={styles.strongCell}>{geofenceName}</div>
-                        </Td>
-
-                        <Td>
-                          <div style={styles.strongCell}>{createdBy}</div>
+                          <div style={styles.strongCell}>{batch.lmPcode || "NAv"}</div>
                         </Td>
 
                         <Td>
                           <button
                             type="button"
-                            style={{
-                              ...styles.deleteBatchButton,
-                              ...(!canDelete ? styles.disabledButton : null),
-                            }}
-                            disabled={!canDelete}
+                            style={styles.deleteBatchButton}
                             onClick={() => handleOpenDelete(batch)}
-                            title={canDelete ? "Delete unaccepted BGO" : "Cannot delete active/executed batch"}
+                            title="Delete this batch upload"
                           >
-                            Delete BGO
+                            Delete
                           </button>
                         </Td>
                       </tr>
@@ -971,8 +838,8 @@ export default function TrnBgoRegisterPage() {
           <div style={styles.modalBox}>
             <h3 style={styles.modalTitle}>Delete TRN BGO Batch</h3>
             <p style={styles.modalText}>
-              Are you sure you want to delete batch <strong>{deleteCandidate.id}</strong>?
-              This will remove the permanent batch document and release any associated staged rows.
+              Are you sure you want to delete batch <strong>{deleteCandidate.id}</strong> ({deleteCandidate.fileName})?
+              This will remove the uploaded batch and all associated rows.
             </p>
 
             {deleteError ? (
@@ -984,7 +851,7 @@ export default function TrnBgoRegisterPage() {
                 type="button"
                 style={styles.modalCancelButton}
                 onClick={handleCloseDelete}
-                disabled={isDeletingBgo}
+                disabled={isDeletingUpload}
               >
                 Cancel
               </button>
@@ -992,9 +859,9 @@ export default function TrnBgoRegisterPage() {
                 type="button"
                 style={styles.modalDeleteButton}
                 onClick={handleConfirmDelete}
-                disabled={isDeletingBgo}
+                disabled={isDeletingUpload}
               >
-                {isDeletingBgo ? "Deleting..." : "Delete Batch"}
+                {isDeletingUpload ? "Deleting..." : "Delete Batch"}
               </button>
             </div>
           </div>
@@ -1232,9 +1099,17 @@ const styles = {
     color: "#0f172a",
     fontWeight: 700,
   },
-  mutedCell: {
-    color: "#64748b",
-    fontSize: 12,
+  fileNameCell: {
+    maxWidth: 240,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "#334155",
+  },
+  readyCell: {
+    color: "#166534",
+    fontSize: 14,
+    fontWeight: 900,
   },
   totalCell: {
     color: "#0f172a",
@@ -1254,18 +1129,18 @@ const styles = {
     textDecoration: "none",
     border: "1px solid #bfdbfe",
   },
-  unallocateButton: {
+  allocateButton: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     padding: "6px 12px",
     borderRadius: 8,
-    background: "#fef3c7",
-    color: "#92400e",
+    background: "#f0fdf4",
+    color: "#166534",
     fontWeight: 800,
     fontSize: 12,
     textDecoration: "none",
-    border: "1px solid #fde68a",
+    border: "1px solid #bbf7d0",
   },
   mapLinkButton: {
     display: "inline-flex",
