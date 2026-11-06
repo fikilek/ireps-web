@@ -174,3 +174,22 @@ test("TrnBgoUploadPage defines handleDownloadSampleCsv to prevent runtime Refere
     "handleDownloadSampleCsv must populate verified Endumeni meters (04298074776)",
   );
 });
+
+test("TrnBgoUploadPage defines duplicate and eligible diagnostic flag columns", () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const content = fs.readFileSync(uploadPagePath, "utf8");
+
+  assert.match(
+    content,
+    /key:\s*"duplicate"/,
+    "TrnBgoUploadPage must define duplicate column",
+  );
+  assert.match(
+    content,
+    /key:\s*"eligible"/,
+    "TrnBgoUploadPage must define eligible column",
+  );
+});
