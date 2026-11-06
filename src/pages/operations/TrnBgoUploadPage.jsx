@@ -542,6 +542,84 @@ export default function TrnBgoUploadPage() {
         render: (r) => <span style={styles.meterNoCell}>{r.meterNo}</span>,
       },
       {
+        key: "foundInAsts",
+        label: "In ASTS?",
+        width: 120,
+        filter: "select",
+        sortable: true,
+        value: (r) => (r.foundInAsts ? "EXISTS" : "NOT FOUND"),
+        sortValue: (r) => (r.foundInAsts ? 1 : 0),
+        render: (r) => (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              borderRadius: 6,
+              fontSize: 11,
+              fontWeight: 800,
+              background: r.foundInAsts ? "#ecfdf5" : "#fef2f2",
+              color: r.foundInAsts ? "#047857" : "#b91c1c",
+              border: `1px solid ${r.foundInAsts ? "#a7f3d0" : "#fecaca"}`,
+            }}
+          >
+            {r.foundInAsts ? "✓ EXISTS" : "✗ NOT FOUND"}
+          </span>
+        ),
+      },
+      {
+        key: "isLmMatch",
+        label: "LM Match",
+        width: 130,
+        filter: "select",
+        sortable: true,
+        value: (r) =>
+          !r.foundInAsts ? "N/A" : r.isLmMatch ? "MATCH" : `OTHER (${r.astLmPcode})`,
+        sortValue: (r) => (r.isLmMatch ? 1 : 0),
+        render: (r) => {
+          if (!r.foundInAsts) {
+            return <span style={{ color: "#94a3b8", fontSize: 11 }}>N/A</span>;
+          }
+          if (r.isLmMatch) {
+            return (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  background: "#eff6ff",
+                  color: "#1d4ed8",
+                  border: "1px solid #bfdbfe",
+                }}
+              >
+                ✓ {r.astLmPcode || "MATCH"}
+              </span>
+            );
+          }
+          return (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 800,
+                background: "#fffbeb",
+                color: "#b45309",
+                border: "1px solid #fde68a",
+              }}
+              title={`Meter belongs to municipality ${r.astLmPcode}`}
+            >
+              ⚠ {r.astLmPcode || "MISMATCH"}
+            </span>
+          );
+        },
+      },
+      {
         key: "meterPhase",
         label: "meterPhase",
         width: 130,
@@ -889,77 +967,6 @@ export default function TrnBgoUploadPage() {
                 title="Clear table and upload a different file"
               >
                 Upload Different File
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Filter Bar */}
-          <div style={styles.filterBar}>
-            <div style={styles.filterGroup}>
-              <span style={styles.filterLabel}>ASTS Filter:</span>
-              <button
-                type="button"
-                style={{
-                  ...styles.filterPill,
-                  ...(foundFilter === "ALL" ? styles.filterPillActive : null),
-                }}
-                onClick={() => setFoundFilter("ALL")}
-              >
-                All ({summary.total})
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...styles.filterPill,
-                  ...(foundFilter === "FOUND" ? styles.filterPillActive : null),
-                }}
-                onClick={() => setFoundFilter("FOUND")}
-              >
-                ✓ Exists in ASTS ({summary.found})
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...styles.filterPill,
-                  ...(foundFilter === "NOT_FOUND" ? styles.filterPillActive : null),
-                }}
-                onClick={() => setFoundFilter("NOT_FOUND")}
-              >
-                ✗ Not Found ({summary.notFound})
-              </button>
-            </div>
-
-            <div style={styles.filterGroup}>
-              <span style={styles.filterLabel}>LM Scope:</span>
-              <button
-                type="button"
-                style={{
-                  ...styles.filterPill,
-                  ...(lmFilter === "ALL" ? styles.filterPillActive : null),
-                }}
-                onClick={() => setLmFilter("ALL")}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...styles.filterPill,
-                  ...(lmFilter === "MATCH" ? styles.filterPillActive : null),
-                }}
-                onClick={() => setLmFilter("MATCH")}
-              >
-                Active LM ({summary.lmMatches})
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...styles.filterPill,
-                  ...(lmFilter === "MISMATCH" ? styles.filterPillActive : null),
-                }}
-                onClick={() => setLmFilter("MISMATCH")}
-              >
-                Other LM ({summary.lmMismatches})
               </button>
             </div>
           </div>
