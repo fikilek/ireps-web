@@ -142,13 +142,24 @@ export default function TrnBgoUploadPage() {
 
     reader.onload = async (e) => {
       try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, {
-          type: "array",
-          cellText: false,
-          cellDates: true,
-          raw: false, // Preserves strings including leading zeroes
-        });
+        const ext = (file.name || "").split(".").pop().toLowerCase();
+        let workbook;
+        if (ext === "csv") {
+          const text =
+            typeof e.target.result === "string"
+              ? e.target.result
+              : new TextDecoder().decode(e.target.result);
+          workbook = XLSX.read(text, {
+            type: "string",
+            raw: true,
+          });
+        } else {
+          const data = new Uint8Array(e.target.result);
+          workbook = XLSX.read(data, {
+            type: "array",
+            raw: true,
+          });
+        }
 
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
           setFileError("Validation Failed: The workbook contains no worksheets.");
@@ -200,7 +211,7 @@ export default function TrnBgoUploadPage() {
         // Parse data rows as JSON using the header keys
         const rawDataRows = XLSX.utils.sheet_to_json(worksheet, {
           defval: "",
-          raw: false,
+          raw: true,
         });
 
         // Gate 3: Row Count limits (1 to 100 rows)
@@ -293,8 +304,18 @@ export default function TrnBgoUploadPage() {
         );
 
         const meterAstMap = new Map();
-        const allMeterNos = parsedRowsDraft.map((r) => r.meterNo);
-        const chunks = chunkArray(allMeterNos, 30);
+        const queryMetersSet = new Set();
+        parsedRowsDraft.forEach((r) => {
+          queryMetersSet.add(r.meterNo);
+          if (r.meterNo.length === 10 && /^\d+$/.test(r.meterNo)) {
+            queryMetersSet.add("0" + r.meterNo);
+          }
+          if (r.meterNo.startsWith("0") && r.meterNo.length === 11) {
+            queryMetersSet.add(r.meterNo.slice(1));
+          }
+        });
+        const allQueryMeterNos = Array.from(queryMetersSet);
+        const chunks = chunkArray(allQueryMeterNos, 30);
 
         for (const chunk of chunks) {
           const astQuery = query(
@@ -308,15 +329,24 @@ export default function TrnBgoUploadPage() {
               data?.ast?.astData?.astNo || data?.master?.id || ""
             ).trim().toUpperCase();
             if (astNo) {
-              meterAstMap.set(astNo, {
+              const docEntry = {
                 id: doc.id,
                 ...data,
-              });
+              };
+              meterAstMap.set(astNo, docEntry);
+              if (astNo.startsWith("0")) {
+                meterAstMap.set(astNo.slice(1), docEntry);
+              } else if (astNo.length === 10) {
+                meterAstMap.set("0" + astNo, docEntry);
+              }
             }
           });
         }
 
-        const foundCount = meterAstMap.size;
+        const foundCount = parsedRowsDraft.filter((r) =>
+          meterAstMap.has(r.meterNo) ||
+          (r.meterNo.length === 10 && meterAstMap.has("0" + r.meterNo))
+        ).length;
 
         // Gate 6 Check: At least 1 meter must exist
         if (foundCount === 0) {
@@ -329,7 +359,7 @@ export default function TrnBgoUploadPage() {
 
         // Enrich parsed rows with ASTS verification details and LM Match
         const enrichedRows = parsedRowsDraft.map((row) => {
-          const astDoc = meterAstMap.get(row.meterNo);
+          const astDoc = meterAstMap.get(row.meterNo) || (row.meterNo.length === 10 ? meterAstMap.get("0" + row.meterNo) : null);
           const foundInAsts = Boolean(astDoc);
           const astLmPcode = String(
             astDoc?.accessData?.parents?.lmPcode || ""
@@ -383,7 +413,12 @@ export default function TrnBgoUploadPage() {
       setValidationProgress("");
     };
 
-    reader.readAsArrayBuffer(file);
+    const fileExt = (file.name || "").split(".").pop().toLowerCase();
+    if (fileExt === "csv") {
+      reader.readAsText(file);
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
   };
 
   const handleReset = () => {
