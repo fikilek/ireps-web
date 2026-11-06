@@ -697,6 +697,7 @@ export default function ConsoleLayout() {
                             <NavLink
                               key={item.path}
                               to={item.path}
+                              end={item.path === "/operations"}
                               className={({ isActive }) =>
                                 isActive ? "active" : ""
                               }

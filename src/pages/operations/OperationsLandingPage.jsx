@@ -2,31 +2,44 @@ import { Link } from "react-router-dom";
 
 const operationModules = [
   {
-    title: "TC Uploads",
+    title: "TRN BGO Register",
+    icon: "TR",
     description:
-      "Upload, validate, and prepare TRN candidate rows before AST-focused BGO consumes them.",
-    path: "/operations/tc-uploads",
+      "Upload, validate, and manage bulk transaction batches (disconnections, readings, inspections) for BGO field execution.",
+    path: "/operations/trn-bgo",
     status: "Active",
     active: true,
   },
   {
-    title: "MD BGO",
+    title: "TB Register",
+    icon: "TB",
     description:
-      "Allocate existing ward geofences to TEAMs or SPs for bulk meter discovery.",
+      "Targeted Batches register for field campaigns, surveys, and targeted meter work.",
+    path: "/operations/targeted-batches",
+    status: "Active",
+    active: true,
+  },
+  {
+    title: "MD BGO Register",
+    icon: "MD",
+    description:
+      "Geofence-based Meter Discovery batch planning, ERF selection, and field allocation.",
     path: "/operations/bgo",
     status: "Active",
     active: true,
   },
   {
-    title: "BGO Dashboard",
+    title: "Dashboard",
+    icon: "DB",
     description:
-      "Monitor BGO batch progress, release state, and execution summaries.",
-    path: "/operations/bgo-dashboard",
+      "Central operational control dashboard monitoring TB, BGO, and ITO field progress.",
+    path: "/operations/dashboard",
     status: "Active",
     active: true,
   },
   {
     title: "Operational Teams",
+    icon: "Op",
     description:
       "Manage teams for allocation, assignment, and field execution grouping.",
     path: "/operations/teams",
@@ -35,19 +48,12 @@ const operationModules = [
   },
   {
     title: "Geo-Fences",
+    icon: "Ge",
     description:
       "Manage operational geospatial work areas for planning and batch work.",
     path: "/operations/geo-fences",
     status: "Active",
     active: true,
-  },
-  {
-    title: "WMS Dashboard",
-    description:
-      "Monitor office-issued workorders, activity, acceptance, and completion.",
-    path: "/operations/wms-dashboard",
-    status: "Coming Soon",
-    active: false,
   },
 ];
 
@@ -65,11 +71,6 @@ export default function OperationsLandingPage() {
         </div>
       </div>
 
-      <div style={styles.notice}>
-        <strong>TC Uploads v1:</strong> TC prepares candidate rows for BGO. TC
-        does not create TRNs and does not issue workorders.
-      </div>
-
       <div style={styles.grid}>
         {operationModules.map((module) => (
           <OperationCard key={module.title} module={module} />
@@ -83,7 +84,7 @@ function OperationCard({ module }) {
   const cardContent = (
     <>
       <div style={styles.cardTopRow}>
-        <div style={styles.cardIcon}>{module.title.slice(0, 2)}</div>
+        <div style={styles.cardIcon}>{module.icon || module.title.slice(0, 2)}</div>
         <span
           style={{
             ...styles.statusBadge,
@@ -146,16 +147,6 @@ const styles = {
     maxWidth: 760,
     color: "#64748b",
     lineHeight: 1.6,
-  },
-  notice: {
-    background: "#eff6ff",
-    border: "1px solid #bfdbfe",
-    color: "#1e3a8a",
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 16,
-    fontSize: 14,
-    lineHeight: 1.5,
   },
   grid: {
     display: "grid",
