@@ -678,8 +678,10 @@ export default function MdBgoPlanningPage() {
   const [createGeoFence, { isLoading: isSavingGeofence }] = useCreateGeoFenceMutation();
   const [createBgo, { isLoading: isCreatingBgo }] = useCreateBgoMutation();
 
-  // Dialog & creation states
-  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  // Dialog & creation states (GPS Sales Table geofence creation routine TB-R055 / GF-R001)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [drawWard, setDrawWard] = useState(null);
   const [geofenceNameInput, setGeofenceNameInput] = useState("");
   const [geofenceDescInput, setGeofenceDescInput] = useState("");
   const [formError, setFormError] = useState("");
@@ -696,7 +698,9 @@ export default function MdBgoPlanningPage() {
   function handleClearDrawing() {
     setDrawingPoints([]);
     setIsDrawing(false);
-    setIsNameModalOpen(false);
+    setIsCreateModalOpen(false);
+    setIsConfirmModalOpen(false);
+    setDrawWard(null);
     setFormError("");
   }
 
@@ -754,6 +758,40 @@ export default function MdBgoPlanningPage() {
   const fullStandardName = useMemo(() => {
     return composeGeofenceName(wardNumber, geofenceNamePart(geofenceNameInput));
   }, [wardNumber, geofenceNameInput]);
+
+  const duplicateWarning = useMemo(() => {
+    const namePart = geofenceNamePart(geofenceNameInput);
+    if (!namePart) return "";
+    const duplicate = findDuplicateGeofence(fullStandardName, wardGeofences);
+    return duplicate ? duplicateGeofenceNameMessage(duplicate) : "";
+  }, [geofenceNameInput, fullStandardName, wardGeofences]);
+
+
+  // Routine Step 1 -> Step 2: Validate name & Start Drawing
+  const handleStartDrawing = () => {
+    const namePart = geofenceNamePart(geofenceNameInput);
+    if (!namePart) {
+      setFormError(`Type a name after "Gf W${wardNumber}".`);
+      return;
+    }
+
+    const duplicate = findDuplicateGeofence(fullStandardName, wardGeofences);
+    if (duplicate) {
+      setFormError(duplicateGeofenceNameMessage(duplicate));
+      return;
+    }
+
+    setDrawWard({
+      pcode: selectedWardPcode,
+      number: wardNumber,
+      name: activeWard?.name || activeWard?.wardName || `Ward ${wardNumber}`,
+    });
+    setDrawingPoints([]);
+    setShowErfsLayer(true);
+    setIsDrawing(true);
+    setIsCreateModalOpen(false);
+    setFormError("");
+  };
 
   // Stage A: Save Geofence Only
   const handleSaveGeofenceOnly = async () => {
@@ -898,7 +936,12 @@ export default function MdBgoPlanningPage() {
             <select
               value={selectedWardPcode}
               onChange={(e) => handleSelectWard(e.target.value)}
-              style={styles.select}
+              style={{
+                ...styles.select,
+                ...(isDrawing ? styles.disabledSelect : null),
+              }}
+              disabled={isDrawing}
+              title={isDrawing ? "Ward selector is locked while drawing. Batches belong to 1 ward only." : ""}
             >
               <option value="">Whole Municipality ({lmName || lmPcode})</option>
               {wards.map((w) => {
@@ -957,9 +1000,10 @@ export default function MdBgoPlanningPage() {
               if (isDrawing) {
                 handleClearDrawing();
               } else {
-                setDrawingPoints([]);
-                setShowErfsLayer(true);
-                setIsDrawing(true);
+                setGeofenceNameInput("");
+                setGeofenceDescInput("");
+                setFormError("");
+                setIsCreateModalOpen(true);
               }
             }}
           >
@@ -971,8 +1015,16 @@ export default function MdBgoPlanningPage() {
       {/* Drawing Toolbar Indicator */}
       {isDrawing ? (
         <div style={styles.drawingStatusBar}>
-          <div style={{ ...styles.drawingCountText, color: counterTone }}>
-            <strong>{counterText}</strong>
+          <div style={styles.drawingStatusLeft}>
+            <span style={styles.drawingCreatingBadge}>
+              Creating: <strong>{fullStandardName}</strong>
+            </span>
+            <span style={styles.drawingPointsCount}>
+              {drawingPoints.length} point{drawingPoints.length === 1 ? "" : "s"}
+            </span>
+            <div style={{ ...styles.drawingCountText, color: counterTone }}>
+              <strong>{counterText}</strong>
+            </div>
           </div>
 
           <div style={styles.drawingActions}>
@@ -994,19 +1046,24 @@ export default function MdBgoPlanningPage() {
             </button>
             <button
               type="button"
+              style={styles.drawingCancelButton}
+              onClick={handleClearDrawing}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
               style={{
                 ...styles.drawingSaveButton,
                 ...(!canSave ? styles.disabledButton : null),
               }}
               disabled={!canSave}
               onClick={() => {
-                setGeofenceNameInput("");
-                setGeofenceDescInput("");
                 setFormError("");
-                setIsNameModalOpen(true);
+                setIsConfirmModalOpen(true);
               }}
             >
-              Save Geofence ({erfsInside.length})
+              Save ({erfsInside.length})
             </button>
           </div>
         </div>
@@ -1173,14 +1230,17 @@ export default function MdBgoPlanningPage() {
         )}
       </div>
 
-      {/* Save Geofence & Create Batch Modal */}
-      {isNameModalOpen ? (
+      {/* Pre-Drawing Modal: Enter Geofence Name & Lock Ward */}
+      {isCreateModalOpen ? (
         <div style={styles.modalOverlay} role="presentation">
           <div style={styles.modalCard} role="dialog" aria-modal="true">
-            <p style={styles.eyebrow}>Save Geofence</p>
+            <p style={styles.eyebrow}>Draw Targeted Batch Geofence</p>
             <h3 style={styles.modalTitle}>
-              Encompasses {erfsInside.length} ERFs (Limit: {BGO_ERF_LIMIT})
+              Targeted Batch: Ward {wardNumber}
             </h3>
+            <p style={styles.modalSubtitle}>
+              Batches belong to 1 ward only. Geofence names always start with "Gf W{wardNumber}" and must be unique in this ward.
+            </p>
 
             <div style={styles.formGroup}>
               <label style={styles.label}>
@@ -1192,7 +1252,10 @@ export default function MdBgoPlanningPage() {
                   type="text"
                   placeholder="e.g. Albert Street North"
                   value={geofenceNameInput}
-                  onChange={(e) => setGeofenceNameInput(e.target.value)}
+                  onChange={(e) => {
+                    setGeofenceNameInput(e.target.value);
+                    if (formError) setFormError("");
+                  }}
                   style={styles.textInput}
                   autoFocus
                 />
@@ -1202,11 +1265,15 @@ export default function MdBgoPlanningPage() {
               </div>
             </div>
 
+            {duplicateWarning ? (
+              <div style={styles.modalError}>{duplicateWarning}</div>
+            ) : null}
+
             <div style={styles.formGroup}>
               <label style={styles.label}>Description (Optional)</label>
               <input
                 type="text"
-                placeholder="Optional notes"
+                placeholder="Optional description / notes"
                 value={geofenceDescInput}
                 onChange={(e) => setGeofenceDescInput(e.target.value)}
                 style={styles.textInput}
@@ -1219,7 +1286,53 @@ export default function MdBgoPlanningPage() {
               <button
                 type="button"
                 style={styles.modalCancelButton}
-                onClick={() => setIsNameModalOpen(false)}
+                onClick={() => setIsCreateModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.modalPrimaryButton,
+                  ...(!geofenceNamePart(geofenceNameInput) || Boolean(duplicateWarning)
+                    ? styles.disabledButton
+                    : null),
+                }}
+                onClick={handleStartDrawing}
+                disabled={!geofenceNamePart(geofenceNameInput) || Boolean(duplicateWarning)}
+              >
+                Start Drawing
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Confirm Modal: Save Geofence Only vs Save & Create Batch */}
+      {isConfirmModalOpen ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true">
+            <p style={styles.eyebrow}>Confirm Geofence & Batch</p>
+            <h3 style={styles.modalTitle}>
+              Save Geofence: {fullStandardName}
+            </h3>
+            <p style={styles.modalSubtitle}>
+              Encompasses {erfsInside.length} ERFs in Ward {wardNumber} (Batch Limit: {BGO_ERF_LIMIT} ERFs).
+            </p>
+
+            <div style={styles.confirmSummaryBox}>
+              <div><strong>Ward:</strong> Ward {wardNumber} ({activeWard?.name || activeWard?.wardName || lmName})</div>
+              <div><strong>Coverage:</strong> {erfsInside.length} ERFs · {wardPremises.length} Known Premises · {wardMeters.length} Meters</div>
+              <div><strong>Points:</strong> {drawingPoints.length} polygon vertices</div>
+            </div>
+
+            {formError ? <div style={styles.modalError}>{formError}</div> : null}
+
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalCancelButton}
+                onClick={() => setIsConfirmModalOpen(false)}
                 disabled={isSavingGeofence || isCreatingBgo}
               >
                 Cancel
@@ -1227,7 +1340,10 @@ export default function MdBgoPlanningPage() {
               <button
                 type="button"
                 style={styles.modalSecondaryButton}
-                onClick={handleSaveGeofenceOnly}
+                onClick={async () => {
+                  await handleSaveGeofenceOnly();
+                  setIsConfirmModalOpen(false);
+                }}
                 disabled={isSavingGeofence || isCreatingBgo}
               >
                 {isSavingGeofence ? "Saving..." : "Save Geofence Only"}
@@ -1235,7 +1351,10 @@ export default function MdBgoPlanningPage() {
               <button
                 type="button"
                 style={styles.modalPrimaryButton}
-                onClick={handleSaveAndCreateBatch}
+                onClick={async () => {
+                  await handleSaveAndCreateBatch();
+                  setIsConfirmModalOpen(false);
+                }}
                 disabled={isSavingGeofence || isCreatingBgo}
               >
                 {isCreatingBgo ? "Creating Batch..." : "Save & Create Batch"}
@@ -1677,5 +1796,65 @@ const styles = {
     padding: "8px 16px",
     fontWeight: 800,
     cursor: "pointer",
+  },
+  drawingStatusLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  drawingCreatingBadge: {
+    fontSize: 13,
+    color: "#0f172a",
+    background: "#f1f5f9",
+    padding: "4px 10px",
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+  },
+  drawingPointsCount: {
+    fontSize: 12,
+    color: "#64748b",
+  },
+  drawingCancelButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 8,
+    background: "#ffffff",
+    color: "#64748b",
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  textareaInput: {
+    width: "100%",
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 13,
+    color: "#0f172a",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  modalNote: {
+    color: "#64748b",
+    fontSize: 12,
+    margin: "10px 0 0",
+    lineHeight: 1.4,
+  },
+  confirmSummaryBox: {
+    padding: 12,
+    background: "#f8fafc",
+    borderRadius: 10,
+    border: "1px solid #e2e8f0",
+    marginBottom: 14,
+    display: "grid",
+    gap: 6,
+    fontSize: 13,
+    color: "#334155",
+  },
+  disabledSelect: {
+    background: "#f1f5f9",
+    cursor: "not-allowed",
+    opacity: 0.7,
   },
 };
