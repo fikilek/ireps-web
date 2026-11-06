@@ -318,28 +318,38 @@ export default function TrnBgoUploadPage() {
         const chunks = chunkArray(allQueryMeterNos, 30);
 
         for (const chunk of chunks) {
-          const astQuery = query(
+          const astQuery1 = query(
             collection(db, "asts"),
             where("ast.astData.astNo", "in", chunk)
           );
-          const snap = await getDocs(astQuery);
-          snap.forEach((doc) => {
-            const data = doc.data();
-            const astNo = String(
-              data?.ast?.astData?.astNo || data?.master?.id || ""
-            ).trim().toUpperCase();
-            if (astNo) {
+          const astQuery2 = query(
+            collection(db, "asts"),
+            where("master.id", "in", chunk)
+          );
+          const [snap1, snap2] = await Promise.all([
+            getDocs(astQuery1),
+            getDocs(astQuery2),
+          ]);
+          [snap1, snap2].forEach((snap) => {
+            snap.forEach((doc) => {
+              const data = doc.data();
+              const astNo = String(
+                data?.ast?.astData?.astNo || data?.master?.id || ""
+              ).trim().toUpperCase();
+              const masterId = String(data?.master?.id || "").trim().toUpperCase();
               const docEntry = {
                 id: doc.id,
                 ...data,
               };
-              meterAstMap.set(astNo, docEntry);
-              if (astNo.startsWith("0")) {
-                meterAstMap.set(astNo.slice(1), docEntry);
-              } else if (astNo.length === 10) {
-                meterAstMap.set("0" + astNo, docEntry);
-              }
-            }
+              [astNo, masterId].filter(Boolean).forEach((num) => {
+                meterAstMap.set(num, docEntry);
+                if (num.startsWith("0")) {
+                  meterAstMap.set(num.slice(1), docEntry);
+                } else if (num.length === 10) {
+                  meterAstMap.set("0" + num, docEntry);
+                }
+              });
+            });
           });
         }
 
@@ -478,6 +488,30 @@ export default function TrnBgoUploadPage() {
     const link = document.createElement("a");
     link.href = url;
     link.download = `NOT_FOUND_METERS_${selectedFile?.name || "upload"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Download Official Sample CSV populated with verified Endumeni (ZA5241) meters
+  const handleDownloadSampleCsv = () => {
+    const rows = [
+      OFFICIAL_HEADERS.join(","),
+      "1,04298074776,Single Phase,electricity,0001106531,,Residential,Credit control disconnection,3,,CONNECTED,654",
+      "2,04298082191,Single Phase,electricity,0001108730,,Residential,Credit control disconnection,3,,CONNECTED,956",
+      "3,04298084684,Single Phase,electricity,0001114692,,Residential,Credit control disconnection,3,,CONNECTED,1561",
+      "4,04297706063,Single Phase,electricity,0002011113,,Residential,Credit control disconnection,6,,CONNECTED,4230",
+      "5,04297706121,Single Phase,electricity,0002010425,,Residential,Credit control disconnection,6,,CONNECTED,4241",
+      "6,04297749576,Single Phase,electricity,0002139600,,Residential,Credit control disconnection,6,,CONNECTED,2631",
+      "7,04297756324,Single Phase,electricity,0002139598,,Residential,Credit control disconnection,6,,CONNECTED,2631",
+      "8,04297758833,Single Phase,electricity,0002011635,,Residential,Credit control disconnection,6,,CONNECTED,2631",
+    ];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "TC_TEST_METERS_DISCONNECTION.csv";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

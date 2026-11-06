@@ -150,3 +150,27 @@ test("AppRoutes routes /operations/trn-bgo/upload to TrnBgoUploadPage", () => {
     "/operations/trn-bgo/upload must render TrnBgoUploadPage",
   );
 });
+
+test("TrnBgoUploadPage defines handleDownloadSampleCsv to prevent runtime ReferenceError", () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const content = fs.readFileSync(uploadPagePath, "utf8");
+
+  assert.match(
+    content,
+    /const handleDownloadSampleCsv\s*=\s*\(\)\s*=>/,
+    "handleDownloadSampleCsv must be declared as a function in TrnBgoUploadPage.jsx",
+  );
+  assert.match(
+    content,
+    /onClick=\{handleDownloadSampleCsv\}/,
+    "Button must reference declared handleDownloadSampleCsv",
+  );
+  assert.match(
+    content,
+    /04298074776/,
+    "handleDownloadSampleCsv must populate verified Endumeni meters (04298074776)",
+  );
+});
