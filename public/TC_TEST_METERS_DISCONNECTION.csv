@@ -1,0 +1,9 @@
+rowNo,meterNo,meterPhase,meterType,linkedAccountNo,premiseAddress,premisePropertyType,actionReason,wardNo,geofence,meterStatus,erfNo
+1,04085348920,Single Phase,electricity,ACC5317,5317 John Parkie Avenue,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5317
+2,04085348706,Single Phase,electricity,ACC5326,5326 Mochana Alley Street,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5326
+3,04085348246,Single Phase,electricity,ACC5553,5553 Mochana Alley Street,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5553
+4,04085348567,Single Phase,electricity,ACC5571,5571 Mochana Alley Street,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5571
+5,04085348514,Single Phase,electricity,ACC5360,5360 Modisakeng Alley Street,Residential,Credit control disconnection,6,Gf Modisakeng Alley,CONNECTED,5360
+6,04085348753,Single Phase,electricity,ACC5386,5386 Modisakeng Alley Street,Residential,Credit control disconnection,6,Gf Modisakeng Alley,CONNECTED,5386
+7,0476812443,Single Phase,electricity,ACC001,192 Kruger Street Mpumelelo,Residential,Credit control list,13,Gf Kruger Mpumelelo,CONNECTED,5320
+8,04297756282,Single Phase,electricity,ACC002,5176 CRAIGSIDE Drive,Residential,Credit control list,13,Gf Kruger Mpumelelo,CONNECTED,5321

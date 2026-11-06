@@ -671,6 +671,14 @@ export default function TrnBgoUploadPage() {
         </div>
 
         <div style={styles.headerActions}>
+          <button
+            type="button"
+            style={styles.sampleDownloadButton}
+            onClick={handleDownloadSampleCsv}
+            title="Download pre-populated sample CSV template"
+          >
+            ↓ Download Sample CSV
+          </button>
           <Link to="/operations/trn-bgo" style={styles.secondaryLinkButton}>
             ← Back to TRN BGO Register
           </Link>
@@ -1123,6 +1131,19 @@ const styles = {
     fontSize: 14,
     fontWeight: 800,
     color: "#0f172a",
+  },
+  sampleDownloadButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontWeight: 700,
+    fontSize: 13,
+    cursor: "pointer",
   },
   resetButton: {
     padding: "8px 14px",
