@@ -35,7 +35,6 @@ import GeneralMonthlyReportPage from "../pages/reports/GeneralMonthlyReportPage"
 import AnomalyReportPage from "../pages/reports/AnomalyReportPage";
 import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 
-import OperationsLandingPage from "../pages/operations/OperationsLandingPage";
 import OperationalTeamsPage from "../pages/operations/OperationalTeamsPage";
 import TcUploadsPage from "../pages/operations/TcUploadsPage";
 import ItoPage from "../pages/operations/ItoPage";
@@ -414,11 +413,7 @@ export default function AppRoutes() {
 
           <Route
             path="/operations"
-            element={
-              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <OperationsLandingPage />
-              </RoleRoute>
-            }
+            element={<Navigate to="/operations/dashboard" replace />}
           />
 
           {/* DR-R001 section 4: only a Manager and a supervisor issue this

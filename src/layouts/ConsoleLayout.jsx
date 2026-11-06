@@ -231,11 +231,6 @@ const navSections = [
         label: "Operations",
         items: [
           {
-            label: "Operations Overview",
-            path: "/operations",
-            allowedRoles: MANAGEMENT_ROLES,
-          },
-          {
             // UI-R009: one dashboard. TB, BGO and ITO are reached from it.
             label: "Dashboard",
             path: "/operations/dashboard",
