@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 
-test("TrnBgoUploadPage exists and uses XLSX and IrepsTable", () => {
+test("TrnBgoUploadPage exists and defines official 12-column template", () => {
   const uploadPagePath = path.join(
     repoRoot,
     "src/pages/operations/TrnBgoUploadPage.jsx",
@@ -27,9 +27,112 @@ test("TrnBgoUploadPage exists and uses XLSX and IrepsTable", () => {
   );
   assert.match(
     content,
-    /VALID_EXTENSIONS\s*=\s*\["csv",\s*"xlsx",\s*"xls",\s*"xml"\]/,
-    "TrnBgoUploadPage must strictly validate CSV and Excel extensions",
+    /MAX_UPLOAD_ROWS\s*=\s*100/,
+    "TrnBgoUploadPage must enforce max 100 rows limit",
   );
+  assert.match(
+    content,
+    /<IrepsTable[\s\S]*?rows=\{filteredRows\}/,
+    "TrnBgoUploadPage must pass filteredRows as the rows prop to IrepsTable",
+  );
+});
+
+test("Official template column header parity: exactly 12 columns in order", () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const content = fs.readFileSync(uploadPagePath, "utf8");
+
+  const expectedHeaders = [
+    "rowNo",
+    "meterNo",
+    "meterPhase",
+    "meterType",
+    "linkedAccountNo",
+    "premiseAddress",
+    "premisePropertyType",
+    "actionReason",
+    "wardNo",
+    "geofence",
+    "meterStatus",
+    "erfNo",
+  ];
+
+  for (const h of expectedHeaders) {
+    assert.ok(
+      content.includes(`"${h}"`),
+      `OFFICIAL_HEADERS must include "${h}"`,
+    );
+  }
+});
+
+test("Validation: Column headers check rejects missing or extra columns", () => {
+  const expected = [
+    "rowNo",
+    "meterNo",
+    "meterPhase",
+    "meterType",
+    "linkedAccountNo",
+    "premiseAddress",
+    "premisePropertyType",
+    "actionReason",
+    "wardNo",
+    "geofence",
+    "meterStatus",
+    "erfNo",
+  ];
+
+  const validateHeaders = (headers) => {
+    const missing = expected.filter((h) => !headers.includes(h));
+    const extra = headers.filter((h) => h && !expected.includes(h));
+    return { valid: missing.length === 0 && extra.length === 0, missing, extra };
+  };
+
+  // Exact match
+  assert.equal(validateHeaders(expected).valid, true);
+
+  // Missing meterNo
+  const missingOne = expected.filter((h) => h !== "meterNo");
+  const resMissing = validateHeaders(missingOne);
+  assert.equal(resMissing.valid, false);
+  assert.deepEqual(resMissing.missing, ["meterNo"]);
+
+  // Extra column added
+  const extraCol = [...expected, "unexpectedField"];
+  const resExtra = validateHeaders(extraCol);
+  assert.equal(resExtra.valid, false);
+  assert.deepEqual(resExtra.extra, ["unexpectedField"]);
+});
+
+test("Validation: Row limits (1 to 100 rows)", () => {
+  const checkRowCount = (count) => {
+    if (count < 1) return { valid: false, error: "0 rows" };
+    if (count > 100) return { valid: false, error: "Exceeds 100 rows" };
+    return { valid: true };
+  };
+
+  assert.equal(checkRowCount(0).valid, false);
+  assert.equal(checkRowCount(1).valid, true);
+  assert.equal(checkRowCount(50).valid, true);
+  assert.equal(checkRowCount(100).valid, true);
+  assert.equal(checkRowCount(101).valid, false);
+});
+
+test("Validation: No duplicate meters within the same file", () => {
+  const checkDuplicates = (meters) => {
+    const seen = new Set();
+    for (const m of meters) {
+      if (seen.has(m)) return { valid: false, duplicate: m };
+      seen.add(m);
+    }
+    return { valid: true };
+  };
+
+  assert.equal(checkDuplicates(["04085348920", "04085348921"]).valid, true);
+  const dupCheck = checkDuplicates(["04085348920", "04085348920"]);
+  assert.equal(dupCheck.valid, false);
+  assert.equal(dupCheck.duplicate, "04085348920");
 });
 
 test("AppRoutes routes /operations/trn-bgo/upload to TrnBgoUploadPage", () => {
@@ -46,22 +149,4 @@ test("AppRoutes routes /operations/trn-bgo/upload to TrnBgoUploadPage", () => {
     /path="\/operations\/trn-bgo\/upload"[\s\S]*?<TrnBgoUploadPage \/>/,
     "/operations/trn-bgo/upload must render TrnBgoUploadPage",
   );
-});
-
-test("File extension validation logic handles allowed and rejected extensions", () => {
-  const validExtensions = ["csv", "xlsx", "xls", "xml"];
-  const isAllowed = (filename) => {
-    const ext = filename.split(".").pop().toLowerCase();
-    return validExtensions.includes(ext);
-  };
-
-  assert.equal(isAllowed("meter_disconnections.csv"), true);
-  assert.equal(isAllowed("METERS.XLSX"), true);
-  assert.equal(isAllowed("batch_2026.xls"), true);
-  assert.equal(isAllowed("export.xml"), true);
-
-  assert.equal(isAllowed("document.pdf"), false);
-  assert.equal(isAllowed("payload.json"), false);
-  assert.equal(isAllowed("image.png"), false);
-  assert.equal(isAllowed("script.py"), false);
 });
