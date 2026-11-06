@@ -249,4 +249,11 @@ test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and 
   assert.match(content, /skip: !shouldLoadErfs/, "ERF query must be skipped when layer is inactive and not drawing");
   assert.match(content, /skip: !shouldLoadPremises/, "Premises query must be skipped when layer is inactive");
   assert.match(content, /skip: !shouldLoadMeters/, "Meters query must be skipped when layer is inactive");
+
+  // Verify declaration order: state hooks must be declared before query conditions
+  const showErfsIndex = content.indexOf("const [showErfsLayer, setShowErfsLayer] = useState(false);");
+  const isDrawingIndex = content.indexOf("const [isDrawing, setIsDrawing] = useState(false);");
+  const shouldLoadErfsIndex = content.indexOf("const shouldLoadErfs =");
+  assert.ok(showErfsIndex !== -1 && shouldLoadErfsIndex !== -1 && showErfsIndex < shouldLoadErfsIndex, "showErfsLayer must be initialized before shouldLoadErfs");
+  assert.ok(isDrawingIndex !== -1 && isDrawingIndex < shouldLoadErfsIndex, "isDrawing must be initialized before shouldLoadErfs");
 });

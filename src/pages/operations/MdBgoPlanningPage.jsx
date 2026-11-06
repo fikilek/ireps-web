@@ -631,6 +631,18 @@ export default function MdBgoPlanningPage() {
     [searchParams, setSearchParams],
   );
 
+  // Collapsible Map Layers Panel (matching Sales GPS pattern)
+  const [layersOpen, setLayersOpen] = useState(true);
+  const [showWardBoundariesLayer, setShowWardBoundariesLayer] = useState(true);
+  const [showErfsLayer, setShowErfsLayer] = useState(false);
+  const [showPremisesLayer, setShowPremisesLayer] = useState(false);
+  const [showMetersLayer, setShowMetersLayer] = useState(false);
+  const [showGeofencesLayer, setShowGeofencesLayer] = useState(true);
+
+  // Drawing state
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawingPoints, setDrawingPoints] = useState([]);
+
   // ERFs for selected ward (lazy-loaded when layer active or drawing)
   const shouldLoadErfs = Boolean(selectedWardPcode && lmPcode && (showErfsLayer || isDrawing));
   const { data: wardErfs = [], isLoading: isErfsLoading } = useGetErfsByWardQuery(
@@ -661,18 +673,6 @@ export default function MdBgoPlanningPage() {
   const [selectedGeofenceId, setSelectedGeofenceId] = useState(
     searchParams.get("focusGeofenceId") || "",
   );
-
-  // Collapsible Map Layers Panel (matching Sales GPS pattern)
-  const [layersOpen, setLayersOpen] = useState(true);
-  const [showWardBoundariesLayer, setShowWardBoundariesLayer] = useState(true);
-  const [showErfsLayer, setShowErfsLayer] = useState(false);
-  const [showPremisesLayer, setShowPremisesLayer] = useState(false);
-  const [showMetersLayer, setShowMetersLayer] = useState(false);
-  const [showGeofencesLayer, setShowGeofencesLayer] = useState(true);
-
-  // Drawing state
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawingPoints, setDrawingPoints] = useState([]);
 
   // Mutations
   const [createGeoFence, { isLoading: isSavingGeofence }] = useCreateGeoFenceMutation();
