@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 
 import { useAuth } from "../../auth/useAuth";
-import { useWarehouse } from "@/context/WarehouseContext";
+import { useGeo } from "@/context/GeoContext";
 import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
 import { useGetErfsByWardQuery } from "../../redux/wardErfsApi";
 import {
@@ -25,6 +25,39 @@ import {
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
 const BGO_ERF_LIMIT = 30;
+
+function resolveWorkbase(auth = {}, geoState = {}) {
+  const candidate =
+    auth?.activeWorkbase ||
+    auth?.profile?.access?.activeWorkbase ||
+    auth?.profile?.activeWorkbase ||
+    auth?.activeLm ||
+    (Array.isArray(auth?.workbases) && auth.workbases[0]) ||
+    (Array.isArray(auth?.profile?.access?.workbases) && auth.profile.access.workbases[0]) ||
+    geoState?.selectedLm ||
+    null;
+
+  const pcode = String(
+    candidate?.lmPcode ||
+      candidate?.pcode ||
+      candidate?.id ||
+      candidate?.localMunicipalityId ||
+      "",
+  ).trim();
+
+  const name = String(
+    candidate?.name ||
+      candidate?.lmName ||
+      candidate?.id ||
+      candidate?.pcode ||
+      "NAv",
+  ).trim();
+
+  return {
+    lmPcode: pcode === "NAv" ? "" : pcode,
+    lmName,
+  };
+}
 
 function parseGeometry(geometry) {
   if (!geometry) return null;
@@ -270,19 +303,14 @@ function MdBgoMapInner({
 export default function MdBgoPlanningPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { userProfile, role } = useAuth();
-  const { activeWorkbase, selectedLm } = useWarehouse();
+  const auth = useAuth();
+  const { role } = auth || {};
+  const { geoState } = useGeo();
 
-  const lmPcode = String(
-    selectedLm?.pcode ||
-      selectedLm?.id ||
-      activeWorkbase?.lmPcode ||
-      activeWorkbase?.pcode ||
-      "",
-  ).trim();
-  const lmName = String(
-    selectedLm?.name || activeWorkbase?.name || activeWorkbase?.lmName || "NAv",
-  ).trim();
+  const { lmPcode, lmName } = useMemo(
+    () => resolveWorkbase(auth, geoState),
+    [auth, geoState],
+  );
 
   // Wards
   const { data: wards = [], isLoading: isWardsLoading } = useGetRegistryWardsByLmQuery(

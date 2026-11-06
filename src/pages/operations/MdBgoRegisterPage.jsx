@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
-import { useWarehouse } from "@/context/WarehouseContext";
+import { useGeo } from "@/context/GeoContext";
 import {
   useGetBgoBatchesByLmQuery,
   useDeleteUnacceptedBgoMutation,
@@ -21,27 +21,37 @@ function valueOrNav(value) {
   return text || "NAv";
 }
 
-function getActiveLmPcode(activeWorkbase, selectedLm) {
-  return String(
-    selectedLm?.pcode ||
-      selectedLm?.id ||
-      activeWorkbase?.lmPcode ||
-      activeWorkbase?.pcode ||
-      activeWorkbase?.id ||
-      activeWorkbase?.localMunicipalityId ||
+function resolveWorkbase(auth = {}, geoState = {}) {
+  const candidate =
+    auth?.activeWorkbase ||
+    auth?.profile?.access?.activeWorkbase ||
+    auth?.profile?.activeWorkbase ||
+    auth?.activeLm ||
+    (Array.isArray(auth?.workbases) && auth.workbases[0]) ||
+    (Array.isArray(auth?.profile?.access?.workbases) && auth.profile.access.workbases[0]) ||
+    geoState?.selectedLm ||
+    null;
+
+  const pcode = String(
+    candidate?.lmPcode ||
+      candidate?.pcode ||
+      candidate?.id ||
+      candidate?.localMunicipalityId ||
       "",
   ).trim();
-}
 
-function getActiveWorkbaseName(activeWorkbase, selectedLm) {
-  return String(
-    selectedLm?.name ||
-      selectedLm?.lmName ||
-      activeWorkbase?.name ||
-      activeWorkbase?.lmName ||
-      activeWorkbase?.id ||
+  const name = String(
+    candidate?.name ||
+      candidate?.lmName ||
+      candidate?.id ||
+      candidate?.pcode ||
       "NAv",
   ).trim();
+
+  return {
+    lmPcode: pcode === "NAv" ? "" : pcode,
+    lmName,
+  };
 }
 
 function getWardLabel(batch = {}) {
@@ -224,11 +234,13 @@ function PaginationControls({
 
 export default function MdBgoRegisterPage() {
   const navigate = useNavigate();
-  const { userProfile, role } = useAuth();
-  const { activeWorkbase, selectedLm } = useWarehouse();
+  const auth = useAuth();
+  const { geoState } = useGeo();
 
-  const lmPcode = getActiveLmPcode(activeWorkbase, selectedLm);
-  const lmName = getActiveWorkbaseName(activeWorkbase, selectedLm);
+  const { lmPcode, lmName } = useMemo(
+    () => resolveWorkbase(auth, geoState),
+    [auth, geoState],
+  );
 
   const {
     data: allBatches = [],

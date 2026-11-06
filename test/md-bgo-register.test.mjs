@@ -125,3 +125,39 @@ test("MD BGO Planning Map adheres to 30 ERF limit invariant", () => {
     "Geofence naming prefix must adhere to GF-R001 pattern",
   );
 });
+
+test("MD BGO Register and Planning resolve active workbase from auth and geo context", () => {
+  const registerPath = path.join(repoRoot, "src/pages/operations/MdBgoRegisterPage.jsx");
+  const registerContent = fs.readFileSync(registerPath, "utf8");
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const planningContent = fs.readFileSync(planningPath, "utf8");
+
+  // Verify resolveWorkbase exists and checks auth.activeWorkbase, profile.access.activeWorkbase, workbases, and geoState
+  for (const [name, content] of [["Register", registerContent], ["Planning", planningContent]]) {
+    assert.match(
+      content,
+      /function resolveWorkbase/,
+      `${name} must define resolveWorkbase helper`,
+    );
+    assert.match(
+      content,
+      /auth\?\.activeWorkbase/,
+      `${name} must check auth.activeWorkbase`,
+    );
+    assert.match(
+      content,
+      /auth\?\.profile\?\.access\?\.activeWorkbase/,
+      `${name} must check auth.profile.access.activeWorkbase`,
+    );
+    assert.match(
+      content,
+      /geoState\?\.selectedLm/,
+      `${name} must check geoState.selectedLm`,
+    );
+    assert.doesNotMatch(
+      content,
+      /const\s*\{\s*activeWorkbase\s*,\s*selectedLm\s*\}\s*=\s*useWarehouse\(\)/,
+      `${name} must NOT destructure activeWorkbase from useWarehouse()`,
+    );
+  }
+});
