@@ -631,22 +631,25 @@ export default function MdBgoPlanningPage() {
     [searchParams, setSearchParams],
   );
 
-  // ERFs for selected ward
+  // ERFs for selected ward (lazy-loaded when layer active or drawing)
+  const shouldLoadErfs = Boolean(selectedWardPcode && lmPcode && (showErfsLayer || isDrawing));
   const { data: wardErfs = [], isLoading: isErfsLoading } = useGetErfsByWardQuery(
     { lmPcode, wardPcode: selectedWardPcode },
-    { skip: !selectedWardPcode || !lmPcode },
+    { skip: !shouldLoadErfs },
   );
 
-  // Premises for selected ward
+  // Premises for selected ward (lazy-loaded when layer active)
+  const shouldLoadPremises = Boolean(selectedWardPcode && showPremisesLayer);
   const { data: wardPremises = [], isLoading: isPremisesLoading } = useGetPremisesByWardQuery(
     selectedWardPcode,
-    { skip: !selectedWardPcode },
+    { skip: !shouldLoadPremises },
   );
 
-  // Meters (Assets) for selected ward
+  // Meters (Assets) for selected ward (lazy-loaded when layer active)
+  const shouldLoadMeters = Boolean(selectedWardPcode && lmPcode && showMetersLayer);
   const { data: wardMeters = [], isLoading: isMetersLoading } = useGetAstsByLmPcodeWardPcodeQuery(
     { lmPcode, wardPcode: selectedWardPcode },
-    { skip: !selectedWardPcode || !lmPcode },
+    { skip: !shouldLoadMeters },
   );
 
   // Existing Geofences for selected ward
@@ -662,9 +665,9 @@ export default function MdBgoPlanningPage() {
   // Collapsible Map Layers Panel (matching Sales GPS pattern)
   const [layersOpen, setLayersOpen] = useState(true);
   const [showWardBoundariesLayer, setShowWardBoundariesLayer] = useState(true);
-  const [showErfsLayer, setShowErfsLayer] = useState(true);
-  const [showPremisesLayer, setShowPremisesLayer] = useState(true);
-  const [showMetersLayer, setShowMetersLayer] = useState(true);
+  const [showErfsLayer, setShowErfsLayer] = useState(false);
+  const [showPremisesLayer, setShowPremisesLayer] = useState(false);
+  const [showMetersLayer, setShowMetersLayer] = useState(false);
   const [showGeofencesLayer, setShowGeofencesLayer] = useState(true);
 
   // Drawing state
@@ -929,7 +932,10 @@ export default function MdBgoPlanningPage() {
 
           {selectedWardPcode ? (
             <div style={styles.erfCountBadge}>
-              Ward {wardNumber}: {wardErfs.length} ERFs · {wardPremises.length} Premises · {wardMeters.length} Meters
+              Ward {wardNumber}: {wardGeofences.length} Geofence{wardGeofences.length === 1 ? "" : "s"}
+              {showErfsLayer || isDrawing ? ` · ${isErfsLoading ? "Loading ERFs…" : wardErfs.length + " ERFs"}` : ""}
+              {showPremisesLayer ? ` · ${isPremisesLoading ? "Loading Premises…" : wardPremises.length + " Premises"}` : ""}
+              {showMetersLayer ? ` · ${isMetersLoading ? "Loading Meters…" : wardMeters.length + " Meters"}` : ""}
             </div>
           ) : (
             <div style={styles.lmCountBadge}>
@@ -952,6 +958,7 @@ export default function MdBgoPlanningPage() {
                 handleClearDrawing();
               } else {
                 setDrawingPoints([]);
+                setShowErfsLayer(true);
                 setIsDrawing(true);
               }
             }}
@@ -1090,9 +1097,7 @@ export default function MdBgoPlanningPage() {
                   />
                   <span style={{ ...styles.legendDot, background: "#94a3b8" }} />
                   <span style={styles.layerLabelText}>ERFs</span>
-                  <strong style={styles.layerCount}>
-                    {selectedWardPcode ? wardErfs.length : "—"}
-                  </strong>
+                  <strong style={styles.layerCount}>{selectedWardPcode ? (showErfsLayer || isDrawing ? (isErfsLoading ? "Loading…" : wardErfs.length) : "Off") : "—"}</strong>
                 </label>
 
                 <label
@@ -1109,9 +1114,7 @@ export default function MdBgoPlanningPage() {
                   />
                   <span style={{ ...styles.legendDot, background: "#2563eb" }} />
                   <span style={styles.layerLabelText}>Premises</span>
-                  <strong style={styles.layerCount}>
-                    {selectedWardPcode ? wardPremises.length : "—"}
-                  </strong>
+                  <strong style={styles.layerCount}>{selectedWardPcode ? (showPremisesLayer ? (isPremisesLoading ? "Loading…" : wardPremises.length) : "Off") : "—"}</strong>
                 </label>
 
                 <label
@@ -1128,9 +1131,7 @@ export default function MdBgoPlanningPage() {
                   />
                   <span style={{ ...styles.legendDot, background: "#0f766e" }} />
                   <span style={styles.layerLabelText}>Meters</span>
-                  <strong style={styles.layerCount}>
-                    {selectedWardPcode ? wardMeters.length : "—"}
-                  </strong>
+                  <strong style={styles.layerCount}>{selectedWardPcode ? (showMetersLayer ? (isMetersLoading ? "Loading…" : wardMeters.length) : "Off") : "—"}</strong>
                 </label>
 
                 <label

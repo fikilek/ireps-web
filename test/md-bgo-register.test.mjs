@@ -237,4 +237,16 @@ test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and 
 
   // Gated activation when no ward is selected
   assert.match(content, /disabled=\{!selectedWardPcode\}/, "ERFs, premises, meters & geofences must be gated to selected ward");
+
+  // Performance defaults (MD-BGO-R010 v1.3.0): ERFs, premises, and meters OFF by default
+  assert.match(content, /const \[showErfsLayer, setShowErfsLayer\] = useState\(false\);/, "showErfsLayer must default to false");
+  assert.match(content, /const \[showPremisesLayer, setShowPremisesLayer\] = useState\(false\);/, "showPremisesLayer must default to false");
+  assert.match(content, /const \[showMetersLayer, setShowMetersLayer\] = useState\(false\);/, "showMetersLayer must default to false");
+  assert.match(content, /const \[showWardBoundariesLayer, setShowWardBoundariesLayer\] = useState\(true\);/, "showWardBoundariesLayer must default to true");
+  assert.match(content, /const \[showGeofencesLayer, setShowGeofencesLayer\] = useState\(true\);/, "showGeofencesLayer must default to true");
+
+  // Query lazy-loading
+  assert.match(content, /skip: !shouldLoadErfs/, "ERF query must be skipped when layer is inactive and not drawing");
+  assert.match(content, /skip: !shouldLoadPremises/, "Premises query must be skipped when layer is inactive");
+  assert.match(content, /skip: !shouldLoadMeters/, "Meters query must be skipped when layer is inactive");
 });
