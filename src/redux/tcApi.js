@@ -145,6 +145,18 @@ function normalizeTcUploadDoc(docSnap) {
       data.withoutGeofenceRows ?? summary.withoutGeofenceRows,
     ),
     readyRows: safeNumber(data.readyRows ?? summary.readyRows),
+    inProgressRows: safeNumber(
+      data.inProgressRows ??
+        summary.inProgressRows ??
+        summary.totalInProgress ??
+        data.derivedExecutionSummary?.totalInProgress,
+    ),
+    completedRows: safeNumber(
+      data.completedRows ??
+        summary.completedRows ??
+        summary.totalCompleted ??
+        data.derivedExecutionSummary?.totalCompleted,
+    ),
     remainingRows: safeNumber(data.remainingRows ?? summary.remainingRows),
     usedRows: safeNumber(data.usedRows ?? summary.usedRows),
     needsGeofenceRows: safeNumber(

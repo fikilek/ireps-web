@@ -106,10 +106,23 @@ test("TRN BGO Register uses canonical IrepsTable component with specification co
   assert.match(content, /label:\s*"BGO Rows"/, "Must have BGO Rows column");
   assert.match(content, /label:\s*"Allocation"/, "Must have Allocation column");
   assert.match(content, /label:\s*"BGO Status"/, "Must have BGO Status column");
-  assert.match(content, /label:\s*"Ready Meters"/, "Must have Ready Meters column");
   assert.match(content, /label:\s*"Total Meters"/, "Must have Total Meters column");
-  assert.match(content, /label:\s*"LM"/, "Must have LM column");
+  assert.match(content, /label:\s*"In Progress"/, "Must have In Progress column");
+  assert.match(content, /label:\s*"Completed"/, "Must have Completed column");
+  assert.match(content, /label:\s*"Ward"/, "Must have Ward column");
   assert.match(content, /label:\s*"Delete BGO"/, "Must have Delete BGO column");
+
+  // Verify LM column is NOT in table columns, but in header
+  assert.doesNotMatch(
+    content,
+    /key:\s*"lmPcode",\s*label:\s*"LM"/,
+    "LM column must be removed from the table",
+  );
+  assert.match(
+    content,
+    /style=\{styles\.lmHeaderPill\}/,
+    "Local Municipality must be displayed in the page header",
+  );
 
   // Verify top buttons
   assert.match(
@@ -150,4 +163,50 @@ test("TRN BGO Register renders 4 lifecycle KPI cards with '?' help button and me
   assert.match(content, /metersCount=\{summary\.unallocatedMeters\}/, "Unallocated card must pass unallocatedMeters");
   assert.match(content, /metersCount=\{summary\.allocatedMeters\}/, "Allocated card must pass allocatedMeters");
   assert.match(content, /metersCount=\{summary\.completedMeters\}/, "Completed card must pass completedMeters");
+});
+
+test("getBatchAllocationStatus strictly returns 'Allocated' or 'Unallocated'", () => {
+  const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
+  const content = fs.readFileSync(registerPath, "utf8");
+
+  // Verify function definition and logic
+  assert.match(
+    content,
+    /function getBatchAllocationStatus\(batch\)/,
+    "TrnBgoRegisterPage must define getBatchAllocationStatus",
+  );
+  assert.match(
+    content,
+    /label:\s*"Allocated"/,
+    "Must return label 'Allocated' for allocated batches",
+  );
+  assert.match(
+    content,
+    /label:\s*"Unallocated"/,
+    "Must return label 'Unallocated' for unallocated batches",
+  );
+  // Verify only Allocated and Unallocated labels exist in the function
+  const fnMatch = content.match(/function getBatchAllocationStatus[\s\S]*?return\s*\{[\s\S]*?label:\s*"Unallocated"[\s\S]*?\};[\s\S]*?\}/);
+  assert.ok(fnMatch, "Must return only Allocated or Unallocated");
+});
+
+test("Batch deletion is guarded: can only delete if inProgress === 0 and completed === 0", () => {
+  const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
+  const content = fs.readFileSync(registerPath, "utf8");
+
+  assert.match(
+    content,
+    /canDelete\s*=\s*inProgress\s*===\s*0\s*&&\s*completed\s*===\s*0/,
+    "Batch can only be deleted if zero meters are in progress or completed",
+  );
+  assert.match(
+    content,
+    /disabled=\{!canDelete\}/,
+    "Delete button must be disabled when execution has started",
+  );
+  assert.match(
+    content,
+    /Cannot delete batch: field execution has commenced/,
+    "handleConfirmDelete must block deletion if inProgress > 0 or completed > 0",
+  );
 });
