@@ -5,8 +5,11 @@ import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
-import { useGetRegistryWardsByLmQuery } from "../../redux/registryWardsApi";
+import { useGetLmBoundaryByIdQuery } from "../../redux/mapLmsApi";
+import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
 import { useGetErfsByWardQuery } from "../../redux/wardErfsApi";
+import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
+import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import {
   useGetGeoFencesByWardQuery,
   useCreateGeoFenceMutation,
@@ -101,61 +104,200 @@ function fitMapToBounds(map, paths = []) {
   if (count > 0) map.fitBounds(bounds, 36);
 }
 
+function fitMapToBbox(map, bbox) {
+  if (!map || !window.google?.maps || !bbox) return;
+  try {
+    if (Array.isArray(bbox) && bbox.length >= 4) {
+      const bounds = new window.google.maps.LatLngBounds(
+        { lat: Number(bbox[1]), lng: Number(bbox[0]) },
+        { lat: Number(bbox[3]), lng: Number(bbox[2]) },
+      );
+      map.fitBounds(bounds, 36);
+    }
+  } catch (err) {
+    console.warn("Could not fit bbox:", err);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function clearMapObjects(ref) {
+  if (!ref.current) return;
+  ref.current.forEach((item) => {
+    if (typeof item.setMap === "function") item.setMap(null);
+  });
+  ref.current = [];
+}
+
 // Inner map child managing Google Maps drawing, layers, and viewport
 function MdBgoMapInner({
-  wardGeometry,
+  lmBoundary,
+  wards = [],
+  selectedWardPcode = "",
+  onSelectWard,
   erfs = [],
+  premises = [],
+  meters = [],
   geofences = [],
   selectedGeofenceId = "",
+  onSelectGeofence,
+  showWardBoundariesLayer = true,
   showErfsLayer = true,
+  showPremisesLayer = true,
+  showMetersLayer = true,
   showGeofencesLayer = true,
-  showWardLayer = true,
   drawingPoints = [],
   isDrawing = false,
   onMapClick,
 }) {
   const map = useMap();
-  const wardPolygonRef = useRef(null);
+  const infoWindowRef = useRef(null);
+
+  const lmPolygonRef = useRef(null);
+  const wardPolygonsRef = useRef([]);
   const erfPolygonsRef = useRef([]);
+  const premiseMarkersRef = useRef([]);
+  const meterMarkersRef = useRef([]);
   const geofencePolygonsRef = useRef([]);
   const draftPolylineRef = useRef(null);
   const draftPolygonRef = useRef(null);
   const draftMarkersRef = useRef([]);
 
-  // Ward boundary
+  // Shared info window
   useEffect(() => {
     if (!map || !window.google?.maps) return;
-    if (wardPolygonRef.current) wardPolygonRef.current.setMap(null);
+    if (!infoWindowRef.current) {
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+    }
+    return () => {
+      infoWindowRef.current?.close();
+      infoWindowRef.current = null;
+    };
+  }, [map]);
 
-    if (showWardLayer && wardGeometry) {
-      const paths = geoJsonPolygonToGooglePaths(parseGeometry(wardGeometry));
-      if (paths.length > 0) {
-        wardPolygonRef.current = new window.google.maps.Polygon({
-          paths,
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.9,
-          strokeWeight: 2.5,
-          fillColor: "#3b82f6",
-          fillOpacity: 0.04,
-          clickable: false,
-          zIndex: 10,
-        });
-        wardPolygonRef.current.setMap(map);
+  useEffect(() => {
+    if (isDrawing) infoWindowRef.current?.close();
+  }, [isDrawing]);
+
+  // Viewport management: Auto-fit to LM when no ward selected; fit to ward when ward selected
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+
+    if (!selectedWardPcode) {
+      // Whole Municipality view
+      const lmGeom = parseGeometry(lmBoundary?.geometry);
+      const lmPaths = geoJsonPolygonToGooglePaths(lmGeom);
+      if (lmPaths.length > 0) {
+        fitMapToBounds(map, lmPaths);
+      } else if (lmBoundary?.bbox) {
+        fitMapToBbox(map, lmBoundary.bbox);
+      } else if (wards.length > 0) {
+        // Fallback: fit to all wards combined
+        const allWardPaths = wards.flatMap((w) =>
+          geoJsonPolygonToGooglePaths(parseGeometry(w.geometry)),
+        );
+        if (allWardPaths.length > 0) fitMapToBounds(map, allWardPaths);
       }
+    } else {
+      // Zoom into selected ward
+      const activeWard = wards.find(
+        (w) => (w.wardPcode || w.pcode || w.id) === selectedWardPcode,
+      );
+      if (activeWard?.geometry) {
+        const wardPaths = geoJsonPolygonToGooglePaths(
+          parseGeometry(activeWard.geometry),
+        );
+        if (wardPaths.length > 0) fitMapToBounds(map, wardPaths);
+      }
+    }
+  }, [map, selectedWardPcode, lmBoundary, wards]);
+
+  // Outer LM boundary polygon
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+    if (lmPolygonRef.current) lmPolygonRef.current.setMap(null);
+
+    const lmGeom = parseGeometry(lmBoundary?.geometry);
+    const lmPaths = geoJsonPolygonToGooglePaths(lmGeom);
+
+    if (lmPaths.length > 0) {
+      lmPolygonRef.current = new window.google.maps.Polygon({
+        paths: lmPaths,
+        strokeColor: "#0284c7",
+        strokeOpacity: 0.9,
+        strokeWeight: 3,
+        fillColor: "#38bdf8",
+        fillOpacity: 0.02,
+        clickable: false,
+        zIndex: 5,
+      });
+      lmPolygonRef.current.setMap(map);
     }
 
     return () => {
-      if (wardPolygonRef.current) wardPolygonRef.current.setMap(null);
+      if (lmPolygonRef.current) lmPolygonRef.current.setMap(null);
     };
-  }, [map, wardGeometry, showWardLayer]);
+  }, [map, lmBoundary]);
 
-  // ERFs Layer
+  // Ward boundaries layer (all wards in LM, highlighted if active)
   useEffect(() => {
     if (!map || !window.google?.maps) return;
-    erfPolygonsRef.current.forEach((poly) => poly.setMap(null));
-    erfPolygonsRef.current = [];
+    clearMapObjects(wardPolygonsRef);
 
-    if (showErfsLayer && erfs.length > 0) {
+    if (showWardBoundariesLayer && wards.length > 0) {
+      const polys = [];
+
+      wards.forEach((ward) => {
+        const pcode = ward.wardPcode || ward.pcode || ward.id;
+        const geom = parseGeometry(ward.geometry);
+        const paths = geoJsonPolygonToGooglePaths(geom);
+        if (paths.length === 0) return;
+
+        const isSelected = pcode === selectedWardPcode;
+        const wardNo = ward.wardNumber || wardNumberFromPcode(pcode);
+
+        const poly = new window.google.maps.Polygon({
+          paths,
+          strokeColor: isSelected ? "#1d4ed8" : "#3b82f6",
+          strokeOpacity: isSelected ? 1 : 0.7,
+          strokeWeight: isSelected ? 3.5 : 1.5,
+          fillColor: isSelected ? "#3b82f6" : "#60a5fa",
+          fillOpacity: isSelected ? 0.12 : 0.04,
+          clickable: !isDrawing,
+          zIndex: isSelected ? 25 : 10,
+        });
+
+        if (!isDrawing) {
+          poly.addListener("click", () => {
+            if (typeof onSelectWard === "function") {
+              onSelectWard(pcode);
+            }
+          });
+        }
+
+        poly.setMap(map);
+        polys.push(poly);
+      });
+
+      wardPolygonsRef.current = polys;
+    }
+
+    return () => clearMapObjects(wardPolygonsRef);
+  }, [map, wards, selectedWardPcode, showWardBoundariesLayer, isDrawing, onSelectWard]);
+
+  // ERFs Layer (active ward only)
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+    clearMapObjects(erfPolygonsRef);
+
+    if (Boolean(selectedWardPcode) && showErfsLayer && erfs.length > 0) {
       const polys = [];
       erfs.forEach((erf) => {
         const geom = parseGeometry(erf.geometry);
@@ -169,7 +311,7 @@ function MdBgoMapInner({
             fillColor: "#cbd5e1",
             fillOpacity: 0.1,
             clickable: false,
-            zIndex: 20,
+            zIndex: 30,
           });
           poly.setMap(map);
           polys.push(poly);
@@ -178,19 +320,150 @@ function MdBgoMapInner({
       erfPolygonsRef.current = polys;
     }
 
-    return () => {
-      erfPolygonsRef.current.forEach((poly) => poly.setMap(null));
-      erfPolygonsRef.current = [];
-    };
-  }, [map, erfs, showErfsLayer]);
+    return () => clearMapObjects(erfPolygonsRef);
+  }, [map, selectedWardPcode, erfs, showErfsLayer]);
 
-  // Existing Geofences
+  // Premises Layer (active ward only)
   useEffect(() => {
     if (!map || !window.google?.maps) return;
-    geofencePolygonsRef.current.forEach((poly) => poly.setMap(null));
-    geofencePolygonsRef.current = [];
+    clearMapObjects(premiseMarkersRef);
 
-    if (showGeofencesLayer && geofences.length > 0) {
+    if (Boolean(selectedWardPcode) && showPremisesLayer && premises.length > 0) {
+      const markers = [];
+
+      premises.forEach((premise) => {
+        const lat = Number(
+          premise?.lat ??
+            premise?.geometry?.centroid?.lat ??
+            premise?.centroid?.lat,
+        );
+        const lng = Number(
+          premise?.lng ??
+            premise?.geometry?.centroid?.lng ??
+            premise?.centroid?.lng,
+        );
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        const marker = new window.google.maps.Marker({
+          position: { lat, lng },
+          map,
+          title: `Premise: ${premise.premiseAddress || premise.id}`,
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 4,
+            fillColor: "#2563eb",
+            fillOpacity: 0.78,
+            strokeColor: "#ffffff",
+            strokeWeight: 1,
+          },
+          clickable: !isDrawing,
+          zIndex: 40,
+        });
+
+        if (!isDrawing) {
+          marker.addListener("click", () => {
+            const infoWindow = infoWindowRef.current;
+            if (!infoWindow) return;
+            const address = premise.premiseAddress || "No Street Address";
+            const id = premise.id || premise.premiseId || "NAv";
+            const metersCount = premise.totalMeterCount ?? 0;
+            infoWindow.setContent(`
+              <div style="font-family: Arial, sans-serif; min-width: 180px; font-size: 13px;">
+                <strong style="color: #0f172a; display: block; margin-bottom: 2px;">${escapeHtml(address)}</strong>
+                <div style="color: #64748b; font-size: 11px;">Premise: ${escapeHtml(id)}</div>
+                <div style="color: #2563eb; font-weight: 700; margin-top: 4px; font-size: 11px;">${metersCount} Known Meters</div>
+              </div>
+            `);
+            infoWindow.open({ anchor: marker, map, shouldFocus: false });
+          });
+        }
+
+        markers.push(marker);
+      });
+
+      premiseMarkersRef.current = markers;
+    }
+
+    return () => clearMapObjects(premiseMarkersRef);
+  }, [map, selectedWardPcode, premises, showPremisesLayer, isDrawing]);
+
+  // Meters (Assets) Layer (active ward only)
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+    clearMapObjects(meterMarkersRef);
+
+    if (Boolean(selectedWardPcode) && showMetersLayer && meters.length > 0) {
+      const markers = [];
+
+      meters.forEach((meter) => {
+        const lat = Number(
+          meter?.ast?.location?.gps?.latitude ??
+            meter?.ast?.location?.gps?.lat ??
+            meter?.location?.gps?.latitude ??
+            meter?.location?.gps?.lat ??
+            meter?.gps?.latitude ??
+            meter?.gps?.lat,
+        );
+        const lng = Number(
+          meter?.ast?.location?.gps?.longitude ??
+            meter?.ast?.location?.gps?.lng ??
+            meter?.location?.gps?.longitude ??
+            meter?.location?.gps?.lng ??
+            meter?.gps?.longitude ??
+            meter?.gps?.lng,
+        );
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        const meterNo = meter?.astData?.astNo || meter?.meterNo || meter?.id || "NAv";
+
+        const marker = new window.google.maps.Marker({
+          position: { lat, lng },
+          map,
+          title: `Meter: ${meterNo}`,
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 4.5,
+            fillColor: "#0f766e",
+            fillOpacity: 0.85,
+            strokeColor: "#ffffff",
+            strokeWeight: 1,
+          },
+          clickable: !isDrawing,
+          zIndex: 45,
+        });
+
+        if (!isDrawing) {
+          marker.addListener("click", () => {
+            const infoWindow = infoWindowRef.current;
+            if (!infoWindow) return;
+            const astId = meter?.id || "NAv";
+            const phase = meter?.astData?.phase || "NAv";
+            infoWindow.setContent(`
+              <div style="font-family: Arial, sans-serif; min-width: 180px; font-size: 13px;">
+                <strong style="color: #0f766e; display: block; margin-bottom: 2px;">Meter: ${escapeHtml(meterNo)}</strong>
+                <div style="color: #64748b; font-size: 11px;">AST ID: ${escapeHtml(astId)}</div>
+                <div style="color: #334155; font-size: 11px; margin-top: 2px;">Phase: ${escapeHtml(phase)}</div>
+              </div>
+            `);
+            infoWindow.open({ anchor: marker, map, shouldFocus: false });
+          });
+        }
+
+        markers.push(marker);
+      });
+
+      meterMarkersRef.current = markers;
+    }
+
+    return () => clearMapObjects(meterMarkersRef);
+  }, [map, selectedWardPcode, meters, showMetersLayer, isDrawing]);
+
+  // Existing Geofences (active ward only)
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+    clearMapObjects(geofencePolygonsRef);
+
+    if (Boolean(selectedWardPcode) && showGeofencesLayer && geofences.length > 0) {
       const polys = [];
       geofences.forEach((gf) => {
         const geom = parseGeometry(gf.geometry);
@@ -201,12 +474,21 @@ function MdBgoMapInner({
             paths,
             strokeColor: isSelected ? "#dc2626" : "#7c3aed",
             strokeOpacity: 0.9,
-            strokeWeight: isSelected ? 3 : 2,
+            strokeWeight: isSelected ? 3.5 : 2,
             fillColor: isSelected ? "#ef4444" : "#8b5cf6",
             fillOpacity: isSelected ? 0.25 : 0.14,
-            clickable: true,
-            zIndex: isSelected ? 70 : 40,
+            clickable: !isDrawing,
+            zIndex: isSelected ? 70 : 50,
           });
+
+          if (!isDrawing) {
+            poly.addListener("click", () => {
+              if (typeof onSelectGeofence === "function") {
+                onSelectGeofence(gf.id);
+              }
+            });
+          }
+
           poly.setMap(map);
           polys.push(poly);
         }
@@ -214,22 +496,17 @@ function MdBgoMapInner({
       geofencePolygonsRef.current = polys;
     }
 
-    return () => {
-      geofencePolygonsRef.current.forEach((poly) => poly.setMap(null));
-      geofencePolygonsRef.current = [];
-    };
-  }, [map, geofences, selectedGeofenceId, showGeofencesLayer]);
+    return () => clearMapObjects(geofencePolygonsRef);
+  }, [map, selectedWardPcode, geofences, selectedGeofenceId, showGeofencesLayer, isDrawing, onSelectGeofence]);
 
-  // Active Draft Polygon / Points
+  // Active Draft Polygon / Points for Geofence drawing
   useEffect(() => {
     if (!map || !window.google?.maps) return;
     if (draftPolylineRef.current) draftPolylineRef.current.setMap(null);
     if (draftPolygonRef.current) draftPolygonRef.current.setMap(null);
-    draftMarkersRef.current.forEach((m) => m.setMap(null));
-    draftMarkersRef.current = [];
+    clearMapObjects(draftMarkersRef);
 
     if (drawingPoints.length > 0) {
-      // Points markers
       const markers = drawingPoints.map((pt, index) => {
         return new window.google.maps.Marker({
           position: pt,
@@ -275,12 +552,11 @@ function MdBgoMapInner({
     return () => {
       if (draftPolylineRef.current) draftPolylineRef.current.setMap(null);
       if (draftPolygonRef.current) draftPolygonRef.current.setMap(null);
-      draftMarkersRef.current.forEach((m) => m.setMap(null));
-      draftMarkersRef.current = [];
+      clearMapObjects(draftMarkersRef);
     };
   }, [map, drawingPoints]);
 
-  // Click listener
+  // Click listener for drawing
   useEffect(() => {
     if (!map) return;
     const listener = map.addListener("click", (event) => {
@@ -302,9 +578,8 @@ function MdBgoMapInner({
 
 export default function MdBgoPlanningPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const auth = useAuth();
-  const { role } = auth || {};
   const { geoState } = useGeo();
 
   const { lmPcode, lmName } = useMemo(
@@ -312,39 +587,69 @@ export default function MdBgoPlanningPage() {
     [auth, geoState],
   );
 
-  // Wards
-  const { data: wards = [], isLoading: isWardsLoading } = useGetRegistryWardsByLmQuery(
-    lmPcode,
-    { skip: !lmPcode },
-  );
+  // Authoritative Municipality Boundary
+  const { data: lmBoundary } = useGetLmBoundaryByIdQuery(lmPcode, {
+    skip: !lmPcode,
+  });
 
+  // Authoritative Ward Boundaries for LM
+  const { data: wards = [] } = useGetWardBoundariesByLmQuery(lmPcode, {
+    skip: !lmPcode,
+  });
+
+  // Selected Ward
   const [selectedWardPcode, setSelectedWardPcode] = useState(
     searchParams.get("wardPcode") || "",
   );
 
-  useEffect(() => {
-    if (!selectedWardPcode && wards.length > 0) {
-      setSelectedWardPcode(wards[0].pcode || wards[0].id || "");
-    }
-  }, [wards, selectedWardPcode]);
-
   const activeWard = useMemo(() => {
+    if (!selectedWardPcode) return null;
     return wards.find(
-      (w) => (w.pcode || w.id || w.wardPcode) === selectedWardPcode,
+      (w) => (w.wardPcode || w.pcode || w.id) === selectedWardPcode,
     );
   }, [wards, selectedWardPcode]);
 
   const wardNumber = useMemo(() => {
-    return wardNumberFromPcode(selectedWardPcode);
-  }, [selectedWardPcode]);
+    if (!selectedWardPcode) return "";
+    return activeWard?.wardNumber || wardNumberFromPcode(selectedWardPcode);
+  }, [selectedWardPcode, activeWard]);
+
+  // Update query params when ward changes
+  const handleSelectWard = useCallback(
+    (pcode) => {
+      setSelectedWardPcode(pcode);
+      setSelectedGeofenceId("");
+      handleClearDrawing();
+      const next = new URLSearchParams(searchParams);
+      if (pcode) {
+        next.set("wardPcode", pcode);
+      } else {
+        next.delete("wardPcode");
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
   // ERFs for selected ward
   const { data: wardErfs = [], isLoading: isErfsLoading } = useGetErfsByWardQuery(
     { lmPcode, wardPcode: selectedWardPcode },
+    { skip: !selectedWardPcode || !lmPcode },
+  );
+
+  // Premises for selected ward
+  const { data: wardPremises = [], isLoading: isPremisesLoading } = useGetPremisesByWardQuery(
+    selectedWardPcode,
     { skip: !selectedWardPcode },
   );
 
-  // Existing Geofences
+  // Meters (Assets) for selected ward
+  const { data: wardMeters = [], isLoading: isMetersLoading } = useGetAstsByLmPcodeWardPcodeQuery(
+    { lmPcode, wardPcode: selectedWardPcode },
+    { skip: !selectedWardPcode || !lmPcode },
+  );
+
+  // Existing Geofences for selected ward
   const { data: wardGeofences = [] } = useGetGeoFencesByWardQuery(
     selectedWardPcode,
     { skip: !selectedWardPcode },
@@ -354,10 +659,13 @@ export default function MdBgoPlanningPage() {
     searchParams.get("focusGeofenceId") || "",
   );
 
-  // Layer toggles
+  // Collapsible Map Layers Panel (matching Sales GPS pattern)
+  const [layersOpen, setLayersOpen] = useState(true);
+  const [showWardBoundariesLayer, setShowWardBoundariesLayer] = useState(true);
   const [showErfsLayer, setShowErfsLayer] = useState(true);
+  const [showPremisesLayer, setShowPremisesLayer] = useState(true);
+  const [showMetersLayer, setShowMetersLayer] = useState(true);
   const [showGeofencesLayer, setShowGeofencesLayer] = useState(true);
-  const [showWardLayer, setShowWardLayer] = useState(true);
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -382,12 +690,12 @@ export default function MdBgoPlanningPage() {
     setDrawingPoints((pts) => pts.slice(0, -1));
   };
 
-  const handleClearDrawing = () => {
+  function handleClearDrawing() {
     setDrawingPoints([]);
     setIsDrawing(false);
     setIsNameModalOpen(false);
     setFormError("");
-  };
+  }
 
   // Evaluate ERFs inside drawn polygon
   const evaluatedGeometry = useMemo(() => {
@@ -541,8 +849,8 @@ export default function MdBgoPlanningPage() {
         summary: {
           erfCount: erfRefs.length,
           totalRows: erfRefs.length,
-          premiseCount: 0,
-          meterCount: 0,
+          premiseCount: wardPremises.length,
+          meterCount: wardMeters.length,
         },
       };
 
@@ -574,44 +882,25 @@ export default function MdBgoPlanningPage() {
           <p style={styles.eyebrow}>Operations / MD BGO Planning Map</p>
           <h2 style={styles.title}>MD BGO Ward Planning Map</h2>
           <p style={styles.subtitle}>
-            Select a ward, draw a geofence with up to 30 ERFs, and create an MD BGO batch.
+            Explore the municipal boundaries and wards. Select a ward to activate ERFs, premises, meters, and draw geofences up to 30 ERFs.
           </p>
         </div>
       </div>
 
-      {/* Top Map Controls Row */}
+      {/* Top Map Controls Bar */}
       <div style={styles.controlsBar}>
         <div style={styles.controlsGroup}>
-          <label style={styles.controlLabel}>
-            Geofence
-            <select
-              value={selectedGeofenceId}
-              onChange={(e) => setSelectedGeofenceId(e.target.value)}
-              style={styles.select}
-            >
-              <option value="">All geofences</option>
-              {wardGeofences.map((gf) => (
-                <option key={gf.id} value={gf.id}>
-                  {gf.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <label style={styles.controlLabel}>
             Ward
             <select
               value={selectedWardPcode}
-              onChange={(e) => {
-                setSelectedWardPcode(e.target.value);
-                setSelectedGeofenceId("");
-                handleClearDrawing();
-              }}
+              onChange={(e) => handleSelectWard(e.target.value)}
               style={styles.select}
             >
+              <option value="">Whole Municipality ({lmName || lmPcode})</option>
               {wards.map((w) => {
-                const pcode = w.pcode || w.id || w.wardPcode;
-                const no = wardNumberFromPcode(pcode);
+                const pcode = w.wardPcode || w.pcode || w.id;
+                const no = w.wardNumber || wardNumberFromPcode(pcode);
                 return (
                   <option key={pcode} value={pcode}>
                     Ward {no} ({pcode})
@@ -621,15 +910,43 @@ export default function MdBgoPlanningPage() {
             </select>
           </label>
 
-          <div style={styles.erfCountBadge}>
-            {wardErfs.length} ERFs
-          </div>
+          <label style={styles.controlLabel}>
+            Geofence
+            <select
+              value={selectedGeofenceId}
+              onChange={(e) => setSelectedGeofenceId(e.target.value)}
+              style={styles.select}
+              disabled={!selectedWardPcode}
+            >
+              <option value="">All geofences in ward</option>
+              {wardGeofences.map((gf) => (
+                <option key={gf.id} value={gf.id}>
+                  {gf.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {selectedWardPcode ? (
+            <div style={styles.erfCountBadge}>
+              Ward {wardNumber}: {wardErfs.length} ERFs · {wardPremises.length} Premises · {wardMeters.length} Meters
+            </div>
+          ) : (
+            <div style={styles.lmCountBadge}>
+              Whole Municipality: {wards.length} Wards · Select a ward to plan
+            </div>
+          )}
         </div>
 
         <div style={styles.controlsGroup}>
           <button
             type="button"
-            style={isDrawing ? styles.drawingActiveButton : styles.drawFenceButton}
+            style={{
+              ...(isDrawing ? styles.drawingActiveButton : styles.drawFenceButton),
+              ...(!selectedWardPcode && !isDrawing ? styles.disabledButton : null),
+            }}
+            disabled={!selectedWardPcode && !isDrawing}
+            title={!selectedWardPcode ? "Select a ward first to draw a geofence" : ""}
             onClick={() => {
               if (isDrawing) {
                 handleClearDrawing();
@@ -694,56 +1011,159 @@ export default function MdBgoPlanningPage() {
           <APIProvider apiKey={googleMapsApiKey}>
             <Map
               defaultCenter={FALLBACK_CENTER}
-              defaultZoom={14}
+              defaultZoom={12}
               style={styles.mapElement}
               gestureHandling="greedy"
               disableDefaultUI={false}
               mapTypeId="roadmap"
             >
               <MdBgoMapInner
-                wardGeometry={activeWard?.geometry}
+                lmBoundary={lmBoundary}
+                wards={wards}
+                selectedWardPcode={selectedWardPcode}
+                onSelectWard={handleSelectWard}
                 erfs={wardErfs}
+                premises={wardPremises}
+                meters={wardMeters}
                 geofences={wardGeofences}
                 selectedGeofenceId={selectedGeofenceId}
+                onSelectGeofence={setSelectedGeofenceId}
+                showWardBoundariesLayer={showWardBoundariesLayer}
                 showErfsLayer={showErfsLayer}
+                showPremisesLayer={showPremisesLayer}
+                showMetersLayer={showMetersLayer}
                 showGeofencesLayer={showGeofencesLayer}
-                showWardLayer={showWardLayer}
                 drawingPoints={drawingPoints}
                 isDrawing={isDrawing}
                 onMapClick={handleMapClick}
               />
             </Map>
 
-            {/* Floating Map Layers Control */}
-            <div style={styles.mapLayersBox}>
-              <div style={styles.mapLayersHeader}>
-                <strong>MAP LAYERS</strong>
+            {/* Floating Map Layers Control Panel */}
+            {!layersOpen ? (
+              <button
+                type="button"
+                onClick={() => setLayersOpen(true)}
+                aria-label="Show map layers"
+                title="Map layers"
+                style={styles.layersOpenButton}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 3 2 8l10 5 10-5-10-5Zm-7.5 8.2L2 12.5l10 5 10-5-2.5-1.3L12 15l-7.5-3.8Zm0 4.5L2 17l10 5 10-5-2.5-1.3L12 19.5l-7.5-3.8Z"
+                    fill="#475569"
+                  />
+                </svg>
+              </button>
+            ) : (
+              <div style={styles.mapLayersBox}>
+                <div style={styles.mapLayersHeader}>
+                  <strong style={styles.mapLayersTitle}>MAP LAYERS</strong>
+                  <button
+                    type="button"
+                    onClick={() => setLayersOpen(false)}
+                    aria-label="Close map layers"
+                    title="Close"
+                    style={styles.layersCloseButton}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {!selectedWardPcode ? (
+                  <div style={styles.layersPrompt}>
+                    Select a ward to activate ERFs, premises, meters & geofences.
+                  </div>
+                ) : null}
+
+                <label
+                  style={{
+                    ...styles.layerCheckboxLabel,
+                    ...(!selectedWardPcode ? styles.layerDisabled : null),
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showErfsLayer}
+                    disabled={!selectedWardPcode}
+                    onChange={(e) => setShowErfsLayer(e.target.checked)}
+                  />
+                  <span style={{ ...styles.legendDot, background: "#94a3b8" }} />
+                  <span style={styles.layerLabelText}>ERFs</span>
+                  <strong style={styles.layerCount}>
+                    {selectedWardPcode ? wardErfs.length : "—"}
+                  </strong>
+                </label>
+
+                <label
+                  style={{
+                    ...styles.layerCheckboxLabel,
+                    ...(!selectedWardPcode ? styles.layerDisabled : null),
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showPremisesLayer}
+                    disabled={!selectedWardPcode}
+                    onChange={(e) => setShowPremisesLayer(e.target.checked)}
+                  />
+                  <span style={{ ...styles.legendDot, background: "#2563eb" }} />
+                  <span style={styles.layerLabelText}>Premises</span>
+                  <strong style={styles.layerCount}>
+                    {selectedWardPcode ? wardPremises.length : "—"}
+                  </strong>
+                </label>
+
+                <label
+                  style={{
+                    ...styles.layerCheckboxLabel,
+                    ...(!selectedWardPcode ? styles.layerDisabled : null),
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showMetersLayer}
+                    disabled={!selectedWardPcode}
+                    onChange={(e) => setShowMetersLayer(e.target.checked)}
+                  />
+                  <span style={{ ...styles.legendDot, background: "#0f766e" }} />
+                  <span style={styles.layerLabelText}>Meters</span>
+                  <strong style={styles.layerCount}>
+                    {selectedWardPcode ? wardMeters.length : "—"}
+                  </strong>
+                </label>
+
+                <label
+                  style={{
+                    ...styles.layerCheckboxLabel,
+                    ...(!selectedWardPcode ? styles.layerDisabled : null),
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showGeofencesLayer}
+                    disabled={!selectedWardPcode}
+                    onChange={(e) => setShowGeofencesLayer(e.target.checked)}
+                  />
+                  <span style={{ ...styles.legendDot, background: "#8b5cf6" }} />
+                  <span style={styles.layerLabelText}>Geofences (this Ward)</span>
+                  <strong style={styles.layerCount}>
+                    {selectedWardPcode ? wardGeofences.length : "—"}
+                  </strong>
+                </label>
+
+                <label style={styles.layerCheckboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={showWardBoundariesLayer}
+                    onChange={(e) => setShowWardBoundariesLayer(e.target.checked)}
+                  />
+                  <span style={{ ...styles.legendDot, background: "#3b82f6" }} />
+                  <span style={styles.layerLabelText}>Ward boundaries</span>
+                  <strong style={styles.layerCount}>{wards.length}</strong>
+                </label>
               </div>
-              <label style={styles.layerCheckboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={showErfsLayer}
-                  onChange={(e) => setShowErfsLayer(e.target.checked)}
-                />
-                ERFs
-              </label>
-              <label style={styles.layerCheckboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={showGeofencesLayer}
-                  onChange={(e) => setShowGeofencesLayer(e.target.checked)}
-                />
-                Geofences (whole Ward)
-              </label>
-              <label style={styles.layerCheckboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={showWardLayer}
-                  onChange={(e) => setShowWardLayer(e.target.checked)}
-                />
-                Ward boundary
-              </label>
-            </div>
+            )}
           </APIProvider>
         ) : (
           <div style={styles.noApiKey}>
@@ -960,6 +1380,16 @@ const styles = {
     fontSize: 13,
     fontWeight: 800,
   },
+  lmCountBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 12px",
+    borderRadius: 999,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: 13,
+    fontWeight: 800,
+  },
   drawFenceButton: {
     border: 0,
     borderRadius: 10,
@@ -1039,25 +1469,68 @@ const styles = {
     width: "100%",
     height: "100%",
   },
+  layersOpenButton: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    zIndex: 55,
+    width: 40,
+    height: 40,
+    display: "grid",
+    placeItems: "center",
+    border: 0,
+    borderRadius: 8,
+    background: "#ffffff",
+    boxShadow: "0 4px 12px rgba(15, 23, 42, 0.15)",
+    cursor: "pointer",
+    padding: 0,
+  },
   mapLayersBox: {
     position: "absolute",
     top: 14,
     right: 14,
-    background: "#ffffff",
+    width: 220,
+    background: "rgba(255, 255, 255, 0.98)",
     borderRadius: 12,
     border: "1px solid #cbd5e1",
-    boxShadow: "0 4px 12px rgba(15, 23, 42, 0.08)",
-    padding: "10px 14px",
-    zIndex: 50,
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.14)",
+    padding: 12,
+    zIndex: 55,
+    display: "grid",
+    gap: 8,
+    fontSize: 12,
+    color: "#0f172a",
   },
   mapLayersHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  mapLayersTitle: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color: "#0f172a",
+  },
+  layersCloseButton: {
+    width: 22,
+    height: 22,
+    border: 0,
+    borderRadius: 4,
+    background: "transparent",
+    color: "#475569",
+    fontSize: 18,
+    lineHeight: "22px",
+    padding: 0,
+    cursor: "pointer",
+  },
+  layersPrompt: {
     fontSize: 11,
     color: "#64748b",
-    letterSpacing: "0.05em",
-    marginBottom: 4,
+    lineHeight: 1.4,
+    padding: "4px 0",
+    borderBottom: "1px solid #f1f5f9",
   },
   layerCheckboxLabel: {
     display: "flex",
@@ -1067,6 +1540,23 @@ const styles = {
     color: "#334155",
     fontWeight: 600,
     cursor: "pointer",
+  },
+  layerDisabled: {
+    opacity: 0.5,
+    cursor: "not-allowed",
+  },
+  layerLabelText: {
+    flex: 1,
+  },
+  layerCount: {
+    fontSize: 11,
+    color: "#475569",
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    flex: "0 0 auto",
   },
   noApiKey: {
     display: "flex",
