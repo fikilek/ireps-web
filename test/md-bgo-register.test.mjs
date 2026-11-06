@@ -300,3 +300,27 @@ test("MD BGO Planning Map adheres to GPS Sales Table geofence creation routine (
   assert.match(content, /Draw Another Geofence in Ward/, "Landing card must have action to draw another geofence");
   assert.match(content, /Return to MD BGO Register/, "Landing card must have action to return to register");
 });
+
+test("MD BGO Planning Map renders iREPS geofences via getGeoFencePath and manages dual-scope visibility (MD-BGO-R010)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // 1. Imports getGeoFencePath and geofenceLabelPoint from geofence-map-helpers
+  assert.match(content, /import\s*\{[^}]*getGeoFencePath[^}]*\}\s*from\s*"\.\/geofence-map-helpers"/, "Must import getGeoFencePath");
+  assert.match(content, /import\s*\{[^}]*geofenceLabelPoint[^}]*\}\s*from\s*"\.\/geofence-map-helpers"/, "Must import geofenceLabelPoint");
+
+  // 2. Extracts path via getGeoFencePath supporting iREPS geometry.points
+  assert.match(content, /getGeoFencePath\(gf\)/, "Must extract pointPath via getGeoFencePath");
+
+  // 3. Dual-scope visibility: all geofences when layer active, only selected when layer inactive
+  assert.match(content, /fencesToRender\s*=\s*showGeofencesLayer/, "fencesToRender must respect showGeofencesLayer toggle");
+  assert.match(content, /gf\.id === selectedGeofenceId/, "Must filter selectedGeofenceId when layer is inactive");
+
+  // 4. Geofence name label marker
+  assert.match(content, /geofenceLabelPoint\(gf\)/, "Must compute label position via geofenceLabelPoint");
+  assert.match(content, /className:\s*"ireps-geofence-label"/, "Must style geofence label");
+
+  // 5. Unified selection handler
+  assert.match(content, /handleSelectGeofence/, "Must provide unified handleSelectGeofence");
+  assert.match(content, /onSelectGeofence=\{handleSelectGeofence\}/, "Map inner must receive handleSelectGeofence");
+});
