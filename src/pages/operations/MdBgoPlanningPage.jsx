@@ -27,7 +27,7 @@ import {
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FALLBACK_CENTER = { lat: -28.168, lng: 30.236 };
-const BGO_ERF_LIMIT = 30;
+const BGO_ERF_LIMIT = 60;
 
 function resolveWorkbase(auth = {}, geoState = {}) {
   const candidate =
@@ -466,7 +466,7 @@ function MdBgoMapInner({
     if (Boolean(selectedWardPcode) && showGeofencesLayer && geofences.length > 0) {
       const polys = [];
       geofences.forEach((gf) => {
-        const geom = parseGeometry(gf.geometry);
+        const geom = parseGeometry(gf.geometry) || gf.geometry?.points || gf.points || gf;
         const paths = geoJsonPolygonToGooglePaths(geom);
         if (paths.length > 0) {
           const isSelected = gf.id === selectedGeofenceId;
@@ -686,6 +686,7 @@ export default function MdBgoPlanningPage() {
   const [geofenceDescInput, setGeofenceDescInput] = useState("");
   const [formError, setFormError] = useState("");
   const [createdResult, setCreatedResult] = useState(null);
+  const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
   const handleMapClick = useCallback((point) => {
     setDrawingPoints((pts) => [...pts, point]);
@@ -793,7 +794,7 @@ export default function MdBgoPlanningPage() {
     setFormError("");
   };
 
-  // Stage A: Save Geofence Only
+  // Stage A: Save Geofence Only (Option 1 with clean post-save landing)
   const handleSaveGeofenceOnly = async () => {
     if (!canSave) return;
     setFormError("");
@@ -814,18 +815,44 @@ export default function MdBgoPlanningPage() {
       const fencePayload = {
         name: fullStandardName,
         description: geofenceDescInput.trim() || "No Description Given",
-        lmPcode,
-        wardPcode: selectedWardPcode,
-        geometry: evaluatedGeometry,
+        parents: {
+          countryPcode: "ZA",
+          provincePcode: lmBoundary?.parents?.provinceId || lmBoundary?.parents?.provincePcode || "NAv",
+          dmPcode: lmBoundary?.parents?.districtId || lmBoundary?.parents?.dmPcode || "NAv",
+          lmPcode,
+          wardPcode: selectedWardPcode,
+        },
+        points: drawingPoints.map((point, index) => ({
+          latitude: point.lat,
+          longitude: point.lng,
+          order: index,
+        })),
       };
 
       const result = await createGeoFence(fencePayload).unwrap();
+      const savedGeofenceId = result?.geofenceId || result?.id || "";
+
+      // 1. Terminate drawing mode completely (clears vertices, removes red cancel button & toolbar, unlocks ward)
       handleClearDrawing();
-      setCreatedResult({
-        type: "GEOFENCE_ONLY",
-        geofenceName: fullStandardName,
-        geofenceId: result?.id || result?.geoFenceId || "",
+
+      // 2. Select the newly saved geofence
+      if (savedGeofenceId) {
+        setSelectedGeofenceId(savedGeofenceId);
+      }
+
+      // 3. Open clean Geofence Landing Panel
+      setSavedGeofenceLanding({
+        id: savedGeofenceId,
+        name: fullStandardName,
+        wardNumber,
+        wardPcode: selectedWardPcode,
+        erfCount: erfsInside.length,
+        premiseCount: wardPremises.length,
+        meterCount: wardMeters.length,
       });
+
+      // 4. Close confirm modal
+      setIsConfirmModalOpen(false);
     } catch (err) {
       setFormError(err?.data?.message || err?.message || "Could not save geofence.");
     }
@@ -1064,6 +1091,63 @@ export default function MdBgoPlanningPage() {
               }}
             >
               Save ({erfsInside.length})
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Geofence Post-Save Clean Landing Panel */}
+      {savedGeofenceLanding && !isDrawing ? (
+        <div style={styles.landingCard}>
+          <div style={styles.landingHeader}>
+            <div style={styles.landingHeaderLeft}>
+              <span style={styles.landingBadge}>● Geofence Saved · Unbatched</span>
+              <h3 style={styles.landingTitle}>{savedGeofenceLanding.name}</h3>
+              <p style={styles.landingSubtitle}>
+                Encompasses <strong>{savedGeofenceLanding.erfCount} ERFs</strong> in Ward {savedGeofenceLanding.wardNumber}. Saved to database and ready for batch origination.
+              </p>
+            </div>
+            <button
+              type="button"
+              style={styles.landingDismissButton}
+              onClick={() => setSavedGeofenceLanding(null)}
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+
+          <div style={styles.landingActions}>
+            <button
+              type="button"
+              style={styles.landingPrimaryButton}
+              onClick={() => {
+                alert(`Batch origination from saved geofence "${savedGeofenceLanding.name}" will be connected in next step.`);
+              }}
+            >
+              Create MD BGO Batch from this Geofence Now →
+            </button>
+
+            <button
+              type="button"
+              style={styles.landingSecondaryButton}
+              onClick={() => {
+                setSavedGeofenceLanding(null);
+                setGeofenceNameInput("");
+                setGeofenceDescInput("");
+                setFormError("");
+                setIsCreateModalOpen(true);
+              }}
+            >
+              + Draw Another Geofence in Ward {wardNumber}
+            </button>
+
+            <button
+              type="button"
+              style={styles.landingLinkButton}
+              onClick={() => navigate("/operations/bgo")}
+            >
+              Return to MD BGO Register
             </button>
           </div>
         </div>
@@ -1340,10 +1424,7 @@ export default function MdBgoPlanningPage() {
               <button
                 type="button"
                 style={styles.modalSecondaryButton}
-                onClick={async () => {
-                  await handleSaveGeofenceOnly();
-                  setIsConfirmModalOpen(false);
-                }}
+                onClick={handleSaveGeofenceOnly}
                 disabled={isSavingGeofence || isCreatingBgo}
               >
                 {isSavingGeofence ? "Saving..." : "Save Geofence Only"}
@@ -1856,5 +1937,92 @@ const styles = {
     background: "#f1f5f9",
     cursor: "not-allowed",
     opacity: 0.7,
+  },
+  landingCard: {
+    background: "#ffffff",
+    border: "2px solid #10b981",
+    borderRadius: 14,
+    padding: 16,
+    margin: "0 0 16px 0",
+    boxShadow: "0 10px 15px -3px rgba(16, 185, 129, 0.1), 0 4px 6px -4px rgba(16, 185, 129, 0.1)",
+  },
+  landingHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  landingHeaderLeft: {
+    flex: 1,
+  },
+  landingBadge: {
+    display: "inline-block",
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#065f46",
+    background: "#d1fae5",
+    padding: "3px 8px",
+    borderRadius: 999,
+    marginBottom: 6,
+    letterSpacing: "0.03em",
+  },
+  landingTitle: {
+    margin: "0 0 4px 0",
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+  landingSubtitle: {
+    margin: 0,
+    fontSize: 13,
+    color: "#475569",
+    lineHeight: 1.4,
+  },
+  landingDismissButton: {
+    background: "transparent",
+    border: 0,
+    fontSize: 22,
+    lineHeight: 1,
+    color: "#94a3b8",
+    cursor: "pointer",
+    padding: "0 4px",
+  },
+  landingActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 14,
+    flexWrap: "wrap",
+  },
+  landingPrimaryButton: {
+    border: 0,
+    borderRadius: 10,
+    background: "#059669",
+    color: "#ffffff",
+    padding: "10px 18px",
+    fontWeight: 800,
+    fontSize: 13,
+    cursor: "pointer",
+    boxShadow: "0 2px 4px rgba(5, 150, 105, 0.2)",
+  },
+  landingSecondaryButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    background: "#ffffff",
+    color: "#0f172a",
+    padding: "10px 18px",
+    fontWeight: 700,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  landingLinkButton: {
+    border: 0,
+    background: "transparent",
+    color: "#2563eb",
+    padding: "10px 14px",
+    fontWeight: 700,
+    fontSize: 13,
+    cursor: "pointer",
+    textDecoration: "underline",
   },
 };

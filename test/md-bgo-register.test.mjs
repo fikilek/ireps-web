@@ -115,14 +115,14 @@ test("MD BGO Register table layout conforms to specification", () => {
   );
 });
 
-test("MD BGO Planning Map adheres to 30 ERF limit invariant", () => {
+test("MD BGO Planning Map adheres to 60 ERF limit invariant", () => {
   const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
   const content = fs.readFileSync(planningPath, "utf8");
 
   assert.match(
     content,
-    /const BGO_ERF_LIMIT = 30;/,
-    "Planning map must define BGO_ERF_LIMIT = 30",
+    /const BGO_ERF_LIMIT = 60;/,
+    "Planning map must define BGO_ERF_LIMIT = 60",
   );
   assert.match(
     content,
@@ -258,7 +258,7 @@ test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and 
   assert.ok(isDrawingIndex !== -1 && isDrawingIndex < shouldLoadErfsIndex, "isDrawing must be initialized before shouldLoadErfs");
 });
 
-test("MD BGO Planning Map adheres to GPS Sales Table geofence creation routine (MD-BGO-R010 v1.4.0)", () => {
+test("MD BGO Planning Map adheres to GPS Sales Table geofence creation routine (MD-BGO-R010 v1.6.0)", () => {
   const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
   const content = fs.readFileSync(planningPath, "utf8");
 
@@ -284,4 +284,14 @@ test("MD BGO Planning Map adheres to GPS Sales Table geofence creation routine (
   assert.match(content, /setIsConfirmModalOpen\(true\)/, "Must open confirm modal on Save");
   assert.match(content, /Save Geofence Only/, "Must provide Save Geofence Only action");
   assert.match(content, /Save & Create Batch/, "Must provide Save & Create Batch action");
+
+  // 7. Canonical parents and points payload for createGeoFence
+  assert.match(content, /countryPcode:\s*"ZA"/, "Must pass countryPcode in parents payload");
+  assert.match(content, /latitude:\s*point\.lat/, "Must pass latitude in points payload");
+
+  // 8. Option 1 clean landing panel
+  assert.match(content, /savedGeofenceLanding/, "Must manage savedGeofenceLanding state");
+  assert.match(content, /Create MD BGO Batch from this Geofence Now/, "Landing card must have action to create batch");
+  assert.match(content, /Draw Another Geofence in Ward/, "Landing card must have action to draw another geofence");
+  assert.match(content, /Return to MD BGO Register/, "Landing card must have action to return to register");
 });
