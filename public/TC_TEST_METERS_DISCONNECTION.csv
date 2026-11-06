@@ -1,9 +1,9 @@
 rowNo,meterNo,meterPhase,meterType,linkedAccountNo,premiseAddress,premisePropertyType,actionReason,wardNo,geofence,meterStatus,erfNo
-1,04085348920,Single Phase,electricity,ACC5317,5317 John Parkie Avenue,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5317
-2,04085348706,Single Phase,electricity,ACC5326,5326 Mochana Alley Street,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5326
-3,04085348246,Single Phase,electricity,ACC5553,5553 Mochana Alley Street,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5553
-4,04085348567,Single Phase,electricity,ACC5571,5571 Mochana Alley Street,Residential,Credit control disconnection,6,Gf Mochana Alley,CONNECTED,5571
-5,04085348514,Single Phase,electricity,ACC5360,5360 Modisakeng Alley Street,Residential,Credit control disconnection,6,Gf Modisakeng Alley,CONNECTED,5360
-6,04085348753,Single Phase,electricity,ACC5386,5386 Modisakeng Alley Street,Residential,Credit control disconnection,6,Gf Modisakeng Alley,CONNECTED,5386
-7,0476812443,Single Phase,electricity,ACC001,192 Kruger Street Mpumelelo,Residential,Credit control list,13,Gf Kruger Mpumelelo,CONNECTED,5320
-8,04297756282,Single Phase,electricity,ACC002,5176 CRAIGSIDE Drive,Residential,Credit control list,13,Gf Kruger Mpumelelo,CONNECTED,5321
+1,04298074776,Single Phase,electricity,0001106531,,Residential,Credit control disconnection,3,,CONNECTED,654
+2,04298082191,Single Phase,electricity,0001108730,,Residential,Credit control disconnection,3,,CONNECTED,956
+3,04298084684,Single Phase,electricity,0001114692,,Residential,Credit control disconnection,3,,CONNECTED,1561
+4,04297706063,Single Phase,electricity,0002011113,,Residential,Credit control disconnection,6,,CONNECTED,4230
+5,04297706121,Single Phase,electricity,0002010425,,Residential,Credit control disconnection,6,,CONNECTED,4241
+6,04297749576,Single Phase,electricity,0002139600,,Residential,Credit control disconnection,6,,CONNECTED,2631
+7,04297756324,Single Phase,electricity,0002139598,,Residential,Credit control disconnection,6,,CONNECTED,2631
+8,04297758833,Single Phase,electricity,0002011635,,Residential,Credit control disconnection,6,,CONNECTED,2631
