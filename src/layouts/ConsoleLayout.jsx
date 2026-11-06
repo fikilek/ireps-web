@@ -242,8 +242,8 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "TC Uploads",
-            path: "/operations/tc-uploads",
+            label: "TRN BGO Register",
+            path: "/operations/trn-bgo",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {

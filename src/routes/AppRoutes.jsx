@@ -60,6 +60,8 @@ import MdBgoPlanningPage from "../pages/operations/MdBgoPlanningPage";
 import MdBgoAllocationPage from "../pages/operations/MdBgoAllocationPage";
 import BmdBgoPage from "../pages/operations/BmdBgoPage";
 import MdBgoRowsPage from "../pages/operations/MdBgoRowsPage";
+import TrnBgoRegisterPage from "../pages/operations/TrnBgoRegisterPage";
+import TrnBgoRowsPage from "../pages/operations/TrnBgoRowsPage";
 import TcBgoDashboardPage from "../pages/operations/TcBgoDashboardPage";
 
 import MapPage from "../pages/maps/MapPage";
@@ -431,10 +433,55 @@ export default function AppRoutes() {
           />
 
           <Route
-            path="/operations/tc-uploads"
+            path="/operations/trn-bgo"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TrnBgoRegisterPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/trn-bgo/upload"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TcUploadsPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/trn-bgo/allocation"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TcBgoPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/trn-bgo/dashboard"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <BgoDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/trn-bgo-rows"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TrnBgoRowsPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/tc-uploads"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TrnBgoRegisterPage />
               </RoleRoute>
             }
           />
