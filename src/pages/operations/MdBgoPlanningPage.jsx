@@ -962,6 +962,7 @@ export default function MdBgoPlanningPage() {
 
   // Mutations
   const [createGeoFence, { isLoading: isSavingGeofence }] = useCreateGeoFenceMutation();
+  const [updateGeoFence, { isLoading: isUpdatingGeoFence }] = useUpdateGeoFenceMutation();
   const [createBgo, { isLoading: isCreatingBgo }] = useCreateBgoMutation();
 
   const handleMapClick = useCallback((point) => {

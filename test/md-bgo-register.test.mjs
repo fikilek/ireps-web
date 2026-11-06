@@ -367,7 +367,8 @@ test("MD BGO Planning Map supports geofence editing, visible description input, 
   assert.match(content, /modalTextarea/, "Must define and apply modalTextarea styling with visible border");
 
   // 3. Edit Geofence details support
-  assert.match(content, /useUpdateGeoFenceMutation/, "Must import and use useUpdateGeoFenceMutation");
+  assert.match(content, /useUpdateGeoFenceMutation/, "Must import useUpdateGeoFenceMutation");
+  assert.match(content, /const\s*\[updateGeoFence,\s*\{\s*isLoading:\s*isUpdatingGeoFence\s*\}\]\s*=\s*useUpdateGeoFenceMutation\(\)/, "Must invoke useUpdateGeoFenceMutation hook and bind updateGeoFence and isUpdatingGeoFence");
   assert.match(content, /handleOpenEditModal/, "Must provide handleOpenEditModal handler");
   assert.match(content, /handleSaveEdit/, "Must provide handleSaveEdit handler");
   assert.match(content, /isEditModalOpen/, "Must manage isEditModalOpen modal state");
