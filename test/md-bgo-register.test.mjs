@@ -159,5 +159,25 @@ test("MD BGO Register and Planning resolve active workbase from auth and geo con
       /const\s*\{\s*activeWorkbase\s*,\s*selectedLm\s*\}\s*=\s*useWarehouse\(\)/,
       `${name} must NOT destructure activeWorkbase from useWarehouse()`,
     );
+
+    // Extract and test execution of resolveWorkbase function
+    const fnMatch = content.match(/function resolveWorkbase\([^)]*\)\s*\{[\s\S]*?\n\}/);
+    assert.ok(fnMatch, `${name} must contain resolveWorkbase implementation`);
+    const resolveFn = new Function(`${fnMatch[0]}; return resolveWorkbase;`)();
+
+    // Test 1: auth.activeWorkbase
+    const res1 = resolveFn({ activeWorkbase: { pcode: "ZA5241", name: "eEndumeni" } }, {});
+    assert.equal(res1.lmPcode, "ZA5241");
+    assert.equal(res1.lmName, "eEndumeni");
+
+    // Test 2: auth.profile.access.activeWorkbase
+    const res2 = resolveFn({ profile: { access: { activeWorkbase: { id: "ZA5241", lmName: "eEndumeni" } } } }, {});
+    assert.equal(res2.lmPcode, "ZA5241");
+    assert.equal(res2.lmName, "eEndumeni");
+
+    // Test 3: fallback to geoState.selectedLm
+    const res3 = resolveFn({}, { selectedLm: { pcode: "ZA5241", name: "eEndumeni" } });
+    assert.equal(res3.lmPcode, "ZA5241");
+    assert.equal(res3.lmName, "eEndumeni");
   }
 });

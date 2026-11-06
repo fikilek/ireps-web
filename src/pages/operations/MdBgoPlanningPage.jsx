@@ -45,7 +45,7 @@ function resolveWorkbase(auth = {}, geoState = {}) {
       "",
   ).trim();
 
-  const name = String(
+  const lmName = String(
     candidate?.name ||
       candidate?.lmName ||
       candidate?.id ||
