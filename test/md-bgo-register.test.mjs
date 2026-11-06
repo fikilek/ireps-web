@@ -257,3 +257,31 @@ test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and 
   assert.ok(showErfsIndex !== -1 && shouldLoadErfsIndex !== -1 && showErfsIndex < shouldLoadErfsIndex, "showErfsLayer must be initialized before shouldLoadErfs");
   assert.ok(isDrawingIndex !== -1 && isDrawingIndex < shouldLoadErfsIndex, "isDrawing must be initialized before shouldLoadErfs");
 });
+
+test("MD BGO Planning Map adheres to GPS Sales Table geofence creation routine (MD-BGO-R010 v1.4.0)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // 1. Pre-drawing modal opens first
+  assert.match(content, /setIsCreateModalOpen\(true\)/, "Must open create modal before drawing begins");
+  assert.match(content, /isCreateModalOpen/, "Must manage isCreateModalOpen state");
+
+  // 2. Fixed prefix per GF-R001 and duplicate check
+  assert.match(content, /Gf W\{wardNumber\}/, "Geofence name must display fixed prefix Gf W{wardNumber}");
+  assert.match(content, /findDuplicateGeofence/, "Must check duplicate geofence names in real-time");
+
+  // 3. Ward locked to 1 ward only (cannot cross ward boundaries)
+  assert.match(content, /disabled=\{isDrawing\}/, "Ward selector must be locked during drawing");
+  assert.match(content, /Batches belong to 1 ward only/, "Must declare single ward batch invariant");
+
+  // 4. Start drawing auto-activates ERF layer
+  assert.match(content, /setShowErfsLayer\(true\)/, "Must activate ERF layer when drawing starts");
+
+  // 5. Drawing toolbar displays Creating name and points
+  assert.match(content, /Creating:\s*<strong>\{fullStandardName\}<\/strong>/, "Drawing bar must display creating name");
+
+  // 6. Confirm modal opens on Save with decoupled options
+  assert.match(content, /setIsConfirmModalOpen\(true\)/, "Must open confirm modal on Save");
+  assert.match(content, /Save Geofence Only/, "Must provide Save Geofence Only action");
+  assert.match(content, /Save & Create Batch/, "Must provide Save & Create Batch action");
+});
