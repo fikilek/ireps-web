@@ -69,24 +69,37 @@ function getTrnTypeInfo(trnTypeRaw = "") {
   return { label: opType || "Transaction", code: "TRN", bg: "#f8fafc", text: "#334155", border: "#e2e8f0" };
 }
 
-function getBgoStatusBadge(statusRaw = "") {
-  const status = String(statusRaw || "").toUpperCase();
-  if (status === "READY_FOR_BGO") {
-    return { label: "READY FOR BGO", bg: "#ecfdf5", text: "#047857", border: "#a7f3d0" };
+export function getBatchAllocationStatus(batch) {
+  const bgoStatus = String(batch?.bgoStatus || "").toUpperCase();
+  const workflowState = String(batch?.workflowState || batch?.workflow?.state || "").toUpperCase();
+  const hasTarget = Array.isArray(batch?.assignment?.targets) && batch.assignment.targets.length > 0;
+  const hasTeamOrSp = Boolean(batch?.teamId || batch?.spId || batch?.allocatedTo || batch?.assignedTeamId);
+
+  const isAllocated =
+    bgoStatus === "USED" ||
+    bgoStatus === "ALLOCATED" ||
+    bgoStatus === "PARTIALLY_USED" ||
+    workflowState === "ALLOCATED" ||
+    workflowState === "IN_PROGRESS" ||
+    workflowState === "ISSUED" ||
+    hasTarget ||
+    hasTeamOrSp;
+
+  if (isAllocated) {
+    return {
+      label: "Allocated",
+      bg: "#eff6ff",
+      text: "#1d4ed8",
+      border: "#bfdbfe",
+    };
   }
-  if (status === "USED" || status === "ALLOCATED") {
-    return { label: "ALLOCATED", bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" };
-  }
-  if (status === "PARTIALLY_USED") {
-    return { label: "PARTIAL ALLOCATION", bg: "#fef3c7", text: "#b45309", border: "#fde68a" };
-  }
-  if (status === "NOT_READY") {
-    return { label: "NOT READY", bg: "#fef2f2", text: "#b91c1c", border: "#fecaca" };
-  }
-  if (status === "COMPLETED") {
-    return { label: "COMPLETED", bg: "#f0fdf4", text: "#15803d", border: "#bbf7d0" };
-  }
-  return { label: status || "STAGED", bg: "#f1f5f9", text: "#475569", border: "#cbd5e1" };
+
+  return {
+    label: "Unallocated",
+    bg: "#fef3c7",
+    text: "#b45309",
+    border: "#fde68a",
+  };
 }
 
 const KPI_HELP_DETAILS = {
@@ -216,28 +229,26 @@ export default function TrnBgoRegisterPage() {
     let totalMeters = 0;
 
     uploads.forEach((item) => {
-      const bgoStatus = String(item.bgoStatus || "").toUpperCase();
-      const workflowState = String(item.workflowState || item.workflow?.state || "").toUpperCase();
       const totalRows = Number(item.totalRows || 0);
+      const inProgress = Number(item.inProgressRows || 0);
+      const completed = Number(item.completedRows || 0);
+      const isCompletedBatch = (totalRows > 0 && completed >= totalRows) ||
+        String(item.workflowState || item.workflow?.state || item.bgoStatus || "").toUpperCase() === "COMPLETED";
 
       totalMeters += totalRows;
 
-      if (workflowState === "COMPLETED" || bgoStatus === "COMPLETED") {
+      if (isCompletedBatch) {
         completedBatches += 1;
         completedMeters += totalRows;
-      } else if (
-        bgoStatus === "USED" ||
-        bgoStatus === "ALLOCATED" ||
-        bgoStatus === "PARTIALLY_USED" ||
-        workflowState === "ALLOCATED" ||
-        workflowState === "IN_PROGRESS"
-      ) {
-        allocatedBatches += 1;
-        allocatedMeters += totalRows;
       } else {
-        // Unallocated / Ready for BGO / Staged
-        unallocatedBatches += 1;
-        unallocatedMeters += totalRows;
+        const alloc = getBatchAllocationStatus(item);
+        if (alloc.label === "Allocated") {
+          allocatedBatches += 1;
+          allocatedMeters += totalRows;
+        } else {
+          unallocatedBatches += 1;
+          unallocatedMeters += totalRows;
+        }
       }
     });
 
@@ -265,6 +276,14 @@ export default function TrnBgoRegisterPage() {
 
   const handleConfirmDelete = async () => {
     if (!deleteCandidate) return;
+    const inProgress = Number(deleteCandidate.inProgressRows || 0);
+    const completed = Number(deleteCandidate.completedRows || 0);
+    if (inProgress > 0 || completed > 0) {
+      setDeleteError(
+        `Cannot delete batch: field execution has commenced (${inProgress} in progress, ${completed} completed).`
+      );
+      return;
+    }
     setDeleteError("");
     try {
       const result = await deleteTcUpload({
@@ -428,10 +447,10 @@ export default function TrnBgoRegisterPage() {
       label: "BGO Status",
       sortable: true,
       filter: "select",
-      value: (batch) => getBgoStatusBadge(batch.bgoStatus).label,
-      sortValue: (batch) => batch.bgoStatus || "",
+      value: (batch) => getBatchAllocationStatus(batch).label,
+      sortValue: (batch) => getBatchAllocationStatus(batch).label,
       render: (batch) => {
-        const badge = getBgoStatusBadge(batch.bgoStatus);
+        const badge = getBatchAllocationStatus(batch);
         return (
           <span
             style={{
@@ -452,17 +471,6 @@ export default function TrnBgoRegisterPage() {
       },
     },
     {
-      key: "readyRows",
-      label: "Ready Meters",
-      sortable: true,
-      filter: "text",
-      value: (batch) => String(batch.readyRows ?? 0),
-      sortValue: (batch) => Number(batch.readyRows || 0),
-      render: (batch) => (
-        <strong style={styles.readyCell}>{formatNumber(batch.readyRows)}</strong>
-      ),
-    },
-    {
       key: "totalRows",
       label: "Total Meters",
       sortable: true,
@@ -474,14 +482,50 @@ export default function TrnBgoRegisterPage() {
       ),
     },
     {
-      key: "lmPcode",
-      label: "LM",
+      key: "inProgressRows",
+      label: "In Progress",
       sortable: true,
-      filter: "select",
-      value: (batch) => batch.lmPcode || "NAv",
-      sortValue: (batch) => batch.lmPcode || "",
+      filter: "text",
+      value: (batch) => String(batch.inProgressRows ?? 0),
+      sortValue: (batch) => Number(batch.inProgressRows || 0),
       render: (batch) => (
-        <div style={styles.strongCell}>{batch.lmPcode || "NAv"}</div>
+        <strong
+          style={{
+            color: Number(batch.inProgressRows || 0) > 0 ? "#b45309" : "#64748b",
+            fontWeight: 800,
+          }}
+        >
+          {formatNumber(batch.inProgressRows)}
+        </strong>
+      ),
+    },
+    {
+      key: "completedRows",
+      label: "Completed",
+      sortable: true,
+      filter: "text",
+      value: (batch) => String(batch.completedRows ?? 0),
+      sortValue: (batch) => Number(batch.completedRows || 0),
+      render: (batch) => (
+        <strong
+          style={{
+            color: Number(batch.completedRows || 0) > 0 ? "#15803d" : "#64748b",
+            fontWeight: 800,
+          }}
+        >
+          {formatNumber(batch.completedRows)}
+        </strong>
+      ),
+    },
+    {
+      key: "wardPcode",
+      label: "Ward",
+      sortable: true,
+      filter: "text",
+      value: (batch) => batch.wardPcode || batch.scope?.wardPcode || "NAv",
+      sortValue: (batch) => batch.wardPcode || batch.scope?.wardPcode || "",
+      render: (batch) => (
+        <div style={styles.strongCell}>{batch.wardPcode || batch.scope?.wardPcode || "NAv"}</div>
       ),
     },
     {
@@ -491,16 +535,40 @@ export default function TrnBgoRegisterPage() {
       filter: null,
       sortable: false,
       export: false,
-      render: (batch) => (
-        <button
-          type="button"
-          style={styles.deleteBatchButton}
-          onClick={() => handleOpenDelete(batch)}
-          title="Delete this batch upload"
-        >
-          Delete
-        </button>
-      ),
+      render: (batch) => {
+        const inProgress = Number(batch.inProgressRows || 0);
+        const completed = Number(batch.completedRows || 0);
+        const canDelete = inProgress === 0 && completed === 0;
+
+        return (
+          <button
+            type="button"
+            style={{
+              ...styles.deleteBatchButton,
+              ...(!canDelete
+                ? {
+                    opacity: 0.45,
+                    cursor: "not-allowed",
+                    background: "#f1f5f9",
+                    color: "#94a3b8",
+                    borderColor: "#e2e8f0",
+                  }
+                : null),
+            }}
+            disabled={!canDelete}
+            onClick={() => {
+              if (canDelete) handleOpenDelete(batch);
+            }}
+            title={
+              canDelete
+                ? "Delete this batch upload"
+                : `Cannot delete: ${inProgress} meters in progress, ${completed} completed`
+            }
+          >
+            Delete
+          </button>
+        );
+      },
     },
   ], [tickedBatchIds]);
 
@@ -511,6 +579,12 @@ export default function TrnBgoRegisterPage() {
           <p style={styles.eyebrow}>Operations / TRN BGO Register</p>
           <div style={styles.titleHelpRow}>
             <h2 style={styles.title}>TRN BGO Register</h2>
+            <div style={styles.lmHeaderPill}>
+              <span style={styles.lmHeaderDot} />
+              <span style={styles.lmHeaderLabel}>Local Municipality:</span>
+              <strong style={styles.lmHeaderValue}>{lmName || lmPcode || "Active Municipality"}</strong>
+              {lmPcode ? <span style={styles.lmHeaderPcode}>({lmPcode})</span> : null}
+            </div>
           </div>
           <p style={styles.subtitle}>
             View permanent Transaction batches originating from uploaded meter lists.
@@ -920,6 +994,35 @@ const styles = {
     color: "#334155",
     textDecoration: "none",
     border: "1px solid #cbd5e1",
+  },
+  lmHeaderPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 12px",
+    borderRadius: 9999,
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    fontSize: 12,
+    color: "#1e40af",
+  },
+  lmHeaderDot: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: "#2563eb",
+  },
+  lmHeaderLabel: {
+    fontWeight: 600,
+    color: "#475569",
+  },
+  lmHeaderValue: {
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+  lmHeaderPcode: {
+    color: "#64748b",
+    fontWeight: 600,
   },
   deleteBatchButton: {
     display: "inline-flex",
