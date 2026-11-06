@@ -69,6 +69,119 @@ function resolveWorkbase(auth = {}, geoState = {}) {
   };
 }
 
+function getPremiseErfId(premise = {}) {
+  return String(
+    premise.erfId ||
+      premise.accessData?.erfId ||
+      premise.raw?.erfId ||
+      premise.raw?.accessData?.erfId ||
+      premise.parents?.erfId ||
+      "",
+  ).trim();
+}
+
+function getPremiseId(premise = {}) {
+  return String(premise.id || premise.premiseId || premise.raw?.id || "").trim();
+}
+
+function getMeterPremiseId(meter = {}) {
+  const raw = meter.raw || {};
+  return String(
+    meter.accessData?.premise?.id ||
+      meter.accessData?.premiseId ||
+      meter.premiseId ||
+      meter.premise?.id ||
+      meter.parents?.premiseId ||
+      meter.links?.premiseId ||
+      raw.accessData?.premise?.id ||
+      raw.accessData?.premiseId ||
+      raw.premiseId ||
+      raw.premise?.id ||
+      raw.parents?.premiseId ||
+      raw.links?.premiseId ||
+      "",
+  ).trim();
+}
+
+function getMeterErfId(meter = {}) {
+  const raw = meter.raw || {};
+  return String(
+    meter.accessData?.erfId ||
+      meter.accessData?.erf?.id ||
+      meter.accessData?.erf?.erfId ||
+      meter.accessData?.erf?.pcode ||
+      meter.erfId ||
+      meter.erf?.id ||
+      meter.erf?.erfId ||
+      meter.parents?.erfId ||
+      meter.links?.erfId ||
+      raw.accessData?.erfId ||
+      raw.accessData?.erf?.id ||
+      raw.accessData?.erf?.erfId ||
+      raw.erfId ||
+      raw.parents?.erfId ||
+      raw.links?.erfId ||
+      "",
+  ).trim();
+}
+
+function evaluateGeofenceAssetChain(gf, erfs = [], premises = [], meters = []) {
+  if (!gf) return { erfCount: 0, premiseCount: 0, meterCount: 0 };
+
+  const path = getGeoFencePath(gf);
+  if (Array.isArray(path) && path.length >= 3 && erfs.length > 0) {
+    let geom = null;
+    try {
+      geom = polygonFromPoints(path);
+    } catch {
+      geom = null;
+    }
+    if (geom) {
+      const insideErfs = erfs.filter((erf) => {
+        const lat = erf.centroid?.latitude ?? erf.centroid?.lat;
+        const lng = erf.centroid?.longitude ?? erf.centroid?.lng;
+        if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return false;
+        try {
+          return strictlyInside({ latitude: Number(lat), longitude: Number(lng) }, geom);
+        } catch {
+          return false;
+        }
+      });
+
+      const erfIdSet = new Set(
+        insideErfs
+          .map((e) => String(e.id || e.erfId || e.pcode || "").trim())
+          .filter(Boolean),
+      );
+
+      const insidePremises = premises.filter((p) => {
+        const eId = getPremiseErfId(p);
+        return eId && erfIdSet.has(eId);
+      });
+
+      const premiseIdSet = new Set(insidePremises.map(getPremiseId).filter(Boolean));
+
+      const insideMeters = meters.filter((m) => {
+        const pId = getMeterPremiseId(m);
+        const eId = getMeterErfId(m);
+        return (pId && premiseIdSet.has(pId)) || (eId && erfIdSet.has(eId));
+      });
+
+      return {
+        erfCount: insideErfs.length,
+        premiseCount: insidePremises.length,
+        meterCount: insideMeters.length,
+      };
+    }
+  }
+
+  return {
+    erfCount: Number(gf.counts?.erfs ?? gf.erfCount ?? 0),
+    premiseCount: Number(gf.counts?.premises ?? gf.premiseCount ?? 0),
+    meterCount: Number(gf.counts?.meters ?? gf.meterCount ?? 0),
+  };
+}
+
 function parseGeometry(geometry) {
   if (!geometry) return null;
   if (typeof geometry === "string") {
@@ -719,22 +832,33 @@ export default function MdBgoPlanningPage() {
   const [createdResult, setCreatedResult] = useState(null);
   const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
-  // ERFs for selected ward (lazy-loaded when layer active or drawing)
-  const shouldLoadErfs = Boolean(selectedWardPcode && lmPcode && (showErfsLayer || isDrawing));
+  // ERFs for selected ward (loaded when layer active, drawing, or when a geofence is selected)
+  const shouldLoadErfs = Boolean(
+    selectedWardPcode &&
+      lmPcode &&
+      (showErfsLayer || isDrawing || selectedGeofenceId || savedGeofenceLanding),
+  );
   const { data: wardErfs = [], isLoading: isErfsLoading } = useGetErfsByWardQuery(
     { lmPcode, wardPcode: selectedWardPcode },
     { skip: !shouldLoadErfs },
   );
 
-  // Premises for selected ward (lazy-loaded when layer active)
-  const shouldLoadPremises = Boolean(selectedWardPcode && showPremisesLayer);
+  // Premises for selected ward (loaded when layer active, drawing, or when a geofence is selected)
+  const shouldLoadPremises = Boolean(
+    selectedWardPcode &&
+      (showPremisesLayer || isDrawing || selectedGeofenceId || savedGeofenceLanding),
+  );
   const { data: wardPremises = [], isLoading: isPremisesLoading } = useGetPremisesByWardQuery(
     selectedWardPcode,
     { skip: !shouldLoadPremises },
   );
 
-  // Meters (Assets) for selected ward (lazy-loaded when layer active)
-  const shouldLoadMeters = Boolean(selectedWardPcode && lmPcode && showMetersLayer);
+  // Meters (Assets) for selected ward (loaded when layer active, drawing, or when a geofence is selected)
+  const shouldLoadMeters = Boolean(
+    selectedWardPcode &&
+      lmPcode &&
+      (showMetersLayer || isDrawing || selectedGeofenceId || savedGeofenceLanding),
+  );
   const { data: wardMeters = [], isLoading: isMetersLoading } = useGetAstsByLmPcodeWardPcodeQuery(
     { lmPcode, wardPcode: selectedWardPcode },
     { skip: !shouldLoadMeters },
@@ -851,6 +975,59 @@ export default function MdBgoPlanningPage() {
   const isOverLimit = erfsInside.length > BGO_ERF_LIMIT;
   const canSave = drawingPoints.length >= 3 && evaluatedGeometry && erfsInside.length >= 1 && !isOverLimit;
 
+  // 3-tier live evaluation during drawing
+  const { premisesInside, metersInside } = useMemo(() => {
+    if (erfsInside.length === 0) {
+      return { premisesInside: [], metersInside: [] };
+    }
+    const erfIdSet = new Set(
+      erfsInside
+        .map((erf) => String(erf.id || erf.erfId || erf.pcode || "").trim())
+        .filter(Boolean),
+    );
+
+    const matchedPremises = wardPremises.filter((premise) => {
+      const erfId = getPremiseErfId(premise);
+      return erfId && erfIdSet.has(erfId);
+    });
+
+    const premiseIdSet = new Set(matchedPremises.map(getPremiseId).filter(Boolean));
+
+    const matchedMeters = wardMeters.filter((meter) => {
+      const premiseId = getMeterPremiseId(meter);
+      const erfId = getMeterErfId(meter);
+      return (premiseId && premiseIdSet.has(premiseId)) || (erfId && erfIdSet.has(erfId));
+    });
+
+    return {
+      premisesInside: matchedPremises,
+      metersInside: matchedMeters,
+    };
+  }, [erfsInside, wardPremises, wardMeters]);
+
+  // Dynamic evaluation for active/selected geofence
+  const activeLandingCounts = useMemo(() => {
+    if (!savedGeofenceLanding) return { erfCount: 0, premiseCount: 0, meterCount: 0 };
+
+    if (wardErfs.length > 0 && Array.isArray(savedGeofenceLanding.points) && savedGeofenceLanding.points.length >= 3) {
+      const evaluated = evaluateGeofenceAssetChain(
+        savedGeofenceLanding,
+        wardErfs,
+        wardPremises,
+        wardMeters,
+      );
+      if (evaluated.erfCount > 0) {
+        return evaluated;
+      }
+    }
+
+    return {
+      erfCount: Number(savedGeofenceLanding.erfCount ?? 0),
+      premiseCount: Number(savedGeofenceLanding.premiseCount ?? 0),
+      meterCount: Number(savedGeofenceLanding.meterCount ?? 0),
+    };
+  }, [savedGeofenceLanding, wardErfs, wardPremises, wardMeters]);
+
   // Counter text
   const counterText = useMemo(() => {
     if (drawingPoints.length < 3) {
@@ -866,8 +1043,8 @@ export default function MdBgoPlanningPage() {
     if (count === 0) {
       return "Inside: 0 ERFs · Outline at least 1 ERF.";
     }
-    return `Inside: ${count} ERF${count === 1 ? "" : "s"} · Ready to save geofence`;
-  }, [drawingPoints.length, evaluatedGeometry, erfsInside.length]);
+    return `Inside: ${count} ERF${count === 1 ? "" : "s"} · ${premisesInside.length} Premises · ${metersInside.length} Meters · Ready to save geofence`;
+  }, [drawingPoints.length, evaluatedGeometry, erfsInside.length, premisesInside.length, metersInside.length]);
 
   const counterTone = useMemo(() => {
     if (drawingPoints.length < 3 || erfsInside.length === 0) return "#475569";
@@ -946,6 +1123,11 @@ export default function MdBgoPlanningPage() {
           longitude: point.lng,
           order: index,
         })),
+        counts: {
+          erfs: erfsInside.length,
+          premises: premisesInside.length,
+          meters: metersInside.length,
+        },
       };
 
       const result = await createGeoFence(fencePayload).unwrap();
@@ -969,8 +1151,8 @@ export default function MdBgoPlanningPage() {
         wardNumber,
         wardPcode: selectedWardPcode,
         erfCount: erfsInside.length,
-        premiseCount: wardPremises.length,
-        meterCount: wardMeters.length,
+        premiseCount: premisesInside.length,
+        meterCount: metersInside.length,
         points: [...drawingPoints],
       });
 
@@ -1224,10 +1406,10 @@ export default function MdBgoPlanningPage() {
         <div style={styles.landingCard}>
           <div style={styles.landingHeader}>
             <div style={styles.landingHeaderLeft}>
-              <span style={styles.landingBadge}>● Geofence Saved · Unbatched</span>
+              <span style={styles.landingBadge}>● Geofence Active · Unbatched</span>
               <h3 style={styles.landingTitle}>{savedGeofenceLanding.name}</h3>
               <p style={styles.landingSubtitle}>
-                Encompasses <strong>{savedGeofenceLanding.erfCount} ERFs</strong> in Ward {savedGeofenceLanding.wardNumber}. Saved to database and ready for batch origination.
+                Ward {savedGeofenceLanding.wardNumber} ({savedGeofenceLanding.wardPcode || selectedWardPcode}) · Ready for batch origination
               </p>
             </div>
             <button
@@ -1240,12 +1422,31 @@ export default function MdBgoPlanningPage() {
             </button>
           </div>
 
+          {/* 3-Tier Operational Metric Cards */}
+          <div style={styles.statGrid}>
+            <div style={styles.statBox}>
+              <span style={styles.statValue}>{activeLandingCounts.erfCount}</span>
+              <span style={styles.statLabel}>ERFs</span>
+              <span style={styles.statDetail}>Enclosed parcels</span>
+            </div>
+            <div style={styles.statBox}>
+              <span style={styles.statValue}>{activeLandingCounts.premiseCount}</span>
+              <span style={styles.statLabel}>Premises</span>
+              <span style={styles.statDetail}>Linked to ERFs</span>
+            </div>
+            <div style={styles.statBox}>
+              <span style={styles.statValue}>{activeLandingCounts.meterCount}</span>
+              <span style={styles.statLabel}>Meters</span>
+              <span style={styles.statDetail}>On premises</span>
+            </div>
+          </div>
+
           <div style={styles.landingActions}>
             <button
               type="button"
               style={styles.landingPrimaryButton}
               onClick={() => {
-                alert(`Batch origination from saved geofence "${savedGeofenceLanding.name}" will be connected in next step.`);
+                alert(`Batch origination from saved geofence "${savedGeofenceLanding.name}" with ${activeLandingCounts.erfCount} ERFs, ${activeLandingCounts.premiseCount} premises, and ${activeLandingCounts.meterCount} meters will be connected in next step.`);
               }}
             >
               Create MD BGO Batch from this Geofence Now →
@@ -1524,12 +1725,12 @@ export default function MdBgoPlanningPage() {
               Save Geofence: {fullStandardName}
             </h3>
             <p style={styles.modalSubtitle}>
-              Encompasses {erfsInside.length} ERFs in Ward {wardNumber} (Batch Limit: {BGO_ERF_LIMIT} ERFs).
+              Encompasses {erfsInside.length} ERFs, {premisesInside.length} Premises, and {metersInside.length} Meters in Ward {wardNumber} (Batch Limit: {BGO_ERF_LIMIT} ERFs).
             </p>
 
             <div style={styles.confirmSummaryBox}>
               <div><strong>Ward:</strong> Ward {wardNumber} ({activeWard?.name || activeWard?.wardName || lmName})</div>
-              <div><strong>Coverage:</strong> {erfsInside.length} ERFs · {wardPremises.length} Known Premises · {wardMeters.length} Meters</div>
+              <div><strong>Coverage:</strong> {erfsInside.length} ERFs · {premisesInside.length} Premises · {metersInside.length} Meters</div>
               <div><strong>Points:</strong> {drawingPoints.length} polygon vertices</div>
             </div>
 
@@ -2100,6 +2301,39 @@ const styles = {
     fontSize: 13,
     color: "#475569",
     lineHeight: 1.4,
+  },
+  statGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+    gap: 12,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  statBox: {
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    padding: "10px 14px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: 800,
+    color: "#0f172a",
+    lineHeight: 1.2,
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#334155",
+    marginTop: 2,
+  },
+  statDetail: {
+    fontSize: 11,
+    color: "#64748b",
+    marginTop: 2,
   },
   landingDismissButton: {
     background: "transparent",
