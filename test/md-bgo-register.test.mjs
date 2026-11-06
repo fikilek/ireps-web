@@ -207,3 +207,34 @@ test("MD BGO Dashboard strictly isolates Meter Discovery from Transaction BGO (M
   assert.doesNotMatch(content, /useGetTcUploadsQuery/, "MD BGO Dashboard must not query or display tc_uploads");
   assert.doesNotMatch(content, /METER_DISCONNECTION/, "Must not contain hardcoded disconnection transaction references");
 });
+
+test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and collapsible layers (MD-BGO-R010)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // Municipality and Ward Boundary streaming queries
+  assert.match(content, /useGetLmBoundaryByIdQuery/, "Must query municipality boundary via useGetLmBoundaryByIdQuery");
+  assert.match(content, /useGetWardBoundariesByLmQuery/, "Must query ward boundaries via useGetWardBoundariesByLmQuery");
+  assert.match(content, /useGetPremisesByWardQuery/, "Must query ward premises via useGetPremisesByWardQuery");
+  assert.match(content, /useGetAstsByLmPcodeWardPcodeQuery/, "Must query ward meters via useGetAstsByLmPcodeWardPcodeQuery");
+
+  // Initial landing view without ward selected
+  assert.match(content, /Whole Municipality/, "Must provide Whole Municipality option/view on initial landing");
+  assert.match(content, /fitMapToBounds\(map, lmPaths\)/, "Must fit map to municipality bounds when no ward selected");
+
+  // Collapsible Map Layers Panel matching Sales GPS pattern
+  assert.match(content, /layersOpen/, "Must manage layersOpen state");
+  assert.match(content, /layersOpenButton/, "Must render layers open toggle button");
+  assert.match(content, /layersCloseButton/, "Must render layers close button");
+  assert.match(content, /MAP LAYERS/, "Must display MAP LAYERS panel header");
+
+  // Layer checkboxes: ERFs, Premises, Meters, Geofences, Ward boundaries
+  assert.match(content, /showWardBoundariesLayer/, "Must toggle Ward boundaries layer");
+  assert.match(content, /showErfsLayer/, "Must toggle ERFs layer");
+  assert.match(content, /showPremisesLayer/, "Must toggle Premises layer");
+  assert.match(content, /showMetersLayer/, "Must toggle Meters layer");
+  assert.match(content, /showGeofencesLayer/, "Must toggle Geofences layer");
+
+  // Gated activation when no ward is selected
+  assert.match(content, /disabled=\{!selectedWardPcode\}/, "ERFs, premises, meters & geofences must be gated to selected ward");
+});
