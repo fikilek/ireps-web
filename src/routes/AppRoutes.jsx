@@ -37,6 +37,7 @@ import NormalisationReportPage from "../pages/reports/NormalisationReportPage";
 
 import OperationalTeamsPage from "../pages/operations/OperationalTeamsPage";
 import TcUploadsPage from "../pages/operations/TcUploadsPage";
+import TrnBgoUploadPage from "../pages/operations/TrnBgoUploadPage";
 import ItoPage from "../pages/operations/ItoPage";
 import TargetedBatchesPage from "../pages/operations/TargetedBatchesPage";
 import TargetedBatchDraftPage from "../pages/operations/TargetedBatchDraftPage";
@@ -438,6 +439,14 @@ export default function AppRoutes() {
 
           <Route
             path="/operations/trn-bgo/upload"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <TrnBgoUploadPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/operations/tc-uploads"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <TcUploadsPage />

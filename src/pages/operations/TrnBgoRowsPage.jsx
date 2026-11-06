@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
@@ -8,17 +8,15 @@ import {
   useGetBgoBatchesByLmQuery,
   useGetBgoRowsByBatchIdQuery,
 } from "../../redux/bgoApi";
-
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+import {
+  useGetTcUploadByIdQuery,
+  useGetTcRowsByTcIdQuery,
+} from "../../redux/tcApi";
+import IrepsTable from "../../components/table/IrepsTable";
 
 function formatNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number.toLocaleString("en-ZA") : "0";
-}
-
-function valueOrNav(value) {
-  const text = String(value ?? "").trim();
-  return text || "NAv";
 }
 
 function resolveWorkbase(auth = {}, geoState = {}) {
@@ -62,63 +60,326 @@ export default function TrnBgoRowsPage() {
 
   const auth = useAuth();
   const { geoState } = useGeo();
-  const { lmPcode: resolvedLmPcode } = useMemo(
+  const { lmPcode: resolvedLmPcode, lmName: resolvedLmName } = useMemo(
     () => resolveWorkbase(auth, geoState),
     [auth, geoState],
   );
   const activeLmPcode = lmPcodeParam || resolvedLmPcode;
 
+  // Stream TC upload metadata (for candidate / staged uploads)
+  const { data: tcUpload, isLoading: isTcUploadLoading } = useGetTcUploadByIdQuery(
+    batchId,
+    { skip: !batchId },
+  );
+
+  // Stream BGO batches list (for converted batches)
   const { data: allBatches = [] } = useGetBgoBatchesByLmQuery(
     { lmPcode: activeLmPcode },
     { skip: !activeLmPcode },
   );
 
-  const batch = useMemo(() => {
+  const bgoBatch = useMemo(() => {
     return allBatches.find((b) => b.id === batchId) || null;
   }, [allBatches, batchId]);
 
+  const activeBatch = tcUpload || bgoBatch || null;
+
+  // Stream rows from tc_rows
   const {
-    data: rows = [],
-    isLoading: isRowsLoading,
-    error: rowsError,
+    data: tcRows = [],
+    isLoading: isTcRowsLoading,
+    error: tcRowsError,
+  } = useGetTcRowsByTcIdQuery(batchId, {
+    skip: !batchId,
+  });
+
+  // Stream rows from bgo_rows (for converted batches)
+  const {
+    data: bgoRows = [],
+    isLoading: isBgoRowsLoading,
+    error: bgoRowsError,
   } = useGetBgoRowsByBatchIdQuery(
     { bgoBatchId: batchId },
-    { skip: !batchId },
+    { skip: !batchId || tcRows.length > 0 },
   );
 
-  const [meterFilter, setMeterFilter] = useState("");
-  const [trnFilter, setTrnFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [addressFilter, setAddressFilter] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const rawRows = tcRows.length > 0 ? tcRows : bgoRows;
+  const isLoading = isTcUploadLoading || isTcRowsLoading || (tcRows.length === 0 && isBgoRowsLoading);
+  const rowsError = tcRowsError || bgoRowsError;
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      const meterNo = String(row?.meterNo || row?.input?.meterNo || row?.ast?.astNo || "").toLowerCase();
-      if (meterFilter && !meterNo.includes(meterFilter.toLowerCase())) return false;
+  // Normalize rows for IrepsTable
+  const displayRows = useMemo(() => {
+    return rawRows.map((row, index) => {
+      const rowNo = row.rowNo ?? index + 1;
+      const meterNo = row.input?.meterNo || row.meterNo || row.ast?.meterNo || row.ast?.astNo || "NAv";
+      const address = row.premise?.address || row.input?.premiseAddress || row.address || "NAv";
+      const erfNo = row.premise?.erfNo || row.input?.erfNo || row.ast?.erfNo || row.erfNo || "NAv";
+      const accountNo = row.input?.accountNo || row.input?.linkedAccountNo || row.accountNo || "NAv";
+      const actionReason = row.input?.reason || row.input?.actionReason || row.actionReason || "NAv";
 
-      const trnId = String(row?.trnId || row?.refs?.trnId || row?.bgo?.trnId || "").toLowerCase();
-      if (trnFilter && !trnId.includes(trnFilter.toLowerCase())) return false;
+      // Meter State
+      const meterStatus = String(
+        row.ast?.statusState || row.ast?.meterStatus || row.input?.meterStatus || "CONNECTED",
+      ).toUpperCase();
 
-      const status = String(row?.status || row?.releaseState || row?.bgo?.releaseState || "").toLowerCase();
-      if (statusFilter && !status.includes(statusFilter.toLowerCase())) return false;
+      // Validation state
+      const isEligible = row.backend?.eligible === true;
+      const validationState = isEligible
+        ? "ELIGIBLE"
+        : (row.backend?.eligibilityCode || row.backend?.state || (row.backend?.matched ? "ELIGIBLE" : "NOT_ELIGIBLE"));
 
-      const address = String(row?.address || row?.premise?.address || row?.input?.premiseAddress || "").toLowerCase();
-      if (addressFilter && !address.includes(addressFilter.toLowerCase())) return false;
+      // Readiness
+      const isReady = row.bgo?.ready === true || (isEligible && !row.backend?.alreadyHasActiveSameOperationTrn);
+      const readinessState = isReady
+        ? "READY_FOR_BGO"
+        : (row.bgo?.readinessState || (row.backend?.alreadyHasActiveSameOperationTrn ? "BLOCKED" : "NOT_READY"));
 
-      return true;
+      // Blocking / exception message
+      const blockingMessage =
+        row.backend?.errors?.[0] ||
+        row.bgo?.readinessReason ||
+        row.backend?.message ||
+        (isReady ? "Ready for batch allocation" : "Not ready");
+      const reasonCode =
+        row.backend?.reasonCodes?.[0] ||
+        (row.backend?.alreadyHasActiveSameOperationTrn ? "BLOCKED_ACTIVE_SAME_OPERATION_TRN" : "");
+
+      // Active conflicting TRN ID
+      const activeTrnId =
+        row.backend?.activeLifecycle?.trnId ||
+        row.trnId ||
+        row.childTrnId ||
+        row.bgo?.trnId ||
+        "None";
+      const activeTrnState = row.backend?.activeLifecycle?.workflowState || "";
+
+      // Ward and Geofence
+      const wardNo =
+        row.premise?.wardNo ||
+        row.premise?.wardPcode ||
+        row.input?.wardNo ||
+        row.wardPcode ||
+        activeBatch?.wardPcode ||
+        "NAv";
+      const geofenceName =
+        row.geofenceRefs?.[0]?.name ||
+        row.geofenceName ||
+        (activeBatch?.summary?.geofenceBreakdown?.[0]?.name) ||
+        "NAv";
+
+      return {
+        id: row.id || `row_${index}`,
+        rowNo,
+        meterNo,
+        address,
+        erfNo,
+        accountNo,
+        actionReason,
+        meterStatus,
+        isEligible,
+        validationState,
+        isReady,
+        readinessState,
+        blockingMessage,
+        reasonCode,
+        activeTrnId,
+        activeTrnState,
+        wardNo,
+        geofenceName,
+        raw: row,
+      };
     });
-  }, [rows, meterFilter, trnFilter, statusFilter, addressFilter]);
+  }, [rawRows, activeBatch]);
 
-  const totalRows = filteredRows.length;
-  const totalPages = Math.ceil(totalRows / pageSize) || 1;
-  const safeCurrentPage = Math.min(Math.max(currentPage, 1), totalPages);
-
-  const pagedRows = useMemo(() => {
-    const start = (safeCurrentPage - 1) * pageSize;
-    return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, safeCurrentPage, pageSize]);
+  // IrepsTable column definitions
+  const columns = useMemo(() => [
+    {
+      key: "rowNo",
+      label: "#",
+      width: 50,
+      filter: null,
+      sortable: true,
+      value: (r) => String(r.rowNo),
+      sortValue: (r) => r.rowNo,
+      render: (r) => <strong>{r.rowNo}</strong>,
+    },
+    {
+      key: "meterNo",
+      label: "Meter No",
+      width: 140,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.meterNo,
+      sortValue: (r) => r.meterNo,
+      render: (r) => (
+        <span style={styles.meterNoCell}>
+          {r.meterNo}
+        </span>
+      ),
+    },
+    {
+      key: "meterStatus",
+      label: "Meter State",
+      width: 120,
+      filter: "select",
+      sortable: true,
+      value: (r) => r.meterStatus,
+      sortValue: (r) => r.meterStatus,
+      render: (r) => {
+        const isConn = r.meterStatus === "CONNECTED";
+        return (
+          <span
+            style={{
+              ...styles.badge,
+              background: isConn ? "#ecfdf5" : "#fef2f2",
+              color: isConn ? "#047857" : "#b91c1c",
+              border: `1px solid ${isConn ? "#a7f3d0" : "#fecaca"}`,
+            }}
+          >
+            {r.meterStatus}
+          </span>
+        );
+      },
+    },
+    {
+      key: "validationState",
+      label: "Validation",
+      width: 110,
+      filter: "select",
+      sortable: true,
+      value: (r) => r.validationState,
+      sortValue: (r) => r.validationState,
+      render: (r) => {
+        const ok = r.isEligible;
+        return (
+          <span
+            style={{
+              ...styles.badge,
+              background: ok ? "#f0fdf4" : "#fef2f2",
+              color: ok ? "#15803d" : "#b91c1c",
+              border: `1px solid ${ok ? "#bbf7d0" : "#fecaca"}`,
+            }}
+          >
+            {r.validationState}
+          </span>
+        );
+      },
+    },
+    {
+      key: "readinessState",
+      label: "BGO Readiness",
+      width: 140,
+      filter: "select",
+      value: (r) => (r.isReady ? "Ready for BGO" : "Blocked"),
+      sortValue: (r) => (r.isReady ? "Ready" : "Blocked"),
+      render: (r) => (
+        <span
+          style={{
+            ...styles.badge,
+            background: r.isReady ? "#ecfdf5" : "#fff7ed",
+            color: r.isReady ? "#047857" : "#c2410c",
+            border: `1px solid ${r.isReady ? "#a7f3d0" : "#fed7aa"}`,
+          }}
+        >
+          {r.isReady ? "READY FOR BGO" : "BLOCKED"}
+        </span>
+      ),
+    },
+    {
+      key: "blockingMessage",
+      label: "Reason / Exception",
+      filter: "text",
+      sortable: true,
+      value: (r) => `${r.reasonCode ? r.reasonCode + " - " : ""}${r.blockingMessage}`,
+      sortValue: (r) => r.blockingMessage,
+      render: (r) => (
+        <div>
+          {r.reasonCode ? (
+            <div style={styles.reasonCodeBadge}>
+              {r.reasonCode}
+            </div>
+          ) : null}
+          <div style={{ fontSize: 12, color: r.isReady ? "#059669" : "#334155" }}>
+            {r.blockingMessage}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "activeTrnId",
+      label: "Active TRN ID",
+      width: 180,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.activeTrnId,
+      sortValue: (r) => r.activeTrnId,
+      render: (r) => {
+        if (!r.activeTrnId || r.activeTrnId === "None") {
+          return <span style={{ color: "#94a3b8", fontSize: 12 }}>None</span>;
+        }
+        return (
+          <div>
+            <div style={styles.activeTrnCode}>
+              {r.activeTrnId}
+            </div>
+            {r.activeTrnState ? (
+              <span style={styles.activeTrnState}>
+                State: {r.activeTrnState}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      key: "address",
+      label: "Address & ERF",
+      filter: "text",
+      sortable: true,
+      value: (r) => `${r.address} ERF ${r.erfNo}`,
+      sortValue: (r) => r.address,
+      render: (r) => (
+        <div>
+          <div style={styles.addressLine}>{r.address}</div>
+          <div style={styles.subtleLine}>ERF: {r.erfNo}</div>
+        </div>
+      ),
+    },
+    {
+      key: "geofenceName",
+      label: "Ward & Geofence",
+      filter: "text",
+      sortable: true,
+      value: (r) => `${r.wardNo} ${r.geofenceName}`,
+      sortValue: (r) => r.geofenceName,
+      render: (r) => (
+        <div>
+          <div style={styles.geofenceLine}>{r.geofenceName}</div>
+          <div style={styles.subtleLine}>Ward: {r.wardNo}</div>
+        </div>
+      ),
+    },
+    {
+      key: "accountNo",
+      label: "Account No",
+      width: 110,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.accountNo,
+      sortValue: (r) => r.accountNo,
+      render: (r) => <span style={{ fontSize: 12 }}>{r.accountNo}</span>,
+    },
+    {
+      key: "actionReason",
+      label: "Action Reason",
+      width: 140,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.actionReason,
+      sortValue: (r) => r.actionReason,
+      render: (r) => <span style={{ fontSize: 12, color: "#475569" }}>{r.actionReason}</span>,
+    },
+  ], []);
 
   return (
     <section style={styles.page}>
@@ -130,21 +391,29 @@ export default function TrnBgoRowsPage() {
             </Link>{" "}
             / Batch Rows
           </p>
-          <h2 style={styles.title}>TRN BGO Batch Rows</h2>
+          <div style={styles.titleHelpRow}>
+            <h2 style={styles.title}>TRN BGO Batch Rows</h2>
+            <div style={styles.lmHeaderPill}>
+              <span style={styles.lmHeaderDot} />
+              <span style={styles.lmHeaderLabel}>Local Municipality:</span>
+              <strong style={styles.lmHeaderValue}>{resolvedLmName || activeLmPcode || "Active LM"}</strong>
+              {activeLmPcode ? <span style={styles.lmHeaderPcode}>({activeLmPcode})</span> : null}
+            </div>
+          </div>
           <p style={styles.subtitle}>
-            Batch ID: <strong>{batchId || "No Batch Selected"}</strong> · {rows.length} total meter candidate rows
+            Batch ID: <strong>{batchId || "No Batch Selected"}</strong> · {displayRows.length} total constituent rows with state machine diagnostics
           </p>
         </div>
 
         <div style={styles.headerActions}>
           <Link to="/operations/trn-bgo" style={styles.secondaryLinkButton}>
-            Back to TRN BGO Register
+            ← Back to Register
           </Link>
           <Link
-            to={`/operations/trn-bgo/allocation?batchId=${encodeURIComponent(batchId)}`}
-            style={styles.primaryButton}
+            to="/operations/trn-bgo/upload"
+            style={styles.secondaryLinkButton}
           >
-            Allocation Board
+            Upload & Create TRN BGO
           </Link>
           <Link to="/operations/trn-bgo/dashboard" style={styles.secondaryLinkButton}>
             TRN BGO Dashboard
@@ -152,139 +421,66 @@ export default function TrnBgoRowsPage() {
         </div>
       </div>
 
-      {batch ? (
+      {activeBatch ? (
         <div style={styles.batchBanner}>
           <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>Operation</span>
             <strong style={styles.bannerValue}>
-              {batch.operationType || batch?.sourceUpload?.trnType || "NAv"}
+              {activeBatch.trnType || activeBatch.operationType || "METER_DISCONNECTION"}
             </strong>
           </div>
           <div style={styles.bannerItem}>
-            <span style={styles.bannerLabel}>Ward</span>
+            <span style={styles.bannerLabel}>File Name</span>
             <strong style={styles.bannerValue}>
-              {batch?.scope?.wardPcode || "NAv"}
+              {activeBatch.fileName || activeBatch.sourceUpload?.fileName || "NAv"}
+            </strong>
+          </div>
+          <div style={styles.bannerItem}>
+            <span style={styles.bannerLabel}>Ward Scope</span>
+            <strong style={styles.bannerValue}>
+              {activeBatch.wardPcode || activeBatch.scope?.wardPcode || activeBatch.wardNo || "NAv"}
             </strong>
           </div>
           <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>Geofence</span>
             <strong style={styles.bannerValue}>
-              {batch?.geofenceName || batch?.geofenceRef?.name || "NAv"}
+              {activeBatch.geofenceName ||
+                activeBatch.geofenceRef?.name ||
+                activeBatch.summary?.geofenceBreakdown?.[0]?.name ||
+                "NAv"}
             </strong>
           </div>
           <div style={styles.bannerItem}>
-            <span style={styles.bannerLabel}>Allocated Target</span>
+            <span style={styles.bannerLabel}>Total Meters</span>
             <strong style={styles.bannerValue}>
-              {batch?.targetName || batch?.target?.name || "Not Allocated"}
+              {formatNumber(activeBatch.totalRows || displayRows.length)}
             </strong>
           </div>
           <div style={styles.bannerItem}>
-            <span style={styles.bannerLabel}>Workflow State</span>
+            <span style={styles.bannerLabel}>BGO Status</span>
             <strong style={styles.bannerValue}>
-              {batch?.workflow?.state || batch?.workflowState || "NAv"}
+              {activeBatch.bgoStatus || activeBatch.workflow?.state || "NAv"}
             </strong>
           </div>
         </div>
       ) : null}
 
+      {rowsError ? (
+        <div style={styles.errorNotice}>
+          Failed to load rows: {rowsError?.data?.message || rowsError?.message || "Unknown error"}
+        </div>
+      ) : null}
+
       <div style={styles.panel}>
-        <div style={styles.filtersBar}>
-          <input
-            type="text"
-            placeholder="Filter Meter No"
-            value={meterFilter}
-            onChange={(e) => {
-              setMeterFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-            style={styles.filterInput}
-          />
-          <input
-            type="text"
-            placeholder="Filter TRN ID"
-            value={trnFilter}
-            onChange={(e) => {
-              setTrnFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-            style={styles.filterInput}
-          />
-          <input
-            type="text"
-            placeholder="Filter Address"
-            value={addressFilter}
-            onChange={(e) => {
-              setAddressFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-            style={styles.filterInput}
-          />
-        </div>
-
-        <div style={styles.tableContainer}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>#</th>
-                <th style={styles.th}>Meter No</th>
-                <th style={styles.th}>Child TRN ID</th>
-                <th style={styles.th}>Release State</th>
-                <th style={styles.th}>Address</th>
-                <th style={styles.th}>ERF No</th>
-                <th style={styles.th}>Account No</th>
-                <th style={styles.th}>Action Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isRowsLoading ? (
-                <tr>
-                  <td colSpan={8} style={styles.loadingCell}>
-                    Loading BGO Batch rows...
-                  </td>
-                </tr>
-              ) : null}
-
-              {!isRowsLoading && filteredRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={styles.emptyCell}>
-                    No rows match the specified criteria.
-                  </td>
-                </tr>
-              ) : null}
-
-              {!isRowsLoading
-                ? pagedRows.map((row, idx) => {
-                    const meterNo = row?.meterNo || row?.input?.meterNo || row?.ast?.astNo || "NAv";
-                    const trnId = row?.trnId || row?.refs?.trnId || row?.bgo?.trnId || "NAv";
-                    const releaseState = row?.releaseState || row?.bgo?.releaseState || row?.status || "WAITING";
-                    const address = row?.address || row?.premise?.address || row?.input?.premiseAddress || "NAv";
-                    const erfNo = row?.erfNo || row?.ast?.erfNo || row?.premise?.erfNo || "NAv";
-                    const accountNo = row?.linkedAccountNo || row?.input?.linkedAccountNo || "NAv";
-                    const actionReason = row?.actionReason || row?.input?.actionReason || "NAv";
-
-                    return (
-                      <tr key={row.id || idx}>
-                        <td style={styles.td}>{(safeCurrentPage - 1) * pageSize + idx + 1}</td>
-                        <td style={styles.td}>
-                          <strong style={styles.meterText}>{meterNo}</strong>
-                        </td>
-                        <td style={styles.td}>
-                          <span style={styles.trnText}>{trnId}</span>
-                        </td>
-                        <td style={styles.td}>
-                          <span style={styles.badge}>{releaseState}</span>
-                        </td>
-                        <td style={styles.td}>{address}</td>
-                        <td style={styles.td}>{erfNo}</td>
-                        <td style={styles.td}>{accountNo}</td>
-                        <td style={styles.td}>{actionReason}</td>
-                      </tr>
-                    );
-                  })
-                : null}
-            </tbody>
-          </table>
-        </div>
+        <IrepsTable
+          data={displayRows}
+          columns={columns}
+          loading={isLoading}
+          emptyText="No constituent meters found for this batch."
+          title={`Batch Rows: ${batchId || "All Rows"}`}
+          pageSizeOptions={[10, 25, 50, 100]}
+          defaultPageSize={25}
+        />
       </div>
     </section>
   );
@@ -292,40 +488,75 @@ export default function TrnBgoRowsPage() {
 
 const styles = {
   page: {
-    padding: "24px 32px 64px",
-    maxWidth: 1600,
-    margin: "0 auto",
+    padding: "24px 32px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+    background: "#f8fafc",
+    minHeight: "100vh",
   },
   header: {
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: 24,
-    marginBottom: 20,
-    flexWrap: "wrap",
+    gap: 16,
   },
   eyebrow: {
     margin: "0 0 6px",
-    color: "#64748b",
     fontSize: 12,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
+    fontWeight: 700,
+    color: "#64748b",
   },
   breadcrumbLink: {
     color: "#2563eb",
     textDecoration: "none",
   },
-  title: {
+  titleHelpRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
     margin: "0 0 6px",
-    fontSize: 28,
+  },
+  title: {
+    margin: 0,
+    fontSize: 24,
     fontWeight: 900,
     color: "#0f172a",
     letterSpacing: "-0.02em",
   },
   subtitle: {
     margin: 0,
+    fontSize: 13,
+    color: "#475569",
+  },
+  lmHeaderPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "4px 12px",
+    borderRadius: 9999,
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    fontSize: 12,
+    color: "#1e40af",
+  },
+  lmHeaderDot: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: "#2563eb",
+  },
+  lmHeaderLabel: {
+    fontWeight: 600,
+    color: "#475569",
+  },
+  lmHeaderValue: {
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+  lmHeaderPcode: {
     color: "#64748b",
+    fontWeight: 600,
   },
   headerActions: {
     display: "flex",
@@ -336,35 +567,36 @@ const styles = {
   primaryButton: {
     display: "inline-flex",
     alignItems: "center",
-    padding: "10px 16px",
-    borderRadius: 12,
+    padding: "8px 16px",
+    borderRadius: 8,
     background: "#2563eb",
     color: "#ffffff",
-    fontWeight: 800,
-    textDecoration: "none",
+    fontWeight: 700,
     fontSize: 13,
+    textDecoration: "none",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
   },
   secondaryLinkButton: {
     display: "inline-flex",
     alignItems: "center",
-    padding: "9px 14px",
-    borderRadius: 12,
-    border: "1px solid #cbd5e1",
+    padding: "8px 14px",
+    borderRadius: 8,
     background: "#ffffff",
-    color: "#475569",
-    fontWeight: 800,
-    textDecoration: "none",
+    color: "#334155",
+    fontWeight: 700,
     fontSize: 13,
+    textDecoration: "none",
+    border: "1px solid #cbd5e1",
   },
   batchBanner: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
     gap: 12,
-    marginBottom: 20,
-    padding: "16px 20px",
-    background: "#f8fafc",
-    borderRadius: 16,
+    background: "#ffffff",
     border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    padding: "16px 20px",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
   },
   bannerItem: {
     display: "flex",
@@ -373,87 +605,79 @@ const styles = {
   },
   bannerLabel: {
     fontSize: 11,
-    fontWeight: 800,
-    textTransform: "uppercase",
+    fontWeight: 700,
     color: "#64748b",
-    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
   },
   bannerValue: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: 800,
     color: "#0f172a",
   },
   panel: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 20,
     background: "#ffffff",
-    padding: 20,
-    boxShadow: "0 4px 16px rgba(15, 23, 42, 0.04)",
+    borderRadius: 14,
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+    overflow: "hidden",
   },
-  filtersBar: {
-    display: "flex",
-    gap: 12,
-    marginBottom: 16,
-    flexWrap: "wrap",
-  },
-  filterInput: {
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "1px solid #cbd5e1",
+  errorNotice: {
+    background: "#fef2f2",
+    border: "1px solid #fecaca",
+    color: "#b91c1c",
+    borderRadius: 10,
+    padding: "12px 16px",
     fontSize: 13,
-    color: "#0f172a",
-    minWidth: 200,
+    fontWeight: 600,
   },
-  tableContainer: {
-    overflowX: "auto",
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "separate",
-    borderSpacing: 0,
-    fontSize: 13,
-  },
-  th: {
-    background: "#f8fafc",
-    color: "#475569",
+  meterNoCell: {
+    fontFamily: "monospace",
     fontWeight: 800,
-    textAlign: "left",
-    padding: "12px 14px",
-    borderBottom: "2px solid #e2e8f0",
-    whiteSpace: "nowrap",
-  },
-  td: {
-    padding: "12px 14px",
-    borderBottom: "1px solid #f1f5f9",
-    verticalAlign: "middle",
-  },
-  meterText: {
+    fontSize: 13,
     color: "#0f172a",
-    fontFamily: "monospace",
-    fontSize: 14,
-  },
-  trnText: {
-    color: "#475569",
-    fontFamily: "monospace",
-    fontSize: 12,
   },
   badge: {
-    display: "inline-block",
+    display: "inline-flex",
+    alignItems: "center",
     padding: "3px 8px",
     borderRadius: 6,
     fontSize: 11,
     fontWeight: 800,
-    background: "#f1f5f9",
-    color: "#475569",
   },
-  loadingCell: {
-    padding: 32,
-    textAlign: "center",
-    color: "#64748b",
+  reasonCodeBadge: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#b91c1c",
+    marginBottom: 2,
+    fontFamily: "monospace",
   },
-  emptyCell: {
-    padding: 32,
-    textAlign: "center",
+  activeTrnCode: {
+    fontFamily: "monospace",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#1d4ed8",
+  },
+  activeTrnState: {
+    display: "inline-block",
+    fontSize: 10,
+    fontWeight: 800,
+    color: "#b45309",
+    marginTop: 2,
+  },
+  addressLine: {
+    fontWeight: 600,
+    fontSize: 13,
+    color: "#0f172a",
+  },
+  geofenceLine: {
+    fontWeight: 700,
+    fontSize: 12,
+    color: "#0f172a",
+  },
+  subtleLine: {
+    fontSize: 11,
     color: "#64748b",
+    marginTop: 1,
   },
 };
