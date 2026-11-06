@@ -353,3 +353,34 @@ test("MD BGO Planning Map enforces 3-tier ERF -> Premise -> Meter asset chain me
   assert.match(content, /Linked to ERFs/, "Must describe premises linked to ERFs");
   assert.match(content, /On premises/, "Must describe meters on premises");
 });
+
+test("MD BGO Planning Map supports geofence editing, visible description input, and scoped ERF number labels (MD-BGO-R010 v1.8.0)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // 1. Scoped ERF number labels on selected geofence
+  assert.match(content, /selectedErfLabelMarkersRef/, "Must track selected geofence ERF label markers");
+  assert.match(content, /ireps-erf-label/, "Must apply ireps-erf-label class to ERF markers");
+  assert.match(content, /strictlyInside/, "Must strictly filter ERF markers to enclosed polygon");
+
+  // 2. Visible description textarea in creation modal
+  assert.match(content, /modalTextarea/, "Must define and apply modalTextarea styling with visible border");
+
+  // 3. Edit Geofence details support
+  assert.match(content, /useUpdateGeoFenceMutation/, "Must import and use useUpdateGeoFenceMutation");
+  assert.match(content, /handleOpenEditModal/, "Must provide handleOpenEditModal handler");
+  assert.match(content, /handleSaveEdit/, "Must provide handleSaveEdit handler");
+  assert.match(content, /isEditModalOpen/, "Must manage isEditModalOpen modal state");
+  assert.match(content, /Edit Geofence Details/, "Must render Edit Geofence Details modal");
+  assert.match(content, /landingEditButton/, "Must provide landing edit button");
+
+  // 4. Backend update callable
+  const callablePath = path.join(repoRoot, "functions/geofences/callables.js");
+  const callableContent = fs.readFileSync(callablePath, "utf8");
+  assert.match(callableContent, /export async function updateGeoFenceRequest/, "Must implement updateGeoFenceRequest");
+  assert.match(callableContent, /export const updateGeoFence\s*=/, "Must export updateGeoFence callable");
+
+  const indexPath = path.join(repoRoot, "functions/index.js");
+  const indexContent = fs.readFileSync(indexPath, "utf8");
+  assert.match(indexContent, /updateGeoFence,/, "Must export updateGeoFence in functions/index.js");
+});

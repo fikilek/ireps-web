@@ -75,7 +75,7 @@ import { onWorkbaseRegistryJobCreated } from "./registry/workbaseSyncTrigger.js"
 import { onCreateMeterCommissioningCallable } from "./commissioning/callable.js";
 import { onMeterCommissioningTrnCreated } from "./commissioning/trigger.js";
 
-import { createGeoFence } from "./geofences/callables.js";
+import { createGeoFence, updateGeoFence } from "./geofences/callables.js";
 import { onGeoFenceCreated } from "./geofences/triggers.js";
 
 import { onUploadAndValidateTcCallable } from "./tcUploads/callables.js";
@@ -274,6 +274,7 @@ export {
   removeTeamMember,
   deleteTeam,
   createGeoFence,
+  updateGeoFence,
   onGeoFenceCreated,
   onMeterLifecycleTrnCallable,
   onCreateMeterLifecycleInstructionCallable,

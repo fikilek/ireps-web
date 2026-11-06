@@ -618,6 +618,27 @@ export const geofencesApi = createApi({
         }
       },
     }),
+
+    updateGeoFence: builder.mutation({
+      async queryFn(payload) {
+        try {
+          const functions = getFunctions();
+          const callable = httpsCallable(functions, "updateGeoFence", { timeout: 60000 });
+          const result = await callable(payload);
+
+          return {
+            data: result.data,
+          };
+        } catch (error) {
+          return {
+            error: {
+              message: error?.message || "Failed to update geofence.",
+              code: error?.code || "UNKNOWN",
+            },
+          };
+        }
+      },
+    }),
   }),
 });
 
@@ -630,4 +651,5 @@ export const {
   useGetGeofenceMemberErfsByWardQuery,
   useGetTcMetersForGeofenceQuery,
   useCreateGeoFenceMutation,
+  useUpdateGeoFenceMutation,
 } = geofencesApi;

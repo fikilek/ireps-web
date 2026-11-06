@@ -13,6 +13,7 @@ import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import {
   useGetGeoFencesByWardQuery,
   useCreateGeoFenceMutation,
+  useUpdateGeoFenceMutation,
 } from "../../redux/geofencesApi";
 import { useCreateBgoMutation } from "../../redux/bgoApi";
 
@@ -289,6 +290,7 @@ function MdBgoMapInner({
   const premiseMarkersRef = useRef([]);
   const meterMarkersRef = useRef([]);
   const geofencePolygonsRef = useRef([]);
+  const selectedErfLabelMarkersRef = useRef([]);
   const draftPolylineRef = useRef(null);
   const draftPolygonRef = useRef(null);
   const draftMarkersRef = useRef([]);
@@ -675,6 +677,64 @@ function MdBgoMapInner({
     return () => clearMapObjects(geofencePolygonsRef);
   }, [map, selectedWardPcode, geofences, selectedGeofenceId, showGeofencesLayer, isDrawing, onSelectGeofence]);
 
+  // ERF Number Labels: Rendered ONLY for the ERFs strictly inside the selected geofence (MD-BGO-R010 v1.8.0)
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+    clearMapObjects(selectedErfLabelMarkersRef);
+
+    if (!selectedGeofenceId || !selectedWardPcode || erfs.length === 0) return;
+
+    const selectedGf = geofences.find((g) => g.id === selectedGeofenceId);
+    if (!selectedGf) return;
+
+    const path = getGeoFencePath(selectedGf);
+    if (!Array.isArray(path) || path.length < 3) return;
+
+    let geom = null;
+    try {
+      geom = polygonFromPoints(path);
+    } catch {
+      geom = null;
+    }
+    if (!geom) return;
+
+    const markers = [];
+    erfs.forEach((erf) => {
+      const lat = Number(erf.centroid?.latitude ?? erf.centroid?.lat);
+      const lng = Number(erf.centroid?.longitude ?? erf.centroid?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      if (strictlyInside({ latitude: lat, longitude: lng }, geom)) {
+        const erfNo = erf.erfNo || erf.properties?.erfNo || erf.id;
+        const marker = new window.google.maps.Marker({
+          position: { lat, lng },
+          map,
+          title: `ERF ${erfNo}`,
+          label: {
+            text: String(erfNo),
+            className: "ireps-erf-label",
+            color: "#0f172a",
+            fontWeight: "700",
+            fontSize: "11px",
+          },
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 1,
+            fillOpacity: 0,
+            strokeOpacity: 0,
+          },
+          clickable: false,
+          zIndex: 65,
+        });
+        markers.push(marker);
+      }
+    });
+
+    selectedErfLabelMarkersRef.current = markers;
+
+    return () => clearMapObjects(selectedErfLabelMarkersRef);
+  }, [map, selectedGeofenceId, selectedWardPcode, geofences, erfs]);
+
   // Active Draft Polygon / Points for Geofence drawing
   useEffect(() => {
     if (!map || !window.google?.maps) return;
@@ -826,9 +886,13 @@ export default function MdBgoPlanningPage() {
   );
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [geofenceNameInput, setGeofenceNameInput] = useState("");
   const [geofenceDescInput, setGeofenceDescInput] = useState("");
+  const [editNameInput, setEditNameInput] = useState("");
+  const [editDescInput, setEditDescInput] = useState("");
   const [formError, setFormError] = useState("");
+  const [editFormError, setEditFormError] = useState("");
   const [createdResult, setCreatedResult] = useState(null);
   const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
@@ -934,6 +998,7 @@ export default function MdBgoPlanningPage() {
           erfCount: found.counts?.erfs ?? found.erfCount ?? 0,
           premiseCount: found.counts?.premises ?? found.premiseCount ?? 0,
           meterCount: found.counts?.meters ?? found.meterCount ?? 0,
+          description: found.description || "",
           points: found.geometry?.points || found.points || [],
         });
       } else {
@@ -942,6 +1007,65 @@ export default function MdBgoPlanningPage() {
     },
     [displayGeofences, wardNumber, selectedWardPcode],
   );
+
+    // Edit Geofence Handlers
+  const handleOpenEditModal = useCallback(() => {
+    const activeGf = savedGeofenceLanding || displayGeofences.find((g) => g.id === selectedGeofenceId);
+    if (!activeGf) return;
+    const namePart = geofenceNamePart(activeGf.name);
+    setEditNameInput(namePart);
+    setEditDescInput(activeGf.description || "");
+    setEditFormError("");
+    setIsEditModalOpen(true);
+  }, [savedGeofenceLanding, displayGeofences, selectedGeofenceId]);
+
+  const fullEditedName = useMemo(() => {
+    if (!wardNumber || !editNameInput.trim()) return "";
+    return composeGeofenceName(wardNumber, editNameInput.trim());
+  }, [wardNumber, editNameInput]);
+
+  const editDuplicateWarning = useMemo(() => {
+    if (!isEditModalOpen || !wardNumber || !editNameInput.trim()) return null;
+    const candidate = fullEditedName;
+    const activeId = savedGeofenceLanding?.id || selectedGeofenceId;
+    const otherFences = wardGeofences.filter((g) => g.id !== activeId);
+    const duplicate = findDuplicateGeofence(candidate, otherFences);
+    return duplicate ? duplicateGeofenceNameMessage(duplicate) : null;
+  }, [isEditModalOpen, wardNumber, editNameInput, fullEditedName, savedGeofenceLanding, selectedGeofenceId, wardGeofences]);
+
+  const handleSaveEdit = async () => {
+    const activeGf = savedGeofenceLanding || displayGeofences.find((g) => g.id === selectedGeofenceId);
+    if (!activeGf) return;
+    if (!editNameInput.trim()) {
+      setEditFormError("Please enter a geofence name.");
+      return;
+    }
+    if (editDuplicateWarning) {
+      setEditFormError(editDuplicateWarning);
+      return;
+    }
+    setEditFormError("");
+    try {
+      await updateGeoFence({
+        id: activeGf.id,
+        name: fullEditedName,
+        description: editDescInput.trim(),
+      }).unwrap();
+
+      setSavedGeofenceLanding((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: fullEditedName,
+              description: editDescInput.trim(),
+            }
+          : null,
+      );
+      setIsEditModalOpen(false);
+    } catch (err) {
+      setEditFormError(err?.data?.message || err?.message || "Could not update geofence.");
+    }
+  };
 
   const handleCloseLanding = useCallback(() => {
     setSavedGeofenceLanding(null);
@@ -1153,6 +1277,7 @@ export default function MdBgoPlanningPage() {
         erfCount: erfsInside.length,
         premiseCount: premisesInside.length,
         meterCount: metersInside.length,
+        description: geofenceDescInput.trim(),
         points: [...drawingPoints],
       });
 
@@ -1406,8 +1531,23 @@ export default function MdBgoPlanningPage() {
         <div style={styles.landingCard}>
           <div style={styles.landingHeader}>
             <div style={styles.landingHeaderLeft}>
-              <span style={styles.landingBadge}>● Geofence Active · Unbatched</span>
-              <h3 style={styles.landingTitle}>{savedGeofenceLanding.name}</h3>
+              <div style={styles.landingBadgeRow}>
+                <span style={styles.landingBadge}>● Geofence Active · Unbatched</span>
+              </div>
+              <div style={styles.landingTitleRow}>
+                <h3 style={styles.landingTitle}>{savedGeofenceLanding.name}</h3>
+                <button
+                  type="button"
+                  style={styles.landingEditButton}
+                  onClick={handleOpenEditModal}
+                  title="Edit Geofence Name and Description"
+                >
+                  ✏ Edit
+                </button>
+              </div>
+              {savedGeofenceLanding.description ? (
+                <p style={styles.landingDescriptionText}>{savedGeofenceLanding.description}</p>
+              ) : null}
               <p style={styles.landingSubtitle}>
                 Ward {savedGeofenceLanding.wardNumber} ({savedGeofenceLanding.wardPcode || selectedWardPcode}) · Ready for batch origination
               </p>
@@ -1638,6 +1778,80 @@ export default function MdBgoPlanningPage() {
         )}
       </div>
 
+            {/* Edit Geofence Modal */}
+      {isEditModalOpen ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true">
+            <h3 style={styles.modalTitle}>Edit Geofence Details</h3>
+            <p style={styles.modalSubtitle}>
+              Update the name suffix or notes for this geofence in Ward {wardNumber}.
+            </p>
+
+            {editFormError ? (
+              <div style={styles.modalError}>{editFormError}</div>
+            ) : null}
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>
+                Geofence Name (Prefix Gf W{wardNumber} is fixed per GF-R001)
+              </label>
+              <div style={styles.prefixInputGroup}>
+                <span style={styles.fixedPrefix}>Gf W{wardNumber}&nbsp;</span>
+                <input
+                  type="text"
+                  placeholder="e.g. Nightingale 1"
+                  value={editNameInput}
+                  onChange={(e) => setEditNameInput(e.target.value)}
+                  style={styles.textInput}
+                  autoFocus
+                />
+              </div>
+              <div style={styles.previewNameText}>
+                Full Name: <strong>{fullEditedName || "—"}</strong>
+              </div>
+            </div>
+
+            {editDuplicateWarning ? (
+              <div style={styles.modalError}>{editDuplicateWarning}</div>
+            ) : null}
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Description (Optional)</label>
+              <textarea
+                placeholder="Optional description / notes"
+                value={editDescInput}
+                onChange={(e) => setEditDescInput(e.target.value)}
+                rows={3}
+                style={styles.modalTextarea}
+              />
+            </div>
+
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalCancelButton}
+                onClick={() => setIsEditModalOpen(false)}
+                disabled={isUpdatingGeoFence}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.modalPrimaryButton,
+                  opacity: (!editNameInput.trim() || editDuplicateWarning || isUpdatingGeoFence) ? 0.6 : 1,
+                  cursor: (!editNameInput.trim() || editDuplicateWarning || isUpdatingGeoFence) ? "not-allowed" : "pointer",
+                }}
+                onClick={handleSaveEdit}
+                disabled={!editNameInput.trim() || Boolean(editDuplicateWarning) || isUpdatingGeoFence}
+              >
+                {isUpdatingGeoFence ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Pre-Drawing Modal: Enter Geofence Name & Lock Ward */}
       {isCreateModalOpen ? (
         <div style={styles.modalOverlay} role="presentation">
@@ -1679,12 +1893,12 @@ export default function MdBgoPlanningPage() {
 
             <div style={styles.formGroup}>
               <label style={styles.label}>Description (Optional)</label>
-              <input
-                type="text"
+              <textarea
                 placeholder="Optional description / notes"
                 value={geofenceDescInput}
                 onChange={(e) => setGeofenceDescInput(e.target.value)}
-                style={styles.textInput}
+                rows={3}
+                style={styles.modalTextarea}
               />
             </div>
 
@@ -2229,6 +2443,45 @@ const styles = {
     fontSize: 12,
     fontWeight: 700,
     cursor: "pointer",
+  },
+  modalTextarea: {
+    width: "100%",
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    padding: "10px 12px",
+    fontSize: 13,
+    color: "#0f172a",
+    background: "#ffffff",
+    outline: "none",
+    boxSizing: "border-box",
+    fontFamily: "inherit",
+    resize: "vertical",
+  },
+  landingBadgeRow: {
+    marginBottom: 6,
+  },
+  landingTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    marginBottom: 4,
+  },
+  landingEditButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 6,
+    background: "#f8fafc",
+    color: "#2563eb",
+    padding: "3px 8px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  landingDescriptionText: {
+    margin: "0 0 6px 0",
+    fontSize: 13,
+    color: "#475569",
+    fontStyle: "italic",
   },
   textareaInput: {
     width: "100%",

@@ -94,3 +94,73 @@ export const createGeoFence = onCall({ secrets: [salesBatchProofKey], timeoutSec
     throw error;
   }
 });
+
+/* =====================================================
+   UPDATE GEOFENCE (NAME & DESCRIPTION)
+   ===================================================== */
+
+export async function updateGeoFenceRequest({ db, request }) {
+  const actorUid = request.auth?.uid || null;
+  if (!actorUid) {
+    throw new HttpsError("unauthenticated", "Authentication is required.");
+  }
+
+  const { id, name, description } = request.data || {};
+  if (!id) {
+    throw new HttpsError("invalid-argument", "Geofence ID is required.");
+  }
+
+  const fenceRef = db.collection("geo_fences").doc(id);
+  const fenceSnap = await fenceRef.get();
+  if (!fenceSnap.exists) {
+    throw new HttpsError("not-found", "Geofence not found.");
+  }
+  const fence = fenceSnap.data();
+
+  const actorUserDoc = await getActorUserDoc(db, actorUid);
+  const allServiceProviders = await getAllServiceProviders(db);
+  await assertCanCreateGeoFence({ actorUserDoc, allServiceProviders });
+  const actorName = getUserDisplayName(actorUserDoc);
+
+  const updates = {
+    "metadata.updatedAt": new Date().toISOString(),
+    "metadata.updatedByUid": actorUid,
+    "metadata.updatedByUser": actorName,
+  };
+
+  if (name && name !== fence.name) {
+    const nameCheck = checkGeofenceName(name, fence.parents?.wardPcode);
+    if (!nameCheck.ok) {
+      throw new HttpsError("invalid-argument", nameCheck.reason);
+    }
+    const wardFences = await db
+      .collection("geo_fences")
+      .where("parents.wardPcode", "==", fence.parents?.wardPcode || "")
+      .get();
+    const otherFences = wardFences.docs
+      .map((d) => d.data())
+      .filter((d) => d.id !== id);
+    const duplicate = findDuplicateGeofence(name, otherFences);
+    if (duplicate) {
+      throw new HttpsError("already-exists", duplicateGeofenceNameMessage(duplicate));
+    }
+    updates.name = name;
+  }
+
+  if (description !== undefined) {
+    updates.description = description;
+  }
+
+  await fenceRef.update(updates);
+
+  return {
+    success: true,
+    id,
+    name: updates.name || fence.name,
+    description: updates.description !== undefined ? updates.description : fence.description,
+  };
+}
+
+export const updateGeoFence = onCall({ timeoutSeconds: 60, memory: "512MiB" }, async (request) => {
+  return await updateGeoFenceRequest({ db: getFirestore(), request });
+});
