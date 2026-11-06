@@ -646,6 +646,19 @@ export default function MdBgoPlanningPage() {
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingPoints, setDrawingPoints] = useState([]);
+  const [drawWard, setDrawWard] = useState(null);
+
+  // Selection & creation dialog states
+  const [selectedGeofenceId, setSelectedGeofenceId] = useState(
+    searchParams.get("focusGeofenceId") || "",
+  );
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [geofenceNameInput, setGeofenceNameInput] = useState("");
+  const [geofenceDescInput, setGeofenceDescInput] = useState("");
+  const [formError, setFormError] = useState("");
+  const [createdResult, setCreatedResult] = useState(null);
+  const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
   // ERFs for selected ward (lazy-loaded when layer active or drawing)
   const shouldLoadErfs = Boolean(selectedWardPcode && lmPcode && (showErfsLayer || isDrawing));
@@ -700,23 +713,9 @@ export default function MdBgoPlanningPage() {
     return list;
   }, [wardGeofences, savedGeofenceLanding]);
 
-  const [selectedGeofenceId, setSelectedGeofenceId] = useState(
-    searchParams.get("focusGeofenceId") || "",
-  );
-
   // Mutations
   const [createGeoFence, { isLoading: isSavingGeofence }] = useCreateGeoFenceMutation();
   const [createBgo, { isLoading: isCreatingBgo }] = useCreateBgoMutation();
-
-  // Dialog & creation states (GPS Sales Table geofence creation routine TB-R055 / GF-R001)
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-  const [drawWard, setDrawWard] = useState(null);
-  const [geofenceNameInput, setGeofenceNameInput] = useState("");
-  const [geofenceDescInput, setGeofenceDescInput] = useState("");
-  const [formError, setFormError] = useState("");
-  const [createdResult, setCreatedResult] = useState(null);
-  const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
   const handleMapClick = useCallback((point) => {
     setDrawingPoints((pts) => [...pts, point]);

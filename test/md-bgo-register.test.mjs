@@ -256,6 +256,11 @@ test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and 
   const shouldLoadErfsIndex = content.indexOf("const shouldLoadErfs =");
   assert.ok(showErfsIndex !== -1 && shouldLoadErfsIndex !== -1 && showErfsIndex < shouldLoadErfsIndex, "showErfsLayer must be initialized before shouldLoadErfs");
   assert.ok(isDrawingIndex !== -1 && isDrawingIndex < shouldLoadErfsIndex, "isDrawing must be initialized before shouldLoadErfs");
+
+  const savedLandingIndex = content.indexOf("const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);");
+  const displayGeofencesIndex = content.indexOf("const displayGeofences = useMemo");
+  assert.ok(savedLandingIndex !== -1 && displayGeofencesIndex !== -1 && savedLandingIndex < displayGeofencesIndex, "savedGeofenceLanding must be initialized before displayGeofences");
+  assert.ok(savedLandingIndex !== -1 && shouldLoadErfsIndex !== -1 && savedLandingIndex < shouldLoadErfsIndex, "savedGeofenceLanding must be initialized before queries");
 });
 
 test("MD BGO Planning Map adheres to GPS Sales Table geofence creation routine (MD-BGO-R010 v1.6.0)", () => {
