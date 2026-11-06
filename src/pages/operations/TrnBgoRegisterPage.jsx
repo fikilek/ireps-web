@@ -83,14 +83,77 @@ function getBgoStatusBadge(statusRaw = "") {
   if (status === "NOT_READY") {
     return { label: "NOT READY", bg: "#fef2f2", text: "#b91c1c", border: "#fecaca" };
   }
+  if (status === "COMPLETED") {
+    return { label: "COMPLETED", bg: "#f0fdf4", text: "#15803d", border: "#bbf7d0" };
+  }
   return { label: status || "STAGED", bg: "#f1f5f9", text: "#475569", border: "#cbd5e1" };
 }
 
-function SummaryCard({ label, value }) {
+const KPI_HELP_DETAILS = {
+  totalBatches: {
+    title: "Total Batches",
+    meaning: "The total number of Transaction Bulk Geofence Origination (TRN BGO) batches currently loaded in the register.",
+    criteria: "Aggregates all permanent transaction batches originating from external uploads or meter selections, spanning all lifecycle states.",
+    nextAction: "Use the top action bar to upload new meter batches or monitor existing batches across all Local Municipalities.",
+  },
+  unallocated: {
+    title: "Unallocated",
+    meaning: "Batches that are staged or validated and ready for field assignment, but have not yet been allocated to an operational TEAM or Service Provider (SP).",
+    criteria: "Batches with status 'READY_FOR_BGO' or 'READY_FOR_ALLOCATION' where team and SP assignments are empty.",
+    nextAction: "Click 'Allocate' on any row or open the 'Allocation Board' to assign these batches to available field teams or contractors.",
+  },
+  allocated: {
+    title: "Allocated",
+    meaning: "Batches that have been officially issued and assigned to an active operational TEAM or Service Provider.",
+    criteria: "Batches with status 'ALLOCATED', 'USED', or 'PARTIALLY_USED', with assigned team/SP and active child transactions dispatched to mobile field workers.",
+    nextAction: "Monitor live field progress on the TRN BGO Dashboard or inspect individual row completion in BGO Rows.",
+  },
+  completed: {
+    title: "Completed",
+    meaning: "Batches where field execution has finished and all constituent child transactions have been executed.",
+    criteria: "Batches with status 'COMPLETED' or where 100% of child transactions have reached their terminal completion or closure state.",
+    nextAction: "Review final completion reports, verify audit records, and confirm meter reconciliation.",
+  },
+};
+
+function SummaryCard({ label, value, metersCount, onHelpClick }) {
   return (
     <div style={styles.summaryCard}>
-      <span style={styles.summaryCardLabel}>{label}</span>
-      <strong style={styles.summaryCardValue}>{formatNumber(value)}</strong>
+      <div style={styles.summaryCardHeader}>
+        <span style={styles.summaryCardLabel}>{label}</span>
+        <button
+          type="button"
+          style={styles.helpButton}
+          onClick={onHelpClick}
+          aria-label={`Learn more about ${label}`}
+          title={`Click to learn what ${label} means`}
+        >
+          ?
+        </button>
+      </div>
+
+      <div style={styles.summaryCardBody}>
+        <strong style={styles.summaryCardValue}>{formatNumber(value)}</strong>
+      </div>
+
+      <div style={styles.summaryCardFooter}>
+        <span style={styles.metersPill} title={`Total meters in ${label.toLowerCase()} batches`}>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+          {formatNumber(metersCount)} {metersCount === 1 ? "Meter" : "Meters"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -131,37 +194,62 @@ export default function TrnBgoRegisterPage() {
   const [deleteError, setDeleteError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
 
+  // KPI Help Modal state
+  const [activeHelpKpi, setActiveHelpKpi] = useState(null);
+
   // Summary KPIs across existing TRN candidate batches
+  // 1. Total Batches (with total meters)
+  // 2. Unallocated (with unallocated meters)
+  // 3. Allocated (with allocated meters)
+  // 4. Completed (with completed meters)
   const summary = useMemo(() => {
-    let readyForBgo = 0;
-    let allocated = 0;
-    let inProgress = 0;
+    let unallocatedBatches = 0;
+    let unallocatedMeters = 0;
+
+    let allocatedBatches = 0;
+    let allocatedMeters = 0;
+
+    let completedBatches = 0;
+    let completedMeters = 0;
+
+    let totalBatches = uploads.length;
     let totalMeters = 0;
 
     uploads.forEach((item) => {
       const bgoStatus = String(item.bgoStatus || "").toUpperCase();
-      const readyRows = Number(item.readyRows || 0);
+      const workflowState = String(item.workflowState || item.workflow?.state || "").toUpperCase();
       const totalRows = Number(item.totalRows || 0);
 
       totalMeters += totalRows;
 
-      if (bgoStatus === "USED" || bgoStatus === "ALLOCATED") {
-        allocated += 1;
-      } else if (bgoStatus === "READY_FOR_BGO" || readyRows > 0) {
-        readyForBgo += 1;
-      } else if (bgoStatus === "PARTIALLY_USED") {
-        allocated += 1;
+      if (workflowState === "COMPLETED" || bgoStatus === "COMPLETED") {
+        completedBatches += 1;
+        completedMeters += totalRows;
+      } else if (
+        bgoStatus === "USED" ||
+        bgoStatus === "ALLOCATED" ||
+        bgoStatus === "PARTIALLY_USED" ||
+        workflowState === "ALLOCATED" ||
+        workflowState === "IN_PROGRESS"
+      ) {
+        allocatedBatches += 1;
+        allocatedMeters += totalRows;
       } else {
-        inProgress += 1;
+        // Unallocated / Ready for BGO / Staged
+        unallocatedBatches += 1;
+        unallocatedMeters += totalRows;
       }
     });
 
     return {
-      totalBatches: uploads.length,
-      readyForAllocation: readyForBgo,
-      allocated,
-      inProgress,
+      totalBatches,
       totalMeters,
+      unallocatedBatches,
+      unallocatedMeters,
+      allocatedBatches,
+      allocatedMeters,
+      completedBatches,
+      completedMeters,
     };
   }, [uploads]);
 
@@ -477,11 +565,32 @@ export default function TrnBgoRegisterPage() {
         </div>
       ) : null}
 
+      {/* 4 Standardized KPI Summary Cards */}
       <div style={styles.summaryGrid}>
-        <SummaryCard label="Total Batches" value={summary.totalBatches} />
-        <SummaryCard label="Ready for Allocation" value={summary.readyForAllocation} />
-        <SummaryCard label="Allocated" value={summary.allocated} />
-        <SummaryCard label="Total Meters" value={summary.totalMeters} />
+        <SummaryCard
+          label="Total Batches"
+          value={summary.totalBatches}
+          metersCount={summary.totalMeters}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.totalBatches)}
+        />
+        <SummaryCard
+          label="Unallocated"
+          value={summary.unallocatedBatches}
+          metersCount={summary.unallocatedMeters}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.unallocated)}
+        />
+        <SummaryCard
+          label="Allocated"
+          value={summary.allocatedBatches}
+          metersCount={summary.allocatedMeters}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.allocated)}
+        />
+        <SummaryCard
+          label="Completed"
+          value={summary.completedBatches}
+          metersCount={summary.completedMeters}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.completed)}
+        />
       </div>
 
       <div style={styles.tablePanel}>
@@ -505,6 +614,55 @@ export default function TrnBgoRegisterPage() {
           }}
         />
       </div>
+
+      {/* KPI Help Modal */}
+      {activeHelpKpi ? (
+        <div style={styles.modalOverlay} role="dialog" aria-modal="true">
+          <div style={styles.helpModalBox}>
+            <div style={styles.modalHeaderRow}>
+              <div>
+                <span style={styles.modalEyebrow}>TRN BGO KPI Explainer</span>
+                <h3 style={styles.helpModalTitle}>{activeHelpKpi.title}</h3>
+              </div>
+              <button
+                type="button"
+                style={styles.closeModalButton}
+                onClick={() => setActiveHelpKpi(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={styles.helpContentSection}>
+              <div style={styles.helpSection}>
+                <h4 style={styles.helpSubheading}>What does this KPI represent?</h4>
+                <p style={styles.helpText}>{activeHelpKpi.meaning}</p>
+              </div>
+
+              <div style={styles.helpSection}>
+                <h4 style={styles.helpSubheading}>Lifecycle & Inclusion Criteria</h4>
+                <p style={styles.helpText}>{activeHelpKpi.criteria}</p>
+              </div>
+
+              <div style={styles.helpSection}>
+                <h4 style={styles.helpSubheading}>Next Operational Action</h4>
+                <p style={styles.helpText}>{activeHelpKpi.nextAction}</p>
+              </div>
+            </div>
+
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalPrimaryButton}
+                onClick={() => setActiveHelpKpi(null)}
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Delete Batch Modal */}
       {deleteCandidate ? (
@@ -627,19 +785,26 @@ const styles = {
   },
   summaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
     gap: 16,
     marginBottom: 20,
   },
   summaryCard: {
     background: "#ffffff",
-    padding: "16px 20px",
+    padding: "16px 18px",
     borderRadius: 14,
     border: "1px solid #e2e8f0",
     display: "flex",
     flexDirection: "column",
-    gap: 6,
+    justifyContent: "space-between",
+    minHeight: 110,
     boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
+  },
+  summaryCardHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
   summaryCardLabel: {
     fontSize: 12,
@@ -648,10 +813,46 @@ const styles = {
     textTransform: "uppercase",
     letterSpacing: "0.04em",
   },
+  helpButton: {
+    width: 22,
+    height: 22,
+    borderRadius: "50%",
+    border: "1px solid #cbd5e1",
+    background: "#f8fafc",
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+    transition: "all 0.15s ease",
+  },
+  summaryCardBody: {
+    margin: "8px 0",
+  },
   summaryCardValue: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: 900,
     color: "#0f172a",
+    lineHeight: 1,
+  },
+  summaryCardFooter: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  metersPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "4px 8px",
+    borderRadius: 6,
+    background: "#f1f5f9",
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 800,
   },
   tablePanel: {
     background: "#ffffff",
@@ -751,13 +952,6 @@ const styles = {
     marginBottom: 16,
     fontSize: 13,
   },
-  loadingNotice: {
-    padding: 32,
-    textAlign: "center",
-    color: "#64748b",
-    fontSize: 14,
-    fontWeight: 700,
-  },
   modalOverlay: {
     position: "fixed",
     inset: 0,
@@ -776,11 +970,75 @@ const styles = {
     width: "100%",
     boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
   },
+  helpModalBox: {
+    background: "#ffffff",
+    borderRadius: 20,
+    padding: 24,
+    maxWidth: 520,
+    width: "100%",
+    boxShadow: "0 25px 30px -5px rgba(0, 0, 0, 0.15)",
+  },
+  modalHeaderRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalEyebrow: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#2563eb",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  },
   modalTitle: {
     margin: "0 0 12px",
     fontSize: 18,
     fontWeight: 900,
     color: "#0f172a",
+  },
+  helpModalTitle: {
+    margin: "4px 0 0",
+    fontSize: 20,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  closeModalButton: {
+    background: "transparent",
+    border: 0,
+    fontSize: 24,
+    lineHeight: 1,
+    color: "#94a3b8",
+    cursor: "pointer",
+    padding: "2px 6px",
+    borderRadius: 6,
+  },
+  helpContentSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    marginBottom: 20,
+  },
+  helpSection: {
+    background: "#f8fafc",
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid #e2e8f0",
+  },
+  helpSubheading: {
+    margin: "0 0 6px",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#334155",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
+  },
+  helpText: {
+    margin: 0,
+    fontSize: 13,
+    color: "#475569",
+    lineHeight: 1.5,
   },
   modalText: {
     margin: "0 0 20px",
@@ -800,6 +1058,16 @@ const styles = {
     background: "#ffffff",
     color: "#475569",
     fontWeight: 700,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  modalPrimaryButton: {
+    padding: "10px 20px",
+    borderRadius: 10,
+    border: 0,
+    background: "#2563eb",
+    color: "#ffffff",
+    fontWeight: 800,
     fontSize: 13,
     cursor: "pointer",
   },

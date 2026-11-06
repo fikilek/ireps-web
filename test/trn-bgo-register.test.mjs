@@ -128,3 +128,26 @@ test("TRN BGO Register uses canonical IrepsTable component with specification co
     "Must have 'TRN BGO Dashboard' action button",
   );
 });
+
+test("TRN BGO Register renders 4 lifecycle KPI cards with '?' help button and meter counts", () => {
+  const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
+  const content = fs.readFileSync(registerPath, "utf8");
+
+  // Verify 4 required KPI card labels
+  assert.match(content, /label="Total Batches"/, "Must render Total Batches KPI card");
+  assert.match(content, /label="Unallocated"/, "Must render Unallocated KPI card");
+  assert.match(content, /label="Allocated"/, "Must render Allocated KPI card");
+  assert.match(content, /label="Completed"/, "Must render Completed KPI card");
+
+  // Verify '?' help button and modal definition
+  assert.match(content, /style=\{styles\.helpButton\}/, "Each card must have a top-right '?' help button");
+  assert.match(content, /KPI_HELP_DETAILS/, "Must define detailed help metadata for all 4 KPIs");
+  assert.match(content, /setActiveHelpKpi/, "Clicking '?' must activate help modal");
+
+  // Verify bottom-right meter pill
+  assert.match(content, /style=\{styles\.metersPill\}/, "Each card must display bottom-right meters pill");
+  assert.match(content, /metersCount=\{summary\.totalMeters\}/, "Total Batches card must pass totalMeters");
+  assert.match(content, /metersCount=\{summary\.unallocatedMeters\}/, "Unallocated card must pass unallocatedMeters");
+  assert.match(content, /metersCount=\{summary\.allocatedMeters\}/, "Allocated card must pass allocatedMeters");
+  assert.match(content, /metersCount=\{summary\.completedMeters\}/, "Completed card must pass completedMeters");
+});
