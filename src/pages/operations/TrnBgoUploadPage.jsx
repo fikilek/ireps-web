@@ -249,14 +249,7 @@ export default function TrnBgoUploadPage() {
             return;
           }
 
-          if (seenMeters.has(meterNo)) {
-            const prevRow = seenMeters.get(meterNo);
-            setFileError(
-              `Validation Failed: Duplicate meter number "${meterNo}" detected on row #${fileRowIdx} (already present on row #${prevRow}). Meter numbers must be unique within the file.`
-            );
-            setIsValidating(false);
-            return;
-          }
+          const isDupInFile = seenMeters.has(meterNo);
           seenMeters.set(meterNo, fileRowIdx);
 
           // rowNo sequence integrity: integer > 0 if provided, else auto-sequence
@@ -285,6 +278,7 @@ export default function TrnBgoUploadPage() {
             _rowNo: resolvedRowNo,
             rowNo: resolvedRowNo,
             meterNo,
+            isDuplicate: isDupInFile,
             meterPhase: String(rawRow.meterPhase || "").trim(),
             meterType: String(rawRow.meterType || "").trim(),
             linkedAccountNo: String(rawRow.linkedAccountNo || "").trim(),
@@ -394,10 +388,17 @@ export default function TrnBgoUploadPage() {
 
           const resolvedErf = row.erfNo || astDoc?.accessData?.erfNo || "";
 
+          const isDuplicate = Boolean(row.isDuplicate);
+          const isEligible = Boolean(foundInAsts && isLmMatch && !isDuplicate);
+
           return {
             ...row,
             foundInAsts,
             isLmMatch,
+            isDuplicate,
+            isEligible,
+            duplicate: String(isDuplicate),
+            eligible: String(isEligible),
             astDocId: astDoc?.id || null,
             astLmPcode: astLmPcode || "NAv",
             astWardPcode: astWardPcode || "NAv",
@@ -568,56 +569,46 @@ export default function TrnBgoUploadPage() {
         ),
       },
       {
-        key: "isLmMatch",
-        label: "LM Match",
-        width: 130,
+        key: "duplicate",
+        label: "duplicate",
+        width: 110,
         filter: "select",
         sortable: true,
-        value: (r) =>
-          !r.foundInAsts ? "N/A" : r.isLmMatch ? "MATCH" : `OTHER (${r.astLmPcode})`,
-        sortValue: (r) => (r.isLmMatch ? 1 : 0),
-        render: (r) => {
-          if (!r.foundInAsts) {
-            return <span style={{ color: "#94a3b8", fontSize: 11 }}>N/A</span>;
-          }
-          if (r.isLmMatch) {
-            return (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "2px 8px",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontWeight: 800,
-                  background: "#eff6ff",
-                  color: "#1d4ed8",
-                  border: "1px solid #bfdbfe",
-                }}
-              >
-                ✓ {r.astLmPcode || "MATCH"}
-              </span>
-            );
-          }
-          return (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "2px 8px",
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 800,
-                background: "#fffbeb",
-                color: "#b45309",
-                border: "1px solid #fde68a",
-              }}
-              title={`Meter belongs to municipality ${r.astLmPcode}`}
-            >
-              ⚠ {r.astLmPcode || "MISMATCH"}
-            </span>
-          );
-        },
+        value: (r) => String(Boolean(r.isDuplicate)),
+        sortValue: (r) => (r.isDuplicate ? 1 : 0),
+        render: (r) => (
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              fontSize: 12,
+              color: r.isDuplicate ? "#b45309" : "#64748b",
+            }}
+          >
+            {String(Boolean(r.isDuplicate))}
+          </span>
+        ),
+      },
+      {
+        key: "eligible",
+        label: "eligible",
+        width: 110,
+        filter: "select",
+        sortable: true,
+        value: (r) => String(Boolean(r.isEligible)),
+        sortValue: (r) => (r.isEligible ? 1 : 0),
+        render: (r) => (
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              fontSize: 12,
+              color: r.isEligible ? "#047857" : "#dc2626",
+            }}
+          >
+            {String(Boolean(r.isEligible))}
+          </span>
+        ),
       },
       {
         key: "meterPhase",
