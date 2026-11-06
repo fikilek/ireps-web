@@ -491,10 +491,10 @@ export default function MdBgoRegisterPage() {
           </Link>
 
           <Link
-            to="/operations/bgo-dashboard"
+            to="/operations/bgo/dashboard"
             style={styles.secondaryLinkButton}
           >
-            Open BGO Dashboard
+            MD BGO Dashboard
           </Link>
 
           {tickedBatchIds.size > 0 ? (

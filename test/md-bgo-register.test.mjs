@@ -34,6 +34,11 @@ test("MD BGO routes are registered in AppRoutes", () => {
   );
   assert.match(
     content,
+    /import MdBgoDashboardPage from "\.\.\/pages\/operations\/MdBgoDashboardPage"/,
+    "AppRoutes must import MdBgoDashboardPage",
+  );
+  assert.match(
+    content,
     /import MdBgoPlanningPage from "\.\.\/pages\/operations\/MdBgoPlanningPage"/,
     "AppRoutes must import MdBgoPlanningPage",
   );
@@ -47,6 +52,11 @@ test("MD BGO routes are registered in AppRoutes", () => {
     content,
     /path="\/operations\/bgo"[\s\S]*?<MdBgoRegisterPage \/>/,
     "/operations/bgo must render MdBgoRegisterPage",
+  );
+  assert.match(
+    content,
+    /path="\/operations\/bgo\/dashboard"[\s\S]*?<MdBgoDashboardPage \/>/,
+    "/operations/bgo/dashboard must render MdBgoDashboardPage",
   );
   assert.match(
     content,
@@ -100,8 +110,8 @@ test("MD BGO Register table layout conforms to specification", () => {
   );
   assert.match(
     content,
-    /Open BGO Dashboard/,
-    "Must have 'Open BGO Dashboard' action button",
+    /MD BGO Dashboard/,
+    "Must have 'MD BGO Dashboard' action button",
   );
 });
 
@@ -180,4 +190,20 @@ test("MD BGO Register and Planning resolve active workbase from auth and geo con
     assert.equal(res3.lmPcode, "ZA5241");
     assert.equal(res3.lmName, "eEndumeni");
   }
+});
+
+test("MD BGO Dashboard strictly isolates Meter Discovery from Transaction BGO (MD-BGO-R011)", () => {
+  const dashboardPath = path.join(repoRoot, "src/pages/operations/MdBgoDashboardPage.jsx");
+  const content = fs.readFileSync(dashboardPath, "utf8");
+
+  // Must query bgo_batches
+  assert.match(content, /useGetBgoBatchesByLmQuery/, "Must query bgo_batches via useGetBgoBatchesByLmQuery");
+
+  // Must filter strictly to MD BGO batches
+  assert.match(content, /function isMdBgoBatch/, "Must define isMdBgoBatch filter");
+  assert.match(content, /batchMode === "BMD" \|\| opType === "METER_DISCOVERY"/, "Must filter to BMD / METER_DISCOVERY");
+
+  // Must NOT query tc_uploads (disconnections, reconnections, etc.)
+  assert.doesNotMatch(content, /useGetTcUploadsQuery/, "MD BGO Dashboard must not query or display tc_uploads");
+  assert.doesNotMatch(content, /METER_DISCONNECTION/, "Must not contain hardcoded disconnection transaction references");
 });
