@@ -518,13 +518,13 @@ export default function TrnBgoUploadPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Build IrepsTable columns
+  // Build IrepsTable columns matching official 12-column template
   const columns = useMemo(() => {
     return [
       {
         key: "_rowNo",
-        label: "#",
-        width: 60,
+        label: "rowNo",
+        width: 75,
         filter: null,
         sortable: true,
         value: (r) => String(r.rowNo || r._rowNo),
@@ -533,8 +533,8 @@ export default function TrnBgoUploadPage() {
       },
       {
         key: "meterNo",
-        label: "Meter No",
-        width: 150,
+        label: "meterNo",
+        width: 140,
         filter: "text",
         sortable: true,
         value: (r) => String(r.meterNo || ""),
@@ -542,87 +542,37 @@ export default function TrnBgoUploadPage() {
         render: (r) => <span style={styles.meterNoCell}>{r.meterNo}</span>,
       },
       {
-        key: "foundInAsts",
-        label: "In ASTS?",
-        width: 120,
+        key: "meterPhase",
+        label: "meterPhase",
+        width: 130,
         filter: "select",
         sortable: true,
-        value: (r) => (r.foundInAsts ? "EXISTS" : "NOT FOUND"),
-        sortValue: (r) => (r.foundInAsts ? 1 : 0),
+        value: (r) => String(r.meterPhase || ""),
+        sortValue: (r) => String(r.meterPhase || ""),
         render: (r) => (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "2px 8px",
-              borderRadius: 6,
-              fontSize: 11,
-              fontWeight: 800,
-              background: r.foundInAsts ? "#ecfdf5" : "#fef2f2",
-              color: r.foundInAsts ? "#047857" : "#b91c1c",
-              border: `1px solid ${r.foundInAsts ? "#a7f3d0" : "#fecaca"}`,
-            }}
-          >
-            {r.foundInAsts ? "✓ EXISTS" : "✗ NOT FOUND"}
+          <span style={{ fontSize: 12, color: "#475569" }}>
+            {r.meterPhase || "—"}
           </span>
         ),
       },
       {
-        key: "isLmMatch",
-        label: "LM Match",
-        width: 130,
+        key: "meterType",
+        label: "meterType",
+        width: 120,
         filter: "select",
         sortable: true,
-        value: (r) =>
-          !r.foundInAsts ? "N/A" : r.isLmMatch ? "MATCH" : `OTHER (${r.astLmPcode})`,
-        sortValue: (r) => (r.isLmMatch ? 1 : 0),
-        render: (r) => {
-          if (!r.foundInAsts) {
-            return <span style={{ color: "#94a3b8", fontSize: 11 }}>N/A</span>;
-          }
-          if (r.isLmMatch) {
-            return (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "2px 8px",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontWeight: 800,
-                  background: "#eff6ff",
-                  color: "#1d4ed8",
-                  border: "1px solid #bfdbfe",
-                }}
-              >
-                ✓ {r.astLmPcode || "MATCH"}
-              </span>
-            );
-          }
-          return (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "2px 8px",
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 800,
-                background: "#fffbeb",
-                color: "#b45309",
-                border: "1px solid #fde68a",
-              }}
-              title={`Meter belongs to municipality ${r.astLmPcode}`}
-            >
-              ⚠ {r.astLmPcode || "MISMATCH"}
-            </span>
-          );
-        },
+        value: (r) => String(r.meterType || ""),
+        sortValue: (r) => String(r.meterType || ""),
+        render: (r) => (
+          <span style={{ fontSize: 12, color: "#475569" }}>
+            {r.meterType || "—"}
+          </span>
+        ),
       },
       {
         key: "linkedAccountNo",
-        label: "Account No",
-        width: 130,
+        label: "linkedAccountNo",
+        width: 140,
         filter: "text",
         sortable: true,
         value: (r) => String(r.linkedAccountNo || ""),
@@ -634,47 +584,83 @@ export default function TrnBgoUploadPage() {
         ),
       },
       {
-        key: "resolvedAddress",
-        label: "Premise Address",
+        key: "premiseAddress",
+        label: "premiseAddress",
         filter: "text",
         sortable: true,
-        value: (r) => String(r.resolvedAddress || ""),
-        sortValue: (r) => String(r.resolvedAddress || ""),
+        value: (r) => String(r.premiseAddress || r.resolvedAddress || ""),
+        sortValue: (r) => String(r.premiseAddress || r.resolvedAddress || ""),
         render: (r) => (
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a" }}>
-              {r.resolvedAddress || "—"}
-            </div>
-            {r.resolvedErf ? (
-              <div style={{ fontSize: 11, color: "#64748b" }}>ERF: {r.resolvedErf}</div>
-            ) : null}
+          <div style={{ fontWeight: 500, fontSize: 13, color: "#0f172a" }}>
+            {r.premiseAddress || r.resolvedAddress || "—"}
           </div>
         ),
       },
       {
-        key: "wardNo",
-        label: "Ward",
-        width: 110,
-        filter: "text",
+        key: "premisePropertyType",
+        label: "premisePropertyType",
+        width: 150,
+        filter: "select",
         sortable: true,
-        value: (r) => String(r.astWardPcode !== "NAv" ? r.astWardPcode : r.wardNo || ""),
-        sortValue: (r) => String(r.astWardPcode !== "NAv" ? r.astWardPcode : r.wardNo || ""),
+        value: (r) => String(r.premisePropertyType || ""),
+        sortValue: (r) => String(r.premisePropertyType || ""),
         render: (r) => (
           <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.astWardPcode !== "NAv" ? r.astWardPcode : r.wardNo || "—"}
+            {r.premisePropertyType || "—"}
           </span>
         ),
       },
       {
-        key: "astStatus",
-        label: "AST Status",
+        key: "actionReason",
+        label: "actionReason",
+        filter: "text",
+        sortable: true,
+        value: (r) => String(r.actionReason || ""),
+        sortValue: (r) => String(r.actionReason || ""),
+        render: (r) => (
+          <span style={{ fontSize: 12, color: "#475569" }}>
+            {r.actionReason || "—"}
+          </span>
+        ),
+      },
+      {
+        key: "wardNo",
+        label: "wardNo",
+        width: 100,
+        filter: "text",
+        sortable: true,
+        value: (r) => String(r.wardNo || (r.astWardPcode !== "NAv" ? r.astWardPcode : "")),
+        sortValue: (r) => String(r.wardNo || (r.astWardPcode !== "NAv" ? r.astWardPcode : "")),
+        render: (r) => (
+          <span style={{ fontSize: 12, color: "#475569" }}>
+            {r.wardNo || (r.astWardPcode !== "NAv" ? r.astWardPcode : "—")}
+          </span>
+        ),
+      },
+      {
+        key: "geofence",
+        label: "geofence",
+        width: 140,
+        filter: "text",
+        sortable: true,
+        value: (r) => String(r.geofence || ""),
+        sortValue: (r) => String(r.geofence || ""),
+        render: (r) => (
+          <span style={{ fontSize: 12, color: "#475569" }}>
+            {r.geofence || "—"}
+          </span>
+        ),
+      },
+      {
+        key: "meterStatus",
+        label: "meterStatus",
         width: 130,
         filter: "select",
         sortable: true,
-        value: (r) => String(r.astStatus || ""),
-        sortValue: (r) => String(r.astStatus || ""),
+        value: (r) => String(r.meterStatus || r.astStatus || ""),
+        sortValue: (r) => String(r.meterStatus || r.astStatus || ""),
         render: (r) => {
-          const val = r.astStatus;
+          const val = r.meterStatus || r.astStatus || "—";
           const isConn = val === "CONNECTED";
           const isDisconn = val === "DISCONNECTED";
           return (
@@ -699,15 +685,16 @@ export default function TrnBgoUploadPage() {
         },
       },
       {
-        key: "actionReason",
-        label: "Action Reason",
+        key: "erfNo",
+        label: "erfNo",
+        width: 100,
         filter: "text",
         sortable: true,
-        value: (r) => String(r.actionReason || ""),
-        sortValue: (r) => String(r.actionReason || ""),
+        value: (r) => String(r.erfNo || r.resolvedErf || ""),
+        sortValue: (r) => String(r.erfNo || r.resolvedErf || ""),
         render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.actionReason || "—"}
+          <span style={{ fontSize: 12, color: "#475569", fontFamily: "monospace" }}>
+            {r.erfNo || r.resolvedErf || "—"}
           </span>
         ),
       },
