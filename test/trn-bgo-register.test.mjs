@@ -81,21 +81,35 @@ test("TRN BGO Register streams tc_uploads so all existing TRN batches display", 
   );
 });
 
-test("TRN BGO Register table layout conforms to specification", () => {
+test("TRN BGO Register uses canonical IrepsTable component with specification columns", () => {
   const registerPath = path.join(repoRoot, "src/pages/operations/TrnBgoRegisterPage.jsx");
   const content = fs.readFileSync(registerPath, "utf8");
 
-  // Verify mandatory columns
-  assert.match(content, /label="Batch ID"/, "Must have Batch ID column");
-  assert.match(content, /label="TRN Type"/, "Must have TRN Type column");
-  assert.match(content, /label="File Name"/, "Must have File Name column");
-  assert.match(content, /<Th>BGO Rows<\/Th>/, "Must have BGO Rows column");
-  assert.match(content, /<Th>Allocation<\/Th>/, "Must have Allocation column");
-  assert.match(content, /label="BGO Status"/, "Must have BGO Status column");
-  assert.match(content, /label="Ready Meters"/, "Must have Ready Meters column");
-  assert.match(content, /label="Total Meters"/, "Must have Total Meters column");
-  assert.match(content, /label="LM"/, "Must have LM column");
-  assert.match(content, /<Th>Delete BGO<\/Th>/, "Must have Delete BGO column");
+  // Verify IrepsTable component usage
+  assert.match(
+    content,
+    /import IrepsTable from "\.\.\/\.\.\/components\/table\/IrepsTable"/,
+    "TrnBgoRegisterPage must import IrepsTable",
+  );
+  assert.match(
+    content,
+    /<IrepsTable[\s\S]*?title="Permanent Transaction Batches"/,
+    "TrnBgoRegisterPage must render IrepsTable with Permanent Transaction Batches title",
+  );
+
+  // Verify mandatory column keys and labels
+  assert.match(content, /key:\s*"select"/, "Must have select checkbox column");
+  assert.match(content, /key:\s*"map"/, "Must have Map column");
+  assert.match(content, /label:\s*"Batch ID"/, "Must have Batch ID column");
+  assert.match(content, /label:\s*"TRN Type"/, "Must have TRN Type column");
+  assert.match(content, /label:\s*"File Name"/, "Must have File Name column");
+  assert.match(content, /label:\s*"BGO Rows"/, "Must have BGO Rows column");
+  assert.match(content, /label:\s*"Allocation"/, "Must have Allocation column");
+  assert.match(content, /label:\s*"BGO Status"/, "Must have BGO Status column");
+  assert.match(content, /label:\s*"Ready Meters"/, "Must have Ready Meters column");
+  assert.match(content, /label:\s*"Total Meters"/, "Must have Total Meters column");
+  assert.match(content, /label:\s*"LM"/, "Must have LM column");
+  assert.match(content, /label:\s*"Delete BGO"/, "Must have Delete BGO column");
 
   // Verify top buttons
   assert.match(
