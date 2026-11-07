@@ -52,6 +52,8 @@ export default function IrepsTable({
   onRowsShown = null,
   filters: controlledFilters,
   onFiltersChange,
+  extraFiltersActive = false,
+  onClearFilters = null,
   searchValue = null,
   searchLabel = "Search all row fields",
   searchPlaceholder = "IDs, meters, addresses, reasons, references…",
@@ -154,7 +156,7 @@ export default function IrepsTable({
 
   const current = paginateIrepsTableRows(sorted, page, pageSize);
   const bands = irepsTableBands(columns, groups);
-  const filtersOn = Boolean(String(filters.$search || "").trim()) || columns.some(
+  const filtersOn = Boolean(extraFiltersActive) || Boolean(String(filters.$search || "").trim()) || columns.some(
     column => column.isFilterActive
       ? column.isFilterActive(filters)
       : irepsTableFilterActive(column, filters[column.key]),
@@ -185,7 +187,10 @@ export default function IrepsTable({
   const pagination = (
     <Pagination
       filtersOn={filtersOn}
-      onClear={() => setFilters({})}
+      onClear={() => {
+        setFilters({});
+        onClearFilters?.();
+      }}
       page={current.page}
       pageSize={pageSize}
       totalPages={current.totalPages}
@@ -199,7 +204,7 @@ export default function IrepsTable({
   );
 
   return (
-    <section style={stickyHeader ? styles.frameSticky : styles.frame} aria-label={title}>
+    <section style={stickyHeader ? styles.frameSticky : styles.frame} aria-label={typeof title === "string" ? title : (downloads.registryName || "Table")}>
       <div style={stickyHeader ? styles.stickyTop : undefined}>
       <div style={styles.toolbar}>
         <strong>{title}</strong>
@@ -208,12 +213,12 @@ export default function IrepsTable({
         </span>
         {toolbar}
         <DownloadButtons
-          registryName={title}
+          registryName={typeof title === "string" ? title : (downloads.registryName || "Rows")}
           fileBaseName="table_rows"
           columns={irepsTableDownloadColumns(columns)}
-          {...downloads}
           visibleRows={sorted}
-          onFullDownload={downloads.onFullDownload ? () => downloads.onFullDownload(sorted) : null}
+          {...downloads}
+          onFullDownload={downloads.onFullDownload ? () => downloads.onFullDownload(downloads.visibleRows ?? sorted) : null}
         />
       </div>
 
