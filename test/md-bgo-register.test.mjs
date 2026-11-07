@@ -432,6 +432,14 @@ test("MD BGO enforces ERF batch exclusivity across active batches (MD-BGO-R013 v
   assert.match(content, /modalConflictBanner/, "Must render modalConflictBanner when ERFs overlap");
   assert.match(content, /erfConflicts\.length\s*>\s*0/, "Must strictly disable originate button when conflicts exist");
 
+  // TDZ initialization safety: activeLandingCounts must precede erfConflicts
+  const activeLandingIdx = content.indexOf("const activeLandingCounts = useMemo");
+  const erfConflictsIdx = content.indexOf("const erfConflicts = useMemo");
+  assert.ok(
+    activeLandingIdx !== -1 && erfConflictsIdx !== -1 && activeLandingIdx < erfConflictsIdx,
+    "activeLandingCounts must be declared before erfConflicts to prevent TDZ initialization crash"
+  );
+
   // 2. Backend enforcement in createBmdBgoBatch
   const callablesPath = path.join(repoRoot, "functions/bgo/callables.js");
   const callablesContent = fs.readFileSync(callablesPath, "utf8");

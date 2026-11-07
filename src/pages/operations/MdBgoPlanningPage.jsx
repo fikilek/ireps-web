@@ -1075,6 +1075,30 @@ export default function MdBgoPlanningPage() {
     return map;
   }, [wardBatches]);
 
+  // Dynamic evaluation for active/selected geofence
+  const activeLandingCounts = useMemo(() => {
+    if (!savedGeofenceLanding) return { erfCount: 0, premiseCount: 0, meterCount: 0, insideErfs: [] };
+
+    if (wardErfs.length > 0 && Array.isArray(savedGeofenceLanding.points) && savedGeofenceLanding.points.length >= 3) {
+      const evaluated = evaluateGeofenceAssetChain(
+        savedGeofenceLanding,
+        wardErfs,
+        wardPremises,
+        wardMeters,
+      );
+      if (evaluated.erfCount > 0) {
+        return evaluated;
+      }
+    }
+
+    return {
+      erfCount: Number(savedGeofenceLanding.erfCount ?? 0),
+      premiseCount: Number(savedGeofenceLanding.premiseCount ?? 0),
+      meterCount: Number(savedGeofenceLanding.meterCount ?? 0),
+      insideErfs: Array.isArray(savedGeofenceLanding.insideErfs) ? savedGeofenceLanding.insideErfs : [],
+    };
+  }, [savedGeofenceLanding, wardErfs, wardPremises, wardMeters]);
+
   const erfConflicts = useMemo(() => {
     if (!savedGeofenceLanding || batchedErfMap.size === 0) return [];
     const insideList = activeLandingCounts.insideErfs || [];
@@ -1319,30 +1343,6 @@ export default function MdBgoPlanningPage() {
       metersInside: matchedMeters,
     };
   }, [erfsInside, wardPremises, wardMeters]);
-
-  // Dynamic evaluation for active/selected geofence
-  const activeLandingCounts = useMemo(() => {
-    if (!savedGeofenceLanding) return { erfCount: 0, premiseCount: 0, meterCount: 0 };
-
-    if (wardErfs.length > 0 && Array.isArray(savedGeofenceLanding.points) && savedGeofenceLanding.points.length >= 3) {
-      const evaluated = evaluateGeofenceAssetChain(
-        savedGeofenceLanding,
-        wardErfs,
-        wardPremises,
-        wardMeters,
-      );
-      if (evaluated.erfCount > 0) {
-        return evaluated;
-      }
-    }
-
-    return {
-      erfCount: Number(savedGeofenceLanding.erfCount ?? 0),
-      premiseCount: Number(savedGeofenceLanding.premiseCount ?? 0),
-      meterCount: Number(savedGeofenceLanding.meterCount ?? 0),
-      insideErfs: Array.isArray(savedGeofenceLanding.insideErfs) ? savedGeofenceLanding.insideErfs : [],
-    };
-  }, [savedGeofenceLanding, wardErfs, wardPremises, wardMeters]);
 
   // Counter text
   const counterText = useMemo(() => {
