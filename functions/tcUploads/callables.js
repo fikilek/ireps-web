@@ -655,11 +655,12 @@ export const onUploadAndValidateTcCallable = onCall(
 
     const fileName = normalizeText(requestData?.fileName || "TC_UPLOAD.csv");
     const notes = normalizeText(requestData?.notes || "");
-    const tcId = buildTcUploadId({ date: nowDate, lmPcode, trnCode });
+    const tcId = buildTcUploadId({ date: nowDate, lmPcode, wardPcode, trnCode });
     const metadata = buildFlatMetadata({ caller, actorName, now });
     const fingerprintResult = buildTcUploadFingerprint({
       trnType,
       lmPcode,
+      wardPcode,
       rows,
     });
     const dedupePolicy = "RETURN_EXISTING_TC_UPLOAD";

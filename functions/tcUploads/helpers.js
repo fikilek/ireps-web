@@ -120,10 +120,12 @@ function getSastDateParts(date = new Date()) {
   };
 }
 
-export function buildTcUploadId({ date = new Date(), lmPcode, trnCode }) {
+export function buildTcUploadId({ date = new Date(), lmPcode, wardPcode, trnCode }) {
   const { yyyymmdd, hhmmss } = getSastDateParts(date);
+  const normalizedWard = normalizeOptionalWardPcode(wardPcode);
+  const geoToken = normalizedWard !== "NAv" ? normalizedWard : normalizeUpper(lmPcode);
 
-  return `TC_${yyyymmdd}_${hhmmss}_${normalizeUpper(lmPcode)}_${normalizeUpper(
+  return `TRN_BGO_${yyyymmdd}_${hhmmss}_${geoToken}_${normalizeUpper(
     trnCode,
   )}`;
 }
@@ -289,11 +291,12 @@ function buildNormalizedFingerprintRows(rows = []) {
     .sort((a, b) => a.rowNo - b.rowNo);
 }
 
-export function buildTcUploadFingerprint({ trnType, lmPcode, rows = [] }) {
+export function buildTcUploadFingerprint({ trnType, lmPcode, wardPcode, rows = [] }) {
   const payload = {
     version: TC_UPLOAD_FINGERPRINT_VERSION,
     trnType: normalizeTrnType(trnType),
     lmPcode: normalizeUpper(lmPcode),
+    wardPcode: normalizeOptionalWardPcode(wardPcode),
     rows: buildNormalizedFingerprintRows(rows),
   };
 

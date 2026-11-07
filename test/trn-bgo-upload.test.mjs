@@ -273,3 +273,39 @@ test("TrnBgoUploadPage defines Column 1 checkbox selection, interactive stat fil
     );
   }
 });
+
+test("TRN-BGO-R014: Ward-Grouped Batch Creation and TRN_BGO_YYYYMMDD_HHMMSS_<WARDPCODE>_<TRNCODE> Batch ID format", async () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const helpersPath = path.join(
+    repoRoot,
+    "functions/tcUploads/helpers.js",
+  );
+  const uploadContent = fs.readFileSync(uploadPagePath, "utf8");
+  const helpersContent = fs.readFileSync(helpersPath, "utf8");
+
+  assert.ok(
+    uploadContent.includes("const wardBatchGroups = useMemo("),
+    "TrnBgoUploadPage must compute wardBatchGroups to split carried rows into 1 batch per ward",
+  );
+  assert.ok(
+    uploadContent.includes("const handleCreateWardBatches = async () =>"),
+    "TrnBgoUploadPage must define handleCreateWardBatches to create 1 batch per ward",
+  );
+  assert.ok(
+    helpersContent.includes("TRN_BGO_${yyyymmdd}_${hhmmss}_${geoToken}_"),
+    "buildTcUploadId must generate TRN_BGO_YYYYMMDD_HHMMSS_<WARDPCODE>_<TRNCODE>",
+  );
+
+  const { buildTcUploadId } = await import("../functions/tcUploads/helpers.js");
+  const fixedDate = new Date("2026-11-07T08:05:00Z"); // 10:05:00 SAST
+  const batchIdWard6 = buildTcUploadId({
+    date: fixedDate,
+    lmPcode: "ZA5241",
+    wardPcode: "ZA5241006",
+    trnCode: "MDCN",
+  });
+  assert.equal(batchIdWard6, "TRN_BGO_20261107_100500_ZA5241006_MDCN");
+});
