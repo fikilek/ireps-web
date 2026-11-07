@@ -151,27 +151,32 @@ test("AppRoutes routes /operations/trn-bgo/upload to TrnBgoUploadPage", () => {
   );
 });
 
-test("TrnBgoUploadPage defines handleDownloadSampleCsv to prevent runtime ReferenceError", () => {
+test("TrnBgoUploadPage removes redundant download buttons and wires Quick Download to selected checkboxes", () => {
   const uploadPagePath = path.join(
     repoRoot,
     "src/pages/operations/TrnBgoUploadPage.jsx",
   );
   const content = fs.readFileSync(uploadPagePath, "utf8");
 
-  assert.match(
-    content,
-    /const handleDownloadSampleCsv\s*=\s*\(\)\s*=>/,
-    "handleDownloadSampleCsv must be declared as a function in TrnBgoUploadPage.jsx",
+  assert.equal(
+    content.includes("↓ Download Sample CSV"),
+    false,
+    "Download Sample CSV button must be removed from the header",
+  );
+  assert.equal(
+    content.includes("↓ Download Selected CSV"),
+    false,
+    "Download Selected CSV button must be removed",
+  );
+  assert.equal(
+    content.includes("↓ Download Not Found CSV"),
+    false,
+    "Download Not Found CSV button must be removed",
   );
   assert.match(
     content,
-    /onClick=\{handleDownloadSampleCsv\}/,
-    "Button must reference declared handleDownloadSampleCsv",
-  );
-  assert.match(
-    content,
-    /04298074776/,
-    "handleDownloadSampleCsv must populate verified Endumeni meters (04298074776)",
+    /visibleRows:\s*selectedRows\.length > 0 \? selectedRows : currentFilteredRows/,
+    "Quick Download must export selectedRows when 1 or more checkboxes are ticked",
   );
 });
 
@@ -228,7 +233,7 @@ test("TrnBgoUploadPage defines dataMatch boolean column and Option A stacked Fil
   );
 });
 
-test("TrnBgoUploadPage defines Column 1 checkbox selection, MasterCheckbox on filtered rows, and Option 2 Batch Stage Gate", () => {
+test("TrnBgoUploadPage defines Column 1 checkbox selection, interactive stat filters, Clear Filters checkbox reset, and Option 2 Batch Stage Gate", () => {
   const uploadPagePath = path.join(
     repoRoot,
     "src/pages/operations/TrnBgoUploadPage.jsx",
@@ -237,8 +242,8 @@ test("TrnBgoUploadPage defines Column 1 checkbox selection, MasterCheckbox on fi
 
   assert.match(
     content,
-    /key:\s*"_select"[\s\S]*?<MasterCheckbox[\s\S]*?key:\s*"_rowNo"/,
-    "Column 1 must be _select with MasterCheckbox before _rowNo",
+    /key:\s*"_select"[\s\S]*?export:\s*false[\s\S]*?<MasterCheckbox[\s\S]*?key:\s*"_rowNo"/,
+    "Column 1 must be _select with export: false and MasterCheckbox before _rowNo",
   );
   assert.match(
     content,
@@ -252,7 +257,19 @@ test("TrnBgoUploadPage defines Column 1 checkbox selection, MasterCheckbox on fi
   );
   assert.match(
     content,
-    /onClick=\{handleDownloadSelectedCsv\}/,
-    "Download Selected CSV button must be wired to handleDownloadSelectedCsv",
+    /onClearFilters=\{\(\)\s*=>\s*\{[\s\S]*?setStatFilter\("ALL"\);[\s\S]*?setSelectedRowKeys\(new Set\(\)\);/,
+    "Clear Filters must reset statFilter and clear selectedRowKeys checkboxes",
   );
+  for (const statLabel of [
+    "Total Meters",
+    "Found in ASTS",
+    "Not Found",
+    "LM Matches",
+    "Selected Rows",
+  ]) {
+    assert.ok(
+      content.includes(`label: "${statLabel}"`),
+      `Interactive stat filters must include "${statLabel}"`,
+    );
+  }
 });

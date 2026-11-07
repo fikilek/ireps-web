@@ -352,6 +352,7 @@ export default function TrnBgoUploadPage() {
   const [parsedRows, setParsedRows] = useState([]);
   const [foundFilter, setFoundFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND
   const [lmFilter, setLmFilter] = useState("ALL"); // ALL, MATCH, MISMATCH
+  const [statFilter, setStatFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND, LM_MATCH, SELECTED
   const [selectedRowKeys, setSelectedRowKeys] = useState(() => new Set());
   const [shownRows, setShownRows] = useState(null);
   const [carriedBatchRows, setCarriedBatchRows] = useState([]);
@@ -365,6 +366,8 @@ export default function TrnBgoUploadPage() {
     setCarriedBatchRows([]);
     setFoundFilter("ALL");
     setLmFilter("ALL");
+    setStatFilter("ALL");
+    setStatFilter("ALL");
 
     if (!file) {
       setSelectedFile(null);
@@ -911,9 +914,14 @@ export default function TrnBgoUploadPage() {
     return { total, found, notFound, lmMatches, lmMismatches };
   }, [parsedRows]);
 
-  // Filtered rows based on Found/Not Found and LM Match filters
+  // Filtered rows based on interactive stat filter pills (Total Meters, Found in ASTS, Not Found, LM Matches, Selected Rows)
   const filteredRows = useMemo(() => {
     return parsedRows.filter((row) => {
+      if (statFilter === "FOUND" && !row.foundInAsts) return false;
+      if (statFilter === "NOT_FOUND" && row.foundInAsts) return false;
+      if (statFilter === "LM_MATCH" && (!row.foundInAsts || !row.isLmMatch)) return false;
+      if (statFilter === "SELECTED" && !selectedRowKeys.has(getRowSelectionKey(row))) return false;
+
       if (foundFilter === "FOUND" && !row.foundInAsts) return false;
       if (foundFilter === "NOT_FOUND" && row.foundInAsts) return false;
 
@@ -922,7 +930,7 @@ export default function TrnBgoUploadPage() {
 
       return true;
     });
-  }, [parsedRows, foundFilter, lmFilter]);
+  }, [parsedRows, statFilter, selectedRowKeys, foundFilter, lmFilter]);
 
   const currentFilteredRows = shownRows ?? filteredRows;
 
@@ -1122,6 +1130,7 @@ export default function TrnBgoUploadPage() {
     return [
       {
         key: "_select",
+        export: false,
         label: (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             <MasterCheckbox
@@ -1466,14 +1475,6 @@ export default function TrnBgoUploadPage() {
         </div>
 
         <div style={styles.headerActions}>
-          <button
-            type="button"
-            style={styles.sampleDownloadButton}
-            onClick={handleDownloadSampleCsv}
-            title="Download pre-populated sample CSV template"
-          >
-            ↓ Download Sample CSV
-          </button>
           <Link to="/operations/trn-bgo" style={styles.secondaryLinkButton}>
             ← Back to TRN BGO Register
           </Link>
@@ -1581,62 +1582,7 @@ export default function TrnBgoUploadPage() {
               <strong style={styles.fileMetaValue}>{formatBytes(selectedFile?.size)}</strong>
             </div>
 
-            <div style={styles.fileMetaItem}>
-              <span style={styles.fileMetaLabel}>Total Meters</span>
-              <strong style={{ ...styles.fileMetaValue, color: "#0f172a" }}>
-                {formatNumber(summary.total)}
-              </strong>
-            </div>
-
-            <div style={styles.fileMetaItem}>
-              <span style={styles.fileMetaLabel}>Found in ASTS</span>
-              <strong style={{ ...styles.fileMetaValue, color: "#16a34a" }}>
-                {formatNumber(summary.found)}
-              </strong>
-            </div>
-
-            <div style={styles.fileMetaItem}>
-              <span style={styles.fileMetaLabel}>Not Found</span>
-              <strong style={{ ...styles.fileMetaValue, color: summary.notFound > 0 ? "#dc2626" : "#64748b" }}>
-                {formatNumber(summary.notFound)}
-              </strong>
-            </div>
-
-            <div style={styles.fileMetaItem}>
-              <span style={styles.fileMetaLabel}>LM Matches</span>
-              <strong style={{ ...styles.fileMetaValue, color: "#2563eb" }}>
-                {formatNumber(summary.lmMatches)}
-              </strong>
-            </div>
-
-            <div style={styles.fileMetaItem}>
-              <span style={styles.fileMetaLabel}>Selected Rows</span>
-              <strong style={{ ...styles.fileMetaValue, color: selectedRows.length > 0 ? "#1d4ed8" : "#64748b" }}>
-                {formatNumber(selectedRows.length)}
-              </strong>
-            </div>
-
             <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-              <button
-                type="button"
-                disabled={selectedRows.length === 0}
-                onClick={handleDownloadSelectedCsv}
-                style={{
-                  ...styles.downloadButton,
-                  background: selectedRows.length > 0 ? "#eff6ff" : "#f1f5f9",
-                  color: selectedRows.length > 0 ? "#1d4ed8" : "#94a3b8",
-                  border: `1px solid ${selectedRows.length > 0 ? "#93c5fd" : "#cbd5e1"}`,
-                  cursor: selectedRows.length > 0 ? "pointer" : "not-allowed",
-                }}
-                title={
-                  selectedRows.length > 0
-                    ? `Download ${selectedRows.length} selected row(s) as CSV`
-                    : "Tick 1 or more rows using the checkboxes in Column 1 to download"
-                }
-              >
-                ↓ Download Selected CSV ({selectedRows.length})
-              </button>
-
               <button
                 type="button"
                 disabled={!canCarryToBatch}
@@ -1661,17 +1607,6 @@ export default function TrnBgoUploadPage() {
               >
                 Carry Selected to Batch Stage ({selectedRows.length}) →
               </button>
-
-              {summary.notFound > 0 ? (
-                <button
-                  type="button"
-                  style={styles.downloadButton}
-                  onClick={handleDownloadNotFoundCsv}
-                  title="Download CSV report of meters not found in asts"
-                >
-                  ↓ Download Not Found CSV ({summary.notFound})
-                </button>
-              ) : null}
 
               <button
                 type="button"
@@ -1759,13 +1694,141 @@ export default function TrnBgoUploadPage() {
               rows={filteredRows}
               columns={columns}
               onRowsShown={setShownRows}
+              extraFiltersActive={
+                statFilter !== "ALL" ||
+                foundFilter !== "ALL" ||
+                lmFilter !== "ALL" ||
+                selectedRowKeys.size > 0
+              }
+              onClearFilters={() => {
+                setStatFilter("ALL");
+                setFoundFilter("ALL");
+                setLmFilter("ALL");
+                setSelectedRowKeys(new Set());
+              }}
+              downloads={{
+                registryName: selectedFile?.name || "TRN BGO Upload Inspection",
+                fileBaseName: (selectedFile?.name || "trn_bgo_upload").replace(/\.[^/.]+$/, ""),
+                scope: { lmName, lmPcode },
+                visibleRows: selectedRows.length > 0 ? selectedRows : currentFilteredRows,
+                rowsLabel: selectedRows.length > 0 ? "selected rows" : "rows",
+              }}
               rowStyle={(r) =>
                 selectedRowKeys.has(getRowSelectionKey(r))
                   ? { background: "#eff6ff" }
                   : null
               }
               rowKey={(r, idx) => r?.meterNo || r?.rowNo || r?._rowNo || idx}
-              title={`Uploaded File Inspection: ${selectedFile?.name || "File"} (${formatNumber(currentFilteredRows.length)} Rows Showing)`}
+              title={
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 10,
+                  }}
+                >
+                  {[
+                    {
+                      key: "ALL",
+                      label: "Total Meters",
+                      count: summary.total,
+                      color: "#0f172a",
+                      activeBg: "#f1f5f9",
+                      activeBorder: "#64748b",
+                    },
+                    {
+                      key: "FOUND",
+                      label: "Found in ASTS",
+                      count: summary.found,
+                      color: "#16a34a",
+                      activeBg: "#f0fdf4",
+                      activeBorder: "#16a34a",
+                    },
+                    {
+                      key: "NOT_FOUND",
+                      label: "Not Found",
+                      count: summary.notFound,
+                      color: summary.notFound > 0 ? "#dc2626" : "#64748b",
+                      activeBg: "#fef2f2",
+                      activeBorder: "#dc2626",
+                    },
+                    {
+                      key: "LM_MATCH",
+                      label: "LM Matches",
+                      count: summary.lmMatches,
+                      color: "#2563eb",
+                      activeBg: "#eff6ff",
+                      activeBorder: "#2563eb",
+                    },
+                    {
+                      key: "SELECTED",
+                      label: "Selected Rows",
+                      count: selectedRows.length,
+                      color: selectedRows.length > 0 ? "#1d4ed8" : "#64748b",
+                      activeBg: "#dbeafe",
+                      activeBorder: "#1d4ed8",
+                    },
+                  ].map((stat) => {
+                    const isActive = statFilter === stat.key;
+                    return (
+                      <button
+                        key={stat.key}
+                        type="button"
+                        onClick={() =>
+                          setStatFilter((prev) =>
+                            prev === stat.key && stat.key !== "ALL" ? "ALL" : stat.key
+                          )
+                        }
+                        title={
+                          stat.key === "ALL"
+                            ? "Show all uploaded rows"
+                            : `Filter table by ${stat.label} (${stat.count})`
+                        }
+                        style={{
+                          display: "inline-flex",
+                          flexDirection: "column",
+                          alignItems: "flex-start",
+                          gap: 2,
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: isActive
+                            ? `2px solid ${stat.activeBorder}`
+                            : "1px solid #e2e8f0",
+                          background: isActive ? stat.activeBg : "#ffffff",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          boxShadow: isActive
+                            ? "0 1px 3px rgba(15, 23, 42, 0.08)"
+                            : "none",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "#64748b",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          {stat.label}
+                        </span>
+                        <strong
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 800,
+                            color: stat.color,
+                            lineHeight: 1.1,
+                          }}
+                        >
+                          {formatNumber(stat.count)}
+                        </strong>
+                      </button>
+                    );
+                  })}
+                </div>
+              }
               pageSizeOptions={[10, 25, 50, 100]}
               defaultPageSize={25}
               emptyText="No rows match the selected filters."
