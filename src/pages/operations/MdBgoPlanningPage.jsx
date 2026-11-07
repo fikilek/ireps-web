@@ -758,13 +758,29 @@ function MdBgoMapInner({
           title: `Node ${index + 1} (Drag to adjust)`,
           icon: {
             path: window.google.maps.SymbolPath.CIRCLE,
-            scale: index === 0 ? 7 : 5,
+            scale: index === 0 ? 9 : 8,
             fillColor: index === 0 ? "#16a34a" : "#2563eb",
             fillOpacity: 1,
             strokeColor: "#ffffff",
-            strokeWeight: 2,
+            strokeWeight: 2.5,
           },
-          zIndex: 150 + index,
+          zIndex: 200 + index,
+        });
+
+        marker.addListener("drag", (event) => {
+          if (!event?.latLng) return;
+          if (draftPolygonRef.current) {
+            const path = draftPolygonRef.current.getPath();
+            if (path && path.getLength() > index) {
+              path.setAt(index, event.latLng);
+            }
+          }
+          if (draftPolylineRef.current) {
+            const path = draftPolylineRef.current.getPath();
+            if (path && path.getLength() > index) {
+              path.setAt(index, event.latLng);
+            }
+          }
         });
 
         marker.addListener("dragend", (event) => {
