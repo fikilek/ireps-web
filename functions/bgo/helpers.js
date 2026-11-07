@@ -561,7 +561,7 @@ export function validateCreateBgoPayload(data = {}) {
 
     normalizedAllocations.push({
       geofenceRef,
-      target: targetCheck.target,
+      target,
       tcRowIds: [...new Set(tcRowIds)],
       instruction: allocation?.instruction || null,
     });
@@ -658,7 +658,8 @@ export function buildBmdBgoBatchId({
   targetType,
   targetId,
 }) {
-  const targetHash = buildHash(targetId || "NAv", 8);
+  const targetHash = targetId ? buildHash(targetId, 8) : "READY";
+  const targetTypePart = targetType || "UNALLOCATED";
 
   return [
     "BMD",
@@ -666,7 +667,7 @@ export function buildBmdBgoBatchId({
     sanitizeFirestoreIdPart(wardPcode, "NO_WARD"),
     "BGO",
     sanitizeFirestoreIdPart(geofenceId, "NO_GEOFENCE"),
-    sanitizeFirestoreIdPart(targetType, "NO_TARGET"),
+    sanitizeFirestoreIdPart(targetTypePart, "NO_TARGET"),
     targetHash,
   ].join("_");
 }
@@ -717,15 +718,25 @@ export function validateCreateBmdBgoPayload(data = {}) {
     };
   }
 
-  const targetCheck = validateTarget(
-    data?.target || {
-      type: data?.targetType,
-      id: data?.targetId,
-      name: data?.targetName,
-    },
+  const hasTarget = Boolean(
+    data?.target?.type ||
+      data?.targetType ||
+      data?.target?.id ||
+      data?.targetId,
   );
 
-  if (!targetCheck.ok) return targetCheck;
+  let target = null;
+  if (hasTarget) {
+    const targetCheck = validateTarget(
+      data?.target || {
+        type: data?.targetType,
+        id: data?.targetId,
+        name: data?.targetName,
+      },
+    );
+    if (!targetCheck.ok) return targetCheck;
+    target = targetCheck.target;
+  }
 
   const rawErfRefs = safeArray(data?.worklist?.erfRefs || data?.erfRefs);
 
@@ -747,6 +758,14 @@ export function validateCreateBmdBgoPayload(data = {}) {
       ok: false,
       code: "BMD_GEOFENCE_HAS_NO_ERFS",
       message: "The selected BMD geofence must have at least one ERF in the worklist",
+    };
+  }
+
+  if (erfRefs.length > 60) {
+    return {
+      ok: false,
+      code: "BMD_GEOFENCE_EXCEEDS_60_ERFS",
+      message: `The selected geofence contains ${erfRefs.length} ERFs, exceeding the maximum limit of 60 ERFs per geofence (MD-BGO-R003).`,
     };
   }
 
