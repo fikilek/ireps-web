@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, query, where, getDocs, documentId } from "firebase/firestore";
 
 import { db } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
@@ -26,6 +26,224 @@ export const OFFICIAL_HEADERS = [
   "meterStatus",
   "erfNo",
 ];
+
+export const COMPARABLE_FIELD_KEYS = [
+  "meterPhase",
+  "meterType",
+  "linkedAccountNo",
+  "premiseAddress",
+  "premisePropertyType",
+  "wardNo",
+  "geofence",
+  "meterStatus",
+  "erfNo",
+];
+
+const NAV_SET = new Set([
+  "",
+  "NAV",
+  "N/AV",
+  "N/A",
+  "NA",
+  "NULL",
+  "UNDEFINED",
+  "—",
+  "-",
+  "BLANK",
+]);
+
+function firstMeaningfulValue(...candidates) {
+  for (const cand of candidates) {
+    if (cand === null || cand === undefined) continue;
+    const str = String(cand).trim();
+    if (!str) continue;
+    if (NAV_SET.has(str.toUpperCase())) continue;
+    return str;
+  }
+  return "NAv";
+}
+
+function buildPremiseAddressText(address) {
+  if (!address) return "";
+  if (typeof address === "string") return address.trim();
+  const parts = [
+    address?.strNo,
+    address?.strName,
+    address?.strType,
+    address?.suburbName,
+  ]
+    .map((p) => String(p || "").trim())
+    .filter((p) => p && !NAV_SET.has(p.toUpperCase()));
+  return parts.join(" ");
+}
+
+function extractWardNoFromPcode(value) {
+  const str = String(value || "").trim();
+  if (!str || NAV_SET.has(str.toUpperCase())) return "";
+  if (/^\d+$/.test(str)) return String(Number(str));
+  const digits = str.replace(/\D/g, "");
+  if (!digits) return str;
+  const lastThree = digits.slice(-3);
+  const wardNo = Number(lastThree);
+  return Number.isFinite(wardNo) && wardNo > 0 ? String(wardNo) : str;
+}
+
+function extractGeofenceNames(refs) {
+  if (!Array.isArray(refs) || refs.length === 0) return "";
+  const names = refs
+    .map((r) =>
+      String(r?.name || r?.label || r?.description || r?.id || "").trim()
+    )
+    .filter((n) => n && !NAV_SET.has(n.toUpperCase()));
+  return Array.from(new Set(names)).join(", ");
+}
+
+function normalizeForComparison(val) {
+  const s = String(val ?? "").trim();
+  if (!s) return "";
+  const u = s.toUpperCase();
+  if (NAV_SET.has(u)) return "";
+  return u.replace(/\s+/g, " ");
+}
+
+function buildFieldComparison(fileRaw, irepsRaw, foundInAsts) {
+  const fileClean = String(fileRaw ?? "").trim();
+  const fileDisplay =
+    fileClean && !NAV_SET.has(fileClean.toUpperCase()) ? fileClean : "Blank";
+
+  if (!foundInAsts) {
+    return {
+      fileDisplay,
+      irepsDisplay: "NAv",
+      isMatch: false,
+    };
+  }
+
+  const irepsClean = String(irepsRaw ?? "").trim();
+  const irepsDisplay =
+    irepsClean && !NAV_SET.has(irepsClean.toUpperCase()) ? irepsClean : "NAv";
+
+  const fNorm = normalizeForComparison(fileDisplay);
+  const iNorm = normalizeForComparison(irepsDisplay);
+
+  const isMatch = Boolean(fNorm && iNorm && fNorm === iNorm);
+
+  return {
+    fileDisplay,
+    irepsDisplay,
+    isMatch,
+  };
+}
+
+function renderStackedComparisonCell(comp, foundInAsts) {
+  const fileDisplay = comp?.fileDisplay || "Blank";
+  const irepsDisplay = comp?.irepsDisplay || "NAv";
+  const isBlankFile = fileDisplay === "Blank";
+  const isMatch = Boolean(comp?.isMatch);
+
+  const bg = !foundInAsts ? "#fef2f2" : isMatch ? "#f8fafc" : "#fffbeb";
+  const border = !foundInAsts ? "#fecaca" : isMatch ? "#e2e8f0" : "#fcd34d";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        padding: "4px 8px",
+        borderRadius: 6,
+        fontSize: 12,
+        lineHeight: 1.35,
+        background: bg,
+        border: `1px solid ${border}`,
+        minWidth: 145,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+        }}
+      >
+        <div
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
+            style={{
+              display: "inline-block",
+              width: 42,
+              fontWeight: 700,
+              color: "#64748b",
+            }}
+          >
+            File:
+          </span>
+          <span
+            style={{
+              fontStyle: isBlankFile ? "italic" : "normal",
+              fontWeight: isBlankFile ? 500 : 600,
+              color: isBlankFile ? "#94a3b8" : "#1e293b",
+            }}
+          >
+            {fileDisplay}
+          </span>
+        </div>
+        {foundInAsts ? (
+          isMatch ? (
+            <span
+              style={{ color: "#059669", fontWeight: 800, flexShrink: 0 }}
+              title="File matches iREPS"
+            >
+              ✓
+            </span>
+          ) : (
+            <span
+              style={{ color: "#b45309", fontWeight: 800, flexShrink: 0 }}
+              title="Discrepancy between File and iREPS"
+            >
+              ≠
+            </span>
+          )
+        ) : null}
+      </div>
+      <div
+        style={{
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          borderTop: "1px solid rgba(226, 232, 240, 0.7)",
+          paddingTop: 2,
+        }}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            width: 42,
+            fontWeight: 700,
+            color: "#64748b",
+          }}
+        >
+          iREPS:
+        </span>
+        <span
+          style={{
+            fontWeight: 600,
+            color:
+              !foundInAsts || irepsDisplay === "NAv" ? "#dc2626" : "#1e3a8a",
+          }}
+        >
+          {irepsDisplay}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // Validation Rule 3: Row limits
 export const MAX_UPLOAD_ROWS = 100;
@@ -298,7 +516,11 @@ export default function TrnBgoUploadPage() {
         );
 
         const meterAstMap = new Map();
+        const meterRegMap = new Map();
+        const meterSalesMap = new Map();
+        const premiseIdsSet = new Set();
         const queryMetersSet = new Set();
+
         parsedRowsDraft.forEach((r) => {
           queryMetersSet.add(r.meterNo);
           if (r.meterNo.length === 10 && /^\d+$/.test(r.meterNo)) {
@@ -311,6 +533,16 @@ export default function TrnBgoUploadPage() {
         const allQueryMeterNos = Array.from(queryMetersSet);
         const chunks = chunkArray(allQueryMeterNos, 30);
 
+        const registerInMap = (map, num, entry) => {
+          if (!num) return;
+          map.set(num, entry);
+          if (num.startsWith("0")) {
+            map.set(num.slice(1), entry);
+          } else if (num.length === 10) {
+            map.set("0" + num, entry);
+          }
+        };
+
         for (const chunk of chunks) {
           const astQuery1 = query(
             collection(db, "asts"),
@@ -320,31 +552,85 @@ export default function TrnBgoUploadPage() {
             collection(db, "asts"),
             where("master.id", "in", chunk)
           );
-          const [snap1, snap2] = await Promise.all([
+          const regQuery = query(
+            collection(db, "registry_meters"),
+            where("meterNo", "in", chunk)
+          );
+          const salesQuery = query(
+            collection(db, "sales-all-meters"),
+            where(documentId(), "in", chunk)
+          );
+
+          const [snap1, snap2, regSnap, salesSnap] = await Promise.all([
             getDocs(astQuery1),
             getDocs(astQuery2),
+            getDocs(regQuery).catch(() => null),
+            getDocs(salesQuery).catch(() => null),
           ]);
+
           [snap1, snap2].forEach((snap) => {
+            if (!snap) return;
             snap.forEach((doc) => {
               const data = doc.data();
               const astNo = String(
                 data?.ast?.astData?.astNo || data?.master?.id || ""
               ).trim().toUpperCase();
               const masterId = String(data?.master?.id || "").trim().toUpperCase();
-              const docEntry = {
-                id: doc.id,
-                ...data,
-              };
+              const docEntry = { id: doc.id, ...data };
               [astNo, masterId].filter(Boolean).forEach((num) => {
-                meterAstMap.set(num, docEntry);
-                if (num.startsWith("0")) {
-                  meterAstMap.set(num.slice(1), docEntry);
-                } else if (num.length === 10) {
-                  meterAstMap.set("0" + num, docEntry);
-                }
+                registerInMap(meterAstMap, num, docEntry);
               });
+              const pId = String(
+                data?.accessData?.premise?.id ||
+                  data?.accessData?.premiseId ||
+                  data?.premise?.id ||
+                  data?.premiseId ||
+                  ""
+              ).trim();
+              if (pId && !NAV_SET.has(pId.toUpperCase())) {
+                premiseIdsSet.add(pId);
+              }
             });
           });
+
+          if (regSnap) {
+            regSnap.forEach((doc) => {
+              const data = doc.data();
+              const mNo = String(data?.meterNo || "").trim().toUpperCase();
+              const docEntry = { id: doc.id, ...data };
+              registerInMap(meterRegMap, mNo, docEntry);
+              const pId = String(data?.premiseId || "").trim();
+              if (pId && !NAV_SET.has(pId.toUpperCase())) {
+                premiseIdsSet.add(pId);
+              }
+            });
+          }
+
+          if (salesSnap) {
+            salesSnap.forEach((doc) => {
+              const data = doc.data();
+              const mNo = String(
+                data?.meterNoNormalized || data?.meterNo || data?.MeterNumber || doc.id || ""
+              ).trim().toUpperCase();
+              registerInMap(meterSalesMap, mNo, { id: doc.id, ...data });
+            });
+          }
+        }
+
+        const premiseMap = new Map();
+        const premiseChunks = chunkArray(Array.from(premiseIdsSet), 30);
+        for (const pChunk of premiseChunks) {
+          if (pChunk.length === 0) continue;
+          const pQuery = query(
+            collection(db, "premises"),
+            where(documentId(), "in", pChunk)
+          );
+          const pSnap = await getDocs(pQuery).catch(() => null);
+          if (pSnap) {
+            pSnap.forEach((doc) => {
+              premiseMap.set(doc.id, { id: doc.id, ...doc.data() });
+            });
+          }
         }
 
         const foundCount = parsedRowsDraft.filter((r) =>
@@ -361,18 +647,41 @@ export default function TrnBgoUploadPage() {
           return;
         }
 
-        // Enrich parsed rows with ASTS verification details and LM Match
+        // Enrich parsed rows with ASTS verification details, iREPS repo values, and dataMatch
         const enrichedRows = parsedRowsDraft.map((row) => {
-          const astDoc = meterAstMap.get(row.meterNo) || (row.meterNo.length === 10 ? meterAstMap.get("0" + row.meterNo) : null);
+          const astDoc =
+            meterAstMap.get(row.meterNo) ||
+            (row.meterNo.length === 10 ? meterAstMap.get("0" + row.meterNo) : null);
+          const regDoc =
+            meterRegMap.get(row.meterNo) ||
+            (row.meterNo.length === 10 ? meterRegMap.get("0" + row.meterNo) : null);
+          const salesDoc =
+            meterSalesMap.get(row.meterNo) ||
+            (row.meterNo.length === 10 ? meterSalesMap.get("0" + row.meterNo) : null);
+
           const foundInAsts = Boolean(astDoc);
+          const premiseId = String(
+            astDoc?.accessData?.premise?.id ||
+              astDoc?.accessData?.premiseId ||
+              astDoc?.premise?.id ||
+              astDoc?.premiseId ||
+              regDoc?.premiseId ||
+              ""
+          ).trim();
+          const premiseDoc = premiseId ? premiseMap.get(premiseId) || null : null;
+
           const astLmPcode = String(
-            astDoc?.accessData?.parents?.lmPcode || ""
+            astDoc?.accessData?.parents?.lmPcode || regDoc?.parents?.lmPcode || ""
           ).trim();
           const astWardPcode = String(
-            astDoc?.accessData?.parents?.wardPcode || ""
+            astDoc?.accessData?.parents?.wardPcode || regDoc?.parents?.wardPcode || ""
           ).trim();
           const astStatus = String(
-            astDoc?.status?.state || astDoc?.status || "CONNECTED"
+            astDoc?.status?.state ||
+              (typeof astDoc?.status === "string" ? astDoc?.status : "") ||
+              regDoc?.statusState ||
+              regDoc?.status ||
+              "CONNECTED"
           ).trim().toUpperCase();
 
           // LM match check
@@ -380,13 +689,118 @@ export default function TrnBgoUploadPage() {
             foundInAsts &&
             (!lmPcode || !astLmPcode || astLmPcode.toUpperCase() === lmPcode.toUpperCase());
 
-          const resolvedAddress =
-            row.premiseAddress ||
-            astDoc?.ast?.location?.address ||
-            astDoc?.master?.premiseAddress ||
-            "NAv";
+          const irepsValues = {
+            meterPhase: foundInAsts
+              ? firstMeaningfulValue(
+                  regDoc?.meterPhase,
+                  astDoc?.ast?.astData?.meter?.phase,
+                  astDoc?.astData?.meter?.phase,
+                  astDoc?.meterPhase
+                )
+              : "NAv",
+            meterType: foundInAsts
+              ? firstMeaningfulValue(
+                  regDoc?.meterType,
+                  astDoc?.meterType,
+                  astDoc?.accessData?.meterType,
+                  astDoc?.ast?.astData?.astType,
+                  astDoc?.astData?.astType
+                )
+              : "NAv",
+            linkedAccountNo: foundInAsts
+              ? firstMeaningfulValue(
+                  astDoc?.accessData?.accountNo,
+                  astDoc?.accessData?.linkedAccountNo,
+                  astDoc?.linkedAccountNo,
+                  astDoc?.accountNo,
+                  regDoc?.accountNo,
+                  regDoc?.linkedAccountNo,
+                  premiseDoc?.accountNo,
+                  salesDoc?.accountNumber,
+                  salesDoc?.AccountNumber
+                )
+              : "NAv",
+            premiseAddress: foundInAsts
+              ? firstMeaningfulValue(
+                  regDoc?.premiseAddress,
+                  astDoc?.accessData?.premise?.address,
+                  astDoc?.premiseAddress,
+                  premiseDoc?.addressText,
+                  premiseDoc?.addressLine,
+                  buildPremiseAddressText(premiseDoc?.address),
+                  [
+                    salesDoc?.addressLine1 || salesDoc?.AddressLine1,
+                    salesDoc?.addressLine2 || salesDoc?.AddressLine2,
+                  ]
+                    .map((s) => String(s || "").trim())
+                    .filter(Boolean)
+                    .join(" ")
+                )
+              : "NAv",
+            premisePropertyType: foundInAsts
+              ? firstMeaningfulValue(
+                  regDoc?.premisePropertyType,
+                  astDoc?.accessData?.premise?.propertyType?.type,
+                  typeof astDoc?.accessData?.premise?.propertyType === "string"
+                    ? astDoc?.accessData?.premise?.propertyType
+                    : "",
+                  premiseDoc?.propertyType?.type
+                )
+              : "NAv",
+            wardNo: foundInAsts
+              ? firstMeaningfulValue(
+                  premiseDoc?.wardNo,
+                  extractWardNoFromPcode(
+                    regDoc?.parents?.wardPcode ||
+                      astDoc?.accessData?.parents?.wardPcode ||
+                      premiseDoc?.wardPcode ||
+                      salesDoc?.erfCandidates?.[0]?.WardPcode ||
+                      salesDoc?.ErfCandidates?.[0]?.WardPcode
+                  )
+                )
+              : "NAv",
+            geofence: foundInAsts
+              ? firstMeaningfulValue(
+                  extractGeofenceNames(astDoc?.geofenceRefs || regDoc?.geofenceRefs),
+                  regDoc?.geofence
+                )
+              : "NAv",
+            meterStatus: foundInAsts ? firstMeaningfulValue(astStatus) : "NAv",
+            erfNo: foundInAsts
+              ? firstMeaningfulValue(
+                  regDoc?.erfNo,
+                  astDoc?.accessData?.erfNo,
+                  astDoc?.erfNo,
+                  premiseDoc?.erfNo,
+                  salesDoc?.erfNo,
+                  salesDoc?.erfNumbers?.[0],
+                  salesDoc?.ErfNumbers?.[0]
+                )
+              : "NAv",
+          };
 
-          const resolvedErf = row.erfNo || astDoc?.accessData?.erfNo || "";
+          const comparisons = {};
+          COMPARABLE_FIELD_KEYS.forEach((fieldKey) => {
+            comparisons[fieldKey] = buildFieldComparison(
+              row[fieldKey],
+              irepsValues[fieldKey],
+              foundInAsts
+            );
+          });
+
+          const isDataMatch = Boolean(
+            foundInAsts &&
+              COMPARABLE_FIELD_KEYS.every(
+                (fieldKey) => comparisons[fieldKey]?.isMatch === true
+              )
+          );
+
+          const resolvedAddress = firstMeaningfulValue(
+            row.premiseAddress,
+            irepsValues.premiseAddress
+          );
+          const resolvedErfVal = firstMeaningfulValue(row.erfNo, irepsValues.erfNo);
+          const resolvedErf = resolvedErfVal === "NAv" ? "" : resolvedErfVal;
 
           const isDuplicate = Boolean(row.isDuplicate);
           const isEligible = Boolean(foundInAsts && isLmMatch && !isDuplicate);
@@ -397,8 +811,12 @@ export default function TrnBgoUploadPage() {
             isLmMatch,
             isDuplicate,
             isEligible,
-            duplicate: String(isDuplicate),
-            eligible: String(isEligible),
+            isDataMatch,
+            duplicate: isDuplicate ? "True" : "False",
+            eligible: isEligible ? "True" : "False",
+            dataMatch: isDataMatch ? "True" : "False",
+            irepsValues,
+            comparisons,
             astDocId: astDoc?.id || null,
             astLmPcode: astLmPcode || "NAv",
             astWardPcode: astWardPcode || "NAv",
@@ -606,77 +1024,104 @@ export default function TrnBgoUploadPage() {
         ),
       },
       {
-        key: "meterPhase",
-        label: "meterPhase",
-        width: 130,
+        key: "dataMatch",
+        label: "dataMatch",
+        width: 115,
         filter: "select",
         sortable: true,
-        value: (r) => String(r.meterPhase || ""),
-        sortValue: (r) => String(r.meterPhase || ""),
+        value: (r) => (r.isDataMatch ? "True" : "False"),
+        sortValue: (r) => (r.isDataMatch ? 1 : 0),
         render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.meterPhase || "—"}
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              fontSize: 12,
+              color: r.isDataMatch ? "#047857" : "#dc2626",
+            }}
+          >
+            {r.isDataMatch ? "True" : "False"}
           </span>
         ),
+      },
+      {
+        key: "meterPhase",
+        label: "meterPhase",
+        width: 185,
+        filter: "text",
+        sortable: true,
+        value: (r) =>
+          `File: ${r.comparisons?.meterPhase?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.meterPhase?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.meterPhase?.fileDisplay || ""}|${r.comparisons?.meterPhase?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(r.comparisons?.meterPhase, r.foundInAsts),
       },
       {
         key: "meterType",
         label: "meterType",
-        width: 120,
-        filter: "select",
+        width: 170,
+        filter: "text",
         sortable: true,
-        value: (r) => String(r.meterType || ""),
-        sortValue: (r) => String(r.meterType || ""),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.meterType || "—"}
-          </span>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.meterType?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.meterType?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.meterType?.fileDisplay || ""}|${r.comparisons?.meterType?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(r.comparisons?.meterType, r.foundInAsts),
       },
       {
         key: "linkedAccountNo",
         label: "linkedAccountNo",
-        width: 140,
+        width: 185,
         filter: "text",
         sortable: true,
-        value: (r) => String(r.linkedAccountNo || ""),
-        sortValue: (r) => String(r.linkedAccountNo || ""),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#334155" }}>
-            {r.linkedAccountNo || "—"}
-          </span>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.linkedAccountNo?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.linkedAccountNo?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.linkedAccountNo?.fileDisplay || ""}|${r.comparisons?.linkedAccountNo?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(
+            r.comparisons?.linkedAccountNo,
+            r.foundInAsts
+          ),
       },
       {
         key: "premiseAddress",
         label: "premiseAddress",
+        width: 240,
         filter: "text",
         sortable: true,
-        value: (r) => String(r.premiseAddress || r.resolvedAddress || ""),
-        sortValue: (r) => String(r.premiseAddress || r.resolvedAddress || ""),
-        render: (r) => (
-          <div style={{ fontWeight: 500, fontSize: 13, color: "#0f172a" }}>
-            {r.premiseAddress || r.resolvedAddress || "—"}
-          </div>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.premiseAddress?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.premiseAddress?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.premiseAddress?.fileDisplay || ""}|${r.comparisons?.premiseAddress?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(
+            r.comparisons?.premiseAddress,
+            r.foundInAsts
+          ),
       },
       {
         key: "premisePropertyType",
         label: "premisePropertyType",
-        width: 150,
-        filter: "select",
+        width: 185,
+        filter: "text",
         sortable: true,
-        value: (r) => String(r.premisePropertyType || ""),
-        sortValue: (r) => String(r.premisePropertyType || ""),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.premisePropertyType || "—"}
-          </span>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.premisePropertyType?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.premisePropertyType?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.premisePropertyType?.fileDisplay || ""}|${r.comparisons?.premisePropertyType?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(
+            r.comparisons?.premisePropertyType,
+            r.foundInAsts
+          ),
       },
       {
         key: "actionReason",
         label: "actionReason",
+        width: 190,
         filter: "text",
         sortable: true,
         value: (r) => String(r.actionReason || ""),
@@ -690,77 +1135,57 @@ export default function TrnBgoUploadPage() {
       {
         key: "wardNo",
         label: "wardNo",
-        width: 100,
+        width: 145,
         filter: "text",
         sortable: true,
-        value: (r) => String(r.wardNo || (r.astWardPcode !== "NAv" ? r.astWardPcode : "")),
-        sortValue: (r) => String(r.wardNo || (r.astWardPcode !== "NAv" ? r.astWardPcode : "")),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.wardNo || (r.astWardPcode !== "NAv" ? r.astWardPcode : "—")}
-          </span>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.wardNo?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.wardNo?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.wardNo?.fileDisplay || ""}|${r.comparisons?.wardNo?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(r.comparisons?.wardNo, r.foundInAsts),
       },
       {
         key: "geofence",
         label: "geofence",
-        width: 140,
+        width: 185,
         filter: "text",
         sortable: true,
-        value: (r) => String(r.geofence || ""),
-        sortValue: (r) => String(r.geofence || ""),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.geofence || "—"}
-          </span>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.geofence?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.geofence?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.geofence?.fileDisplay || ""}|${r.comparisons?.geofence?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(r.comparisons?.geofence, r.foundInAsts),
       },
       {
         key: "meterStatus",
         label: "meterStatus",
-        width: 130,
-        filter: "select",
+        width: 175,
+        filter: "text",
         sortable: true,
-        value: (r) => String(r.meterStatus || r.astStatus || ""),
-        sortValue: (r) => String(r.meterStatus || r.astStatus || ""),
-        render: (r) => {
-          const val = r.meterStatus || r.astStatus || "—";
-          const isConn = val === "CONNECTED";
-          const isDisconn = val === "DISCONNECTED";
-          return (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "2px 8px",
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 800,
-                background: isConn ? "#ecfdf5" : isDisconn ? "#fff7ed" : "#f1f5f9",
-                color: isConn ? "#047857" : isDisconn ? "#c2410c" : "#475569",
-                border: `1px solid ${
-                  isConn ? "#a7f3d0" : isDisconn ? "#fed7aa" : "#cbd5e1"
-                }`,
-              }}
-            >
-              {val}
-            </span>
-          );
-        },
+        value: (r) =>
+          `File: ${r.comparisons?.meterStatus?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.meterStatus?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.meterStatus?.fileDisplay || ""}|${r.comparisons?.meterStatus?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(
+            r.comparisons?.meterStatus,
+            r.foundInAsts
+          ),
       },
       {
         key: "erfNo",
         label: "erfNo",
-        width: 100,
+        width: 150,
         filter: "text",
         sortable: true,
-        value: (r) => String(r.erfNo || r.resolvedErf || ""),
-        sortValue: (r) => String(r.erfNo || r.resolvedErf || ""),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569", fontFamily: "monospace" }}>
-            {r.erfNo || r.resolvedErf || "—"}
-          </span>
-        ),
+        value: (r) =>
+          `File: ${r.comparisons?.erfNo?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.erfNo?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.erfNo?.fileDisplay || ""}|${r.comparisons?.erfNo?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(r.comparisons?.erfNo, r.foundInAsts),
       },
     ];
   }, []);
