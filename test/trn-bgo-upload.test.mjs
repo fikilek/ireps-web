@@ -203,3 +203,27 @@ test("TrnBgoUploadPage defines Found?, duplicate and eligible diagnostic flag co
     "LM Match column must remain removed",
   );
 });
+
+test("TrnBgoUploadPage defines dataMatch boolean column and Option A stacked File vs iREPS comparison cells", () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const content = fs.readFileSync(uploadPagePath, "utf8");
+
+  assert.match(
+    content,
+    /key:\s*"dataMatch"[\s\S]*?label:\s*"dataMatch"[\s\S]*?value:\s*\(r\)\s*=>\s*\(r\.isDataMatch\s*\?\s*"True"\s*:\s*"False"\)/,
+    "TrnBgoUploadPage must define dataMatch column with True/False row values",
+  );
+  assert.match(
+    content,
+    /function renderStackedComparisonCell\(/,
+    "TrnBgoUploadPage must define renderStackedComparisonCell for Option A stacked File vs iREPS comparison",
+  );
+  assert.match(
+    content,
+    /renderStackedComparisonCell\(\s*r\.comparisons\?\.premiseAddress,\s*r\.foundInAsts\s*\)/,
+    "premiseAddress column must render stacked File vs iREPS comparison cell",
+  );
+});
