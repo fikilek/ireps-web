@@ -192,11 +192,11 @@ export function buildBgoBatchDoc({
     geofenceRef,
 
     workflow: {
-      state: "ISSUED",
+      state: target ? "ISSUED" : "READY_FOR_ALLOCATION",
       createdMode: "OFFICE",
-      issuedAt: now,
-      issuedByUid: actorUid || "NAv",
-      issuedByUser: actorName || "NAv",
+      issuedAt: target ? now : null,
+      issuedByUid: target ? (actorUid || "NAv") : null,
+      issuedByUser: target ? (actorName || "NAv") : null,
       acceptedAt: null,
       acceptedByUid: null,
       acceptedByUser: null,
@@ -625,7 +625,7 @@ export function buildBmdBgoBatchDoc({
     },
 
     assignment: {
-      targets: [target],
+      targets: target ? [target] : [],
       instruction: {
         code: trnType,
         text: "Bulk meter discovery geofence allocation",
@@ -737,15 +737,17 @@ export function buildBmdBgoBatchHistoryDoc({
   now,
 }) {
   return {
-    event: "ISSUED",
-    workflowState: "ISSUED",
+    event: target ? "ISSUED" : "ORIGINATED",
+    workflowState: target ? "ISSUED" : "READY_FOR_ALLOCATION",
     outcome: "NAv",
     bgoBatchId,
     trnType: "METER_DISCOVERY",
     geofenceRef,
-    target,
+    target: target || null,
     summary,
-    note: "BMD-BGO batch issued without upfront child TRNs",
+    note: target
+      ? `BMD-BGO batch issued to ${target.name || target.id}`
+      : "BMD-BGO batch originated from geofence and ready for allocation",
     actor: {
       uid: actorUid || "NAv",
       name: actorName || "NAv",

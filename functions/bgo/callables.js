@@ -608,6 +608,68 @@ async function createBmdBgoBatch({
     actorUid,
   });
 
+  // 1. Geofence link status check (MD-BGO-R012)
+  const fenceRef = db.collection("geo_fences").doc(geofenceRef.id);
+  const fenceSnap = await fenceRef.get();
+  if (fenceSnap.exists) {
+    const fenceData = fenceSnap.data() || {};
+    if (fenceData.bgo?.linkState === "LINKED" && fenceData.bgo?.batchId) {
+      return buildFailureResult(
+        "GEOFENCE_ALREADY_BATCHED",
+        `Geofence "${geofenceRef.name || geofenceRef.id}" is already linked to batch ${fenceData.bgo.batchId}.`,
+        { existingBatchId: fenceData.bgo.batchId },
+      );
+    }
+  }
+
+  // 2. ERF Batch Exclusivity Guard (MD-BGO-R013)
+  const candidateErfIdSet = new Set(
+    (Array.isArray(worklist?.erfRefs) ? worklist.erfRefs : [])
+      .map((e) => String(e?.id || e?.erfId || "").trim())
+      .filter(Boolean),
+  );
+
+  const existingWardBatchesSnap = await db
+    .collection(BGO_COLLECTIONS.batches)
+    .where("scope.wardPcode", "==", scope.wardPcode)
+    .get();
+
+  const conflictingErfs = [];
+  existingWardBatchesSnap.docs.forEach((doc) => {
+    const batchData = doc.data() || {};
+    const state = batchData?.workflow?.state || batchData?.workflowState || "";
+    if (state === "CANCELLED" || state === "REJECTED" || state === "DELETED") return;
+
+    const batchErfs = Array.isArray(batchData?.worklist?.erfRefs)
+      ? batchData.worklist.erfRefs
+      : [];
+
+    batchErfs.forEach((erf) => {
+      const erfId = String(erf?.id || erf?.erfId || "").trim();
+      if (candidateErfIdSet.has(erfId)) {
+        conflictingErfs.push({
+          erfId,
+          erfNo: erf?.erfNo || erfId,
+          batchId: doc.id,
+        });
+      }
+    });
+  });
+
+  if (conflictingErfs.length > 0) {
+    const conflictDesc = conflictingErfs
+      .slice(0, 5)
+      .map((c) => `ERF ${c.erfNo} (Batch: ${c.batchId})`)
+      .join(", ");
+
+    return buildFailureResult(
+      "ERF_ALREADY_IN_ANOTHER_BATCH",
+      `${conflictingErfs.length} ERF(s) in this geofence already belong to an active batch (${conflictDesc}). Under MD-BGO-R013, an ERF cannot belong to more than 1 batch.`,
+      { conflictingErfs },
+    );
+  }
+
+  // 3. Validate existing batch doc
   const existingOutputPaths = await validateExistingOutputDocs({
     db,
     plannedBatchIds: [bgoBatchId],
@@ -626,6 +688,7 @@ async function createBmdBgoBatch({
     );
   }
 
+  // 3. Build Batch Doc & History
   const batchDoc = buildBmdBgoBatchDoc({
     bgoBatchId,
     trnType,
@@ -649,23 +712,15 @@ async function createBmdBgoBatch({
     now,
   });
 
-  const notificationDoc = buildBmdBgoNotificationRecord({
-    bgoBatchId,
-    target,
-    geofenceRef,
-    summary,
-    actorUid,
-    actorName,
-    now,
-  });
-
   const writeJobs = [];
 
+  // Write Batch doc
   writeJobs.push((batch) => {
     const batchRef = db.collection(BGO_COLLECTIONS.batches).doc(bgoBatchId);
     batch.create(batchRef, batchDoc);
   });
 
+  // Write History doc
   writeJobs.push((batch) => {
     const historyRef = db
       .collection(BGO_COLLECTIONS.batches)
@@ -676,9 +731,89 @@ async function createBmdBgoBatch({
     batch.set(historyRef, historyDoc);
   });
 
+  // Write Notification doc only if target assigned
+  if (target) {
+    const notificationDoc = buildBmdBgoNotificationRecord({
+      bgoBatchId,
+      target,
+      geofenceRef,
+      summary,
+      actorUid,
+      actorName,
+      now,
+    });
+
+    writeJobs.push((batch) => {
+      const notificationRef = db.collection(BGO_COLLECTIONS.notifications).doc();
+      batch.set(notificationRef, notificationDoc);
+    });
+  }
+
+  // 4. Write ERF rows into bgo_rows (MD-BGO-R002 & MD-BGO-R012)
+  const erfRefs = Array.isArray(worklist?.erfRefs) ? worklist.erfRefs : [];
+  erfRefs.forEach((erf, idx) => {
+    const rowId = `${bgoBatchId}_ROW_${String(idx + 1).padStart(3, "0")}`;
+    const rowDoc = {
+      id: rowId,
+      rowNo: idx + 1,
+      batchId: bgoBatchId,
+      bgoBatchId,
+      trnType: "BULK_GEOFENCE_ORIGIN",
+      operationType: "METER_DISCOVERY",
+      operationCode: "MDIS",
+      batchMode: "BMD",
+      scope: {
+        lmPcode: scope.lmPcode,
+        lmName: scope.lmName,
+        wardPcode: scope.wardPcode,
+        wardName: scope.wardName,
+      },
+      geofenceRef: {
+        id: geofenceRef.id,
+        name: geofenceRef.name,
+      },
+      erf: {
+        id: erf.id,
+        erfNo: erf.erfNo || erf.id,
+        erfType: erf.erfType || "FORMAL",
+        centroid: erf.centroid || null,
+        address: erf.address || "",
+      },
+      workflow: {
+        state: target ? "ISSUED" : "READY_FOR_ALLOCATION",
+      },
+      metadata: {
+        createdAt: now,
+        createdByUid: actorUid,
+        createdByUser: actorName,
+      },
+    };
+    writeJobs.push((batch) => {
+      const rowRef = db.collection(BGO_COLLECTIONS.rows).doc(rowId);
+      batch.create(rowRef, rowDoc);
+    });
+  });
+
+  // 5. Update geofence with bi-directional BGO batch linkage (MD-BGO-R012)
   writeJobs.push((batch) => {
-    const notificationRef = db.collection(BGO_COLLECTIONS.notifications).doc();
-    batch.set(notificationRef, notificationDoc);
+    batch.set(
+      fenceRef,
+      {
+        bgo: {
+          batchId: bgoBatchId,
+          linkState: "LINKED",
+          batchedAt: now,
+          batchedByUid: actorUid,
+          batchedByUser: actorName,
+        },
+        metadata: {
+          updatedAt: now,
+          updatedByUid: actorUid,
+          updatedByUser: actorName,
+        },
+      },
+      { merge: true },
+    );
   });
 
   const committedWrites = await commitWriteJobsInChunks({
@@ -698,7 +833,7 @@ async function createBmdBgoBatch({
     bgoBatchId,
     bgoBatchIds: [bgoBatchId],
     createdBgoBatchCount: 1,
-    createdBgoRowCount: 0,
+    createdBgoRowCount: erfRefs.length,
     createdChildTrnCount: 0,
     trnIds: [],
     committedWrites,

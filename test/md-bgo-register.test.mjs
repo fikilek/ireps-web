@@ -385,3 +385,65 @@ test("MD BGO Planning Map supports geofence editing, visible description input, 
   const indexContent = fs.readFileSync(indexPath, "utf8");
   assert.match(indexContent, /updateGeoFence,/, "Must export updateGeoFence in functions/index.js");
 });
+
+test("MD BGO Planning Map supports geofence-to-batch two-way linkage and origination (MD-BGO-R012 v1.9.0)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // 1. UI batch origination trigger and modal
+  assert.match(content, /isAlreadyBatched/, "Must detect whether geofence is already batched");
+  assert.match(content, /activeBatchId/, "Must track activeBatchId on geofence");
+  assert.match(content, /isOriginateModalOpen/, "Must manage isOriginateModalOpen modal state");
+  assert.match(content, /handleOpenOriginateModal/, "Must provide handleOpenOriginateModal handler");
+  assert.match(content, /handleOriginateBatch/, "Must provide handleOriginateBatch handler");
+  assert.match(content, /Originate Batch from Geofence/, "Must render Originate Batch modal dialog");
+  assert.match(content, /landingBadgeBatched/, "Must provide dedicated batched badge style");
+
+  // 2. Allocation options: Bank in Register vs Team
+  assert.match(content, /Bank in Register/, "Must provide Bank in Register allocation option");
+  assert.match(content, /Allocate Now to Team/, "Must provide Allocate Now to Team option");
+  assert.match(content, /useGetAvailableTeamsQuery/, "Must query available teams for allocation");
+
+  // 3. Backend BMD batch origination and linkage
+  const callablesPath = path.join(repoRoot, "functions/bgo/callables.js");
+  const callablesContent = fs.readFileSync(callablesPath, "utf8");
+  assert.match(callablesContent, /GEOFENCE_ALREADY_BATCHED/, "Must guard against duplicate batch origination for same geofence");
+  assert.match(callablesContent, /BGO_COLLECTIONS\.rows/, "Must write ERF rows to bgo_rows collection");
+  assert.match(callablesContent, /linkState:\s*"LINKED"/, "Must link geofence to batch in geo_fences collection");
+
+  // 4. Backend validation & factory
+  const helpersPath = path.join(repoRoot, "functions/bgo/helpers.js");
+  const helpersContent = fs.readFileSync(helpersPath, "utf8");
+  assert.match(helpersContent, /BMD_GEOFENCE_EXCEEDS_60_ERFS/, "Must enforce 60 ERF limit in BMD payload validation");
+
+  const trnFactoryPath = path.join(repoRoot, "functions/bgo/trnFactory.js");
+  const trnFactoryContent = fs.readFileSync(trnFactoryPath, "utf8");
+  assert.match(trnFactoryContent, /state:\s*target\s*\?\s*"ISSUED"\s*:\s*"READY_FOR_ALLOCATION"/, "Must set READY_FOR_ALLOCATION when target is unallocated");
+});
+
+test("MD BGO enforces ERF batch exclusivity across active batches (MD-BGO-R013 v2.0.0)", () => {
+  const planningPath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  const content = fs.readFileSync(planningPath, "utf8");
+
+  // 1. Frontend ward batches query and conflict detection
+  assert.match(content, /useGetBmdBgoBatchesByWardQuery/, "Must import and query ward BMD batches");
+  assert.match(content, /batchedErfMap/, "Must map active batched ERF IDs across the ward");
+  assert.match(content, /erfConflicts/, "Must compute ERF overlap conflicts for candidate geofence");
+  assert.match(content, /modalConflictBanner/, "Must render modalConflictBanner when ERFs overlap");
+  assert.match(content, /erfConflicts\.length\s*>\s*0/, "Must strictly disable originate button when conflicts exist");
+
+  // 2. Backend enforcement in createBmdBgoBatch
+  const callablesPath = path.join(repoRoot, "functions/bgo/callables.js");
+  const callablesContent = fs.readFileSync(callablesPath, "utf8");
+  assert.match(callablesContent, /ERF_ALREADY_IN_ANOTHER_BATCH/, "Must return ERF_ALREADY_IN_ANOTHER_BATCH on overlap");
+  assert.match(callablesContent, /candidateErfIdSet/, "Must track candidate ERF IDs");
+  assert.match(callablesContent, /existingWardBatchesSnap/, "Must query existing ward batches for ERF collision");
+
+  // 3. Authoritative rules verification
+  const rulesPath = path.join(repoRoot, "../ireps-rules/bgo/md-bgo-rules.md");
+  if (fs.existsSync(rulesPath)) {
+    const rulesContent = fs.readFileSync(rulesPath, "utf8");
+    assert.match(rulesContent, /MD-BGO-R013/, "Must document MD-BGO-R013 in rules");
+    assert.match(rulesContent, /ERF Batch Exclusivity/, "Must name ERF Batch Exclusivity in rules");
+  }
+});

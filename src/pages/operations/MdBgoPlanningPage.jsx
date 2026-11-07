@@ -15,7 +15,11 @@ import {
   useCreateGeoFenceMutation,
   useUpdateGeoFenceMutation,
 } from "../../redux/geofencesApi";
-import { useCreateBgoMutation } from "../../redux/bgoApi";
+import {
+  useCreateBgoMutation,
+  useGetBmdBgoBatchesByWardQuery,
+} from "../../redux/bgoApi";
+import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 
 import {
   getGeoFencePath,
@@ -172,6 +176,7 @@ function evaluateGeofenceAssetChain(gf, erfs = [], premises = [], meters = []) {
         erfCount: insideErfs.length,
         premiseCount: insidePremises.length,
         meterCount: insideMeters.length,
+        insideErfs,
       };
     }
   }
@@ -893,6 +898,10 @@ export default function MdBgoPlanningPage() {
   const [editDescInput, setEditDescInput] = useState("");
   const [formError, setFormError] = useState("");
   const [editFormError, setEditFormError] = useState("");
+  const [isOriginateModalOpen, setIsOriginateModalOpen] = useState(false);
+  const [originateTargetType, setOriginateTargetType] = useState("UNALLOCATED");
+  const [originateTargetId, setOriginateTargetId] = useState("");
+  const [originateError, setOriginateError] = useState("");
   const [createdResult, setCreatedResult] = useState(null);
   const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
@@ -964,6 +973,8 @@ export default function MdBgoPlanningPage() {
   const [createGeoFence, { isLoading: isSavingGeofence }] = useCreateGeoFenceMutation();
   const [updateGeoFence, { isLoading: isUpdatingGeoFence }] = useUpdateGeoFenceMutation();
   const [createBgo, { isLoading: isCreatingBgo }] = useCreateBgoMutation();
+  const { data: availableTeams = [] } = useGetAvailableTeamsQuery({ lmPcode }, { skip: !lmPcode });
+  const { data: wardBatches = [] } = useGetBmdBgoBatchesByWardQuery(selectedWardPcode, { skip: !selectedWardPcode });
 
   const handleMapClick = useCallback((point) => {
     setDrawingPoints((pts) => [...pts, point]);
@@ -1000,6 +1011,7 @@ export default function MdBgoPlanningPage() {
           premiseCount: found.counts?.premises ?? found.premiseCount ?? 0,
           meterCount: found.counts?.meters ?? found.meterCount ?? 0,
           description: found.description || "",
+          bgo: found.bgo || null,
           points: found.geometry?.points || found.points || [],
         });
       } else {
@@ -1009,7 +1021,162 @@ export default function MdBgoPlanningPage() {
     [displayGeofences, wardNumber, selectedWardPcode],
   );
 
-    // Edit Geofence Handlers
+    // Geofence Batch Linkage Status (MD-BGO-R012)
+  const isAlreadyBatched = useMemo(() => {
+    const gf = savedGeofenceLanding || displayGeofences.find((g) => g.id === selectedGeofenceId);
+    return Boolean(gf?.bgo?.linkState === "LINKED" && gf?.bgo?.batchId);
+  }, [savedGeofenceLanding, displayGeofences, selectedGeofenceId]);
+
+  const activeBatchId = useMemo(() => {
+    const gf = savedGeofenceLanding || displayGeofences.find((g) => g.id === selectedGeofenceId);
+    return gf?.bgo?.batchId || "";
+  }, [savedGeofenceLanding, displayGeofences, selectedGeofenceId]);
+
+  // Active batched ERFs across the ward for single-batch exclusivity (MD-BGO-R013)
+  const batchedErfMap = useMemo(() => {
+    const map = new Map();
+    wardBatches.forEach((batch) => {
+      const state = batch?.workflowState || batch?.workflow?.state || "";
+      if (state === "CANCELLED" || state === "REJECTED" || state === "DELETED") return;
+      const bErfs = Array.isArray(batch?.worklist?.erfRefs) ? batch.worklist.erfRefs : [];
+      bErfs.forEach((erf) => {
+        const eId = String(erf?.id || erf?.erfId || "").trim();
+        if (eId) {
+          map.set(eId, {
+            erfNo: erf.erfNo || eId,
+            batchId: batch.bgoBatchId || batch.batchId || batch.id,
+          });
+        }
+      });
+    });
+    return map;
+  }, [wardBatches]);
+
+  const erfConflicts = useMemo(() => {
+    if (!savedGeofenceLanding || batchedErfMap.size === 0) return [];
+    const insideList = activeLandingCounts.insideErfs || [];
+    const conflicts = [];
+    insideList.forEach((erf) => {
+      const eId = String(erf.id || erf.erfId || erf.pcode || "").trim();
+      if (batchedErfMap.has(eId)) {
+        conflicts.push({
+          ...batchedErfMap.get(eId),
+          erfId: eId,
+        });
+      }
+    });
+    return conflicts;
+  }, [savedGeofenceLanding, batchedErfMap, activeLandingCounts.insideErfs]);
+
+  const handleOpenOriginateModal = useCallback(() => {
+    if (isAlreadyBatched) return;
+    setOriginateTargetType("UNALLOCATED");
+    setOriginateTargetId("");
+    setOriginateError("");
+    setIsOriginateModalOpen(true);
+  }, [isAlreadyBatched]);
+
+  const handleOriginateBatch = async () => {
+    const activeGf = savedGeofenceLanding || displayGeofences.find((g) => g.id === selectedGeofenceId);
+    if (!activeGf) return;
+
+    const erfList = activeLandingCounts.insideErfs && activeLandingCounts.insideErfs.length > 0
+      ? activeLandingCounts.insideErfs
+      : wardErfs.filter((erf) => {
+          const path = getGeoFencePath(activeGf);
+          if (!path || path.length < 3) return false;
+          const lat = Number(erf.centroid?.latitude ?? erf.centroid?.lat);
+          const lng = Number(erf.centroid?.longitude ?? erf.centroid?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+          try {
+            return strictlyInside({ latitude: lat, longitude: lng }, polygonFromPoints(path));
+          } catch {
+            return false;
+          }
+        });
+
+    if (erfList.length === 0) {
+      setOriginateError("No ERFs found inside this geofence to originate batch.");
+      return;
+    }
+
+    if (erfList.length > BGO_ERF_LIMIT) {
+      setOriginateError(`This geofence contains ${erfList.length} ERFs, exceeding the maximum limit of ${BGO_ERF_LIMIT} ERFs (MD-BGO-R003).`);
+      return;
+    }
+
+    if (erfConflicts.length > 0) {
+      setOriginateError(`${erfConflicts.length} ERF(s) in this geofence already belong to an active batch. Under MD-BGO-R013, an ERF cannot belong to more than 1 batch.`);
+      return;
+    }
+
+    const selectedTeam = originateTargetType === "TEAM" && originateTargetId
+      ? availableTeams.find((t) => t.id === originateTargetId)
+      : null;
+
+    const payload = {
+      batchMode: "BMD",
+      sourceModule: "BULK_METER_DISCOVERY",
+      trnType: "METER_DISCOVERY",
+      operationType: "METER_DISCOVERY",
+      scope: {
+        lmPcode: activeGf.parents?.lmPcode || lmPcode,
+        lmName,
+        wardPcode: activeGf.parents?.wardPcode || selectedWardPcode,
+        wardName: activeWard?.wardName || `Ward ${wardNumber}`,
+      },
+      geofenceRef: {
+        id: activeGf.id,
+        name: activeGf.name,
+      },
+      worklist: {
+        type: "ERF_LIST",
+        erfRefs: erfList.map((e) => ({
+          id: String(e.id || e.erfId || e.pcode),
+          erfNo: String(e.erfNo || e.properties?.erfNo || e.id || "NAv"),
+          erfType: String(e.erfType || e.properties?.erfType || "FORMAL"),
+          centroid: e.centroid || null,
+          address: String(e.address || e.properties?.address || ""),
+        })),
+      },
+      summary: {
+        erfCount: erfList.length,
+        premiseCount: activeLandingCounts.premiseCount,
+        meterCount: activeLandingCounts.meterCount,
+      },
+      ...(selectedTeam ? {
+        target: {
+          type: "TEAM",
+          id: selectedTeam.id,
+          name: selectedTeam.name,
+        },
+      } : {}),
+    };
+
+    setOriginateError("");
+    try {
+      const res = await createBgo(payload).unwrap();
+      const newBatchId = res?.bgoBatchId || res?.data?.bgoBatchId || res?.id;
+
+      setSavedGeofenceLanding((prev) =>
+        prev
+          ? {
+              ...prev,
+              bgo: {
+                batchId: newBatchId,
+                linkState: "LINKED",
+              },
+            }
+          : null,
+      );
+
+      setIsOriginateModalOpen(false);
+    } catch (err) {
+      setOriginateError(err?.message || err?.data?.message || "Failed to originate MD BGO batch.");
+    }
+  };
+
+  // Edit Geofence Handlers
   const handleOpenEditModal = useCallback(() => {
     const activeGf = savedGeofenceLanding || displayGeofences.find((g) => g.id === selectedGeofenceId);
     if (!activeGf) return;
@@ -1150,6 +1317,7 @@ export default function MdBgoPlanningPage() {
       erfCount: Number(savedGeofenceLanding.erfCount ?? 0),
       premiseCount: Number(savedGeofenceLanding.premiseCount ?? 0),
       meterCount: Number(savedGeofenceLanding.meterCount ?? 0),
+      insideErfs: Array.isArray(savedGeofenceLanding.insideErfs) ? savedGeofenceLanding.insideErfs : [],
     };
   }, [savedGeofenceLanding, wardErfs, wardPremises, wardMeters]);
 
@@ -1533,7 +1701,11 @@ export default function MdBgoPlanningPage() {
           <div style={styles.landingHeader}>
             <div style={styles.landingHeaderLeft}>
               <div style={styles.landingBadgeRow}>
+                {isAlreadyBatched ? (
+                <span style={styles.landingBadgeBatched}>● Batch Originated · {activeBatchId}</span>
+              ) : (
                 <span style={styles.landingBadge}>● Geofence Active · Unbatched</span>
+              )}
               </div>
               <div style={styles.landingTitleRow}>
                 <h3 style={styles.landingTitle}>{savedGeofenceLanding.name}</h3>
@@ -1583,37 +1755,67 @@ export default function MdBgoPlanningPage() {
           </div>
 
           <div style={styles.landingActions}>
-            <button
-              type="button"
-              style={styles.landingPrimaryButton}
-              onClick={() => {
-                alert(`Batch origination from saved geofence "${savedGeofenceLanding.name}" with ${activeLandingCounts.erfCount} ERFs, ${activeLandingCounts.premiseCount} premises, and ${activeLandingCounts.meterCount} meters will be connected in next step.`);
-              }}
-            >
-              Create MD BGO Batch from this Geofence Now →
-            </button>
-
-            <button
-              type="button"
-              style={styles.landingSecondaryButton}
-              onClick={() => {
-                setSavedGeofenceLanding(null);
-                setGeofenceNameInput("");
-                setGeofenceDescInput("");
-                setFormError("");
-                setIsCreateModalOpen(true);
-              }}
-            >
-              + Draw Another Geofence in Ward {wardNumber}
-            </button>
-
-            <button
-              type="button"
-              style={styles.landingLinkButton}
-              onClick={() => navigate("/operations/bgo")}
-            >
-              Return to MD BGO Register
-            </button>
+            {isAlreadyBatched ? (
+              <>
+                <button
+                  type="button"
+                  style={styles.landingPrimaryButton}
+                  onClick={() => navigate(`/operations/bgo?search=${encodeURIComponent(activeBatchId)}`)}
+                >
+                  View in MD BGO Register →
+                </button>
+                <button
+                  type="button"
+                  style={styles.landingSecondaryButton}
+                  onClick={() => navigate(`/operations/bgo/allocation?batchId=${encodeURIComponent(activeBatchId)}`)}
+                >
+                  Open Allocation Board →
+                </button>
+                <button
+                  type="button"
+                  style={styles.landingLinkButton}
+                  onClick={() => {
+                    setSavedGeofenceLanding(null);
+                    setGeofenceNameInput("");
+                    setGeofenceDescInput("");
+                    setFormError("");
+                    setIsCreateModalOpen(true);
+                  }}
+                >
+                  + Draw Another Geofence in Ward {wardNumber}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  style={styles.landingPrimaryButton}
+                  onClick={handleOpenOriginateModal}
+                >
+                  Create MD BGO Batch from this Geofence Now →
+                </button>
+                <button
+                  type="button"
+                  style={styles.landingSecondaryButton}
+                  onClick={() => {
+                    setSavedGeofenceLanding(null);
+                    setGeofenceNameInput("");
+                    setGeofenceDescInput("");
+                    setFormError("");
+                    setIsCreateModalOpen(true);
+                  }}
+                >
+                  + Draw Another Geofence in Ward {wardNumber}
+                </button>
+                <button
+                  type="button"
+                  style={styles.landingLinkButton}
+                  onClick={() => navigate("/operations/bgo")}
+                >
+                  Return to MD BGO Register
+                </button>
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -1779,7 +1981,120 @@ export default function MdBgoPlanningPage() {
         )}
       </div>
 
-            {/* Edit Geofence Modal */}
+                  {/* Originate MD BGO Batch Modal (MD-BGO-R012) */}
+      {isOriginateModalOpen ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true">
+            <p style={styles.eyebrow}>MD BGO Batch Origination</p>
+            <h3 style={styles.modalTitle}>Originate Batch from Geofence</h3>
+            <p style={styles.modalSubtitle}>
+              Create an official Meter Discovery batch linked to <strong>{savedGeofenceLanding?.name}</strong> in Ward {wardNumber} ({selectedWardPcode}).
+            </p>
+
+            {originateError ? (
+              <div style={styles.modalError}>{originateError}</div>
+            ) : null}
+
+            {erfConflicts.length > 0 ? (
+              <div style={styles.modalConflictBanner}>
+                <div style={{ fontWeight: 800, color: "#92400e" }}>⚠️ ERF Batch Conflict (MD-BGO-R013)</div>
+                <div style={{ marginTop: 4, color: "#78350f" }}>
+                  {erfConflicts.length} ERF(s) in this geofence already belong to an active batch:
+                </div>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18, color: "#78350f" }}>
+                  {erfConflicts.slice(0, 5).map((c) => (
+                    <li key={c.erfId}>
+                      ERF {c.erfNo} (in Batch <code>{c.batchId}</code>)
+                    </li>
+                  ))}
+                  {erfConflicts.length > 5 && <li>...and {erfConflicts.length - 5} more</li>}
+                </ul>
+                <div style={{ marginTop: 6, fontSize: 11, color: "#b45309" }}>
+                  Under MD-BGO-R013, an ERF cannot belong to more than 1 batch. Batch origination is blocked.
+                </div>
+              </div>
+            ) : null}
+
+            <div style={styles.confirmSummaryBox}>
+              <div><strong>Geofence:</strong> {savedGeofenceLanding?.name}</div>
+              <div><strong>Scope:</strong> {lmName} · Ward {wardNumber}</div>
+              <div><strong>Enclosed ERFs:</strong> {activeLandingCounts.erfCount} cadastral parcels</div>
+              <div><strong>Linked Premises:</strong> {activeLandingCounts.premiseCount}</div>
+              <div><strong>Linked Meters:</strong> {activeLandingCounts.meterCount}</div>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Initial Allocation Option</label>
+              <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#1e293b" }}>
+                  <input
+                    type="radio"
+                    name="allocationOption"
+                    value="UNALLOCATED"
+                    checked={originateTargetType === "UNALLOCATED"}
+                    onChange={() => setOriginateTargetType("UNALLOCATED")}
+                  />
+                  <span><strong>Bank in Register</strong> (Ready for Allocation later from Register or Board)</span>
+                </label>
+
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#1e293b" }}>
+                  <input
+                    type="radio"
+                    name="allocationOption"
+                    value="TEAM"
+                    checked={originateTargetType === "TEAM"}
+                    onChange={() => setOriginateTargetType("TEAM")}
+                  />
+                  <span><strong>Allocate Now to Team</strong></span>
+                </label>
+              </div>
+            </div>
+
+            {originateTargetType === "TEAM" ? (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Select Operational Team ({availableTeams.length} available)</label>
+                <select
+                  value={originateTargetId}
+                  onChange={(e) => setOriginateTargetId(e.target.value)}
+                  style={styles.select}
+                >
+                  <option value="">-- Choose Operational Team --</option>
+                  {availableTeams.map((team) => (
+                    <option key={team.id || team.teamId} value={team.id || team.teamId}>
+                      {team.name || team.teamName || team.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalCancelButton}
+                onClick={() => setIsOriginateModalOpen(false)}
+                disabled={isCreatingBgo}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.modalPrimaryButton,
+                  opacity: isCreatingBgo || erfConflicts.length > 0 || (originateTargetType === "TEAM" && !originateTargetId) ? 0.6 : 1,
+                  cursor: isCreatingBgo || erfConflicts.length > 0 || (originateTargetType === "TEAM" && !originateTargetId) ? "not-allowed" : "pointer",
+                }}
+                onClick={handleOriginateBatch}
+                disabled={isCreatingBgo || erfConflicts.length > 0 || (originateTargetType === "TEAM" && !originateTargetId)}
+              >
+                {isCreatingBgo ? "Originating Batch..." : "Originate Batch Now →"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Edit Geofence Modal */}
       {isEditModalOpen ? (
         <div style={styles.modalOverlay} role="presentation">
           <div style={styles.modalCard} role="dialog" aria-modal="true">
@@ -2374,6 +2689,14 @@ const styles = {
     fontSize: 12,
     color: "#64748b",
   },
+  modalConflictBanner: {
+    padding: "10px 14px",
+    borderRadius: 10,
+    background: "#fffbeb",
+    border: "1px solid #fde68a",
+    fontSize: 12,
+    marginBottom: 14,
+  },
   modalError: {
     padding: 10,
     borderRadius: 8,
@@ -2532,6 +2855,17 @@ const styles = {
   },
   landingHeaderLeft: {
     flex: 1,
+  },
+  landingBadgeBatched: {
+    display: "inline-block",
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#1e40af",
+    background: "#dbeafe",
+    padding: "3px 8px",
+    borderRadius: 999,
+    marginBottom: 6,
+    letterSpacing: "0.03em",
   },
   landingBadge: {
     display: "inline-block",
