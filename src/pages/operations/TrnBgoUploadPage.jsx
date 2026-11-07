@@ -1,4 +1,36 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+
+function getRowSelectionKey(row) {
+  return String(row?.rowNo || row?._rowNo || row?.meterNo || "");
+}
+
+function MasterCheckbox({ checked, indeterminate, disabled, onChange, title }) {
+  const checkboxRef = useRef(null);
+
+  useEffect(() => {
+    if (checkboxRef.current) {
+      checkboxRef.current.indeterminate = Boolean(indeterminate && !checked);
+    }
+  }, [checked, indeterminate]);
+
+  return (
+    <input
+      ref={checkboxRef}
+      type="checkbox"
+      checked={Boolean(checked)}
+      disabled={Boolean(disabled)}
+      onChange={onChange}
+      title={title}
+      aria-label={title || "Select all filtered rows"}
+      style={{
+        width: 16,
+        height: 16,
+        cursor: disabled ? "not-allowed" : "pointer",
+        accentColor: "#2563eb",
+      }}
+    />
+  );
+}
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { collection, query, where, getDocs, documentId } from "firebase/firestore";
@@ -320,11 +352,17 @@ export default function TrnBgoUploadPage() {
   const [parsedRows, setParsedRows] = useState([]);
   const [foundFilter, setFoundFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND
   const [lmFilter, setLmFilter] = useState("ALL"); // ALL, MATCH, MISMATCH
+  const [selectedRowKeys, setSelectedRowKeys] = useState(() => new Set());
+  const [shownRows, setShownRows] = useState(null);
+  const [carriedBatchRows, setCarriedBatchRows] = useState([]);
 
   // Handle file selection and multi-gate validation
   const handleFileChange = (file) => {
     setFileError("");
     setParsedRows([]);
+    setSelectedRowKeys(new Set());
+    setShownRows(null);
+    setCarriedBatchRows([]);
     setFoundFilter("ALL");
     setLmFilter("ALL");
 
@@ -853,6 +891,9 @@ export default function TrnBgoUploadPage() {
   const handleReset = () => {
     setSelectedFile(null);
     setParsedRows([]);
+    setSelectedRowKeys(new Set());
+    setShownRows(null);
+    setCarriedBatchRows([]);
     setFileError("");
     setValidationProgress("");
     setFoundFilter("ALL");
@@ -882,6 +923,145 @@ export default function TrnBgoUploadPage() {
       return true;
     });
   }, [parsedRows, foundFilter, lmFilter]);
+
+  const currentFilteredRows = shownRows ?? filteredRows;
+
+  const allFilteredSelected = useMemo(() => {
+    if (currentFilteredRows.length === 0) return false;
+    return currentFilteredRows.every((r) =>
+      selectedRowKeys.has(getRowSelectionKey(r))
+    );
+  }, [currentFilteredRows, selectedRowKeys]);
+
+  const someFilteredSelected = useMemo(() => {
+    if (currentFilteredRows.length === 0 || allFilteredSelected) return false;
+    return currentFilteredRows.some((r) =>
+      selectedRowKeys.has(getRowSelectionKey(r))
+    );
+  }, [currentFilteredRows, selectedRowKeys, allFilteredSelected]);
+
+  const handleToggleMasterSelect = useCallback(() => {
+    if (currentFilteredRows.length === 0) return;
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      const everySelected = currentFilteredRows.every((r) =>
+        next.has(getRowSelectionKey(r))
+      );
+      if (everySelected) {
+        currentFilteredRows.forEach((r) => next.delete(getRowSelectionKey(r)));
+      } else {
+        currentFilteredRows.forEach((r) => next.add(getRowSelectionKey(r)));
+      }
+      return next;
+    });
+  }, [currentFilteredRows]);
+
+  const handleToggleRowSelect = useCallback((row) => {
+    const key = getRowSelectionKey(row);
+    if (!key) return;
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectedRows = useMemo(() => {
+    return parsedRows.filter((r) => selectedRowKeys.has(getRowSelectionKey(r)));
+  }, [parsedRows, selectedRowKeys]);
+
+  const ineligibleSelectedRows = useMemo(() => {
+    return selectedRows.filter((r) => !r.isEligible);
+  }, [selectedRows]);
+
+  // Option 2 Strict Gate: Carry to Batch Stage is enabled ONLY when >= 1 rows are selected AND 0 ineligible rows are selected
+  const canCarryToBatch =
+    selectedRows.length > 0 && ineligibleSelectedRows.length === 0;
+
+  const handleDownloadSelectedCsv = () => {
+    if (selectedRows.length === 0) return;
+
+    const headers = [
+      "rowNo",
+      "meterNo",
+      "Found?",
+      "duplicate",
+      "eligible",
+      "dataMatch",
+      "meterPhase",
+      "iREPS_meterPhase",
+      "meterType",
+      "iREPS_meterType",
+      "linkedAccountNo",
+      "iREPS_linkedAccountNo",
+      "premiseAddress",
+      "iREPS_premiseAddress",
+      "premisePropertyType",
+      "iREPS_premisePropertyType",
+      "actionReason",
+      "wardNo",
+      "iREPS_wardNo",
+      "geofence",
+      "iREPS_geofence",
+      "meterStatus",
+      "iREPS_meterStatus",
+      "erfNo",
+      "iREPS_erfNo",
+    ];
+
+    const csvRows = selectedRows.map((r) => [
+      r.rowNo,
+      r.meterNo,
+      r.foundInAsts ? "True" : "False",
+      r.isDuplicate ? "True" : "False",
+      r.isEligible ? "True" : "False",
+      r.isDataMatch ? "True" : "False",
+      r.meterPhase,
+      r.irepsValues?.meterPhase || "NAv",
+      r.meterType,
+      r.irepsValues?.meterType || "NAv",
+      r.linkedAccountNo,
+      r.irepsValues?.linkedAccountNo || "NAv",
+      r.premiseAddress,
+      r.irepsValues?.premiseAddress || "NAv",
+      r.premisePropertyType,
+      r.irepsValues?.premisePropertyType || "NAv",
+      r.actionReason,
+      r.wardNo,
+      r.irepsValues?.wardNo || "NAv",
+      r.geofence,
+      r.irepsValues?.geofence || "NAv",
+      r.meterStatus,
+      r.irepsValues?.meterStatus || "NAv",
+      r.erfNo,
+      r.irepsValues?.erfNo || "NAv",
+    ]);
+
+    const csvContent = [headers, ...csvRows]
+      .map((row) =>
+        row.map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `SELECTED_ROWS_${selectedFile?.name || "upload.csv"}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCarryToBatchStage = () => {
+    if (!canCarryToBatch) return;
+    setCarriedBatchRows(selectedRows);
+  };
 
   // Download Not Found CSV Report
   const handleDownloadNotFoundCsv = () => {
@@ -937,9 +1117,72 @@ export default function TrnBgoUploadPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Build IrepsTable columns matching official 12-column template
+  // Build IrepsTable columns with Column 1 Checkbox Selection + 16 inspection columns
   const columns = useMemo(() => {
     return [
+      {
+        key: "_select",
+        label: (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <MasterCheckbox
+              checked={allFilteredSelected}
+              indeterminate={someFilteredSelected}
+              disabled={currentFilteredRows.length === 0}
+              onChange={handleToggleMasterSelect}
+              title={
+                allFilteredSelected
+                  ? `Deselect all ${currentFilteredRows.length} filtered row(s)`
+                  : `Select all ${currentFilteredRows.length} filtered row(s)`
+              }
+            />
+          </div>
+        ),
+        width: 54,
+        align: "center",
+        filter: null,
+        sortable: false,
+        renderFilter: () =>
+          selectedRowKeys.size > 0 ? (
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                color: "#1d4ed8",
+                textAlign: "center",
+                background: "#dbeafe",
+                borderRadius: 4,
+                padding: "2px 4px",
+              }}
+              title={`${selectedRowKeys.size} row(s) currently selected`}
+            >
+              {selectedRowKeys.size} sel
+            </div>
+          ) : null,
+        value: (r) =>
+          selectedRowKeys.has(getRowSelectionKey(r)) ? "Selected" : "",
+        render: (r) => {
+          const isSelected = selectedRowKeys.has(getRowSelectionKey(r));
+          return (
+            <div
+              style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => handleToggleRowSelect(r)}
+                aria-label={`Select row ${r.rowNo || r._rowNo}`}
+                style={{
+                  width: 16,
+                  height: 16,
+                  cursor: "pointer",
+                  accentColor: "#2563eb",
+                }}
+              />
+            </div>
+          );
+        },
+      },
       {
         key: "_rowNo",
         label: "rowNo",
@@ -1188,7 +1431,14 @@ export default function TrnBgoUploadPage() {
           renderStackedComparisonCell(r.comparisons?.erfNo, r.foundInAsts),
       },
     ];
-  }, []);
+  }, [
+    allFilteredSelected,
+    someFilteredSelected,
+    currentFilteredRows.length,
+    handleToggleMasterSelect,
+    handleToggleRowSelect,
+    selectedRowKeys,
+  ]);
 
   return (
     <section style={styles.page}>
@@ -1359,7 +1609,59 @@ export default function TrnBgoUploadPage() {
               </strong>
             </div>
 
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={styles.fileMetaItem}>
+              <span style={styles.fileMetaLabel}>Selected Rows</span>
+              <strong style={{ ...styles.fileMetaValue, color: selectedRows.length > 0 ? "#1d4ed8" : "#64748b" }}>
+                {formatNumber(selectedRows.length)}
+              </strong>
+            </div>
+
+            <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+              <button
+                type="button"
+                disabled={selectedRows.length === 0}
+                onClick={handleDownloadSelectedCsv}
+                style={{
+                  ...styles.downloadButton,
+                  background: selectedRows.length > 0 ? "#eff6ff" : "#f1f5f9",
+                  color: selectedRows.length > 0 ? "#1d4ed8" : "#94a3b8",
+                  border: `1px solid ${selectedRows.length > 0 ? "#93c5fd" : "#cbd5e1"}`,
+                  cursor: selectedRows.length > 0 ? "pointer" : "not-allowed",
+                }}
+                title={
+                  selectedRows.length > 0
+                    ? `Download ${selectedRows.length} selected row(s) as CSV`
+                    : "Tick 1 or more rows using the checkboxes in Column 1 to download"
+                }
+              >
+                ↓ Download Selected CSV ({selectedRows.length})
+              </button>
+
+              <button
+                type="button"
+                disabled={!canCarryToBatch}
+                onClick={handleCarryToBatchStage}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  background: canCarryToBatch ? "#16a34a" : "#e2e8f0",
+                  color: canCarryToBatch ? "#ffffff" : "#64748b",
+                  border: `1px solid ${canCarryToBatch ? "#15803d" : "#cbd5e1"}`,
+                  cursor: canCarryToBatch ? "pointer" : "not-allowed",
+                }}
+                title={
+                  ineligibleSelectedRows.length > 0
+                    ? `Cannot carry to Batch Stage: ${ineligibleSelectedRows.length} selected row(s) have eligible = False. Filter eligible = True first.`
+                    : selectedRows.length === 0
+                      ? "Tick 1 or more eligible = True rows in Column 1 to carry through to the Batch Stage"
+                      : `Carry ${selectedRows.length} eligible row(s) to Batch Stage`
+                }
+              >
+                Carry Selected to Batch Stage ({selectedRows.length}) →
+              </button>
+
               {summary.notFound > 0 ? (
                 <button
                   type="button"
@@ -1382,13 +1684,88 @@ export default function TrnBgoUploadPage() {
             </div>
           </div>
 
+          {/* Option 2 Gate Prompt when any eligible = False row is selected */}
+          {ineligibleSelectedRows.length > 0 ? (
+            <div
+              role="alert"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "10px 16px",
+                borderRadius: 10,
+                background: "#fffbeb",
+                border: "1px solid #fcd34d",
+                color: "#92400e",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              <span>
+                Batch Stage Gate: <strong>{ineligibleSelectedRows.length}</strong> of your{" "}
+                <strong>{selectedRows.length}</strong> selected row(s) have{" "}
+                <code>eligible = False</code>. You can download this selection now, or filter{" "}
+                <code>eligible = True</code> and re-select using the Master Checkbox to carry rows to the Batch Stage.
+              </span>
+            </div>
+          ) : null}
+
+          {/* Carried to Batch Stage Confirmation Banner */}
+          {carriedBatchRows.length > 0 ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "12px 18px",
+                borderRadius: 10,
+                background: "#ecfdf5",
+                border: "1px solid #6ee7b7",
+                color: "#065f46",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              <div>
+                ✓ <strong>{carriedBatchRows.length}</strong> eligible meter(s) carried through to the Batch Stage:{" "}
+                <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
+                  {carriedBatchRows.map((r) => r.meterNo).join(", ")}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCarriedBatchRows([])}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #34d399",
+                  background: "#ffffff",
+                  color: "#065f46",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Clear Batch Stage Selection
+              </button>
+            </div>
+          ) : null}
+
           {/* IrepsTable displaying validated rows */}
           <div style={styles.tablePanel}>
             <IrepsTable
               rows={filteredRows}
               columns={columns}
+              onRowsShown={setShownRows}
+              rowStyle={(r) =>
+                selectedRowKeys.has(getRowSelectionKey(r))
+                  ? { background: "#eff6ff" }
+                  : null
+              }
               rowKey={(r, idx) => r?.meterNo || r?.rowNo || r?._rowNo || idx}
-              title={`Uploaded File Inspection: ${selectedFile?.name || "File"} (${formatNumber(filteredRows.length)} Rows Showing)`}
+              title={`Uploaded File Inspection: ${selectedFile?.name || "File"} (${formatNumber(currentFilteredRows.length)} Rows Showing)`}
               pageSizeOptions={[10, 25, 50, 100]}
               defaultPageSize={25}
               emptyText="No rows match the selected filters."
