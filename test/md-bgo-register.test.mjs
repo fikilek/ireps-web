@@ -447,3 +447,56 @@ test("MD BGO enforces ERF batch exclusivity across active batches (MD-BGO-R013 v
     assert.match(rulesContent, /ERF Batch Exclusivity/, "Must name ERF Batch Exclusivity in rules");
   }
 });
+test("MD BGO Planning Map supports creation-phase draggable nodes without Map constructor collision (MD-BGO-R010.8)", () => {
+  const pagePath = path.join(repoRoot, "src/pages/operations/MdBgoPlanningPage.jsx");
+  assert.ok(fs.existsSync(pagePath), "MdBgoPlanningPage.jsx must exist");
+  const pageContent = fs.readFileSync(pagePath, "utf8");
+
+  // 1. Google Maps alias prevents shadowing native Map
+  assert.match(
+    pageContent,
+    /import\s*{[^}]*Map\s+as\s+GoogleMap[^}]*}\s*from\s*["']@vis\.gl\/react-google-maps["']/,
+    "Must alias Map as GoogleMap to avoid shadowing native window.Map constructor"
+  );
+  assert.match(
+    pageContent,
+    /new\s+window\.Map\(\)/,
+    "Must explicitly use new window.Map() for dictionary mappings"
+  );
+  assert.match(
+    pageContent,
+    /<GoogleMap/,
+    "Must render <GoogleMap> in JSX"
+  );
+
+  // 2. Draggable nodes during drafting
+  assert.match(
+    pageContent,
+    /draggable:\s*true/,
+    "Draft markers must be draggable during geofence creation"
+  );
+  assert.match(
+    pageContent,
+    /marker\.addListener\(["']dragend["']/,
+    "Draft markers must have dragend listeners"
+  );
+  assert.match(
+    pageContent,
+    /handlePointDrag/,
+    "Must define handlePointDrag callback to update vertices"
+  );
+  assert.match(
+    pageContent,
+    /onPointDrag={handlePointDrag}/,
+    "Must pass onPointDrag to MdBgoMapInner"
+  );
+
+  // 3. Rules documentation
+  const rulesPath = path.join(repoRoot, "../ireps-rules/bgo/md-bgo-rules.md");
+  if (fs.existsSync(rulesPath)) {
+    const rulesContent = fs.readFileSync(rulesPath, "utf8");
+    assert.match(rulesContent, /MD-BGO-R010\.8/, "Must document MD-BGO-R010.8 in rules");
+    assert.match(rulesContent, /Draggable Polygon Nodes/, "Must name Draggable Polygon Nodes in rules");
+  }
+});
+

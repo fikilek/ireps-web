@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { APIProvider, Map, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
@@ -285,6 +285,7 @@ function MdBgoMapInner({
   drawingPoints = [],
   isDrawing = false,
   onMapClick,
+  onPointDrag,
 }) {
   const map = useMap();
   const infoWindowRef = useRef(null);
@@ -749,19 +750,33 @@ function MdBgoMapInner({
 
     if (drawingPoints.length > 0) {
       const markers = drawingPoints.map((pt, index) => {
-        return new window.google.maps.Marker({
+        const marker = new window.google.maps.Marker({
           position: pt,
           map,
+          draggable: true,
+          cursor: "grab",
+          title: `Node ${index + 1} (Drag to adjust)`,
           icon: {
             path: window.google.maps.SymbolPath.CIRCLE,
-            scale: index === 0 ? 6 : 4,
+            scale: index === 0 ? 7 : 5,
             fillColor: index === 0 ? "#16a34a" : "#2563eb",
             fillOpacity: 1,
             strokeColor: "#ffffff",
             strokeWeight: 2,
           },
-          zIndex: 100,
+          zIndex: 150 + index,
         });
+
+        marker.addListener("dragend", (event) => {
+          if (event?.latLng && typeof onPointDrag === "function") {
+            onPointDrag(index, {
+              lat: event.latLng.lat(),
+              lng: event.latLng.lng(),
+            });
+          }
+        });
+
+        return marker;
       });
       draftMarkersRef.current = markers;
 
@@ -980,6 +995,14 @@ export default function MdBgoPlanningPage() {
     setDrawingPoints((pts) => [...pts, point]);
   }, []);
 
+  const handlePointDrag = useCallback((index, newPoint) => {
+    setDrawingPoints((pts) => {
+      const next = [...pts];
+      next[index] = newPoint;
+      return next;
+    });
+  }, []);
+
   const handleUndoPoint = () => {
     setDrawingPoints((pts) => pts.slice(0, -1));
   };
@@ -1034,7 +1057,7 @@ export default function MdBgoPlanningPage() {
 
   // Active batched ERFs across the ward for single-batch exclusivity (MD-BGO-R013)
   const batchedErfMap = useMemo(() => {
-    const map = new Map();
+    const map = new window.Map();
     wardBatches.forEach((batch) => {
       const state = batch?.workflowState || batch?.workflow?.state || "";
       if (state === "CANCELLED" || state === "REJECTED" || state === "DELETED") return;
@@ -1646,7 +1669,7 @@ export default function MdBgoPlanningPage() {
               Creating: <strong>{fullStandardName}</strong>
             </span>
             <span style={styles.drawingPointsCount}>
-              {drawingPoints.length} point{drawingPoints.length === 1 ? "" : "s"}
+              {drawingPoints.length} point{drawingPoints.length === 1 ? "" : "s"} · Drag nodes to adjust
             </span>
             <div style={{ ...styles.drawingCountText, color: counterTone }}>
               <strong>{counterText}</strong>
@@ -1824,7 +1847,7 @@ export default function MdBgoPlanningPage() {
       <div style={styles.mapContainer}>
         {googleMapsApiKey ? (
           <APIProvider apiKey={googleMapsApiKey}>
-            <Map
+            <GoogleMap
               defaultCenter={FALLBACK_CENTER}
               defaultZoom={12}
               style={styles.mapElement}
@@ -1851,8 +1874,9 @@ export default function MdBgoPlanningPage() {
                 drawingPoints={drawingPoints}
                 isDrawing={isDrawing}
                 onMapClick={handleMapClick}
+                onPointDrag={handlePointDrag}
               />
-            </Map>
+            </GoogleMap>
 
             {/* Floating Map Layers Control Panel */}
             {!layersOpen ? (
