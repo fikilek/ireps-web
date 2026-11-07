@@ -39,6 +39,7 @@ import { db } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
+import { useUploadAndValidateTcMutation } from "../../redux/tcApi";
 
 // Validation Rule 4: Allowed file extensions
 const VALID_EXTENSIONS = ["csv", "xlsx", "xls", "xml"];
@@ -327,6 +328,59 @@ function resolveWorkbase(auth = {}, geoState = {}) {
   };
 }
 
+
+function resolveRowWardInfo(row, fallbackLmPcode = "") {
+  const rawWardPcode = String(row?.astWardPcode || "").trim().toUpperCase();
+  const rawWardNo = String(
+    row?.irepsValues?.wardNo && row.irepsValues.wardNo !== "NAv"
+      ? row.irepsValues.wardNo
+      : row?.wardNo || ""
+  ).trim();
+
+  const lm = String(row?.astLmPcode && row.astLmPcode !== "NAv" ? row.astLmPcode : fallbackLmPcode || "")
+    .trim()
+    .toUpperCase();
+
+  let wardPcode = rawWardPcode && rawWardPcode !== "NAV" ? rawWardPcode : "";
+  const digits = rawWardNo.replace(/\D/g, "");
+
+  if (!wardPcode && lm && digits) {
+    wardPcode = `${lm}${digits.padStart(3, "0")}`;
+  }
+
+  let wardNo = digits ? String(Number(digits)) : "";
+  if (!wardNo && wardPcode && wardPcode.length >= 3) {
+    const suffix = wardPcode.slice(-3).replace(/\D/g, "");
+    if (suffix) wardNo = String(Number(suffix));
+  }
+
+  return {
+    wardPcode: wardPcode || "NAv",
+    wardNo: wardNo || "NAv",
+    wardLabel: wardNo ? `Ward ${wardNo}` : wardPcode || "Unassigned Ward",
+  };
+}
+
+function inferTrnTypeFromRows(rows = []) {
+  for (const r of rows) {
+    const reason = String(r?.actionReason || "").toUpperCase();
+    if (reason.includes("RECONNECT")) return "METER_RECONNECTION";
+    if (reason.includes("DISCONNECT")) return "METER_DISCONNECTION";
+    if (reason.includes("REMOV")) return "METER_REMOVAL";
+    if (reason.includes("INSPECT")) return "METER_INSPECTION";
+    if (reason.includes("READ")) return "METER_READING";
+  }
+  return "METER_DISCONNECTION";
+}
+
+const TRN_OPERATION_OPTIONS = [
+  { value: "METER_DISCONNECTION", code: "MDCN", label: "Meter Disconnection (MDCN)" },
+  { value: "METER_RECONNECTION", code: "MRCN", label: "Meter Reconnection (MRCN)" },
+  { value: "METER_INSPECTION", code: "MINSP", label: "Meter Inspection (MINSP)" },
+  { value: "METER_READING", code: "MREAD", label: "Meter Reading (MREAD)" },
+  { value: "METER_REMOVAL", code: "MREM", label: "Meter Removal (MREM)" },
+];
+
 // Chunk an array into sub-arrays of size N (Firestore 'in' operator max is 30)
 function chunkArray(items, size = 30) {
   const chunks = [];
@@ -356,6 +410,12 @@ export default function TrnBgoUploadPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState(() => new Set());
   const [shownRows, setShownRows] = useState(null);
   const [carriedBatchRows, setCarriedBatchRows] = useState([]);
+  const [selectedTrnType, setSelectedTrnType] = useState("METER_DISCONNECTION");
+  const [batchNotes, setBatchNotes] = useState("");
+  const [isCreatingBatches, setIsCreatingBatches] = useState(false);
+  const [createdBatchesResult, setCreatedBatchesResult] = useState([]);
+  const [batchCreateError, setBatchCreateError] = useState("");
+  const [uploadAndValidateTc] = useUploadAndValidateTcMutation();
 
   // Handle file selection and multi-gate validation
   const handleFileChange = (file) => {
@@ -364,6 +424,8 @@ export default function TrnBgoUploadPage() {
     setSelectedRowKeys(new Set());
     setShownRows(null);
     setCarriedBatchRows([]);
+    setCreatedBatchesResult([]);
+    setBatchCreateError("");
     setFoundFilter("ALL");
     setLmFilter("ALL");
     setStatFilter("ALL");
@@ -715,7 +777,13 @@ export default function TrnBgoUploadPage() {
             astDoc?.accessData?.parents?.lmPcode || regDoc?.parents?.lmPcode || ""
           ).trim();
           const astWardPcode = String(
-            astDoc?.accessData?.parents?.wardPcode || regDoc?.parents?.wardPcode || ""
+            astDoc?.accessData?.parents?.wardPcode ||
+              regDoc?.parents?.wardPcode ||
+              premiseDoc?.wardPcode ||
+              premiseDoc?.parents?.wardPcode ||
+              salesDoc?.erfCandidates?.[0]?.WardPcode ||
+              salesDoc?.ErfCandidates?.[0]?.WardPcode ||
+              ""
           ).trim();
           const astStatus = String(
             astDoc?.status?.state ||
@@ -897,6 +965,8 @@ export default function TrnBgoUploadPage() {
     setSelectedRowKeys(new Set());
     setShownRows(null);
     setCarriedBatchRows([]);
+    setCreatedBatchesResult([]);
+    setBatchCreateError("");
     setFileError("");
     setValidationProgress("");
     setFoundFilter("ALL");
@@ -1069,6 +1139,95 @@ export default function TrnBgoUploadPage() {
   const handleCarryToBatchStage = () => {
     if (!canCarryToBatch) return;
     setCarriedBatchRows(selectedRows);
+    setSelectedTrnType(inferTrnTypeFromRows(selectedRows));
+    setCreatedBatchesResult([]);
+    setBatchCreateError("");
+  };
+
+  // Group carriedBatchRows by resolved Ward (1 batch per Ward)
+  const wardBatchGroups = useMemo(() => {
+    if (carriedBatchRows.length === 0) return [];
+    const map = new Map();
+
+    carriedBatchRows.forEach((row) => {
+      const wardInfo = resolveRowWardInfo(row, lmPcode);
+      const groupKey = wardInfo.wardPcode !== "NAv" ? wardInfo.wardPcode : `WARD_${wardInfo.wardNo}`;
+      if (!map.has(groupKey)) {
+        map.set(groupKey, {
+          wardKey: groupKey,
+          wardPcode: wardInfo.wardPcode,
+          wardNo: wardInfo.wardNo,
+          wardLabel: wardInfo.wardLabel,
+          rows: [],
+        });
+      }
+      map.get(groupKey).rows.push(row);
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.wardPcode).localeCompare(String(b.wardPcode), undefined, { numeric: true })
+    );
+  }, [carriedBatchRows, lmPcode]);
+
+  const handleCreateWardBatches = async () => {
+    if (wardBatchGroups.length === 0 || isCreatingBatches) return;
+    setIsCreatingBatches(true);
+    setBatchCreateError("");
+    setCreatedBatchesResult([]);
+
+    try {
+      const effectiveLmPcode =
+        lmPcode ||
+        carriedBatchRows.find((r) => r.astLmPcode && r.astLmPcode !== "NAv")?.astLmPcode ||
+        "ZA5241";
+
+      const results = [];
+
+      for (const group of wardBatchGroups) {
+        const resequencedRows = group.rows.map((r, index) => ({
+          rowNo: String(index + 1),
+          meterNo: String(r.meterNo || ""),
+          meterPhase: String(r.meterPhase || r.irepsValues?.meterPhase || ""),
+          meterType: String(r.meterType || r.irepsValues?.meterType || ""),
+          linkedAccountNo: String(r.linkedAccountNo || r.irepsValues?.linkedAccountNo || ""),
+          premiseAddress: String(r.premiseAddress || r.irepsValues?.premiseAddress || ""),
+          premisePropertyType: String(
+            r.premisePropertyType || r.irepsValues?.premisePropertyType || ""
+          ),
+          actionReason: String(r.actionReason || ""),
+          wardNo: String(group.wardNo !== "NAv" ? group.wardNo : r.wardNo || ""),
+          geofence: String(r.geofence || r.irepsValues?.geofence || ""),
+          meterStatus: String(r.meterStatus || r.irepsValues?.meterStatus || ""),
+          erfNo: String(r.erfNo || r.irepsValues?.erfNo || ""),
+        }));
+
+        const response = await uploadAndValidateTc({
+          fileName: selectedFile?.name || "TRN_BGO_UPLOAD.csv",
+          trnType: selectedTrnType,
+          lmPcode: effectiveLmPcode,
+          wardPcode: group.wardPcode !== "NAv" ? group.wardPcode : undefined,
+          notes: batchNotes,
+          rows: resequencedRows,
+        }).unwrap();
+
+        results.push({
+          wardLabel: group.wardLabel,
+          wardPcode: group.wardPcode,
+          meterCount: group.rows.length,
+          tcId: response?.tcId || response?.upload?.id || "CREATED",
+          duplicate: Boolean(response?.duplicate),
+          message: response?.message || "Batch created.",
+        });
+      }
+
+      setCreatedBatchesResult(results);
+    } catch (err) {
+      setBatchCreateError(
+        err?.message || err?.data?.message || "Failed to create ward batch(es)."
+      );
+    } finally {
+      setIsCreatingBatches(false);
+    }
   };
 
   // Download Not Found CSV Report
@@ -1646,45 +1805,369 @@ export default function TrnBgoUploadPage() {
             </div>
           ) : null}
 
-          {/* Carried to Batch Stage Confirmation Banner */}
+          {/* Stage 2: Ward-Grouped Batch Creation Panel (TRN-BGO-R014) */}
           {carriedBatchRows.length > 0 ? (
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "12px 18px",
-                borderRadius: 10,
-                background: "#ecfdf5",
-                border: "1px solid #6ee7b7",
-                color: "#065f46",
-                fontSize: 13,
-                fontWeight: 700,
+                flexDirection: "column",
+                gap: 16,
+                padding: "18px 22px",
+                borderRadius: 12,
+                background: "#ffffff",
+                border: "2px solid #2563eb",
+                boxShadow: "0 4px 12px rgba(37, 99, 235, 0.08)",
               }}
             >
-              <div>
-                ✓ <strong>{carriedBatchRows.length}</strong> eligible meter(s) carried through to the Batch Stage:{" "}
-                <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
-                  {carriedBatchRows.map((r) => r.meterNo).join(", ")}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCarriedBatchRows([])}
+              <div
                 style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "1px solid #34d399",
-                  background: "#ffffff",
-                  color: "#065f46",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: 12,
                 }}
               >
-                Clear Batch Stage Selection
-              </button>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span
+                      style={{
+                        padding: "3px 10px",
+                        borderRadius: 9999,
+                        background: "#dbeafe",
+                        color: "#1d4ed8",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Batch Stage
+                    </span>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: "#0f172a" }}>
+                      Ward-Grouped Batch Origination ({wardBatchGroups.length}{" "}
+                      {wardBatchGroups.length === 1 ? "Ward Batch" : "Ward Batches"} ·{" "}
+                      {carriedBatchRows.length} Eligible Meters)
+                    </h3>
+                  </div>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#475569" }}>
+                    A batch can only belong to 1 ward. Your selected rows span{" "}
+                    <strong>{wardBatchGroups.length}</strong>{" "}
+                    {wardBatchGroups.length === 1 ? "ward" : "different wards"}, so{" "}
+                    <strong>{wardBatchGroups.length}</strong>{" "}
+                    {wardBatchGroups.length === 1 ? "batch" : "separate batches"} will be created with canonical ID{" "}
+                    <code>
+                      TRN_BGO_YYYYMMDD_HHMMSS_&lt;WARDPCODE&gt;_
+                      {TRN_OPERATION_OPTIONS.find((o) => o.value === selectedTrnType)?.code || "MDCN"}
+                    </code>
+                    .
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCarriedBatchRows([]);
+                    setCreatedBatchesResult([]);
+                    setBatchCreateError("");
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#f8fafc",
+                    color: "#475569",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close Batch Stage
+                </button>
+              </div>
+
+              {/* Ward Batch Preview Cards */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {wardBatchGroups.map((group, idx) => {
+                  const opCode =
+                    TRN_OPERATION_OPTIONS.find((o) => o.value === selectedTrnType)?.code || "MDCN";
+                  return (
+                    <div
+                      key={group.wardKey}
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        background: "#f8fafc",
+                        border: "1px solid #cbd5e1",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
+                        <strong style={{ fontSize: 14, color: "#0f172a" }}>
+                          Batch {idx + 1}: {group.wardLabel}{" "}
+                          <span style={{ color: "#2563eb", fontFamily: "monospace" }}>
+                            ({group.wardPcode})
+                          </span>
+                        </strong>
+                        <span
+                          style={{
+                            padding: "2px 8px",
+                            borderRadius: 9999,
+                            background: "#dcfce7",
+                            color: "#15803d",
+                            fontSize: 12,
+                            fontWeight: 800,
+                          }}
+                        >
+                          {group.rows.length} {group.rows.length === 1 ? "Meter" : "Meters"}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace" }}>
+                        ID Pattern: TRN_BGO_YYYYMMDD_HHMMSS_{group.wardPcode}_{opCode}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#334155",
+                          fontFamily: "monospace",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={group.rows.map((r) => r.meterNo).join(", ")}
+                      >
+                        Meters: {group.rows.map((r) => r.meterNo).join(", ")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Operation Type & Create Action Row */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-end",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: 14,
+                  paddingTop: 8,
+                  borderTop: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#475569",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Transaction Operation Type
+                    </span>
+                    <select
+                      value={selectedTrnType}
+                      onChange={(e) => setSelectedTrnType(e.target.value)}
+                      disabled={isCreatingBatches}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#0f172a",
+                        background: "#ffffff",
+                      }}
+                    >
+                      {TRN_OPERATION_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 260 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#475569",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Batch Notes (Optional)
+                    </span>
+                    <input
+                      type="text"
+                      value={batchNotes}
+                      onChange={(e) => setBatchNotes(e.target.value)}
+                      disabled={isCreatingBatches}
+                      placeholder="e.g. Credit control disconnection batch"
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        fontSize: 13,
+                        color: "#0f172a",
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isCreatingBatches || wardBatchGroups.length === 0}
+                  onClick={handleCreateWardBatches}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 8,
+                    border: "1px solid #1d4ed8",
+                    background: isCreatingBatches ? "#93c5fd" : "#2563eb",
+                    color: "#ffffff",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: isCreatingBatches ? "wait" : "pointer",
+                  }}
+                >
+                  {isCreatingBatches
+                    ? `Creating ${wardBatchGroups.length} Ward Batch(es)...`
+                    : `Create ${wardBatchGroups.length} Ward ${wardBatchGroups.length === 1 ? "Batch" : "Batches"} (${carriedBatchRows.length} Meters)`}
+                </button>
+              </div>
+
+              {batchCreateError ? (
+                <div
+                  role="alert"
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    color: "#991b1b",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {batchCreateError}
+                </div>
+              ) : null}
+
+              {createdBatchesResult.length > 0 ? (
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    borderRadius: 10,
+                    background: "#ecfdf5",
+                    border: "1px solid #6ee7b7",
+                    color: "#065f46",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: 10,
+                    }}
+                  >
+                    <strong style={{ fontSize: 14 }}>
+                      ✓ Successfully Processed {createdBatchesResult.length} Ward{" "}
+                      {createdBatchesResult.length === 1 ? "Batch" : "Batches"}:
+                    </strong>
+                    <Link
+                      to="/operations/trn-bgo"
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 8,
+                        background: "#059669",
+                        color: "#ffffff",
+                        textDecoration: "none",
+                        fontSize: 12,
+                        fontWeight: 800,
+                      }}
+                    >
+                      Open TRN BGO Register →
+                    </Link>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {createdBatchesResult.map((res) => (
+                      <div
+                        key={res.tcId}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          background: "#ffffff",
+                          border: "1px solid #a7f3d0",
+                          fontSize: 13,
+                        }}
+                      >
+                        <div>
+                          <strong>{res.wardLabel}</strong> ({res.wardPcode}) —{" "}
+                          <code style={{ fontWeight: 800, color: "#0f172a" }}>{res.tcId}</code>{" "}
+                          <span style={{ color: "#047857", fontWeight: 700 }}>
+                            ({res.meterCount} meters)
+                          </span>
+                          {res.duplicate ? (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                padding: "2px 6px",
+                                borderRadius: 4,
+                                background: "#fef3c7",
+                                color: "#92400e",
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}
+                            >
+                              Existing Batch Returned
+                            </span>
+                          ) : null}
+                        </div>
+                        <Link
+                          to={`/operations/trn-bgo-rows?batchId=${encodeURIComponent(res.tcId)}`}
+                          style={{
+                            color: "#1d4ed8",
+                            fontWeight: 800,
+                            fontSize: 12,
+                            textDecoration: "none",
+                          }}
+                        >
+                          Inspect Batch Rows →
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
