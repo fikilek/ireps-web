@@ -227,3 +227,32 @@ test("TrnBgoUploadPage defines dataMatch boolean column and Option A stacked Fil
     "premiseAddress column must render stacked File vs iREPS comparison cell",
   );
 });
+
+test("TrnBgoUploadPage defines Column 1 checkbox selection, MasterCheckbox on filtered rows, and Option 2 Batch Stage Gate", () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const content = fs.readFileSync(uploadPagePath, "utf8");
+
+  assert.match(
+    content,
+    /key:\s*"_select"[\s\S]*?<MasterCheckbox[\s\S]*?key:\s*"_rowNo"/,
+    "Column 1 must be _select with MasterCheckbox before _rowNo",
+  );
+  assert.match(
+    content,
+    /onRowsShown=\{setShownRows\}/,
+    "IrepsTable must pass onRowsShown={setShownRows} so MasterCheckbox selects all filtered rows",
+  );
+  assert.match(
+    content,
+    /const canCarryToBatch\s*=\s*selectedRows\.length > 0 && ineligibleSelectedRows\.length === 0/,
+    "Option 2 gate must disable Carry Selected to Batch Stage when any selected row has eligible = False",
+  );
+  assert.match(
+    content,
+    /onClick=\{handleDownloadSelectedCsv\}/,
+    "Download Selected CSV button must be wired to handleDownloadSelectedCsv",
+  );
+});
