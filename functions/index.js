@@ -78,7 +78,13 @@ import { onMeterCommissioningTrnCreated } from "./commissioning/trigger.js";
 import { createGeoFence, updateGeoFence } from "./geofences/callables.js";
 import { onGeoFenceCreated } from "./geofences/triggers.js";
 
-import { onUploadAndValidateTcCallable } from "./tcUploads/callables.js";
+import {
+  onUploadAndValidateTcCallable,
+  onCreateTrnBgoWardBatchesCallable,
+  onAllocateTrnBgoWardBatchesCallable,
+  onCreateTrnBgoWardBatchesCallable,
+  onAllocateTrnBgoWardBatchesCallable,
+} from "./tcUploads/callables.js";
 import { onRefreshTcUploadGeofenceReadinessCallable } from "./tcUploads/refreshCallable.js";
 import { onDeleteTcUploadCallable } from "./tcUploads/deleteCallable.js";
 import {

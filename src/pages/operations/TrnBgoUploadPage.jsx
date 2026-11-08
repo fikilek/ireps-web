@@ -31,7 +31,7 @@ function MasterCheckbox({ checked, indeterminate, disabled, onChange, title }) {
     />
   );
 }
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { collection, query, where, getDocs, documentId } from "firebase/firestore";
 
@@ -39,7 +39,13 @@ import { db } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
-import { useUploadAndValidateTcMutation } from "../../redux/tcApi";
+import {
+  useUploadAndValidateTcMutation,
+  useCreateTrnBgoWardBatchesMutation,
+  useAllocateTrnBgoWardBatchesMutation,
+} from "../../redux/tcApi";
+import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
+import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 
 // Validation Rule 4: Allowed file extensions
 const VALID_EXTENSIONS = ["csv", "xlsx", "xls", "xml"];
@@ -409,13 +415,26 @@ export default function TrnBgoUploadPage() {
   const [statFilter, setStatFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND, LM_MATCH, SELECTED
   const [selectedRowKeys, setSelectedRowKeys] = useState(() => new Set());
   const [shownRows, setShownRows] = useState(null);
+  const navigate = useNavigate();
+  const [viewMode, setViewMode] = useState("INSPECTION"); // "INSPECTION" | "DRAFT"
   const [carriedBatchRows, setCarriedBatchRows] = useState([]);
   const [selectedTrnType, setSelectedTrnType] = useState("METER_DISCONNECTION");
   const [batchNotes, setBatchNotes] = useState("");
   const [isCreatingBatches, setIsCreatingBatches] = useState(false);
   const [createdBatchesResult, setCreatedBatchesResult] = useState([]);
   const [batchCreateError, setBatchCreateError] = useState("");
+  const [creationModalState, setCreationModalState] = useState(null); // null | { status: "PASS" | "FAIL", title, message, errors, batches, totalMeters }
+  const [allocationMode, setAllocationMode] = useState("UNALLOCATED"); // "UNALLOCATED" | "TEAM" | "SP"
+  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedSpId, setSelectedSpId] = useState("");
+  const [isAllocating, setIsAllocating] = useState(false);
+  const [allocationError, setAllocationError] = useState("");
+
   const [uploadAndValidateTc] = useUploadAndValidateTcMutation();
+  const [createTrnBgoWardBatches] = useCreateTrnBgoWardBatchesMutation();
+  const [allocateTrnBgoWardBatches] = useAllocateTrnBgoWardBatchesMutation();
+  const { data: availableTeams = [] } = useGetAvailableTeamsQuery();
+  const { data: availableServiceProviders = [] } = useGetAvailableServiceProvidersQuery();
 
   // Handle file selection and multi-gate validation
   const handleFileChange = (file) => {
@@ -423,9 +442,13 @@ export default function TrnBgoUploadPage() {
     setParsedRows([]);
     setSelectedRowKeys(new Set());
     setShownRows(null);
+    setViewMode("INSPECTION");
+    setViewMode("INSPECTION");
     setCarriedBatchRows([]);
     setCreatedBatchesResult([]);
     setBatchCreateError("");
+    setCreationModalState(null);
+    setCreationModalState(null);
     setFoundFilter("ALL");
     setLmFilter("ALL");
     setStatFilter("ALL");
@@ -1142,7 +1165,25 @@ export default function TrnBgoUploadPage() {
     setSelectedTrnType(inferTrnTypeFromRows(selectedRows));
     setCreatedBatchesResult([]);
     setBatchCreateError("");
+    setCreationModalState(null);
+    setViewMode("DRAFT");
   };
+
+  const handleRemoveRowFromDraft = useCallback((rowToRemove) => {
+    const keyToRemove = getRowSelectionKey(rowToRemove);
+    setCarriedBatchRows((prev) => {
+      const next = prev.filter((r) => getRowSelectionKey(r) !== keyToRemove);
+      if (next.length === 0) {
+        setViewMode("INSPECTION");
+      }
+      return next;
+    });
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(keyToRemove);
+      return next;
+    });
+  }, []);
 
   // Group carriedBatchRows by resolved Ward (1 batch per Ward)
   const wardBatchGroups = useMemo(() => {
@@ -1169,11 +1210,140 @@ export default function TrnBgoUploadPage() {
     );
   }, [carriedBatchRows, lmPcode]);
 
+  const draftBatchColumns = useMemo(() => {
+    return [
+      {
+        key: "draftRowNo",
+        label: "rowNo",
+        width: 70,
+        sortable: true,
+        filter: null,
+        value: (r, idx) => String(r._draftRowNo || idx + 1),
+        sortValue: (r, idx) => Number(r._draftRowNo || idx + 1),
+        render: (r, idx) => <strong>{r._draftRowNo || idx + 1}</strong>,
+      },
+      {
+        key: "meterNo",
+        label: "meterNo",
+        width: 140,
+        sortable: true,
+        filter: "text",
+        value: (r) => String(r.meterNo || ""),
+        sortValue: (r) => String(r.meterNo || ""),
+        render: (r) => <span style={styles.meterNoCell}>{r.meterNo}</span>,
+      },
+      {
+        key: "meterType",
+        label: "meterType",
+        width: 130,
+        sortable: true,
+        filter: "select",
+        value: (r) => String(r.irepsValues?.meterType || r.meterType || "NAv"),
+        sortValue: (r) => String(r.irepsValues?.meterType || r.meterType || ""),
+      },
+      {
+        key: "meterPhase",
+        label: "meterPhase",
+        width: 120,
+        sortable: true,
+        filter: "select",
+        value: (r) => String(r.irepsValues?.meterPhase || r.meterPhase || "NAv"),
+        sortValue: (r) => String(r.irepsValues?.meterPhase || r.meterPhase || ""),
+      },
+      {
+        key: "linkedAccountNo",
+        label: "linkedAccountNo",
+        width: 150,
+        sortable: true,
+        filter: "text",
+        value: (r) => String(r.irepsValues?.linkedAccountNo || r.linkedAccountNo || "NAv"),
+        sortValue: (r) => String(r.irepsValues?.linkedAccountNo || r.linkedAccountNo || ""),
+      },
+      {
+        key: "premiseAddress",
+        label: "premiseAddress",
+        width: 240,
+        sortable: true,
+        filter: "text",
+        value: (r) => String(r.resolvedAddress || r.irepsValues?.premiseAddress || r.premiseAddress || "NAv"),
+        sortValue: (r) => String(r.resolvedAddress || r.irepsValues?.premiseAddress || r.premiseAddress || ""),
+      },
+      {
+        key: "erfNo",
+        label: "erfNo",
+        width: 100,
+        sortable: true,
+        filter: "text",
+        value: (r) => String(r.resolvedErf || r.irepsValues?.erfNo || r.erfNo || "NAv"),
+        sortValue: (r) => String(r.resolvedErf || r.irepsValues?.erfNo || r.erfNo || ""),
+      },
+      {
+        key: "geofence",
+        label: "geofence",
+        width: 160,
+        sortable: true,
+        filter: "text",
+        value: (r) => String(r.irepsValues?.geofence || r.geofence || "NAv"),
+        sortValue: (r) => String(r.irepsValues?.geofence || r.geofence || ""),
+      },
+      {
+        key: "meterStatus",
+        label: "meterStatus",
+        width: 130,
+        sortable: true,
+        filter: "select",
+        value: (r) => String(r.irepsValues?.meterStatus || r.meterStatus || "NAv"),
+        sortValue: (r) => String(r.irepsValues?.meterStatus || r.meterStatus || ""),
+      },
+      {
+        key: "actionReason",
+        label: "actionReason",
+        width: 200,
+        sortable: true,
+        filter: "text",
+        value: (r) => String(r.actionReason || "NAv"),
+        sortValue: (r) => String(r.actionReason || ""),
+      },
+      {
+        key: "remove",
+        label: "Action",
+        width: 90,
+        sortable: false,
+        filter: null,
+        export: false,
+        render: (r) => (
+          <button
+            type="button"
+            onClick={() => handleRemoveRowFromDraft(r)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #fecaca",
+              background: "#fef2f2",
+              color: "#b91c1c",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+            title="Remove this TRN row from the draft batch"
+          >
+            Remove
+          </button>
+        ),
+      },
+    ];
+  }, [handleRemoveRowFromDraft]);
+
   const handleCreateWardBatches = async () => {
     if (wardBatchGroups.length === 0 || isCreatingBatches) return;
     setIsCreatingBatches(true);
     setBatchCreateError("");
     setCreatedBatchesResult([]);
+    setCreationModalState(null);
+    setAllocationMode("UNALLOCATED");
+    setSelectedTeamId("");
+    setSelectedSpId("");
+    setAllocationError("");
 
     try {
       const effectiveLmPcode =
@@ -1181,10 +1351,10 @@ export default function TrnBgoUploadPage() {
         carriedBatchRows.find((r) => r.astLmPcode && r.astLmPcode !== "NAv")?.astLmPcode ||
         "ZA5241";
 
-      const results = [];
-
-      for (const group of wardBatchGroups) {
-        const resequencedRows = group.rows.map((r, index) => ({
+      const batchesPayload = wardBatchGroups.map((group) => ({
+        wardPcode: group.wardPcode,
+        wardLabel: group.wardLabel,
+        rows: group.rows.map((r, index) => ({
           rowNo: String(index + 1),
           meterNo: String(r.meterNo || ""),
           meterPhase: String(r.meterPhase || r.irepsValues?.meterPhase || ""),
@@ -1199,34 +1369,100 @@ export default function TrnBgoUploadPage() {
           geofence: String(r.geofence || r.irepsValues?.geofence || ""),
           meterStatus: String(r.meterStatus || r.irepsValues?.meterStatus || ""),
           erfNo: String(r.erfNo || r.irepsValues?.erfNo || ""),
-        }));
+        })),
+      }));
 
-        const response = await uploadAndValidateTc({
-          fileName: selectedFile?.name || "TRN_BGO_UPLOAD.csv",
-          trnType: selectedTrnType,
-          lmPcode: effectiveLmPcode,
-          wardPcode: group.wardPcode !== "NAv" ? group.wardPcode : undefined,
-          notes: batchNotes,
-          rows: resequencedRows,
-        }).unwrap();
+      const response = await createTrnBgoWardBatches({
+        fileName: selectedFile?.name || "TRN_BGO_UPLOAD.csv",
+        trnType: selectedTrnType,
+        lmPcode: effectiveLmPcode,
+        notes: batchNotes,
+        batches: batchesPayload,
+      }).unwrap();
 
-        results.push({
-          wardLabel: group.wardLabel,
-          wardPcode: group.wardPcode,
-          meterCount: group.rows.length,
-          tcId: response?.tcId || response?.upload?.id || "CREATED",
-          duplicate: Boolean(response?.duplicate),
-          message: response?.message || "Batch created.",
+      if (!response?.success) {
+        setCreationModalState({
+          status: "FAIL",
+          title: "Batch Creation Failed — Zero Batches Created",
+          message:
+            response?.message ||
+            "All-or-Nothing Gate: Validation failed. No batches were created.",
+          errors: Array.isArray(response?.errors) ? response.errors : [],
+          batches: [],
+          totalMeters: 0,
         });
+        return;
       }
 
-      setCreatedBatchesResult(results);
+      const createdBatches = Array.isArray(response.batches) ? response.batches : [];
+      setCreatedBatchesResult(createdBatches);
+      setCreationModalState({
+        status: "PASS",
+        title: `Successfully Created ${createdBatches.length} Ward ${createdBatches.length === 1 ? "Batch" : "Batches"}`,
+        message:
+          response.message ||
+          `All ${createdBatches.length} ward batch(es) (${response.totalMeters || carriedBatchRows.length} TRNs) were created atomically.`,
+        errors: [],
+        batches: createdBatches,
+        totalMeters: response.totalMeters || carriedBatchRows.length,
+      });
     } catch (err) {
-      setBatchCreateError(
-        err?.message || err?.data?.message || "Failed to create ward batch(es)."
-      );
+      const errMsg =
+        err?.message ||
+        err?.data?.message ||
+        "All-or-Nothing Gate: Failed to create ward batches. Zero batches were created.";
+      setBatchCreateError(errMsg);
+      setCreationModalState({
+        status: "FAIL",
+        title: "Batch Creation Failed — Zero Batches Created",
+        message: errMsg,
+        errors: Array.isArray(err?.details?.errors) ? err.details.errors : [errMsg],
+        batches: [],
+        totalMeters: 0,
+      });
     } finally {
       setIsCreatingBatches(false);
+    }
+  };
+
+  const handleConfirmPassModalAndNavigate = async () => {
+    if (!creationModalState || creationModalState.status !== "PASS") return;
+    const batchIds = (creationModalState.batches || []).map((b) => b.tcId).filter(Boolean);
+
+    if (allocationMode === "UNALLOCATED") {
+      navigate("/operations/trn-bgo");
+      return;
+    }
+
+    const targetType = allocationMode; // "TEAM" or "SP"
+    const targetList = targetType === "TEAM" ? availableTeams : availableServiceProviders;
+    const chosenId = targetType === "TEAM" ? selectedTeamId : selectedSpId;
+    const chosenTarget = targetList.find((item) => item.id === chosenId);
+
+    if (!chosenId || !chosenTarget) {
+      setAllocationError(
+        `Please select an active ${targetType === "TEAM" ? "Operational Team" : "Service Provider"} or choose "Leave Unallocated".`
+      );
+      return;
+    }
+
+    setIsAllocating(true);
+    setAllocationError("");
+    try {
+      await allocateTrnBgoWardBatches({
+        batchIds,
+        targetType,
+        targetId: chosenTarget.id,
+        targetName: chosenTarget.name || chosenTarget.label || chosenTarget.id,
+      }).unwrap();
+
+      navigate("/operations/trn-bgo");
+    } catch (err) {
+      setAllocationError(
+        err?.message || err?.data?.message || "Failed to allocate batches. Please try again."
+      );
+    } finally {
+      setIsAllocating(false);
     }
   };
 
@@ -1719,10 +1955,10 @@ export default function TrnBgoUploadPage() {
         </div>
       ) : null}
 
-      {/* Validated Rows Table View */}
-      {parsedRows.length > 0 ? (
+      {/* PAGE 1: Validated Rows Inspection Table View */}
+      {parsedRows.length > 0 && viewMode === "INSPECTION" ? (
         <div style={styles.previewSection}>
-          {/* File Meta & Validation Summary Banner */}
+          {/* File Meta & Action Bar */}
           <div style={styles.fileSummaryBanner}>
             <div style={styles.fileMetaItem}>
               <span style={styles.fileMetaLabel}>File Name</span>
@@ -1760,8 +1996,8 @@ export default function TrnBgoUploadPage() {
                   ineligibleSelectedRows.length > 0
                     ? `Cannot carry to Batch Stage: ${ineligibleSelectedRows.length} selected row(s) have eligible = False. Filter eligible = True first.`
                     : selectedRows.length === 0
-                      ? "Tick 1 or more eligible = True rows in Column 1 to carry through to the Batch Stage"
-                      : `Carry ${selectedRows.length} eligible row(s) to Batch Stage`
+                      ? "Tick 1 or more eligible = True rows in Column 1 to carry through to the Batch Draft Page"
+                      : `Open Batch Draft Page with ${selectedRows.length} eligible row(s)`
                 }
               >
                 Carry Selected to Batch Stage ({selectedRows.length}) →
@@ -1799,375 +2035,9 @@ export default function TrnBgoUploadPage() {
               <span>
                 Batch Stage Gate: <strong>{ineligibleSelectedRows.length}</strong> of your{" "}
                 <strong>{selectedRows.length}</strong> selected row(s) have{" "}
-                <code>eligible = False</code>. You can download this selection now, or filter{" "}
-                <code>eligible = True</code> and re-select using the Master Checkbox to carry rows to the Batch Stage.
+                <code>eligible = False</code>. Filter{" "}
+                <code>eligible = True</code> and re-select using the Master Checkbox to carry rows to the Batch Draft Page.
               </span>
-            </div>
-          ) : null}
-
-          {/* Stage 2: Ward-Grouped Batch Creation Panel (TRN-BGO-R014) */}
-          {carriedBatchRows.length > 0 ? (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 16,
-                padding: "18px 22px",
-                borderRadius: 12,
-                background: "#ffffff",
-                border: "2px solid #2563eb",
-                boxShadow: "0 4px 12px rgba(37, 99, 235, 0.08)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span
-                      style={{
-                        padding: "3px 10px",
-                        borderRadius: 9999,
-                        background: "#dbeafe",
-                        color: "#1d4ed8",
-                        fontSize: 11,
-                        fontWeight: 800,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Batch Stage
-                    </span>
-                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: "#0f172a" }}>
-                      Ward-Grouped Batch Origination ({wardBatchGroups.length}{" "}
-                      {wardBatchGroups.length === 1 ? "Ward Batch" : "Ward Batches"} ·{" "}
-                      {carriedBatchRows.length} Eligible Meters)
-                    </h3>
-                  </div>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#475569" }}>
-                    A batch can only belong to 1 ward. Your selected rows span{" "}
-                    <strong>{wardBatchGroups.length}</strong>{" "}
-                    {wardBatchGroups.length === 1 ? "ward" : "different wards"}, so{" "}
-                    <strong>{wardBatchGroups.length}</strong>{" "}
-                    {wardBatchGroups.length === 1 ? "batch" : "separate batches"} will be created with canonical ID{" "}
-                    <code>
-                      TRN_BGO_YYYYMMDD_HHMMSS_&lt;WARDPCODE&gt;_
-                      {TRN_OPERATION_OPTIONS.find((o) => o.value === selectedTrnType)?.code || "MDCN"}
-                    </code>
-                    .
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCarriedBatchRows([]);
-                    setCreatedBatchesResult([]);
-                    setBatchCreateError("");
-                  }}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #cbd5e1",
-                    background: "#f8fafc",
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Close Batch Stage
-                </button>
-              </div>
-
-              {/* Ward Batch Preview Cards */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                  gap: 12,
-                }}
-              >
-                {wardBatchGroups.map((group, idx) => {
-                  const opCode =
-                    TRN_OPERATION_OPTIONS.find((o) => o.value === selectedTrnType)?.code || "MDCN";
-                  return (
-                    <div
-                      key={group.wardKey}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: 10,
-                        background: "#f8fafc",
-                        border: "1px solid #cbd5e1",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                        }}
-                      >
-                        <strong style={{ fontSize: 14, color: "#0f172a" }}>
-                          Batch {idx + 1}: {group.wardLabel}{" "}
-                          <span style={{ color: "#2563eb", fontFamily: "monospace" }}>
-                            ({group.wardPcode})
-                          </span>
-                        </strong>
-                        <span
-                          style={{
-                            padding: "2px 8px",
-                            borderRadius: 9999,
-                            background: "#dcfce7",
-                            color: "#15803d",
-                            fontSize: 12,
-                            fontWeight: 800,
-                          }}
-                        >
-                          {group.rows.length} {group.rows.length === 1 ? "Meter" : "Meters"}
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace" }}>
-                        ID Pattern: TRN_BGO_YYYYMMDD_HHMMSS_{group.wardPcode}_{opCode}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "#334155",
-                          fontFamily: "monospace",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                        title={group.rows.map((r) => r.meterNo).join(", ")}
-                      >
-                        Meters: {group.rows.map((r) => r.meterNo).join(", ")}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Operation Type & Create Action Row */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-end",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: 14,
-                  paddingTop: 8,
-                  borderTop: "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: "#475569",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Transaction Operation Type
-                    </span>
-                    <select
-                      value={selectedTrnType}
-                      onChange={(e) => setSelectedTrnType(e.target.value)}
-                      disabled={isCreatingBatches}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #cbd5e1",
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "#0f172a",
-                        background: "#ffffff",
-                      }}
-                    >
-                      {TRN_OPERATION_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 260 }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: "#475569",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Batch Notes (Optional)
-                    </span>
-                    <input
-                      type="text"
-                      value={batchNotes}
-                      onChange={(e) => setBatchNotes(e.target.value)}
-                      disabled={isCreatingBatches}
-                      placeholder="e.g. Credit control disconnection batch"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #cbd5e1",
-                        fontSize: 13,
-                        color: "#0f172a",
-                      }}
-                    />
-                  </label>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isCreatingBatches || wardBatchGroups.length === 0}
-                  onClick={handleCreateWardBatches}
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: 8,
-                    border: "1px solid #1d4ed8",
-                    background: isCreatingBatches ? "#93c5fd" : "#2563eb",
-                    color: "#ffffff",
-                    fontSize: 13,
-                    fontWeight: 800,
-                    cursor: isCreatingBatches ? "wait" : "pointer",
-                  }}
-                >
-                  {isCreatingBatches
-                    ? `Creating ${wardBatchGroups.length} Ward Batch(es)...`
-                    : `Create ${wardBatchGroups.length} Ward ${wardBatchGroups.length === 1 ? "Batch" : "Batches"} (${carriedBatchRows.length} Meters)`}
-                </button>
-              </div>
-
-              {batchCreateError ? (
-                <div
-                  role="alert"
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                    background: "#fef2f2",
-                    border: "1px solid #fecaca",
-                    color: "#991b1b",
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
-                >
-                  {batchCreateError}
-                </div>
-              ) : null}
-
-              {createdBatchesResult.length > 0 ? (
-                <div
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: 10,
-                    background: "#ecfdf5",
-                    border: "1px solid #6ee7b7",
-                    color: "#065f46",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      flexWrap: "wrap",
-                      gap: 10,
-                    }}
-                  >
-                    <strong style={{ fontSize: 14 }}>
-                      ✓ Successfully Processed {createdBatchesResult.length} Ward{" "}
-                      {createdBatchesResult.length === 1 ? "Batch" : "Batches"}:
-                    </strong>
-                    <Link
-                      to="/operations/trn-bgo"
-                      style={{
-                        padding: "6px 14px",
-                        borderRadius: 8,
-                        background: "#059669",
-                        color: "#ffffff",
-                        textDecoration: "none",
-                        fontSize: 12,
-                        fontWeight: 800,
-                      }}
-                    >
-                      Open TRN BGO Register →
-                    </Link>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {createdBatchesResult.map((res) => (
-                      <div
-                        key={res.tcId}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          flexWrap: "wrap",
-                          gap: 8,
-                          padding: "8px 12px",
-                          borderRadius: 8,
-                          background: "#ffffff",
-                          border: "1px solid #a7f3d0",
-                          fontSize: 13,
-                        }}
-                      >
-                        <div>
-                          <strong>{res.wardLabel}</strong> ({res.wardPcode}) —{" "}
-                          <code style={{ fontWeight: 800, color: "#0f172a" }}>{res.tcId}</code>{" "}
-                          <span style={{ color: "#047857", fontWeight: 700 }}>
-                            ({res.meterCount} meters)
-                          </span>
-                          {res.duplicate ? (
-                            <span
-                              style={{
-                                marginLeft: 8,
-                                padding: "2px 6px",
-                                borderRadius: 4,
-                                background: "#fef3c7",
-                                color: "#92400e",
-                                fontSize: 11,
-                                fontWeight: 700,
-                              }}
-                            >
-                              Existing Batch Returned
-                            </span>
-                          ) : null}
-                        </div>
-                        <Link
-                          to={`/operations/trn-bgo-rows?batchId=${encodeURIComponent(res.tcId)}`}
-                          style={{
-                            color: "#1d4ed8",
-                            fontWeight: 800,
-                            fontSize: 12,
-                            textDecoration: "none",
-                          }}
-                        >
-                          Inspect Batch Rows →
-                        </Link>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -2316,6 +2186,655 @@ export default function TrnBgoUploadPage() {
               defaultPageSize={25}
               emptyText="No rows match the selected filters."
             />
+          </div>
+        </div>
+      ) : null}
+
+      {/* PAGE 2: Dedicated Batch Draft Page (Separated Ward Batches on One Page) */}
+      {parsedRows.length > 0 && viewMode === "DRAFT" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Top Draft Control Bar */}
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: 12,
+              border: "2px solid #2563eb",
+              padding: "20px 24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+              boxShadow: "0 4px 12px rgba(37, 99, 235, 0.08)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 14,
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                  <span
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 9999,
+                      background: "#dbeafe",
+                      color: "#1d4ed8",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Step 3 · Batch Draft Page
+                  </span>
+                  <h3 style={{ margin: 0, fontSize: 19, fontWeight: 900, color: "#0f172a" }}>
+                    Verify Separated Ward Batches ({wardBatchGroups.length}{" "}
+                    {wardBatchGroups.length === 1 ? "Batch" : "Batches"} ·{" "}
+                    {carriedBatchRows.length} TRNs)
+                  </h3>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
+                  A batch can only belong to 1 ward. Your {carriedBatchRows.length} selected TRNs have been separated into{" "}
+                  <strong>
+                    {wardBatchGroups.length} Ward{" "}
+                    {wardBatchGroups.length === 1 ? "Batch" : "Batches"}
+                  </strong>{" "}
+                  below. Verify each batch's TRN list and click{" "}
+                  <strong>Create Batch(es)</strong>. Creation is{" "}
+                  <strong>All-or-Nothing</strong> (creates all batches or fails all).
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={isCreatingBatches}
+                onClick={() => setViewMode("INSPECTION")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#f8fafc",
+                  color: "#334155",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: isCreatingBatches ? "not-allowed" : "pointer",
+                }}
+              >
+                ← Back to File Inspection ({parsedRows.length} Rows)
+              </button>
+            </div>
+
+            {/* Operation Type, Notes & Primary Create Batch(es) Button */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 16,
+                paddingTop: 14,
+                borderTop: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#475569",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Operation Type
+                  </span>
+                  <select
+                    value={selectedTrnType}
+                    onChange={(e) => setSelectedTrnType(e.target.value)}
+                    disabled={isCreatingBatches}
+                    style={{
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "#0f172a",
+                      background: "#ffffff",
+                    }}
+                  >
+                    {TRN_OPERATION_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 280 }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#475569",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Batch Notes (Optional)
+                  </span>
+                  <input
+                    type="text"
+                    value={batchNotes}
+                    onChange={(e) => setBatchNotes(e.target.value)}
+                    disabled={isCreatingBatches}
+                    placeholder="e.g. Credit control disconnection batch"
+                    style={{
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      fontSize: 13,
+                      color: "#0f172a",
+                    }}
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                disabled={isCreatingBatches || wardBatchGroups.length === 0}
+                onClick={handleCreateWardBatches}
+                style={{
+                  padding: "11px 22px",
+                  borderRadius: 8,
+                  border: "1px solid #15803d",
+                  background: isCreatingBatches ? "#86efac" : "#16a34a",
+                  color: "#ffffff",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: isCreatingBatches ? "wait" : "pointer",
+                  boxShadow: "0 2px 6px rgba(22, 163, 74, 0.25)",
+                }}
+              >
+                {isCreatingBatches
+                  ? `Creating ${wardBatchGroups.length} Batch(es)...`
+                  : `Create Batch(es) (${wardBatchGroups.length} ${wardBatchGroups.length === 1 ? "Batch" : "Batches"} · ${carriedBatchRows.length} TRNs)`}
+              </button>
+            </div>
+          </div>
+
+          {/* Separated Ward Batch Sections — Each with its own TRN Table */}
+          {wardBatchGroups.map((group, batchIdx) => {
+            const opOption =
+              TRN_OPERATION_OPTIONS.find((o) => o.value === selectedTrnType) ||
+              TRN_OPERATION_OPTIONS[0];
+            const rowsWithDraftNo = group.rows.map((r, rIdx) => ({
+              ...r,
+              _draftRowNo: rIdx + 1,
+            }));
+
+            return (
+              <div
+                key={group.wardKey}
+                style={{
+                  background: "#ffffff",
+                  borderRadius: 12,
+                  border: "1px solid #cbd5e1",
+                  overflow: "hidden",
+                  boxShadow: "0 1px 4px rgba(15, 23, 42, 0.05)",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "14px 20px",
+                    background: "#f8fafc",
+                    borderBottom: "1px solid #e2e8f0",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        background: "#1e40af",
+                        color: "#ffffff",
+                        fontSize: 12,
+                        fontWeight: 800,
+                      }}
+                    >
+                      Draft Batch {batchIdx + 1} of {wardBatchGroups.length}
+                    </span>
+                    <strong style={{ fontSize: 16, fontWeight: 900, color: "#0f172a" }}>
+                      {group.wardLabel}{" "}
+                      <span style={{ color: "#2563eb", fontFamily: "monospace" }}>
+                        ({group.wardPcode})
+                      </span>
+                    </strong>
+                    <span
+                      style={{
+                        padding: "3px 10px",
+                        borderRadius: 9999,
+                        background: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        color: "#1d4ed8",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        fontFamily: "monospace",
+                      }}
+                    >
+                      ID: TRN_BGO_YYYYMMDD_HHMMSS_{group.wardPcode}_{opOption.code}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 9999,
+                        background: "#dcfce7",
+                        color: "#15803d",
+                        fontSize: 12,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {group.rows.length} {group.rows.length === 1 ? "TRN" : "TRNs"}
+                    </span>
+                  </div>
+                </div>
+
+                <IrepsTable
+                  rows={rowsWithDraftNo}
+                  columns={draftBatchColumns}
+                  rowKey={(r, idx) => r?.meterNo || r?.rowNo || idx}
+                  title={`${group.wardLabel} (${group.wardPcode}) — Constituent TRNs (${group.rows.length})`}
+                  downloads={{
+                    registryName: `Draft_Batch_${group.wardPcode}`,
+                    fileBaseName: `draft_batch_${group.wardPcode.toLowerCase()}`,
+                    scope: { lmName, lmPcode, wardPcode: group.wardPcode, wardLabel: group.wardLabel },
+                  }}
+                  pageSizeOptions={[10, 25, 50, 100]}
+                  defaultPageSize={25}
+                  emptyText="No TRN rows in this ward batch."
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* Feedback Modal on Batch Creation Completion (All-or-Nothing Pass or Fail) */}
+      {creationModalState ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(15, 23, 42, 0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 640,
+              background: "#ffffff",
+              borderRadius: 14,
+              border:
+                creationModalState.status === "PASS"
+                  ? "2px solid #16a34a"
+                  : "2px solid #dc2626",
+              boxShadow: "0 20px 40px rgba(15, 23, 42, 0.25)",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: "18px 24px",
+                background: creationModalState.status === "PASS" ? "#f0fdf4" : "#fef2f2",
+                borderBottom:
+                  creationModalState.status === "PASS"
+                    ? "1px solid #bbf7d0"
+                    : "1px solid #fecaca",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: "50%",
+                    background: creationModalState.status === "PASS" ? "#16a34a" : "#dc2626",
+                    color: "#ffffff",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 18,
+                    fontWeight: 900,
+                  }}
+                >
+                  {creationModalState.status === "PASS" ? "✓" : "✕"}
+                </span>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      color: creationModalState.status === "PASS" ? "#15803d" : "#b91c1c",
+                    }}
+                  >
+                    {creationModalState.status === "PASS"
+                      ? "All-or-Nothing Batch Creation Passed"
+                      : "All-or-Nothing Batch Creation Failed"}
+                  </div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "#0f172a" }}>
+                    {creationModalState.title}
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div
+              style={{
+                padding: "20px 24px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+                maxHeight: "70vh",
+                overflowY: "auto",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 14, color: "#334155", lineHeight: 1.5 }}>
+                {creationModalState.message}
+              </p>
+
+              {creationModalState.status === "FAIL" ? (
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    color: "#991b1b",
+                    fontSize: 13,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                  }}
+                >
+                  <strong>Failure Reason(s):</strong>
+                  {(creationModalState.errors || []).map((errText, idx) => (
+                    <div key={idx} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                      • {errText}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {/* Created Batches Summary List */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        color: "#475569",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Created Ward Batches ({creationModalState.batches.length})
+                    </span>
+                    {creationModalState.batches.map((b) => (
+                      <div
+                        key={b.tcId}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: 8,
+                          background: "#f8fafc",
+                          border: "1px solid #cbd5e1",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: 8,
+                        }}
+                      >
+                        <div>
+                          <strong style={{ fontSize: 13, color: "#0f172a" }}>
+                            {b.wardLabel} ({b.wardPcode})
+                          </strong>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "monospace",
+                              fontWeight: 700,
+                              color: "#1d4ed8",
+                            }}
+                          >
+                            {b.tcId}
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 9999,
+                            background: "#dcfce7",
+                            color: "#15803d",
+                            fontSize: 12,
+                            fontWeight: 800,
+                          }}
+                        >
+                          {b.meterCount} TRNs
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Allocation Choice: Leave Unallocated OR Allocate to TEAM / SP */}
+                  <div
+                    style={{
+                      padding: "16px",
+                      borderRadius: 10,
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <strong style={{ fontSize: 13, color: "#0f172a" }}>
+                      Batch Allocation Option Before Opening Register:
+                    </strong>
+
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      {[
+                        {
+                          key: "UNALLOCATED",
+                          label: "Leave Unallocated (Bank in Register)",
+                        },
+                        {
+                          key: "TEAM",
+                          label: `Allocate to Operational Team (${availableTeams.length})`,
+                        },
+                        {
+                          key: "SP",
+                          label: `Allocate to Service Provider (${availableServiceProviders.length})`,
+                        },
+                      ].map((opt) => {
+                        const active = allocationMode === opt.key;
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => {
+                              setAllocationMode(opt.key);
+                              setAllocationError("");
+                            }}
+                            style={{
+                              padding: "8px 14px",
+                              borderRadius: 8,
+                              border: active ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                              background: active ? "#eff6ff" : "#ffffff",
+                              color: active ? "#1d4ed8" : "#334155",
+                              fontSize: 12,
+                              fontWeight: 800,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {allocationMode === "TEAM" ? (
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>
+                          Select Operational Team
+                        </span>
+                        <select
+                          value={selectedTeamId}
+                          onChange={(e) => setSelectedTeamId(e.target.value)}
+                          style={{
+                            padding: "9px 12px",
+                            borderRadius: 8,
+                            border: "1px solid #cbd5e1",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#0f172a",
+                            background: "#ffffff",
+                          }}
+                        >
+                          <option value="">-- Select Team --</option>
+                          {availableTeams.map((team) => (
+                            <option key={team.id} value={team.id}>
+                              {team.name} ({team.memberCount || 0} members)
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+
+                    {allocationMode === "SP" ? (
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>
+                          Select Service Provider (SP)
+                        </span>
+                        <select
+                          value={selectedSpId}
+                          onChange={(e) => setSelectedSpId(e.target.value)}
+                          style={{
+                            padding: "9px 12px",
+                            borderRadius: 8,
+                            border: "1px solid #cbd5e1",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#0f172a",
+                            background: "#ffffff",
+                          }}
+                        >
+                          <option value="">-- Select Service Provider --</option>
+                          {availableServiceProviders.map((sp) => (
+                            <option key={sp.id} value={sp.id}>
+                              {sp.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+
+                    {allocationError ? (
+                      <div
+                        role="alert"
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 6,
+                          background: "#fef2f2",
+                          border: "1px solid #fecaca",
+                          color: "#b91c1c",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {allocationError}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: "14px 24px",
+                background: "#f8fafc",
+                borderTop: "1px solid #e2e8f0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                gap: 12,
+              }}
+            >
+              {creationModalState.status === "FAIL" ? (
+                <button
+                  type="button"
+                  onClick={() => setCreationModalState(null)}
+                  style={{
+                    padding: "9px 18px",
+                    borderRadius: 8,
+                    border: "1px solid #dc2626",
+                    background: "#dc2626",
+                    color: "#ffffff",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  Return to Batch Draft to Fix
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isAllocating}
+                  onClick={handleConfirmPassModalAndNavigate}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 8,
+                    border: "1px solid #15803d",
+                    background: isAllocating ? "#86efac" : "#16a34a",
+                    color: "#ffffff",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: isAllocating ? "wait" : "pointer",
+                  }}
+                >
+                  {isAllocating
+                    ? "Allocating & Opening Register..."
+                    : allocationMode === "UNALLOCATED"
+                      ? "Leave Unallocated & Go to TRN BGO Register →"
+                      : `Allocate ${creationModalState.batches.length} Batch(es) & Go to TRN BGO Register →`}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       ) : null}
