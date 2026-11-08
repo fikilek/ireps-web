@@ -1212,11 +1212,55 @@ export const onAllocateTrnBgoWardBatchesCallable = onCall(
     if (batchIds.length === 0) {
       throw new HttpsError("invalid-argument", "At least one batchId is required for allocation.");
     }
+
+    const writeBatch = db.batch();
+
+    if (targetType === "UNALLOCATE") {
+      for (const tcId of batchIds) {
+        const uploadRef = db.collection(TC_UPLOADS_COLLECTION).doc(tcId);
+        const docSnap = await uploadRef.get();
+        if (docSnap.exists) {
+          const docData = docSnap.data() || {};
+          const inProgress = Number(docData.inProgressRows || 0);
+          const completed = Number(docData.completedRows || 0);
+          if (inProgress > 0 || completed > 0) {
+            throw new HttpsError(
+              "failed-precondition",
+              `Cannot unallocate batch ${tcId}: field execution has already commenced (${inProgress} in progress, ${completed} completed).`
+            );
+          }
+        }
+        const patch = {
+          bgoStatus: "READY_FOR_BGO",
+          workflowState: "READY_FOR_BGO",
+          allocatedTo: FieldValue.delete(),
+          allocatedAt: FieldValue.delete(),
+          allocatedByUid: FieldValue.delete(),
+          allocatedByUser: FieldValue.delete(),
+          assignment: FieldValue.delete(),
+          teamId: FieldValue.delete(),
+          assignedTeamId: FieldValue.delete(),
+          teamName: FieldValue.delete(),
+          spId: FieldValue.delete(),
+          spName: FieldValue.delete(),
+          metadata: buildUpdateMetadata({ caller, actorName, now }),
+        };
+        writeBatch.set(uploadRef, patch, { merge: true });
+      }
+
+      await writeBatch.commit();
+
+      return {
+        success: true,
+        code: "TRN_BGO_BATCHES_UNALLOCATED",
+        batchIds,
+        message: `Unallocated ${batchIds.length} batch(es) successfully.`,
+      };
+    }
+
     if (!targetId) {
       throw new HttpsError("invalid-argument", "A target TEAM or Service Provider must be selected.");
     }
-
-    const writeBatch = db.batch();
 
     for (const tcId of batchIds) {
       const uploadRef = db.collection(TC_UPLOADS_COLLECTION).doc(tcId);
