@@ -588,11 +588,11 @@ async function createBmdBgoBatch({
   const { trnType, scope, geofenceRef, target, worklist, summary } = payloadCheck;
 
   const bgoBatchId = buildBmdBgoBatchId({
+    date: new Date(now),
     lmPcode: scope.lmPcode,
     wardPcode: scope.wardPcode,
-    geofenceId: geofenceRef.id,
-    targetType: target.type,
-    targetId: target.id,
+    trnType,
+    operationCode: "MDIS",
   });
 
   logger.info("onCreateBgoCallable -- BMD START", {
@@ -752,7 +752,7 @@ async function createBmdBgoBatch({
   // 4. Write ERF rows into bgo_rows (MD-BGO-R002 & MD-BGO-R012)
   const erfRefs = Array.isArray(worklist?.erfRefs) ? worklist.erfRefs : [];
   erfRefs.forEach((erf, idx) => {
-    const rowId = `${bgoBatchId}_ROW_${String(idx + 1).padStart(3, "0")}`;
+    const rowId = `${bgoBatchId}_R${String(idx + 1).padStart(6, "0")}`;
     const rowDoc = {
       id: rowId,
       rowNo: idx + 1,
