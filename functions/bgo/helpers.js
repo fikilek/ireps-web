@@ -35,6 +35,32 @@ export function normalizeUpper(value) {
   return normalizeText(value).toUpperCase();
 }
 
+export function resolveRequiredWardPcodeFromGeofence({
+  geofenceData,
+  requestedWardPcode,
+  geofenceName = "selected geofence",
+} = {}) {
+  const resolvedWardPcode = normalizeText(geofenceData?.parents?.wardPcode);
+  if (!hasMeaningfulValue(resolvedWardPcode)) {
+    throw new HttpsError(
+      "failed-precondition",
+      `Geofence "${geofenceName}" has no resolvable ward Pcode. Batch origination was stopped.`,
+    );
+  }
+
+  if (
+    hasMeaningfulValue(requestedWardPcode) &&
+    normalizeUpper(requestedWardPcode) !== normalizeUpper(resolvedWardPcode)
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The selected geofence ward Pcode does not match the requested batch scope.",
+    );
+  }
+
+  return resolvedWardPcode;
+}
+
 export function hasMeaningfulValue(value) {
   const text = normalizeUpper(value);
 
@@ -668,15 +694,19 @@ export function getSastDateParts(date = new Date()) {
 
 export function buildBmdBgoBatchId({
   date = new Date(),
-  lmPcode,
   wardPcode,
   trnType = "METER_DISCOVERY",
   operationCode,
 } = {}) {
+  if (!hasMeaningfulValue(wardPcode)) {
+    throw new Error("A resolvable ward Pcode is required to create an MD BGO batch.");
+  }
+
   const { yyyymmdd, hhmmss } = getSastDateParts(date);
-  const geoToken = wardPcode && wardPcode !== "NAv"
-    ? sanitizeFirestoreIdPart(wardPcode, "NO_WARD")
-    : sanitizeFirestoreIdPart(lmPcode, "NO_LM");
+  const geoToken = sanitizeFirestoreIdPart(wardPcode, "");
+  if (!geoToken) {
+    throw new Error("A resolvable ward Pcode is required to create an MD BGO batch.");
+  }
   const opCode = operationCode || getTrnShortCode(trnType) || "MDIS";
 
   return `MD_BGO_${yyyymmdd}_${hhmmss}_${geoToken}_${normalizeUpper(opCode)}`;
@@ -703,11 +733,11 @@ export function validateCreateBmdBgoPayload(data = {}) {
   );
   const wardName = normalizeText(scope?.wardName || data?.wardName || "NAv") || "NAv";
 
-  if (!lmPcode || !wardPcode) {
+  if (!hasMeaningfulValue(lmPcode)) {
     return {
       ok: false,
       code: "INVALID_BMD_SCOPE",
-      message: "BMD-BGO requires lmPcode and wardPcode",
+      message: "BMD-BGO requires lmPcode",
     };
   }
 
@@ -752,11 +782,22 @@ export function validateCreateBmdBgoPayload(data = {}) {
 
   const seenErfIds = new Set();
   const erfRefs = rawErfRefs
-    .map((erf) => ({
-      id: normalizeText(erf?.id || erf?.erfId || ""),
-      erfNo: normalizeText(erf?.erfNo || erf?.number || erf?.id || "NAv") || "NAv",
-      erfType: normalizeUpper(erf?.erfType || erf?.type || "FORMAL") || "FORMAL",
-    }))
+    .map((erf) => {
+      const rawCentroid = erf?.centroid || {};
+      const latitude = Number(rawCentroid?.latitude ?? rawCentroid?.lat);
+      const longitude = Number(rawCentroid?.longitude ?? rawCentroid?.lng);
+      const centroid = Number.isFinite(latitude) && Number.isFinite(longitude)
+        ? { latitude, longitude }
+        : null;
+
+      return {
+        id: normalizeText(erf?.id || erf?.erfId || ""),
+        erfNo: normalizeText(erf?.erfNo || erf?.number || erf?.id || "NAv") || "NAv",
+        erfType: normalizeUpper(erf?.erfType || erf?.type || "FORMAL") || "FORMAL",
+        centroid,
+        address: normalizeText(erf?.address || erf?.properties?.address || ""),
+      };
+    })
     .filter((erf) => {
       if (!erf.id || seenErfIds.has(erf.id)) return false;
       seenErfIds.add(erf.id);
@@ -792,7 +833,7 @@ export function validateCreateBmdBgoPayload(data = {}) {
     scope: {
       lmPcode,
       lmName,
-      wardPcode,
+      wardPcode: hasMeaningfulValue(wardPcode) ? wardPcode : "",
       wardName,
     },
     geofenceRef,

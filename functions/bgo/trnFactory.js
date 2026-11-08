@@ -615,6 +615,7 @@ export function buildBmdBgoBatchDoc({
     trnType: "BULK_GEOFENCE_ORIGIN",
     operationType: trnType,
     operationCode,
+    batchMode: "BMD",
 
     origin: {
       channel: "OFFICE",
@@ -644,11 +645,11 @@ export function buildBmdBgoBatchDoc({
     },
 
     workflow: {
-      state: "ISSUED",
+      state: target ? "ISSUED" : "READY_FOR_ALLOCATION",
       createdMode: "OFFICE",
-      issuedAt: now,
-      issuedByUid: actorUid || "NAv",
-      issuedByUser: actorName || "NAv",
+      issuedAt: target ? now : null,
+      issuedByUid: target ? actorUid || "NAv" : null,
+      issuedByUser: target ? actorName || "NAv" : null,
       acceptedAt: null,
       acceptedByUid: null,
       acceptedByUser: null,
@@ -708,9 +709,13 @@ export function buildBmdBgoBatchDoc({
       kind: "BGO_BATCH",
       batchMode: "BMD",
       batchId: bgoBatchId,
-      targetType: target.type,
-      targetId: target.id,
-      targetName: target.name,
+      ...(target
+        ? {
+            targetType: target.type,
+            targetId: target.id,
+            targetName: target.name,
+          }
+        : {}),
       geofenceId: geofenceRef.id,
       geofenceName: geofenceRef.name,
       releaseState: BGO_CHILD_RELEASE_STATES.waiting,

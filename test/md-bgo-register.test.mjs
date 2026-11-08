@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildBmdBgoBatchId,
+  resolveRequiredWardPcodeFromGeofence,
+  validateCreateBmdBgoPayload,
+} from "../functions/bgo/helpers.js";
+import { buildBmdBgoBatchDoc } from "../functions/bgo/trnFactory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -527,8 +533,23 @@ test("MD BGO generates canonical MD_BGO_YYYYMMDD_HHMMSS_<WARDPCODE>_MDIS batch I
     "Callables must pass operationCode: 'MDIS' to buildBmdBgoBatchId"
   );
   assert.ok(
-    callablesContent.includes('padStart(6, "0")'),
-    "Row IDs must use canonical _R000001 format"
+    callablesContent.includes('const rowId = `${bgoBatchId}_ROW_${idx + 1}`;'),
+    "Row IDs must use canonical {bgoBatchId}_ROW_{rowNo} format"
+  );
+  assert.match(
+    helpersContent,
+    /if\s*\(!hasMeaningfulValue\(wardPcode\)\)/,
+    "Batch IDs must reject missing ward Pcodes instead of falling back to the LM Pcode"
+  );
+  assert.match(
+    callablesContent,
+    /resolveRequiredWardPcodeFromGeofence\(\{/,
+    "Batch origination must resolve the authoritative ward Pcode from the saved geofence"
+  );
+  assert.match(
+    callablesContent,
+    /throw new HttpsError\(\s*"failed-precondition"/,
+    "Unresolvable ward Pcodes must throw and stop batch origination"
   );
 
   // 3. Rules documentation
@@ -538,4 +559,96 @@ test("MD BGO generates canonical MD_BGO_YYYYMMDD_HHMMSS_<WARDPCODE>_MDIS batch I
     assert.match(rulesContent, /MD-BGO-R014/, "Must document MD-BGO-R014 in rules");
     assert.match(rulesContent, /MD_BGO_YYYYMMDD_HHMMSS/, "Must document ID format in rules");
   }
+});
+
+test("MD BGO batch IDs require ward Pcodes and use SAST", () => {
+  assert.equal(
+    buildBmdBgoBatchId({
+      date: new Date("2026-11-08T07:25:30.000Z"),
+      wardPcode: "ZA5241006",
+      operationCode: "MDIS",
+    }),
+    "MD_BGO_20261108_092530_ZA5241006_MDIS",
+  );
+
+  assert.throws(
+    () => buildBmdBgoBatchId({ lmPcode: "ZA5241", operationCode: "MDIS" }),
+    /resolvable ward Pcode is required/i,
+  );
+  assert.throws(
+    () => buildBmdBgoBatchId({ wardPcode: "NAv", operationCode: "MDIS" }),
+    /resolvable ward Pcode is required/i,
+  );
+});
+
+test("MD BGO ward resolution throws when absent and rejects mismatched scope", () => {
+  assert.equal(
+    resolveRequiredWardPcodeFromGeofence({
+      geofenceData: { parents: { wardPcode: "ZA5241006" } },
+      requestedWardPcode: "ZA5241006",
+    }),
+    "ZA5241006",
+  );
+
+  assert.throws(
+    () => resolveRequiredWardPcodeFromGeofence({
+      geofenceData: { parents: { lmPcode: "ZA5241" } },
+      requestedWardPcode: "",
+      geofenceName: "Gf W6 Nightingale1",
+    }),
+    (error) => error?.code === "failed-precondition" && /ward Pcode/i.test(error.message),
+  );
+  assert.throws(
+    () => resolveRequiredWardPcodeFromGeofence({
+      geofenceData: { parents: { wardPcode: "ZA5241006" } },
+      requestedWardPcode: "ZA5241007",
+    }),
+    (error) => error?.code === "failed-precondition",
+  );
+});
+
+test("MD BGO ERF worklist preserves cadastral row coordinates and address", () => {
+  const result = validateCreateBmdBgoPayload({
+    batchMode: "BMD",
+    trnType: "METER_DISCOVERY",
+    scope: { lmPcode: "ZA5241", wardPcode: "ZA5241006" },
+    geofenceRef: { id: "GF1", name: "Gf W6 Nightingale1" },
+    worklist: {
+      erfRefs: [{
+        id: "ERF1",
+        erfNo: "3504",
+        erfType: "FORMAL",
+        centroid: { lat: -28.2, lng: 30.1 },
+        address: "3619 Robin Road",
+      }],
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.worklist.erfRefs[0], {
+    id: "ERF1",
+    erfNo: "3504",
+    erfType: "FORMAL",
+    centroid: { latitude: -28.2, longitude: 30.1 },
+    address: "3619 Robin Road",
+  });
+});
+
+test("MD BGO banked batch is READY_FOR_ALLOCATION and supports no initial target", () => {
+  const batch = buildBmdBgoBatchDoc({
+    bgoBatchId: "MD_BGO_20261108_092530_ZA5241006_MDIS",
+    scope: { lmPcode: "ZA5241", wardPcode: "ZA5241006" },
+    geofenceRef: { id: "GF1", name: "Gf W6 Nightingale1" },
+    target: null,
+    worklist: { erfRefs: [{ id: "ERF1", erfNo: "3504" }] },
+    summary: { erfCount: 1, premiseCount: 0, meterCount: 0 },
+    now: "2026-11-08T07:25:30.000Z",
+    actorUid: "user-1",
+    actorName: "User One",
+  });
+
+  assert.equal(batch.batchMode, "BMD");
+  assert.equal(batch.workflow.state, "READY_FOR_ALLOCATION");
+  assert.deepEqual(batch.assignment.targets, []);
+  assert.equal(batch.bgo.targetType, undefined);
 });

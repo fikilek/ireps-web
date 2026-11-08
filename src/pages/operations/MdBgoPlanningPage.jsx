@@ -826,7 +826,7 @@ function MdBgoMapInner({
       if (draftPolygonRef.current) draftPolygonRef.current.setMap(null);
       clearMapObjects(draftMarkersRef);
     };
-  }, [map, drawingPoints]);
+  }, [map, drawingPoints, onPointDrag]);
 
   // Click listener for drawing
   useEffect(() => {
@@ -841,7 +841,7 @@ function MdBgoMapInner({
     });
 
     return () => {
-      google.maps.event.removeListener(listener);
+      window.google.maps.event.removeListener(listener);
     };
   }, [map, isDrawing, onMapClick]);
 
@@ -1220,6 +1220,12 @@ export default function MdBgoPlanningPage() {
     try {
       const res = await createBgo(payload).unwrap();
       const newBatchId = res?.bgoBatchId || res?.data?.bgoBatchId || res?.id;
+      if (res?.success === false) {
+        throw new Error(res.message || "Failed to originate MD BGO batch.");
+      }
+      if (!newBatchId) {
+        throw new Error("Batch origination returned no batch ID. The dialog remains open for review.");
+      }
 
       setSavedGeofenceLanding((prev) =>
         prev

@@ -1,4 +1,4 @@
-import { onCall } from "firebase-functions/v2/https";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
 
@@ -15,7 +15,10 @@ import {
   getTcRowTrnType,
   hasMeaningfulValue,
   isTcRowReadyForBgo,
+  normalizeText,
+  normalizeUpper,
   normalizeGeofenceRef,
+  resolveRequiredWardPcodeFromGeofence,
   resolveBgoCreateAuthority,
   safeArray,
   selectedGeofenceBelongsToRow,
@@ -585,12 +588,47 @@ async function createBmdBgoBatch({
     return buildFailureResult(payloadCheck.code, payloadCheck.message);
   }
 
-  const { trnType, scope, geofenceRef, target, worklist, summary } = payloadCheck;
+  const { trnType, geofenceRef, target, worklist, summary } = payloadCheck;
+  let { scope } = payloadCheck;
+
+  // Resolve ward identity from the saved geofence itself. The client scope is
+  // only a consistency check and must never become an LM-code fallback.
+  const fenceRef = db.collection("geo_fences").doc(geofenceRef.id);
+  const fenceSnap = await fenceRef.get();
+  if (!fenceSnap.exists) {
+    throw new HttpsError(
+      "failed-precondition",
+      `Geofence "${geofenceRef.name || geofenceRef.id}" was not found; its ward Pcode cannot be resolved.`,
+    );
+  }
+
+  const fenceData = fenceSnap.data() || {};
+  const resolvedWardPcode = resolveRequiredWardPcodeFromGeofence({
+    geofenceData: fenceData,
+    requestedWardPcode: scope.wardPcode,
+    geofenceName: geofenceRef.name || geofenceRef.id,
+  });
+
+  const resolvedLmPcode = normalizeText(fenceData?.parents?.lmPcode);
+  if (
+    hasMeaningfulValue(resolvedLmPcode) &&
+    normalizeUpper(scope.lmPcode) !== normalizeUpper(resolvedLmPcode)
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The selected geofence municipality does not match the requested batch scope.",
+    );
+  }
+
+  scope = {
+    ...scope,
+    lmPcode: resolvedLmPcode || scope.lmPcode,
+    wardPcode: resolvedWardPcode,
+  };
 
   const bgoBatchId = buildBmdBgoBatchId({
     date: new Date(now),
-    lmPcode: scope.lmPcode,
-    wardPcode: scope.wardPcode,
+    wardPcode: resolvedWardPcode,
     trnType,
     operationCode: "MDIS",
   });
@@ -609,17 +647,12 @@ async function createBmdBgoBatch({
   });
 
   // 1. Geofence link status check (MD-BGO-R012)
-  const fenceRef = db.collection("geo_fences").doc(geofenceRef.id);
-  const fenceSnap = await fenceRef.get();
-  if (fenceSnap.exists) {
-    const fenceData = fenceSnap.data() || {};
-    if (fenceData.bgo?.linkState === "LINKED" && fenceData.bgo?.batchId) {
-      return buildFailureResult(
-        "GEOFENCE_ALREADY_BATCHED",
-        `Geofence "${geofenceRef.name || geofenceRef.id}" is already linked to batch ${fenceData.bgo.batchId}.`,
-        { existingBatchId: fenceData.bgo.batchId },
-      );
-    }
+  if (fenceData.bgo?.linkState === "LINKED" && fenceData.bgo?.batchId) {
+    return buildFailureResult(
+      "GEOFENCE_ALREADY_BATCHED",
+      `Geofence "${geofenceRef.name || geofenceRef.id}" is already linked to batch ${fenceData.bgo.batchId}.`,
+      { existingBatchId: fenceData.bgo.batchId },
+    );
   }
 
   // 2. ERF Batch Exclusivity Guard (MD-BGO-R013)
@@ -752,7 +785,7 @@ async function createBmdBgoBatch({
   // 4. Write ERF rows into bgo_rows (MD-BGO-R002 & MD-BGO-R012)
   const erfRefs = Array.isArray(worklist?.erfRefs) ? worklist.erfRefs : [];
   erfRefs.forEach((erf, idx) => {
-    const rowId = `${bgoBatchId}_R${String(idx + 1).padStart(6, "0")}`;
+    const rowId = `${bgoBatchId}_ROW_${idx + 1}`;
     const rowDoc = {
       id: rowId,
       rowNo: idx + 1,
@@ -1414,6 +1447,8 @@ export const onCreateBgoCallable = onCall(async (request) => {
       stack: error?.stack || "NAv",
       code: error?.code || "NAv",
     });
+
+    if (error instanceof HttpsError) throw error;
 
     return buildFailureResult(
       "UNKNOWN_ERROR",
