@@ -328,9 +328,9 @@ export default function TrnBgoRegisterPage() {
       export: false,
       render: (batch) => (
         <Link
-          to={`/operations/tc-uploads/${batch.id}/bgo`}
+          to={`/operations/trn-bgo/map?batchId=${encodeURIComponent(batch.id)}`}
           style={styles.mapLinkButton}
-          title="View BGO Geofences"
+          title="View Batch Map"
         >
           <svg
             width="17"
@@ -427,17 +427,24 @@ export default function TrnBgoRegisterPage() {
       sortable: false,
       export: false,
       render: (batch) => {
-        const canAllocate = Number(batch.readyRows || 0) > 0 || batch.bgoStatus === "READY_FOR_BGO";
+        const alloc = getBatchAllocationStatus(batch);
+        const isAllocated = alloc.label === "Allocated";
         return (
           <Link
-            to={`/operations/tc-uploads/${batch.id}/bgo`}
+            to={`/operations/trn-bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
             style={{
               ...styles.allocateButton,
-              ...(!canAllocate ? { opacity: 0.5, pointerEvents: "none" } : null),
+              ...(isAllocated
+                ? {
+                    background: "#ecfdf5",
+                    borderColor: "#a7f3d0",
+                    color: "#047857",
+                  }
+                : null),
             }}
-            title={canAllocate ? "Open allocation board" : "Batch not ready for allocation"}
+            title={isAllocated ? `Allocated to ${batch.allocatedTo || "Team/SP"}` : "Allocate this batch"}
           >
-            Allocate
+            {isAllocated ? "Allocated" : "Allocate"}
           </Link>
         );
       },

@@ -218,6 +218,24 @@ export default function TrnBgoRowsPage() {
       ),
     },
     {
+      key: "meterType",
+      label: "Meter Type",
+      width: 120,
+      sortable: true,
+      filter: "select",
+      value: (r) => r.meterType,
+      sortValue: (r) => r.meterType,
+    },
+    {
+      key: "meterPhase",
+      label: "Meter Phase",
+      width: 120,
+      sortable: true,
+      filter: "select",
+      value: (r) => r.meterPhase,
+      sortValue: (r) => r.meterPhase,
+    },
+    {
       key: "meterStatus",
       label: "Meter State",
       width: 120,
@@ -473,7 +491,12 @@ export default function TrnBgoRowsPage() {
 
       <div style={styles.panel}>
         <IrepsTable
-          data={displayRows}
+          rows={displayRows}
+          downloads={{
+            registryName: `TRN BGO Batch Rows ${batchId || ""}`.trim(),
+            fileBaseName: `trn_bgo_rows_${(batchId || "batch").toLowerCase()}`,
+            scope: { lmName: resolvedLmName, lmPcode: activeLmPcode, batchId },
+          }}
           columns={columns}
           loading={isLoading}
           emptyText="No constituent meters found for this batch."
