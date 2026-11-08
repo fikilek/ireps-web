@@ -82,8 +82,6 @@ import {
   onUploadAndValidateTcCallable,
   onCreateTrnBgoWardBatchesCallable,
   onAllocateTrnBgoWardBatchesCallable,
-  onCreateTrnBgoWardBatchesCallable,
-  onAllocateTrnBgoWardBatchesCallable,
 } from "./tcUploads/callables.js";
 import { onRefreshTcUploadGeofenceReadinessCallable } from "./tcUploads/refreshCallable.js";
 import { onDeleteTcUploadCallable } from "./tcUploads/deleteCallable.js";
@@ -293,6 +291,8 @@ export {
   onIrepsSelectOptionsCallable,
   onIrepsSelectLookupAdminCallable,
   onUploadAndValidateTcCallable,
+  onCreateTrnBgoWardBatchesCallable,
+  onAllocateTrnBgoWardBatchesCallable,
   onRefreshTcUploadGeofenceReadinessCallable,
   onDeleteTcUploadCallable,
   onCreateBgoCallable,
