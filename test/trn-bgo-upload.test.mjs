@@ -309,3 +309,53 @@ test("TRN-BGO-R014: Ward-Grouped Batch Creation and TRN_BGO_YYYYMMDD_HHMMSS_<WAR
   });
   assert.equal(batchIdWard6, "TRN_BGO_20261107_100500_ZA5241006_MDCN");
 });
+
+
+test("TRN-BGO-R015: Batch Draft Page, Atomic All-or-Nothing Creation Callable, and Pass/Fail Allocation Modal", () => {
+  const uploadPagePath = path.join(
+    repoRoot,
+    "src/pages/operations/TrnBgoUploadPage.jsx",
+  );
+  const callablesPath = path.join(
+    repoRoot,
+    "functions/tcUploads/callables.js",
+  );
+  const tcApiPath = path.join(repoRoot, "src/redux/tcApi.js");
+  const uploadContent = fs.readFileSync(uploadPagePath, "utf8");
+  const callablesContent = fs.readFileSync(callablesPath, "utf8");
+  const tcApiContent = fs.readFileSync(tcApiPath, "utf8");
+
+  assert.ok(
+    uploadContent.includes('viewMode === "DRAFT"'),
+    'TrnBgoUploadPage must render a dedicated Batch Draft Page when viewMode === "DRAFT"',
+  );
+  assert.ok(
+    uploadContent.includes("← Back to File Inspection"),
+    "Batch Draft Page must include a Back to File Inspection button",
+  );
+  assert.ok(
+    uploadContent.includes("creationModalState ? ("),
+    "TrnBgoUploadPage must render a Feedback Modal after batch creation attempt",
+  );
+  assert.ok(
+    uploadContent.includes("handleConfirmPassModalAndNavigate"),
+    "Pass modal must allow allocating created batches to a TEAM or SP or leaving unallocated and navigating to TRN BGO Register",
+  );
+  assert.ok(
+    uploadContent.includes('navigate("/operations/trn-bgo")'),
+    "Pass modal must navigate to /operations/trn-bgo where created batches are listed",
+  );
+  assert.ok(
+    callablesContent.includes("export const onCreateTrnBgoWardBatchesCallable"),
+    "functions/tcUploads/callables.js must export onCreateTrnBgoWardBatchesCallable for atomic all-or-nothing creation",
+  );
+  assert.ok(
+    callablesContent.includes("export const onAllocateTrnBgoWardBatchesCallable"),
+    "functions/tcUploads/callables.js must export onAllocateTrnBgoWardBatchesCallable for post-creation TEAM/SP allocation",
+  );
+  assert.ok(
+    tcApiContent.includes("useCreateTrnBgoWardBatchesMutation") &&
+      tcApiContent.includes("useAllocateTrnBgoWardBatchesMutation"),
+    "tcApi.js must export useCreateTrnBgoWardBatchesMutation and useAllocateTrnBgoWardBatchesMutation",
+  );
+});

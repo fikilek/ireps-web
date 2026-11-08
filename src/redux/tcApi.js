@@ -132,6 +132,13 @@ function normalizeTcUploadDoc(docSnap) {
     wardPcode: valueOrNav(data.wardPcode || data.parents?.wardPcode),
     validationState: valueOrNav(data.validationState),
     bgoStatus: valueOrNav(data.bgoStatus),
+    workflowState: valueOrNav(data.workflowState || data.workflow?.state),
+    assignment: data.assignment || null,
+    teamId: data.teamId || data.assignedTeamId || null,
+    teamName: data.teamName || null,
+    spId: data.spId || null,
+    spName: data.spName || null,
+    allocatedTo: data.allocatedTo || null,
     writeState: valueOrNav(data.writeState),
     totalRows: safeNumber(data.totalRows ?? summary.totalRows),
     validRows: safeNumber(data.validRows ?? summary.validRows),
@@ -459,6 +466,50 @@ export const tcApi = createApi({
       },
     }),
 
+    createTrnBgoWardBatches: builder.mutation({
+      async queryFn(payload) {
+        try {
+          const callable = httpsCallable(
+            functions,
+            "onCreateTrnBgoWardBatchesCallable",
+          );
+          const response = await callable(payload || {});
+          return { data: response.data };
+        } catch (error) {
+          return {
+            error: {
+              message:
+                error?.message || "Failed to create TRN BGO ward batches.",
+              code: error?.code || "unknown",
+              details: error?.details || null,
+            },
+          };
+        }
+      },
+    }),
+
+    allocateTrnBgoWardBatches: builder.mutation({
+      async queryFn(payload) {
+        try {
+          const callable = httpsCallable(
+            functions,
+            "onAllocateTrnBgoWardBatchesCallable",
+          );
+          const response = await callable(payload || {});
+          return { data: response.data };
+        } catch (error) {
+          return {
+            error: {
+              message:
+                error?.message || "Failed to allocate TRN BGO ward batches.",
+              code: error?.code || "unknown",
+              details: error?.details || null,
+            },
+          };
+        }
+      },
+    }),
+
     uploadAndValidateTc: builder.mutation({
       async queryFn(payload) {
         try {
@@ -531,6 +582,8 @@ export const {
   useGetTcUploadsQuery,
   useGetTcUploadByIdQuery,
   useGetTcRowsByTcIdQuery,
+  useCreateTrnBgoWardBatchesMutation,
+  useAllocateTrnBgoWardBatchesMutation,
   useUploadAndValidateTcMutation,
   useDeleteTcUploadMutation,
   useRefreshTcUploadGeofenceReadinessMutation,
