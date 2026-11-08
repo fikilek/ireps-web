@@ -796,7 +796,7 @@ export function validateCreateBmdBgoPayload(data = {}) {
       wardName,
     },
     geofenceRef,
-    target: targetCheck.target,
+    target,
     worklist: {
       type: "ERF_LIST",
       erfRefs,
