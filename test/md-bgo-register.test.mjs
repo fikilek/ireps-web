@@ -507,4 +507,35 @@ test("MD BGO Planning Map supports creation-phase draggable nodes without Map co
     assert.match(rulesContent, /Draggable Polygon Nodes/, "Must name Draggable Polygon Nodes in rules");
   }
 });
+test("MD BGO generates canonical MD_BGO_YYYYMMDD_HHMMSS_<WARDPCODE>_MDIS batch IDs (MD-BGO-R014)", () => {
+  const helpersPath = path.join(repoRoot, "functions/bgo/helpers.js");
+  assert.ok(fs.existsSync(helpersPath), "helpers.js must exist");
+  const helpersContent = fs.readFileSync(helpersPath, "utf8");
 
+  // 1. Helpers function structure
+  assert.match(helpersContent, /export function getSastDateParts/, "Must export getSastDateParts");
+  assert.match(helpersContent, /export function buildBmdBgoBatchId/, "Must export buildBmdBgoBatchId");
+  assert.ok(helpersContent.includes("MD_BGO_"), "Must build MD_BGO_ prefix");
+  assert.ok(helpersContent.includes("getSastDateParts(date)"), "Must use getSastDateParts for SAST timestamp");
+
+  // 2. Callables usage
+  const callablesPath = path.join(repoRoot, "functions/bgo/callables.js");
+  assert.ok(fs.existsSync(callablesPath), "callables.js must exist");
+  const callablesContent = fs.readFileSync(callablesPath, "utf8");
+  assert.ok(
+    callablesContent.includes('operationCode: "MDIS"'),
+    "Callables must pass operationCode: 'MDIS' to buildBmdBgoBatchId"
+  );
+  assert.ok(
+    callablesContent.includes('padStart(6, "0")'),
+    "Row IDs must use canonical _R000001 format"
+  );
+
+  // 3. Rules documentation
+  const rulesPath = path.join(repoRoot, "../ireps-rules/bgo/md-bgo-rules.md");
+  if (fs.existsSync(rulesPath)) {
+    const rulesContent = fs.readFileSync(rulesPath, "utf8");
+    assert.match(rulesContent, /MD-BGO-R014/, "Must document MD-BGO-R014 in rules");
+    assert.match(rulesContent, /MD_BGO_YYYYMMDD_HHMMSS/, "Must document ID format in rules");
+  }
+});

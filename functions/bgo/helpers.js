@@ -651,25 +651,35 @@ export function isBmdBgoCreatePayload(data = {}) {
   );
 }
 
+export function getSastDateParts(date = new Date()) {
+  const sastDate = new Date(date.getTime() + 2 * 60 * 60 * 1000);
+  const year = String(sastDate.getUTCFullYear());
+  const month = String(sastDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(sastDate.getUTCDate()).padStart(2, "0");
+  const hour = String(sastDate.getUTCHours()).padStart(2, "0");
+  const minute = String(sastDate.getUTCMinutes()).padStart(2, "0");
+  const second = String(sastDate.getUTCSeconds()).padStart(2, "0");
+
+  return {
+    yyyymmdd: `${year}${month}${day}`,
+    hhmmss: `${hour}${minute}${second}`,
+  };
+}
+
 export function buildBmdBgoBatchId({
+  date = new Date(),
   lmPcode,
   wardPcode,
-  geofenceId,
-  targetType,
-  targetId,
-}) {
-  const targetHash = targetId ? buildHash(targetId, 8) : "READY";
-  const targetTypePart = targetType || "UNALLOCATED";
+  trnType = "METER_DISCOVERY",
+  operationCode,
+} = {}) {
+  const { yyyymmdd, hhmmss } = getSastDateParts(date);
+  const geoToken = wardPcode && wardPcode !== "NAv"
+    ? sanitizeFirestoreIdPart(wardPcode, "NO_WARD")
+    : sanitizeFirestoreIdPart(lmPcode, "NO_LM");
+  const opCode = operationCode || getTrnShortCode(trnType) || "MDIS";
 
-  return [
-    "BMD",
-    sanitizeFirestoreIdPart(lmPcode, "NO_LM"),
-    sanitizeFirestoreIdPart(wardPcode, "NO_WARD"),
-    "BGO",
-    sanitizeFirestoreIdPart(geofenceId, "NO_GEOFENCE"),
-    sanitizeFirestoreIdPart(targetTypePart, "NO_TARGET"),
-    targetHash,
-  ].join("_");
+  return `MD_BGO_${yyyymmdd}_${hhmmss}_${geoToken}_${normalizeUpper(opCode)}`;
 }
 
 export function validateCreateBmdBgoPayload(data = {}) {
