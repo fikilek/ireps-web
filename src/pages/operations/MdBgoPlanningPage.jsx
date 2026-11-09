@@ -1604,11 +1604,20 @@ export default function MdBgoPlanningPage() {
               disabled={!selectedWardPcode}
             >
               <option value="">All geofences in ward</option>
-              {displayGeofences.map((gf) => (
-                <option key={gf.id} value={gf.id}>
-                  {gf.name}
-                </option>
-              ))}
+              {displayGeofences.map((gf) => {
+                const linkedToBatch = Boolean(
+                  gf?.bgo?.linkState === "LINKED" && gf?.bgo?.batchId,
+                );
+                return (
+                  <option
+                    key={gf.id}
+                    value={gf.id}
+                    style={linkedToBatch ? { color: "#b91c1c", fontWeight: 700 } : undefined}
+                  >
+                    {gf.name}
+                  </option>
+                );
+              })}
             </select>
           </label>
 
