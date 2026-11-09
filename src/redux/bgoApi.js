@@ -388,6 +388,20 @@ export const bgoApi = createApi({
   reducerPath: "bgoApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    allocateMdBgoBatchesTogether: builder.mutation({
+      async queryFn(payload) {
+        try {
+          const callable = httpsCallable(functions, "onAllocateMdBgoBatchesTogetherCallable");
+          const result = await callable(payload || {});
+          const data = result?.data || {};
+          if (data?.success === false) return { error: { status: data?.code || "MD_BGO_ALLOCATION_FAILED", data, message: data?.message || "Failed to allocate MD BGO batches" } };
+          return { data };
+        } catch (error) {
+          const uncertain = ["deadline-exceeded", "unavailable", "cancelled", "internal"].includes(String(error?.code || "").replace(/^functions\//, ""));
+          return { error: { status: error?.code || "MD_BGO_ALLOCATION_ERROR", data: error, message: error?.message || "Failed to allocate MD BGO batches", uncertain } };
+        }
+      },
+    }),
     createBgo: builder.mutation({
       async queryFn(payload) {
         try {
@@ -732,6 +746,7 @@ export const {
   useDeleteUnacceptedBgoMutation,
   useGetBmdBgoBatchesByWardQuery,
   useGetBgoBatchesByLmQuery,
+  useAllocateMdBgoBatchesTogetherMutation,
   useGetBgoBatchesByTcIdQuery,
   useGetBgoRowsByTcIdQuery,
   useGetBgoRowsByBatchIdQuery,

@@ -124,6 +124,7 @@ import { onIssuedWorkExpires } from "./meterLifecycle/expireSilentWorkSchedule.j
 import { onCheckMeterRegistrationCallable } from "./meterLifecycle/checkRegistrationCallable.js";
 
 import { onCreateBgoCallable } from "./bgo/callables.js";
+import { onAllocateMdBgoBatchesTogetherCallable } from "./bgo/allocationCallable.js";
 import { createOrLinkMdBgoPremise } from "./bgo/mdBgoPremiseLink.js";
 import {
   onAcceptRejectBgoBatchCallable,
@@ -297,6 +298,7 @@ export {
   onRefreshTcUploadGeofenceReadinessCallable,
   onDeleteTcUploadCallable,
   onCreateBgoCallable,
+  onAllocateMdBgoBatchesTogetherCallable,
   onAcceptRejectBgoBatchCallable,
   onReverseBgoBatchAcceptanceCallable,
   onDeleteUnacceptedBgoCallable,

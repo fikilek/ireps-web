@@ -8,6 +8,7 @@ import {
   useGetBgoBatchesByLmQuery,
   useDeleteUnacceptedBgoMutation,
 } from "../../redux/bgoApi";
+import { useMdBgoAllocationSelection } from "./md-bgo/allocationSelection";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 
@@ -253,17 +254,8 @@ export default function MdBgoRegisterPage() {
 
   const [deleteBgo, { isLoading: isDeletingBgo }] = useDeleteUnacceptedBgoMutation();
 
-  // Selection ticks
-  const [tickedBatchIds, setTickedBatchIds] = useState(new Set());
-  const toggleTick = (id) => {
-    setTickedBatchIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const clearTicks = () => setTickedBatchIds(new Set());
+  // MD-BGO-R017: register ticks persist per LM so the Allocation Map can show the same selection.
+  const { selectedIds: tickedBatchIds, isTicked, toggle: toggleTick, clear: clearTicks } = useMdBgoAllocationSelection(lmPcode);
 
   // Delete modal state
   const [deleteCandidate, setDeleteCandidate] = useState(null);
@@ -487,7 +479,7 @@ export default function MdBgoRegisterPage() {
             to="/operations/bgo/allocation"
             style={styles.secondaryLinkButton}
           >
-            Allocation Board ({tickedBatchIds.size})
+            Allocation Map ({tickedBatchIds.length})
           </Link>
 
           <Link
@@ -497,7 +489,7 @@ export default function MdBgoRegisterPage() {
             MD BGO Dashboard
           </Link>
 
-          {tickedBatchIds.size > 0 ? (
+          {tickedBatchIds.length > 0 ? (
             <button
               type="button"
               style={styles.clearTicksButton}
@@ -743,7 +735,7 @@ export default function MdBgoRegisterPage() {
                   {pagedBatches.map((batch) => {
                     const status = getAllocationStatus(batch);
                     const isAllocated = status === "ALLOCATED" || status === "IN_PROGRESS" || status === "COMPLETED";
-                    const isTicked = tickedBatchIds.has(batch.id);
+                    const rowIsTicked = isTicked(batch.id);
                     const targetName = batch?.targetName || batch?.target?.name || "";
                     const totalErfs = getBatchErfCount(batch);
                     const wardNo = getWardNoFormatted(batch);
@@ -757,7 +749,7 @@ export default function MdBgoRegisterPage() {
                         <Td>
                           <input
                             type="checkbox"
-                            checked={isTicked}
+                            checked={rowIsTicked}
                             onChange={() => toggleTick(batch.id)}
                             aria-label={`Select batch ${batch.id}`}
                           />
