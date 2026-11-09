@@ -765,17 +765,12 @@ export function validateCreateBmdBgoPayload(data = {}) {
       data?.targetId,
   );
 
-  let target = null;
   if (hasTarget) {
-    const targetCheck = validateTarget(
-      data?.target || {
-        type: data?.targetType,
-        id: data?.targetId,
-        name: data?.targetName,
-      },
-    );
-    if (!targetCheck.ok) return targetCheck;
-    target = targetCheck.target;
+    return {
+      ok: false,
+      code: "BMD_INITIAL_ALLOCATION_NOT_SUPPORTED",
+      message: "MD BGO batches are created unallocated. Allocate them from the MD BGO Register or Allocation Map.",
+    };
   }
 
   const rawErfRefs = safeArray(data?.worklist?.erfRefs || data?.erfRefs);
@@ -837,7 +832,7 @@ export function validateCreateBmdBgoPayload(data = {}) {
       wardName,
     },
     geofenceRef,
-    target,
+    target: null,
     worklist: {
       type: "ERF_LIST",
       erfRefs,

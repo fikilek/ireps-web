@@ -405,10 +405,18 @@ test("MD BGO Planning Map supports geofence-to-batch two-way linkage and origina
   assert.match(content, /Originate Batch from Geofence/, "Must render Originate Batch modal dialog");
   assert.match(content, /landingBadgeBatched/, "Must provide dedicated batched badge style");
 
-  // 2. Allocation options: Bank in Register vs Team
-  assert.match(content, /Bank in Register/, "Must provide Bank in Register allocation option");
-  assert.match(content, /Allocate Now to Team/, "Must provide Allocate Now to Team option");
-  assert.match(content, /useGetAvailableTeamsQuery/, "Must query available teams for allocation");
+  // 2. Origination always creates an unallocated batch and returns to the register.
+  assert.doesNotMatch(content, /Initial Allocation Option|Bank in Register|Allocate Now to Team|Select Operational Team/);
+  assert.doesNotMatch(content, /Proceed to Allocate Batch|createdResult/);
+  const originateHandler = content.match(/const handleOriginateBatch = async \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(originateHandler, "Must define the geofence origination handler");
+  assert.match(originateHandler[1], /navigate\("\/operations\/bgo"\)/, "Successful geofence origination must automatically return to the register");
+  const draftBatchHandler = content.match(/const handleSaveAndCreateBatch = async \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(draftBatchHandler, "Must define the Save & Create Batch handler");
+  assert.match(draftBatchHandler[1], /navigate\("\/operations\/bgo"\)/, "Successful Save & Create Batch must automatically return to the register");
+  const registerPath = path.join(repoRoot, "src/pages/operations/MdBgoRegisterPage.jsx");
+  const registerContent = fs.readFileSync(registerPath, "utf8");
+  assert.match(registerContent, /useState\(\{ key: "createdAt", direction: "desc" \}\)/, "The register must show the newest-created batch first by default");
 
   // 3. Backend BMD batch origination and linkage
   const callablesPath = path.join(repoRoot, "functions/bgo/callables.js");
@@ -421,6 +429,7 @@ test("MD BGO Planning Map supports geofence-to-batch two-way linkage and origina
   const helpersPath = path.join(repoRoot, "functions/bgo/helpers.js");
   const helpersContent = fs.readFileSync(helpersPath, "utf8");
   assert.match(helpersContent, /BMD_GEOFENCE_EXCEEDS_60_ERFS/, "Must enforce 60 ERF limit in BMD payload validation");
+  assert.match(helpersContent, /BMD_INITIAL_ALLOCATION_NOT_SUPPORTED/, "Must prevent initial assignment when creating an MD BGO batch");
 
   const trnFactoryPath = path.join(repoRoot, "functions/bgo/trnFactory.js");
   const trnFactoryContent = fs.readFileSync(trnFactoryPath, "utf8");
@@ -632,6 +641,20 @@ test("MD BGO ERF worklist preserves cadastral row coordinates and address", () =
     centroid: { latitude: -28.2, longitude: 30.1 },
     address: "3619 Robin Road",
   });
+});
+
+test("MD BGO origination rejects an initial allocation target", () => {
+  const result = validateCreateBmdBgoPayload({
+    batchMode: "BMD",
+    trnType: "METER_DISCOVERY",
+    scope: { lmPcode: "ZA5241", wardPcode: "ZA5241006" },
+    geofenceRef: { id: "GF1", name: "Gf W6 Nightingale1" },
+    target: { type: "TEAM", id: "TEAM1", name: "Peter Team" },
+    worklist: { erfRefs: [{ id: "ERF1", erfNo: "3504" }] },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "BMD_INITIAL_ALLOCATION_NOT_SUPPORTED");
 });
 
 test("MD BGO banked batch is READY_FOR_ALLOCATION and supports no initial target", () => {

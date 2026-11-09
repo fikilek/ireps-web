@@ -19,7 +19,6 @@ import {
   useCreateBgoMutation,
   useGetBmdBgoBatchesByWardQuery,
 } from "../../redux/bgoApi";
-import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 
 import {
   getGeoFencePath,
@@ -930,10 +929,7 @@ export default function MdBgoPlanningPage() {
   const [formError, setFormError] = useState("");
   const [editFormError, setEditFormError] = useState("");
   const [isOriginateModalOpen, setIsOriginateModalOpen] = useState(false);
-  const [originateTargetType, setOriginateTargetType] = useState("UNALLOCATED");
-  const [originateTargetId, setOriginateTargetId] = useState("");
   const [originateError, setOriginateError] = useState("");
-  const [createdResult, setCreatedResult] = useState(null);
   const [savedGeofenceLanding, setSavedGeofenceLanding] = useState(null);
 
   // ERFs for selected ward (loaded when layer active, drawing, or when a geofence is selected)
@@ -1004,7 +1000,6 @@ export default function MdBgoPlanningPage() {
   const [createGeoFence, { isLoading: isSavingGeofence }] = useCreateGeoFenceMutation();
   const [updateGeoFence, { isLoading: isUpdatingGeoFence }] = useUpdateGeoFenceMutation();
   const [createBgo, { isLoading: isCreatingBgo }] = useCreateBgoMutation();
-  const { data: availableTeams = [] } = useGetAvailableTeamsQuery({ lmPcode }, { skip: !lmPcode });
   const { data: wardBatches = [] } = useGetBmdBgoBatchesByWardQuery(selectedWardPcode, { skip: !selectedWardPcode });
 
   const handleMapClick = useCallback((point) => {
@@ -1133,8 +1128,6 @@ export default function MdBgoPlanningPage() {
 
   const handleOpenOriginateModal = useCallback(() => {
     if (isAlreadyBatched) return;
-    setOriginateTargetType("UNALLOCATED");
-    setOriginateTargetId("");
     setOriginateError("");
     setIsOriginateModalOpen(true);
   }, [isAlreadyBatched]);
@@ -1173,10 +1166,6 @@ export default function MdBgoPlanningPage() {
       return;
     }
 
-    const selectedTeam = originateTargetType === "TEAM" && originateTargetId
-      ? availableTeams.find((t) => t.id === originateTargetId)
-      : null;
-
     const payload = {
       batchMode: "BMD",
       sourceModule: "BULK_METER_DISCOVERY",
@@ -1207,13 +1196,6 @@ export default function MdBgoPlanningPage() {
         premiseCount: activeLandingCounts.premiseCount,
         meterCount: activeLandingCounts.meterCount,
       },
-      ...(selectedTeam ? {
-        target: {
-          type: "TEAM",
-          id: selectedTeam.id,
-          name: selectedTeam.name,
-        },
-      } : {}),
     };
 
     setOriginateError("");
@@ -1227,19 +1209,8 @@ export default function MdBgoPlanningPage() {
         throw new Error("Batch origination returned no batch ID. The dialog remains open for review.");
       }
 
-      setSavedGeofenceLanding((prev) =>
-        prev
-          ? {
-              ...prev,
-              bgo: {
-                batchId: newBatchId,
-                linkState: "LINKED",
-              },
-            }
-          : null,
-      );
-
       setIsOriginateModalOpen(false);
+      navigate("/operations/bgo");
     } catch (err) {
       setOriginateError(err?.message || err?.data?.message || "Failed to originate MD BGO batch.");
     }
@@ -1568,15 +1539,12 @@ export default function MdBgoPlanningPage() {
 
       const batchResult = await createBgo(batchPayload).unwrap();
       const batchId = batchResult?.bgoBatchId || batchResult?.batchId || batchResult?.id || "";
+      if (!batchId) {
+        throw new Error("Batch origination returned no batch ID. The batch was not confirmed.");
+      }
 
       handleClearDrawing();
-      setCreatedResult({
-        type: "BATCH_CREATED",
-        batchId,
-        geofenceName: fullStandardName,
-        geofenceId,
-        erfCount: erfRefs.length,
-      });
+      navigate("/operations/bgo");
     } catch (err) {
       setFormError(err?.data?.message || err?.message || "Could not create batch.");
     }
@@ -2069,51 +2037,6 @@ export default function MdBgoPlanningPage() {
               <div><strong>Linked Meters:</strong> {activeLandingCounts.meterCount}</div>
             </div>
 
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Initial Allocation Option</label>
-              <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#1e293b" }}>
-                  <input
-                    type="radio"
-                    name="allocationOption"
-                    value="UNALLOCATED"
-                    checked={originateTargetType === "UNALLOCATED"}
-                    onChange={() => setOriginateTargetType("UNALLOCATED")}
-                  />
-                  <span><strong>Bank in Register</strong> (Ready for Allocation later from Register or Board)</span>
-                </label>
-
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#1e293b" }}>
-                  <input
-                    type="radio"
-                    name="allocationOption"
-                    value="TEAM"
-                    checked={originateTargetType === "TEAM"}
-                    onChange={() => setOriginateTargetType("TEAM")}
-                  />
-                  <span><strong>Allocate Now to Team</strong></span>
-                </label>
-              </div>
-            </div>
-
-            {originateTargetType === "TEAM" ? (
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Select Operational Team ({availableTeams.length} available)</label>
-                <select
-                  value={originateTargetId}
-                  onChange={(e) => setOriginateTargetId(e.target.value)}
-                  style={styles.select}
-                >
-                  <option value="">-- Choose Operational Team --</option>
-                  {availableTeams.map((team) => (
-                    <option key={team.id || team.teamId} value={team.id || team.teamId}>
-                      {team.name || team.teamName || team.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-
             <div style={styles.modalActions}>
               <button
                 type="button"
@@ -2127,11 +2050,11 @@ export default function MdBgoPlanningPage() {
                 type="button"
                 style={{
                   ...styles.modalPrimaryButton,
-                  opacity: isCreatingBgo || erfConflicts.length > 0 || (originateTargetType === "TEAM" && !originateTargetId) ? 0.6 : 1,
-                  cursor: isCreatingBgo || erfConflicts.length > 0 || (originateTargetType === "TEAM" && !originateTargetId) ? "not-allowed" : "pointer",
+                  opacity: isCreatingBgo || erfConflicts.length > 0 ? 0.6 : 1,
+                  cursor: isCreatingBgo || erfConflicts.length > 0 ? "not-allowed" : "pointer",
                 }}
                 onClick={handleOriginateBatch}
-                disabled={isCreatingBgo || erfConflicts.length > 0 || (originateTargetType === "TEAM" && !originateTargetId)}
+                disabled={isCreatingBgo || erfConflicts.length > 0}
               >
                 {isCreatingBgo ? "Originating Batch..." : "Originate Batch Now →"}
               </button>
@@ -2332,10 +2255,7 @@ export default function MdBgoPlanningPage() {
               <button
                 type="button"
                 style={styles.modalPrimaryButton}
-                onClick={async () => {
-                  await handleSaveAndCreateBatch();
-                  setIsConfirmModalOpen(false);
-                }}
+                onClick={handleSaveAndCreateBatch}
                 disabled={isSavingGeofence || isCreatingBgo}
               >
                 {isCreatingBgo ? "Creating Batch..." : "Save & Create Batch"}
@@ -2345,62 +2265,6 @@ export default function MdBgoPlanningPage() {
         </div>
       ) : null}
 
-      {/* Creation Success Modal */}
-      {createdResult ? (
-        <div style={styles.modalOverlay} role="presentation">
-          <div style={styles.modalCard} role="dialog" aria-modal="true">
-            <p style={styles.eyebrow}>
-              {createdResult.type === "BATCH_CREATED"
-                ? "MD BGO Batch Created"
-                : "Geofence Saved"}
-            </p>
-            <h3 style={styles.modalTitle}>
-              {createdResult.type === "BATCH_CREATED"
-                ? `Batch ${createdResult.batchId}`
-                : createdResult.geofenceName}
-            </h3>
-            <p style={styles.modalSubtitle}>
-              {createdResult.type === "BATCH_CREATED"
-                ? `Created permanent batch for ${createdResult.geofenceName} with ${createdResult.erfCount} ERFs. Status: READY FOR ALLOCATION.`
-                : `Geofence ${createdResult.geofenceName} saved successfully in Ward ${wardNumber}.`}
-            </p>
-
-            <div style={styles.modalActions}>
-              {createdResult.type === "BATCH_CREATED" ? (
-                <>
-                  <button
-                    type="button"
-                    style={styles.modalSecondaryButton}
-                    onClick={() => {
-                      setCreatedResult(null);
-                      navigate("/operations/bgo");
-                    }}
-                  >
-                    Return to MD BGO Register
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.modalPrimaryButton}
-                    onClick={() => {
-                      navigate(`/operations/bgo/allocation?batchId=${encodeURIComponent(createdResult.batchId)}`);
-                    }}
-                  >
-                    Proceed to Allocate Batch →
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  style={styles.modalPrimaryButton}
-                  onClick={() => setCreatedResult(null)}
-                >
-                  Continue Planning
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }
