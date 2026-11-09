@@ -4,6 +4,7 @@ export const MD_BGO_ALLOCATION_MAX = 15;
 export const MD_BGO_ALLOCATION_STATES = Object.freeze({ READY: "READY", ISSUED: "ISSUED", UNAVAILABLE: "UNAVAILABLE" });
 const text = value => String(value ?? "").trim();
 const upper = value => text(value).toUpperCase();
+const hasTargetId = value => { const id = upper(value); return Boolean(id) && id !== "NAV"; };
 
 export function buildMdBgoAllocationModel({ batches = [], geofences = [] } = {}) {
   const fences = Array.isArray(geofences) ? geofences : [];
@@ -18,7 +19,7 @@ export function buildMdBgoAllocationModel({ batches = [], geofences = [] } = {})
     const fence = fences.find(item => item.id === geofenceId) || fences.find(item => item.bgo?.batchId === batch.id) || null;
     const workflow = upper(batch.workflowState || raw.workflow?.state);
     const issued = ["ISSUED", "ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(workflow);
-    const assigned = Boolean(raw.bgo?.targetId || batch.targetId || raw.assignment?.targets?.length);
+    const assigned = hasTargetId(raw.bgo?.targetId) || hasTargetId(batch.targetId) || Boolean(raw.assignment?.targets?.length);
     if (!fence) { if (workflow === "READY_FOR_ALLOCATION") readyNotOnMap += 1; continue; }
     const count = Number(batch.summary?.erfCount ?? raw.summary?.erfCount ?? raw.worklist?.erfRefs?.length ?? 0) || 0;
     const targetName = text(batch.targetName || batch.target?.name || raw.bgo?.targetName || raw.assignment?.targets?.[0]?.name);

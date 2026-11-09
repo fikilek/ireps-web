@@ -12,6 +12,13 @@ test("MD BGO allocation model maps only BMD batches and labels ready/issued geof
   assert.equal(model.counts.ready, 1); assert.equal(model.counts.issued, 1);
 });
 
+test("normalized NAv target id does not make an unassigned batch unavailable", () => {
+  const unassigned = { ...batch("NAV_BATCH"), targetId: "NAv" };
+  const model = buildMdBgoAllocationModel({ batches: [unassigned], geofences: [fence("NAV_BATCH", "Gf W6 Unassigned")] });
+  assert.equal(model.items[0].state, MD_BGO_ALLOCATION_STATES.READY);
+  assert.deepEqual(toggleMdBgoSelection([], model.items[0]).ids, ["NAV_BATCH"]);
+});
+
 test("selection is capped at 15, totals ERFs and drops batches that cease to be ready", () => {
   const item = { bgoBatchId: "A", state: MD_BGO_ALLOCATION_STATES.READY, erfCount: 4, wardLabel: "Ward 6" };
   assert.deepEqual(toggleMdBgoSelection([], item), { ids: ["A"], message: "" });
