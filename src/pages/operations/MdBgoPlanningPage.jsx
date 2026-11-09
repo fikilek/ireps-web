@@ -2560,8 +2560,8 @@ const styles = {
   mapContainer: {
     position: "relative",
     width: "100%",
-    height: "calc(100vh - 280px)",
-    minHeight: 520,
+    height: "calc(200vh - 560px)",
+    minHeight: 1040,
     borderRadius: 20,
     overflow: "hidden",
     border: "1px solid #cbd5e1",
