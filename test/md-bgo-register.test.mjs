@@ -423,7 +423,7 @@ test("MD BGO Planning Map supports geofence-to-batch two-way linkage and origina
   const callablesContent = fs.readFileSync(callablesPath, "utf8");
   assert.match(callablesContent, /GEOFENCE_ALREADY_BATCHED/, "Must guard against duplicate batch origination for same geofence");
   assert.match(callablesContent, /BGO_COLLECTIONS\.rows/, "Must write ERF rows to bgo_rows collection");
-  assert.match(callablesContent, /linkState:\s*"LINKED"/, "Must link geofence to batch in geo_fences collection");
+  assert.match(callablesContent, /"bgo\.linkState":\s*"LINKED"/, "Must transactionally link geofence to batch in geo_fences collection");
 
   // 4. Backend validation & factory
   const helpersPath = path.join(repoRoot, "functions/bgo/helpers.js");

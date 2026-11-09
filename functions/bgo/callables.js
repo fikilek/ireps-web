@@ -647,7 +647,7 @@ async function createBmdBgoBatch({
   });
 
   // 1. Geofence link status check (MD-BGO-R012)
-  if (fenceData.bgo?.linkState === "LINKED" && fenceData.bgo?.batchId) {
+  if (hasMeaningfulValue(fenceData.bgo?.batchId)) {
     return buildFailureResult(
       "GEOFENCE_ALREADY_BATCHED",
       `Geofence "${geofenceRef.name || geofenceRef.id}" is already linked to batch ${fenceData.bgo.batchId}.`,
@@ -744,47 +744,26 @@ async function createBmdBgoBatch({
     actorName,
     now,
   });
+  const batchRef = db.collection(BGO_COLLECTIONS.batches).doc(bgoBatchId);
+  const historyRef = batchRef.collection("history").doc();
+  const notificationRef = target
+    ? db.collection(BGO_COLLECTIONS.notifications).doc()
+    : null;
+  const notificationDoc = target
+    ? buildBmdBgoNotificationRecord({
+        bgoBatchId,
+        target,
+        geofenceRef,
+        summary,
+        actorUid,
+        actorName,
+        now,
+      })
+    : null;
 
-  const writeJobs = [];
-
-  // Write Batch doc
-  writeJobs.push((batch) => {
-    const batchRef = db.collection(BGO_COLLECTIONS.batches).doc(bgoBatchId);
-    batch.create(batchRef, batchDoc);
-  });
-
-  // Write History doc
-  writeJobs.push((batch) => {
-    const historyRef = db
-      .collection(BGO_COLLECTIONS.batches)
-      .doc(bgoBatchId)
-      .collection("history")
-      .doc();
-
-    batch.set(historyRef, historyDoc);
-  });
-
-  // Write Notification doc only if target assigned
-  if (target) {
-    const notificationDoc = buildBmdBgoNotificationRecord({
-      bgoBatchId,
-      target,
-      geofenceRef,
-      summary,
-      actorUid,
-      actorName,
-      now,
-    });
-
-    writeJobs.push((batch) => {
-      const notificationRef = db.collection(BGO_COLLECTIONS.notifications).doc();
-      batch.set(notificationRef, notificationDoc);
-    });
-  }
-
-  // 4. Write ERF rows into bgo_rows (MD-BGO-R002 & MD-BGO-R012)
+  // 4. Prepare ERF rows for the atomic geofence claim (MD-BGO-R002 & R012).
   const erfRefs = Array.isArray(worklist?.erfRefs) ? worklist.erfRefs : [];
-  erfRefs.forEach((erf, idx) => {
+  const rowWrites = erfRefs.map((erf, idx) => {
     const rowId = `${bgoBatchId}_ROW_${idx + 1}`;
     const rowDoc = {
       id: rowId,
@@ -821,39 +800,106 @@ async function createBmdBgoBatch({
         createdByUser: actorName,
       },
     };
-    writeJobs.push((batch) => {
-      const rowRef = db.collection(BGO_COLLECTIONS.rows).doc(rowId);
-      batch.create(rowRef, rowDoc);
+    return {
+      ref: db.collection(BGO_COLLECTIONS.rows).doc(rowId),
+      data: rowDoc,
+    };
+  });
+
+  // Claim the geofence and create its batch in one transaction. Reading and
+  // writing the fence serializes simultaneous originations for this polygon.
+  const transactionResult = await db.runTransaction(async (transaction) => {
+    const [currentFenceSnap, currentBatchSnap] = await Promise.all([
+      transaction.get(fenceRef),
+      transaction.get(batchRef),
+    ]);
+
+    if (!currentFenceSnap.exists) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Geofence "${geofenceRef.name || geofenceRef.id}" was not found; its ward Pcode cannot be resolved.`,
+      );
+    }
+
+    const currentFenceData = currentFenceSnap.data() || {};
+    const currentWardPcode = resolveRequiredWardPcodeFromGeofence({
+      geofenceData: currentFenceData,
+      requestedWardPcode: scope.wardPcode,
+      geofenceName: geofenceRef.name || geofenceRef.id,
     });
+    const currentLmPcode = normalizeText(currentFenceData?.parents?.lmPcode);
+    if (
+      hasMeaningfulValue(currentLmPcode) &&
+      normalizeUpper(scope.lmPcode) !== normalizeUpper(currentLmPcode)
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "The selected geofence municipality does not match the requested batch scope.",
+      );
+    }
+
+    const existingBatchId = String(currentFenceData?.bgo?.batchId || "").trim();
+    if (hasMeaningfulValue(existingBatchId)) {
+      return {
+        success: false,
+        code: "GEOFENCE_ALREADY_BATCHED",
+        message: `Geofence "${geofenceRef.name || geofenceRef.id}" is already linked to batch ${existingBatchId}.`,
+        existingBatchId,
+      };
+    }
+
+    if (currentBatchSnap.exists) {
+      return {
+        success: false,
+        code: "BMD_BGO_BATCH_ALREADY_EXISTS",
+        message: "A BMD-BGO batch already exists for this batch identifier.",
+        bgoBatchId,
+      };
+    }
+
+    // Guard against a geofence ward changing between initial validation and
+    // the transaction that writes the canonical batch identifier.
+    if (normalizeUpper(currentWardPcode) !== normalizeUpper(resolvedWardPcode)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "The selected geofence ward changed during batch origination. Please retry.",
+      );
+    }
+
+    transaction.create(batchRef, batchDoc);
+    transaction.create(historyRef, historyDoc);
+    rowWrites.forEach(({ ref, data: rowDoc }) => transaction.create(ref, rowDoc));
+    if (notificationRef && notificationDoc) {
+      transaction.create(notificationRef, notificationDoc);
+    }
+    transaction.update(fenceRef, {
+      "bgo.batchId": bgoBatchId,
+      "bgo.linkState": "LINKED",
+      "bgo.batchedAt": now,
+      "bgo.batchedByUid": actorUid,
+      "bgo.batchedByUser": actorName,
+      "metadata.updatedAt": now,
+      "metadata.updatedByUid": actorUid,
+      "metadata.updatedByUser": actorName,
+    });
+
+    return {
+      success: true,
+      committedWrites:
+        1 + 1 + rowWrites.length + (notificationRef ? 1 : 0) + 1,
+    };
   });
 
-  // 5. Update geofence with bi-directional BGO batch linkage (MD-BGO-R012)
-  writeJobs.push((batch) => {
-    batch.set(
-      fenceRef,
-      {
-        bgo: {
-          batchId: bgoBatchId,
-          linkState: "LINKED",
-          batchedAt: now,
-          batchedByUid: actorUid,
-          batchedByUser: actorName,
-        },
-        metadata: {
-          updatedAt: now,
-          updatedByUid: actorUid,
-          updatedByUser: actorName,
-        },
-      },
-      { merge: true },
-    );
-  });
+  if (!transactionResult.success) {
+    const details = { ...transactionResult };
+    const { code, message } = details;
+    delete details.success;
+    delete details.code;
+    delete details.message;
+    return buildFailureResult(code, message, details);
+  }
 
-  const committedWrites = await commitWriteJobsInChunks({
-    db,
-    writeJobs,
-    chunkSize: 380,
-  });
+  const committedWrites = transactionResult.committedWrites;
 
   logger.info("onCreateBgoCallable -- BMD SUCCESS", {
     bgoBatchId,
