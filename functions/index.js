@@ -124,6 +124,7 @@ import { onIssuedWorkExpires } from "./meterLifecycle/expireSilentWorkSchedule.j
 import { onCheckMeterRegistrationCallable } from "./meterLifecycle/checkRegistrationCallable.js";
 
 import { onCreateBgoCallable } from "./bgo/callables.js";
+import { createOrLinkMdBgoPremise } from "./bgo/mdBgoPremiseLink.js";
 import {
   onAcceptRejectBgoBatchCallable,
   onReverseBgoBatchAcceptanceCallable,
@@ -5560,6 +5561,8 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 
     const caller = request?.auth || null;
     const data = request?.data || {};
+    const hasMdBgoContext = Object.prototype.hasOwnProperty.call(data, "mdBgoContext");
+    const mdBgoContext = data?.mdBgoContext || null;
 
     const premiseId = data?.id || "NAv";
     const hasTargetedBatchContext = Object.prototype.hasOwnProperty.call(
@@ -5644,7 +5647,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     /* ------------------------------------------------
        3. IDEMPOTENCY (BY ID)
        ------------------------------------------------ */
-    if (premiseSnap.exists && !isTargetedBatchPremise) {
+    if (premiseSnap.exists && !isTargetedBatchPremise && !hasMdBgoContext) {
       logTime("already exists", { premiseId });
 
       return buildPremiseSuccessResult(
@@ -5729,6 +5732,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     );
 
     delete safePayload.metadata;
+    delete safePayload.mdBgoContext;
 
     // TB-R067 (1.3.73) 6: the premise this row is being moved off, when the worker is putting a wrong join
     // right. It travels beside the premise and is never written onto one.
@@ -5788,7 +5792,19 @@ export const onPremiseCreateCallable = onCall(async (request) => {
     const firestoreSetStartedAtMs = Date.now();
     let targetedBatchLink = null;
 
-    if (isTargetedBatchPremise) {
+    if (hasMdBgoContext) {
+      const historyRef = premiseRef.collection("qaHistory").doc(`SUBMIT_${premiseId}`);
+      targetedBatchLink = await createOrLinkMdBgoPremise({
+        db,
+        premiseRef,
+        premisePayload: finalPayload,
+        mdBgoContext,
+        historyRef,
+        actorUid: caller.uid,
+        actorName,
+        authToken: caller.token || {},
+      });
+    } else if (isTargetedBatchPremise) {
       targetedBatchLink = await createOrLinkTargetedBatchPremise({
         db,
         premiseRef,
@@ -5835,13 +5851,17 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 
     return buildPremiseSuccessResult(
       premiseId,
-      targetedBatchLink?.alreadyLinked
-        ? "Premise and Targeted Batch linkage already exist"
-        : "Premise created successfully",
+      hasMdBgoContext
+        ? targetedBatchLink?.alreadyLinked
+          ? "Premise and MD BGO row linkage already exist"
+          : "Premise created and linked to the MD BGO row"
+        : targetedBatchLink?.alreadyLinked
+          ? "Premise and Targeted Batch linkage already exist"
+          : "Premise created successfully",
       targetedBatchLink
-        ? {
-            targetedBatchLink,
-          }
+        ? hasMdBgoContext
+          ? { mdBgoLink: targetedBatchLink }
+          : { targetedBatchLink }
         : {},
     );
   } catch (error) {
