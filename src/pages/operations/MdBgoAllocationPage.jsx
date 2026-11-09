@@ -136,7 +136,7 @@ export default function MdBgoAllocationPage() {
   };
   const closeWindow = () => {
     const view = windowView; if (!view || view.kind === "allocating") return;
-    if (view.kind === "done") setMessage(`${view.issuedIds.length} batch(es) issued to ${view.targetName}. They now wait for acceptance.`);
+    if (view.kind === "done") { navigate("/operations/bgo"); return; }
     if (view.kind === "failed" || view.kind === "uncertain") setMessage(view.lines?.[0] || view.title);
     setWindowView(null);
   };

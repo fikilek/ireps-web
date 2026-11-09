@@ -42,6 +42,8 @@ test("page and callable preserve MD BGO state and storage boundaries", async () 
   const server = await read("../../../../functions/bgo/allocationCallable.js");
   const index = await read("../../../../functions/index.js");
   assert.match(page, /useGetBgoBatchesByLmQuery/); assert.match(page, /useGetGeoFencesByLmQuery/); assert.match(page, /useAllocateMdBgoBatchesTogetherMutation/);
+  assert.match(page, /if \(view\.kind === "done"\) \{ navigate\("\/operations\/bgo"\); return; \}/);
+  assert.match(page, /view\.kind === "done"\).*label: "OK".*onClick: onClose/s);
   assert.match(server, /workflow\.state": "ISSUED"/); assert.match(server, /"assignment\.targets"/); assert.match(server, /runTransaction/);
   assert.doesNotMatch(server, /tb_rows|tb_uploads|ALLOCATED/);
   assert.match(index, /onAllocateMdBgoBatchesTogetherCallable,/);
