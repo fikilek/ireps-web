@@ -6,10 +6,12 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import {
   useGetBgoBatchesByLmQuery,
+  useGetMdBgoRowsByLmQuery,
   useDeleteUnacceptedBgoMutation,
   useUnallocateMdBgoBatchMutation,
 } from "../../redux/bgoApi";
 import { useMdBgoAllocationSelection } from "./md-bgo/allocationSelection";
+import { getMdBgoBatchStatus, getMdBgoRowStatusCounts } from "./md-bgo/mdBgoRegisterModel";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 
@@ -254,6 +256,12 @@ export default function MdBgoRegisterPage() {
     { lmPcode },
     { skip: !lmPcode },
   );
+  const { data: mdBgoRowsStream = { rows: [], ready: false, error: "" } } =
+    useGetMdBgoRowsByLmQuery({ lmPcode }, { skip: !lmPcode });
+  const mdBgoRowCountsByBatchId = useMemo(
+    () => getMdBgoRowStatusCounts(mdBgoRowsStream.rows),
+    [mdBgoRowsStream.rows],
+  );
 
   const [deleteBgo, { isLoading: isDeletingBgo }] = useDeleteUnacceptedBgoMutation();
   const [unallocateBgo, { isLoading: isUnallocatingBgo }] = useUnallocateMdBgoBatchMutation();
@@ -267,7 +275,7 @@ export default function MdBgoRegisterPage() {
   const [actionNotice, setActionNotice] = useState("");
   const [unallocateCandidate, setUnallocateCandidate] = useState(null);
   const [unallocateReason, setUnallocateReason] = useState("");
-  const [unallocateError, setUnallocateError] = useState("");
+  const [unallocateOutcome, setUnallocateOutcome] = useState(null);
 
   // Table filters & sorting
   const [batchIdFilter, setBatchIdFilter] = useState("");
@@ -404,9 +412,16 @@ export default function MdBgoRegisterPage() {
       } else if (key === "allocatedTo") {
         left = a?.targetName || a?.target?.name || "";
         right = b?.targetName || b?.target?.name || "";
+      } else if (key === "batchStatus") {
+        left = getMdBgoBatchStatus(a);
+        right = getMdBgoBatchStatus(b);
       } else if (key === "total") {
         left = getBatchErfCount(a);
         right = getBatchErfCount(b);
+      } else if (key === "inProgress" || key === "completed") {
+        const field = key === "inProgress" ? "inProgress" : "completed";
+        left = mdBgoRowCountsByBatchId.get(a?.id)?.[field] || 0;
+        right = mdBgoRowCountsByBatchId.get(b?.id)?.[field] || 0;
       } else if (key === "ward") {
         left = getWardLabel(a);
         right = getWardLabel(b);
@@ -425,7 +440,7 @@ export default function MdBgoRegisterPage() {
     });
 
     return items;
-  }, [filteredBatches, sortConfig]);
+  }, [filteredBatches, sortConfig, mdBgoRowCountsByBatchId]);
 
   // Pagination slice
   const totalRows = sortedBatches.length;
@@ -459,14 +474,19 @@ export default function MdBgoRegisterPage() {
 
   const handleUnallocateBatch = async () => {
     if (!unallocateCandidate || isUnallocatingBgo) return;
-    setUnallocateError("");
     const raw = unallocateCandidate.raw || {};
     const issuedAt = raw.workflow?.issuedAt;
     const expectedIssuedAtMillis = typeof issuedAt?.toMillis === "function"
       ? issuedAt.toMillis()
       : issuedAt instanceof Date ? issuedAt.getTime() : Date.parse(issuedAt);
     if (!Number.isFinite(expectedIssuedAtMillis)) {
-      setUnallocateError("The allocation timestamp is unavailable. Refresh the register and reopen Unallocate.");
+      setUnallocateOutcome({
+        kind: "failure",
+        batchId: unallocateCandidate.id,
+        message: "The allocation timestamp is unavailable. Refresh the register and reopen Unallocate.",
+      });
+      setUnallocateCandidate(null);
+      setUnallocateReason("");
       return;
     }
     try {
@@ -478,13 +498,23 @@ export default function MdBgoRegisterPage() {
         requestId: unallocateCandidate.requestId,
         reason: unallocateReason,
       }).unwrap();
-      setActionNotice(response?.message || `Batch ${unallocateCandidate.id} is ready for allocation.`);
+      setUnallocateOutcome({
+        kind: "success",
+        batchId: unallocateCandidate.id,
+        message: response?.message || `Batch ${unallocateCandidate.id} is ready for allocation.`,
+      });
       setUnallocateCandidate(null);
       setUnallocateReason("");
     } catch (err) {
-      setUnallocateError(err?.uncertain
-        ? "The result is still being confirmed. Retry this same confirmation; the server safely recognizes the same request."
-        : err?.data?.message || err?.message || "Could not unallocate this MD BGO batch.");
+      setUnallocateOutcome({
+        kind: err?.uncertain ? "uncertain" : "failure",
+        batchId: unallocateCandidate.id,
+        message: err?.uncertain
+          ? "The result could not be confirmed. Check the batch in the MD BGO Register before trying again."
+          : err?.data?.message || err?.message || "Could not unallocate this MD BGO batch.",
+      });
+      setUnallocateCandidate(null);
+      setUnallocateReason("");
     }
   };
 
@@ -620,8 +650,26 @@ export default function MdBgoRegisterPage() {
                       onSort={handleSort}
                     />
                     <SortableTh
+                      label="Batch Status"
+                      sortKey="batchStatus"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <SortableTh
                       label="Total"
                       sortKey="total"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <SortableTh
+                      label="In Progress"
+                      sortKey="inProgress"
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                    />
+                    <SortableTh
+                      label="Completed"
+                      sortKey="completed"
                       sortConfig={sortConfig}
                       onSort={handleSort}
                     />
@@ -697,6 +745,7 @@ export default function MdBgoRegisterPage() {
                         ))}
                       </select>
                     </th>
+                    <th style={styles.filterHeaderCell} />
                     <th style={styles.filterHeaderCell}>
                       <input
                         type="text"
@@ -711,6 +760,8 @@ export default function MdBgoRegisterPage() {
                         aria-label="Filter Total"
                       />
                     </th>
+                    <th style={styles.filterHeaderCell} />
+                    <th style={styles.filterHeaderCell} />
                     <th style={styles.filterHeaderCell}>
                       <select
                         value={wardFilter}
@@ -762,7 +813,7 @@ export default function MdBgoRegisterPage() {
                 <tbody>
                   {sortedBatches.length === 0 ? (
                     <tr>
-                      <Td colSpan={11}>
+                      <Td colSpan={14}>
                         {bmdBatches.length === 0
                           ? "No permanent MD BGO Batches were found for this Local Municipality."
                           : "No permanent MD BGO Batches match the selected filters."}
@@ -784,6 +835,8 @@ export default function MdBgoRegisterPage() {
                     const rowIsTicked = isTicked(batch.id);
                     const targetName = batch?.targetName || batch?.target?.name || "";
                     const totalErfs = getBatchErfCount(batch);
+                    const batchStatus = getMdBgoBatchStatus(batch);
+                    const rowCounts = mdBgoRowCountsByBatchId.get(batch.id) || { inProgress: 0, completed: 0 };
                     const wardNo = getWardNoFormatted(batch);
                     const wardPcode = batch?.scope?.wardPcode || "NAv";
                     const geofenceName = batch?.geofenceName || batch?.geofenceRef?.name || "NAv";
@@ -846,7 +899,6 @@ export default function MdBgoRegisterPage() {
                               disabled={fieldworkStarted || unallocationIntentUnavailable}
                               title={fieldworkStarted ? "Field work has started; this batch cannot be unallocated" : unallocationIntentUnavailable ? "Allocation details are incomplete; contact an MNG" : "Unallocate this batch before field work starts"}
                               onClick={() => {
-                                setUnallocateError("");
                                 setUnallocateReason("");
                                 setUnallocateCandidate({
                                   ...batch,
@@ -876,7 +928,23 @@ export default function MdBgoRegisterPage() {
                         </Td>
 
                         <Td>
+                          <div style={styles.strongCell}>{batchStatus}</div>
+                        </Td>
+
+                        <Td>
                           <strong style={styles.totalCell}>{formatNumber(totalErfs)}</strong>
+                        </Td>
+
+                        <Td>
+                          <strong style={styles.totalCell}>
+                            {mdBgoRowsStream.error ? "NAv" : mdBgoRowsStream.ready ? formatNumber(rowCounts.inProgress) : "…"}
+                          </strong>
+                        </Td>
+
+                        <Td>
+                          <strong style={styles.totalCell}>
+                            {mdBgoRowsStream.error ? "NAv" : mdBgoRowsStream.ready ? formatNumber(rowCounts.completed) : "…"}
+                          </strong>
                         </Td>
 
                         <Td>
@@ -986,11 +1054,43 @@ export default function MdBgoRegisterPage() {
               style={styles.reasonInput}
               disabled={isUnallocatingBgo}
             />
-            {unallocateError ? <div style={styles.modalError}>{unallocateError}</div> : null}
             <div style={styles.modalActions}>
               <button type="button" style={styles.modalCancelButton} onClick={() => setUnallocateCandidate(null)} disabled={isUnallocatingBgo}>Cancel</button>
               <button type="button" style={styles.modalPrimaryButton} onClick={handleUnallocateBatch} disabled={isUnallocatingBgo || !unallocateReason.trim()}>
                 {isUnallocatingBgo ? "Unallocating..." : "Confirm Unallocate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {unallocateOutcome ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="md-bgo-unallocate-outcome-title">
+            <p style={styles.eyebrow}>
+              {unallocateOutcome.kind === "success"
+                ? "Unallocation Successful"
+                : unallocateOutcome.kind === "uncertain"
+                  ? "Unallocation Not Confirmed"
+                  : "Unallocation Failed"}
+            </p>
+            <h2 id="md-bgo-unallocate-outcome-title" style={styles.modalTitle}>{unallocateOutcome.batchId}</h2>
+            <p style={styles.modalSubtitle}>
+              {unallocateOutcome.kind === "success"
+                ? "This batch is now Ready for Allocation."
+                : unallocateOutcome.message}
+            </p>
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalPrimaryButton}
+                onClick={() => {
+                  const successful = unallocateOutcome.kind === "success";
+                  setUnallocateOutcome(null);
+                  if (successful) navigate("/operations/bgo");
+                }}
+              >
+                OK
               </button>
             </div>
           </div>

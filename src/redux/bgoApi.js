@@ -13,6 +13,7 @@ import { db, functions } from "../firebase";
 const BGO_BATCHES_COLLECTION = "bgo_batches";
 // BGO row truth now lives in trns. BGO row = BGO-created MLCT TRN.
 const BGO_ROWS_COLLECTION = "trns";
+const MD_BGO_ROWS_COLLECTION = "bgo_rows";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -534,6 +535,51 @@ export const bgoApi = createApi({
       },
     }),
 
+    getMdBgoRowsByLm: builder.query({
+      queryFn: () => ({ data: { rows: [], ready: false, error: "" } }),
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = String(arg?.lmPcode || "").trim();
+        if (!lmPcode) return;
+
+        let unsubscribe = null;
+        try {
+          await cacheDataLoaded;
+          const rowsQuery = query(
+            collection(db, MD_BGO_ROWS_COLLECTION),
+            where("scope.lmPcode", "==", lmPcode),
+            limitQuery(resolveLimit(arg, 10000)),
+          );
+          unsubscribe = onSnapshot(
+            rowsQuery,
+            (snapshot) => {
+              const rows = snapshot.docs.map((docSnapshot) => ({
+                ...docSnapshot.data(),
+                id: docSnapshot.id,
+              }));
+              updateCachedData((draft) => {
+                draft.rows.splice(0, draft.rows.length, ...rows);
+                draft.ready = true;
+                draft.error = "";
+              });
+            },
+            (error) => {
+              console.error("bgoApi getMdBgoRowsByLm stream error:", error);
+              updateCachedData((draft) => {
+                draft.ready = true;
+                draft.error = error?.message || "Could not read MD BGO rows.";
+              });
+            },
+          );
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) unsubscribe();
+        }
+      },
+    }),
+
     getBmdBgoBatchesByWard: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
@@ -760,6 +806,7 @@ export const {
   useDeleteUnacceptedBgoMutation,
   useGetBmdBgoBatchesByWardQuery,
   useGetBgoBatchesByLmQuery,
+  useGetMdBgoRowsByLmQuery,
   useAllocateMdBgoBatchesTogetherMutation,
   useUnallocateMdBgoBatchMutation,
   useGetBgoBatchesByTcIdQuery,

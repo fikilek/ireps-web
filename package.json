@@ -28,7 +28,9 @@
   "dependencies": {
     "@googlemaps/markerclusterer": "^2.6.2",
     "@reduxjs/toolkit": "^2.11.2",
+    "@turf/boolean-valid": "^7.4.0",
     "@turf/difference": "^7.3.5",
+    "@turf/kinks": "^7.4.0",
     "@vis.gl/react-google-maps": "^1.8.3",
     "firebase": "^12.12.1",
     "pdf-lib": "^1.17.1",
