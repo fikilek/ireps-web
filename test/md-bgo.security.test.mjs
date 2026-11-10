@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, query, setDoc, updateDoc, where } from "firebase/firestore";
 
 const projectId = "demo-ireps-qa";
 const batchId = "MD_BGO_TEST_BATCH";
@@ -95,4 +95,30 @@ test("active clients cannot write MD BGO rows directly", async () => {
     bgoBatchId: batchId,
     scope: { lmPcode: "ZA5241" },
   }));
+});
+
+test("Register parent and LM row-count queries are authorized and counts stream subsequent work", async () => {
+  const db = env.authenticatedContext("active-field-worker").firestore();
+  await env.withSecurityRulesDisabled((context) => setDoc(doc(context.firestore(), "bgo_batches", batchId), {
+    scope: { lmPcode: "ZA5241" }, batchMode: "BMD", workflow: { state: "READY_FOR_ALLOCATION" },
+  }));
+  for (const field of ["scope.lmPcode", "sourceUpload.lmPcode", "origin.lmPcode", "lmPcode"]) {
+    const result = await assertSucceeds(getDocs(query(collection(db, "bgo_batches"), where(field, "==", "ZA5241"), limit(1000))));
+    assert.equal(result.size, field === "scope.lmPcode" ? 1 : 0);
+  }
+  const rowsQuery = query(collection(db, "bgo_rows"), where("scope.lmPcode", "==", "ZA5241"), limit(10000));
+  let off;
+  let initial;
+  const receivedInitial = new Promise((resolve) => { initial = resolve; });
+  const updated = new Promise((resolve, reject) => {
+    off = onSnapshot(rowsQuery, (snapshot) => {
+      initial();
+      if (snapshot.docs.some((row) => row.data().workflow?.state === "IN_PROGRESS")) resolve();
+    }, reject);
+  });
+  try {
+    await receivedInitial;
+    await env.withSecurityRulesDisabled((context) => updateDoc(doc(context.firestore(), "bgo_rows/row-1"), { "workflow.state": "IN_PROGRESS" }));
+    await updated;
+  } finally { off?.(); }
 });

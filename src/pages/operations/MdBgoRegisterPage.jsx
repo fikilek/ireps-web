@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
@@ -11,9 +11,8 @@ import {
   useUnallocateMdBgoBatchMutation,
 } from "../../redux/bgoApi";
 import { useMdBgoAllocationSelection } from "./md-bgo/allocationSelection";
-import { getMdBgoBatchStatus, getMdBgoRowStatusCounts } from "./md-bgo/mdBgoRegisterModel";
-
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+import { buildMdBgoRegisterRow, getAllocationStatus, getMdBgoRowStatusCounts, isBmdBatch, mdBgoRegisterSearchValue } from "./md-bgo/mdBgoRegisterModel";
+import IrepsTable from "../../components/table/IrepsTable";
 
 function formatNumber(value) {
   const number = Number(value);
@@ -58,182 +57,11 @@ function resolveWorkbase(auth = {}, geoState = {}) {
   };
 }
 
-function getWardLabel(batch = {}) {
-  const wardName = batch?.scope?.wardName;
-  const wardPcode = batch?.scope?.wardPcode || "";
-  const match = wardPcode.match(/(\d{1,3})$/);
-  const wardNo = match ? String(Number(match[1])) : "";
-
-  if (wardNo) return `Ward ${wardNo}`;
-  return wardName || "NAv";
-}
-
-function getWardNoFormatted(batch = {}) {
-  const wardPcode = batch?.scope?.wardPcode || "";
-  const match = wardPcode.match(/(\d{1,3})$/);
-  if (!match) return "NAv";
-  return match[1].padStart(3, "0");
-}
-
-function getBatchErfCount(batch = {}) {
-  const count =
-    batch?.summary?.erfCount ??
-    batch?.summary?.totalRows ??
-    batch?.raw?.summary?.erfCount ??
-    batch?.raw?.worklist?.erfRefs?.length ??
-    0;
-  return Number(count) || 0;
-}
-
-function isBmdBatch(batch = {}) {
-  const batchMode = String(
-    batch?.batchMode || batch?.raw?.bgo?.batchMode || batch?.bgo?.batchMode || "",
-  ).toUpperCase();
-  const opType = String(
-    batch?.operationType || batch?.trnType || batch?.raw?.operationType || "",
-  ).toUpperCase();
-  return batchMode === "BMD" || opType === "METER_DISCOVERY";
-}
-
-function getAllocationStatus(batch = {}) {
-  const workflowState = String(
-    batch?.workflowState || batch?.raw?.workflow?.state || "",
-  ).toUpperCase();
-  const targetId = String(
-    batch?.targetId || batch?.target?.id || batch?.raw?.bgo?.targetId || "",
-  ).trim();
-  const hasTarget = Boolean(targetId && targetId.toUpperCase() !== "NAV");
-
-  if (workflowState === "COMPLETED") return "COMPLETED";
-  if (workflowState === "IN_PROGRESS") return "IN_PROGRESS";
-  if (["ALLOCATED", "ISSUED", "ACCEPTED", "REJECTED"].includes(workflowState) || hasTarget) return "ALLOCATED";
-  if (workflowState === "READY_FOR_ALLOCATION" && !hasTarget) return "READY_FOR_ALLOCATION";
-  return "ALLOCATION_REVIEW";
-}
-
-function compareTableValues(left, right) {
-  if (typeof left === "number" && typeof right === "number") {
-    return left - right;
-  }
-  return String(left || "").localeCompare(String(right || ""), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function SortableTh({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  const indicator = isActive ? (sortConfig.direction === "asc" ? " ▲" : " ▼") : "";
-
-  return (
-    <th style={styles.th}>
-      <button
-        type="button"
-        style={styles.sortHeaderButton}
-        onClick={() => onSort(sortKey)}
-        aria-label={`Sort by ${label}`}
-      >
-        {label}
-        <span style={styles.sortIndicator}>{indicator}</span>
-      </button>
-    </th>
-  );
-}
-
-function Th({ children }) {
-  return <th style={styles.th}>{children}</th>;
-}
-
-function Td({ children, colSpan = 1 }) {
-  return (
-    <td style={styles.td} colSpan={colSpan}>
-      {children}
-    </td>
-  );
-}
-
 function SummaryCard({ label, value }) {
   return (
     <div style={styles.summaryCard}>
       <span style={styles.summaryCardLabel}>{label}</span>
       <strong style={styles.summaryCardValue}>{formatNumber(value)}</strong>
-    </div>
-  );
-}
-
-function PaginationControls({
-  currentPage,
-  pageSize,
-  totalPages,
-  totalRows,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  if (totalRows === 0) return null;
-
-  const startRow = (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(currentPage * pageSize, totalRows);
-
-  return (
-    <div style={styles.paginationBar}>
-      <div style={styles.paginationSummary}>
-        Showing {formatNumber(startRow)}-{formatNumber(endRow)} of {formatNumber(totalRows)}
-      </div>
-
-      <div style={styles.paginationControls}>
-        <label style={styles.pageSizeLabel}>
-          Rows per page
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            style={styles.pageSizeSelect}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(1)}
-          disabled={currentPage <= 1}
-        >
-          First
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage <= 1}
-        >
-          Previous
-        </button>
-
-        <span style={styles.pageIndicator}>
-          Page {currentPage} of {Math.max(1, totalPages)}
-        </span>
-
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage >= totalPages}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          style={styles.paginationButton}
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage >= totalPages}
-        >
-          Last
-        </button>
-      </div>
     </div>
   );
 }
@@ -277,22 +105,6 @@ export default function MdBgoRegisterPage() {
   const [unallocateReason, setUnallocateReason] = useState("");
   const [unallocateOutcome, setUnallocateOutcome] = useState(null);
 
-  // Table filters & sorting
-  const [batchIdFilter, setBatchIdFilter] = useState("");
-  const [allocationFilter, setAllocationFilter] = useState("");
-  const [allocatedToFilter, setAllocatedToFilter] = useState("");
-  const [totalFilter, setTotalFilter] = useState("");
-  const [wardFilter, setWardFilter] = useState("");
-  const [geofenceFilter, setGeofenceFilter] = useState("");
-  const [createdByFilter, setCreatedByFilter] = useState("");
-  const [sortConfig, setSortConfig] = useState({ key: "createdAt", direction: "desc" });
-
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(5);
-
-  const resetToFirstPage = () => setCurrentPage(1);
-
   // Filter only BMD batches
   const bmdBatches = useMemo(() => {
     return allBatches.filter(isBmdBatch);
@@ -322,141 +134,10 @@ export default function MdBgoRegisterPage() {
     };
   }, [bmdBatches]);
 
-  // Dropdown filter options
-  const allocatedToOptions = useMemo(() => {
-    const set = new Set();
-    bmdBatches.forEach((batch) => {
-      const name = batch?.targetName || batch?.target?.name;
-      if (name && name !== "NAv") set.add(name);
-    });
-    return Array.from(set).sort();
-  }, [bmdBatches]);
-
-  const wardFilterOptions = useMemo(() => {
-    const set = new Set();
-    bmdBatches.forEach((batch) => {
-      const label = getWardLabel(batch);
-      if (label && label !== "NAv") set.add(label);
-    });
-    return Array.from(set).sort();
-  }, [bmdBatches]);
-
-  // Filtering
-  const filteredBatches = useMemo(() => {
-    return bmdBatches.filter((batch) => {
-      if (batchIdFilter) {
-        const id = String(batch.id || batch.batchId || "").toUpperCase();
-        if (!id.includes(batchIdFilter.trim().toUpperCase())) return false;
-      }
-
-      if (allocationFilter) {
-        const status = getAllocationStatus(batch);
-        if (allocationFilter === "ALLOCATED" && status !== "ALLOCATED" && status !== "ALLOCATION_REVIEW" && status !== "IN_PROGRESS" && status !== "COMPLETED") return false;
-        if (allocationFilter === "NOT ALLOCATED" && status !== "READY_FOR_ALLOCATION") return false;
-      }
-
-      if (allocatedToFilter) {
-        const name = String(batch?.targetName || batch?.target?.name || "");
-        if (name !== allocatedToFilter) return false;
-      }
-
-      if (totalFilter) {
-        const total = getBatchErfCount(batch);
-        if (String(total) !== totalFilter.trim()) return false;
-      }
-
-      if (wardFilter) {
-        const label = getWardLabel(batch);
-        if (label !== wardFilter) return false;
-      }
-
-      if (geofenceFilter) {
-        const name = String(batch?.geofenceName || batch?.geofenceRef?.name || "").toUpperCase();
-        if (!name.includes(geofenceFilter.trim().toUpperCase())) return false;
-      }
-
-      if (createdByFilter) {
-        const creator = String(batch?.metadata?.createdByUser || "").toUpperCase();
-        if (!creator.includes(createdByFilter.trim().toUpperCase())) return false;
-      }
-
-      return true;
-    });
-  }, [
-    bmdBatches,
-    batchIdFilter,
-    allocationFilter,
-    allocatedToFilter,
-    totalFilter,
-    wardFilter,
-    geofenceFilter,
-    createdByFilter,
-  ]);
-
-  // Sorting
-  const sortedBatches = useMemo(() => {
-    const items = [...filteredBatches];
-    const { key, direction } = sortConfig;
-    const factor = direction === "asc" ? 1 : -1;
-
-    items.sort((a, b) => {
-      let left = "";
-      let right = "";
-
-      if (key === "batchId") {
-        left = a?.id || "";
-        right = b?.id || "";
-      } else if (key === "allocation") {
-        left = getAllocationStatus(a);
-        right = getAllocationStatus(b);
-      } else if (key === "allocatedTo") {
-        left = a?.targetName || a?.target?.name || "";
-        right = b?.targetName || b?.target?.name || "";
-      } else if (key === "batchStatus") {
-        left = getMdBgoBatchStatus(a);
-        right = getMdBgoBatchStatus(b);
-      } else if (key === "total") {
-        left = getBatchErfCount(a);
-        right = getBatchErfCount(b);
-      } else if (key === "inProgress" || key === "completed") {
-        const field = key === "inProgress" ? "inProgress" : "completed";
-        left = mdBgoRowCountsByBatchId.get(a?.id)?.[field] || 0;
-        right = mdBgoRowCountsByBatchId.get(b?.id)?.[field] || 0;
-      } else if (key === "ward") {
-        left = getWardLabel(a);
-        right = getWardLabel(b);
-      } else if (key === "geofence") {
-        left = a?.geofenceName || a?.geofenceRef?.name || "";
-        right = b?.geofenceName || b?.geofenceRef?.name || "";
-      } else if (key === "createdBy") {
-        left = a?.metadata?.createdByUser || "";
-        right = b?.metadata?.createdByUser || "";
-      } else if (key === "createdAt") {
-        left = a?.metadata?.createdAt || a?.createdAt || "";
-        right = b?.metadata?.createdAt || b?.createdAt || "";
-      }
-
-      return compareTableValues(left, right) * factor;
-    });
-
-    return items;
-  }, [filteredBatches, sortConfig, mdBgoRowCountsByBatchId]);
-
-  // Pagination slice
-  const totalRows = sortedBatches.length;
-  const totalPages = Math.ceil(totalRows / pageSize) || 1;
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pagedBatches = useMemo(() => {
-    const start = (safeCurrentPage - 1) * pageSize;
-    return sortedBatches.slice(start, start + pageSize);
-  }, [sortedBatches, safeCurrentPage, pageSize]);
-
-  const handleSort = (key) => {
-    setSortConfig((current) => ({
-      key,
-      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
-    }));
-  };
+  const tableRows = useMemo(
+    () => bmdBatches.map((batch) => buildMdBgoRegisterRow(batch, mdBgoRowCountsByBatchId, mdBgoRowsStream)),
+    [bmdBatches, mdBgoRowCountsByBatchId, mdBgoRowsStream],
+  );
 
   const handleDeleteBatch = async () => {
     if (!deleteCandidate || isDeletingBgo) return;
@@ -517,6 +198,56 @@ export default function MdBgoRegisterPage() {
       setUnallocateReason("");
     }
   };
+
+  const countCell = (value) => value == null ? (mdBgoRowsStream.error ? "NAv" : "…") : formatNumber(value);
+  const columns = [
+    {
+      key: "selection", label: "[ ]", export: false,
+      render: (batch) => <input type="checkbox" checked={isTicked(batch.id)} onChange={() => toggleTick(batch.id)} aria-label={`Select batch ${batch.id}`} />,
+    },
+    {
+      key: "map", label: "Map", export: false,
+      render: (batch) => <Link to={`/operations/bgo/${encodeURIComponent(batch.id)}/map`} style={styles.mapLinkButton} title="View MD BGO Batch Map" aria-label={`View MD BGO Batch Map for ${batch.id}`}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z" /><path d="M9 3v15" /><path d="M15 6v15" />
+        </svg>
+      </Link>,
+    },
+    { key: "batchId", label: "Batch ID", filter: "text", value: (batch) => batch.id },
+    {
+      key: "rows", label: "BGO Rows", export: false,
+      render: (batch) => <Link to={`/operations/md-bgo-rows?batchId=${encodeURIComponent(batch.id)}&wardPcode=${encodeURIComponent(batch.wardPcode)}&lmPcode=${encodeURIComponent(lmPcode)}`} style={styles.rowLinkButton}>BGO Rows</Link>,
+    },
+    {
+      key: "allocation", label: "Allocation", filter: "select", value: (batch) => batch.allocation,
+      filterOptions: [{ value: "NOT ALLOCATED", label: "Not Allocated" }, { value: "ALLOCATED", label: "Allocated" }],
+      render: (batch) => batch.isAllocated ? <button
+        type="button"
+        style={{ ...styles.unallocateButton, ...((batch.fieldworkStarted || batch.unallocationIntentUnavailable) ? styles.disabledButton : null) }}
+        disabled={batch.fieldworkStarted || batch.unallocationIntentUnavailable}
+        title={batch.fieldworkStarted ? "Field work has started; this batch cannot be unallocated" : batch.unallocationIntentUnavailable ? "Allocation details are incomplete; contact an MNG" : "Unallocate this batch before field work starts"}
+        onClick={() => {
+          setUnallocateReason("");
+          setUnallocateCandidate({
+            ...batch, targetType: batch.intentTargetType, targetId: batch.intentTargetId,
+            requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          });
+        }}
+      >Unallocate</button> : <Link to={`/operations/bgo/allocation?batchId=${encodeURIComponent(batch.id)}`} style={styles.rowLinkButton} title="Allocate this batch on Allocation Board">Allocate</Link>,
+    },
+    { key: "allocatedTo", label: "Allocated To", filter: "select", value: (batch) => batch.allocatedTo },
+    { key: "batchStatus", label: "Batch Status", filter: "select", value: (batch) => batch.batchStatus },
+    { key: "total", label: "Total", filter: "text", value: (batch) => batch.total, sortValue: (batch) => batch.total, render: (batch) => formatNumber(batch.total) },
+    { key: "inProgress", label: "In Progress", filter: "text", value: (batch) => batch.inProgress, sortValue: (batch) => batch.inProgress, sortEmptyLast: true, filterDisabled: !mdBgoRowsStream.ready || Boolean(mdBgoRowsStream.error), render: (batch) => countCell(batch.inProgress) },
+    { key: "completed", label: "Completed", filter: "text", value: (batch) => batch.completed, sortValue: (batch) => batch.completed, sortEmptyLast: true, filterDisabled: !mdBgoRowsStream.ready || Boolean(mdBgoRowsStream.error), render: (batch) => countCell(batch.completed) },
+    { key: "ward", label: "Ward", filter: "select", value: (batch) => batch.ward, exportValue: (batch) => `${batch.ward} (${batch.wardPcode})`, render: (batch) => <div><div style={styles.strongCell}>{batch.wardNo}</div><div style={styles.mutedCell}>{batch.wardPcode}</div></div> },
+    { key: "geofence", label: "Geofence", filter: "text", value: (batch) => batch.geofence },
+    { key: "createdBy", label: "Created By", filter: "text", value: (batch) => batch.createdBy },
+    {
+      key: "delete", label: "Delete BGO", export: false,
+      render: (batch) => <button type="button" style={{ ...styles.deleteBatchButton, ...(!batch.canDelete ? styles.disabledButton : null) }} disabled={!batch.canDelete} onClick={() => setDeleteCandidate(batch)} title={batch.canDelete ? "Delete this unaccepted BGO batch" : "Cannot delete active or in-progress batch"}>Delete BGO</button>,
+    },
+  ];
 
   return (
     <section style={styles.page}>
@@ -589,6 +320,13 @@ export default function MdBgoRegisterPage() {
         </div>
       ) : null}
 
+      {mdBgoRowsStream.error ? (
+        <div role="alert" style={styles.errorNotice}>
+          <strong>MD BGO row counts could not be loaded.</strong>
+          <div>{mdBgoRowsStream.error}</div>
+        </div>
+      ) : null}
+
       {isBatchesLoading ? (
         <div style={styles.loadingNotice}>Loading MD BGO Batches...</div>
       ) : (
@@ -603,7 +341,6 @@ export default function MdBgoRegisterPage() {
           <div style={styles.panel}>
             <div style={styles.panelHeader}>
               <div>
-                <h3 style={styles.panelTitle}>Permanent Meter Discovery Batches</h3>
                 <p style={styles.panelSubtitle}>
                   Permanent batches loaded from bgo_batches for {lmName} ({lmPcode}).
                 </p>
@@ -612,386 +349,15 @@ export default function MdBgoRegisterPage() {
               <div style={styles.draftStreamBadge}>Permanent Firestore register</div>
             </div>
 
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={(newSize) => {
-                setPageSize(newSize);
-                resetToFirstPage();
-              }}
-            />
-
-            <div style={styles.tableContainer}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <Th>[ ]</Th>
-                    <Th>Map</Th>
-                    <SortableTh
-                      label="Batch ID"
-                      sortKey="batchId"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <Th>BGO Rows</Th>
-                    <SortableTh
-                      label="Allocation"
-                      sortKey="allocation"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Allocated To"
-                      sortKey="allocatedTo"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Batch Status"
-                      sortKey="batchStatus"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Total"
-                      sortKey="total"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="In Progress"
-                      sortKey="inProgress"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Completed"
-                      sortKey="completed"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Ward"
-                      sortKey="ward"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Geofence"
-                      sortKey="geofence"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <SortableTh
-                      label="Created By"
-                      sortKey="createdBy"
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                    />
-                    <Th>Delete BGO</Th>
-                  </tr>
-
-                  {/* Integrated Header Filters */}
-                  <tr>
-                    <th style={styles.filterHeaderCell} />
-                    <th style={styles.filterHeaderCell} />
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        value={batchIdFilter}
-                        onChange={(e) => {
-                          setBatchIdFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter Batch ID"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Batch ID"
-                      />
-                    </th>
-                    <th style={styles.filterHeaderCell} />
-                    <th style={styles.filterHeaderCell}>
-                      <select
-                        value={allocationFilter}
-                        onChange={(e) => {
-                          setAllocationFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Allocation"
-                      >
-                        <option value="">All</option>
-                        <option value="NOT ALLOCATED">Not Allocated</option>
-                        <option value="ALLOCATED">Allocated</option>
-                      </select>
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <select
-                        value={allocatedToFilter}
-                        onChange={(e) => {
-                          setAllocatedToFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Allocated To"
-                      >
-                        <option value="">All</option>
-                        {allocatedToOptions.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </th>
-                    <th style={styles.filterHeaderCell} />
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={totalFilter}
-                        onChange={(e) => {
-                          setTotalFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Total"
-                      />
-                    </th>
-                    <th style={styles.filterHeaderCell} />
-                    <th style={styles.filterHeaderCell} />
-                    <th style={styles.filterHeaderCell}>
-                      <select
-                        value={wardFilter}
-                        onChange={(e) => {
-                          setWardFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Ward"
-                      >
-                        <option value="">All Wards</option>
-                        {wardFilterOptions.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        value={geofenceFilter}
-                        onChange={(e) => {
-                          setGeofenceFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter Geofence"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Geofence"
-                      />
-                    </th>
-                    <th style={styles.filterHeaderCell}>
-                      <input
-                        type="text"
-                        value={createdByFilter}
-                        onChange={(e) => {
-                          setCreatedByFilter(e.target.value);
-                          resetToFirstPage();
-                        }}
-                        placeholder="Filter Created By"
-                        style={styles.columnFilterInput}
-                        aria-label="Filter Created By"
-                      />
-                    </th>
-                    <th style={styles.filterHeaderCell} />
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {sortedBatches.length === 0 ? (
-                    <tr>
-                      <Td colSpan={14}>
-                        {bmdBatches.length === 0
-                          ? "No permanent MD BGO Batches were found for this Local Municipality."
-                          : "No permanent MD BGO Batches match the selected filters."}
-                      </Td>
-                    </tr>
-                  ) : null}
-
-                  {pagedBatches.map((batch) => {
-                    const status = getAllocationStatus(batch);
-                    const isAllocated = status !== "READY_FOR_ALLOCATION";
-                    const fieldworkStarted = status === "IN_PROGRESS" || status === "COMPLETED";
-                    const intentTargetType = batch.targetType || batch.target?.type || batch.raw?.bgo?.targetType || "";
-                    const intentTargetId = batch.targetId || batch.target?.id || batch.raw?.bgo?.targetId || "";
-                    const intentIssuedAt = batch.raw?.workflow?.issuedAt;
-                    const intentIssuedAtMillis = typeof intentIssuedAt?.toMillis === "function"
-                      ? intentIssuedAt.toMillis()
-                      : intentIssuedAt instanceof Date ? intentIssuedAt.getTime() : Date.parse(intentIssuedAt);
-                    const unallocationIntentUnavailable = !["TEAM", "SP"].includes(String(intentTargetType).toUpperCase()) || !intentTargetId || String(intentTargetId).toUpperCase() === "NAV" || !Number.isFinite(intentIssuedAtMillis);
-                    const rowIsTicked = isTicked(batch.id);
-                    const targetName = batch?.targetName || batch?.target?.name || "";
-                    const totalErfs = getBatchErfCount(batch);
-                    const batchStatus = getMdBgoBatchStatus(batch);
-                    const rowCounts = mdBgoRowCountsByBatchId.get(batch.id) || { inProgress: 0, completed: 0 };
-                    const wardNo = getWardNoFormatted(batch);
-                    const wardPcode = batch?.scope?.wardPcode || "NAv";
-                    const geofenceName = batch?.geofenceName || batch?.geofenceRef?.name || "NAv";
-                    const createdBy = batch?.metadata?.createdByUser || batch?.createdByUser || "NAv";
-                    const canDelete = status === "READY_FOR_ALLOCATION" || status === "ALLOCATED";
-
-                    return (
-                      <tr key={batch.id}>
-                        <Td>
-                          <input
-                            type="checkbox"
-                            checked={rowIsTicked}
-                            onChange={() => toggleTick(batch.id)}
-                            aria-label={`Select batch ${batch.id}`}
-                          />
-                        </Td>
-
-                        <Td>
-                          <Link
-                            to={`/operations/bgo/${encodeURIComponent(batch.id)}/map`}
-                            style={styles.mapLinkButton}
-                            title="View MD BGO Batch Map"
-                            aria-label={`View MD BGO Batch Map for ${batch.id}`}
-                          >
-                            <svg
-                              width="17"
-                              height="17"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z" />
-                              <path d="M9 3v15" />
-                              <path d="M15 6v15" />
-                            </svg>
-                          </Link>
-                        </Td>
-
-                        <Td>
-                          <div style={styles.strongCell}>{batch.id || "NAv"}</div>
-                        </Td>
-
-                        <Td>
-                          <Link
-                            to={`/operations/md-bgo-rows?batchId=${encodeURIComponent(batch.id)}&wardPcode=${encodeURIComponent(wardPcode)}&lmPcode=${encodeURIComponent(lmPcode)}`}
-                            style={styles.rowLinkButton}
-                          >
-                            BGO Rows
-                          </Link>
-                        </Td>
-
-                        <Td>
-                          {isAllocated ? (
-                            <button
-                              type="button"
-                              style={{ ...styles.unallocateButton, ...((fieldworkStarted || unallocationIntentUnavailable) ? styles.disabledButton : null) }}
-                              disabled={fieldworkStarted || unallocationIntentUnavailable}
-                              title={fieldworkStarted ? "Field work has started; this batch cannot be unallocated" : unallocationIntentUnavailable ? "Allocation details are incomplete; contact an MNG" : "Unallocate this batch before field work starts"}
-                              onClick={() => {
-                                setUnallocateReason("");
-                                setUnallocateCandidate({
-                                  ...batch,
-                                  targetType: intentTargetType,
-                                  targetId: intentTargetId,
-                                  requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                                });
-                              }}
-                            >
-                              Unallocate
-                            </button>
-                          ) : (
-                            <Link
-                              to={`/operations/bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
-                              style={styles.rowLinkButton}
-                              title="Allocate this batch on Allocation Board"
-                            >
-                              Allocate
-                            </Link>
-                          )}
-                        </Td>
-
-                        <Td>
-                          {targetName ? (
-                            <div style={styles.strongCell}>{targetName}</div>
-                          ) : null}
-                        </Td>
-
-                        <Td>
-                          <div style={styles.strongCell}>{batchStatus}</div>
-                        </Td>
-
-                        <Td>
-                          <strong style={styles.totalCell}>{formatNumber(totalErfs)}</strong>
-                        </Td>
-
-                        <Td>
-                          <strong style={styles.totalCell}>
-                            {mdBgoRowsStream.error ? "NAv" : mdBgoRowsStream.ready ? formatNumber(rowCounts.inProgress) : "…"}
-                          </strong>
-                        </Td>
-
-                        <Td>
-                          <strong style={styles.totalCell}>
-                            {mdBgoRowsStream.error ? "NAv" : mdBgoRowsStream.ready ? formatNumber(rowCounts.completed) : "…"}
-                          </strong>
-                        </Td>
-
-                        <Td>
-                          <div style={styles.strongCell}>{wardNo}</div>
-                          <div style={styles.mutedCell}>{wardPcode}</div>
-                        </Td>
-
-                        <Td>
-                          <div style={styles.strongCell}>{geofenceName}</div>
-                        </Td>
-
-                        <Td>
-                          <div style={styles.strongCell}>{createdBy}</div>
-                        </Td>
-
-                        <Td>
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.deleteBatchButton,
-                              ...(!canDelete ? styles.disabledButton : null),
-                            }}
-                            disabled={!canDelete}
-                            onClick={() => setDeleteCandidate(batch)}
-                            title={canDelete ? "Delete this unaccepted BGO batch" : "Cannot delete active or in-progress batch"}
-                          >
-                            Delete BGO
-                          </button>
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <PaginationControls
-              currentPage={safeCurrentPage}
-              pageSize={pageSize}
-              totalPages={totalPages}
-              totalRows={totalRows}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={(newSize) => {
-                setPageSize(newSize);
-                resetToFirstPage();
-              }}
+            <IrepsTable
+              title="Permanent Meter Discovery Batches"
+              columns={columns}
+              rows={tableRows}
+              rowKey={(batch) => batch.id}
+              searchValue={mdBgoRegisterSearchValue}
+              searchPlaceholder="Batch IDs, teams, wards, geofences, statuses, creators…"
+              downloads={{ fileBaseName: "md_bgo_register", scope: { module: "MD BGO Register", lmPcode } }}
+              emptyText="No permanent MD BGO batches match the current scope or filters."
             />
           </div>
         </>
@@ -1257,11 +623,6 @@ const styles = {
     marginBottom: 16,
     flexWrap: "wrap",
   },
-  panelTitle: {
-    margin: 0,
-    fontSize: 20,
-    color: "#0f172a",
-  },
   panelSubtitle: {
     margin: "4px 0 0",
     color: "#64748b",
@@ -1278,59 +639,6 @@ const styles = {
     fontWeight: 800,
     textTransform: "uppercase",
     letterSpacing: "0.06em",
-  },
-  tableContainer: {
-    overflowX: "auto",
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontSize: 13,
-    textAlign: "left",
-  },
-  th: {
-    padding: "12px 10px",
-    borderBottom: "1px solid #cbd5e1",
-    color: "#475569",
-    fontWeight: 800,
-    whiteSpace: "nowrap",
-  },
-  td: {
-    padding: "12px 10px",
-    borderBottom: "1px solid #f1f5f9",
-    verticalAlign: "middle",
-  },
-  sortHeaderButton: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
-    border: 0,
-    background: "transparent",
-    color: "inherit",
-    font: "inherit",
-    fontWeight: 800,
-    cursor: "pointer",
-    padding: 0,
-  },
-  sortIndicator: {
-    color: "#2563eb",
-  },
-  filterHeaderCell: {
-    padding: "6px 10px 12px",
-    borderBottom: "1px solid #e2e8f0",
-  },
-  columnFilterInput: {
-    width: "100%",
-    minWidth: 80,
-    boxSizing: "border-box",
-    border: "1px solid #cbd5e1",
-    borderRadius: 8,
-    padding: "6px 8px",
-    fontSize: 12,
-    background: "#ffffff",
-    color: "#0f172a",
   },
   mapLinkButton: {
     width: 30,
@@ -1352,10 +660,6 @@ const styles = {
   mutedCell: {
     fontSize: 11,
     color: "#64748b",
-  },
-  totalCell: {
-    fontWeight: 800,
-    color: "#0f172a",
   },
   rowLinkButton: {
     display: "inline-flex",
@@ -1399,55 +703,6 @@ const styles = {
     fontSize: 11,
     cursor: "pointer",
     whiteSpace: "nowrap",
-  },
-  paginationBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    padding: "10px 0",
-    flexWrap: "wrap",
-  },
-  paginationSummary: {
-    color: "#64748b",
-    fontSize: 13,
-  },
-  paginationControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  pageSizeLabel: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    color: "#475569",
-    fontSize: 12,
-    marginRight: 8,
-  },
-  pageSizeSelect: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 8,
-    padding: "4px 8px",
-    fontSize: 12,
-    background: "#ffffff",
-  },
-  paginationButton: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 8,
-    background: "#ffffff",
-    color: "#334155",
-    padding: "6px 12px",
-    fontSize: 12,
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  pageIndicator: {
-    color: "#0f172a",
-    fontSize: 12,
-    fontWeight: 700,
-    padding: "0 4px",
   },
   modalOverlay: {
     position: "fixed",
