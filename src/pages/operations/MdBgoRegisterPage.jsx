@@ -856,9 +856,10 @@ export default function MdBgoRegisterPage() {
 
                         <Td>
                           <Link
-                            to={`/operations/bgo/plan?focusGeofenceId=${encodeURIComponent(batch.geofenceId || batch.geofenceRef?.id || "")}&wardPcode=${encodeURIComponent(wardPcode)}`}
+                            to={`/operations/bgo/${encodeURIComponent(batch.id)}/map`}
                             style={styles.mapLinkButton}
-                            title="View Geofence Map"
+                            title="View MD BGO Batch Map"
+                            aria-label={`View MD BGO Batch Map for ${batch.id}`}
                           >
                             <svg
                               width="17"

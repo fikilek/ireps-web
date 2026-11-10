@@ -60,6 +60,7 @@ import MdBgoPlanningPage from "../pages/operations/MdBgoPlanningPage";
 import MdBgoAllocationPage from "../pages/operations/MdBgoAllocationPage";
 import BmdBgoPage from "../pages/operations/BmdBgoPage";
 import MdBgoRowsPage from "../pages/operations/MdBgoRowsPage";
+import MdBgoBatchMapPage from "../pages/operations/MdBgoBatchMapPage";
 import TrnBgoRegisterPage from "../pages/operations/TrnBgoRegisterPage";
 import TrnBgoRowsPage from "../pages/operations/TrnBgoRowsPage";
 import TrnBgoAllocationPage from "../pages/operations/TrnBgoAllocationPage";
@@ -656,6 +657,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MdBgoDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/bgo/:batchId/map"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MdBgoBatchMapPage />
               </RoleRoute>
             }
           />

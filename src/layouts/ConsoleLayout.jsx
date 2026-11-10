@@ -501,6 +501,10 @@ function getActiveNavItem(items = [], pathname) {
 }
 
 function getPageTitle(activeNavItem, pathname) {
+  if (/^\/operations\/bgo\/[^/]+\/map$/.test(pathname)) {
+    return "MD BGO Batch Map";
+  }
+
   if (pathname === "/operations/targeted-batches") {
     return "TB Register";
   }
