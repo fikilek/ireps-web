@@ -3,10 +3,12 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import IrepsTable from "../../components/table/IrepsTable";
+import DataActionButton, { ErfActionIcon } from "../../components/table/DataActionButton";
+import BoundaryMapModal from "../registries/components/BoundaryMapModal";
 import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import { useGetMdBgoBatchByIdQuery, useGetMdBgoRowsByBatchIdQuery } from "../../redux/bgoApi";
 import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
-import { buildMdBgoRowsSummary, enrichMdBgoRows, mdBgoRowSearchValue } from "./md-bgo/mdBgoRowsModel.js";
+import { buildMdBgoMeterRows, buildMdBgoRowsSummary, enrichMdBgoRows, mdBgoRowSearchValue } from "./md-bgo/mdBgoRowsModel.js";
 
 const PROGRESS_OPTIONS = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "UNAVAILABLE"];
 const PROGRESS_LABELS = {
@@ -65,29 +67,35 @@ export default function MdBgoRowsPage() {
   const { data: premises = [], isLoading: premisesLoading } = useGetPremisesByWardQuery(wardPcode, { skip: !wardPcode });
   const { data: meters = [], isLoading: metersLoading } = useGetAstsByLmPcodeWardPcodeQuery({ lmPcode, wardPcode }, { skip: !lmPcode || !wardPcode });
   const [filters, setFilters] = useState({});
+  const [mapView, setMapView] = useState(null);
 
-  const enrichedRows = useMemo(() => enrichMdBgoRows({ rows, premises, meters }), [rows, premises, meters]);
-  const summary = useMemo(() => buildMdBgoRowsSummary(rows), [rows]);
+  const enrichedRows = useMemo(() => buildMdBgoMeterRows(enrichMdBgoRows({ rows, premises, meters })), [rows, premises, meters]);
+  const summary = useMemo(() => buildMdBgoRowsSummary(enrichedRows), [enrichedRows]);
   const selectedProgress = filters.progress || "";
   const columns = useMemo(() => [
-    { key: "rowNo", label: "Row", group: "Row Details", filter: "text", value: (row) => row.rowNo, sortValue: (row) => row.rowNo },
-    { key: "erfNo", label: "ERF", group: "Row Details", filter: "text", value: (row) => row.erfNo },
-    { key: "premiseNo", label: "Premise No", group: "Premise", filter: "text", value: (row) => row.premiseNo },
-    { key: "premiseId", label: "Premise ID", group: "Premise", filter: "text", value: (row) => row.premiseId || "NAv" },
-    { key: "premiseAddress", label: "Premise Address", group: "Premise", filter: "text", value: (row) => row.premiseAddress },
-    { key: "propertyType", label: "Property Type", group: "Premise", filter: "select", value: (row) => row.propertyType },
-    { key: "propertyName", label: "Property Name", group: "Premise", filter: "text", value: (row) => row.propertyName },
-    { key: "unitNo", label: "Unit No", group: "Premise", filter: "text", value: (row) => row.unitNo },
-    { key: "meterNumbers", label: "Meters", group: "Meter Discovery", filter: "text", value: (row) => row.meterNumbers },
-    { key: "progress", label: "Progress", group: "Meter Discovery", filter: "select", filterOptions: PROGRESS_OPTIONS.map((value) => ({ value, label: PROGRESS_LABELS[value] })), value: (row) => row.progress, render: (row) => <StatusBadge value={row.progress} /> },
-    { key: "workflowState", label: "Row State", group: "Meter Discovery", filter: "select", filterOptions: STATE_OPTIONS.map((value) => ({ value, label: prettyState(value) })), value: (row) => row.workflowState, render: (row) => <StatusBadge value={row.workflowState} /> },
-    { key: "rowKey", label: "BGO Row ID", group: "Row Details", filter: "text", value: (row) => row.rowKey },
-  ], []);
+    { key: "meterNo", label: "Meter No", filter: "text", value: (row) => row.meterNo },
+    {
+      key: "erfNo", label: "Erf No", filter: "text", value: (row) => row.erfNo,
+      render: (row) => row.erfId ? <DataActionButton compact title="Where this ERF is" icon={<ErfActionIcon />} onClick={() => setMapView({ erfId: row.erfId, erfNo: row.erfNo, wardPcode: row.scope?.wardPcode || wardPcode })}>{row.erfNo}</DataActionButton> : shown(row.erfNo),
+    },
+    {
+      key: "premiseAddress", label: "Premise Address", filter: "text",
+      value: (row) => [row.premiseAddress, row.premiseId].filter(Boolean).join(" "),
+      exportValue: (row) => [row.premiseAddress, row.premiseId].filter(Boolean).join("\n"),
+      render: (row) => <div><div>{row.premiseAddress}</div>{row.premiseId ? <small style={{ display: "block", color: "#64748b", fontSize: 10, marginTop: 3, overflowWrap: "anywhere" }}>{row.premiseId}</small> : null}</div>,
+    },
+    { key: "propertyType", label: "Property Type", filter: "select", value: (row) => row.propertyType },
+    { key: "propertyName", label: "Property Name", filter: "text", value: (row) => row.propertyName },
+    { key: "unitNo", label: "Unit No", filter: "text", value: (row) => row.unitNo },
+    { key: "progress", label: "Progress", filter: "select", filterOptions: PROGRESS_OPTIONS.map((value) => ({ value, label: PROGRESS_LABELS[value] })), value: (row) => row.progress, render: (row) => <StatusBadge value={row.progress} /> },
+    { key: "workflowState", label: "Row State", filter: "select", filterOptions: STATE_OPTIONS.map((value) => ({ value, label: prettyState(value) })), value: (row) => row.workflowState, render: (row) => <StatusBadge value={row.workflowState} /> },
+    { key: "sourceRowId", label: "BGO Row ID", filter: "text", value: (row) => row.sourceRowId },
+  ], [wardPcode]);
   const downloads = useMemo(() => ({
     registryName: "MD BGO Rows",
     fileBaseName: `md_bgo_rows_${batchId || "batch"}`,
     scope: { module: "MD BGO Rows", lmPcode, wardPcode, batchId },
-    columns: columns.map((column) => ({ key: column.key, header: column.label, value: column.value })),
+    columns: columns.map((column) => ({ key: column.key, header: column.label, value: column.exportValue || column.value })),
   }), [batchId, columns, lmPcode, wardPcode]);
   const loading = Boolean(batchId) && (!batchResult?.ready || !rowResult?.ready || premisesLoading || metersLoading);
   const error = batchResult?.error || rowResult?.error || (batchResult?.ready && !batch ? "The selected MD BGO batch was not found." : "");
@@ -102,7 +110,7 @@ export default function MdBgoRowsPage() {
     </div>
     <header style={{ marginBottom: 18 }}>
       <h1 style={{ margin: "0 0 6px", color: "#0f172a", fontSize: 30 }}>MD BGO Rows</h1>
-      <p style={{ margin: 0, color: "#64748b" }}>One live work row per ERF or captured premise for this batch.</p>
+      <p style={{ margin: 0, color: "#64748b" }}>One row per discovered meter; ERF and premise work awaiting meter discovery shows NAv.</p>
     </header>
     {error ? <section role="alert" style={{ padding: 16, marginBottom: 16, border: "1px solid #fecaca", borderRadius: 12, color: "#991b1b", background: "#fef2f2" }}><strong>MD BGO rows could not be loaded.</strong><div>{error}</div></section> : null}
     <section aria-label="Batch Details" style={{ padding: 18, marginBottom: 16, border: "1px solid #e2e8f0", borderRadius: 16, background: "white" }}>
@@ -118,10 +126,8 @@ export default function MdBgoRowsPage() {
     <IrepsTable
       title="BGO Rows"
       columns={columns}
-      groups={[{ key: "Row Details", label: "Row Details" }, { key: "Premise", label: "Premise" }, { key: "Meter Discovery", label: "Meter Discovery" }]}
       rows={enrichedRows}
       rowKey={(row) => row.rowKey}
-      defaultSort={{ key: "rowNo", direction: "asc" }}
       filters={filters}
       onFiltersChange={setFilters}
       searchValue={mdBgoRowSearchValue}
@@ -130,5 +136,6 @@ export default function MdBgoRowsPage() {
       loadingText="Loading live batch rows and linked premise/meter details…"
       emptyText={rows.length ? "No BGO rows match the current filters." : "No permanent BGO rows were found for this batch."}
     />
+    {mapView ? <BoundaryMapModal mode="ERF" erfId={mapView.erfId} erfNo={mapView.erfNo} wardPcode={mapView.wardPcode} onClose={() => setMapView(null)} /> : null}
   </main>;
 }

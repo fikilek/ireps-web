@@ -42,7 +42,8 @@ function addressOf(premise) {
 export function enrichMdBgoRows({ rows = [], premises = [], meters = [] }) {
   const premiseById = new Map(premises.map((premise) => [text(premise?.id), premise]));
   const metersByPremise = new Map();
-  meters.forEach((meter) => {
+  const uniqueMeters = new Map(meters.map((meter) => [first(meter?.id, meter?.astId), meter]));
+  uniqueMeters.forEach((meter) => {
     const premiseId = getPremiseIdFromAst(meter);
     if (!premiseId) return;
     const items = metersByPremise.get(premiseId) || [];
@@ -59,7 +60,7 @@ export function enrichMdBgoRows({ rows = [], premises = [], meters = [] }) {
       ...row,
       rowKey: first(row?.id, row?.bgoRowId),
       rowNo: Number(row?.rowNo) || 0,
-      erfId: first(row?.erf?.id, row?.erfId),
+      erfId: first(row?.erf?.id, row?.refs?.erfId, row?.erfId),
       erfNo: first(row?.erf?.erfNo, row?.erfNo) || "NAv",
       premiseId: premiseId || "",
       premiseNo: first(premise?.premiseNo, premise?.master?.premiseNo, row?.premise?.premiseNo) || "NAv",
@@ -76,8 +77,24 @@ export function enrichMdBgoRows({ rows = [], premises = [], meters = [] }) {
   });
 }
 
+// Display rows fan out by meter; the permanent BGO work item and its state stay intact.
+export function buildMdBgoMeterRows(rows = []) {
+  return rows.flatMap((row) => {
+    const sourceRowId = row.rowKey;
+    const meters = row.meters.length ? row.meters : [null];
+    return meters.map((meter) => ({
+      ...row,
+      sourceRowId,
+      rowKey: JSON.stringify([sourceRowId, meter?.id || null]),
+      meterId: meter?.id || "",
+      meterNo: meter?.number || "NAv",
+      meterNumbers: meter?.number || "NAv",
+    }));
+  });
+}
+
 export function mdBgoRowSearchValue(row) {
-  return [row?.rowNo, row?.erfNo, row?.erfId, row?.premiseNo, row?.premiseId,
+  return [row?.erfNo, row?.erfId, row?.premiseId,
     row?.premiseAddress, row?.propertyType, row?.propertyName, row?.unitNo,
-    row?.meterNumbers, row?.workflowState].filter(Boolean).join(" ");
+    row?.meterNo || row?.meterNumbers, row?.workflowState, row?.sourceRowId || row?.rowKey].filter(Boolean).join(" ");
 }
