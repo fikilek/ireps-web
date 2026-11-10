@@ -10,7 +10,7 @@
 //   rowKey   how to identify a row
 // It owns sorting and pagination. Filters can be controlled by a page so KPI
 // cards and column filters share the same state. Downloads are standard.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DownloadButtons from "../DownloadButtons";
 import SalesRangeFilterModal from "../../pages/sales/components/SalesRangeFilterModal";
 import { EMPTY_SALES_RANGE_FILTER, getSalesRangeFilterButtonLabel } from "../../pages/sales/salesUtils.js";
@@ -62,7 +62,7 @@ export default function IrepsTable({
   // Pages with KPIs can reuse the same domain-filtered rows here, avoiding a
   // second pass. filterRows remains the domain matching contract.
   filteredRows: providedFilteredRows = null,
-  stickyHeader = false,
+  stickyHeader = true,
   // Owner, 10 October 2026, on the Meter Registry. Off by default: IrepsTable
   // is shared by every registry, so these are switched on one table at a time
   // rather than changing eight at once.
@@ -75,30 +75,34 @@ export default function IrepsTable({
   onRowClick,
 }) {
   const topScrollRef = useRef(null);
+  const bottomScrollRef = useRef(null);
   const bodyScrollRef = useRef(null);
   const tableRef = useRef(null);
-  const syncingRef = useRef(false);
+  const stickyTopRef = useRef(null);
+  const horizontalOffsetRef = useRef(0);
   const [tableWidth, setTableWidth] = useState(0);
+  const [stickyMetrics, setStickyMetrics] = useState({ top: 0, left: 0 });
+  const pageScroll = stickyHeader && maxHeight == null;
   const pinnedColumnKey = stickyColumnKey ?? (stickyFirstColumn ? columns[0]?.key : null);
+  const pinnedLeft = pageScroll ? stickyMetrics.left : 0;
 
-  // The strip above the table scrolls nothing of its own: it holds a spacer as
-  // wide as the table, and the two keep each other in step. The guard stops
-  // the pair bouncing a scroll back and forth between them.
-  function syncScroll(from, to) {
-    if (syncingRef.current || !from.current || !to.current) return;
-
-    syncingRef.current = true;
-    to.current.scrollLeft = from.current.scrollLeft;
-    window.requestAnimationFrame(() => {
-      syncingRef.current = false;
-    });
-  }
+  // An overflow:auto ancestor traps sticky headings inside that ancestor, even
+  // when it only scrolls horizontally. Page-scrolling tables use overflow:clip
+  // and paired horizontal bars instead, keeping the original semantic thead.
+  const scrollHorizontally = useCallback((requested) => {
+    const body = bodyScrollRef.current;
+    const table = tableRef.current;
+    if (!body || !table) return;
+    const left = Math.max(0, Math.min(requested, table.scrollWidth - body.clientWidth));
+    horizontalOffsetRef.current = left;
+    table.style.marginLeft = pageScroll ? `${-left}px` : "";
+    for (const element of [topScrollRef.current, bottomScrollRef.current, ...(!pageScroll ? [body] : [])]) {
+      if (element && element.scrollLeft !== left) element.scrollLeft = left;
+    }
+  }, [pageScroll]);
 
   useEffect(() => {
-    if (!topScrollbar) return undefined;
-
     const table = tableRef.current;
-
     if (!table || typeof ResizeObserver === "undefined") return undefined;
 
     // The body's vertical scrollbar narrows its viewport. Include that gutter
@@ -107,6 +111,10 @@ export default function IrepsTable({
       const body = bodyScrollRef.current;
       const gutter = body ? body.offsetWidth - body.clientWidth : 0;
       setTableWidth(table.scrollWidth + gutter);
+      const top = stickyTopRef.current?.getBoundingClientRect().height || 0;
+      const left = body?.getBoundingClientRect().left || 0;
+      setStickyMetrics((previous) => previous.top === top && previous.left === left ? previous : { top, left });
+      scrollHorizontally(horizontalOffsetRef.current);
     };
 
     measure();
@@ -115,9 +123,28 @@ export default function IrepsTable({
 
     observer.observe(table);
     if (bodyScrollRef.current) observer.observe(bodyScrollRef.current);
+    if (stickyTopRef.current) observer.observe(stickyTopRef.current);
+    window.addEventListener("resize", measure);
 
-    return () => observer.disconnect();
-  }, [topScrollbar, columns.length]);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [topScrollbar, columns.length, scrollHorizontally]);
+
+  useEffect(() => {
+    const body = bodyScrollRef.current;
+    if (!pageScroll || !body) return undefined;
+    const onWheel = (event) => {
+      if (event.ctrlKey) return;
+      if (!event.shiftKey && Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+      const delta = event.deltaX || (event.shiftKey ? event.deltaY : 0);
+      if (!delta) return;
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? body.clientWidth : 1;
+      const before = horizontalOffsetRef.current;
+      scrollHorizontally(before + delta * scale);
+      if (before !== horizontalOffsetRef.current) event.preventDefault();
+    };
+    body.addEventListener("wheel", onWheel, { passive: false });
+    return () => body.removeEventListener("wheel", onWheel);
+  }, [pageScroll, scrollHorizontally]);
 
   const [internalFilters, setInternalFilters] = useState({});
   const filters = controlledFilters ?? internalFilters;
@@ -205,7 +232,7 @@ export default function IrepsTable({
 
   return (
     <section style={stickyHeader ? styles.frameSticky : styles.frame} aria-label={typeof title === "string" ? title : (downloads.registryName || "Table")}>
-      <div style={stickyHeader ? styles.stickyTop : undefined}>
+      <div ref={stickyTopRef} style={stickyHeader ? styles.stickyTop : undefined}>
       <div style={styles.toolbar}>
         <strong>{title}</strong>
         <span style={{ ...styles.muted, marginLeft: "auto" }} aria-live="polite">
@@ -239,7 +266,7 @@ export default function IrepsTable({
         <div
           ref={topScrollRef}
           style={styles.topScroll}
-          onScroll={() => syncScroll(topScrollRef, bodyScrollRef)}
+          onScroll={(event) => scrollHorizontally(event.currentTarget.scrollLeft)}
           aria-hidden="true"
         >
           <div style={{ width: tableWidth, height: 1 }} />
@@ -250,11 +277,22 @@ export default function IrepsTable({
 
       <div
         ref={bodyScrollRef}
-        style={{ ...styles.scroll, maxHeight }}
-        onScroll={topScrollbar ? () => syncScroll(bodyScrollRef, topScrollRef) : undefined}
+        style={{ ...(pageScroll ? styles.pageScroll : styles.scroll), maxHeight }}
+        onScroll={!pageScroll ? (event) => scrollHorizontally(event.currentTarget.scrollLeft) : undefined}
+        onFocusCapture={pageScroll ? (event) => {
+          const target = event.target.getBoundingClientRect();
+          const viewport = event.currentTarget.getBoundingClientRect();
+          const pinnedIndex = columns.findIndex((column) => column.key === pinnedColumnKey);
+          if (pinnedIndex >= 0 && event.target.closest("th, td")?.cellIndex === pinnedIndex) return;
+          const heading = tableRef.current?.tHead;
+          const pinnedWidth = pinnedIndex >= 0 ? heading?.rows[heading.rows.length - 1]?.cells[pinnedIndex]?.getBoundingClientRect().width || 0 : 0;
+          const visibleLeft = viewport.left + pinnedWidth;
+          if (target.left < visibleLeft) scrollHorizontally(horizontalOffsetRef.current + target.left - visibleLeft);
+          else if (target.right > viewport.right) scrollHorizontally(horizontalOffsetRef.current + target.right - viewport.right);
+        } : undefined}
       >
         <table ref={tableRef} style={styles.table}>
-          <thead style={stickyHeader ? { position: "sticky", top: 0, zIndex: 2, background: T.headBackground } : undefined}>
+          <thead style={stickyHeader ? { position: "sticky", top: pageScroll ? stickyMetrics.top : 0, zIndex: 2, background: T.headBackground } : undefined}>
             {bands.length ? (
               <tr>
                 {bands.map((band) => (
@@ -267,7 +305,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? styles.pinnedHead : null), ...column.headerStyle }}>
+                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? { ...styles.pinnedHead, left: pinnedLeft } : null), ...column.headerStyle }}>
                   {(column.sortable ?? Boolean(column.filter)) ? (
                     <button
                       type="button"
@@ -289,7 +327,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} style={{ ...styles.filterCell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? styles.pinnedFilter : null), ...column.headerStyle }}>
+                <th key={column.key} style={{ ...styles.filterCell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? { ...styles.pinnedFilter, left: pinnedLeft } : null), ...column.headerStyle }}>
                   {column.renderFilter ? column.renderFilter({ filters, setFilter }) : !column.filter ? null : column.filter === "select" ? (
                     <select
                       aria-label={`Filter ${column.label}`}
@@ -350,7 +388,7 @@ export default function IrepsTable({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    style={{ ...styles.cell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, textAlign: column.align || "left", ...column.cellStyle, ...(column.key === pinnedColumnKey ? styles.pinnedCell : null) }}
+                    style={{ ...styles.cell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, textAlign: column.align || "left", ...column.cellStyle, ...(column.key === pinnedColumnKey ? { ...styles.pinnedCell, left: pinnedLeft } : null) }}
                   >
                     {column.render ? column.render(row, index) : column.value?.(row)}
                   </td>
@@ -368,6 +406,8 @@ export default function IrepsTable({
           </tbody>
         </table>
       </div>
+
+      {pageScroll ? <div ref={bottomScrollRef} style={styles.topScroll} onScroll={(event) => scrollHorizontally(event.currentTarget.scrollLeft)} aria-hidden="true"><div style={{ width: tableWidth, height: 1 }} /></div> : null}
 
       {pagination}
 
@@ -486,6 +526,7 @@ const styles = {
   // visible. `clip` cuts the corners the same way and is not a scroll
   // container, so sticky survives it.
   frameSticky: {
+    minWidth: 0,
     border: `1px solid ${T.border}`,
     borderRadius: T.radius,
     background: T.rowBackground,
@@ -564,6 +605,7 @@ const styles = {
   },
 
   scroll: { overflowX: "auto" },
+  pageScroll: { overflow: "clip", minWidth: 0 },
 
   // A second scrollbar, above the table. On a long table the only scrollbar is
   // at the foot of it, so reaching the right-hand columns means scrolling down
