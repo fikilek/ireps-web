@@ -288,16 +288,6 @@ export default function MdBgoRegisterPage() {
             MD BGO Dashboard
           </Link>
 
-          {tickedBatchIds.length > 0 ? (
-            <button
-              type="button"
-              style={styles.clearTicksButton}
-              onClick={clearTicks}
-              title="Clear selected batches"
-            >
-              Clear ticks
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -354,6 +344,8 @@ export default function MdBgoRegisterPage() {
               columns={columns}
               rows={tableRows}
               rowKey={(batch) => batch.id}
+              extraFiltersActive={tickedBatchIds.length > 0}
+              onClearFilters={clearTicks}
               searchValue={mdBgoRegisterSearchValue}
               searchPlaceholder="Batch IDs, teams, wards, geofences, statuses, creators…"
               downloads={{ fileBaseName: "md_bgo_register", scope: { module: "MD BGO Register", lmPcode } }}
@@ -508,21 +500,6 @@ const styles = {
     justifyContent: "flex-end",
     gap: 10,
     flexWrap: "wrap",
-  },
-  clearTicksButton: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: "1px solid #cbd5e1",
-    borderRadius: 14,
-    background: "#ffffff",
-    color: "#475569",
-    padding: "11px 16px",
-    fontWeight: 900,
-    fontSize: "inherit",
-    fontFamily: "inherit",
-    cursor: "pointer",
-    textDecoration: "none",
   },
   primaryButton: {
     display: "inline-flex",
