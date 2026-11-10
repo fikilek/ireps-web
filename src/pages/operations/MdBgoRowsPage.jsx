@@ -107,11 +107,11 @@ export default function MdBgoRowsPage() {
     {error ? <section role="alert" style={{ padding: 16, marginBottom: 16, border: "1px solid #fecaca", borderRadius: 12, color: "#991b1b", background: "#fef2f2" }}><strong>MD BGO rows could not be loaded.</strong><div>{error}</div></section> : null}
     <section aria-label="Batch Details" style={{ padding: 18, marginBottom: 16, border: "1px solid #e2e8f0", borderRadius: 16, background: "white" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-        <div><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>BATCH ID</small><strong>{batchId}</strong></div>
-        <div><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>GEOFENCE</small><strong>{shown(batch?.geofenceRef?.name)}</strong></div>
-        <div><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>WARD</small><strong>{shown(scope.wardName)}{scope.wardPcode ? ` (${scope.wardPcode})` : ""}</strong></div>
-        <div><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>BATCH STATUS</small><strong>{prettyState(batch?.workflow?.state)}</strong></div>
-        <div><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>ERFs IN BATCH</small><strong>{Number(batch?.summary?.erfCount ?? batch?.summary?.totalRows ?? rows.length).toLocaleString("en-ZA")}</strong></div>
+        <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>BATCH ID</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{batchId}</strong></div>
+        <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>GEOFENCE</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{shown(batch?.geofenceRef?.name)}</strong></div>
+        <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>WARD</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{shown(scope.wardName)}{scope.wardPcode ? ` (${scope.wardPcode})` : ""}</strong></div>
+        <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>BATCH STATUS</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{prettyState(batch?.workflow?.state)}</strong></div>
+        <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>ERFs IN BATCH</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{Number(batch?.summary?.erfCount ?? batch?.summary?.totalRows ?? rows.length).toLocaleString("en-ZA")}</strong></div>
       </div>
     </section>
     <SummaryCards summary={summary} selected={selectedProgress} onSelect={filterRows} />

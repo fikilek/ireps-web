@@ -89,7 +89,7 @@ service cloud.firestore {
     // acquire no client access automatically. All these writers are server-side.
     match /{collection}/{id} {
       allow read: if active() && collection in [
-        'account_master', 'asts', 'batch_erf_overrides', 'bgo_batches',
+        'account_master', 'asts', 'batch_erf_overrides', 'bgo_batches', 'bgo_rows',
         'conlog_sales_atomic', 'conlog_sales_monthly', 'conlog_sales_monthly_lm', 'conlog_sales_monthly_lm_groups',
         'countries', 'demo_sales_meters', 'districts', 'districtMunicipalities', 'towns', 'wards',
         'erfs', 'field_account_data', 'fwr_live_locations',
