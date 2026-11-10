@@ -2,6 +2,7 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { httpsCallable } from "firebase/functions";
 import {
   collection,
+  doc,
   limit as limitQuery,
   onSnapshot,
   query,
@@ -580,6 +581,69 @@ export const bgoApi = createApi({
       },
     }),
 
+    getMdBgoBatchById: builder.query({
+      queryFn: () => ({ data: { batch: null, ready: false, error: "" } }),
+      async onCacheEntryAdded(batchId, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        const id = String(batchId || "").trim();
+        if (!id) return;
+        let unsubscribe = null;
+        try {
+          await cacheDataLoaded;
+          unsubscribe = onSnapshot(
+            doc(db, BGO_BATCHES_COLLECTION, id),
+            (snapshot) => updateCachedData((draft) => {
+              draft.batch = snapshot.exists() ? { ...snapshot.data(), id: snapshot.id } : null;
+              draft.ready = true;
+              draft.error = "";
+            }),
+            (error) => updateCachedData((draft) => {
+              draft.ready = true;
+              draft.error = error?.message || "Could not read the MD BGO batch.";
+            }),
+          );
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) unsubscribe();
+        }
+      },
+    }),
+
+    getMdBgoRowsByBatchId: builder.query({
+      queryFn: () => ({ data: { rows: [], ready: false, error: "" } }),
+      async onCacheEntryAdded(batchId, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        const id = String(batchId || "").trim();
+        if (!id) return;
+        let unsubscribe = null;
+        try {
+          await cacheDataLoaded;
+          const rowsQuery = query(
+            collection(db, MD_BGO_ROWS_COLLECTION),
+            where("bgoBatchId", "==", id),
+          );
+          unsubscribe = onSnapshot(
+            rowsQuery,
+            (snapshot) => {
+              const rows = snapshot.docs
+                .map((rowSnapshot) => ({ ...rowSnapshot.data(), id: rowSnapshot.id }))
+                .sort((left, right) => Number(left.rowNo || 0) - Number(right.rowNo || 0));
+              updateCachedData((draft) => {
+                draft.rows.splice(0, draft.rows.length, ...rows);
+                draft.ready = true;
+                draft.error = "";
+              });
+            },
+            (error) => updateCachedData((draft) => {
+              draft.ready = true;
+              draft.error = error?.message || "Could not read MD BGO rows.";
+            }),
+          );
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) unsubscribe();
+        }
+      },
+    }),
+
     getBmdBgoBatchesByWard: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
@@ -807,6 +871,8 @@ export const {
   useGetBmdBgoBatchesByWardQuery,
   useGetBgoBatchesByLmQuery,
   useGetMdBgoRowsByLmQuery,
+  useGetMdBgoBatchByIdQuery,
+  useGetMdBgoRowsByBatchIdQuery,
   useAllocateMdBgoBatchesTogetherMutation,
   useUnallocateMdBgoBatchMutation,
   useGetBgoBatchesByTcIdQuery,
