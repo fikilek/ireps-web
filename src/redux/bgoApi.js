@@ -402,6 +402,20 @@ export const bgoApi = createApi({
         }
       },
     }),
+    unallocateMdBgoBatch: builder.mutation({
+      async queryFn(payload) {
+        try {
+          const callable = httpsCallable(functions, "onUnallocateMdBgoBatchCallable");
+          const result = await callable(payload || {});
+          const data = result?.data || {};
+          if (data?.success === false) return { error: { status: data?.code || "MD_BGO_UNALLOCATION_FAILED", data, message: data?.message || "Failed to unallocate MD BGO batch" } };
+          return { data };
+        } catch (error) {
+          const uncertain = ["deadline-exceeded", "unavailable", "cancelled", "internal"].includes(String(error?.code || "").replace(/^functions\//, ""));
+          return { error: { status: error?.code || "MD_BGO_UNALLOCATION_ERROR", data: error, message: error?.message || "Failed to unallocate MD BGO batch", uncertain } };
+        }
+      },
+    }),
     createBgo: builder.mutation({
       async queryFn(payload) {
         try {
@@ -747,6 +761,7 @@ export const {
   useGetBmdBgoBatchesByWardQuery,
   useGetBgoBatchesByLmQuery,
   useAllocateMdBgoBatchesTogetherMutation,
+  useUnallocateMdBgoBatchMutation,
   useGetBgoBatchesByTcIdQuery,
   useGetBgoRowsByTcIdQuery,
   useGetBgoRowsByBatchIdQuery,

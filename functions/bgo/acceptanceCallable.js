@@ -842,52 +842,29 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
 
     if (childSnaps.length === 0 && isBmdBatch) {
       const bmdWorklistCount = getBmdWorklistTotalRows(batchData);
-
-      writeJobs.push((batch) => {
-        batch.update(
-          batchRef,
-          buildBmdBgoBatchDecisionPatch({
-            action,
-            now,
-            actor,
-            rejectReason,
-            totalRows: bmdWorklistCount,
-          }),
-        );
+      const historyRef = batchRef.collection("history").doc();
+      await db.runTransaction(async transaction => {
+        const currentSnap = await transaction.get(batchRef);
+        if (!currentSnap.exists) throw Object.assign(new Error("The MD BGO batch no longer exists."), { code: "BGO_BATCH_NOT_FOUND" });
+        const current = currentSnap.data() || {};
+        if (getBatchWorkflowState(current) !== BGO_WORKFLOW_STATES.ISSUED || getBatchReleaseState(current) !== BGO_RELEASE_STATES.WAITING || getBgoBatchTarget(current)?.id !== target?.id || getBgoBatchTarget(current)?.type !== target?.type) {
+          throw Object.assign(new Error("The MD BGO batch was changed or unallocated before this decision could be saved."), { code: "BGO_BATCH_NOT_WAITING_ACCEPTANCE" });
+        }
+        transaction.update(batchRef, buildBmdBgoBatchDecisionPatch({ action, now, actor, rejectReason, totalRows: bmdWorklistCount }));
+        transaction.set(historyRef, buildBgoHistoryEvent({
+          trnId: batchId,
+          trnType,
+          event: action === "ACCEPT" ? "BMD_BGO_BATCH_ACCEPTED" : "BMD_BGO_BATCH_REJECTED",
+          workflowState: action === "ACCEPT" ? BGO_WORKFLOW_STATES.ACCEPTED : BGO_WORKFLOW_STATES.REJECTED,
+          actorUid: actor.uid,
+          actorName: actor.name,
+          now,
+          note: action === "ACCEPT"
+            ? "MD-BGO batch accepted. Discovery TRNs will be created only when field discovery is submitted."
+            : `MD-BGO batch rejected before field discovery started: ${rejectReason}`,
+        }));
       });
-
-      writeJobs.push((batch) => {
-        const historyRef = batchRef.collection("history").doc();
-
-        batch.set(
-          historyRef,
-          buildBgoHistoryEvent({
-            trnId: batchId,
-            trnType,
-            event:
-              action === "ACCEPT"
-                ? "BMD_BGO_BATCH_ACCEPTED"
-                : "BMD_BGO_BATCH_REJECTED",
-            workflowState:
-              action === "ACCEPT"
-                ? BGO_WORKFLOW_STATES.ACCEPTED
-                : BGO_WORKFLOW_STATES.REJECTED,
-            actorUid: actor.uid,
-            actorName: actor.name,
-            now,
-            note:
-              action === "ACCEPT"
-                ? "MD-BGO batch accepted. Discovery TRNs will be created only when field discovery is submitted."
-                : `MD-BGO batch rejected before field discovery started: ${rejectReason}`,
-          }),
-        );
-      });
-
-      const committedWrites = await commitWriteJobsInChunks({
-        db,
-        writeJobs,
-        chunkSize: 380,
-      });
+      const committedWrites = 2;
 
       logger.info("onAcceptRejectBgoBatchCallable -- BMD SUCCESS", {
         batchId,

@@ -125,6 +125,7 @@ import { onCheckMeterRegistrationCallable } from "./meterLifecycle/checkRegistra
 
 import { onCreateBgoCallable } from "./bgo/callables.js";
 import { onAllocateMdBgoBatchesTogetherCallable } from "./bgo/allocationCallable.js";
+import { onUnallocateMdBgoBatchCallable } from "./bgo/unallocationCallable.js";
 import { createOrLinkMdBgoPremise } from "./bgo/mdBgoPremiseLink.js";
 import {
   onAcceptRejectBgoBatchCallable,
@@ -299,6 +300,7 @@ export {
   onDeleteTcUploadCallable,
   onCreateBgoCallable,
   onAllocateMdBgoBatchesTogetherCallable,
+  onUnallocateMdBgoBatchCallable,
   onAcceptRejectBgoBatchCallable,
   onReverseBgoBatchAcceptanceCallable,
   onDeleteUnacceptedBgoCallable,

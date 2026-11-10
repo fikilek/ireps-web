@@ -74,6 +74,7 @@ export const onAllocateMdBgoBatchesTogetherCallable = onCall({ memory: "512MiB",
         transaction.update(batchRefs[index], {
           "assignment.targets": [target],
           "bgo.targetType": targetType, "bgo.targetId": targetId, "bgo.targetName": target.name, "bgo.releaseState": "WAITING_BATCH_ACCEPTANCE",
+          "bgo.issuedByUid": actorUid, "bgo.issuedByUser": actorName,
           "workflow.state": "ISSUED", "workflow.issuedAt": issuedAt, "workflow.issuedByUid": actorUid, "workflow.issuedByUser": actorName,
           "metadata.updatedAt": issuedAt, "metadata.updatedByUid": actorUid, "metadata.updatedByUser": actorName,
         });

@@ -7,6 +7,7 @@ import { useGeo } from "@/context/GeoContext";
 import {
   useGetBgoBatchesByLmQuery,
   useDeleteUnacceptedBgoMutation,
+  useUnallocateMdBgoBatchMutation,
 } from "../../redux/bgoApi";
 import { useMdBgoAllocationSelection } from "./md-bgo/allocationSelection";
 
@@ -99,11 +100,13 @@ function getAllocationStatus(batch = {}) {
   const targetId = String(
     batch?.targetId || batch?.target?.id || batch?.raw?.bgo?.targetId || "",
   ).trim();
+  const hasTarget = Boolean(targetId && targetId.toUpperCase() !== "NAV");
 
   if (workflowState === "COMPLETED") return "COMPLETED";
   if (workflowState === "IN_PROGRESS") return "IN_PROGRESS";
-  if (workflowState === "ALLOCATED" || (targetId && workflowState === "ISSUED")) return "ALLOCATED";
-  return "READY_FOR_ALLOCATION";
+  if (["ALLOCATED", "ISSUED", "ACCEPTED", "REJECTED"].includes(workflowState) || hasTarget) return "ALLOCATED";
+  if (workflowState === "READY_FOR_ALLOCATION" && !hasTarget) return "READY_FOR_ALLOCATION";
+  return "ALLOCATION_REVIEW";
 }
 
 function compareTableValues(left, right) {
@@ -253,6 +256,7 @@ export default function MdBgoRegisterPage() {
   );
 
   const [deleteBgo, { isLoading: isDeletingBgo }] = useDeleteUnacceptedBgoMutation();
+  const [unallocateBgo, { isLoading: isUnallocatingBgo }] = useUnallocateMdBgoBatchMutation();
 
   // MD-BGO-R017: register ticks persist per LM so the Allocation Map can show the same selection.
   const { selectedIds: tickedBatchIds, isTicked, toggle: toggleTick, clear: clearTicks } = useMdBgoAllocationSelection(lmPcode);
@@ -261,6 +265,9 @@ export default function MdBgoRegisterPage() {
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
+  const [unallocateCandidate, setUnallocateCandidate] = useState(null);
+  const [unallocateReason, setUnallocateReason] = useState("");
+  const [unallocateError, setUnallocateError] = useState("");
 
   // Table filters & sorting
   const [batchIdFilter, setBatchIdFilter] = useState("");
@@ -293,7 +300,7 @@ export default function MdBgoRegisterPage() {
     bmdBatches.forEach((batch) => {
       const status = getAllocationStatus(batch);
       if (status === "READY_FOR_ALLOCATION") ready += 1;
-      else if (status === "ALLOCATED") allocated += 1;
+      else if (status === "ALLOCATED" || status === "ALLOCATION_REVIEW") allocated += 1;
       else if (status === "IN_PROGRESS") inProgress += 1;
       else if (status === "COMPLETED") completed += 1;
     });
@@ -336,7 +343,7 @@ export default function MdBgoRegisterPage() {
 
       if (allocationFilter) {
         const status = getAllocationStatus(batch);
-        if (allocationFilter === "ALLOCATED" && status !== "ALLOCATED" && status !== "IN_PROGRESS" && status !== "COMPLETED") return false;
+        if (allocationFilter === "ALLOCATED" && status !== "ALLOCATED" && status !== "ALLOCATION_REVIEW" && status !== "IN_PROGRESS" && status !== "COMPLETED") return false;
         if (allocationFilter === "NOT ALLOCATED" && status !== "READY_FOR_ALLOCATION") return false;
       }
 
@@ -447,6 +454,37 @@ export default function MdBgoRegisterPage() {
       setDeleteCandidate(null);
     } catch (err) {
       setDeleteError(err?.data?.message || err?.message || "Could not delete BGO batch.");
+    }
+  };
+
+  const handleUnallocateBatch = async () => {
+    if (!unallocateCandidate || isUnallocatingBgo) return;
+    setUnallocateError("");
+    const raw = unallocateCandidate.raw || {};
+    const issuedAt = raw.workflow?.issuedAt;
+    const expectedIssuedAtMillis = typeof issuedAt?.toMillis === "function"
+      ? issuedAt.toMillis()
+      : issuedAt instanceof Date ? issuedAt.getTime() : Date.parse(issuedAt);
+    if (!Number.isFinite(expectedIssuedAtMillis)) {
+      setUnallocateError("The allocation timestamp is unavailable. Refresh the register and reopen Unallocate.");
+      return;
+    }
+    try {
+      const response = await unallocateBgo({
+        bgoBatchId: unallocateCandidate.id,
+        expectedTargetType: unallocateCandidate.targetType,
+        expectedTargetId: unallocateCandidate.targetId,
+        expectedIssuedAtMillis,
+        requestId: unallocateCandidate.requestId,
+        reason: unallocateReason,
+      }).unwrap();
+      setActionNotice(response?.message || `Batch ${unallocateCandidate.id} is ready for allocation.`);
+      setUnallocateCandidate(null);
+      setUnallocateReason("");
+    } catch (err) {
+      setUnallocateError(err?.uncertain
+        ? "The result is still being confirmed. Retry this same confirmation; the server safely recognizes the same request."
+        : err?.data?.message || err?.message || "Could not unallocate this MD BGO batch.");
     }
   };
 
@@ -734,7 +772,15 @@ export default function MdBgoRegisterPage() {
 
                   {pagedBatches.map((batch) => {
                     const status = getAllocationStatus(batch);
-                    const isAllocated = status === "ALLOCATED" || status === "IN_PROGRESS" || status === "COMPLETED";
+                    const isAllocated = status !== "READY_FOR_ALLOCATION";
+                    const fieldworkStarted = status === "IN_PROGRESS" || status === "COMPLETED";
+                    const intentTargetType = batch.targetType || batch.target?.type || batch.raw?.bgo?.targetType || "";
+                    const intentTargetId = batch.targetId || batch.target?.id || batch.raw?.bgo?.targetId || "";
+                    const intentIssuedAt = batch.raw?.workflow?.issuedAt;
+                    const intentIssuedAtMillis = typeof intentIssuedAt?.toMillis === "function"
+                      ? intentIssuedAt.toMillis()
+                      : intentIssuedAt instanceof Date ? intentIssuedAt.getTime() : Date.parse(intentIssuedAt);
+                    const unallocationIntentUnavailable = !["TEAM", "SP"].includes(String(intentTargetType).toUpperCase()) || !intentTargetId || String(intentTargetId).toUpperCase() === "NAV" || !Number.isFinite(intentIssuedAtMillis);
                     const rowIsTicked = isTicked(batch.id);
                     const targetName = batch?.targetName || batch?.target?.name || "";
                     const totalErfs = getBatchErfCount(batch);
@@ -794,13 +840,24 @@ export default function MdBgoRegisterPage() {
 
                         <Td>
                           {isAllocated ? (
-                            <Link
-                              to={`/operations/bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
-                              style={styles.unallocateButton}
-                              title="View or modify allocation on Allocation Board"
+                            <button
+                              type="button"
+                              style={{ ...styles.unallocateButton, ...((fieldworkStarted || unallocationIntentUnavailable) ? styles.disabledButton : null) }}
+                              disabled={fieldworkStarted || unallocationIntentUnavailable}
+                              title={fieldworkStarted ? "Field work has started; this batch cannot be unallocated" : unallocationIntentUnavailable ? "Allocation details are incomplete; contact an MNG" : "Unallocate this batch before field work starts"}
+                              onClick={() => {
+                                setUnallocateError("");
+                                setUnallocateReason("");
+                                setUnallocateCandidate({
+                                  ...batch,
+                                  targetType: intentTargetType,
+                                  targetId: intentTargetId,
+                                  requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                                });
+                              }}
                             >
                               Unallocate
-                            </Link>
+                            </button>
                           ) : (
                             <Link
                               to={`/operations/bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
@@ -902,6 +959,38 @@ export default function MdBgoRegisterPage() {
                 disabled={isDeletingBgo}
               >
                 {isDeletingBgo ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {unallocateCandidate ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="md-bgo-unallocate-title">
+            <p style={styles.eyebrow}>Unallocate MD BGO Batch</p>
+            <h2 id="md-bgo-unallocate-title" style={styles.modalTitle}>{unallocateCandidate.id}</h2>
+            <p style={styles.modalSubtitle}>
+              Take this batch back from <strong>{unallocateCandidate.targetName || unallocateCandidate.target?.name || "the assigned target"}</strong> and return it to Ready for Allocation. The batch and its ERF rows will be preserved.
+            </p>
+            {String(unallocateCandidate.raw?.workflow?.state || "").toUpperCase() === "ACCEPTED" ? (
+              <div style={styles.unallocateWarning}>The team has accepted this batch. It may remain on their device until it reconnects; the server will refuse any later field submission.</div>
+            ) : null}
+            <label style={styles.reasonLabel} htmlFor="md-bgo-unallocate-reason">Reason for unallocation</label>
+            <textarea
+              id="md-bgo-unallocate-reason"
+              value={unallocateReason}
+              onChange={event => setUnallocateReason(event.target.value)}
+              maxLength={1000}
+              rows={4}
+              style={styles.reasonInput}
+              disabled={isUnallocatingBgo}
+            />
+            {unallocateError ? <div style={styles.modalError}>{unallocateError}</div> : null}
+            <div style={styles.modalActions}>
+              <button type="button" style={styles.modalCancelButton} onClick={() => setUnallocateCandidate(null)} disabled={isUnallocatingBgo}>Cancel</button>
+              <button type="button" style={styles.modalPrimaryButton} onClick={handleUnallocateBatch} disabled={isUnallocatingBgo || !unallocateReason.trim()}>
+                {isUnallocatingBgo ? "Unallocating..." : "Confirm Unallocate"}
               </button>
             </div>
           </div>
@@ -1194,6 +1283,7 @@ const styles = {
     fontSize: 12,
     textDecoration: "none",
     whiteSpace: "nowrap",
+    cursor: "pointer",
   },
   deleteBatchButton: {
     display: "inline-flex",
@@ -1320,4 +1410,16 @@ const styles = {
     fontWeight: 800,
     cursor: "pointer",
   },
+  modalPrimaryButton: {
+    border: 0,
+    borderRadius: 10,
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "8px 16px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  reasonLabel: { display: "block", marginBottom: 6, color: "#334155", fontSize: 13, fontWeight: 800 },
+  reasonInput: { boxSizing: "border-box", width: "100%", border: "1px solid #cbd5e1", borderRadius: 10, padding: 10, marginBottom: 14, font: "inherit", resize: "vertical" },
+  unallocateWarning: { padding: 10, borderRadius: 8, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 12, lineHeight: 1.5, marginBottom: 14 },
 };
