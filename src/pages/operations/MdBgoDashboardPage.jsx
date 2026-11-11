@@ -15,7 +15,7 @@ const workLegend = [
   { key: "completed", label: "Completed", color: "var(--md-completed)" },
 ];
 
-function Donut({ label, segments, total, centre, caption }) {
+export function Donut({ label, segments, total, centre, caption }) {
   let cursor = 0;
   const stops = segments.map(segment => {
     const start = cursor;
@@ -28,14 +28,14 @@ function Donut({ label, segments, total, centre, caption }) {
   </div>;
 }
 
-function ReadFailure({ error }) {
+export function ReadFailure({ error, title = "MD BGO Dashboard could not be loaded" }) {
   const dialog = useRef(null);
   useEffect(() => {
     if (error && !dialog.current.open) dialog.current.showModal();
     if (!error && dialog.current.open) dialog.current.close();
   }, [error]);
   return <dialog ref={dialog} className="md-dashboard-dialog" aria-labelledby="md-dashboard-failure-title">
-    <h2 id="md-dashboard-failure-title">MD BGO Dashboard could not be loaded</h2>
+    <h2 id="md-dashboard-failure-title">{title}</h2>
     <p>{error}</p><form method="dialog"><button type="submit">OK</button></form>
   </dialog>;
 }
@@ -54,7 +54,7 @@ export default function MdBgoDashboardPage() {
   return <section className="md-dashboard">
     <header className="md-dashboard-header">
       <div><p className="md-eyebrow">Operations / MD BGO</p><h2>MD BGO Dashboard</h2><p className="md-intro">Municipal coverage. Batch workload. Field progress.</p></div>
-      <div className="md-header-actions"><span className="md-scope">{lmName}</span><Link to="/operations/bgo">Back to MD BGO Register</Link></div>
+      <div className="md-header-actions"><span className="md-scope">{lmName}</span><Link to="/operations/bgo/dashboard/map">Map Dashboard</Link><Link to="/operations/bgo">Back to MD BGO Register</Link></div>
     </header>
     {!lmPcode ? <p className="md-notice">Select an active municipality to view its dashboard.</p> : error ? <p className="md-notice md-error" role="alert">MD BGO data could not be loaded. {error}</p> : !model ? <p className="md-notice" role="status">Loading live MD BGO coverage and work progress…</p> : <>
       <div className="md-overview">

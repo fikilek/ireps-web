@@ -56,6 +56,7 @@ import TcFinalReportPage from "../pages/operations/TcFinalReportPage";
 import BgoDashboardPage from "../pages/operations/BgoDashboardPage";
 import MdBgoRegisterPage from "../pages/operations/MdBgoRegisterPage";
 import MdBgoDashboardPage from "../pages/operations/MdBgoDashboardPage";
+import MdBgoMapDashboardPage from "../pages/operations/MdBgoMapDashboardPage";
 import MdBgoPlanningPage from "../pages/operations/MdBgoPlanningPage";
 import MdBgoAllocationPage from "../pages/operations/MdBgoAllocationPage";
 import BmdBgoPage from "../pages/operations/BmdBgoPage";
@@ -657,6 +658,15 @@ export default function AppRoutes() {
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
                 <MdBgoDashboardPage />
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/operations/bgo/dashboard/map"
+            element={
+              <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
+                <MdBgoMapDashboardPage />
               </RoleRoute>
             }
           />
