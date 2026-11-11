@@ -26,3 +26,12 @@ test("MD BGO opts into three pins and shared heading/filter/body use the same la
   for (const name of ["pinnedHead", "pinnedFilter", "pinnedCell"]) assert.ok(shared.includes(`pinStyle(column, styles.${name})`));
   assert.match(shared, /viewport.left \+ pinnedLayout.width/);
 });
+
+test("page-scrolling pins compensate table movement without viewport-coordinate sticky insets", async () => {
+  const shared = await readFile(new URL("./IrepsTable.jsx", import.meta.url), "utf8");
+  assert.doesNotMatch(shared, /stickyMetrics\.left/);
+  assert.match(shared, /position: "relative"/);
+  assert.match(shared, /table\.style\.setProperty\("--ireps-horizontal-offset",/);
+  assert.match(shared, /naturalOffsets\[column\.key\]/);
+  assert.match(shared, /columnWidths: widths/);
+});

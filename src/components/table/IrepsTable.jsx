@@ -84,15 +84,21 @@ export default function IrepsTable({
   const stickyTopRef = useRef(null);
   const horizontalOffsetRef = useRef(0);
   const [tableWidth, setTableWidth] = useState(0);
-  const [stickyMetrics, setStickyMetrics] = useState({ top: 0, left: 0 });
+  const [stickyMetrics, setStickyMetrics] = useState({ top: 0 });
   const [pinnedLayout, setPinnedLayout] = useState({ offsets: {}, width: 0 });
   const pageScroll = stickyHeader && maxHeight == null;
   const pinnedKeys = irepsTablePinnedKeys(columns.map(column => ({ key: column.key })), { stickyColumnKeys, stickyColumnKey, stickyFirstColumn });
   const pinnedSignature = JSON.stringify(pinnedKeys);
   const columnSignature = JSON.stringify(columns.map(column => column.key));
-  const pinnedLeft = pageScroll ? stickyMetrics.left : 0;
+  const naturalOffsets = irepsTablePinnedLayout(JSON.parse(columnSignature), pinnedLayout.columnWidths).offsets;
   const pinStyle = (column, style) => pinnedKeys.includes(column.key)
-    ? { ...style, left: pinnedLeft + (pinnedLayout.offsets[column.key] || 0) } : null;
+    ? { ...style, ...(pageScroll ? {
+      // Compensate the table's negative margin in table coordinates. Sticky
+      // left insets use the nearest scroll ancestor, which may be the app's
+      // inset main panel rather than the browser viewport.
+      position: "relative",
+      left: `max(0px, calc(var(--ireps-horizontal-offset, 0px) + ${(pinnedLayout.offsets[column.key] || 0) - (naturalOffsets[column.key] || 0)}px))`,
+    } : { left: pinnedLayout.offsets[column.key] || 0 }) } : null;
 
   // An overflow:auto ancestor traps sticky headings inside that ancestor, even
   // when it only scrolls horizontally. Page-scrolling tables use overflow:clip
@@ -104,6 +110,7 @@ export default function IrepsTable({
     const left = Math.max(0, Math.min(requested, table.scrollWidth - body.clientWidth));
     horizontalOffsetRef.current = left;
     table.style.marginLeft = pageScroll ? `${-left}px` : "";
+    table.style.setProperty("--ireps-horizontal-offset", `${left}px`);
     for (const element of [topScrollRef.current, bottomScrollRef.current, ...(!pageScroll ? [body] : [])]) {
       if (element && element.scrollLeft !== left) element.scrollLeft = left;
     }
@@ -120,11 +127,10 @@ export default function IrepsTable({
       const gutter = body ? body.offsetWidth - body.clientWidth : 0;
       setTableWidth(table.scrollWidth + gutter);
       const top = stickyTopRef.current?.getBoundingClientRect().height || 0;
-      const left = body?.getBoundingClientRect().left || 0;
-      setStickyMetrics((previous) => previous.top === top && previous.left === left ? previous : { top, left });
+      setStickyMetrics((previous) => previous.top === top ? previous : { top });
       const cells = table.querySelectorAll('thead th[scope="col"]');
       const widths = Object.fromEntries(JSON.parse(columnSignature).map((key, index) => [key, cells[index]?.getBoundingClientRect().width || 0]));
-      const layout = irepsTablePinnedLayout(JSON.parse(pinnedSignature), widths);
+      const layout = { ...irepsTablePinnedLayout(JSON.parse(pinnedSignature), widths), columnWidths: widths };
       setPinnedLayout(previous => JSON.stringify(previous) === JSON.stringify(layout) ? previous : layout);
       scrollHorizontally(horizontalOffsetRef.current);
     };
