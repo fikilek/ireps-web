@@ -126,7 +126,7 @@ import { onCheckMeterRegistrationCallable } from "./meterLifecycle/checkRegistra
 import { onCreateBgoCallable } from "./bgo/callables.js";
 import { onAllocateMdBgoBatchesTogetherCallable } from "./bgo/allocationCallable.js";
 import { onUnallocateMdBgoBatchCallable } from "./bgo/unallocationCallable.js";
-import { createOrLinkMdBgoPremise } from "./bgo/mdBgoPremiseLink.js";
+import { createOrLinkMdBgoPremise, resolveMdBgoPremiseContext } from "./bgo/mdBgoPremiseLink.js";
 import { prepareMdBgoRegistration } from "./bgo/mdBgoRegistration.js";
 import {
   onAcceptRejectBgoBatchCallable,
@@ -5569,8 +5569,8 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 
     const caller = request?.auth || null;
     const data = request?.data || {};
-    const hasMdBgoContext = Object.prototype.hasOwnProperty.call(data, "mdBgoContext");
-    const mdBgoContext = data?.mdBgoContext || null;
+    let hasMdBgoContext = Object.prototype.hasOwnProperty.call(data, "mdBgoContext");
+    let mdBgoContext = data?.mdBgoContext || null;
 
     const premiseId = data?.id || "NAv";
     const hasTargetedBatchContext = Object.prototype.hasOwnProperty.call(
@@ -5644,6 +5644,14 @@ export const onPremiseCreateCallable = onCall(async (request) => {
 
     const idCheckStartedAtMs = Date.now();
     const premiseSnap = await premiseRef.get();
+
+    if (!hasMdBgoContext && !isTargetedBatchPremise) {
+      mdBgoContext = await resolveMdBgoPremiseContext({ db,
+        premisePayload: premiseSnap.exists ? { ...premiseSnap.data(), id: premiseId } : data,
+        actorUid: caller.uid, authToken: caller.token || {},
+      });
+      hasMdBgoContext = Boolean(mdBgoContext);
+    }
 
     logger.info("⏱️ onPremiseCreateCallable -- premise id check", {
       premiseId,
@@ -5805,7 +5813,7 @@ export const onPremiseCreateCallable = onCall(async (request) => {
       targetedBatchLink = await createOrLinkMdBgoPremise({
         db,
         premiseRef,
-        premisePayload: finalPayload,
+        premisePayload: premiseSnap.exists ? premiseSnap.data() : finalPayload,
         mdBgoContext,
         historyRef,
         actorUid: caller.uid,

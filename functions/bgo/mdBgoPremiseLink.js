@@ -17,6 +17,60 @@ function teamMemberIds(team = {}) {
     : [];
 }
 
+async function assignedToActor({ batch, actorUid, authToken = {}, read }) {
+  const target = batch?.target || batch?.bgo?.target || batch?.assignment?.targets?.[0] || {};
+  const targetType = upper(target?.type || batch?.bgo?.targetType);
+  const targetId = text(target?.id || batch?.bgo?.targetId);
+  if (targetType === "USER") return targetId === actorUid;
+  if (targetType === "TEAM" && targetId) {
+    const snap = await read("teams", targetId);
+    return snap.exists && teamMemberIds(snap.data()).includes(actorUid);
+  }
+  if (targetType === "SP" && targetId) {
+    const snap = await read("users", actorUid);
+    const profile = snap.exists ? snap.data() : {};
+    return targetId === text(authToken.spId || authToken.serviceProviderId ||
+      profile?.employment?.serviceProvider?.id || profile?.serviceProvider?.id);
+  }
+  return false;
+}
+
+// Premise submission is the trigger, even when navigation lost the optional mobile context.
+// Resolve only exact ERF membership in a released batch assigned to this actor. The linking
+// transaction below revalidates allocation and scope before creating any row.
+export async function resolveMdBgoPremiseContext({ db, premisePayload, actorUid, authToken = {} }) {
+  const erfId = text(premisePayload?.erfId);
+  if (!erfId) return null;
+  const rows = await db.collection("bgo_rows").where("erf.id", "==", erfId).get();
+  const candidates = rows.docs.filter((doc) => {
+    const row = doc.data();
+    return upper(row.batchMode) === "BMD" && upper(row.operationType) === "METER_DISCOVERY" &&
+      upper(row.workflow?.state) !== "CANCELLED" && text(row.bgoBatchId);
+  });
+  if (!candidates.length) return null;
+  const read = (collection, id) => db.collection(collection).doc(id).get();
+  const profile = await read("users", actorUid);
+  if (!profile.exists || upper(profile.data()?.accountStatus) !== "ACTIVE") return null;
+  const matches = [];
+  for (const batchId of new Set(candidates.map((doc) => text(doc.data().bgoBatchId)))) {
+    const snap = await read("bgo_batches", batchId);
+    if (!snap.exists) continue;
+    const batch = snap.data();
+    if (upper(batch.batchMode || batch.bgo?.batchMode) !== "BMD" || upper(batch.operationType) !== "METER_DISCOVERY" ||
+      !["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(upper(batch.workflow?.state)) ||
+      upper(batch.bgo?.releaseState) !== "RELEASED_TO_EXECUTION" ||
+      text(batch.scope?.wardPcode) !== text(premisePayload.parents?.wardPcode) ||
+      text(batch.scope?.lmPcode) !== text(premisePayload.parents?.lmPcode)) continue;
+    if (!await assignedToActor({ batch, actorUid, authToken, read })) continue;
+    const rank = (doc) => text(doc.data().refs?.premiseId) === text(premisePayload.id) ? 0 : doc.data().refs?.premiseId ? 2 : 1;
+    const row = candidates.filter((doc) => text(doc.data().bgoBatchId) === batchId)
+      .sort((a, b) => rank(a) - rank(b) || Number(a.data().rowNo) - Number(b.data().rowNo))[0];
+    matches.push({ batchId, rowId: row.id, erfId, batchMode: "BMD" });
+  }
+  if (matches.length > 1) fail("MD_BGO_BATCH_AMBIGUOUS", "This ERF belongs to more than one assigned MD BGO batch. Open the intended batch work row to capture its premise.");
+  return matches[0] || null;
+}
+
 export async function createOrLinkMdBgoPremise({
   db,
   premiseRef,
@@ -74,23 +128,8 @@ export async function createOrLinkMdBgoPremise({
       fail("MD_BGO_PREMISE_SCOPE_MISMATCH", "The premise scope does not match the MD BGO batch.");
     }
 
-    const target = batch?.target || batch?.bgo?.target || batch?.assignment?.targets?.[0] || {};
-    const targetType = upper(target?.type || batch?.bgo?.targetType);
-    const targetId = text(target?.id || batch?.bgo?.targetId);
-    let allowed = targetType === "USER" && targetId === actorUid;
-    if (targetType === "SP") {
-      const profileSnap = await tx.get(db.collection("users").doc(actorUid));
-      const profile = profileSnap.exists ? profileSnap.data() || {} : {};
-      const actorSpId = text(
-        authToken?.spId || authToken?.serviceProviderId ||
-        profile?.employment?.serviceProvider?.id || profile?.serviceProvider?.id,
-      );
-      allowed = targetId === actorSpId;
-    }
-    if (targetType === "TEAM" && targetId) {
-      const teamSnap = await tx.get(db.collection("teams").doc(targetId));
-      allowed = teamSnap.exists && teamMemberIds(teamSnap.data() || {}).includes(actorUid);
-    }
+    const allowed = await assignedToActor({ batch, actorUid, authToken,
+      read: (collection, id) => tx.get(db.collection(collection).doc(id)) });
     if (!allowed) fail("MD_BGO_BATCH_NOT_ASSIGNED_TO_ACTOR", "This MD BGO batch is not assigned to the current worker.");
 
     const premiseId = premiseRef.id;
@@ -133,7 +172,7 @@ export async function createOrLinkMdBgoPremise({
         "workflow.state": "IN_PROGRESS",
         "metadata.updatedAt": premisePayload?.metadata?.updatedAt,
       });
-      tx.set(premiseRef, premisePayload);
+      if (!premiseSnap.exists) tx.create(premiseRef, premisePayload);
       if (historyRef && !premiseSnap.exists) tx.create(historyRef, {
         eventId: `SUBMIT_${premiseId}`, premiseId, action: "PREMISE_SUBMITTED",
         previousStatus: null, newStatus: "QA_PENDING", sourceVersion: premisePayload?.qa?.sourceVersion || null,
