@@ -169,7 +169,7 @@ test("Register Total streams an additional premise row instead of retaining its 
     off = onSnapshot(rowsQuery, snap => {
       const rows = snap.docs.map(item => ({ id: item.id, ...item.data() }));
       const display = buildMdBgoRegisterRow(batch, getMdBgoRowStatusCounts(rows), { ready: true, error: "" });
-      if (snap.size === 1) { assert.equal(display.total, 1); initial(); }
+      if (snap.size === 1) { assert.equal(display.total, 1); assert.equal(display.notStarted, 1); initial(); }
       if (snap.size === 2) resolve(display);
     }, reject);
   });
@@ -179,7 +179,8 @@ test("Register Total streams an additional premise row instead of retaining its 
       bgoBatchId: batchId, scope: { lmPcode: "ZA5241" }, refs: { premiseId: "UNIT_B" }, workflow: { state: "IN_PROGRESS" },
     }));
     const display = await Promise.race([changed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Register total stream timed out")), 10000); })]);
-    assert.deepEqual([display.total, display.inProgress, display.completed], [2, 1, 0]);
+    assert.deepEqual([display.total, display.notStarted, display.inProgress, display.completed], [2, 1, 1, 0]);
+    assert.equal(display.notStarted + display.inProgress + display.completed, display.total);
     assert.equal(batch.summary.erfCount, 1);
   } finally { clearTimeout(timer); off?.(); }
 });

@@ -56,6 +56,7 @@ export function buildMdBgoRegisterRow(batch, countsByBatchId, stream) {
     allocatedTo: batch.targetName || batch.target?.name || "NAv",
     batchStatus: getMdBgoBatchStatus(batch),
     total: counts?.total ?? null,
+    notStarted: counts ? counts.total - counts.inProgress - counts.completed : null,
     inProgress: counts?.inProgress ?? null,
     completed: counts?.completed ?? null,
     ward: getWardLabel(batch),
@@ -74,7 +75,7 @@ export function buildMdBgoRegisterRow(batch, countsByBatchId, stream) {
 
 export function mdBgoRegisterSearchValue(row) {
   return [row.batchId, row.allocation, row.allocatedTo, row.batchStatus, row.total,
-    row.inProgress, row.completed, row.ward, row.wardNo, row.wardPcode, row.geofence, row.createdBy].filter((value) => value != null).join(" ");
+    row.notStarted, row.inProgress, row.completed, row.ward, row.wardNo, row.wardPcode, row.geofence, row.createdBy].filter((value) => value != null).join(" ");
 }
 
 function getWardLabel(batch = {}) {
