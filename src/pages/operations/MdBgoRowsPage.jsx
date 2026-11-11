@@ -3,12 +3,14 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import IrepsTable from "../../components/table/IrepsTable";
-import DataActionButton, { ErfActionIcon } from "../../components/table/DataActionButton";
+import DataActionButton, { ErfActionIcon, MeterActionIcon } from "../../components/table/DataActionButton";
 import BoundaryMapModal from "../registries/components/BoundaryMapModal";
+import MeterDeepDetailsModal from "../registries/components/MeterDeepDetailsModal";
 import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import { useGetMdBgoBatchByIdQuery, useGetMdBgoRowsByBatchIdQuery } from "../../redux/bgoApi";
 import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
 import { buildMdBgoMeterRows, buildMdBgoRowsSummary, enrichMdBgoRows, mdBgoRowSearchValue } from "./md-bgo/mdBgoRowsModel.js";
+import { MD_BGO_PREMISE_ADDRESS_WIDTH, MD_BGO_ROW_COLUMN_OPTIONS, MD_BGO_ROW_DEFAULT_VISIBILITY, mdBgoVisibleRowColumns, mdBgoMeterDetailsId, clearMdBgoHiddenColumnFilter } from "./md-bgo/mdBgoRowsPresentation.js";
 
 const PROGRESS_OPTIONS = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "UNAVAILABLE"];
 const PROGRESS_LABELS = {
@@ -17,7 +19,6 @@ const PROGRESS_LABELS = {
   COMPLETED: "Completed",
   UNAVAILABLE: "Unavailable",
 };
-const STATE_OPTIONS = ["READY_FOR_ALLOCATION", "ISSUED", "ALLOCATED", "ACCEPTED", "REJECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "NAv"];
 const EMPTY_ROWS = Object.freeze([]);
 
 const text = (value) => String(value ?? "").trim();
@@ -68,18 +69,25 @@ export default function MdBgoRowsPage() {
   const { data: meters = [], isLoading: metersLoading } = useGetAstsByLmPcodeWardPcodeQuery({ lmPcode, wardPcode }, { skip: !lmPcode || !wardPcode });
   const [filters, setFilters] = useState({});
   const [mapView, setMapView] = useState(null);
+  const [selectedMeterId, setSelectedMeterId] = useState(null);
+  const [columnVisibility, setColumnVisibility] = useState(MD_BGO_ROW_DEFAULT_VISIBILITY);
+  const [showColumnControls, setShowColumnControls] = useState(false);
 
   const enrichedRows = useMemo(() => buildMdBgoMeterRows(enrichMdBgoRows({ rows, premises, meters })), [rows, premises, meters]);
   const summary = useMemo(() => buildMdBgoRowsSummary(enrichedRows), [enrichedRows]);
   const selectedProgress = filters.progress || "";
-  const columns = useMemo(() => [
-    { key: "meterNo", label: "Meter No", filter: "text", value: (row) => row.meterNo },
+  const allColumns = useMemo(() => [
+    { key: "meterNo", label: "Meter No", filter: "text", value: (row) => row.meterNo,
+      render: (row) => mdBgoMeterDetailsId(row) ? <DataActionButton icon={<MeterActionIcon />} title="Open meter details" onClick={() => setSelectedMeterId(mdBgoMeterDetailsId(row))}>{row.meterNo}</DataActionButton> : shown(row.meterNo),
+    },
     {
       key: "erfNo", label: "Erf No", filter: "text", value: (row) => row.erfNo,
       render: (row) => row.erfId ? <DataActionButton compact title="Where this ERF is" icon={<ErfActionIcon />} onClick={() => setMapView({ erfId: row.erfId, erfNo: row.erfNo, wardPcode: row.scope?.wardPcode || wardPcode })}>{row.erfNo}</DataActionButton> : shown(row.erfNo),
     },
     {
       key: "premiseAddress", label: "Premise Address", filter: "text",
+      width: MD_BGO_PREMISE_ADDRESS_WIDTH, minWidth: MD_BGO_PREMISE_ADDRESS_WIDTH,
+      cellStyle: { boxSizing: "border-box", overflowWrap: "anywhere" }, headerStyle: { boxSizing: "border-box" },
       value: (row) => [row.premiseAddress, row.premiseId].filter(Boolean).join(" "),
       exportValue: (row) => [row.premiseAddress, row.premiseId].filter(Boolean).join("\n"),
       render: (row) => <div><div>{row.premiseAddress}</div>{row.premiseId ? <small style={{ display: "block", color: "#64748b", fontSize: 10, marginTop: 3, overflowWrap: "anywhere" }}>{row.premiseId}</small> : null}</div>,
@@ -88,9 +96,22 @@ export default function MdBgoRowsPage() {
     { key: "propertyName", label: "Property Name", filter: "text", value: (row) => row.propertyName },
     { key: "unitNo", label: "Unit No", filter: "text", value: (row) => row.unitNo },
     { key: "progress", label: "Progress", filter: "select", filterOptions: PROGRESS_OPTIONS.map((value) => ({ value, label: PROGRESS_LABELS[value] })), value: (row) => row.progress, render: (row) => <StatusBadge value={row.progress} /> },
-    { key: "workflowState", label: "Row State", filter: "select", filterOptions: STATE_OPTIONS.map((value) => ({ value, label: prettyState(value) })), value: (row) => row.workflowState, render: (row) => <StatusBadge value={row.workflowState} /> },
     { key: "sourceRowId", label: "BGO Row ID", filter: "text", value: (row) => row.sourceRowId },
   ], [wardPcode]);
+  const columns = useMemo(() => mdBgoVisibleRowColumns(allColumns, columnVisibility), [allColumns, columnVisibility]);
+  const toggleColumn = (key) => {
+    if (columnVisibility[key]) setFilters(current => clearMdBgoHiddenColumnFilter(current, key));
+    setColumnVisibility(current => ({ ...current, [key]: !current[key] }));
+  };
+  const columnControls = showColumnControls ? <div style={{ padding: "12px 14px", borderTop: "1px solid #e2e8f0", background: "#f8fafc" }}>
+    <div style={{ color: "#64748b", fontSize: 12, marginBottom: 10 }}>Always visible: Meter No</div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 18px" }}>
+      {MD_BGO_ROW_COLUMN_OPTIONS.map(option => <label key={option.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+        <input type="checkbox" checked={Boolean(columnVisibility[option.key])} onChange={() => toggleColumn(option.key)} />
+        <span>{option.label}</span>
+      </label>)}
+    </div>
+  </div> : null;
   const downloads = useMemo(() => ({
     registryName: "MD BGO Rows",
     fileBaseName: `md_bgo_rows_${batchId || "batch"}`,
@@ -126,6 +147,8 @@ export default function MdBgoRowsPage() {
     <IrepsTable
       title="BGO Rows"
       columns={columns}
+      toolbar={<button type="button" aria-expanded={showColumnControls} onClick={() => setShowColumnControls(current => !current)} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 10px", color: "#1d4ed8", background: "white", font: "inherit", cursor: "pointer" }}>{showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}</button>}
+      columnControls={columnControls}
       rows={enrichedRows}
       rowKey={(row) => row.rowKey}
       filters={filters}
@@ -137,5 +160,6 @@ export default function MdBgoRowsPage() {
       emptyText={rows.length ? "No BGO rows match the current filters." : "No permanent BGO rows were found for this batch."}
     />
     {mapView ? <BoundaryMapModal mode="ERF" erfId={mapView.erfId} erfNo={mapView.erfNo} wardPcode={mapView.wardPcode} onClose={() => setMapView(null)} /> : null}
+    {selectedMeterId ? <MeterDeepDetailsModal meterId={selectedMeterId} onClose={() => setSelectedMeterId(null)} /> : null}
   </main>;
 }

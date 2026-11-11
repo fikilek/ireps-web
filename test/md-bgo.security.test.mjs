@@ -185,6 +185,17 @@ test("Register Total streams an additional premise row instead of retaining its 
   } finally { clearTimeout(timer); off?.(); }
 });
 
+test("BGO Rows meter-details ID is readable under client rules, updates, and denies inactive accounts", async () => {
+  await env.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), "asts/MD_BGO_METER"), {
+    ast: { astData: { astNo: "0413863399" } }, accessData: { parents: { lmPcode: "ZA5241", wardPcode: "ZA5241006" } },
+  }));
+  const active = env.authenticatedContext("active-field-worker").firestore();
+  const meter = await assertSucceeds(getDoc(doc(active, "asts/MD_BGO_METER")));
+  assert.equal(meter.data().ast.astData.astNo, "0413863399");
+  await assertFails(getDoc(doc(env.authenticatedContext("inactive-field-worker").firestore(), "asts/MD_BGO_METER")));
+  await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), "asts/MD_BGO_METER")));
+});
+
 test("BGO Rows receives live meter discovery and can read the Registry ERF boundary", async () => {
   const db = env.authenticatedContext("active-field-worker").firestore();
   await env.withSecurityRulesDisabled(async (context) => {
