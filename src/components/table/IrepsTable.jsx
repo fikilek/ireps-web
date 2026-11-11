@@ -20,6 +20,7 @@ import {
   EMPTY_DATETIME_FILTER,
 } from "../DatetimeFilter";
 import { IREPS_TABLE_TOKENS as T } from "./irepsTableTokens.js";
+import { irepsTablePinnedKeys, irepsTablePinnedLayout } from "./irepsTablePinning.js";
 import {
   IREPS_TABLE_DEFAULT_PAGE_SIZE,
   IREPS_TABLE_PAGE_SIZES,
@@ -69,6 +70,8 @@ export default function IrepsTable({
   stickyFirstColumn = false,
   // Pin a named column even when optional columns appear before it.
   stickyColumnKey = null,
+  // Opt in to several adjacent pinned columns; existing single-column props still work.
+  stickyColumnKeys = null,
   topScrollbar = true,
   maxHeight,
   rowStyle,
@@ -82,9 +85,14 @@ export default function IrepsTable({
   const horizontalOffsetRef = useRef(0);
   const [tableWidth, setTableWidth] = useState(0);
   const [stickyMetrics, setStickyMetrics] = useState({ top: 0, left: 0 });
+  const [pinnedLayout, setPinnedLayout] = useState({ offsets: {}, width: 0 });
   const pageScroll = stickyHeader && maxHeight == null;
-  const pinnedColumnKey = stickyColumnKey ?? (stickyFirstColumn ? columns[0]?.key : null);
+  const pinnedKeys = irepsTablePinnedKeys(columns.map(column => ({ key: column.key })), { stickyColumnKeys, stickyColumnKey, stickyFirstColumn });
+  const pinnedSignature = JSON.stringify(pinnedKeys);
+  const columnSignature = JSON.stringify(columns.map(column => column.key));
   const pinnedLeft = pageScroll ? stickyMetrics.left : 0;
+  const pinStyle = (column, style) => pinnedKeys.includes(column.key)
+    ? { ...style, left: pinnedLeft + (pinnedLayout.offsets[column.key] || 0) } : null;
 
   // An overflow:auto ancestor traps sticky headings inside that ancestor, even
   // when it only scrolls horizontally. Page-scrolling tables use overflow:clip
@@ -114,6 +122,10 @@ export default function IrepsTable({
       const top = stickyTopRef.current?.getBoundingClientRect().height || 0;
       const left = body?.getBoundingClientRect().left || 0;
       setStickyMetrics((previous) => previous.top === top && previous.left === left ? previous : { top, left });
+      const cells = table.querySelectorAll('thead th[scope="col"]');
+      const widths = Object.fromEntries(JSON.parse(columnSignature).map((key, index) => [key, cells[index]?.getBoundingClientRect().width || 0]));
+      const layout = irepsTablePinnedLayout(JSON.parse(pinnedSignature), widths);
+      setPinnedLayout(previous => JSON.stringify(previous) === JSON.stringify(layout) ? previous : layout);
       scrollHorizontally(horizontalOffsetRef.current);
     };
 
@@ -124,10 +136,11 @@ export default function IrepsTable({
     observer.observe(table);
     if (bodyScrollRef.current) observer.observe(bodyScrollRef.current);
     if (stickyTopRef.current) observer.observe(stickyTopRef.current);
+    table.querySelectorAll('thead th[scope="col"]').forEach(cell => observer.observe(cell));
     window.addEventListener("resize", measure);
 
     return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
-  }, [topScrollbar, columns.length, scrollHorizontally]);
+  }, [topScrollbar, columnSignature, pinnedSignature, scrollHorizontally]);
 
   useEffect(() => {
     const body = bodyScrollRef.current;
@@ -282,11 +295,9 @@ export default function IrepsTable({
         onFocusCapture={pageScroll ? (event) => {
           const target = event.target.getBoundingClientRect();
           const viewport = event.currentTarget.getBoundingClientRect();
-          const pinnedIndex = columns.findIndex((column) => column.key === pinnedColumnKey);
-          if (pinnedIndex >= 0 && event.target.closest("th, td")?.cellIndex === pinnedIndex) return;
-          const heading = tableRef.current?.tHead;
-          const pinnedWidth = pinnedIndex >= 0 ? heading?.rows[heading.rows.length - 1]?.cells[pinnedIndex]?.getBoundingClientRect().width || 0 : 0;
-          const visibleLeft = viewport.left + pinnedWidth;
+          const cellIndex = event.target.closest("th, td")?.cellIndex;
+          if (pinnedKeys.includes(columns[cellIndex]?.key)) return;
+          const visibleLeft = viewport.left + pinnedLayout.width;
           if (target.left < visibleLeft) scrollHorizontally(horizontalOffsetRef.current + target.left - visibleLeft);
           else if (target.right > viewport.right) scrollHorizontally(horizontalOffsetRef.current + target.right - viewport.right);
         } : undefined}
@@ -305,7 +316,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? { ...styles.pinnedHead, left: pinnedLeft } : null), ...column.headerStyle }}>
+                <th key={column.key} scope="col" aria-sort={sort.key === column.key ? sort.direction === "asc" ? "ascending" : "descending" : undefined} style={{ ...styles.head, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...pinStyle(column, styles.pinnedHead), ...column.headerStyle }}>
                   {(column.sortable ?? Boolean(column.filter)) ? (
                     <button
                       type="button"
@@ -327,7 +338,7 @@ export default function IrepsTable({
 
             <tr>
               {columns.map((column) => (
-                <th key={column.key} style={{ ...styles.filterCell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...(column.key === pinnedColumnKey ? { ...styles.pinnedFilter, left: pinnedLeft } : null), ...column.headerStyle }}>
+                <th key={column.key} style={{ ...styles.filterCell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, ...pinStyle(column, styles.pinnedFilter), ...column.headerStyle }}>
                   {column.renderFilter ? column.renderFilter({ filters, setFilter }) : !column.filter ? null : column.filter === "select" ? (
                     <select
                       aria-label={`Filter ${column.label}`}
@@ -388,7 +399,7 @@ export default function IrepsTable({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    style={{ ...styles.cell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, textAlign: column.align || "left", ...column.cellStyle, ...(column.key === pinnedColumnKey ? { ...styles.pinnedCell, left: pinnedLeft } : null) }}
+                    style={{ ...styles.cell, minWidth: column.minWidth, width: column.width, maxWidth: column.maxWidth, textAlign: column.align || "left", ...column.cellStyle, ...pinStyle(column, styles.pinnedCell) }}
                   >
                     {column.render ? column.render(row, index) : column.value?.(row)}
                   </td>

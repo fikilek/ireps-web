@@ -343,6 +343,7 @@ export default function MdBgoRegisterPage() {
             <IrepsTable
               title="Permanent Meter Discovery Batches"
               columns={columns}
+              stickyColumnKeys={["selection", "map", "batchId"]}
               rows={tableRows}
               rowKey={(batch) => batch.id}
               extraFiltersActive={tickedBatchIds.length > 0}
