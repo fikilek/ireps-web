@@ -15,6 +15,7 @@
 // a worker, a photograph upload or a counter bumped in here would happen twice (Firestore's own rule).
 
 import { newMeterCounts } from "./meterCounts.js";
+import { prepareMdBgoRegistration } from "../bgo/mdBgoRegistration.js";
 
 /** A failure the door can turn into a refusal the worker reads. */
 export function registrationError(irepsCode, message) {
@@ -92,6 +93,8 @@ export async function registerMeterInTransaction({
     );
   }
 
+  const mdBgoCompletion = await prepareMdBgoRegistration({ tx, db, trnData, astId, normalizedMeterNo,
+    actorUid: metadata.updatedByUid, actorName: metadata.updatedByUser, now: metadata.updatedAt });
   const targetedBatchCompletion =
     await completeTargetedBatchMeterDiscoveryInTransaction({
       transaction: tx,
@@ -167,6 +170,7 @@ export async function registerMeterInTransaction({
   };
 
   // ---- writes ----
+  mdBgoCompletion.apply();
 
   // 1. The meter. Kept if it is somehow already there, so a repair can never double-write it.
   if (!astSnap.exists) {

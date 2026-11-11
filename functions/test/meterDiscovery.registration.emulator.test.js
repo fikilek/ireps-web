@@ -11,7 +11,7 @@ test("accessible Discovery commits the full registration with canonical metadata
   const db = getFirestore();
   await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${process.env.GCLOUD_PROJECT}/databases/(default)/documents`, { method: "DELETE" });
   await Promise.all([
-    db.doc("users/U1").set({ employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
+    db.doc("users/U1").set({ accountStatus: "ACTIVE", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
     db.doc("serviceProviders/SP1").set({ profile: { registeredName: "Provider" } }),
     db.doc("ireps_erfs/E1").set({ admin: { localMunicipality: { pcode: "ZA5241" }, ward: { pcode: "ZA5241006" } } }),
     db.doc("premises/P1").set({ erfId: "E1", address: { strNo: "4311", strName: "Jacaranda", strType: "Avenue" }, propertyType: { type: "House" }, services: {}, geometry: { centroid: { lat: -28.1, lng: 30.1 } } }),

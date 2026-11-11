@@ -55,7 +55,14 @@ export function enrichMdBgoRows({ rows = [], premises = [], meters = [] }) {
   return rows.map((row) => {
     const premiseId = getPremiseId(row);
     const premise = premiseId ? premiseById.get(premiseId) || null : null;
-    const rowMeters = premiseId ? metersByPremise.get(premiseId) || [] : [];
+    const linkedMeters = premiseId ? metersByPremise.get(premiseId) || [] : [];
+    const explicitMeterId = first(row?.refs?.meterId, row?.meter?.id);
+    const rowMeters = explicitMeterId
+      ? linkedMeters.filter((meter) => meter.id === explicitMeterId)
+      : linkedMeters;
+    if (explicitMeterId && !rowMeters.length && row?.meter?.meterNo) {
+      rowMeters.push({ id: explicitMeterId, number: row.meter.meterNo });
+    }
     return {
       ...row,
       rowKey: first(row?.id, row?.bgoRowId),

@@ -1,4 +1,5 @@
 import { HttpsError } from "firebase-functions/v2/https";
+import { summarizeMdBgoWorkRows } from "./mdBgoRegistration.js";
 
 const text = (value) => String(value ?? "").trim();
 const upper = (value) => text(value).toUpperCase();
@@ -55,7 +56,7 @@ export async function createOrLinkMdBgoPremise({
     if (upper(batch?.batchMode || batch?.bgo?.batchMode) !== "BMD" || upper(batch?.operationType) !== "METER_DISCOVERY") {
       fail("MD_BGO_BATCH_TYPE_INVALID", "The selected batch is not an MD BGO batch.");
     }
-    if (!["ACCEPTED", "IN_PROGRESS"].includes(upper(batch?.workflow?.state)) || upper(batch?.bgo?.releaseState) !== "RELEASED_TO_EXECUTION") {
+    if (!["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(upper(batch?.workflow?.state)) || upper(batch?.bgo?.releaseState) !== "RELEASED_TO_EXECUTION") {
       fail("MD_BGO_BATCH_NOT_ACCEPTED", "The MD BGO batch has not been accepted for field execution.");
     }
     if (text(row?.id || rowSnap.id) !== rowId || text(row?.bgoBatchId || row?.batchId) !== batchId || text(row?.erf?.id || row?.erfId) !== erfId) {
@@ -112,20 +113,24 @@ export async function createOrLinkMdBgoPremise({
       const nextRowRef = db.collection("bgo_rows").doc(nextRowId);
       const nextRowSnap = await tx.get(nextRowRef);
       if (nextRowSnap.exists) fail("MD_BGO_ROW_ID_CONFLICT", "The next MD BGO row ID is already in use.");
-      tx.create(nextRowRef, {
+      const nextRow = {
         ...row,
         id: nextRowId,
         batchId,
         bgoBatchId: batchId,
         rowNo,
-        refs: { ...(row?.refs || {}), premiseId },
+        refs: { premiseId },
+        meter: null,
+        noAccessCount: 0,
         premise: { id: premiseId, premiseNo: text(premisePayload?.premiseNo) || null },
-        workflow: { ...(row?.workflow || {}), state: "IN_PROGRESS" },
-        metadata: { ...(row?.metadata || {}), updatedAt: premisePayload?.metadata?.updatedAt, updatedByUid: actorUid, updatedByUser: actorName },
-      });
+        workflow: { state: "IN_PROGRESS" },
+        metadata: { createdAt: premisePayload?.metadata?.createdAt, createdByUid: actorUid, createdByUser: actorName, updatedAt: premisePayload?.metadata?.updatedAt, updatedByUid: actorUid, updatedByUser: actorName },
+      };
+      tx.create(nextRowRef, nextRow);
+      const summary = summarizeMdBgoWorkRows([...allRowsSnap.docs.map((doc) => doc.data()), nextRow]);
       tx.update(batchRef, {
-        "summary.totalRows": allRowsSnap.size + 1,
-        "summary.premiseCount": Number(batch?.summary?.premiseCount || 0) + (premiseSnap.exists ? 0 : 1),
+        ...Object.fromEntries(Object.entries(summary).map(([key, value]) => [`summary.${key}`, value])),
+        "workflow.state": "IN_PROGRESS",
         "metadata.updatedAt": premisePayload?.metadata?.updatedAt,
       });
       tx.set(premiseRef, premisePayload);
@@ -147,7 +152,9 @@ export async function createOrLinkMdBgoPremise({
       "metadata.updatedByUid": actorUid,
       "metadata.updatedByUser": actorName,
     });
-    tx.update(batchRef, { "workflow.state": "IN_PROGRESS", "summary.premiseCount": Number(batch?.summary?.premiseCount || 0) + (premiseSnap.exists ? 0 : 1), "metadata.updatedAt": premisePayload?.metadata?.updatedAt });
+    const summary = summarizeMdBgoWorkRows(allRowsSnap.docs.map((doc) => doc.id === rowId
+      ? { ...row, refs: { ...row.refs, premiseId }, workflow: { state: "IN_PROGRESS" } } : doc.data()));
+    tx.update(batchRef, { "workflow.state": "IN_PROGRESS", ...Object.fromEntries(Object.entries(summary).map(([key, value]) => [`summary.${key}`, value])), "metadata.updatedAt": premisePayload?.metadata?.updatedAt });
     if (!premiseSnap.exists) tx.create(premiseRef, premisePayload);
     if (historyRef && !premiseSnap.exists) tx.create(historyRef, {
       eventId: `SUBMIT_${premiseId}`, premiseId, action: "PREMISE_SUBMITTED",

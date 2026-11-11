@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { buildMdBgoMeterRows, enrichMdBgoRows } from "../src/pages/operations/md-bgo/mdBgoRowsModel.js";
 
 const projectId = "demo-ireps-qa";
@@ -96,6 +96,40 @@ test("active clients cannot write MD BGO rows directly", async () => {
     bgoBatchId: batchId,
     scope: { lmPcode: "ZA5241" },
   }));
+});
+
+test("BGO exact linked premise, meter and ERF queries allow active FWR and stream later changes", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await Promise.all([setDoc(doc(ctx.firestore(), "premises/linked-premise"), { id: "linked-premise", erfId: "linked-erf", address: { strName: "Before" } }),
+      setDoc(doc(ctx.firestore(), "asts/linked-meter"), { id: "linked-meter" }),
+      setDoc(doc(ctx.firestore(), "ireps_erfs/linked-erf"), { id: "linked-erf" })]);
+  });
+  const db = env.authenticatedContext("active-field-worker").firestore();
+  for (const [name, id] of [["premises", "linked-premise"], ["asts", "linked-meter"], ["ireps_erfs", "linked-erf"]]) {
+    const q = (client) => query(collection(client, name), where(documentId(), "in", [id]));
+    assert.equal((await assertSucceeds(getDocs(q(db)))).size, 1);
+    await assertFails(getDocs(q(env.unauthenticatedContext().firestore())));
+    await assertFails(getDocs(q(env.authenticatedContext("inactive-field-worker").firestore())));
+  }
+  const snapshots = [];
+  let stop, ready, changed;
+  const first = new Promise((resolve) => { ready = resolve; });
+  const later = new Promise((resolve, reject) => {
+    stop = onSnapshot(query(collection(db, "premises"), where(documentId(), "in", ["linked-premise"])), (snap) => {
+      snapshots.push(snap); ready(); if (snap.docs[0]?.data()?.address?.strName === "After") resolve();
+    }, reject);
+    setTimeout(() => reject(new Error("Linked premise update timed out")), 10000).unref();
+    changed = () => {};
+  });
+  try { await first; await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), "premises/linked-premise"), { "address.strName": "After" })); await later; assert.ok(snapshots.length >= 2); }
+  finally { stop(); changed(); }
+});
+
+test("permanent meter rows on one premise display only their own linked meter", () => {
+  const rows = [1, 2].map((i) => ({ id: `row-${i}`, refs: { premiseId: "p", meterId: `m${i}` }, meter: { id: `m${i}`, meterNo: `100${i}` } }));
+  const enriched = enrichMdBgoRows({ rows, premises: [{ id: "p" }], meters: [1, 2].map((i) => ({ id: `m${i}`, premiseId: "p", meterNo: `100${i}` })) });
+  const display = buildMdBgoMeterRows(enriched);
+  assert.equal(display.length, 2); assert.deepEqual(display.map((r) => r.meterId), ["m1", "m2"]);
 });
 
 test("Register parent and LM row-count queries are authorized and counts stream subsequent work", async () => {

@@ -127,6 +127,7 @@ import { onCreateBgoCallable } from "./bgo/callables.js";
 import { onAllocateMdBgoBatchesTogetherCallable } from "./bgo/allocationCallable.js";
 import { onUnallocateMdBgoBatchCallable } from "./bgo/unallocationCallable.js";
 import { createOrLinkMdBgoPremise } from "./bgo/mdBgoPremiseLink.js";
+import { prepareMdBgoRegistration } from "./bgo/mdBgoRegistration.js";
 import {
   onAcceptRejectBgoBatchCallable,
   onReverseBgoBatchAcceptanceCallable,
@@ -4120,12 +4121,15 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
 
           const premiseRef = db.doc(`premises/${finalPayload.accessData.premise.id}`);
           const premiseSnapshot = await tx.get(premiseRef);
+          const mdBgoVisit = await prepareMdBgoRegistration({ tx, db, trnData: finalPayload,
+            actorUid: caller.uid, actorName, now: nowIso, noAccess: true });
           await recordTargetedBatchNoAccessInTransaction({
             transaction: tx,
             db,
             trnData: finalPayload,
             actor: { uid: caller.uid, name: actorName },
           });
+          mdBgoVisit.apply();
 
           // TR-R001: the agreed root and nothing else. A no access was reaching trns with
           // capturedAt, sourceModule, executionOutcome, geofenceRefs and more hanging off the
