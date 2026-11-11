@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 
 import { db, functions } from "../firebase";
+import { emptyMdBgoDashboard, subscribeMdBgoDashboard } from "./mdBgoDashboardStream.js";
 
 const BGO_BATCHES_COLLECTION = "bgo_batches";
 // BGO row truth now lives in trns. BGO row = BGO-created MLCT TRN.
@@ -390,6 +391,19 @@ export const bgoApi = createApi({
   reducerPath: "bgoApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getMdBgoDashboard: builder.query({
+      queryFn: () => ({ data: emptyMdBgoDashboard() }),
+      async onCacheEntryAdded(arg, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        if (!arg?.lmPcode) return;
+        let stop;
+        try {
+          await cacheDataLoaded;
+          stop = subscribeMdBgoDashboard(db, arg.lmPcode, data => updateCachedData(() => data));
+          await cacheEntryRemoved;
+        } finally { stop?.(); }
+      },
+      keepUnusedDataFor: 0,
+    }),
     allocateMdBgoBatchesTogether: builder.mutation({
       async queryFn(payload) {
         try {
@@ -866,6 +880,7 @@ export const bgoApi = createApi({
 });
 
 export const {
+  useGetMdBgoDashboardQuery,
   useCreateBgoMutation,
   useDeleteUnacceptedBgoMutation,
   useGetBmdBgoBatchesByWardQuery,
