@@ -20,8 +20,8 @@ test("MD BGO row counts count only distinct source documents with explicit reque
     { id: "R6", workflow: { state: "COMPLETED" } },
   ]);
 
-  assert.deepEqual(counts.get("B1"), { inProgress: 1, completed: 1 });
-  assert.deepEqual(counts.get("B2"), { inProgress: 0, completed: 1 });
+  assert.deepEqual(counts.get("B1"), { total: 4, inProgress: 1, completed: 1 });
+  assert.deepEqual(counts.get("B2"), { total: 1, inProgress: 0, completed: 1 });
   assert.equal(counts.has(""), false);
 });
 
@@ -35,11 +35,11 @@ const ready = { ready: true, error: "" };
 
 test("standard table rows preserve IDs, parent data, counts and searchable batch values", () => {
   const original = batch("READY_FOR_ALLOCATION");
-  const row = buildMdBgoRegisterRow(original, new Map([[original.id, { inProgress: 2, completed: 3 }]]), ready);
+  const row = buildMdBgoRegisterRow(original, new Map([[original.id, { total: 25, inProgress: 2, completed: 3 }]]), ready);
   assert.equal(row.id, original.id);
   assert.equal(row.raw, original.raw);
   assert.equal(original.allocation, undefined, "projection must not mutate streamed source");
-  assert.deepEqual([row.total, row.inProgress, row.completed, row.ward, row.wardNo], [23, 2, 3, "Ward 6", "006"]);
+  assert.deepEqual([row.total, row.inProgress, row.completed, row.ward, row.wardNo], [25, 2, 3, "Ward 6", "006"]);
   assert.match(mdBgoRegisterSearchValue(row), /Nightingale/);
   assert.match(mdBgoRegisterSearchValue(row), /ZA5241006/);
   assert.equal(row.isAllocated, false);
@@ -49,12 +49,26 @@ test("count loading and failure stay unavailable instead of fabricating zeros", 
   const original = batch("READY_FOR_ALLOCATION");
   for (const stream of [{ ready: false }, { ready: true, error: "permission-denied" }]) {
     const row = buildMdBgoRegisterRow(original, new Map(), stream);
+    assert.equal(row.total, null);
     assert.equal(row.inProgress, null);
     assert.equal(row.completed, null);
   }
   const row = buildMdBgoRegisterRow(original, new Map(), ready);
+  assert.equal(row.total, 0);
   assert.equal(row.inProgress, 0);
   assert.equal(row.completed, 0);
+});
+
+test("Register Total grows with new flat premises while the original ERF total stays 59", () => {
+  const original = { ...batch("IN_PROGRESS"), summary: { erfCount: 59, totalRows: 59 } };
+  const rows = Array.from({ length: 59 }, (_, index) => ({ id: `R${index}`, bgoBatchId: original.id, workflow: { state: index < 2 ? "IN_PROGRESS" : "ISSUED" } }));
+  const before = buildMdBgoRegisterRow(original, getMdBgoRowStatusCounts(rows), ready);
+  assert.equal(before.total, 59);
+  const extra = { id: "UNIT_B", bgoBatchId: original.id, workflow: { state: "IN_PROGRESS" } };
+  const after = buildMdBgoRegisterRow(original, getMdBgoRowStatusCounts([...rows, extra, extra, { ...extra, id: "CANCELLED", workflow: { state: "CANCELLED" } }]), ready);
+  assert.deepEqual([after.total, after.inProgress, after.completed], [60, 3, 0]);
+  assert.equal(original.summary.erfCount, 59);
+  assert.match(mdBgoRegisterSearchValue(after), /60/);
 });
 
 test("table migration preserves allocation, started-work and delete action guards", () => {

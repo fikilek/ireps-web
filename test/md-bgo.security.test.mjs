@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import { collection, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { buildMdBgoMeterRows, enrichMdBgoRows } from "../src/pages/operations/md-bgo/mdBgoRowsModel.js";
+import { buildMdBgoRegisterRow, getMdBgoRowStatusCounts } from "../src/pages/operations/md-bgo/mdBgoRegisterModel.js";
 
 const projectId = "demo-ireps-qa";
 const batchId = "MD_BGO_TEST_BATCH";
@@ -156,6 +157,31 @@ test("Register parent and LM row-count queries are authorized and counts stream 
     await env.withSecurityRulesDisabled((context) => updateDoc(doc(context.firestore(), "bgo_rows/row-1"), { "workflow.state": "IN_PROGRESS" }));
     await updated;
   } finally { off?.(); }
+});
+
+test("Register Total streams an additional premise row instead of retaining its original ERF count", async () => {
+  const db = env.authenticatedContext("active-field-worker").firestore();
+  const rowsQuery = query(collection(db, "bgo_rows"), where("scope.lmPcode", "==", "ZA5241"), limit(10000));
+  const batch = { id: batchId, workflowState: "IN_PROGRESS", summary: { erfCount: 1 } };
+  let initial, off, timer;
+  const receivedInitial = new Promise(resolve => { initial = resolve; });
+  const changed = new Promise((resolve, reject) => {
+    off = onSnapshot(rowsQuery, snap => {
+      const rows = snap.docs.map(item => ({ id: item.id, ...item.data() }));
+      const display = buildMdBgoRegisterRow(batch, getMdBgoRowStatusCounts(rows), { ready: true, error: "" });
+      if (snap.size === 1) { assert.equal(display.total, 1); initial(); }
+      if (snap.size === 2) resolve(display);
+    }, reject);
+  });
+  try {
+    await receivedInitial;
+    await env.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), "bgo_rows/new-flat-premise"), {
+      bgoBatchId: batchId, scope: { lmPcode: "ZA5241" }, refs: { premiseId: "UNIT_B" }, workflow: { state: "IN_PROGRESS" },
+    }));
+    const display = await Promise.race([changed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Register total stream timed out")), 10000); })]);
+    assert.deepEqual([display.total, display.inProgress, display.completed], [2, 1, 0]);
+    assert.equal(batch.summary.erfCount, 1);
+  } finally { clearTimeout(timer); off?.(); }
 });
 
 test("BGO Rows receives live meter discovery and can read the Registry ERF boundary", async () => {

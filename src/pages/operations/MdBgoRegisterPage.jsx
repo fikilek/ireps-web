@@ -237,7 +237,7 @@ export default function MdBgoRegisterPage() {
     },
     { key: "allocatedTo", label: "Allocated To", filter: "select", value: (batch) => batch.allocatedTo },
     { key: "batchStatus", label: "Batch Status", filter: "select", value: (batch) => batch.batchStatus },
-    { key: "total", label: "Total", filter: "text", value: (batch) => batch.total, sortValue: (batch) => batch.total, render: (batch) => formatNumber(batch.total) },
+    { key: "total", label: "Total", filter: "text", value: (batch) => batch.total, sortValue: (batch) => batch.total, sortEmptyLast: true, render: (batch) => batch.total == null ? "NAv" : formatNumber(batch.total) },
     { key: "inProgress", label: "In Progress", filter: "text", value: (batch) => batch.inProgress, sortValue: (batch) => batch.inProgress, sortEmptyLast: true, filterDisabled: !mdBgoRowsStream.ready || Boolean(mdBgoRowsStream.error), render: (batch) => countCell(batch.inProgress) },
     { key: "completed", label: "Completed", filter: "text", value: (batch) => batch.completed, sortValue: (batch) => batch.completed, sortEmptyLast: true, filterDisabled: !mdBgoRowsStream.ready || Boolean(mdBgoRowsStream.error), render: (batch) => countCell(batch.completed) },
     { key: "ward", label: "Ward", filter: "select", value: (batch) => batch.ward, exportValue: (batch) => `${batch.ward} (${batch.wardPcode})`, render: (batch) => <div><div style={styles.strongCell}>{batch.wardNo}</div><div style={styles.mutedCell}>{batch.wardPcode}</div></div> },

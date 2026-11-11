@@ -18,17 +18,22 @@ export function getMdBgoBatchStatus(batch = {}) {
 
 export function getMdBgoRowStatusCounts(rows = []) {
   const countsByBatchId = new Map();
+  const seen = new Set();
 
   rows.forEach((row) => {
     const batchId = String(row?.bgoBatchId || row?.batchId || "").trim();
     if (!batchId) return;
 
     const state = String(row?.workflow?.state || "").trim().toUpperCase();
-    if (state !== "IN_PROGRESS" && state !== "COMPLETED") return;
+    if (state === "CANCELLED") return;
+    const key = row.id ? `${batchId}:${row.id}` : null;
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
 
-    const counts = countsByBatchId.get(batchId) || { inProgress: 0, completed: 0 };
+    const counts = countsByBatchId.get(batchId) || { total: 0, inProgress: 0, completed: 0 };
+    counts.total += 1;
     if (state === "IN_PROGRESS") counts.inProgress += 1;
-    else counts.completed += 1;
+    else if (state === "COMPLETED") counts.completed += 1;
     countsByBatchId.set(batchId, counts);
   });
 
@@ -43,14 +48,14 @@ export function buildMdBgoRegisterRow(batch, countsByBatchId, stream) {
   const issuedAtMillis = typeof issuedAt?.toMillis === "function"
     ? issuedAt.toMillis()
     : issuedAt instanceof Date ? issuedAt.getTime() : Date.parse(issuedAt);
-  const counts = stream.ready && !stream.error ? countsByBatchId.get(batch.id) || { inProgress: 0, completed: 0 } : null;
+  const counts = stream.ready && !stream.error ? countsByBatchId.get(batch.id) || { total: 0, inProgress: 0, completed: 0 } : null;
   return {
     ...batch,
     batchId: batch.id,
     allocation: status === "READY_FOR_ALLOCATION" ? "NOT ALLOCATED" : "ALLOCATED",
     allocatedTo: batch.targetName || batch.target?.name || "NAv",
     batchStatus: getMdBgoBatchStatus(batch),
-    total: getBatchErfCount(batch),
+    total: counts?.total ?? null,
     inProgress: counts?.inProgress ?? null,
     completed: counts?.completed ?? null,
     ward: getWardLabel(batch),
@@ -87,16 +92,6 @@ function getWardNoFormatted(batch = {}) {
   const match = wardPcode.match(/(\d{1,3})$/);
   if (!match) return "NAv";
   return match[1].padStart(3, "0");
-}
-
-function getBatchErfCount(batch = {}) {
-  const count =
-    batch?.summary?.erfCount ??
-    batch?.summary?.totalRows ??
-    batch?.raw?.summary?.erfCount ??
-    batch?.raw?.worklist?.erfRefs?.length ??
-    0;
-  return Number(count) || 0;
 }
 
 export function isBmdBatch(batch = {}) {
