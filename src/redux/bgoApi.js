@@ -12,6 +12,8 @@ import {
 import { db, functions } from "../firebase";
 import { emptyMdBgoDashboard, subscribeMdBgoDashboard } from "./mdBgoDashboardStream.js";
 
+import { emptyMdBgoRowQa, subscribeMdBgoRowQa } from "./mdBgoRowQaStream.js";
+
 const BGO_BATCHES_COLLECTION = "bgo_batches";
 // BGO row truth now lives in trns. BGO row = BGO-created MLCT TRN.
 const BGO_ROWS_COLLECTION = "trns";
@@ -391,6 +393,18 @@ export const bgoApi = createApi({
   reducerPath: "bgoApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getMdBgoRowQa: builder.query({
+      queryFn: () => ({ data: emptyMdBgoRowQa() }),
+      async onCacheEntryAdded(arg, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        let stop;
+        try {
+          await cacheDataLoaded;
+          stop = subscribeMdBgoRowQa(db, arg, data => updateCachedData(() => data));
+          await cacheEntryRemoved;
+        } finally { stop?.(); }
+      },
+      keepUnusedDataFor: 0,
+    }),
     getMdBgoDashboard: builder.query({
       queryFn: () => ({ data: emptyMdBgoDashboard() }),
       async onCacheEntryAdded(arg, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
@@ -881,6 +895,7 @@ export const bgoApi = createApi({
 
 export const {
   useGetMdBgoDashboardQuery,
+  useGetMdBgoRowQaQuery,
   useCreateBgoMutation,
   useDeleteUnacceptedBgoMutation,
   useGetBmdBgoBatchesByWardQuery,

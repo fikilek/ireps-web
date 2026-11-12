@@ -1,17 +1,23 @@
 /* eslint-disable no-unused-vars -- JSX tags are consumed by the JSX transform. */
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import IrepsTable from "../../components/table/IrepsTable";
 import DataActionButton, { ErfActionIcon, MeterActionIcon } from "../../components/table/DataActionButton";
 import BoundaryMapModal from "../registries/components/BoundaryMapModal";
 import MeterDeepDetailsModal from "../registries/components/MeterDeepDetailsModal";
 import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
-import { useGetMdBgoBatchByIdQuery, useGetMdBgoRowsByBatchIdQuery } from "../../redux/bgoApi";
+import { useGetMdBgoBatchByIdQuery, useGetMdBgoRowsByBatchIdQuery, useGetMdBgoRowQaQuery } from "../../redux/bgoApi";
 import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
 import { buildMdBgoMeterRows, buildMdBgoRowsSummary, enrichMdBgoRows, mdBgoRowSearchValue } from "./md-bgo/mdBgoRowsModel.js";
 import { MD_BGO_PREMISE_ADDRESS_WIDTH, MD_BGO_ROW_COLUMN_OPTIONS, MD_BGO_ROW_DEFAULT_VISIBILITY, mdBgoVisibleRowColumns, mdBgoMeterDetailsId, clearMdBgoHiddenColumnFilter } from "./md-bgo/mdBgoRowsPresentation.js";
 
+import QaPill from "../../components/table/QaPill";
+import { formatSastDateTime } from "../../utils/formatSastDateTime.js";
+import { enrichMdBgoRowQa, mdBgoRowQaLinks } from "./md-bgo/mdBgoRowQaModel.js";
+import { ReadFailure } from "./MdBgoDashboardPage.jsx";
+
+const QA_OPTIONS = ["QA NAv", "QA PENDING", "QA PASS", "QA FAIL"];
 const PROGRESS_OPTIONS = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "UNAVAILABLE"];
 const PROGRESS_LABELS = {
   NOT_STARTED: "Not Started",
@@ -57,6 +63,7 @@ function SummaryCards({ summary, selected, onSelect }) {
 
 export default function MdBgoRowsPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const batchId = text(searchParams.get("batchId") || searchParams.get("bgoBatchId"));
   const { data: batchResult } = useGetMdBgoBatchByIdQuery(batchId, { skip: !batchId });
   const { data: rowResult } = useGetMdBgoRowsByBatchIdQuery(batchId, { skip: !batchId });
@@ -73,7 +80,10 @@ export default function MdBgoRowsPage() {
   const [columnVisibility, setColumnVisibility] = useState(MD_BGO_ROW_DEFAULT_VISIBILITY);
   const [showColumnControls, setShowColumnControls] = useState(false);
 
-  const enrichedRows = useMemo(() => buildMdBgoMeterRows(enrichMdBgoRows({ rows, premises, meters })), [rows, premises, meters]);
+  const meterRows = useMemo(() => buildMdBgoMeterRows(enrichMdBgoRows({ rows, premises, meters })), [rows, premises, meters]);
+  const qaLinks = useMemo(() => ({ ...mdBgoRowQaLinks(meterRows), batchId }), [meterRows, batchId]);
+  const { currentData: qaSource } = useGetMdBgoRowQaQuery(qaLinks, { skip: !batchId || !rowResult?.ready });
+  const enrichedRows = useMemo(() => enrichMdBgoRowQa(meterRows, qaSource), [meterRows, qaSource]);
   const summary = useMemo(() => buildMdBgoRowsSummary(enrichedRows), [enrichedRows]);
   const selectedProgress = filters.progress || "";
   const allColumns = useMemo(() => [
@@ -96,8 +106,15 @@ export default function MdBgoRowsPage() {
     { key: "propertyName", label: "Property Name", filter: "text", value: (row) => row.propertyName },
     { key: "unitNo", label: "Unit No", filter: "text", value: (row) => row.unitNo },
     { key: "progress", label: "Progress", filter: "select", filterOptions: PROGRESS_OPTIONS.map((value) => ({ value, label: PROGRESS_LABELS[value] })), value: (row) => row.progress, render: (row) => <StatusBadge value={row.progress} /> },
+    { key: "lastActivity", label: "Last Activity", filter: "date", sortable: true, value: row => row.lastActivity, sortValue: row => row.lastActivity || 0, render: row => formatSastDateTime(row.lastActivity), sortEmptyLast: true },
+    ...[["premiseQa", "Premise", "premiseQaHref"], ["meterQa", "Meter", "meterQaHref"]].map(([key, label, href]) => ({
+      key, label, filter: "select", sortable: true, filterOptions: QA_OPTIONS.map(value => ({ value, label: value })), value: row => row[key],
+      render: row => <QaPill status={row[key]} disabled={!row[href]} title={row[href] ? `Open linked ${label === "Premise" ? "premise in Premise" : "meter-discovery TRN in TRN"} Registry` : "Linked QA record unavailable"} ariaLabel={`${label} QA: ${row[key]}`} onClick={() => navigate(row[href])} />,
+    })),
+    { key: "qaFinal", label: "QA Final", filter: "select", sortable: true, filterOptions: QA_OPTIONS.filter(value => value !== "QA PENDING").map(value => ({ value, label: value })), value: row => row.qaFinal,
+      render: row => <QaPill status={row.qaFinal} disabled title={row.progress === "COMPLETED" ? `QA Final: ${row.qaFinal}` : "QA Final is unavailable until the BGO row is COMPLETED"} /> },
     { key: "sourceRowId", label: "BGO Row ID", filter: "text", value: (row) => row.sourceRowId },
-  ], [wardPcode]);
+  ], [wardPcode, navigate]);
   const columns = useMemo(() => mdBgoVisibleRowColumns(allColumns, columnVisibility), [allColumns, columnVisibility]);
   const toggleColumn = (key) => {
     if (columnVisibility[key]) setFilters(current => clearMdBgoHiddenColumnFilter(current, key));
@@ -143,6 +160,8 @@ export default function MdBgoRowsPage() {
         <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>ERFs IN BATCH</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{Number(batch?.summary?.erfCount ?? batch?.summary?.totalRows ?? rows.length).toLocaleString("en-ZA")}</strong></div>
       </div>
     </section>
+    {qaSource?.error ? <ReadFailure error={qaSource.error} title="Linked row QA could not be loaded" /> : null}
+    {!qaSource?.ready ? <p role="status" style={{ color: "#64748b", fontSize: 12 }}>{qaSource?.error ? "Linked QA is unavailable. No current outcome is shown." : "Loading current linked QA records…"}</p> : null}
     <SummaryCards summary={summary} selected={selectedProgress} onSelect={filterRows} />
     <IrepsTable
       title="BGO Rows"

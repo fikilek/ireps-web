@@ -1,3 +1,5 @@
+import { formatSastDateTime } from "../../../utils/formatSastDateTime.js";
+
 const text = (value) => String(value ?? "").trim();
 const first = (...values) => values.map(text).find(Boolean) || "";
 const upper = (value) => text(value).toUpperCase();
@@ -103,5 +105,5 @@ export function buildMdBgoMeterRows(rows = []) {
 export function mdBgoRowSearchValue(row) {
   return [row?.erfNo, row?.erfId, row?.premiseId,
     row?.premiseAddress, row?.propertyType, row?.propertyName, row?.unitNo,
-    row?.meterNo || row?.meterNumbers, row?.workflowState, row?.sourceRowId || row?.rowKey].filter(Boolean).join(" ");
+    row?.meterNo || row?.meterNumbers, row?.workflowState, row?.premiseQa, row?.meterQa, row?.qaFinal, row?.lastActivity ? formatSastDateTime(row.lastActivity) : "", row?.sourceRowId || row?.rowKey].filter(Boolean).join(" ");
 }

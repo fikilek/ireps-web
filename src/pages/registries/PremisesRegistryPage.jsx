@@ -204,7 +204,12 @@ export default function PremisesRegistryPage() {
     isMainContractor(reviewerProvider) &&
     !parentIdOf(reviewerProvider);
 
-  const selectedWardPcode = getSelectedWardPcodeFromGeo(geoState);
+  // A QA pointer must not search the unrelated ward last selected in GeoContext.
+  const [pointerWard, setPointerWard] = useState(() => {
+    const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+    return params.get("premiseId") ? params.get("wardPcode") || "" : "";
+  });
+  const selectedWardPcode = pointerWard || getSelectedWardPcodeFromGeo(geoState);
 
   const [filters, setFilters] = useState(() => {
     const searchParams =
@@ -387,6 +392,7 @@ export default function PremisesRegistryPage() {
     const nextWard = wardRows.find((ward) => ward.wardPcode === nextWardPcode) || null;
 
     resetTableControls();
+    setPointerWard("");
 
     updateGeo({
       selectedWard: buildRegistryWardSelection(nextWard, nextWardPcode),

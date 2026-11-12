@@ -6,6 +6,10 @@ export const MD_BGO_ROW_COLUMN_OPTIONS = Object.freeze([
   { key: "propertyName", label: "Property Name" },
   { key: "unitNo", label: "Unit No" },
   { key: "progress", label: "Progress" },
+  { key: "lastActivity", label: "Last Activity" },
+  { key: "premiseQa", label: "Premise" },
+  { key: "meterQa", label: "Meter" },
+  { key: "qaFinal", label: "QA Final" },
   { key: "sourceRowId", label: "BGO Row ID" },
 ]);
 export const MD_BGO_ROW_DEFAULT_VISIBILITY = Object.freeze(Object.fromEntries(

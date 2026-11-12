@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import IrepsTable from "../../components/table/IrepsTable";
+import { reportingQaFinal } from "../../utils/reportingQaFinal.js";
 
 import { useGetTargetedBatchReportByIdQuery } from "../../redux/salesTargetedBatchApi";
 import SalesBatchMapModal from "./components/SalesBatchMapModal";
@@ -121,33 +122,11 @@ function getMeterQaStatus(row) {
 }
 
 function getQaFinalStatus(row) {
-  if (!isRowCompleted(row)) return "QA NAv";
-  const raw = row?.qaFinalStatus ?? row?.qa?.finalStatus ?? row?.qa?.tbStatus;
-  if (!raw) {
-    const premise = normalizeUpper(getPremiseQaStatus(row)).replace(/_/g, " ");
-    const meter = normalizeUpper(getMeterQaStatus(row)).replace(/_/g, " ");
-    const noAccess = normalizeUpper(getNoAccessQaStatus(row)).replace(/_/g, " ");
-
-    if (premise === "QA FAIL" || meter === "QA FAIL" || noAccess === "QA FAIL") {
-      return "QA FAIL";
-    }
-    if (premise === "QA PASS" && meter === "QA PASS") {
-      return "QA PASS";
-    }
-    return "QA NAv";
-  }
-  const normalized = normalizeUpper(raw).replace(/_/g, " ");
-  if (normalized === "QA PENDING" || normalized === "PENDING") {
-    return "QA NAv";
-  }
-  if (normalized === "QA PASS" || normalized === "PASS") return "QA PASS";
-  if (normalized === "QA FAIL" || normalized === "FAIL") return "QA FAIL";
-  if (normalized === "QA UPDATED" || normalized === "UPDATED") return "QA UPDATED";
-  if (normalized === "COMPLETED") return "COMPLETED";
-  if (normalized === "NOT STARTED" || normalized === "NOT_STARTED") return "NOT STARTED";
-  if (normalized === "IN PROGRESS" || normalized === "IN_PROGRESS") return "IN PROGRESS";
-  if (normalized === "QA NAV" || normalized === "NAV") return "QA NAv";
-  return cleanText(raw);
+  return reportingQaFinal({
+    completed: isRowCompleted(row),
+    premise: getPremiseQaStatus(row), meter: getMeterQaStatus(row), noAccess: getNoAccessQaStatus(row),
+    stored: row?.qaFinalStatus ?? row?.qa?.finalStatus ?? row?.qa?.tbStatus,
+  });
 }
 
 function statusTone(status = "") {
