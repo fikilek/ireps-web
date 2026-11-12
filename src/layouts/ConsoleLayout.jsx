@@ -242,12 +242,12 @@ const navSections = [
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "TB Register",
+            label: "Targeted Audit Register",
             path: "/operations/targeted-batches",
             allowedRoles: MANAGEMENT_ROLES,
           },
           {
-            label: "MD BGO Register",
+            label: "Sweep Audit Register",
             path: "/operations/bgo",
             allowedRoles: MANAGEMENT_ROLES,
           },
