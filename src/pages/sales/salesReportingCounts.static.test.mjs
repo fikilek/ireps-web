@@ -38,7 +38,8 @@ test("no old number while counting, and count filters wait for the counts", () =
 
 test("Open Report shows and filters each row by its one status, after the Sales meters are read", () => {
   assert.match(report, /<Badge value=\{statusPending \? "Counting…" : row\.workStatus\} \/>/);
-  assert.match(report, /\(statusPending \|\| row\.workStatus !== executionFilter\)/);
+  assert.match(report, /key: "execution",[\s\S]*?filter: "select",[\s\S]*?filterDisabled: statusPending/);
+  assert.match(report, /value: \(row\) => \(statusPending \? "Counting…" : row\.workStatus\)/);
   assert.match(report, /value=\{statusPending \? "Counting…" : row\.workStatus\}\s+\/>/);
   assert.match(report, /const statusPending = !TERMINAL_STREAM_STATES\.has\(sourceStatuses\.sales\)/);
   assert.doesNotMatch(report, /value=\{row\.execution\.status\}/);

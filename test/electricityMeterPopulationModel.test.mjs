@@ -9,9 +9,9 @@ import {
   EMD_HELP_STORIES,
 } from "../src/pages/dashboard/models/electricityMeterPopulationModel.js";
 
-describe("electricityMeterPopulationModel (EMP-R001 v1.3.0)", () => {
-  it("formats numbers with en-ZA grouping", () => {
-    assert.equal(formatNumber(10216), "10\u00A0216"); // non-breaking space in en-ZA
+describe("electricityMeterPopulationModel (EMP-R001 v1.4.0)", () => {
+  it("formats grouped dashboard numbers", () => {
+    assert.equal(formatNumber(10216), "10,216"); // dashboard grouping
     assert.equal(formatNumber(0), "0");
     assert.equal(formatNumber(null), "0");
   });
@@ -41,20 +41,20 @@ describe("electricityMeterPopulationModel (EMP-R001 v1.3.0)", () => {
       lmPcode: "ZA241",
       month: "2026-10",
       totalMeters: 10216,
-      sources: { onList: 9796, foundInField: 420 },
-      categories: { normal: 7956, targeted: 1840 },
-      targetedGps: { withGps: 1396, withoutGps: 444 },
+      purchases: { buying: 9000, notBuying: 1216, salesTotalC: 90000000, unitsTotal: 45000 },
+      categories: { normal: 8376, targeted: 1840 },
       movements: { unchanged: 9642, new: 318, replacements: 184, removed: 72 },
     };
 
     const norm = normalizeElectricityPopulationDoc(raw);
     assert.equal(norm.totalMeters, 10216);
-    assert.equal(norm.onList, 9796);
-    assert.equal(norm.foundInField, 420);
-    assert.equal(norm.normal, 7956);
+    assert.equal(norm.buying, 9000);
+    assert.equal(norm.notBuying, 1216);
+    assert.equal(norm.salesTotalC, 90000000);
+    assert.equal(norm.unitsTotal, 45000);
+    assert.equal(norm.normal, 8376);
     assert.equal(norm.targeted, 1840);
-    assert.equal(norm.targetedWithGps, 1396);
-    assert.equal(norm.targetedWithoutGps, 444);
+    assert.equal(norm.classifiedTotal, 10216);
     assert.equal(norm.movements.unchanged, 9642);
     assert.equal(norm.movements.newMeters, 318);
     assert.equal(norm.movements.replacements, 184);

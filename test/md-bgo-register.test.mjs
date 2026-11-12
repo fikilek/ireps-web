@@ -19,8 +19,8 @@ test("MD BGO Register navigation is configured in ConsoleLayout", () => {
 
   assert.match(
     content,
-    /label:\s*"MD BGO Register"/,
-    "ConsoleLayout must label the menu item as 'MD BGO Register'",
+    /label:\s*"Sweep Audit Register"/,
+    "ConsoleLayout must label the menu item as 'Sweep Audit Register'",
   );
   assert.match(
     content,
@@ -93,15 +93,15 @@ test("MD BGO Register table layout conforms to specification", () => {
   );
 
   // Verify mandatory columns
-  assert.match(content, /label="Batch ID"/, "Must have Batch ID column");
-  assert.match(content, /<Th>BGO Rows<\/Th>/, "Must have BGO Rows column");
-  assert.match(content, /label="Allocation"/, "Must have Allocation column");
-  assert.match(content, /label="Allocated To"/, "Must have Allocated To column");
-  assert.match(content, /label="Total"/, "Must have Total ERFs column");
-  assert.match(content, /label="Ward"/, "Must have Ward column");
-  assert.match(content, /label="Geofence"/, "Must have Geofence column");
-  assert.match(content, /label="Created By"/, "Must have Created By column");
-  assert.match(content, /<Th>Delete BGO<\/Th>/, "Must have Delete BGO column");
+  assert.match(content, /label: "Batch ID"/, "Must have Batch ID column");
+  assert.match(content, /key: "rows", label: "BGO Rows"/, "Must have BGO Rows column");
+  assert.match(content, /label: "Allocation"/, "Must have Allocation column");
+  assert.match(content, /label: "Allocated To"/, "Must have Allocated To column");
+  assert.match(content, /label: "Total"/, "Must have Total ERFs column");
+  assert.match(content, /label: "Ward"/, "Must have Ward column");
+  assert.match(content, /label: "Geofence"/, "Must have Geofence column");
+  assert.match(content, /label: "Created By"/, "Must have Created By column");
+  assert.match(content, /key: "delete", label: "Delete BGO"/, "Must have Delete BGO column");
 
   // Verify top buttons
   assert.match(
@@ -111,8 +111,8 @@ test("MD BGO Register table layout conforms to specification", () => {
   );
   assert.match(
     content,
-    /Allocation Board/,
-    "Must have 'Allocation Board' action button",
+    /Allocation Map/,
+    "Must have 'Allocation Map' action button",
   );
   assert.match(
     content,
@@ -198,20 +198,15 @@ test("MD BGO Register and Planning resolve active workbase from auth and geo con
   }
 });
 
-test("MD BGO Dashboard strictly isolates Meter Discovery from Transaction BGO (MD-BGO-R011)", () => {
-  const dashboardPath = path.join(repoRoot, "src/pages/operations/MdBgoDashboardPage.jsx");
-  const content = fs.readFileSync(dashboardPath, "utf8");
-
-  // Must query bgo_batches
-  assert.match(content, /useGetBgoBatchesByLmQuery/, "Must query bgo_batches via useGetBgoBatchesByLmQuery");
-
-  // Must filter strictly to MD BGO batches
-  assert.match(content, /function isMdBgoBatch/, "Must define isMdBgoBatch filter");
-  assert.match(content, /batchMode === "BMD" \|\| opType === "METER_DISCOVERY"/, "Must filter to BMD / METER_DISCOVERY");
-
-  // Must NOT query tc_uploads (disconnections, reconnections, etc.)
-  assert.doesNotMatch(content, /useGetTcUploadsQuery/, "MD BGO Dashboard must not query or display tc_uploads");
-  assert.doesNotMatch(content, /METER_DISCONNECTION/, "Must not contain hardcoded disconnection transaction references");
+test("MD BGO Dashboard strictly isolates Meter Discovery from Transaction BGO (MD-BGO-R011)", async () => {
+  const content = fs.readFileSync(path.join(repoRoot, "src/pages/operations/MdBgoDashboardPage.jsx"), "utf8");
+  const stream = fs.readFileSync(path.join(repoRoot, "src/redux/mdBgoDashboardStream.js"), "utf8");
+  assert.match(content, /useGetMdBgoDashboardQuery/);
+  assert.match(stream, /collection\(db, "bgo_batches"\)/);
+  assert.doesNotMatch(content + stream, /useGetTcUploadsQuery|collection\(db, "tc_uploads"\)/);
+  const { buildMdBgoDashboard } = await import("../src/pages/operations/md-bgo/mdBgoDashboardModel.js");
+  const model = buildMdBgoDashboard({ batches: [{ id: "md", operationType: "METER_DISCOVERY", workflow: { state: "ISSUED" } }, { id: "trn", operationType: "METER_DISCONNECTION", workflow: { state: "ISSUED" } }] });
+  assert.deepEqual(model.batches.map(batch => batch.id), ["md"]);
 });
 
 test("MD BGO Planning Map satisfies whole-municipality overview, ward zoom, and collapsible layers (MD-BGO-R010)", () => {
@@ -416,7 +411,9 @@ test("MD BGO Planning Map supports geofence-to-batch two-way linkage and origina
   assert.match(draftBatchHandler[1], /navigate\("\/operations\/bgo"\)/, "Successful Save & Create Batch must automatically return to the register");
   const registerPath = path.join(repoRoot, "src/pages/operations/MdBgoRegisterPage.jsx");
   const registerContent = fs.readFileSync(registerPath, "utf8");
-  assert.match(registerContent, /useState\(\{ key: "createdAt", direction: "desc" \}\)/, "The register must show the newest-created batch first by default");
+  assert.match(registerContent, /rows=\{tableRows\}/);
+  const api = fs.readFileSync(path.join(repoRoot, "src/redux/bgoApi.js"), "utf8");
+  assert.match(api, /filter\(\(batch\) => isBmdBatchForScope\(batch, lmPcode, wardPcode\)\)\s*\.sort\(sortByCreatedDesc\)/, "The register source must provide newest-created batches first");
 
   // 3. Backend BMD batch origination and linkage
   const callablesPath = path.join(repoRoot, "functions/bgo/callables.js");
