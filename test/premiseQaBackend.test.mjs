@@ -154,7 +154,7 @@ test("projectPremiseQaToTbRow validates bidirectional linkage and projects QA wi
           }),
         };
       }
-      return { exists: false };
+      return { exists: false, docs: [] };
     },
     update: (ref, data) => {
       updates.push({ refId: ref.id, data });
@@ -163,6 +163,7 @@ test("projectPremiseQaToTbRow validates bidirectional linkage and projects QA wi
 
   const fakeDb = {
     collection: (col) => ({
+      where: () => ({ query: true }),
       doc: (id) => ({ col, id }),
     }),
   };
@@ -223,6 +224,7 @@ test("invalidatePremiseQaIfSubstantive resets QA_PASS to QA_PENDING when substan
       }),
     }),
     collection: (col) => ({
+      where: () => ({ query: true }),
       doc: (id) => ({ path: `${col}/${id}`, id }),
     }),
     runTransaction: async (cb) => {
@@ -242,7 +244,7 @@ test("invalidatePremiseQaIfSubstantive resets QA_PASS to QA_PENDING when substan
               }),
             };
           }
-          return { exists: false };
+          return { exists: false, docs: [] };
         },
         create: (ref, data) => { historyEntry = { path: ref.path, data }; },
         update: (ref, data) => {
@@ -298,6 +300,7 @@ test("invalidatePremiseQaIfSubstantive returns QA_FAIL to QA_PENDING when correc
       }),
     }),
     collection: (col) => ({
+      where: () => ({ query: true }),
       doc: (id) => ({ path: `${col}/${id}`, id }),
     }),
     runTransaction: async (cb) => {
@@ -310,7 +313,7 @@ test("invalidatePremiseQaIfSubstantive returns QA_FAIL to QA_PENDING when correc
               data: () => ({ id: "ROW_001", tbId: "TB_001", refs: { premiseId: "PRM_FAIL" } }),
             };
           }
-          return { exists: false };
+          return { exists: false, docs: [] };
         },
         create: (ref, data) => { historyEntry = { path: ref.path, data }; },
         update: (ref, data) => { if (ref.path === "premises/PRM_FAIL") premiseUpdate = data; },
@@ -409,7 +412,7 @@ test("getPremiseQaReview returns media photographs and full premise context", as
             }),
           };
         }
-        return { exists: false };
+        return { exists: false, docs: [] };
       },
     }),
     collection: (path) => ({

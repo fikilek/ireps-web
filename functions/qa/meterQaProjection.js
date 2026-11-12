@@ -81,7 +81,6 @@ export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {})
   const normQaState = String(qaState || "QA_PENDING").trim().toUpperCase().replace(/ /g, "_");
 
   const updatedRowIds = new Set();
-  const calculatedTbStatusByRowId = new Map();
 
   for (const { ref, data: row } of plan.rows) {
     const rowId = ref.id;
@@ -92,7 +91,6 @@ export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {})
       normQaState,
       row.execution?.status
     );
-    calculatedTbStatusByRowId.set(rowId, calculatedTbStatus);
 
     const updateData = {
       "qa.meterStatus": normQaState,
@@ -125,20 +123,9 @@ export function applyMeterQaTbRowWrites(tx, plan, qaState, reviewerDetails = {})
         const isThisRow = updatedRowIds.has(r.id);
         const pStatus = norm(r.qa?.premiseStatus);
         const mStatus = norm(isThisRow ? normQaState : r.qa?.meterStatus);
-        const execStatus = norm(r.execution?.status);
-        const tbStatus = norm(
-          isThisRow
-            ? calculatedTbStatusByRowId.get(r.id)
-            : (r.qa?.tbStatus || calculateTbQaStatus(pStatus, mStatus, execStatus))
-        );
-
-        if (tbStatus === "QA_FAIL" || pStatus === "QA_FAIL" || mStatus === "QA_FAIL") {
-          qaFailRows += 1;
-        } else if (execStatus === "COMPLETED") {
-          if (tbStatus === "QA_PASS" || (pStatus === "QA_PASS" && mStatus === "QA_PASS")) {
-            qaPassRows += 1;
-          }
-        }
+        const final = calculateTbQaStatus(pStatus, mStatus);
+        if (final === "QA_FAIL") qaFailRows += 1;
+        else if (final === "QA_PASS") qaPassRows += 1;
       }
 
       tx.update(batchPlan.parentRef, {

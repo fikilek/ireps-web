@@ -178,7 +178,7 @@ test("the close writes exactly what a batch completion writes, plus its history"
     "execution.status": "COMPLETED", "execution.startedAt": FIND_MS, "execution.completedAt": FIND_MS, "execution.outcome": OUTCOME,
     // TB-R064 (1.3.67): the same meter was found, so there is no other number to record.
     "execution.foundMeterNo": null,
-    "refs.premiseId": "PREM1", "refs.meterId": TRN, "refs.trnId": TRN, "metadata.updatedAt": SERVER, "metadata.updatedByUid": "FWR1", "metadata.updatedByUser": "Field Worker" });
+    "refs.premiseId": "PREM1", "refs.meterId": TRN, "refs.trnId": TRN, "qa.meterStatus": "QA_PENDING", "qa.tbStatus": "QA_NAv", "metadata.updatedAt": SERVER, "metadata.updatedByUid": "FWR1", "metadata.updatedByUser": "Field Worker" });
   assert.equal(Object.hasOwn(sales, "targetedBatchId"), false, "closing keeps the scalar");
   assert.deepEqual([sales["metadata.updatedAt"], sales["metadata.updatedByUid"], sales["metadata.updatedByUser"]], [SERVER, "FWR1", "Field Worker"]);
   assert.equal(inspectSalesTbRefsIntegrity(sales.tbRefs).valid, true);

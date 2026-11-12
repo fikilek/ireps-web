@@ -1261,7 +1261,7 @@ export function normalizeTargetedBatchReportRow({
       address: fieldAddress || null,
       point: null,
       status: premiseId ? "LINKED" : "PENDING",
-      qaStatus: row?.qa?.premiseStatus || null,
+      qaStatus: premise?.qa?.status || row?.qa?.premiseStatus || null,
       linkSource: premiseId
         ? cleanText(fieldWork?.premiseId)
           ? "sales.tbRefs.fieldWork.premiseId"

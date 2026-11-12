@@ -112,7 +112,7 @@ export default function MdBgoRowsPage() {
       render: row => <QaPill status={row[key]} disabled={!row[href]} title={row[href] ? `Open linked ${label === "Premise" ? "premise in Premise" : "meter-discovery TRN in TRN"} Registry` : "Linked QA record unavailable"} ariaLabel={`${label} QA: ${row[key]}`} onClick={() => navigate(row[href])} />,
     })),
     { key: "qaFinal", label: "QA Final", filter: "select", sortable: true, filterOptions: QA_OPTIONS.filter(value => value !== "QA PENDING").map(value => ({ value, label: value })), value: row => row.qaFinal,
-      render: row => <QaPill status={row.qaFinal} disabled title={row.progress === "COMPLETED" ? `QA Final: ${row.qaFinal}` : "QA Final is unavailable until the BGO row is COMPLETED"} /> },
+      render: row => <QaPill status={row.qaFinal} disabled title={`QA Final: ${row.qaFinal}; derived from current Premise and Meter QA`} /> },
     { key: "sourceRowId", label: "BGO Row ID", filter: "text", value: (row) => row.sourceRowId },
   ], [wardPcode, navigate]);
   const columns = useMemo(() => mdBgoVisibleRowColumns(allColumns, columnVisibility), [allColumns, columnVisibility]);

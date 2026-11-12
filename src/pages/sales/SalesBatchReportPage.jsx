@@ -116,7 +116,6 @@ function getNoAccessQaStatus(row) {
 }
 
 function getMeterQaStatus(row) {
-  if (!isRowCompleted(row)) return "QA NAv";
   const raw = row?.fieldMeter?.qaStatus ?? row?.qa?.meterStatus;
   return raw ? normalizeQaStatus(raw) : "QA NAv";
 }
@@ -766,13 +765,11 @@ export default function SalesBatchReportPage() {
         render: (row) => {
           const premiseId = getPremiseQaTarget(row);
           const isCompleted = isRowCompleted(row);
-          const isEnabled = isCompleted && Boolean(premiseId);
+          const isEnabled = Boolean(premiseId);
           const status = getPremiseQaStatus(row);
           const title = isEnabled
             ? `Open Premise ${premiseId} in Premise Registry`
-            : !isCompleted
-              ? "QA is unavailable until the Sales row is COMPLETED"
-              : "No Premise record linked to this row";
+            : "No Premise record linked to this row";
 
           return (
             <QaPill
@@ -842,13 +839,11 @@ export default function SalesBatchReportPage() {
         render: (row) => {
           const astId = getMeterQaTarget(row);
           const isCompleted = isRowCompleted(row);
-          const isEnabled = isCompleted && Boolean(astId);
+          const isEnabled = Boolean(astId);
           const status = getMeterQaStatus(row);
           const title = isEnabled
             ? `Open Meter Discovery TRN ${astId} in TRN Registry`
-            : !isCompleted
-              ? "QA is unavailable until the Sales row is COMPLETED"
-              : "No Meter Discovery TRN (AST ID) available for this row";
+            : "No Meter Discovery TRN (AST ID) available for this row";
 
           return (
             <QaPill
@@ -882,10 +877,7 @@ export default function SalesBatchReportPage() {
         value: (row) => getQaFinalStatus(row),
         render: (row) => {
           const status = getQaFinalStatus(row);
-          const isCompleted = isRowCompleted(row);
-          const title = !isCompleted
-            ? "QA is unavailable until the Sales row is COMPLETED"
-            : `QA Final: ${status}`;
+          const title = `QA Final: ${status}; derived from current Premise and Meter QA`;
 
           return (
             <span title={title}>

@@ -50,7 +50,7 @@ test("exact linked-document stream waits for all server sources and isolates fla
     assert.equal(Object.keys(source.premises).length, 2);
     const [a, b] = enrichMdBgoRowQa(rows, source);
     assert.equal(a.premiseQa, "QA PENDING"); assert.equal(b.premiseQa, "QA FAIL");
-    assert.equal(a.qaFinal, "QA FAIL"); assert.equal(b.qaFinal, "QA NAv");
+    assert.equal(a.qaFinal, "QA FAIL"); assert.equal(b.qaFinal, "QA FAIL");
     assert.match(a.premiseQaHref, /wardPcode=WARD-6/);
   } finally { stream.stop(); }
 });

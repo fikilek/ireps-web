@@ -14,7 +14,7 @@ test("each flat points to its own exact premise; meter points to discovery TRN r
   assert.equal(a.meterQaHref, "/registries/trns?trnId=TRN%2FA");
   assert.equal(b.meterQaHref, "");
   assert.equal(a.premiseQa, "QA PENDING"); assert.equal(b.premiseQa, "QA FAIL");
-  assert.equal(a.meterQa, "QA FAIL"); assert.equal(a.qaFinal, "QA FAIL"); assert.equal(b.qaFinal, "QA NAv");
+  assert.equal(a.meterQa, "QA FAIL"); assert.equal(a.qaFinal, "QA FAIL"); assert.equal(b.qaFinal, "QA FAIL");
 });
 
 test("canonical TRN workflow overrides stale legacy QA; completed TRN is pending", () => {
@@ -57,9 +57,9 @@ test("all four QA columns default visible", () => {
   for (const key of ["lastActivity", "premiseQa", "meterQa", "qaFinal"]) assert.equal(MD_BGO_ROW_DEFAULT_VISIBILITY[key], true);
 });
 
-test("shared final presentation preserves TB stored precedence and completion gate", () => {
+test("shared final presentation ignores stale stored final values and execution gates", () => {
   assert.equal(reportingQaFinal({ completed: false, stored: "QA_FAIL" }), "QA NAv");
-  assert.equal(reportingQaFinal({ completed: true, premise: "QA PENDING", meter: "QA PENDING", stored: "QA_FAIL" }), "QA FAIL");
+  assert.equal(reportingQaFinal({ completed: true, premise: "QA PENDING", meter: "QA PENDING", stored: "QA_FAIL" }), "QA NAv");
   assert.equal(reportingQaFinal({ completed: true, stored: "QA_PENDING" }), "QA NAv");
   assert.equal(reportingQaFinal({ completed: true, premise: "QA PASS", meter: "QA PASS" }), "QA PASS");
 });

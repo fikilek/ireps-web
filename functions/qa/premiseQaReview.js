@@ -165,9 +165,8 @@ export async function readPremiseQaTbRow(tx, db, premiseId, premise) {
   };
 }
 
-export function calculateTbQaStatus(premiseStatus, meterStatus, executionStatus = null) {
+export function calculateTbQaStatus(premiseStatus, meterStatus, _executionStatus = null) {
   const norm = (s) => String(s || "").trim().toUpperCase().replace(/ /g, "_");
-  if (norm(executionStatus) !== "COMPLETED") return "QA_NAv";
   const p = norm(premiseStatus);
   const m = norm(meterStatus);
 
@@ -220,16 +219,9 @@ export function applyPremiseQaTbRowProjection(tx, tbRowPlan, qaState, reviewerDe
       const isThisRow = r.id === tbRowPlan.rowId;
       const pStatus = norm(isThisRow ? qaState : r.qa?.premiseStatus);
       const mStatus = norm(isThisRow ? tbRowPlan.row?.qa?.meterStatus : r.qa?.meterStatus);
-      const execStatus = norm(isThisRow ? tbRowPlan.row?.execution?.status : r.execution?.status);
-      const tbStatus = norm(isThisRow ? calculatedTbStatus : r.qa?.tbStatus);
-
-      if (tbStatus === "QA_FAIL" || pStatus === "QA_FAIL" || mStatus === "QA_FAIL") {
-        qaFailRows += 1;
-      } else if (execStatus === "COMPLETED") {
-        if (tbStatus === "QA_PASS" || (pStatus === "QA_PASS" && mStatus === "QA_PASS")) {
-          qaPassRows += 1;
-        }
-      }
+      const final = calculateTbQaStatus(pStatus, mStatus);
+      if (final === "QA_FAIL") qaFailRows += 1;
+      else if (final === "QA_PASS") qaPassRows += 1;
     }
 
     tx.update(tbRowPlan.parentRef, {

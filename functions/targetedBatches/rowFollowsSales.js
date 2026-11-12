@@ -68,7 +68,6 @@ export async function readRowsTakenOut({ db, read, tbId }) {
 
 // ---------------------------------------------------------------- the batch (TB-R053 section 4, copied from the clean-up planner)
 export function countRows(rows) {
-  const norm = s => String(s ?? "").trim().toUpperCase().replace(/ /g, "_");
   return {
     totalRows: rows.length,
     acceptedRows: rows.filter(r => r.decision?.status === "ACCEPT").length,
@@ -78,14 +77,14 @@ export function countRows(rows) {
     unallocatedRows: rows.filter(r => r.allocation?.allocatable === true && r.allocation?.status !== "ALLOCATED").length,
     executionStartedRows: rows.filter(r => (r.execution?.status || "NOT_STARTED") !== "NOT_STARTED").length,
     completedRows: rows.filter(r => r.execution?.status === "COMPLETED").length,
-    qaPassRows: rows.filter(r => norm(r.execution?.status) === "COMPLETED" && (norm(r.qa?.tbStatus) === "QA_PASS" || (norm(r.qa?.premiseStatus) === "QA_PASS" && norm(r.qa?.meterStatus) === "QA_PASS"))).length,
-    qaFailRows: rows.filter(r => norm(r.qa?.tbStatus) === "QA_FAIL" || norm(r.qa?.premiseStatus) === "QA_FAIL" || norm(r.qa?.meterStatus) === "QA_FAIL").length,
+    qaPassRows: rows.filter(r => calculateTbQaStatus(r.qa?.premiseStatus, r.qa?.meterStatus) === "QA_PASS").length,
+    qaFailRows: rows.filter(r => calculateTbQaStatus(r.qa?.premiseStatus, r.qa?.meterStatus) === "QA_FAIL").length,
   };
 }
 // Section 14 completion target, as premiseLink.js getTargetedBatchCompletionTarget.
 export const completionTarget = counts => [counts.allocatableRows, counts.acceptedRows, counts.allocatedRows, counts.totalRows].find(n => Number.isInteger(n) && n > 0) || 0;
 // A row as the counts and the status rule see it.
-export const rowState = row => ({ id: row.id, execution: { status: rowStatus(row), startedAt: millis(row.execution?.startedAt), completedAt: millis(row.execution?.completedAt) },
+export const rowState = row => ({ id: row.id, qa: row.qa || {}, execution: { status: rowStatus(row), startedAt: millis(row.execution?.startedAt), completedAt: millis(row.execution?.completedAt) },
   decision: { status: row.decision?.status ?? null }, allocation: { status: row.allocation?.status ?? null, allocatable: row.allocation?.allocatable ?? null } });
 export const parentState = parent => ({ status: parent?.status ?? null, acceptance: parent?.acceptance?.status ?? null,
   execution: { status: parent?.execution?.status ?? null, startedAt: millis(parent?.execution?.startedAt), completedAt: millis(parent?.execution?.completedAt) },
@@ -269,7 +268,7 @@ export function decideRowFollowsSales(facts) {
     const completedAtMs = rowStartMs !== null && rowStartMs > findAtMs ? rowStartMs : findAtMs;
     const targetedMeterNo = row.meter?.numberNormalized || row.meter?.numberRaw || salesId;
     const meterMatch = Boolean(normMeterNo(targetedMeterNo)) && normMeterNo(targetedMeterNo) === normMeterNo(discoveredMeterNo);
-    const closedStates = states.map(s => (s.id === row.id ? { ...s, execution: { status: "COMPLETED", startedAt: s.execution.startedAt ?? findAtMs, completedAt: completedAtMs } } : s));
+    const closedStates = states.map(s => (s.id === row.id ? { ...s, qa: { ...s.qa, meterStatus: "QA_PENDING" }, execution: { status: "COMPLETED", startedAt: s.execution.startedAt ?? findAtMs, completedAt: completedAtMs } } : s));
     const after = parentAfter(before, closedStates, executionFallback(closedStates));
     if (after.action === "HOLD") return held(`PARENT_${after.reason}`);
     const rowErfId = row.refs?.erfId || sales.erfId || null;
