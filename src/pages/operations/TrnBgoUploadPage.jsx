@@ -33,6 +33,7 @@ function MasterCheckbox({ checked, indeterminate, disabled, onChange, title }) {
 }
 import { Link, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
+import "./trnBgoUpload.css";
 import { httpsCallable } from "firebase/functions";
 import { parseUpload, sampleWorkbook, OFFICIAL_HEADERS, UPLOAD_TRN_TYPES, duplicateGroups, resolveDuplicates } from "./trnBgoUploadParser.js";
 
@@ -1551,12 +1552,12 @@ export default function TrnBgoUploadPage() {
             </div>
           ) : null}
 
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-            <label>Local Municipality<br /><select aria-label="Local Municipality" value={lmPcode} disabled={isValidating || Boolean(pendingSource)} onChange={(e) => setChosenLm(e.target.value)}>
+          <div className="trn-upload-controls">
+            <label>Local Municipality<select aria-label="Local Municipality" value={lmPcode} disabled={isValidating || Boolean(pendingSource)} onChange={(e) => setChosenLm(e.target.value)}>
               <option value="">Select municipality</option>
               {authorizedLms.map((lm) => <option key={lm.id} value={lm.id}>{lm.name} ({lm.id})</option>)}
             </select></label>
-            <label>TRN Type<br /><select aria-label="TRN Type" value={selectedTrnType} disabled={isValidating || Boolean(pendingSource)} onChange={(e) => setSelectedTrnType(e.target.value)}>
+            <label>TRN Type<select aria-label="TRN Type" value={selectedTrnType} disabled={isValidating || Boolean(pendingSource)} onChange={(e) => setSelectedTrnType(e.target.value)}>
               {UPLOAD_TRN_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
             </select></label>
             <button type="button" onClick={handleDownloadSampleTemplate}>Download Sample Template</button>
@@ -1609,7 +1610,7 @@ export default function TrnBgoUploadPage() {
 
       {pendingSource ? (
         <div style={uploadModalOverlay}>
-          <div role="dialog" aria-modal="true" aria-label="Resolve duplicate meter numbers" style={uploadModalCard}>
+          <div role="dialog" aria-modal="true" aria-label="Resolve duplicate meter numbers" className="trn-upload-modal" style={uploadModalCard}>
             <h3>Resolve duplicate meter numbers</h3>
             <p>{duplicateGroups(pendingSource).length} groups; {duplicateGroups(pendingSource).reduce((n, [, rows]) => n + rows.length, 0)} affected rows. Choose one occurrence to keep in every group. Other occurrences will be dropped.</p>
             {duplicateGroups(pendingSource).map(([meter, rows]) => (
@@ -1630,7 +1631,7 @@ export default function TrnBgoUploadPage() {
         </div>
       ) : null}
       {uploadFeedback ? (
-        <div style={{ ...uploadModalOverlay, zIndex: 1201 }}><div role="dialog" aria-modal="true" aria-label={uploadFeedback.title} style={uploadModalCard}>
+        <div style={{ ...uploadModalOverlay, zIndex: 1201 }}><div role="dialog" aria-modal="true" aria-label={uploadFeedback.title} className="trn-upload-modal" style={uploadModalCard}>
           <h3>{uploadFeedback.title}</h3><p style={{ whiteSpace: "pre-line" }}>{uploadFeedback.message}</p>
           {uploadFeedback.rows ? <div style={{ overflowX: "auto" }}><table><thead><tr>{[...OFFICIAL_HEADERS, "Municipality"].map((key) => <th key={key}>{key}</th>)}</tr></thead><tbody>{uploadFeedback.rows.map((row) => <tr key={row.rowNo}>{OFFICIAL_HEADERS.map((key) => <td key={key} style={{ padding: 8, whiteSpace: "nowrap" }}>{row[key]}</td>)}<td>{row.actualLmPcode}</td></tr>)}</tbody></table></div> : null}
           <button type="button" onClick={() => setUploadFeedback(null)}>OK</button>
