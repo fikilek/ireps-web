@@ -49,7 +49,12 @@ test("MD BGO callable registration closes work atomically and survives retries a
     replies.forEach((r) => assert.equal(r.success, true, JSON.stringify(r)));
     const rows = await db.collection("bgo_rows").where("bgoBatchId", "==", batchId).get(); assert.equal(rows.size, 3);
     assert.deepEqual(rows.docs.map((d) => d.data().rowNo).sort(), [1, 2, 3]);
-    rows.docs.forEach((d) => { assert.equal(d.data().refs.premiseId, "P1"); assert.equal(d.data().workflow.state, "COMPLETED"); });
+    for (const d of rows.docs) {
+      assert.equal(d.data().refs.premiseId, "P1"); assert.equal(d.data().workflow.state, "COMPLETED");
+      const trn = (await db.doc(`trns/${d.data().refs.trnId}`).get()).data();
+      assert.equal(trn.origin.mdBgo.rowId, d.id);
+      assert.equal(trn.mdBgoContext, undefined);
+    }
     assert.equal((await db.doc(`bgo_batches/${batchId}`).get()).data().summary.meterCount, 3);
   });
   await t.test("premise duplication never copies existing meter or completion links", async () => {

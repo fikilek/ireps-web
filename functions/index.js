@@ -4033,6 +4033,8 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
     if (hasAccess === "yes") {
       try {
         registration = await db.runTransaction(async (tx) => {
+          // A retried attempt must retain the submitted anchor, not an aborted row ID.
+          const attemptPayload = { ...finalPayload };
           const liveTrnSnap = await tx.get(trnRef);
           if (liveTrnSnap.exists) {
             if (!await acceptedSubmission(tx, db, data.id, liveTrnSnap.data(), data, caller.uid)) throw new HttpsError("failed-precondition", "Existing submission could not be verified; retain the queued capture for recovery.");
@@ -4043,7 +4045,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
             tx,
             db,
             Timestamp,
-            trnData: finalPayload,
+            trnData: attemptPayload,
             trnId: data.id,
             rawMeterNo: meterNoRaw,
             normalizedMeterNo: meterNoNormalized,
@@ -4056,7 +4058,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           });
 
           // The transaction itself, in the same commit, already carrying what came of it.
-          tx.create(trnRef, { ...stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }), derived: result.derived });
+          tx.create(trnRef, { ...stripToDeclaredRoot(attemptPayload, { actor: { uid: caller.uid, name: actorName } }), derived: result.derived });
 
           return result;
         });
@@ -4106,6 +4108,7 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
       // behaviour the deleted callable had.
       try {
         await db.runTransaction(async (tx) => {
+          const attemptPayload = { ...finalPayload };
           const existing = await tx.get(trnRef);
 
           if (existing.exists) {
@@ -4119,14 +4122,14 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
             return;
           }
 
-          const premiseRef = db.doc(`premises/${finalPayload.accessData.premise.id}`);
+          const premiseRef = db.doc(`premises/${attemptPayload.accessData.premise.id}`);
           const premiseSnapshot = await tx.get(premiseRef);
-          const mdBgoVisit = await prepareMdBgoRegistration({ tx, db, trnData: finalPayload,
+          const mdBgoVisit = await prepareMdBgoRegistration({ tx, db, trnData: attemptPayload,
             actorUid: caller.uid, actorName, now: nowIso, noAccess: true });
           await recordTargetedBatchNoAccessInTransaction({
             transaction: tx,
             db,
-            trnData: finalPayload,
+            trnData: attemptPayload,
             actor: { uid: caller.uid, name: actorName },
           });
           mdBgoVisit.apply();
@@ -4135,8 +4138,8 @@ export const onMeterDiscoveryCallable = onCall(async (request) => {
           // capturedAt, sourceModule, executionOutcome, geofenceRefs and more hanging off the
           // root, none of them declared. The batch it came from moves into `origin`, which is
           // the declared home for "where the work came from and what it followed".
-          tx.create(trnRef, stripToDeclaredRoot(finalPayload, { actor: { uid: caller.uid, name: actorName } }));
-          tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(data.id), ...noAccessPremiseMetadata(finalPayload.metadata, premiseSnapshot.data()?.metadata) });
+          tx.create(trnRef, stripToDeclaredRoot(attemptPayload, { actor: { uid: caller.uid, name: actorName } }));
+          tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(data.id), ...noAccessPremiseMetadata(attemptPayload.metadata, premiseSnapshot.data()?.metadata) });
         });
       } catch (error) {
         if (error?.code !== 6 && error?.code !== "already-exists") throw error;
