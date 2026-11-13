@@ -7,132 +7,76 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 
-test("TrnBgoUploadPage exists and defines official 12-column template", () => {
-  const uploadPagePath = path.join(
-    repoRoot,
-    "src/pages/operations/TrnBgoUploadPage.jsx",
-  );
-  assert.ok(fs.existsSync(uploadPagePath), "TrnBgoUploadPage.jsx must exist");
+import * as XLSX from "xlsx";
+import { parseUpload, sampleWorkbook, OFFICIAL_HEADERS, MAX_UPLOAD_ROWS, duplicateGroups, resolveDuplicates } from "../src/pages/operations/trnBgoUploadParser.js";
+const row = (number, meter = `00${number}`, other = {}) => ({ ...Object.fromEntries(OFFICIAL_HEADERS.map((key) => [key, ""])), rowNo: String(number), meterNo: meter, ...other });
+const csv = (rows, headers = OFFICIAL_HEADERS) => [headers.join(","), ...rows.map((entry) => headers.map((key) => `"${String(entry[key] ?? "").replaceAll('"', '""')}"`).join(","))].join("\r\n");
 
-  const content = fs.readFileSync(uploadPagePath, "utf8");
-  assert.match(
-    content,
-    /import \* as XLSX from "xlsx"/,
-    "TrnBgoUploadPage must import XLSX",
-  );
-  assert.match(
-    content,
-    /import IrepsTable from "\.\.\/\.\.\/components\/table\/IrepsTable"/,
-    "TrnBgoUploadPage must import IrepsTable",
-  );
-  assert.match(
-    content,
-    /MAX_UPLOAD_ROWS\s*=\s*100/,
-    "TrnBgoUploadPage must enforce max 100 rows limit",
-  );
-  assert.match(
-    content,
-    /<IrepsTable[\s\S]*?rows=\{filteredRows\}/,
-    "TrnBgoUploadPage must pass filteredRows as the rows prop to IrepsTable",
-  );
+test("CSV parser preserves quoted commas, multiline text, escaped quotes and leading zeros", () => {
+  const result = parseUpload(csv([row(1, "000123", { premiseAddress: '12, Road\nUnit "A"', linkedAccountNo: "00045" })]), "original name.csv");
+  assert.equal(result.rows[0].meterNo, "000123");
+  assert.equal(result.rows[0].linkedAccountNo, "00045");
+  assert.equal(result.rows[0].premiseAddress, '12, Road\nUnit "A"');
+  const multiline = parseUpload(csv([row(1, "0001", { premiseAddress: "A\nB" }), row(2, "0002")]), "meters.csv");
+  assert.deepEqual(multiline.rows.map((entry) => entry.sourcePosition), [2, 4]);
 });
 
-test("Official template column header parity: exactly 12 columns in order", () => {
-  const uploadPagePath = path.join(
-    repoRoot,
-    "src/pages/operations/TrnBgoUploadPage.jsx",
-  );
-  const content = fs.readFileSync(uploadPagePath, "utf8");
-
-  const expectedHeaders = [
-    "rowNo",
-    "meterNo",
-    "meterPhase",
-    "meterType",
-    "linkedAccountNo",
-    "premiseAddress",
-    "premisePropertyType",
-    "actionReason",
-    "wardNo",
-    "geofence",
-    "meterStatus",
-    "erfNo",
-  ];
-
-  for (const h of expectedHeaders) {
-    assert.ok(
-      content.includes(`"${h}"`),
-      `OFFICIAL_HEADERS must include "${h}"`,
-    );
+test("XLS and XLSX use first worksheet and preserve displayed/text meter identifiers", () => {
+  for (const bookType of ["xls", "xlsx"]) {
+    const wb = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([OFFICIAL_HEADERS, OFFICIAL_HEADERS.map((key) => row(1, "000123")[key]), OFFICIAL_HEADERS.map((key) => row(2, "000045")[key])]);
+    sheet.B3 = { t: "n", v: 45, z: "000000" };
+    XLSX.utils.book_append_sheet(wb, sheet, "First");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["invalid extra sheet"]]), "Ignored");
+    const parsed = parseUpload(XLSX.write(wb, { bookType, type: "buffer" }), `meters.${bookType}`);
+    assert.deepEqual(parsed.rows.map((entry) => entry.meterNo), ["000123", "000045"]);
+    assert.equal(parsed.warnings.length, 1);
   }
 });
 
-test("Validation: Column headers check rejects missing or extra columns", () => {
-  const expected = [
-    "rowNo",
-    "meterNo",
-    "meterPhase",
-    "meterType",
-    "linkedAccountNo",
-    "premiseAddress",
-    "premisePropertyType",
-    "actionReason",
-    "wardNo",
-    "geofence",
-    "meterStatus",
-    "erfNo",
-  ];
-
-  const validateHeaders = (headers) => {
-    const missing = expected.filter((h) => !headers.includes(h));
-    const extra = headers.filter((h) => h && !expected.includes(h));
-    return { valid: missing.length === 0 && extra.length === 0, missing, extra };
-  };
-
-  // Exact match
-  assert.equal(validateHeaders(expected).valid, true);
-
-  // Missing meterNo
-  const missingOne = expected.filter((h) => h !== "meterNo");
-  const resMissing = validateHeaders(missingOne);
-  assert.equal(resMissing.valid, false);
-  assert.deepEqual(resMissing.missing, ["meterNo"]);
-
-  // Extra column added
-  const extraCol = [...expected, "unexpectedField"];
-  const resExtra = validateHeaders(extraCol);
-  assert.equal(resExtra.valid, false);
-  assert.deepEqual(resExtra.extra, ["unexpectedField"]);
+test("strict ordered headers reject missing, extra, repeated, renamed and reordered columns", () => {
+  for (const headers of [OFFICIAL_HEADERS.slice(1), [...OFFICIAL_HEADERS, "extra"], OFFICIAL_HEADERS.map((key, index) => index === 1 ? "rowNo" : key), OFFICIAL_HEADERS.map((key) => key === "meterNo" ? "MeterNo" : key), [...OFFICIAL_HEADERS].reverse()]) {
+    assert.throws(() => parseUpload(csv([row(1)], headers), "meters.csv"), /12 columns in order/);
+  }
 });
 
-test("Validation: Row limits (1 to 100 rows)", () => {
-  const checkRowCount = (count) => {
-    if (count < 1) return { valid: false, error: "0 rows" };
-    if (count > 100) return { valid: false, error: "Exceeds 100 rows" };
-    return { valid: true };
-  };
-
-  assert.equal(checkRowCount(0).valid, false);
-  assert.equal(checkRowCount(1).valid, true);
-  assert.equal(checkRowCount(50).valid, true);
-  assert.equal(checkRowCount(100).valid, true);
-  assert.equal(checkRowCount(101).valid, false);
+test("nonblank source rows require supplied sequence and retain blank physical positions", () => {
+  const parsed = parseUpload(`${OFFICIAL_HEADERS.join(",")}\r\n${csv([row(1)]).split("\r\n")[1]}\r\n,,,,,,,,,,,\r\n${csv([row(2)]).split("\r\n")[1]}`, "meters.csv");
+  assert.deepEqual(parsed.rows.map((entry) => entry.sourcePosition), [2, 4]);
+  for (const bad of ["", "1.5", "1junk", "2", "-1"]) assert.throws(() => parseUpload(csv([row(bad)]), "meters.csv"), /rowNo/);
+  assert.throws(() => parseUpload(csv([row(1), row(3)]), "meters.csv"), /rowNo/);
+  assert.throws(() => parseUpload(csv([row(1), row(2, "", { actionReason: "partly filled" })]), "meters.csv"), /meterNo/);
 });
 
-test("Validation: No duplicate meters within the same file", () => {
-  const checkDuplicates = (meters) => {
-    const seen = new Set();
-    for (const m of meters) {
-      if (seen.has(m)) return { valid: false, duplicate: m };
-      seen.add(m);
-    }
-    return { valid: true };
-  };
+test("row cap counts nonblank rows: 200 passes, 201 fails with actual/max/split feedback", () => {
+  assert.equal(MAX_UPLOAD_ROWS, 200);
+  assert.equal(parseUpload(csv(Array.from({ length: 200 }, (_, index) => row(index + 1))), "meters.csv").rows.length, 200);
+  assert.throws(() => parseUpload(csv(Array.from({ length: 201 }, (_, index) => row(index + 1))), "meters.csv"), /201.*200.*Split/);
+  assert.throws(() => parseUpload(OFFICIAL_HEADERS.join(","), "meters.csv"), /0 meter rows/);
+});
 
-  assert.equal(checkDuplicates(["04085348920", "04085348921"]).valid, true);
-  const dupCheck = checkDuplicates(["04085348920", "04085348920"]);
-  assert.equal(dupCheck.valid, false);
-  assert.equal(dupCheck.duplicate, "04085348920");
+test("all duplicate groups require explicit winners and retain surviving original row numbers", () => {
+  const source = parseUpload(csv([row(1, "0001"), row(2, "0002"), row(3, "0001"), row(4, "0002"), row(5, "0005")]), "meters.csv").rows;
+  assert.deepEqual(duplicateGroups(source).map(([, entries]) => entries.length), [2, 2]);
+  assert.throws(() => resolveDuplicates(source), /Choose/);
+  assert.throws(() => resolveDuplicates(source, { "0001": "3" }), /0002/);
+  assert.throws(() => resolveDuplicates(source, { "0001": "5", "0002": "2" }), /0001/);
+  assert.deepEqual(resolveDuplicates(source, { "0001": "3", "0002": "2" }).map((entry) => entry.rowNo), ["2", "3", "5"]);
+  assert.equal(source.length, 5);
+});
+
+test("sample Excel has exact headers and ten wholly empty data rows", () => {
+  const wb = XLSX.read(XLSX.write(sampleWorkbook(), { type: "buffer", bookType: "xlsx" }));
+  const matrix = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "", blankrows: true });
+  assert.deepEqual(matrix[0], OFFICIAL_HEADERS);
+  assert.equal(matrix.length, 11);
+  assert.ok(matrix.slice(1).every((entry) => entry.every((cell) => cell === "")));
+});
+
+test("unsupported, corrupt and malformed CSV inputs fail clearly", () => {
+  assert.throws(() => parseUpload("anything", "meters.xml"), /Unsupported/);
+  assert.throws(() => parseUpload(new Uint8Array([0, 1, 2]), "meters.xlsx"));
+  assert.throws(() => parseUpload(`${OFFICIAL_HEADERS.join(",")}\n1,"unclosed`, "meters.csv"), /closing quote/);
 });
 
 test("AppRoutes routes /operations/trn-bgo/upload to TrnBgoUploadPage", () => {

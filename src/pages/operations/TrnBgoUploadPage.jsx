@@ -33,40 +33,23 @@ function MasterCheckbox({ checked, indeterminate, disabled, onChange, title }) {
 }
 import { Link, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
-import { collection, query, where, getDocs, documentId } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { parseUpload, sampleWorkbook, OFFICIAL_HEADERS, UPLOAD_TRN_TYPES, duplicateGroups, resolveDuplicates } from "./trnBgoUploadParser.js";
 
-import { db } from "../../firebase";
+import { functions } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
 import {
-  useUploadAndValidateTcMutation,
   useCreateTrnBgoWardBatchesMutation,
   useAllocateTrnBgoWardBatchesMutation,
 } from "../../redux/tcApi";
 import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 
-// Validation Rule 4: Allowed file extensions
-const VALID_EXTENSIONS = ["csv", "xlsx", "xls", "xml"];
 
-// Validation Rule 2: Exact 12 official template column headers
-export const OFFICIAL_HEADERS = [
-  "rowNo",
-  "meterNo",
-  "meterPhase",
-  "meterType",
-  "linkedAccountNo",
-  "premiseAddress",
-  "premisePropertyType",
-  "actionReason",
-  "wardNo",
-  "geofence",
-  "meterStatus",
-  "erfNo",
-];
 
-export const COMPARABLE_FIELD_KEYS = [
+const COMPARABLE_FIELD_KEYS = [
   "meterPhase",
   "meterType",
   "linkedAccountNo",
@@ -285,8 +268,8 @@ function renderStackedComparisonCell(comp, foundInAsts) {
 }
 
 // Validation Rule 3: Row limits
-export const MAX_UPLOAD_ROWS = 100;
-export const MIN_UPLOAD_ROWS = 1;
+
+
 
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return "0 Bytes";
@@ -367,18 +350,6 @@ function resolveRowWardInfo(row, fallbackLmPcode = "") {
   };
 }
 
-function inferTrnTypeFromRows(rows = []) {
-  for (const r of rows) {
-    const reason = String(r?.actionReason || "").toUpperCase();
-    if (reason.includes("RECONNECT")) return "METER_RECONNECTION";
-    if (reason.includes("DISCONNECT")) return "METER_DISCONNECTION";
-    if (reason.includes("REMOV")) return "METER_REMOVAL";
-    if (reason.includes("INSPECT")) return "METER_INSPECTION";
-    if (reason.includes("READ")) return "METER_READING";
-  }
-  return "METER_DISCONNECTION";
-}
-
 const TRN_OPERATION_OPTIONS = [
   { value: "METER_DISCONNECTION", code: "MDCN", label: "Meter Disconnection (MDCN)" },
   { value: "METER_RECONNECTION", code: "MRCN", label: "Meter Reconnection (MRCN)" },
@@ -387,23 +358,31 @@ const TRN_OPERATION_OPTIONS = [
   { value: "METER_REMOVAL", code: "MREM", label: "Meter Removal (MREM)" },
 ];
 
-// Chunk an array into sub-arrays of size N (Firestore 'in' operator max is 30)
-function chunkArray(items, size = 30) {
-  const chunks = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
-
 export default function TrnBgoUploadPage() {
   const auth = useAuth();
   const { geoState } = useGeo();
-  const { lmPcode, lmName } = useMemo(
+  const { lmPcode: defaultLmPcode } = useMemo(
     () => resolveWorkbase(auth, geoState),
     [auth, geoState],
   );
 
+  const authorizedLms = useMemo(() => {
+    const bases = [...(auth.workbases || []), auth.activeWorkbase].filter(Boolean);
+    const result = new Map();
+    bases.forEach((base) => {
+      const id = typeof base === "string" ? base : base.lmPcode || base.pcode || base.id;
+      if (id && id !== "NAv") result.set(id, { id, name: base.name || base.lmName || id });
+    });
+    return [...result.values()];
+  }, [auth.workbases, auth.activeWorkbase]);
+  const [chosenLm, setChosenLm] = useState("");
+  const lmPcode = authorizedLms.some((lm) => lm.id === chosenLm) ? chosenLm : authorizedLms.some((lm) => lm.id === defaultLmPcode) ? defaultLmPcode : authorizedLms[0]?.id || "";
+  const lmName = authorizedLms.find((lm) => lm.id === lmPcode)?.name || "";
+  const [pendingSource, setPendingSource] = useState(null);
+  const [duplicateKeep, setDuplicateKeep] = useState({});
+  const [uploadFeedback, setUploadFeedback] = useState(null);
+  const [fidelityWarnings, setFidelityWarnings] = useState([]);
+  const validationRun = useRef(0);
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileError, setFileError] = useState("");
@@ -430,359 +409,63 @@ export default function TrnBgoUploadPage() {
   const [isAllocating, setIsAllocating] = useState(false);
   const [allocationError, setAllocationError] = useState("");
 
-  const [uploadAndValidateTc] = useUploadAndValidateTcMutation();
   const [createTrnBgoWardBatches] = useCreateTrnBgoWardBatchesMutation();
   const [allocateTrnBgoWardBatches] = useAllocateTrnBgoWardBatchesMutation();
   const { data: availableTeams = [] } = useGetAvailableTeamsQuery();
   const { data: availableServiceProviders = [] } = useGetAvailableServiceProvidersQuery();
 
-  // Handle file selection and multi-gate validation
-  const handleFileChange = (file) => {
-    setFileError("");
-    setParsedRows([]);
-    setSelectedRowKeys(new Set());
-    setShownRows(null);
-    setViewMode("INSPECTION");
-    setViewMode("INSPECTION");
-    setCarriedBatchRows([]);
-    setCreatedBatchesResult([]);
-    setBatchCreateError("");
-    setCreationModalState(null);
-    setCreationModalState(null);
-    setFoundFilter("ALL");
-    setLmFilter("ALL");
-    setStatFilter("ALL");
-    setStatFilter("ALL");
-
-    if (!file) {
-      setSelectedFile(null);
-      return;
-    }
-
-    const fileName = file.name || "";
-    const ext = fileName.split(".").pop().toLowerCase();
-
-    // Gate 1: Check file extension
-    if (!VALID_EXTENSIONS.includes(ext)) {
-      setFileError(
-        `Validation Failed: The file "${fileName}" is not supported. The file must be either a CSV or an Excel file (.csv, .xlsx, .xls, .xml).`
-      );
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-
-    setSelectedFile(file);
-    validateAndParseFile(file);
+  const showUploadError = (message) => {
+    setFileError(message);
+    setUploadFeedback({ title: "Upload validation failed", message });
   };
 
-  // Step 1 & 2 Multi-Gate Validation & ASTS Lookup
-  const validateAndParseFile = async (file) => {
-    setIsValidating(true);
+  const handleFileChange = async (file) => {
+    if (isValidating || pendingSource) return;
+    const run = ++validationRun.current;
+    setFileError(""); setParsedRows([]); setSelectedRowKeys(new Set());
+    setShownRows(null); setViewMode("INSPECTION"); setCarriedBatchRows([]);
+    setCreatedBatchesResult([]); setBatchCreateError(""); setCreationModalState(null);
+    setFoundFilter("ALL"); setLmFilter("ALL"); setStatFilter("ALL");
+    setDuplicateKeep({}); setUploadFeedback(null); setFidelityWarnings([]);
+    if (!file) { setSelectedFile(null); return; }
+    if (!lmPcode || !UPLOAD_TRN_TYPES.includes(selectedTrnType)) {
+      showUploadError("Select an authorized municipality and TRN type before uploading."); return;
+    }
+    setSelectedFile(file); setIsValidating(true);
     setValidationProgress("Reading and inspecting file structure...");
-    setFileError("");
+    try {
+      const result = parseUpload(file.name.toLowerCase().endsWith(".csv") ? await file.text() : await file.arrayBuffer(), file.name);
+      if (run !== validationRun.current) return;
+      setFidelityWarnings(result.warnings);
+      if (duplicateGroups(result.rows).length) setPendingSource(result.rows);
+      else await matchSourceRows(result.rows, {}, run, file);
+    } catch (error) { if (run === validationRun.current) showUploadError(error.message); }
+    finally { if (run === validationRun.current) { setIsValidating(false); setValidationProgress(""); } }
+  };
 
-    const reader = new FileReader();
-
-    reader.onload = async (e) => {
-      try {
-        const ext = (file.name || "").split(".").pop().toLowerCase();
-        let workbook;
-        if (ext === "csv") {
-          const text =
-            typeof e.target.result === "string"
-              ? e.target.result
-              : new TextDecoder().decode(e.target.result);
-          workbook = XLSX.read(text, {
-            type: "string",
-            raw: true,
-          });
-        } else {
-          const data = new Uint8Array(e.target.result);
-          workbook = XLSX.read(data, {
-            type: "array",
-            raw: true,
-          });
-        }
-
-        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-          setFileError("Validation Failed: The workbook contains no worksheets.");
-          setIsValidating(false);
-          return;
-        }
-
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        // Parse header row directly
-        const sheetRows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-          blankrows: false,
-        });
-
-        if (!sheetRows || sheetRows.length === 0) {
-          setFileError("Validation Failed: The file contains no data or headers.");
-          setIsValidating(false);
-          return;
-        }
-
-        const rawHeaderRow = (sheetRows[0] || []).map((h) => String(h || "").trim());
-
-        // Gate 2: Exact Column Headers Parity (Exact names required)
-        const missingHeaders = OFFICIAL_HEADERS.filter(
-          (expected) => !rawHeaderRow.includes(expected)
-        );
-        const unexpectedHeaders = rawHeaderRow.filter(
-          (actual) => actual && !OFFICIAL_HEADERS.includes(actual)
-        );
-
-        if (missingHeaders.length > 0 || unexpectedHeaders.length > 0) {
-          const errorParts = [];
-          if (missingHeaders.length > 0) {
-            errorParts.push(`Missing required columns: [${missingHeaders.join(", ")}]`);
-          }
-          if (unexpectedHeaders.length > 0) {
-            errorParts.push(`Unexpected extra columns: [${unexpectedHeaders.join(", ")}]`);
-          }
-          setFileError(
-            `Validation Failed: Column headers must match the official template exactly (12 columns).\n${errorParts.join(" | ")}`
-          );
-          setIsValidating(false);
-          return;
-        }
-
-        // Parse data rows as JSON using the header keys
-        const rawDataRows = XLSX.utils.sheet_to_json(worksheet, {
-          defval: "",
-          raw: true,
-        });
-
-        // Gate 3: Row Count limits (1 to 100 rows)
-        if (rawDataRows.length < MIN_UPLOAD_ROWS) {
-          setFileError("Validation Failed: The uploaded file contains 0 meter rows.");
-          setIsValidating(false);
-          return;
-        }
-
-        if (rawDataRows.length > MAX_UPLOAD_ROWS) {
-          setFileError(
-            `Validation Failed: The file contains ${formatNumber(rawDataRows.length)} rows. Maximum allowed per upload file is ${MAX_UPLOAD_ROWS} meters.`
-          );
-          setIsValidating(false);
-          return;
-        }
-
-        // Gate 4 & 5: Value Validation (No Blank Meter Numbers, No Duplicate Meters)
-        const seenMeters = new Map();
-        const seenRowNos = new Set();
-        const parsedRowsDraft = [];
-
-        for (let i = 0; i < rawDataRows.length; i++) {
-          const rawRow = rawDataRows[i];
-          const fileRowIdx = i + 1; // 1-based index
-
-          // Meter Number: string trim, preserve leading zeros
-          const meterNo = String(rawRow.meterNo || "").trim().toUpperCase();
-
-          if (!meterNo) {
-            setFileError(
-              `Validation Failed: Row #${fileRowIdx} has an empty or blank meter number. 'meterNo' is mandatory for every row.`
-            );
-            setIsValidating(false);
-            return;
-          }
-
-          const isDupInFile = seenMeters.has(meterNo);
-          seenMeters.set(meterNo, fileRowIdx);
-
-          // rowNo sequence integrity: integer > 0 if provided, else auto-sequence
-          let resolvedRowNo = fileRowIdx;
-          if (rawRow.rowNo !== "" && rawRow.rowNo !== undefined) {
-            const parsedNo = parseInt(String(rawRow.rowNo).trim(), 10);
-            if (Number.isNaN(parsedNo) || parsedNo <= 0) {
-              setFileError(
-                `Validation Failed: Row #${fileRowIdx} has an invalid rowNo "${rawRow.rowNo}". rowNo must be a positive whole number.`
-              );
-              setIsValidating(false);
-              return;
-            }
-            if (seenRowNos.has(parsedNo)) {
-              setFileError(
-                `Validation Failed: Duplicate rowNo "${parsedNo}" detected on row #${fileRowIdx}. rowNo must be unique.`
-              );
-              setIsValidating(false);
-              return;
-            }
-            seenRowNos.add(parsedNo);
-            resolvedRowNo = parsedNo;
-          }
-
-          parsedRowsDraft.push({
-            _rowNo: resolvedRowNo,
-            rowNo: resolvedRowNo,
-            meterNo,
-            isDuplicate: isDupInFile,
-            meterPhase: String(rawRow.meterPhase || "").trim(),
-            meterType: String(rawRow.meterType || "").trim(),
-            linkedAccountNo: String(rawRow.linkedAccountNo || "").trim(),
-            premiseAddress: String(rawRow.premiseAddress || "").trim(),
-            premisePropertyType: String(rawRow.premisePropertyType || "").trim(),
-            actionReason: String(rawRow.actionReason || "").trim(),
-            wardNo: String(rawRow.wardNo || "").trim(),
-            geofence: String(rawRow.geofence || "").trim(),
-            meterStatus: String(rawRow.meterStatus || "").trim(),
-            erfNo: String(rawRow.erfNo || "").trim(),
-          });
-        }
-
-        // Gate 6: Query ASTS in Firestore (At least 1 meter must exist)
-        setValidationProgress(
-          `Verifying ${parsedRowsDraft.length} meters against authoritative asset database (asts)...`
-        );
-
-        const meterAstMap = new Map();
-        const meterRegMap = new Map();
-        const meterSalesMap = new Map();
-        const premiseIdsSet = new Set();
-        const queryMetersSet = new Set();
-
-        parsedRowsDraft.forEach((r) => {
-          queryMetersSet.add(r.meterNo);
-          if (r.meterNo.length === 10 && /^\d+$/.test(r.meterNo)) {
-            queryMetersSet.add("0" + r.meterNo);
-          }
-          if (r.meterNo.startsWith("0") && r.meterNo.length === 11) {
-            queryMetersSet.add(r.meterNo.slice(1));
-          }
-        });
-        const allQueryMeterNos = Array.from(queryMetersSet);
-        const chunks = chunkArray(allQueryMeterNos, 30);
-
-        const registerInMap = (map, num, entry) => {
-          if (!num) return;
-          map.set(num, entry);
-          if (num.startsWith("0")) {
-            map.set(num.slice(1), entry);
-          } else if (num.length === 10) {
-            map.set("0" + num, entry);
-          }
-        };
-
-        for (const chunk of chunks) {
-          const astQuery1 = query(
-            collection(db, "asts"),
-            where("ast.astData.astNo", "in", chunk)
-          );
-          const astQuery2 = query(
-            collection(db, "asts"),
-            where("master.id", "in", chunk)
-          );
-          const regQuery = query(
-            collection(db, "registry_meters"),
-            where("meterNo", "in", chunk)
-          );
-          const salesQuery = query(
-            collection(db, "sales-all-meters"),
-            where(documentId(), "in", chunk)
-          );
-
-          const [snap1, snap2, regSnap, salesSnap] = await Promise.all([
-            getDocs(astQuery1),
-            getDocs(astQuery2),
-            getDocs(regQuery).catch(() => null),
-            getDocs(salesQuery).catch(() => null),
-          ]);
-
-          [snap1, snap2].forEach((snap) => {
-            if (!snap) return;
-            snap.forEach((doc) => {
-              const data = doc.data();
-              const astNo = String(
-                data?.ast?.astData?.astNo || data?.master?.id || ""
-              ).trim().toUpperCase();
-              const masterId = String(data?.master?.id || "").trim().toUpperCase();
-              const docEntry = { id: doc.id, ...data };
-              [astNo, masterId].filter(Boolean).forEach((num) => {
-                registerInMap(meterAstMap, num, docEntry);
-              });
-              const pId = String(
-                data?.accessData?.premise?.id ||
-                  data?.accessData?.premiseId ||
-                  data?.premise?.id ||
-                  data?.premiseId ||
-                  ""
-              ).trim();
-              if (pId && !NAV_SET.has(pId.toUpperCase())) {
-                premiseIdsSet.add(pId);
-              }
-            });
-          });
-
-          if (regSnap) {
-            regSnap.forEach((doc) => {
-              const data = doc.data();
-              const mNo = String(data?.meterNo || "").trim().toUpperCase();
-              const docEntry = { id: doc.id, ...data };
-              registerInMap(meterRegMap, mNo, docEntry);
-              const pId = String(data?.premiseId || "").trim();
-              if (pId && !NAV_SET.has(pId.toUpperCase())) {
-                premiseIdsSet.add(pId);
-              }
-            });
-          }
-
-          if (salesSnap) {
-            salesSnap.forEach((doc) => {
-              const data = doc.data();
-              const mNo = String(
-                data?.meterNoNormalized || data?.meterNo || data?.MeterNumber || doc.id || ""
-              ).trim().toUpperCase();
-              registerInMap(meterSalesMap, mNo, { id: doc.id, ...data });
-            });
-          }
-        }
-
-        const premiseMap = new Map();
-        const premiseChunks = chunkArray(Array.from(premiseIdsSet), 30);
-        for (const pChunk of premiseChunks) {
-          if (pChunk.length === 0) continue;
-          const pQuery = query(
-            collection(db, "premises"),
-            where(documentId(), "in", pChunk)
-          );
-          const pSnap = await getDocs(pQuery).catch(() => null);
-          if (pSnap) {
-            pSnap.forEach((doc) => {
-              premiseMap.set(doc.id, { id: doc.id, ...doc.data() });
-            });
-          }
-        }
-
-        const foundCount = parsedRowsDraft.filter((r) =>
-          meterAstMap.has(r.meterNo) ||
-          (r.meterNo.length === 10 && meterAstMap.has("0" + r.meterNo))
-        ).length;
-
-        // Gate 6 Check: At least 1 meter must exist
-        if (foundCount === 0) {
-          setFileError(
-            `Validation Failed: None of the ${parsedRowsDraft.length} meters in this file exist in the asset database (asts). At least 1 existing meter is required to proceed.`
-          );
-          setIsValidating(false);
-          return;
-        }
-
+  const matchSourceRows = async (sourceRows, keep, run = validationRun.current, file = selectedFile) => {
+    setIsValidating(true);
+    setValidationProgress("Verifying meters against the authoritative registry...");
+    try {
+      const workingRows = resolveDuplicates(sourceRows, keep);
+      const callable = httpsCallable(functions, "onValidateTrnBgoStage1Callable");
+      const { data } = await callable({ fileName: file.name, lmPcode, lmName, trnType: selectedTrnType, rows: sourceRows, keep });
+      if (run !== validationRun.current) return;
+      const meterAstMap = new Map(data.meterAstEntries);
+      const meterRegMap = new Map(data.meterRegEntries);
+      const meterSalesMap = new Map(data.meterSalesEntries);
+      const premiseMap = new Map(data.premiseEntries);
+      const parsedRowsDraft = workingRows.map((row) => ({ ...Object.fromEntries(OFFICIAL_HEADERS.map((key) => [key, String(row[key]).trim()])), rowNo: Number(row.rowNo), _rowNo: Number(row.rowNo), meterNo: row.meterNo.trim(), sourcePosition: row.sourcePosition, isDuplicate: false }));
         // Enrich parsed rows with ASTS verification details, iREPS repo values, and dataMatch
         const enrichedRows = parsedRowsDraft.map((row) => {
           const astDoc =
-            meterAstMap.get(row.meterNo) ||
+            meterAstMap.get(row.meterNo.toUpperCase()) ||
             (row.meterNo.length === 10 ? meterAstMap.get("0" + row.meterNo) : null);
           const regDoc =
-            meterRegMap.get(row.meterNo) ||
+            meterRegMap.get(row.meterNo.toUpperCase()) ||
             (row.meterNo.length === 10 ? meterRegMap.get("0" + row.meterNo) : null);
           const salesDoc =
-            meterSalesMap.get(row.meterNo) ||
+            meterSalesMap.get(row.meterNo.toUpperCase()) ||
             (row.meterNo.length === 10 ? meterSalesMap.get("0" + row.meterNo) : null);
 
           const foundInAsts = Boolean(astDoc);
@@ -958,31 +641,17 @@ export default function TrnBgoUploadPage() {
           };
         });
 
-        setParsedRows(enrichedRows);
-      } catch (err) {
-        console.error("File validation error:", err);
-        setFileError(`Failed to validate file: ${err?.message || "Unknown error"}`);
-      } finally {
-        setIsValidating(false);
-        setValidationProgress("");
-      }
-    };
+      setParsedRows(enrichedRows);
+      setPendingSource(null);
+      if (data.mismatches.length) setUploadFeedback({ title: "Municipality mismatch", message: `${data.mismatches.length} meter(s) belong to a different municipality from ${lmName} (${lmPcode}).`, rows: data.mismatches });
 
-    reader.onerror = () => {
-      setFileError("Failed to read file from disk.");
-      setIsValidating(false);
-      setValidationProgress("");
-    };
-
-    const fileExt = (file.name || "").split(".").pop().toLowerCase();
-    if (fileExt === "csv") {
-      reader.readAsText(file);
-    } else {
-      reader.readAsArrayBuffer(file);
-    }
+    } catch (error) { if (run === validationRun.current) showUploadError(error.message); }
+    finally { if (run === validationRun.current) { setIsValidating(false); setValidationProgress(""); } }
   };
 
   const handleReset = () => {
+    validationRun.current++;
+    setPendingSource(null); setDuplicateKeep({}); setUploadFeedback(null); setFidelityWarnings([]);
     setSelectedFile(null);
     setParsedRows([]);
     setSelectedRowKeys(new Set());
@@ -1162,7 +831,7 @@ export default function TrnBgoUploadPage() {
   const handleCarryToBatchStage = () => {
     if (!canCarryToBatch) return;
     setCarriedBatchRows(selectedRows);
-    setSelectedTrnType(inferTrnTypeFromRows(selectedRows));
+    // Retain the selected upload TRN context rather than infer it from row text.
     setCreatedBatchesResult([]);
     setBatchCreateError("");
     setCreationModalState(null);
@@ -1496,28 +1165,8 @@ export default function TrnBgoUploadPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Download Official Sample CSV populated with verified Endumeni (ZA5241) meters
-  const handleDownloadSampleCsv = () => {
-    const rows = [
-      OFFICIAL_HEADERS.join(","),
-      "1,04298074776,Single Phase,electricity,0001106531,,Residential,Credit control disconnection,3,,CONNECTED,654",
-      "2,04298082191,Single Phase,electricity,0001108730,,Residential,Credit control disconnection,3,,CONNECTED,956",
-      "3,04298084684,Single Phase,electricity,0001114692,,Residential,Credit control disconnection,3,,CONNECTED,1561",
-      "4,04297706063,Single Phase,electricity,0002011113,,Residential,Credit control disconnection,6,,CONNECTED,4230",
-      "5,04297706121,Single Phase,electricity,0002010425,,Residential,Credit control disconnection,6,,CONNECTED,4241",
-      "6,04297749576,Single Phase,electricity,0002139600,,Residential,Credit control disconnection,6,,CONNECTED,2631",
-      "7,04297756324,Single Phase,electricity,0002139598,,Residential,Credit control disconnection,6,,CONNECTED,2631",
-      "8,04297758833,Single Phase,electricity,0002011635,,Residential,Credit control disconnection,6,,CONNECTED,2631",
-    ];
-    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "TC_TEST_METERS_DISCONNECTION.csv";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const handleDownloadSampleTemplate = () => {
+    XLSX.writeFile(sampleWorkbook(), "TRN_BGO_Sample_Template.xlsx");
   };
 
   // Build IrepsTable columns with Column 1 Checkbox Selection + 16 inspection columns
@@ -1865,7 +1514,7 @@ export default function TrnBgoUploadPage() {
             </div>
           </div>
           <p style={styles.subtitle}>
-            Step 1 & 2: Upload external meter list (.csv / Excel), validate 12-column template & row constraints, and inspect asset existence in asts.
+            Stage 1: Upload an Excel or CSV meter list, validate the template and inspect registry matches.
           </p>
         </div>
 
@@ -1886,7 +1535,7 @@ export default function TrnBgoUploadPage() {
             <div>
               <h3 style={styles.uploadCardTitle}>Select File to Upload</h3>
               <p style={styles.uploadCardSubtitle}>
-                Supported formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>, <code>.xls</code>, <code>.xml</code>). Maximum <strong>100 meters</strong> per file.
+                Supported formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>, <code>.xls</code>). Maximum <strong>200 meters</strong> per file.
               </p>
             </div>
           </div>
@@ -1902,9 +1551,19 @@ export default function TrnBgoUploadPage() {
             </div>
           ) : null}
 
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
+            <label>Local Municipality<br /><select aria-label="Local Municipality" value={lmPcode} disabled={isValidating || Boolean(pendingSource)} onChange={(e) => setChosenLm(e.target.value)}>
+              <option value="">Select municipality</option>
+              {authorizedLms.map((lm) => <option key={lm.id} value={lm.id}>{lm.name} ({lm.id})</option>)}
+            </select></label>
+            <label>TRN Type<br /><select aria-label="TRN Type" value={selectedTrnType} disabled={isValidating || Boolean(pendingSource)} onChange={(e) => setSelectedTrnType(e.target.value)}>
+              {UPLOAD_TRN_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
+            </select></label>
+            <button type="button" onClick={handleDownloadSampleTemplate}>Download Sample Template</button>
+          </div>
           <div
             style={styles.dropzone}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => { if (!isValidating && !pendingSource) fileInputRef.current?.click(); }}
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -1920,7 +1579,8 @@ export default function TrnBgoUploadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv, .xlsx, .xls, .xml, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel, text/csv"
+              disabled={isValidating || Boolean(pendingSource) || !lmPcode}
+              accept=".csv, .xlsx, .xls, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel, text/csv"
               style={{ display: "none" }}
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
@@ -1941,12 +1601,42 @@ export default function TrnBgoUploadPage() {
               <strong>Click to browse</strong> or drag & drop meter file here
             </p>
             <p style={styles.dropzoneSubtext}>
-              Must use official 12-column template. Max 100 rows. At least 1 meter must exist in asts.
+              Use the official 12-column template. Maximum 200 nonblank rows; rowNo and meterNo are required.
             </p>
           </div>
         </div>
       ) : null}
 
+      {pendingSource ? (
+        <div style={uploadModalOverlay}>
+          <div role="dialog" aria-modal="true" aria-label="Resolve duplicate meter numbers" style={uploadModalCard}>
+            <h3>Resolve duplicate meter numbers</h3>
+            <p>{duplicateGroups(pendingSource).length} groups; {duplicateGroups(pendingSource).reduce((n, [, rows]) => n + rows.length, 0)} affected rows. Choose one occurrence to keep in every group. Other occurrences will be dropped.</p>
+            {duplicateGroups(pendingSource).map(([meter, rows]) => (
+              <div key={meter} style={{ marginBottom: 20, border: "1px solid #cbd5e1", padding: 12 }}>
+                <h4>Meter {meter}</h4>
+                <div style={{ overflowX: "auto" }}><table><thead><tr><th>Keep / Drop</th>{OFFICIAL_HEADERS.map((key) => <th key={key}>{key}</th>)}</tr></thead>
+                  <tbody>{rows.map((row) => <tr key={row.rowNo}><td style={{ whiteSpace: "nowrap" }}><label>
+                    <input type="radio" name={`keep-${meter}`} disabled={isValidating} checked={String(duplicateKeep[meter]) === String(row.rowNo).trim()} onChange={() => setDuplicateKeep((current) => ({ ...current, [meter]: String(row.rowNo).trim() }))} />
+                    {!duplicateKeep[meter] ? "Choose to keep" : String(duplicateKeep[meter]) === String(row.rowNo).trim() ? "KEEP" : "DROP"}
+                  </label></td>{OFFICIAL_HEADERS.map((key) => <td key={key} style={{ padding: 8, whiteSpace: "nowrap" }}>{row[key]}</td>)}</tr>)}</tbody>
+                </table></div>
+              </div>
+            ))}
+            <p>{Object.keys(duplicateKeep).length} of {duplicateGroups(pendingSource).length} groups resolved.</p>
+            <button type="button" disabled={isValidating} onClick={handleReset}>Cancel</button>{" "}
+            <button type="button" disabled={isValidating || duplicateGroups(pendingSource).some(([key]) => !duplicateKeep[key])} onClick={() => matchSourceRows(pendingSource, duplicateKeep)}>Continue</button>
+          </div>
+        </div>
+      ) : null}
+      {uploadFeedback ? (
+        <div style={{ ...uploadModalOverlay, zIndex: 1201 }}><div role="dialog" aria-modal="true" aria-label={uploadFeedback.title} style={uploadModalCard}>
+          <h3>{uploadFeedback.title}</h3><p style={{ whiteSpace: "pre-line" }}>{uploadFeedback.message}</p>
+          {uploadFeedback.rows ? <div style={{ overflowX: "auto" }}><table><thead><tr>{[...OFFICIAL_HEADERS, "Municipality"].map((key) => <th key={key}>{key}</th>)}</tr></thead><tbody>{uploadFeedback.rows.map((row) => <tr key={row.rowNo}>{OFFICIAL_HEADERS.map((key) => <td key={key} style={{ padding: 8, whiteSpace: "nowrap" }}>{row[key]}</td>)}<td>{row.actualLmPcode}</td></tr>)}</tbody></table></div> : null}
+          <button type="button" onClick={() => setUploadFeedback(null)}>OK</button>
+        </div></div>
+      ) : null}
+      {fidelityWarnings.length && parsedRows.length > 0 ? <div role="status" style={styles.errorNotice}>{fidelityWarnings.join(" ")}</div> : null}
       {/* Loading validation indicator */}
       {isValidating ? (
         <div style={styles.parsingNotice}>
@@ -3131,3 +2821,6 @@ const styles = {
     borderRadius: 4,
   },
 };
+
+const uploadModalOverlay = { position: "fixed", inset: 0, background: "rgba(15,23,42,.55)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 };
+const uploadModalCard = { background: "white", color: "#0f172a", borderRadius: 12, padding: 24, width: "min(1400px, 96vw)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px #0005" };

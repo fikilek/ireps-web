@@ -6499,3 +6499,5 @@ export const onMeterInstallationCallable = onCall(async (request) => {
 });
 
 export { onWardSourceCountsWritten, onErfWardCountsWritten, onPremiseWardCountsWritten, onMeterWardCountsWritten, onTrnWardCountsWritten, recoverWardCounts } from "./registry/wardCountTriggers.js";
+
+export { onValidateTrnBgoStage1Callable } from './tcUploads/stage1Callable.js';
