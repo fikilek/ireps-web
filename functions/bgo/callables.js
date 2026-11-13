@@ -20,6 +20,7 @@ import {
   normalizeGeofenceRef,
   resolveRequiredWardPcodeFromGeofence,
   resolveBgoCreateAuthority,
+  resolveMdBgoCreateAuthority,
   safeArray,
   selectedGeofenceBelongsToRow,
   validateCreateBgoPayload,
@@ -941,7 +942,9 @@ export const onCreateBgoCallable = onCall(async (request) => {
     const trnTimestampBaseMs = Date.now();
     let trnTimestampOffset = 0;
 
-    const authority = await resolveBgoCreateAuthority({ db, request });
+    const authority = await (isBmdBgoCreatePayload(data)
+      ? resolveMdBgoCreateAuthority({ db, request })
+      : resolveBgoCreateAuthority({ db, request }));
 
     if (!authority.ok) {
       return buildFailureResult(

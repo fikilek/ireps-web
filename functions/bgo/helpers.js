@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
+import {
+  getServiceProviderLmClients,
+  getUserServiceProviderId,
+  isSubcServiceProvider,
+} from "../teams/helpers.js";
 
 export const BGO_COLLECTIONS = {
   batches: "bgo_batches",
@@ -219,6 +224,40 @@ export async function resolveBgoCreateAuthority({ db, request }) {
     clientType: clientType || "UNKNOWN",
     isMnc,
     profile,
+  };
+}
+
+// MD origination uses the saved provider's municipal relationship, not a copy
+// of that relationship on a user/token. Other BGO actions retain their policy.
+export async function resolveMdBgoCreateAuthority({ db, request }) {
+  const authority = await resolveBgoCreateAuthority({ db, request });
+  if (authority.role === "MNG") return authority;
+
+  let isMnc = false;
+  if (authority.role === "SPV") {
+    const providerId = getUserServiceProviderId(authority.profile);
+    const data = request?.data || {};
+    const lmPcode = normalizeText(
+      data.scope?.lmPcode || data.lmPcode || data.parents?.lmPcode,
+    );
+    if (providerId && lmPcode) {
+      const snap = await db.doc(`serviceProviders/${providerId}`).get();
+      const provider = snap.exists ? snap.data() : null;
+      isMnc = Boolean(
+        provider && normalizeUpper(provider.status) === "ACTIVE" &&
+        !isSubcServiceProvider(provider) &&
+        getServiceProviderLmClients(provider).some(
+          client => normalizeUpper(client.id) === normalizeUpper(lmPcode),
+        ),
+      );
+    }
+  }
+  return {
+    ...authority,
+    ok: authority.role === "SPV" && isMnc,
+    isMnc,
+    relationshipType: isMnc ? "MNC" : "UNKNOWN",
+    clientType: isMnc ? "LM" : "UNKNOWN",
   };
 }
 
