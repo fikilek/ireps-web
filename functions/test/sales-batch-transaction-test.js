@@ -9,11 +9,22 @@ import { createGeoFenceRequest } from "../geofences/callables.js";
 import { createSalesBatch } from "../targetedBatches/sales-batch-creation.js";
 import { allocateNonGpsBatchAtomically, allocateSalesBatchesTogether, onAllocateTargetedBatchCallable, onAllocateTargetedBatchesTogetherCallable } from "../targetedBatches/allocationCallable.js";
 import { onAcceptRejectTargetedBatchCallable } from "../targetedBatches/acceptanceCallable.js";
-import { recordTargetedBatchNoAccess } from "../targetedBatches/recordTargetedBatchNoAccessCallable.js";
+import { recordTargetedBatchNoAccessInTransaction } from "../targetedBatches/premiseLink.js";
 import { onGeoFenceCreated } from "../geofences/triggers.js";
 import { deleteSalesBatch } from "../targetedBatches/deleteCallable.js";
 import { onUnallocateTargetedBatchCallable, unallocateSalesBatch } from "../targetedBatches/unallocateCallable.js";
 import { forgetSalesCategoryMonths } from "../salesAllMeters/sales-category-month.js";
+
+// Exercise the canonical atomic batch recorder; the retired standalone callable is no longer a capture path.
+async function recordTargetedBatchNoAccess({db,request}) {
+ const d=request.data;
+ const trnData={id:d.trnId,targetedBatchContext:{...d,operationType:"METER_DISCOVERY"},accessData:{premise:{id:d.premiseId}},metadata:{createdOnDevice:d.capturedAt,createdAt:d.capturedAt}};
+ return db.runTransaction(async transaction=>{
+  const result=await recordTargetedBatchNoAccessInTransaction({transaction,db,trnData,actor:{uid:request.auth.uid,name:"Worker"}});
+  transaction.create(db.doc(`trns/${d.trnId}`),trnData);
+  return result;
+ });
+}
 
 const host=process.env.FIRESTORE_EMULATOR_HOST;
 if(!/^(127\.0\.0\.1|localhost):[0-9]+$/.test(host||""))throw new Error("Firestore emulator unavailable: explicitly set a localhost FIRESTORE_EMULATOR_HOST; real projects are prohibited");
@@ -22,6 +33,7 @@ const app=initializeApp({projectId});
 const db=getFirestore(app);
 const f=JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json",import.meta.url),"utf8"));
 // Production geometry is JSON text: Firestore cannot store nested arrays.
+f.profile.accountStatus="ACTIVE";
 f.erf.geometry=JSON.stringify(f.erf.geometry);
 f.ward.geometry=JSON.stringify(f.ward.geometry);
 // Rules TB-R046: only CAT meters are batched, by the LM's newest category month. The fixture meter is a
@@ -216,7 +228,7 @@ test("source classification change between two origins cannot produce two batche
 async function allocateFixture(n=1,{source="PREPAID_SALES_NON_GPS",targetType="TEAM"}={}){
  const ids=await seed(n,{source}),intent=await prepare(ids,{source});await createSalesBatch({db,request:request(intent),codec});
  await db.doc(`users/${f.actor.uid}`).update({"employment.serviceProvider.id":"MNC1"});
- await db.doc("users/FWR1").set({profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
+ await db.doc("users/FWR1").set({accountStatus:"ACTIVE",employment:{role:"FWR",serviceProvider:{id:"SP1"}},profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
  await db.doc("teams/TEAM1").set({team:{status:"ACTIVE",name:"Test team"},ownership:{mncServiceProviderId:"MNC1"},scope:{memberUserIds:["FWR1"]},memberUids:["FWR1"]});
  await db.doc("serviceProviders/SP1").set({status:"ACTIVE",name:"Test SP",clients:[{id:"MNC1",clientType:"SP",relationshipType:"SUBC"}]});
  const args={db,request:request({}),parentRef:db.doc(`tb_uploads/${f.tbId}`),tbId:f.tbId,targetType,targetId:targetType==="TEAM"?"TEAM1":"SP1",actorMncId:"MNC1",actorUid:f.actor.uid,actorName:f.actor.user,startedAtMs:Date.now()};
@@ -353,7 +365,7 @@ async function twoBatches(){
  await createSalesBatch({db,request:request(await prepare([a])),codec});
  await createSalesBatch({db,request:request(await prepare([b],{tbId:TB_B})),codec});
  await db.doc(`users/${f.actor.uid}`).update({"employment.serviceProvider.id":"MNC1"});
- await db.doc("users/FWR1").set({profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
+ await db.doc("users/FWR1").set({accountStatus:"ACTIVE",employment:{role:"FWR",serviceProvider:{id:"SP1"}},profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
  await db.doc("teams/TEAM1").set({team:{status:"ACTIVE",name:"Test team"},ownership:{mncServiceProviderId:"MNC1"},scope:{memberUserIds:["FWR1"]},memberUids:["FWR1"]});
  await db.doc("serviceProviders/SP1").set({status:"ACTIVE",name:"Test SP",clients:[{id:"MNC1",clientType:"SP",relationshipType:"SUBC"}]});
  return {db,request:request({}),tbIds:[f.tbId,TB_B],targetType:"TEAM",targetId:"TEAM1",actorMncId:"MNC1",actorUid:f.actor.uid,actorName:f.actor.user};
@@ -389,11 +401,11 @@ test("the Allocation Map Function allows 1 to 15 distinct batches and reports th
 
 
 // Targeted Batch rules TB-R048 (1.3.33): Unallocate.
-const withoutMetadata=doc=>{const copy=structuredClone(doc);delete copy.metadata;return copy;};
+const withoutMetadata=doc=>{const copy=structuredClone(doc);delete copy.metadata;delete copy.lastActivity;return copy;};
 async function unallocationFixture(){
  const ids=await seed(1),intent=await prepare(ids);await createSalesBatch({db,request:request(intent),codec});
  await db.doc(`users/${f.actor.uid}`).update({"employment.serviceProvider.id":"MNC1"});
- await db.doc("users/FWR1").set({profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
+ await db.doc("users/FWR1").set({accountStatus:"ACTIVE",employment:{role:"FWR",serviceProvider:{id:"SP1"}},profile:{displayName:"Worker",employment:{role:"FWR",serviceProvider:{id:"SP1"}}}});
  await db.doc("users/MANAGER2").set({...structuredClone(f.profile),displayName:"Second Manager",employment:{role:"MNG",serviceProvider:{id:"MNC1"}}});
  await db.doc("users/SUPERVISOR2").set({...structuredClone(f.profile),displayName:"Main Supervisor",employment:{role:"SPV",serviceProvider:{id:"MNC1"}}});
  await db.doc("serviceProviders/MNC1").set({status:"ACTIVE",name:"Main SP",clients:[]});

@@ -125,12 +125,12 @@ test("Draft amendment preserves one TRN, original credit and every earlier versi
   assert.equal((await amend(context)).idempotent, true);
   await assert.rejects(amend(context, { explanation: "Different retry" }), code("already-exists"));
 });
-test("Fail to Updated sends one return notice and one review notice, with no self-review", async () => {
+test("Fail correction resubmits as Draft and sends one return notice and one review notice, with no self-review", async () => {
   const original = await seedAmendment(), review = await prepare("reviewer", original.id);
   await save(review, { trnId: original.id, state: "FAIL", reasonCode: "OTHER", comment: "Correct the comment" });
   assert.equal((await db.collection("qaNotifications").where("recipientUid", "==", "worker").get()).size, 1);
   const context = await amendContext(original.id);
-  assert.equal((await amend(context)).amendment.state, "UPDATED");
+  assert.equal((await amend(context)).amendment.state, "DRAFT");
   await amend(context);
   assert.equal((await db.collection("qaNotifications").get()).size, 2);
   assert.equal((await db.collection("qaEmailOutbox").get()).size, 2);
@@ -140,7 +140,7 @@ test("Fail to Updated sends one return notice and one review notice, with no sel
       assert.equal(doc.data().wardPcode, original.accessData.parents.wardPcode);
     }
   }
-  await assert.rejects(amendContext(original.id), code("permission-denied"));
+  assert.equal((await amendContext(original.id)).state, "DRAFT");
   await db.doc("users/worker").set(user("MNG"));
   assert.equal((await prepare("worker", original.id)).mayReview, false);
   const nextReview = await prepare("manager", original.id);
@@ -160,15 +160,15 @@ test("MNC supervisor takeover requires evidence the submitter left and a recorde
   await amend(context, { takeoverReason: "Submitter left the company; account disabled" }, "reviewer");
   assert.equal((await prepare("reviewer", original.id)).mayReview, false);
 });
-test("Old amendments retain newer meter findings and require explicit acknowledgement", async () => {
+test("Corrections apply changed meter facts without the retired RETAIN_METER_FACTS interruption", async () => {
   const original = await seedAmendment();
-  await db.doc("trns/later-inspection").set({ ...trn(), ast: original.ast, metadata: { ...original.metadata, createdOnDevice: "2026-09-02T07:00:00Z" } });
+  await db.doc("trns/later-inspection").set({ ...trn(), workflow: { ...trn().workflow, completedAt: "2026-09-02T07:00:00Z" }, ast: original.ast, metadata: { ...original.metadata, createdOnDevice: "2026-09-02T07:00:00Z" } });
   await db.doc(`asts/${original.id}`).update({ "ast.astData.astManufacturer": "Newer field finding" });
   const context = await amendContext(original.id), ast = structuredClone(original.ast);
   ast.astData.astManufacturer = "Corrected original finding";
-  await assert.rejects(amend(context, { fields: { ast } }), error => { assert.equal(error.details.kind, "RETAIN_METER_FACTS"); return true; });
-  await amend(context, { fields: { ast }, retainNewerMeterFacts: true });
-  assert.equal((await db.doc(`asts/${original.id}`).get()).data().ast.astData.astManufacturer, "Newer field finding");
+  const result = await amend(context, { fields: { ast } });
+  assert.ok(result.amendment.meterProjection.appliedPaths.includes("ast.astData.astManufacturer"));
+  assert.equal((await db.doc(`asts/${original.id}`).get()).data().ast.astData.astManufacturer, "Corrected original finding");
   assert.equal((await db.doc(`trns/${original.id}`).get()).data().ast.astData.astManufacturer, "Corrected original finding");
 });
 test("Current amendment changes only matching meter fields and never the visit count", async () => {
@@ -231,7 +231,7 @@ test("Returned-work TRN listener sees reviews without notices; server excludes o
   await ready;
   await db.doc("trns/FAIL").update({ "workflow.state": "COMPLETED" });
   await update;
-  assert.ok(!(await listQaAmendments(db, "worker")).items.some(item => item.trnId === "FAIL"));
+  assert.ok((await listQaAmendments(db, "worker")).items.some(item => item.trnId === "FAIL"));
   assert.equal((await db.collection("qaNotifications").get()).size, 0);
   await db.doc("users/worker").update({ accountStatus: "DISABLED" });
   await assert.rejects(listQaAmendments(db, "worker"), code("permission-denied"));
@@ -274,13 +274,13 @@ test("Pass preserves the exact original, creates one permanent decision, stamps 
   assert.equal(result.qa.reviewedAt, after.metadata.updatedAt);
   await assert.rejects(save(context, { requestId: "second", previousReviewId: "request1" }), code("failed-precondition"));
 });
-test("Fail requires a governed reason but permits an optional explanation in Draft and Updated", async () => {
+test("Fail requires a governed reason but permits an optional explanation in initial and resubmitted Draft", async () => {
   const context = await prepare();
   for (const extra of [{ state: "FAIL" }, { state: "FAIL", comment: "An explanation alone is insufficient" }, { state: "FAIL", reasonCode: "forged", comment: "A reason" }, { state: "FAIL", reasonCode: "OTHER", comment: "x".repeat(4001) }]) await assert.rejects(save(context, extra), code("invalid-argument"));
   assert.ok(QA_FAILURE_REASONS.some(r => r.code === "ILLEGAL_CONNECTION_EVIDENCE"));
-  for (const state of ["DRAFT", "UPDATED"]) {
+  for (const state of ["INITIAL", "RESUBMITTED"]) {
     for (const [index, comment] of [undefined, "", "   ", " Cable connection not visible "].entries()) {
-      await db.doc("trns/work").set(trn({ workflow: { ...trn().workflow, state: state === "DRAFT" ? "COMPLETED" : `QA ${state}` } }));
+      await db.doc("trns/work").set(trn({ workflow: { ...trn().workflow, state: "COMPLETED" }, fieldComment: { text: state === "RESUBMITTED" ? "Corrected and resubmitted" : "Initial submission" } }));
       const current = await prepare(), requestId = `optional-${state}-${index}`;
       const reasonCode = index === 0 ? "OTHER" : "ILLEGAL_CONNECTION_EVIDENCE";
       const result = await save(current, { requestId, state: "FAIL", reasonCode, comment });
@@ -296,11 +296,12 @@ test("Fail requires a governed reason but permits an optional explanation in Dra
     }
   }
 });
-test("Only Draft and Updated may pass or fail; all other state changes are refused", async () => {
+test("Only submitted Draft may pass or fail; all other state changes are refused", async () => {
   for (const current of ["DRAFT", "UPDATED", "FAIL", "PASS", "BROKEN"]) {
     await db.doc("trns/work").set(trn({ workflow: { ...trn().workflow, state: current === "DRAFT" ? "COMPLETED" : current === "BROKEN" ? "BROKEN" : `QA ${current}` }, qa: { reviewId: `old-${current}` } }));
+    if (["UPDATED", "BROKEN"].includes(current)) { const blocked = await prepare(); assert.equal(blocked.mayReview, false); await assert.rejects(save(blocked, { requestId: current }), code("permission-denied")); continue; }
     const context = await prepare();
-    if (["DRAFT", "UPDATED"].includes(current)) { const result = await save(context, { requestId: current }); assert.equal(result.qa.state, "PASS"); }
+    if (current === "DRAFT") { const result = await save(context, { requestId: current }); assert.equal(result.qa.state, "PASS"); }
     else await assert.rejects(save(context, { requestId: current }), code(current === "BROKEN" ? "permission-denied" : "failed-precondition"));
   }
   for (const requested of ["DRAFT", "UPDATED", "CREATED", "DELETE", "REOPEN"]) await assert.rejects(save({}, { state: requested }), code("invalid-argument"));

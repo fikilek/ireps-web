@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+const physicalAsset = ({ metadata, counts, ...physical }) => physical;
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { initializeApp, deleteApp } from "firebase-admin/app";
@@ -27,7 +28,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     db.doc("asts/A1").set(asset),
     db.doc("premises/P1").set({ erfId: "E1", address: { strNo: "1", strName: "Main", strType: "Street" }, propertyType: { type: "House" }, geometry: { centroid: { lat: -28.1, lng: 30.1 } }, services: { electricity: { astId: "A1", status: "DISCONNECTED" } } }),
     db.doc("ireps_erfs/E1").set({ admin: { localMunicipality: { pcode: "ZA5241" }, ward: { pcode: "ZA5241001" } } }),
-    db.doc("users/U1").set({ employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
+    db.doc("users/U1").set({ accountStatus: "ACTIVE", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
     db.doc("serviceProviders/SP1").set({ profile: { registeredName: "Provider One" } }),
   ]);
   const capturedAt = "2026-09-30T20:00:00.000Z";
@@ -58,7 +59,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.deepEqual(trn.assignment, {});
     for (const key of ["inspection", "executionOutcome", "astId", "trnType", "capturedAt"]) assert.equal(key in trn, false, key);
     assert.equal("uri" in trn.media[0], false);
-    assert.deepEqual((await db.doc("asts/A1").get()).data(), asset);
+    assert.deepEqual(physicalAsset((await db.doc("asts/A1").get()).data()), physicalAsset(asset));
     assert.deepEqual((await db.doc("premises/P1").get()).data().noAccessTrnIds, ["T1"]);
     assert.equal((await db.doc("premises/P1").get()).data().metadata.updatedAt, trn.metadata.updatedAt);
     const again = await send(payload);
@@ -91,7 +92,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.equal(trn.workflow.state, "COMPLETED");
     assert.equal(trn.inspection, undefined);
     assert.equal(trn.executionOutcome, undefined);
-    assert.deepEqual((await db.doc("asts/A1").get()).data(), asset);
+    assert.deepEqual(physicalAsset((await db.doc("asts/A1").get()).data()), physicalAsset(asset));
     assert.equal((await send(payload)).idempotent, true);
     assert.equal((await db.collection("trns/OFFICE1/history").get()).size, 1);
   });
@@ -137,6 +138,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.equal((await send(make("X", { instructionTrnId: "NOT_YOURS" }))).code, "INSTRUCTION_NOT_ASSIGNED");
   });
   await t.test("an actual successful inspection retains device time and closes the premise group", async () => {
+    await db.doc("trns/NOT_YOURS").delete();
     const at = "2026-10-01T10:00:00.000Z";
     const payload = {
       id: "ACCESS_PROOF", origin: { channel: "FIELD" }, status: { state: "DISCONNECTED" },

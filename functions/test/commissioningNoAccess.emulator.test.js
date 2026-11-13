@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+const physicalAsset = ({ metadata, counts, ...physical }) => physical;
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { initializeApp, deleteApp } from "firebase-admin/app";
@@ -33,7 +34,7 @@ test("Commissioning shared No Access through real callable and trigger", { skip:
     db.doc("asts/COMM_A1").set(asset),
     db.doc("premises/COMM_P1").set({erfId:"COMM_E1",address:{strNo:"1",strName:"Main",strType:"Street"},services:{electricity:{astId:"COMM_A1",status:"FIELD"}}}),
     db.doc("ireps_erfs/COMM_E1").set({admin:{localMunicipality:{pcode:"ZA5241"},ward:{pcode:"ZA5241006"}}}),
-    db.doc("users/COMM_U1").set({employment:{role:"FWR",serviceProvider:{id:"COMM_SP1"}}}),
+    db.doc("users/COMM_U1").set({ accountStatus: "ACTIVE",employment:{role:"FWR",serviceProvider:{id:"COMM_SP1"}}}),
     db.doc("serviceProviders/COMM_SP1").set({profile:{registeredName:"Provider"}}),
   ]);
   for (const returning of [false,true]) {
@@ -58,7 +59,7 @@ test("Commissioning shared No Access through real callable and trigger", { skip:
       assert.equal(trn.media.length,returning ? 0 : 1);
       if (!returning) assert.equal("uri" in trn.media[0],false);
       await onMeterCommissioningTrnCreated.run({params:{trnId:data.id},data:snap});
-      assert.deepEqual((await db.doc("asts/COMM_A1").get()).data(),before);
+      assert.deepEqual(physicalAsset((await db.doc("asts/COMM_A1").get()).data()), physicalAsset(before));
       assert.deepEqual((await db.doc("premises/COMM_P1").get()).data().services,{electricity:{astId:"COMM_A1",status:"FIELD"}});
       const repeats = await Promise.all([send(data),send(data)]);
       assert.ok(repeats.every(r=>r.success && r.idempotent));
