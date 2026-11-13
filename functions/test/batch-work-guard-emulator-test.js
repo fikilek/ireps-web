@@ -37,6 +37,8 @@ const projectId = process.env.GCLOUD_PROJECT || "demo-ireps-guard";
 if (!/^demo-/.test(projectId)) throw new Error("Only a demo project may be used: real projects are prohibited");
 const db = getFirestore();
 const f = JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json", import.meta.url), "utf8"));
+Object.assign(f.profile, { accountStatus: "ACTIVE" });
+Object.assign(f.sales, { customerNo: "CUSTOMER1", lastPurchaseAtISO: "2026-07-01T00:00:00Z", daysSinceLastPurchase: 1 });
 f.erf.geometry = JSON.stringify(f.erf.geometry);
 f.ward.geometry = JSON.stringify(f.ward.geometry);
 // Rules TB-R046: only CAT meters are batched, by the LM's newest category month (last month, as the other tests).
@@ -51,17 +53,17 @@ beforeEach(async () => {
   const response = await fetch(`http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`, { method: "DELETE" }); assert.equal(response.ok, true);
   await Promise.all([
     db.doc(`users/${f.actor.uid}`).set({ ...f.profile, employment: { role: "MNG", serviceProvider: { id: "MNC1" } } }),
-    db.doc("ireps_erfs/ERF1").set(f.erf), db.doc("wards/ZA5241001").set(f.ward),
+    db.doc("ireps_erfs/ERF1").set(f.erf), db.doc("ireps_erfs/ERF2").set({ erfId: "ERF2", admin: f.erf.admin }), db.doc("wards/ZA5241001").set(f.ward),
     db.doc("serviceProviders/MNC1").set({ status: "ACTIVE", name: "Main SP", clients: [] }),
     db.doc("serviceProviders/SP1").set({ status: "ACTIVE", name: "Test SP", clients: [{ id: "MNC1", clientType: "SP", relationshipType: "SUBC" }] }),
     db.doc("teams/TEAM1").set({ team: { status: "ACTIVE", name: "Team One" }, ownership: { mncServiceProviderId: "MNC1" }, scope: { memberUserIds: ["FWR1"] }, memberUids: ["FWR1"] }),
     db.doc("teams/TEAM2").set({ team: { status: "ACTIVE", name: "Team Two" }, ownership: { mncServiceProviderId: "MNC1" }, scope: { memberUserIds: ["FWR2"] }, memberUids: ["FWR2"] }),
-    db.doc("users/FWR1").set({ profile: { displayName: "Worker One", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
-    db.doc("users/FWR2").set({ profile: { displayName: "Worker Two", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
+    db.doc("users/FWR1").set({ accountStatus: "ACTIVE", profile: { displayName: "Worker One", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
+    db.doc("users/FWR2").set({ accountStatus: "ACTIVE", profile: { displayName: "Worker Two", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
     // A supervisor of another service provider: SP1 is a subcontractor of MNC1, and this LM is among their
     // workbases but is not the active one. Rules TB-R060 (1.3.62) refuses them; before it, they could free
     // this batch's allocated work and hand it to their own team.
-    db.doc("users/SPV9").set({ profile: { displayName: "Other Supervisor", employment: { role: "SPV", serviceProvider: { id: "SP1" } } },
+    db.doc("users/SPV9").set({ accountStatus: "ACTIVE", profile: { displayName: "Other Supervisor", employment: { role: "SPV", serviceProvider: { id: "SP1" } } },
       employment: { role: "SPV", serviceProvider: { id: "SP1" } }, access: { activeWorkbase: { id: "ZA9999" }, workbases: [{ id: "ZA9999" }, { id: "ZA5241" }] } }),
     db.doc("team_member_history/TEAM1__FWR1__1").set({ id: "TEAM1__FWR1__1", teamId: "TEAM1", teamName: "Team One", userUid: "FWR1", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null }),
     db.doc("team_member_history/TEAM2__FWR2__1").set({ id: "TEAM2__FWR2__1", teamId: "TEAM2", teamName: "Team Two", userUid: "FWR2", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null }),
@@ -108,7 +110,7 @@ async function allocatedBatch(n = 2) {
 // Every document of the emulator, to prove that a refused submission wrote nothing.
 async function dump() {
   const out = {};
-  const walk = async collections => { for (const c of collections) for (const d of (await c.get()).docs) { out[d.ref.path] = JSON.stringify(d.data()); await walk(await d.ref.listCollections()); } };
+  const walk = async collections => { for (const c of collections.filter(c => c.id !== "refused_submissions")) for (const d of (await c.get()).docs) { out[d.ref.path] = JSON.stringify(d.data()); await walk(await d.ref.listCollections()); } };
   await walk(await db.listCollections());
   for (const d of (await db.collectionGroup("history").get()).docs) out[d.ref.path] = JSON.stringify(d.data());
   return out;
@@ -378,7 +380,7 @@ async function erfOfBatchedMeter(meterNo) {
 function illegallyConnected(request) {
   const next = structuredClone(request);
   next.data.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter", otherAnomalies: [] };
-  next.data.ast.normalisation = { actionTaken: ["Illegal connection - meter disconnected"] };
+  next.data.ast.normalisation = { actionTaken: ["Disconnect meter"] };
   next.data.media = media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "anomalyPhoto", "normalisationPhoto");
   return next;
 }
@@ -413,11 +415,8 @@ test("an illegally connected meter goes through on another team's ERF, and the u
   const erfId = await erfOfBatchedMeter(a);
   const parent = await data(`tb_uploads/${TB}`);
 
-  // The gate never applies to the batch's own meter number: that stays TB-R059's ownership test. Proved
-  // first, while the batch's rows are still open.
-  const ownNumber = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(a, "FWR2")));
-  assert.deepEqual([ownNumber.success, ownNumber.code], [false, METER_IN_ANOTHER_TEAMS_BATCH], "the gate never applies to the batch's own meter number");
-
+  // TB-R062 v1.3.90 allows any illegally connected meter to be captured by anyone.
+  // This case verifies the different-meter ERF override and its audit independently.
   const result = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(OTHER_METER, "FWR2")));
   assert.deepEqual([result.success, result.code], [true, "SUCCESS"], JSON.stringify(result));
   assert.equal((await db.doc(`trns/TRN_MDIS_${OTHER_METER}_FWR2`).get()).exists, true);
@@ -436,7 +435,7 @@ test("an illegally connected meter goes through on another team's ERF, and the u
     { tbId: TB, geofenceId: parent.geofenceId, targetType: "TEAM", targetId: "TEAM1", targetName: "Team One" },
   );
   assert.equal(override.batch.rowMeterNo, a, "the batch row that holds the ERF is named");
-  assert.equal(override.anomaly.text, "Illegally Connected; Illegal connection - meter disconnected");
+  assert.equal(override.anomaly.text, "Illegally Connected");
   assert.equal(typeof override.recordedAt, "string");
   // Counted per worker and per team, both plain equality reads that need no new index.
   assert.equal((await db.collection("batch_erf_overrides").where("worker.uid", "==", "FWR2").get()).size, 1);
@@ -470,7 +469,7 @@ test("the ERF is free again once the batch's row on it is Completed, or the batc
 
   await db.doc(`tb_uploads/${TB}`).update({ "allocation.status": "NOT_STARTED", "allocation.targetId": FieldValue.delete(), "allocation.targetType": FieldValue.delete(), "allocation.targetName": FieldValue.delete() });
   const unallocated = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
-  assert.deepEqual([unallocated.success, unallocated.code], [true, "SUCCESS"], "nobody has been given this work, so the ERF holds nobody");
+  assert.deepEqual([unallocated.success, unallocated.code], [false, "METER_IN_AN_UNALLOCATED_BATCH"], "unallocated batch work remains guarded");
 });
 
 test("a row taken out of the batch stops holding its ERF (TB-R060), row by row", async () => {
@@ -492,4 +491,11 @@ test("a row taken out of the batch stops holding its ERF (TB-R060), row by row",
   await rows.docs[0].ref.update({ "execution.status": "COMPLETED", "execution.completedAt": Timestamp.now() });
   const free = await onMeterDiscoveryCallable.run(discovery(OTHER_METER, "FWR2"));
   assert.deepEqual([free.success, free.code], [true, "SUCCESS"], JSON.stringify(free));
+});
+
+test("illegal-connection exception also allows the batch's own meter number (TB-R062 v1.3.90)", async () => {
+ const [meterNo] = await allocatedBatch();
+ const reply = await onMeterDiscoveryCallable.run(illegallyConnected(discovery(meterNo, "FWR2")));
+ assert.equal(reply.success, true, JSON.stringify(reply));
+ assert.ok((await db.doc(`batch_erf_overrides/TRN_MDIS_${meterNo}_FWR2`).get()).exists);
 });

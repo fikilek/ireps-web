@@ -20,7 +20,7 @@ test("Discovery and Installation enforce the return agreement through their real
   assert.deepEqual(NO_ACCESS_REASONS.map(s => s.toUpperCase()).sort(), NO_ACCESS_REASON_CODES.map(s => s.toUpperCase()).sort());
   await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${process.env.GCLOUD_PROJECT}/databases/(default)/documents`, { method: "DELETE" });
   await Promise.all([
-    db.doc("users/U1").set({ employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
+    db.doc("users/U1").set({ accountStatus: "ACTIVE", employment: { role: "FWR", serviceProvider: { id: "SP1" } } }),
     db.doc("serviceProviders/SP1").set({ profile: { registeredName: "Provider" } }),
     db.doc("ireps_erfs/E1").set({ admin: { localMunicipality: { pcode: "ZA5241" }, ward: { pcode: "ZA5241006" } } }),
     db.doc("premises/P1").set({ erfId: "E1", address: { strNo: "1", strName: "Test", strType: "Road" }, propertyType: { type: "House" }, services: {}, geometry: { centroid: { lat: -28.1, lng: 30.1 } } }),
@@ -52,6 +52,8 @@ test("Discovery and Installation enforce the return agreement through their real
       assert.equal(before.metadata.createdOnDevice, capturedAt);
       assert.notEqual(before.metadata.createdAt, capturedAt, "Arrival must not replace the original offline capture time");
       assert.doesNotThrow(() => normalizeNoAccessAccessData(before.accessData, { metadata: before.metadata }));
+      // Receipt verification is strict: retry the canonical acknowledged reason spelling.
+      payload.accessData.access = structuredClone(before.accessData.access);
       assert.equal((await send(payload)).success, true);
       assert.deepEqual((await db.doc(`trns/${payload.id}`).get()).data(), before);
       const premise = (await db.doc("premises/P1").get()).data();
@@ -79,6 +81,9 @@ test("Discovery and Installation enforce the return agreement through their real
       assert.equal(stored.metadata.createdOnDeviceByUid, "U1");
       assert.equal(stored.media.length, 1);
       assert.doesNotThrow(() => normalizeNoAccessAccessData(stored.accessData, { metadata: stored.metadata }));
+      // A spoofed author cannot prove an accepted receipt; the canonical actor can.
+      payload.metadata.createdOnDeviceByUid = "U1";
+      payload.accessData.access = structuredClone(stored.accessData.access);
       assert.equal((await send(payload)).success, true);
       assert.deepEqual((await db.doc(`trns/${payload.id}`).get()).data(), stored);
       assert.equal((await db.collection("asts").get()).size, 0);

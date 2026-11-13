@@ -40,6 +40,8 @@ const projectId = process.env.GCLOUD_PROJECT || "demo-ireps-diff";
 if (!/^demo-/.test(projectId)) throw new Error("Only a demo project may be used: real projects are prohibited");
 const db = getFirestore();
 const f = JSON.parse(fs.readFileSync(new URL("./fixtures/sales-batch-fixtures.json", import.meta.url), "utf8"));
+Object.assign(f.profile, { accountStatus: "ACTIVE" });
+Object.assign(f.sales, { customerNo: "CUSTOMER1", lastPurchaseAtISO: "2026-07-01T00:00:00Z", daysSinceLastPurchase: 1 });
 f.erf.geometry = JSON.stringify(f.erf.geometry);
 f.ward.geometry = JSON.stringify(f.ward.geometry);
 // Rules TB-R046: only CAT meters are batched, by the LM's newest category month (last month, as the other tests).
@@ -57,13 +59,13 @@ beforeEach(async () => {
   const response = await fetch(`http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`, { method: "DELETE" }); assert.equal(response.ok, true);
   await Promise.all([
     db.doc(`users/${f.actor.uid}`).set({ ...f.profile, employment: { role: "MNG", serviceProvider: { id: "MNC1" } } }),
-    db.doc("ireps_erfs/ERF1").set(f.erf), db.doc("wards/ZA5241001").set(f.ward),
+    db.doc("ireps_erfs/ERF1").set(f.erf), db.doc("ireps_erfs/ERF2").set({ erfId: "ERF2", admin: f.erf.admin }), db.doc("wards/ZA5241001").set(f.ward),
     db.doc("serviceProviders/MNC1").set({ status: "ACTIVE", name: "Main SP", clients: [] }),
     db.doc("serviceProviders/SP1").set({ status: "ACTIVE", name: "Test SP", clients: [{ id: "MNC1", clientType: "SP", relationshipType: "SUBC" }] }),
     db.doc("teams/TEAM1").set({ team: { status: "ACTIVE", name: "Team One" }, ownership: { mncServiceProviderId: "MNC1" }, scope: { memberUserIds: ["FWR1"] }, memberUids: ["FWR1"] }),
     db.doc("teams/TEAM2").set({ team: { status: "ACTIVE", name: "Team Two" }, ownership: { mncServiceProviderId: "MNC1" }, scope: { memberUserIds: ["FWR2"] }, memberUids: ["FWR2"] }),
-    db.doc("users/FWR1").set({ profile: { displayName: "Worker One", employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }),
-    db.doc("users/FWR2").set({ profile: { displayName: "Worker Two", employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }),
+    db.doc("users/FWR1").set({ accountStatus: "ACTIVE", profile: { displayName: "Worker One", employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }),
+    db.doc("users/FWR2").set({ accountStatus: "ACTIVE", profile: { displayName: "Worker Two", employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }, employment: { role: "FWR", serviceProvider: { id: "SP1", name: "Test SP" } } }),
     db.doc("team_member_history/TEAM1__FWR1__1").set({ id: "TEAM1__FWR1__1", teamId: "TEAM1", teamName: "Team One", userUid: "FWR1", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null }),
     db.doc("team_member_history/TEAM2__FWR2__1").set({ id: "TEAM2__FWR2__1", teamId: "TEAM2", teamName: "Team Two", userUid: "FWR2", joinedAt: "2026-01-01T00:00:00.000Z", leftAt: null }),
   ]);
@@ -138,7 +140,7 @@ const discovery = (meterNo, uid, erfId = "ERF1") => ({ auth: { uid, token: {} },
 function illegallyConnected(payload) {
   const next = structuredClone(payload);
   next.data.ast.anomalies = { anomaly: "Illegally Connected", anomalyDetail: "Bridge Wire On The Meter", otherAnomalies: [] };
-  next.data.ast.normalisation = { actionTaken: ["Illegal connection - meter disconnected"] };
+  next.data.ast.normalisation = { actionTaken: ["Disconnect meter"] };
   next.data.media = media("astNoPhoto", "sealPhoto", "keypadPhoto", "astCbPhoto", "anomalyPhoto", "normalisationPhoto");
   return next;
 }
@@ -279,7 +281,7 @@ test("on the sales path the row closes once, and the batch completion that follo
   assert.deepEqual([result.success, result.code], [true, "SUCCESS"], JSON.stringify(result));
 
   const closed = await data(`tb_rows/${rowId}`);
-  assert.deepEqual([closed.execution.status, closed.execution.outcome], ["COMPLETED", ROW_OUTCOME]);
+  assert.deepEqual([closed.execution.status, closed.execution.outcome], ["COMPLETED", "METER_DISCOVERED"]);
   assert.equal(closed.execution.startedAt.toMillis(), startedAt.toMillis(), "the row keeps the time the team started it");
   assert.equal(closed.refs.premiseId, `PREM_${EXPECTED}`, "a premise the row already had is kept");
 
