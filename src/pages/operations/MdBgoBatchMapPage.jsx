@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/useAuth";
 import { db } from "../../firebase";
-import SalesTargetedBatchMap from "../sales/components/SalesTargetedBatchMap";
+import BgoBatchMap from "./md-bgo/BgoBatchMap";
 import { subscribeMdBgoMap } from "./md-bgo/mdBgoMapStream.js";
 
 const text = (value) => String(value ?? "").trim();
@@ -50,7 +50,7 @@ export default function MdBgoBatchMapPage() {
       <section aria-label="Batch Asset Counts" style={styles.grid}>{[["Batch Rows", data.membership.rowCount], ["ERFs", data.erfs.length], ["Premises", data.premises.length], ["Field Meters", data.meters.length]].map(([label, count]) => <article key={label} style={styles.card}><span style={styles.label}>{label}</span><strong style={{ ...styles.value, fontSize: 25 }}>{count.toLocaleString("en-ZA")}</strong></article>)}</section>
       {missing || missingFence ? <section role="status" style={{ ...styles.notice, background: "#fffbeb", color: "#92400e" }}><strong>Some batch references could not be resolved.</strong><div>ERFs: {diagnostics.missingErfCount}; premises: {diagnostics.missingPremiseCount}; field meters: {diagnostics.missingMeterCount}; rows without an ERF: {diagnostics.rowsMissingErfRef}.{missingFence ? " The linked geofence could not be resolved." : ""}</div></section> : null}
       {!data.membership.rowCount ? <p role="status" style={styles.notice}>This batch has no BGO Rows.</p> : null}
-      <SalesTargetedBatchMap erfs={data.erfs} premises={data.premises} meters={data.meters} geofence={data.geofence} />
+      <BgoBatchMap key={batchId} erfs={data.erfs} premises={data.premises} meters={data.meters} geofence={data.geofence} />
       <section aria-label="Spatial Coverage" style={styles.card}><h2 style={{ margin: "0 0 12px", fontSize: 18 }}>Spatial Coverage <small style={{ color: "#059669" }}>● Live</small></h2><div style={styles.grid}>{[["ERFs", diagnostics.erfsFound, diagnostics.erfRefs, diagnostics.erfsWithGeometry, "with geometry"], ["Premises", diagnostics.premisesFound, diagnostics.premiseRefs, diagnostics.premisesWithGps, "with GPS"], ["Field Meters", diagnostics.metersFound, diagnostics.meterRefs, diagnostics.metersWithGps, "with GPS"]].map(([label, found, referenced, spatial, helper]) => <div key={label}><strong>{label}</strong><div>{found} of {referenced} found · {spatial} {helper}</div></div>)}</div></section>
     </> : null}
   </main>;

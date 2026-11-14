@@ -22,7 +22,7 @@ export function buildMdBgoMapModel({ batchId, lmPcode, batch, rows = [], erfById
     ]);
     return (meters.length ? meters : [null]).map((meterId) => ({ id: row.id, rowNo: row.rowNo, refs: { erfId, premiseId, meterId } }));
   });
-  const model = buildTargetedBatchMapReadModel({ tbId: batchId, expectedLmPcode: lmPcode, batch, rows: links, erfById, premiseById, meterById });
+  const model = buildTargetedBatchMapReadModel({ tbId: batchId, expectedLmPcode: lmPcode, batch, rows: links, erfById, premiseById: batchPremisesWithGps(premiseById), meterById });
   return {
     ...model,
     batch,
@@ -30,4 +30,9 @@ export function buildMdBgoMapModel({ batchId, lmPcode, batch, rows = [], erfById
     membership: { ...model.membership, rowCount: rows.length },
     diagnostics: { ...model.diagnostics, rows: rows.length },
   };
+}
+
+export function batchPremisesWithGps(records = {}) {
+  return Object.fromEntries(Object.entries(records).map(([id, premise]) => [id, { ...premise,
+    geometry: { ...premise.geometry, centroid: premise.geometry?.centroid || premise.gps || premise.location?.gps || null } }]));
 }

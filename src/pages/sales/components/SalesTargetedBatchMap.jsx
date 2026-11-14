@@ -634,11 +634,13 @@ export default function SalesTargetedBatchMap({
   viewport = null,
   fitButtonStyle = null,
   geofence = null,
+  batchBoundary = null,
+  visibleLayers = { erfs: true, premises: true, meters: true },
 }) {
   const [fitRequest, setFitRequest] = useState(0);
 
   // TB-R043: the batch's geofence, drawn like every batch geofence (purple, named).
-  const geofenceBoundary = useMemo(() => getGeoFencePath(geofence), [geofence]);
+  const geofenceBoundary = useMemo(() => batchBoundary || getGeoFencePath(geofence), [batchBoundary, geofence]);
   const geofenceList = useMemo(
     () => (geofence && geofenceBoundary.length >= 3 ? [geofence] : []),
     [geofence, geofenceBoundary],
@@ -747,24 +749,24 @@ export default function SalesTargetedBatchMap({
                 boundary={geofenceBoundary}
               />}
               <ExistingGeoFenceLayer geofences={geofenceList} selectedGeoFenceId="" interactive={false} fitSelected={false} />
-              <ErfPolygonLayer erfs={safeErfs} focusedErfId={focusedErfId} />
-              <ErfLabelsLayer
+              {visibleLayers.erfs && <ErfPolygonLayer erfs={safeErfs} focusedErfId={focusedErfId} />}
+              {visibleLayers.erfs && <ErfLabelsLayer
                 erfs={safeErfs}
                 focusedErfId={focusedErfId}
-              />
-              <FocusConnectionLineLayer
+              />}
+              {visibleLayers.premises && visibleLayers.meters && <FocusConnectionLineLayer
                 focusedMeter={focusedMeter}
                 focusedPremise={focusedPremise}
-              />
-              <PremiseMarkersLayer
+              />}
+              {visibleLayers.premises && <PremiseMarkersLayer
                 premises={safePremises}
                 focusedPremiseId={focusedPremiseId}
-              />
-              <MeterMarkersLayer
+              />}
+              {visibleLayers.meters && <MeterMarkersLayer
                 meters={safeMeters}
                 focusedMeterId={focusedMeterId}
                 meterStateColors={meterStateColors}
-              />
+              />}
             </Map>
           </APIProvider>
           {spatialFeatureCount === 0 && <p role="status" style={styles.mapNotice}>No usable spatial features are available for this batch.</p>}
