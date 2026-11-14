@@ -610,7 +610,8 @@ export default function TrnBgoUploadPage() {
           const resolvedErf = resolvedErfVal === "NAv" ? "" : resolvedErfVal;
 
           const isDuplicate = Boolean(row.isDuplicate);
-          const isEligible = new Map(data.eligibility || []).get(String(row.rowNo))?.eligible === true;
+          const eligibility = new Map(data.eligibility || []).get(String(row.rowNo));
+          const isEligible = eligibility?.eligible === true;
 
           return {
             ...row,
@@ -618,6 +619,7 @@ export default function TrnBgoUploadPage() {
             isLmMatch,
             isDuplicate,
             isEligible,
+            nonEligibleReason: isEligible ? "" : (eligibility?.message || "Eligibility could not be confirmed. Validate the file again."),
             isDataMatch,
             duplicate: isDuplicate ? "True" : "False",
             eligible: isEligible ? "True" : "False",
@@ -753,8 +755,9 @@ export default function TrnBgoUploadPage() {
       "meterNo",
       "Found?",
       "duplicate",
-      "eligible",
       "dataMatch",
+      "eligible",
+      "non eligible reason",
       "meterPhase",
       "iREPS_meterPhase",
       "meterType",
@@ -780,8 +783,9 @@ export default function TrnBgoUploadPage() {
       r.meterNo,
       r.foundInAsts ? "True" : "False",
       r.isDuplicate ? "True" : "False",
-      r.isEligible ? "True" : "False",
       r.isDataMatch ? "True" : "False",
+      r.isEligible ? "True" : "False",
+      r.nonEligibleReason || "",
       r.meterPhase,
       r.irepsValues?.meterPhase || "NAv",
       r.meterType,
@@ -1216,6 +1220,27 @@ export default function TrnBgoUploadPage() {
         ),
       },
       {
+        key: "dataMatch",
+        label: "dataMatch",
+        width: 115,
+        filter: "select",
+        sortable: true,
+        value: (r) => (r.isDataMatch ? "True" : "False"),
+        sortValue: (r) => (r.isDataMatch ? 1 : 0),
+        render: (r) => (
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              fontSize: 12,
+              color: r.isDataMatch ? "#047857" : "#dc2626",
+            }}
+          >
+            {r.isDataMatch ? "True" : "False"}
+          </span>
+        ),
+      },
+      {
         key: "eligible",
         label: "eligible",
         width: 110,
@@ -1237,23 +1262,15 @@ export default function TrnBgoUploadPage() {
         ),
       },
       {
-        key: "dataMatch",
-        label: "dataMatch",
-        width: 115,
-        filter: "select",
+        key: "nonEligibleReason",
+        label: "non eligible reason",
+        width: 310,
+        filter: "text",
         sortable: true,
-        value: (r) => (r.isDataMatch ? "True" : "False"),
-        sortValue: (r) => (r.isDataMatch ? 1 : 0),
+        value: (r) => r.nonEligibleReason || "",
         render: (r) => (
-          <span
-            style={{
-              fontFamily: "monospace",
-              fontWeight: 700,
-              fontSize: 12,
-              color: r.isDataMatch ? "#047857" : "#dc2626",
-            }}
-          >
-            {r.isDataMatch ? "True" : "False"}
+          <span style={{ color: "#b91c1c", whiteSpace: "normal", overflowWrap: "anywhere" }}>
+            {r.nonEligibleReason}
           </span>
         ),
       },
@@ -1576,7 +1593,11 @@ export default function TrnBgoUploadPage() {
                 type="button"
                 disabled={!canCarryToBatch || isCreatingBatches}
                 onClick={handleCreateWardBatches}
+                aria-busy={isCreatingBatches}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
                   padding: "9px 16px",
                   borderRadius: 8,
                   fontSize: 13,
@@ -1584,7 +1605,7 @@ export default function TrnBgoUploadPage() {
                   background: canCarryToBatch ? "#16a34a" : "#e2e8f0",
                   color: canCarryToBatch ? "#ffffff" : "#64748b",
                   border: `1px solid ${canCarryToBatch ? "#15803d" : "#cbd5e1"}`,
-                  cursor: canCarryToBatch ? "pointer" : "not-allowed",
+                  cursor: isCreatingBatches ? "wait" : canCarryToBatch ? "pointer" : "not-allowed",
                 }}
                 title={
                   ineligibleSelectedRows.length > 0
@@ -1594,7 +1615,16 @@ export default function TrnBgoUploadPage() {
                       : `Open Batch Draft Page with ${selectedRows.length} eligible row(s)`
                 }
               >
-                Create Batch
+                {isCreatingBatches && (
+                  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.3" />
+                    <g>
+                    <path d="M12 3a9 9 0 0 1 9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                    <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+                    </g>
+                  </svg>
+                )}
+                {isCreatingBatches ? "Creating Batch…" : "Create Batch"}
               </button>
 
               <button
@@ -1941,7 +1971,11 @@ export default function TrnBgoUploadPage() {
                 type="button"
                 disabled={isCreatingBatches || wardBatchGroups.length === 0}
                 onClick={handleCreateWardBatches}
+                aria-busy={isCreatingBatches}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
                   padding: "11px 22px",
                   borderRadius: 8,
                   border: "1px solid #15803d",
