@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
@@ -75,7 +76,7 @@ export const wardErfsApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getErfsByWard: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         { lmPcode, wardPcode },
@@ -99,10 +100,11 @@ export const wardErfsApi = createApi({
               return erf?.lmPcode === lmPcode;
             });
 
-            updateCachedData(() => sortErfs(rows));
-          });
+            updateCachedData(() => ({ value: sortErfs(rows), ready: true, error: null }));
+          }, error => updateCachedData(draft => failStream(draft, error)));
         } catch (error) {
           console.error("mapWardErfsApi snapshot error:", error);
+              updateCachedData(draft => failStream(draft, error));
         }
 
         await cacheEntryRemoved;
@@ -115,4 +117,6 @@ export const wardErfsApi = createApi({
   }),
 });
 
-export const { useGetErfsByWardQuery } = wardErfsApi;
+export const { useGetErfsByWardQuery: useGetErfsByWardQueryRaw } = wardErfsApi;
+
+export const useGetErfsByWardQuery = streamQueryHook(useGetErfsByWardQueryRaw);

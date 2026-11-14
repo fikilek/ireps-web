@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
 function getRowSelectionKey(row) {
@@ -1561,8 +1562,7 @@ export default function TrnBgoUploadPage() {
       {/* Loading validation indicator */}
       {isValidating ? (
         <div style={styles.parsingNotice}>
-          <div style={styles.spinner} />
-          <div>{validationProgress || "Validating file... Please wait."}</div>
+          <LoadingIndicator>{validationProgress || "Validating file... Please wait."}</LoadingIndicator>
         </div>
       ) : null}
 
@@ -1667,7 +1667,7 @@ export default function TrnBgoUploadPage() {
 
           {/* IrepsTable displaying validated rows */}
           <div style={styles.tablePanel}>
-            <IrepsTable
+            <IrepsTable showLoadingSpinner
               rows={filteredRows}
               columns={columns}
               onRowsShown={setShownRows}
@@ -2078,7 +2078,7 @@ export default function TrnBgoUploadPage() {
                   </div>
                 </div>
 
-                <IrepsTable
+                <IrepsTable showLoadingSpinner
                   rows={rowsWithDraftNo}
                   columns={draftBatchColumns}
                   rowKey={(r, idx) => r?.meterNo || r?.rowNo || idx}

@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
@@ -79,7 +80,7 @@ export const mapPremisesApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getPremisesByWard: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         wardPcode,
@@ -112,11 +113,12 @@ export const mapPremisesApi = createApi({
                 .sort(sortPremisesByUpdatedAtDesc);
 
               updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...rows);
+                draft.value.splice(0, draft.value.length, ...rows); draft.ready = true; draft.error = null;
               });
             },
             (error) => {
               console.error("mapPremisesApi stream error:", error);
+              updateCachedData(draft => failStream(draft, error));
             },
           );
 
@@ -130,7 +132,7 @@ export const mapPremisesApi = createApi({
     }),
 
     getPremisesByLmPcode: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         arg,
@@ -171,11 +173,12 @@ export const mapPremisesApi = createApi({
                 .sort(sortPremisesByUpdatedAtDesc);
 
               updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...rows);
+                draft.value.splice(0, draft.value.length, ...rows); draft.ready = true; draft.error = null;
               });
             },
             (error) => {
               console.error("mapPremisesApi LM stream error:", error);
+              updateCachedData(draft => failStream(draft, error));
             },
           );
 
@@ -190,5 +193,9 @@ export const mapPremisesApi = createApi({
   }),
 });
 
-export const { useGetPremisesByWardQuery, useGetPremisesByLmPcodeQuery } =
+export const { useGetPremisesByWardQuery: useGetPremisesByWardQueryRaw, useGetPremisesByLmPcodeQuery: useGetPremisesByLmPcodeQueryRaw } =
   mapPremisesApi;
+
+export const useGetPremisesByWardQuery = streamQueryHook(useGetPremisesByWardQueryRaw);
+
+export const useGetPremisesByLmPcodeQuery = streamQueryHook(useGetPremisesByLmPcodeQueryRaw);

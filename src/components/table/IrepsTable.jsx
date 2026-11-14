@@ -1,3 +1,4 @@
+import LoadingIndicator from "../LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 // The one iREPS table. Every table in iREPS is this component with different
 // columns and rows: the same bands, headings, filters, pagination, colours and
@@ -47,6 +48,7 @@ export default function IrepsTable({
   resetPageKey,
   emptyText = "No rows match the current filters.",
   loading = false,
+  showLoadingSpinner = false,
   loadingText = "Loading…",
   toolbar = null,
   columnControls = null,
@@ -250,10 +252,11 @@ export default function IrepsTable({
   );
 
   return (
-    <section style={stickyHeader ? styles.frameSticky : styles.frame} aria-label={typeof title === "string" ? title : (downloads.registryName || "Table")}>
+    <section aria-busy={showLoadingSpinner ? loading : undefined} style={stickyHeader ? styles.frameSticky : styles.frame} aria-label={typeof title === "string" ? title : (downloads.registryName || "Table")}>
       <div ref={stickyTopRef} style={stickyHeader ? styles.stickyTop : undefined}>
       <div style={styles.toolbar}>
         <strong>{title}</strong>
+        {loading && showLoadingSpinner && sorted.length > 0 ? <LoadingIndicator>{loadingText}</LoadingIndicator> : null}
         <span style={{ ...styles.muted, marginLeft: "auto" }} aria-live="polite">
           {sorted.length} of {rows.length} rows
         </span>
@@ -416,7 +419,7 @@ export default function IrepsTable({
             {!sorted.length ? (
               <tr>
                 <td style={styles.cell} colSpan={columns.length}>
-                  {loading ? loadingText : emptyText}
+                  {loading ? (showLoadingSpinner ? <LoadingIndicator>{loadingText}</LoadingIndicator> : loadingText) : emptyText}
                 </td>
               </tr>
             ) : null}

@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
@@ -2223,7 +2224,7 @@ export default function TcBgoDashboardPage() {
         <div style={styles.heroStatusStack}>
           <span style={styles.statusPill}>{getPrimaryStatus(metrics)}</span>
           <span style={styles.streamPill}>
-            {loadingText ? `STREAMING ${loadingText}` : "LIVE DETAIL STREAMS"}
+            {loadingText ? <LoadingIndicator>{`Loading ${loadingText}…`}</LoadingIndicator> : "LIVE DETAIL STREAMS"}
           </span>
         </div>
       </div>

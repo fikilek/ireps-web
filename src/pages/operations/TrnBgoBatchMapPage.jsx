@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -302,7 +303,7 @@ export default function TrnBgoBatchMapPage() {
   });
 
   // Query ward boundary if batch has wardPcode
-  const { data: wards = [] } = useGetWardBoundariesByLmQuery(
+  const { data: wards = [], isLoading: areWardsLoading } = useGetWardBoundariesByLmQuery(
     { lmPcode: activeBatch?.lmPcode || lmPcode },
     { skip: !(activeBatch?.lmPcode || lmPcode) }
   );
@@ -410,6 +411,7 @@ export default function TrnBgoBatchMapPage() {
         </div>
       </div>
 
+      {isUploadsLoading || isRowsLoading || areWardsLoading ? <LoadingIndicator>Loading batch map data…</LoadingIndicator> : null}
       {/* Map + Side Panel Container */}
       <div style={styles.mapContainer}>
         {/* Map Canvas */}
@@ -507,7 +509,7 @@ export default function TrnBgoBatchMapPage() {
 
             {/* Meters List */}
             <div style={styles.metersList}>
-              {filteredMeters.length === 0 ? (
+              {isRowsLoading ? <LoadingIndicator>Loading constituent meters…</LoadingIndicator> : filteredMeters.length === 0 ? (
                 <div style={{ padding: 16, color: "#64748b", fontSize: 13, textAlign: "center" }}>
                   No constituent meters match your search.
                 </div>

@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX tags are consumed by the JSX transform. */
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -42,7 +43,7 @@ export default function MdBgoBatchMapPage() {
       </nav>
     </header>
     {!lmPcode ? <p role="alert" style={styles.notice}>Activate a Local Municipality workbase before opening this map.</p> : null}
-    {batchId && lmPcode && !ready ? <p role="status" style={styles.notice}>Loading the live MD BGO Batch Map…</p> : null}
+    {batchId && lmPcode && !ready ? <p role="status" style={styles.notice}><LoadingIndicator>Loading the live MD BGO Batch Map…</LoadingIndicator></p> : null}
     {error ? <section role="alert" style={{ ...styles.notice, color: "#991b1b", background: "#fef2f2", borderColor: "#fecaca" }}><strong>MD BGO Batch Map could not be loaded.</strong><div>{error}</div></section> : null}
     {batch && !error ? <section aria-label="Batch Details" style={styles.grid}>{identity.map(([label, value]) => <article key={label} style={styles.card}><span style={styles.label}>{label}</span><strong style={styles.value}>{value || "NAv"}</strong></article>)}</section> : null}
     {ready && batch && !error ? <>

@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -507,7 +508,7 @@ export const bgoApi = createApi({
     }),
 
     getBgoBatchesByLm: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -546,11 +547,13 @@ export const bgoApi = createApi({
                 ).sort(sortByUpdatedDesc);
 
                 updateCachedData((draft) => {
-                  draft.splice(0, draft.length, ...batches);
+                  draft.value.splice(0, draft.value.length, ...batches);
+                  draft.ready = latestSnapshots.size === queries.length;
                 });
               },
               (error) => {
                 console.error("bgoApi getBgoBatchesByLm stream error:", error);
+                updateCachedData(draft => failStream(draft, error));
               },
             );
 
@@ -673,7 +676,7 @@ export const bgoApi = createApi({
     }),
 
     getBmdBgoBatchesByWard: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -705,11 +708,13 @@ export const bgoApi = createApi({
                 .sort(sortByCreatedDesc);
 
               updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...batches);
+                draft.value.splice(0, draft.value.length, ...batches);
+                  draft.ready = true;
               });
             },
             (error) => {
               console.error("bgoApi getBmdBgoBatchesByWard stream error:", error);
+                updateCachedData(draft => failStream(draft, error));
             },
           );
 
@@ -721,7 +726,7 @@ export const bgoApi = createApi({
     }),
 
     getBgoBatchesByTcId: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -749,11 +754,13 @@ export const bgoApi = createApi({
                   ).sort(sortByCreatedDesc);
 
                   updateCachedData((draft) => {
-                    draft.splice(0, draft.length, ...batches);
+                    draft.value.splice(0, draft.value.length, ...batches);
+                  draft.ready = latestSnapshots.size === 4;
                   });
                 },
                 (error) => {
                   console.error("bgoApi getBgoBatchesByTcId stream error:", error);
+                updateCachedData(draft => failStream(draft, error));
                 },
               );
 
@@ -769,7 +776,7 @@ export const bgoApi = createApi({
     }),
 
     getBgoRowsByTcId: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -797,11 +804,13 @@ export const bgoApi = createApi({
                   ).sort(sortBgoRows);
 
                   updateCachedData((draft) => {
-                    draft.splice(0, draft.length, ...rows);
+                    draft.value.splice(0, draft.value.length, ...rows);
+                  draft.ready = latestSnapshots.size === 4;
                   });
                 },
                 (error) => {
                   console.error("bgoApi getBgoRowsByTcId stream error:", error);
+                updateCachedData(draft => failStream(draft, error));
                 },
               );
 
@@ -817,7 +826,7 @@ export const bgoApi = createApi({
     }),
 
     getBgoRowsByBatchId: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -873,11 +882,13 @@ export const bgoApi = createApi({
                 ).sort(sortBgoRows);
 
                 updateCachedData((draft) => {
-                  draft.splice(0, draft.length, ...rows);
+                  draft.value.splice(0, draft.value.length, ...rows);
+                  draft.ready = latestSnapshots.size === queries.length;
                 });
               },
               (error) => {
                 console.error("bgoApi getBgoRowsByBatchId stream error:", error);
+                updateCachedData(draft => failStream(draft, error));
               },
             );
 
@@ -898,14 +909,24 @@ export const {
   useGetMdBgoRowQaQuery,
   useCreateBgoMutation,
   useDeleteUnacceptedBgoMutation,
-  useGetBmdBgoBatchesByWardQuery,
-  useGetBgoBatchesByLmQuery,
+  useGetBmdBgoBatchesByWardQuery: useGetBmdBgoBatchesByWardQueryRaw,
+  useGetBgoBatchesByLmQuery: useGetBgoBatchesByLmQueryRaw,
   useGetMdBgoRowsByLmQuery,
   useGetMdBgoBatchByIdQuery,
   useGetMdBgoRowsByBatchIdQuery,
   useAllocateMdBgoBatchesTogetherMutation,
   useUnallocateMdBgoBatchMutation,
-  useGetBgoBatchesByTcIdQuery,
-  useGetBgoRowsByTcIdQuery,
-  useGetBgoRowsByBatchIdQuery,
+  useGetBgoBatchesByTcIdQuery: useGetBgoBatchesByTcIdQueryRaw,
+  useGetBgoRowsByTcIdQuery: useGetBgoRowsByTcIdQueryRaw,
+  useGetBgoRowsByBatchIdQuery: useGetBgoRowsByBatchIdQueryRaw,
 } = bgoApi;
+
+export const useGetBgoBatchesByLmQuery = streamQueryHook(useGetBgoBatchesByLmQueryRaw);
+
+export const useGetBmdBgoBatchesByWardQuery = streamQueryHook(useGetBmdBgoBatchesByWardQueryRaw);
+
+export const useGetBgoBatchesByTcIdQuery = streamQueryHook(useGetBgoBatchesByTcIdQueryRaw);
+
+export const useGetBgoRowsByTcIdQuery = streamQueryHook(useGetBgoRowsByTcIdQueryRaw);
+
+export const useGetBgoRowsByBatchIdQuery = streamQueryHook(useGetBgoRowsByBatchIdQueryRaw);

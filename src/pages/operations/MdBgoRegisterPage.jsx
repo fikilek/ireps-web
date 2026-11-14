@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -318,8 +319,9 @@ export default function MdBgoRegisterPage() {
         </div>
       ) : null}
 
+      {lmPcode && !mdBgoRowsStream.ready && !mdBgoRowsStream.error ? <LoadingIndicator>Loading batch row counts…</LoadingIndicator> : null}
       {isBatchesLoading ? (
-        <div style={styles.loadingNotice}>Loading MD BGO Batches...</div>
+        <div style={styles.loadingNotice}><LoadingIndicator>Loading MD BGO Batches...</LoadingIndicator></div>
       ) : (
         <>
           <div style={styles.summaryGrid}>
@@ -340,7 +342,7 @@ export default function MdBgoRegisterPage() {
               <div style={styles.draftStreamBadge}>Permanent Firestore register</div>
             </div>
 
-            <IrepsTable
+            <IrepsTable showLoadingSpinner
               title="Permanent Meter Discovery Batches"
               columns={columns}
               stickyColumnKeys={["selection", "map", "batchId"]}

@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -1139,7 +1140,7 @@ export default function BmdBgoPage() {
         <Badge tone="success">BMD MODE</Badge>
       </div>
 
-      {isLoading ? <div style={styles.notice}>Loading MD BGO context...</div> : null}
+      {isLoading ? <div style={styles.notice}><LoadingIndicator>Loading MD BGO context...</LoadingIndicator></div> : null}
       {geofencesError ? <div style={styles.errorNotice}>{errorMessage}</div> : null}
 
       <div style={styles.scopePanel}>

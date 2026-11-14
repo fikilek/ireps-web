@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
@@ -57,7 +58,7 @@ export const astsApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getAstsByLmPcode: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         arg,
@@ -84,15 +85,17 @@ export const astsApi = createApi({
               updateCachedData(() => {
                 const next = snapshot.docs.map(mapAstDoc);
                 sortAstsByUpdatedAtDesc(next);
-                return next;
+                return { value: next, ready: true, error: null };
               });
             },
             (error) => {
               console.error("❌ [AST_LM_SNAPSHOT_ERROR]:", error);
+              updateCachedData(draft => failStream(draft, error));
             },
           );
         } catch (error) {
           console.error("❌ [AST_LM_STREAM_ERROR]:", error);
+              updateCachedData(draft => failStream(draft, error));
         }
 
         await cacheEntryRemoved;
@@ -139,7 +142,7 @@ export const astsApi = createApi({
     }),
 
     getAstsByLmPcodeWardPcode: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         { lmPcode, wardPcode },
@@ -165,15 +168,17 @@ export const astsApi = createApi({
               updateCachedData(() => {
                 const next = snapshot.docs.map(mapAstDoc);
                 sortAstsByUpdatedAtDesc(next);
-                return next;
+                return { value: next, ready: true, error: null };
               });
             },
             (error) => {
               console.error("❌ [AST_WARD_SNAPSHOT_ERROR]:", error);
+              updateCachedData(draft => failStream(draft, error));
             },
           );
         } catch (error) {
           console.error("❌ [AST_WARD_STREAM_ERROR]:", error);
+              updateCachedData(draft => failStream(draft, error));
         }
 
         await cacheEntryRemoved;
@@ -185,6 +190,10 @@ export const astsApi = createApi({
 
 export const {
   useGetAstByIdQuery,
-  useGetAstsByLmPcodeQuery,
-  useGetAstsByLmPcodeWardPcodeQuery,
+  useGetAstsByLmPcodeQuery: useGetAstsByLmPcodeQueryRaw,
+  useGetAstsByLmPcodeWardPcodeQuery: useGetAstsByLmPcodeWardPcodeQueryRaw,
 } = astsApi;
+
+export const useGetAstsByLmPcodeWardPcodeQuery = streamQueryHook(useGetAstsByLmPcodeWardPcodeQueryRaw);
+
+export const useGetAstsByLmPcodeQuery = streamQueryHook(useGetAstsByLmPcodeQueryRaw);

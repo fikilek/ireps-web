@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -881,7 +882,7 @@ function UploadDashboardCard({ upload }) {
             <span style={styles.goodPill}>ON TRACK</span>
           )}
           {isFetchingBgoBatches || isFetchingBgoRows ? (
-            <span style={styles.streamMiniPill}>LIVE EXECUTION</span>
+            <LoadingIndicator>Loading live execution…</LoadingIndicator>
           ) : null}
         </div>
       </div>
@@ -1317,10 +1318,11 @@ export default function BgoDashboardPage() {
         </div>
       ) : null}
 
+      {isConnecting && !isPageLoading ? <LoadingIndicator>Loading live dashboard details…</LoadingIndicator> : null}
       <div style={styles.uploadGrid}>
         {isPageLoading ? (
           <article style={styles.emptyCard}>
-            <p style={styles.eyebrow}>Loading</p>
+            <LoadingIndicator>Loading dashboard data…</LoadingIndicator>
             <h3 style={styles.emptyTitle}>Connecting to BGO dashboard streams...</h3>
             <p style={styles.mutedText}>The dashboard will show TC upload cards and MD-BGO allocation cards.</p>
           </article>

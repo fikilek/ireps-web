@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { collection, doc, onSnapshot } from "firebase/firestore";
 
@@ -26,7 +27,7 @@ export const mapLmsApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getLmBoundaryById: builder.query({
-      queryFn: () => ({ data: null }),
+      queryFn: () => ({ data: pendingStream(null) }),
 
       async onCacheEntryAdded(
         lmPcode,
@@ -45,16 +46,17 @@ export const mapLmsApi = createApi({
             lmRef,
             (snapshot) => {
               if (!snapshot.exists()) {
-                updateCachedData(() => null);
+                updateCachedData(() => ({ value: null, ready: true, error: null }));
                 return;
               }
 
               const row = normalizeLmRow(snapshot.id, snapshot.data());
 
-              updateCachedData(() => row);
+              updateCachedData(() => ({ value: row, ready: true, error: null }));
             },
             (error) => {
               console.error("mapLmsApi stream error:", error);
+              updateCachedData(draft => failStream(draft, error));
             },
           );
 
@@ -106,4 +108,6 @@ export const mapLmsApi = createApi({
   }),
 });
 
-export const { useGetLmBoundaryByIdQuery, useGetAllLmsQuery } = mapLmsApi;
+export const { useGetLmBoundaryByIdQuery: useGetLmBoundaryByIdQueryRaw, useGetAllLmsQuery } = mapLmsApi;
+
+export const useGetLmBoundaryByIdQuery = streamQueryHook(useGetLmBoundaryByIdQueryRaw);

@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useGetTcUploadsQuery, useAllocateTrnBgoWardBatchesMutation } from "../../redux/tcApi";
 import { buildTrnAllocationModel, toggleTrnAllocationSelection } from "./md-bgo/trnAllocationModel";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
@@ -91,9 +92,9 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
   const mdBatches = useGetBgoBatchesByLmQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode || bulkMode });
   const tcBatches = useGetTcUploadsQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode || !bulkMode });
   const { data: batches = EMPTY, isLoading, error: batchError } = bulkMode ? tcBatches : mdBatches;
-  const { data: geofences = EMPTY } = useGetGeoFencesByLmQuery({ lmPcode }, { skip: !lmPcode });
-  const { data: lmWards = EMPTY } = useGetWardBoundariesByLmQuery(lmPcode, { skip: !lmPcode });
-  const { data: directory } = useGetTargetedBatchAllocationDirectoryQuery(mncId || skipToken);
+  const { data: geofences = EMPTY, isLoading: areGeofencesLoading } = useGetGeoFencesByLmQuery({ lmPcode }, { skip: !lmPcode });
+  const { data: lmWards = EMPTY, isLoading: areWardsLoading } = useGetWardBoundariesByLmQuery(lmPcode, { skip: !lmPcode });
+  const { data: directory, isLoading: isDirectoryLoading } = useGetTargetedBatchAllocationDirectoryQuery(mncId || skipToken);
   const [allocateTogether] = useAllocateMdBgoBatchesTogetherMutation();
   const [allocateBulk] = useAllocateTrnBgoWardBatchesMutation();
   const [selectedIds, setSelectedIds] = useState(() => text(searchParams.get("batchId")) ? [text(searchParams.get("batchId"))] : []); const [target, setTarget] = useState(null); const [dragTarget, setDragTarget] = useState(null); const [dropFocused, setDropFocused] = useState(false); const [showAll, setShowAll] = useState(false);
@@ -160,6 +161,7 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
     <Link to={registerPath} style={styles.back}>← Back to {bulkLabel} Register</Link>
     <header><p style={styles.eyebrow}>Operations / {bulkLabel} Register</p><h1 style={styles.title}>{bulkLabel} Allocation Map</h1>
       <p style={styles.subtitle}>Select ready {bulkLabel} batches on the map and issue their {unitLabel} work items together to one TEAM or SP (up to {MD_BGO_ALLOCATION_MAX} batches).</p></header>
+    {areGeofencesLoading || areWardsLoading || isDirectoryLoading ? <LoadingIndicator>Loading allocation map and targets…</LoadingIndicator> : null}
     {model.readyNotOnMap ? <div style={styles.note}>{model.readyNotOnMap} ready batch(es) have no authoritative boundary and are unavailable on this map.</div> : null}
     {batchError ? <div role="alert" style={styles.error}>{batchError?.data?.message || batchError?.message || "MD BGO batches could not be loaded."}</div> : null}
     <div style={styles.layout}>
@@ -169,7 +171,7 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
           <label><input type="checkbox" checked={showAll} onChange={event => setShowAll(event.target.checked)} /> Show all batches</label>
           <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Fit to map</button>
         </div>
-        <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}>Loading batches…</p> : !shown.length ? <p style={styles.status}>Choose Show all batches, or open allocation from the Register.</p> :
+        <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}><LoadingIndicator>Loading batches…</LoadingIndicator></p> : !shown.length ? <p style={styles.status}>Choose Show all batches, or open allocation from the Register.</p> :
           <APIProvider apiKey={key}><GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={12} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
             <WardBoundaryPolygons wards={wards} /><MdBgoAllocationPolygons items={shown} selectedIds={selectedIds} onToggle={toggle} /><FitBatches items={shown} request={fitRequest} />
           </GoogleMap></APIProvider>}</div>

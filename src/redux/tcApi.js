@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -356,7 +357,7 @@ export const tcApi = createApi({
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
     getTcUploads: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         arg,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -366,30 +367,31 @@ export const tcApi = createApi({
         try {
           await cacheDataLoaded;
 
-          if (!auth.currentUser) return;
+          if (!auth.currentUser) { updateCachedData(draft => { draft.ready = true; }); return; }
           let epoch = 0;
           let stopQueries = [];
           const stopProfile = onSnapshot(doc(db, "users", auth.currentUser.uid), snapshot => {
             const current = ++epoch;
             stopQueries.forEach(stop => stop()); stopQueries = [];
             const profile = snapshot.data();
-            updateCachedData(draft => { draft.splice(0, draft.length); });
-            if (profile?.accountStatus !== "ACTIVE") return;
+            updateCachedData(draft => { draft.value.splice(0, draft.value.length); draft.ready = false; draft.error = null; });
+            if (profile?.accountStatus !== "ACTIVE") { updateCachedData(draft => { draft.ready = true; }); return; }
             const pc = value => typeof value === "string" ? value : value?.lmPcode || value?.pcode || value?.id;
             const grants = [...new Set([profile.access?.activeWorkbase, ...(profile.access?.workbases || [])].map(pc).filter(Boolean))];
             const requested = typeof arg === "object" ? arg.lmPcode : null;
             const scopes = requested ? grants.filter(lm => lm === requested) : grants;
             const latest = new Map();
+            if (!scopes.length) updateCachedData(draft => { draft.ready = true; });
             scopes.forEach(lm => {
               const uploadsQuery = query(collection(db, TC_UPLOADS_COLLECTION), where("lmPcode", "==", lm), orderBy("metadata.createdAt", "desc"), limitQuery(resolveLimit(arg)));
               stopQueries.push(onSnapshot(uploadsQuery, docs => {
                 if (current !== epoch) return;
                 latest.set(lm, docs.docs.map(normalizeTcUploadDoc).filter(row=>row && row.workflowState!=="DELETED"));
                 const rows = [...latest.values()].flat().sort((a,b)=>String(b.metadata?.createdAt||"").localeCompare(String(a.metadata?.createdAt||"")));
-                updateCachedData(draft => { draft.splice(0, draft.length, ...rows); });
-              }, () => { latest.delete(lm); updateCachedData(draft => { draft.splice(0, draft.length, ...[...latest.values()].flat()); }); }));
+                updateCachedData(draft => { draft.value.splice(0, draft.value.length, ...rows); draft.ready = latest.size === scopes.length; });
+              }, error => { if (current !== epoch) return; latest.delete(lm); updateCachedData(draft => { draft.value.splice(0, draft.value.length, ...[...latest.values()].flat()); failStream(draft, error); }); }));
             });
-          }, () => updateCachedData(draft => { draft.splice(0, draft.length); }));
+          }, error => updateCachedData(draft => { draft.value.splice(0, draft.value.length); failStream(draft, error); }));
           unsubscribe = () => { epoch++; stopProfile(); stopQueries.forEach(stop => stop()); };
 
           await cacheEntryRemoved;
@@ -400,7 +402,7 @@ export const tcApi = createApi({
     }),
 
     getTcUploadById: builder.query({
-      queryFn: () => ({ data: null }),
+      queryFn: () => ({ data: pendingStream(null) }),
       async onCacheEntryAdded(
         tcId,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -417,10 +419,10 @@ export const tcApi = createApi({
             (docSnapshot) => {
               const upload = normalizeTcUploadDoc(docSnapshot);
 
-              updateCachedData(() => upload);
+              updateCachedData(draft => { draft.value = upload; draft.ready = true; draft.error = null; });
             },
             (error) => {
-              updateCachedData(() => null);
+              updateCachedData(draft => { draft.value = null; failStream(draft, error); });
               console.error("tcApi getTcUploadById stream error:", error);
             },
           );
@@ -433,7 +435,7 @@ export const tcApi = createApi({
     }),
 
     getTcRowsByTcId: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
         tcId,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
@@ -458,11 +460,11 @@ export const tcApi = createApi({
                 .sort(sortTcRows);
 
               updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...rows);
+                draft.value.splice(0, draft.value.length, ...rows); draft.ready = true;
               });
             },
             (error) => {
-              updateCachedData(() => []);
+              updateCachedData(draft => { draft.value = []; failStream(draft, error); });
               console.error("tcApi getTcRowsByTcId stream error:", error);
             },
           );
@@ -587,12 +589,18 @@ export const tcApi = createApi({
 });
 
 export const {
-  useGetTcUploadsQuery,
-  useGetTcUploadByIdQuery,
-  useGetTcRowsByTcIdQuery,
+  useGetTcUploadsQuery: useGetTcUploadsQueryRaw,
+  useGetTcUploadByIdQuery: useGetTcUploadByIdQueryRaw,
+  useGetTcRowsByTcIdQuery: useGetTcRowsByTcIdQueryRaw,
   useCreateTrnBgoWardBatchesMutation,
   useAllocateTrnBgoWardBatchesMutation,
   useUploadAndValidateTcMutation,
   useDeleteTcUploadMutation,
   useRefreshTcUploadGeofenceReadinessMutation,
 } = tcApi;
+
+export const useGetTcUploadsQuery = streamQueryHook(useGetTcUploadsQueryRaw);
+
+export const useGetTcUploadByIdQuery = streamQueryHook(useGetTcUploadByIdQueryRaw);
+
+export const useGetTcRowsByTcIdQuery = streamQueryHook(useGetTcRowsByTcIdQueryRaw);

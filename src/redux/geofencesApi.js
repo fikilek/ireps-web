@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 // src/redux/geofencesApi.js
 
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
@@ -269,7 +270,7 @@ export const geofencesApi = createApi({
 
   endpoints: (builder) => ({
     getGeoFencesByWard: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         { lmPcode, wardPcode },
@@ -299,10 +300,11 @@ export const geofencesApi = createApi({
               }))
               .sort(byName);
 
-            updateCachedData(() => rows);
-          });
+            updateCachedData(() => ({ value: rows, ready: true, error: null }));
+          }, error => updateCachedData(draft => failStream(draft, error)));
         } catch (error) {
           console.log("getGeoFencesByWard stream error", error);
+              updateCachedData(draft => failStream(draft, error));
         }
 
         await cacheEntryRemoved;
@@ -313,7 +315,7 @@ export const geofencesApi = createApi({
     // Targeted Batch rules TB-R047 (Allocation Map): every active geofence of the LM, the one map
     // that covers every Ward. Two equality filters, so no composite index is needed.
     getGeoFencesByLm: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         { lmPcode },
@@ -334,10 +336,11 @@ export const geofencesApi = createApi({
           await cacheDataLoaded;
 
           unsubscribe = onSnapshot(q, (snapshot) => {
-            updateCachedData(() => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).sort(byName));
-          });
+            updateCachedData(() => ({ value: snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).sort(byName), ready: true, error: null }));
+          }, error => updateCachedData(draft => failStream(draft, error)));
         } catch (error) {
           console.log("getGeoFencesByLm stream error", error);
+              updateCachedData(draft => failStream(draft, error));
         }
 
         await cacheEntryRemoved;
@@ -643,8 +646,8 @@ export const geofencesApi = createApi({
 });
 
 export const {
-  useGetGeoFencesByWardQuery,
-  useGetGeoFencesByLmQuery,
+  useGetGeoFencesByWardQuery: useGetGeoFencesByWardQueryRaw,
+  useGetGeoFencesByLmQuery: useGetGeoFencesByLmQueryRaw,
   useGetNoGeofenceMetersByWardQuery,
   useGetGeofenceMemberMetersByWardQuery,
   useGetGeofenceMemberPremisesByWardQuery,
@@ -653,3 +656,7 @@ export const {
   useCreateGeoFenceMutation,
   useUpdateGeoFenceMutation,
 } = geofencesApi;
+
+export const useGetGeoFencesByWardQuery = streamQueryHook(useGetGeoFencesByWardQueryRaw);
+
+export const useGetGeoFencesByLmQuery = streamQueryHook(useGetGeoFencesByLmQueryRaw);

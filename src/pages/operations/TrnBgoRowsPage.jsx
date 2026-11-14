@@ -73,7 +73,7 @@ export default function TrnBgoRowsPage() {
   );
 
   // Stream BGO batches list (for converted batches)
-  const { data: allBatches = [] } = useGetBgoBatchesByLmQuery(
+  const { data: allBatches = [], isLoading: areBatchesLoading } = useGetBgoBatchesByLmQuery(
     { lmPcode: activeLmPcode },
     { skip: !activeLmPcode },
   );
@@ -100,11 +100,11 @@ export default function TrnBgoRowsPage() {
     error: bgoRowsError,
   } = useGetBgoRowsByBatchIdQuery(
     { bgoBatchId: batchId },
-    { skip: !batchId || tcRows.length > 0 },
+    { skip: !batchId || isTcRowsLoading || tcRows.length > 0 },
   );
 
   const rawRows = tcRows.length > 0 ? tcRows : bgoRows;
-  const isLoading = isTcUploadLoading || isTcRowsLoading || (tcRows.length === 0 && isBgoRowsLoading);
+  const isLoading = isTcUploadLoading || isTcRowsLoading || (!tcUpload && areBatchesLoading) || (tcRows.length === 0 && isBgoRowsLoading);
   const rowsError = tcRowsError || bgoRowsError;
 
   // Normalize rows for IrepsTable
@@ -481,7 +481,7 @@ export default function TrnBgoRowsPage() {
       ) : null}
 
       <div style={styles.panel}>
-        <IrepsTable
+        <IrepsTable showLoadingSpinner
           rows={displayRows}
           downloads={{
             registryName: `TRN BGO Batch Rows ${batchId || ""}`.trim(),

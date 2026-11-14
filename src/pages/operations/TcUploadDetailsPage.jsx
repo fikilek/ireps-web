@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -884,7 +885,7 @@ export default function TcUploadDetailsPage() {
       </div>
 
       {isLoading ? (
-        <div style={styles.notice}>Loading real TC rows...</div>
+        <div style={styles.notice}><LoadingIndicator>Loading real TC rows...</LoadingIndicator></div>
       ) : null}
 
       {isError ? <div style={styles.errorNotice}>{errorMessage}</div> : null}

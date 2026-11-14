@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX tags are consumed by the JSX transform. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -36,7 +37,7 @@ function MapDashboard({ lmPcode, lmName, uid }) {
   const onSelect = useCallback(key => { setSelection(key); setFitRequest(value => ({ serial: value.serial + 1, lm: false })); }, []);
   return <section className="md-dashboard md-map-dashboard">
     <header className="md-dashboard-header"><div><p className="md-eyebrow">Operations / MD BGO / Map Dashboard</p><h2>MD BGO Map Dashboard</h2><p className="md-intro">Explore coverage and fieldwork by municipality, ward or geofence.</p></div><div className="md-header-actions"><span className="md-scope">{lmName}</span><Link to="/operations/bgo/dashboard">Back to MD BGO Dashboard</Link></div></header>
-    {!lmPcode ? <p className="md-notice">Select an active municipality to view its map.</p> : error ? <p role="alert" className="md-notice md-error">MD BGO Map Dashboard could not be loaded. {error}</p> : !model ? <p role="status" className="md-notice">Loading live boundaries and municipal ERF coverage…</p> : <>
+    {!lmPcode ? <p className="md-notice">Select an active municipality to view its map.</p> : error ? <p role="alert" className="md-notice md-error">MD BGO Map Dashboard could not be loaded. {error}</p> : !model ? <p role="status" className="md-notice"><LoadingIndicator>Loading live boundaries and municipal ERF coverage…</LoadingIndicator></p> : <>
       <div className="md-map-toolbar"><div className="md-map-modes" aria-label="Map aggregation mode">{modes.map(([key, label]) => <button key={key} type="button" aria-pressed={mode === key} onClick={() => { setMode(key); setSelection(""); setFitRequest(value => ({ serial: value.serial + 1, lm: false })); }}>{label}</button>)}</div>
         {mode !== "lm" ? <label>Area<select aria-label="Select map area" value={area.key === model.lm.key ? "" : area.key} onChange={event => onSelect(event.target.value)}><option value="">Whole municipality</option>{options.map(option => <option key={option.key} value={option.key}>{option.name}</option>)}</select></label> : null}
         <label>Colour by<select aria-label="Map shading" value={metric} onChange={event => setMetric(event.target.value)}><option value="coverage">Batch coverage</option><option value="completion">Work completion</option></select></label>

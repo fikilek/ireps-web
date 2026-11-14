@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX tags are consumed by the JSX transform. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -56,7 +57,7 @@ export default function MdBgoDashboardPage() {
       <div><p className="md-eyebrow">Operations / MD BGO</p><h2>MD BGO Dashboard</h2><p className="md-intro">Municipal coverage. Batch workload. Field progress.</p></div>
       <div className="md-header-actions"><span className="md-scope">{lmName}</span><Link to="/operations/bgo/dashboard/map">Map Dashboard</Link><Link to="/operations/bgo">Back to MD BGO Register</Link></div>
     </header>
-    {!lmPcode ? <p className="md-notice">Select an active municipality to view its dashboard.</p> : error ? <p className="md-notice md-error" role="alert">MD BGO data could not be loaded. {error}</p> : !model ? <p className="md-notice" role="status">Loading live MD BGO coverage and work progress…</p> : <>
+    {!lmPcode ? <p className="md-notice">Select an active municipality to view its dashboard.</p> : error ? <p className="md-notice md-error" role="alert">MD BGO data could not be loaded. {error}</p> : !model ? <p className="md-notice" role="status"><LoadingIndicator>Loading live MD BGO coverage and work progress…</LoadingIndicator></p> : <>
       <div className="md-overview">
         <section className="md-chart-panel" aria-label="Municipal ERF coverage">
           <h3>Municipal ERF coverage</h3><p className="md-subtitle">ERFs included in an MD BGO batch</p>

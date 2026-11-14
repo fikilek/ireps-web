@@ -551,7 +551,7 @@ export default function TrnBgoAllocationPage() {
 
       {/* Constituent Meters Table */}
       <div style={styles.tablePanel}>
-        <IrepsTable
+        <IrepsTable showLoadingSpinner
           rows={displayRows}
           columns={columns}
           loading={isRowsLoading || isUploadsLoading}

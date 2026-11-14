@@ -674,7 +674,7 @@ export default function TrnBgoRegisterPage() {
       </div>
 
       <div style={styles.tablePanel}>
-        <IrepsTable
+        <IrepsTable showLoadingSpinner
           title="Permanent Transaction Batches"
           columns={columns}
           rows={uploads}

@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -1467,7 +1468,7 @@ export default function TcBgoPage() {
       </div>
 
       {isLoading ? (
-        <div style={styles.notice}>Loading BGO context...</div>
+        <div style={styles.notice}><LoadingIndicator>Loading BGO context...</LoadingIndicator></div>
       ) : null}
 
       {isError ? <div style={styles.errorNotice}>{errorMessage}</div> : null}

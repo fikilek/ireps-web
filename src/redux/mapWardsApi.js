@@ -1,3 +1,4 @@
+import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
@@ -91,7 +92,7 @@ export const mapWardsApi = createApi({
     }),
 
     getWardBoundariesByLm: builder.query({
-      queryFn: () => ({ data: [] }),
+      queryFn: () => ({ data: pendingStream([]) }),
 
       async onCacheEntryAdded(
         lmPcode,
@@ -124,11 +125,12 @@ export const mapWardsApi = createApi({
                 .sort(sortWardRows);
 
               updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...rows);
+                draft.value.splice(0, draft.value.length, ...rows); draft.ready = true; draft.error = null;
               });
             },
             (error) => {
               console.error("mapWardsApi stream error:", error);
+              updateCachedData(draft => failStream(draft, error));
             },
           );
 
@@ -145,5 +147,7 @@ export const mapWardsApi = createApi({
 
 export const {
   useGetWardBoundaryByPcodeQuery,
-  useGetWardBoundariesByLmQuery,
+  useGetWardBoundariesByLmQuery: useGetWardBoundariesByLmQueryRaw,
 } = mapWardsApi;
+
+export const useGetWardBoundariesByLmQuery = streamQueryHook(useGetWardBoundariesByLmQueryRaw);

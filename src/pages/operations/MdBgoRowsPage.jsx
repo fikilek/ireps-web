@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX tags are consumed by the JSX transform. */
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -161,9 +162,9 @@ export default function MdBgoRowsPage() {
       </div>
     </section>
     {qaSource?.error ? <ReadFailure error={qaSource.error} title="Linked row QA could not be loaded" /> : null}
-    {!qaSource?.ready ? <p role="status" style={{ color: "#64748b", fontSize: 12 }}>{qaSource?.error ? "Linked QA is unavailable. No current outcome is shown." : "Loading current linked QA records…"}</p> : null}
+    {!qaSource?.ready ? <p role="status" style={{ color: "#64748b", fontSize: 12 }}>{qaSource?.error ? "Linked QA is unavailable. No current outcome is shown." : <LoadingIndicator>Loading current linked QA records…</LoadingIndicator>}</p> : null}
     <SummaryCards summary={summary} selected={selectedProgress} onSelect={filterRows} />
-    <IrepsTable
+    <IrepsTable showLoadingSpinner
       title="BGO Rows"
       columns={columns}
       toolbar={<button type="button" aria-expanded={showColumnControls} onClick={() => setShowColumnControls(current => !current)} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 10px", color: "#1d4ed8", background: "white", font: "inherit", cursor: "pointer" }}>{showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}</button>}

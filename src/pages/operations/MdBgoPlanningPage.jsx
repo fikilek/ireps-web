@@ -1,3 +1,4 @@
+import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -859,12 +860,12 @@ export default function MdBgoPlanningPage() {
   );
 
   // Authoritative Municipality Boundary
-  const { data: lmBoundary } = useGetLmBoundaryByIdQuery(lmPcode, {
+  const { data: lmBoundary, isLoading: isLmLoading } = useGetLmBoundaryByIdQuery(lmPcode, {
     skip: !lmPcode,
   });
 
   // Authoritative Ward Boundaries for LM
-  const { data: wards = [] } = useGetWardBoundariesByLmQuery(lmPcode, {
+  const { data: wards = [], isLoading: areWardsLoading } = useGetWardBoundariesByLmQuery(lmPcode, {
     skip: !lmPcode,
   });
 
@@ -965,7 +966,7 @@ export default function MdBgoPlanningPage() {
   );
 
   // Existing Geofences for selected ward
-  const { data: wardGeofences = [] } = useGetGeoFencesByWardQuery(
+  const { data: wardGeofences = [], isLoading: isGeofencesLoading } = useGetGeoFencesByWardQuery(
     { lmPcode, wardPcode: selectedWardPcode },
     { skip: !lmPcode || !selectedWardPcode },
   );
@@ -1624,6 +1625,7 @@ export default function MdBgoPlanningPage() {
           {selectedWardPcode ? (
             <div style={styles.erfCountBadge}>
               Ward {wardNumber}: {displayGeofences.length} Geofence{displayGeofences.length === 1 ? "" : "s"}
+              {isLmLoading || areWardsLoading || isErfsLoading || isPremisesLoading || isMetersLoading || isGeofencesLoading ? <LoadingIndicator>Loading planning map data…</LoadingIndicator> : null}
               {showErfsLayer || isDrawing ? ` · ${isErfsLoading ? "Loading ERFs…" : wardErfs.length + " ERFs"}` : ""}
               {showPremisesLayer ? ` · ${isPremisesLoading ? "Loading Premises…" : wardPremises.length + " Premises"}` : ""}
               {showMetersLayer ? ` · ${isMetersLoading ? "Loading Meters…" : wardMeters.length + " Meters"}` : ""}
