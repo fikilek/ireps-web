@@ -1,4 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
+import LoadingIndicator from "../../components/LoadingIndicator";
+import { batchCreator } from "../../redux/trnBgoRegisterDetails.js";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -7,6 +9,7 @@ import { useGeo } from "@/context/GeoContext";
 import {
   useGetTcUploadsQuery,
   useGetTrnBgoProgressQuery,
+  useGetTrnBgoRegisterDetailsQuery,
   useDeleteTcUploadMutation,
 } from "../../redux/tcApi";
 import IrepsTable from "../../components/table/IrepsTable";
@@ -191,6 +194,7 @@ export default function TrnBgoRegisterPage() {
 
   const batchIds = sourceUploads.filter(batch => batch.contractVersion).map(batch => batch.id).sort();
   const { currentData: progress } = useGetTrnBgoProgressQuery({ batchIds });
+  const { currentData: registerDetails } = useGetTrnBgoRegisterDetailsQuery({ batchIds: sourceUploads.map(batch => batch.id).sort() });
   const uploads = useMemo(() => sourceUploads.map(batch => {
     if (!batch.contractVersion) return { ...batch, notStartedRows: Math.max(0, Number(batch.totalRows || 0) - Number(batch.inProgressRows || 0) - Number(batch.completedRows || 0)) };
     const counts = progress?.ready && !progress.error ? progress.counts[batch.id] : null;
@@ -555,6 +559,22 @@ export default function TrnBgoRegisterPage() {
       ),
     },
     {
+      key: "geofence",
+      label: "Geofence",
+      sortable: true,
+      filter: "text",
+      value: batch => registerDetails?.[batch.id]?.text || "NAv",
+      render: batch => registerDetails?.[batch.id]?.ready ? <div title={registerDetails[batch.id].error || undefined}>{registerDetails[batch.id].text}</div> : <LoadingIndicator>Loading…</LoadingIndicator>,
+    },
+    {
+      key: "createdBy",
+      label: "Created By",
+      sortable: true,
+      filter: "text",
+      value: batchCreator,
+      render: batch => <div>{batchCreator(batch)}</div>,
+    },
+    {
       key: "delete",
       label: "Delete BGO",
       width: 96,
@@ -596,7 +616,7 @@ export default function TrnBgoRegisterPage() {
         );
       },
     },
-  ], [tickedBatchIds]);
+  ], [tickedBatchIds, registerDetails]);
 
   return (
     <section style={styles.page}>

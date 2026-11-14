@@ -1,3 +1,4 @@
+import { subscribeTrnBgoRegisterDetails } from "./trnBgoRegisterDetails.js";
 import { trnBgoProgress } from "./trnBgoProgress.js";
 import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
@@ -357,6 +358,17 @@ export const tcApi = createApi({
   reducerPath: "tcApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getTrnBgoRegisterDetails: builder.query({
+      queryFn: () => ({ data: {} }),
+      async onCacheEntryAdded({ batchIds = [] }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        let stop = () => {};
+        try {
+          await cacheDataLoaded;
+          stop = subscribeTrnBgoRegisterDetails(db, batchIds, values => updateCachedData(() => values));
+          await cacheEntryRemoved;
+        } finally { stop(); }
+      },
+    }),
     getTrnBgoProgress: builder.query({
       queryFn: () => ({ data: { counts: {}, ready: false, error: "" } }),
       async onCacheEntryAdded({ batchIds = [] }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
@@ -616,6 +628,7 @@ export const tcApi = createApi({
 
 export const {
   useGetTrnBgoProgressQuery,
+  useGetTrnBgoRegisterDetailsQuery,
   useGetTcUploadsQuery: useGetTcUploadsQueryRaw,
   useGetTcUploadByIdQuery: useGetTcUploadByIdQueryRaw,
   useGetTcRowsByTcIdQuery: useGetTcRowsByTcIdQueryRaw,
