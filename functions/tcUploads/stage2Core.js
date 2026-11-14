@@ -50,9 +50,13 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   if(!ward || wardLm!==lmPcode)return {eligible:false,message:"The authoritative Ward does not belong to the selected municipality."};
   const refs=normalizeGeoFenceRefs(ast.geofenceRefs);
   if(!refs.length)return {eligible:false,message:"Matched meter has no geofenceRefs."};
-  const canonical=validateLifecycleInstructionEligibility({trnType,astDoc:ast});
-  const existing=getEligibilityResult({trnType,astData:ast});
-  if(!canonical.ok||!existing.eligible)return {eligible:false,message:canonical.message||existing.message};
+  // Bulk disconnection origination has no current-status gate (owner, 14 Nov 2026).
+  // Individual issuance and field execution keep their separate validators.
+  if(trnType!=="METER_DISCONNECTION") {
+    const canonical=validateLifecycleInstructionEligibility({trnType,astDoc:ast});
+    const existing=getEligibilityResult({trnType,astData:ast});
+    if(!canonical.ok||!existing.eligible)return {eligible:false,message:canonical.message||existing.message};
+  }
   const registration=await checkMeterRegistration({db,astId,reader});
   if(!registration.ok)return {eligible:false,message:registration.message};
   const query=db.collection("trns").where("ast.astData.astId","==",astId).where("accessData.trnType","==",trnType).where("workflow.state","in",STATES_HOLDING_THE_METER).limit(1);

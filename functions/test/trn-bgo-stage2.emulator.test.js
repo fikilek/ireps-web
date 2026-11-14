@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { initializeApp,deleteApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { createBulkGraph, BULK_CONTRACT,digest,parseSource } from "../tcUploads/stage2Core.js";
+import { validateLifecycleInstructionEligibility } from "../meterLifecycle/helpers.js";
 import { OFFICIAL_HEADERS } from "../tcUploads/stage1Validation.js";
 import { serializeCsv } from "../tcUploads/sourceCsv.js";
 import { verifyBulkInstruction, verifyBulkExecution } from "../tcUploads/bulkPolicy.js";
@@ -17,7 +18,7 @@ test("actual bulk coordinator: atomic 200-row creation, source lineage, retry an
  const fixture=[];
  for(let i=0;i<200;i++) {
   const id=`TRN_MDIS_${stamp}_${i}`,wardPcode=`${lmPcode}${String(i).padStart(3,"0")}`,premiseId=`P_${stamp}_${i}`,no=rows[i].meterNo,parents={lmPcode,wardPcode};
-  fixture.push([`wards/${wardPcode}`,{parents:{localMunicipalityId:lmPcode},name:`Ward${i}`}],[`premises/${premiseId}`,{id:premiseId,parents,erfId:`E${i}`,erfNo:`${i}`,services:{electricityMeters:[{trnId:id}]}}],[`asts/${id}`,{id,meterType:"electricity",accessData:{parents,premise:{id:premiseId},erfNo:`${i}`},ast:{astData:{astId:id,astNo:no,meter:{type:"conventional"}}},status:{state:"CONNECTED"},geofenceRefs:[{id:"G1",name:"Geo"}]}],[`trns/${id}`,{id,accessData:{trnType:"METER_DISCOVERY",access:{hasAccess:"yes"}},ast:{astData:{astNo:no}}}],[`meter_master/${no}`,{refs:{asts:{id}}}]);
+  fixture.push([`wards/${wardPcode}`,{parents:{localMunicipalityId:lmPcode},name:`Ward${i}`}],[`premises/${premiseId}`,{id:premiseId,parents,erfId:`E${i}`,erfNo:`${i}`,services:{electricityMeters:[{trnId:id}]}}],[`asts/${id}`,{id,meterType:"electricity",accessData:{parents,premise:{id:premiseId},erfNo:`${i}`},ast:{astData:{astId:id,astNo:no,meter:{type:"conventional"}}},status:{state:i===0?"CONNECTED":"DISCONNECTED"},geofenceRefs:[{id:"G1",name:"Geo"}]}],[`trns/${id}`,{id,accessData:{trnType:"METER_DISCOVERY",access:{hasAccess:"yes"}},ast:{astData:{astNo:no}}}],[`meter_master/${no}`,{refs:{asts:{id}}}]);
  }
  for(let i=0;i<fixture.length;i+=400){const b=db.batch();fixture.slice(i,i+400).forEach(([path,data])=>b.set(db.doc(path),data));await b.commit();}
  const csv=serializeCsv([OFFICIAL_HEADERS,...rows.map(r=>OFFICIAL_HEADERS.map(h=>r[h]))]);
@@ -26,6 +27,8 @@ test("actual bulk coordinator: atomic 200-row creation, source lineage, retry an
  const data={lmPcode,trnType,selectedRowNos:rows.map(r=>r.rowNo),keep:{}};
  const [result,concurrentResult]=await Promise.all([createBulkGraph({db,uid,data,source,csv}),createBulkGraph({db,uid,data,source,csv})]);
  assert.deepEqual(concurrentResult,result);
+ assert.equal(validateLifecycleInstructionEligibility({trnType,astDoc:{status:{state:"DISCONNECTED"}}}).ok,false,"individual issuance retains its status gate");
+ assert.equal((await db.doc(`asts/TRN_MDIS_${stamp}_1`).get()).data().status.state,"DISCONNECTED","bulk creation must not change physical meter status");
  assert.equal(result.success,true);assert.equal(result.totalMeters,200);assert.equal(result.batches.length,200);
  assert.deepEqual(await createBulkGraph({db,uid,data,source,csv}),result);
  const parent=(await db.doc(`tc_uploads/${result.batches[0].tcId}`).get()).data();
