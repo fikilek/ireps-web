@@ -38,7 +38,7 @@ service firebase.storage {
     }
     match /{topFolder}/{rest=**} {
       allow read: if request.auth != null
-        && topFolder != 'generated-reports';
+        && !(topFolder in ['generated-reports', 'trn-bgo-source']);
     }
   }
 }

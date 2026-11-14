@@ -1,3 +1,4 @@
+import { verifyBulkInstruction, adoptBulkInstruction, verifyBulkExecution, deriveBulkExecutionOutcome } from "../tcUploads/bulkPolicy.js";
 import { requireActiveRoles } from "../auth/authority.js";
 import { acceptedSubmission } from "../qa/submissionReceipt.js";
 import { workflowState as canonicalWorkflowState } from "../qa/model.js";
@@ -482,6 +483,12 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
     }
 
     const { trnId, trnType, astId, premiseId } = commonCheck;
+    const bulkStored = await verifyBulkInstruction({ db, id: trnId, astId, trnType });
+    if (bulkStored) {
+      if (data.instructionTrnId !== trnId) return buildFailureResult("INVALID_BULK_INSTRUCTION", "Execute the existing assigned bulk instruction.");
+      adoptBulkInstruction(data, bulkStored);
+    } else if (data?.origin?.trnBgo) return buildFailureResult("INVALID_BULK_LINEAGE", "Client-supplied bulk lineage is not authorized.");
+
 
     const instructionTrnId = String(data?.instructionTrnId || "").trim();
 
@@ -721,6 +728,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         }
 
         const existingTrn = trnSnap.data() || {};
+        if (existingTrn.origin?.trnBgo) {
+          const currentBulk = await verifyBulkExecution({db,reader:tx,uid:actorUid,id:trnId,astId,trnType});
+          adoptBulkInstruction(data,currentBulk);
+        }
         const existingTrnType = readTrnType(existingTrn);
         const workflowState = readWorkflowState(existingTrn);
 
@@ -744,8 +755,8 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
             responsePayload = buildFailureResult("SUBMISSION_RECEIPT_UNCONFIRMED", "This submitted transaction is protected. The queued capture could not be verified; retain it for recovery.", { trnId, workflowState: canonicalWorkflowState(existingTrn) });
             return;
           }
-          const existingOutcome =
-            existingTrn?.executionOutcome?.outcome || "NAv";
+          const recordedOutcome = bulkStored ? deriveBulkExecutionOutcome(existingTrn) : existingTrn?.executionOutcome;
+          const existingOutcome = recordedOutcome?.outcome || "NAv";
 
           responsePayload = buildSuccessResult(
             trnId,
@@ -757,7 +768,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
               astStatusAfter: astDoc?.status?.state || "NAv",
               astStatusChanged: false,
               astDataChanged: false,
-              executionOutcome: existingTrn?.executionOutcome || {
+              executionOutcome: recordedOutcome || {
                 outcome: existingOutcome,
                 success: ["SUCCESS", "SUCCESSFUL_READING"].includes(existingOutcome),
               },
@@ -1015,6 +1026,13 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           }),
         };
 
+        // Modern bulk jobs retain the declared canonical root. Outcome responses
+        // are derived from the saved access/type/workflow evidence, not a new root.
+        if (bulkStored) {
+          delete trnUpdatePatch.executionOutcome;
+          delete trnUpdatePatch.targetedBatchContext;
+          if (recognisedBatch) trnUpdatePatch["origin.targetedBatch"] = recognisedBatch;
+        }
         tx.update(trnRef, trnUpdatePatch);
 
         const astPatch = actionCheck?.astPatch || {};

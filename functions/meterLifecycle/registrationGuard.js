@@ -61,7 +61,8 @@ export function premiseHoldsMeter(premiseData = {}, astId = "") {
   });
 }
 
-export async function checkMeterRegistration({ db, astId }) {
+export async function checkMeterRegistration({ db, astId, reader = null }) {
+  const read = ref => reader ? reader.get(ref) : ref.get();
   const meterId = String(astId || "").trim();
 
   if (!meterId) {
@@ -72,7 +73,7 @@ export async function checkMeterRegistration({ db, astId }) {
     );
   }
 
-  const astSnap = await db.collection("asts").doc(meterId).get();
+  const astSnap = await read(db.collection("asts").doc(meterId));
 
   if (!astSnap.exists) {
     return result(
@@ -85,7 +86,7 @@ export async function checkMeterRegistration({ db, astId }) {
   const astDoc = astSnap.data() || {};
   const checks = [check("METER_RECORD", true, meterId)];
 
-  const registrationSnap = await db.collection("trns").doc(meterId).get();
+  const registrationSnap = await read(db.collection("trns").doc(meterId));
 
   if (!registrationSnap.exists) {
     checks.push(check("REGISTRATION_TRN", false, meterId));
@@ -190,7 +191,7 @@ export async function checkMeterRegistration({ db, astId }) {
     );
   }
 
-  const masterSnap = await db.collection("meter_master").doc(meterNo).get();
+  const masterSnap = await read(db.collection("meter_master").doc(meterNo));
   const masterAstId = String(masterSnap.data()?.refs?.asts?.id || "").trim();
   const masterAgrees = masterSnap.exists && masterAstId === meterId;
 
@@ -240,7 +241,7 @@ export async function checkMeterRegistration({ db, astId }) {
     );
   }
 
-  const premiseSnap = await db.collection("premises").doc(premiseId).get();
+  const premiseSnap = await read(db.collection("premises").doc(premiseId));
 
   if (!premiseSnap.exists) {
     checks.push(check("PREMISE_LINK", false, premiseId));

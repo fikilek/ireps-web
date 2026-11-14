@@ -229,7 +229,7 @@ function getBatchReleaseState(batchData = {}) {
   return normalizeUpper(batchData?.bgo?.releaseState || batchData?.releaseState);
 }
 
-async function isActorAllowedForBgoTarget({ db, actor, target }) {
+export async function isActorAllowedForBgoTarget({ db, actor, target }) {
   if (!actor?.uid) return false;
 
   const targetType = normalizeUpper(target?.type);
@@ -682,6 +682,15 @@ export const onAcceptRejectBgoBatchCallable = onCall(async (request) => {
   try {
     const db = getFirestore();
     const data = request?.data || {};
+    const tcId = String(data.batchId || data.id || "");
+    if (tcId.startsWith("TRN_BGO_")) {
+      const tc = await db.doc(`tc_uploads/${tcId}`).get();
+      if (tc.data()?.contractVersion) {
+        const { decideTcBatch } = await import("../tcUploads/allocation.js");
+        return decideTcBatch({ db, request });
+      }
+    }
+
     const now = new Date().toISOString();
 
     const actorResult = await getBgoActorContext({ db, request });

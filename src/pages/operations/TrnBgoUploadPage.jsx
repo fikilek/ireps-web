@@ -43,10 +43,7 @@ import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
 import {
   useCreateTrnBgoWardBatchesMutation,
-  useAllocateTrnBgoWardBatchesMutation,
 } from "../../redux/tcApi";
-import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
-import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
 
 
 
@@ -385,6 +382,7 @@ export default function TrnBgoUploadPage() {
   const [fidelityWarnings, setFidelityWarnings] = useState([]);
   const validationRun = useRef(0);
   const fileInputRef = useRef(null);
+  const originalSource = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileError, setFileError] = useState("");
   const [isValidating, setIsValidating] = useState(false);
@@ -404,16 +402,8 @@ export default function TrnBgoUploadPage() {
   const [createdBatchesResult, setCreatedBatchesResult] = useState([]);
   const [batchCreateError, setBatchCreateError] = useState("");
   const [creationModalState, setCreationModalState] = useState(null); // null | { status: "PASS" | "FAIL", title, message, errors, batches, totalMeters }
-  const [allocationMode, setAllocationMode] = useState("UNALLOCATED"); // "UNALLOCATED" | "TEAM" | "SP"
-  const [selectedTeamId, setSelectedTeamId] = useState("");
-  const [selectedSpId, setSelectedSpId] = useState("");
-  const [isAllocating, setIsAllocating] = useState(false);
-  const [allocationError, setAllocationError] = useState("");
 
   const [createTrnBgoWardBatches] = useCreateTrnBgoWardBatchesMutation();
-  const [allocateTrnBgoWardBatches] = useAllocateTrnBgoWardBatchesMutation();
-  const { data: availableTeams = [] } = useGetAvailableTeamsQuery();
-  const { data: availableServiceProviders = [] } = useGetAvailableServiceProvidersQuery();
 
   const showUploadError = (message) => {
     setFileError(message);
@@ -438,6 +428,7 @@ export default function TrnBgoUploadPage() {
       const result = parseUpload(file.name.toLowerCase().endsWith(".csv") ? await file.text() : await file.arrayBuffer(), file.name);
       if (run !== validationRun.current) return;
       setFidelityWarnings(result.warnings);
+      originalSource.current = { csv: result.sourceCsv, uploadId: crypto.randomUUID() };
       if (duplicateGroups(result.rows).length) setPendingSource(result.rows);
       else await matchSourceRows(result.rows, {}, run, file);
     } catch (error) { if (run === validationRun.current) showUploadError(error.message); }
@@ -449,7 +440,7 @@ export default function TrnBgoUploadPage() {
     setValidationProgress("Verifying meters against the authoritative registry...");
     try {
       const workingRows = resolveDuplicates(sourceRows, keep);
-      const callable = httpsCallable(functions, "onValidateTrnBgoStage1Callable");
+      const callable = httpsCallable(functions, "onPreviewTrnBgoEligibilityCallable");
       const { data } = await callable({ fileName: file.name, lmPcode, lmName, trnType: selectedTrnType, rows: sourceRows, keep });
       if (run !== validationRun.current) return;
       const meterAstMap = new Map(data.meterAstEntries);
@@ -619,7 +610,7 @@ export default function TrnBgoUploadPage() {
           const resolvedErf = resolvedErfVal === "NAv" ? "" : resolvedErfVal;
 
           const isDuplicate = Boolean(row.isDuplicate);
-          const isEligible = Boolean(foundInAsts && isLmMatch && !isDuplicate);
+          const isEligible = new Map(data.eligibility || []).get(String(row.rowNo))?.eligible === true;
 
           return {
             ...row,
@@ -680,6 +671,7 @@ export default function TrnBgoUploadPage() {
   // Filtered rows based on interactive stat filter pills (Total Meters, Found in ASTS, Not Found, LM Matches, Selected Rows)
   const filteredRows = useMemo(() => {
     return parsedRows.filter((row) => {
+      if (statFilter === "ELIGIBLE" && !row.isEligible) return false;
       if (statFilter === "FOUND" && !row.foundInAsts) return false;
       if (statFilter === "NOT_FOUND" && row.foundInAsts) return false;
       if (statFilter === "LM_MATCH" && (!row.foundInAsts || !row.isLmMatch)) return false;
@@ -773,7 +765,6 @@ export default function TrnBgoUploadPage() {
       "iREPS_premiseAddress",
       "premisePropertyType",
       "iREPS_premisePropertyType",
-      "actionReason",
       "wardNo",
       "iREPS_wardNo",
       "geofence",
@@ -801,7 +792,6 @@ export default function TrnBgoUploadPage() {
       r.irepsValues?.premiseAddress || "NAv",
       r.premisePropertyType,
       r.irepsValues?.premisePropertyType || "NAv",
-      r.actionReason,
       r.wardNo,
       r.irepsValues?.wardNo || "NAv",
       r.geofence,
@@ -965,15 +955,7 @@ export default function TrnBgoUploadPage() {
         value: (r) => String(r.irepsValues?.meterStatus || r.meterStatus || "NAv"),
         sortValue: (r) => String(r.irepsValues?.meterStatus || r.meterStatus || ""),
       },
-      {
-        key: "actionReason",
-        label: "actionReason",
-        width: 200,
-        sortable: true,
-        filter: "text",
-        value: (r) => String(r.actionReason || "NAv"),
-        sortValue: (r) => String(r.actionReason || ""),
-      },
+
       {
         key: "remove",
         label: "Action",
@@ -1005,58 +987,32 @@ export default function TrnBgoUploadPage() {
   }, [handleRemoveRowFromDraft]);
 
   const handleCreateWardBatches = async () => {
-    if (wardBatchGroups.length === 0 || isCreatingBatches) return;
+    if (selectedRows.length === 0 || selectedRows.some(row => !row.isEligible) || isCreatingBatches) return;
     setIsCreatingBatches(true);
     setBatchCreateError("");
     setCreatedBatchesResult([]);
     setCreationModalState(null);
-    setAllocationMode("UNALLOCATED");
-    setSelectedTeamId("");
-    setSelectedSpId("");
-    setAllocationError("");
 
     try {
-      const effectiveLmPcode =
-        lmPcode ||
-        carriedBatchRows.find((r) => r.astLmPcode && r.astLmPcode !== "NAv")?.astLmPcode ||
-        "ZA5241";
-
-      const batchesPayload = wardBatchGroups.map((group) => ({
-        wardPcode: group.wardPcode,
-        wardLabel: group.wardLabel,
-        rows: group.rows.map((r, index) => ({
-          rowNo: String(index + 1),
-          meterNo: String(r.meterNo || ""),
-          meterPhase: String(r.meterPhase || r.irepsValues?.meterPhase || ""),
-          meterType: String(r.meterType || r.irepsValues?.meterType || ""),
-          linkedAccountNo: String(r.linkedAccountNo || r.irepsValues?.linkedAccountNo || ""),
-          premiseAddress: String(r.premiseAddress || r.irepsValues?.premiseAddress || ""),
-          premisePropertyType: String(
-            r.premisePropertyType || r.irepsValues?.premisePropertyType || ""
-          ),
-          actionReason: String(r.actionReason || ""),
-          wardNo: String(group.wardNo !== "NAv" ? group.wardNo : r.wardNo || ""),
-          geofence: String(r.geofence || r.irepsValues?.geofence || ""),
-          meterStatus: String(r.meterStatus || r.irepsValues?.meterStatus || ""),
-          erfNo: String(r.erfNo || r.irepsValues?.erfNo || ""),
-        })),
-      }));
-
-      const response = await createTrnBgoWardBatches({
-        fileName: selectedFile?.name || "TRN_BGO_UPLOAD.csv",
-        trnType: selectedTrnType,
-        lmPcode: effectiveLmPcode,
-        notes: batchNotes,
-        batches: batchesPayload,
-      }).unwrap();
+      if (!originalSource.current || !selectedRows.length || selectedRows.some(row => !row.isEligible)) throw new Error("Select eligible original source rows.");
+      const original = originalSource.current;
+      const hashBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(original.csv));
+      const hash = [...new Uint8Array(hashBytes)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+      const prepare = httpsCallable(functions, "onPrepareTrnBgoSourceCallable");
+      const { data: source } = await prepare({ uploadId: original.uploadId, hash, fileName: selectedFile.name, lmPcode, trnType: selectedTrnType });
+      if (!source.uploaded) {
+        const upload = await fetch(source.uploadUrl, { method: "PUT", headers: { "Content-Type": "text/csv; charset=utf-8" }, body: original.csv });
+        if (!upload.ok && upload.status !== 412) throw new Error("Original source transfer could not be confirmed. Retry the same request.");
+      }
+      const response = await createTrnBgoWardBatches({ sourceFileId: source.sourceFileId, lmPcode, trnType: selectedTrnType, selectedRowNos: selectedRows.map(row => String(row.rowNo)), keep: duplicateKeep }).unwrap();
 
       if (!response?.success) {
         setCreationModalState({
           status: "FAIL",
-          title: "Batch Creation Failed — Zero Batches Created",
+          title: "Batch Creation Could Not Be Confirmed",
           message:
             response?.message ||
-            "All-or-Nothing Gate: Validation failed. No batches were created.",
+            "Creation could not be confirmed. Retry the same request to recover its result.",
           errors: Array.isArray(response?.errors) ? response.errors : [],
           batches: [],
           totalMeters: 0,
@@ -1080,11 +1036,11 @@ export default function TrnBgoUploadPage() {
       const errMsg =
         err?.message ||
         err?.data?.message ||
-        "All-or-Nothing Gate: Failed to create ward batches. Zero batches were created.";
+        "Creation outcome could not be confirmed. Retry the same request safely.";
       setBatchCreateError(errMsg);
       setCreationModalState({
         status: "FAIL",
-        title: "Batch Creation Failed — Zero Batches Created",
+        title: "Batch Creation Could Not Be Confirmed",
         message: errMsg,
         errors: Array.isArray(err?.details?.errors) ? err.details.errors : [errMsg],
         batches: [],
@@ -1095,59 +1051,19 @@ export default function TrnBgoUploadPage() {
     }
   };
 
-  const handleConfirmPassModalAndNavigate = async () => {
-    if (!creationModalState || creationModalState.status !== "PASS") return;
-    const batchIds = (creationModalState.batches || []).map((b) => b.tcId).filter(Boolean);
-
-    if (allocationMode === "UNALLOCATED") {
-      navigate("/operations/trn-bgo");
-      return;
-    }
-
-    const targetType = allocationMode; // "TEAM" or "SP"
-    const targetList = targetType === "TEAM" ? availableTeams : availableServiceProviders;
-    const chosenId = targetType === "TEAM" ? selectedTeamId : selectedSpId;
-    const chosenTarget = targetList.find((item) => item.id === chosenId);
-
-    if (!chosenId || !chosenTarget) {
-      setAllocationError(
-        `Please select an active ${targetType === "TEAM" ? "Operational Team" : "Service Provider"} or choose "Leave Unallocated".`
-      );
-      return;
-    }
-
-    setIsAllocating(true);
-    setAllocationError("");
-    try {
-      await allocateTrnBgoWardBatches({
-        batchIds,
-        targetType,
-        targetId: chosenTarget.id,
-        targetName: chosenTarget.name || chosenTarget.label || chosenTarget.id,
-      }).unwrap();
-
-      navigate("/operations/trn-bgo");
-    } catch (err) {
-      setAllocationError(
-        err?.message || err?.data?.message || "Failed to allocate batches. Please try again."
-      );
-    } finally {
-      setIsAllocating(false);
-    }
-  };
+  const handleConfirmPassModalAndNavigate = () => navigate("/operations/trn-bgo");
 
   // Download Not Found CSV Report
   const handleDownloadNotFoundCsv = () => {
     const notFoundRows = parsedRows.filter((r) => !r.foundInAsts);
     if (notFoundRows.length === 0) return;
 
-    const headers = ["rowNo", "meterNo", "linkedAccountNo", "premiseAddress", "actionReason", "validationResult"];
+    const headers = ["rowNo", "meterNo", "linkedAccountNo", "premiseAddress", "validationResult"];
     const rows = notFoundRows.map((r) => [
       r.rowNo,
       r.meterNo,
       r.linkedAccountNo,
       r.premiseAddress,
-      r.actionReason,
       "NOT_FOUND_IN_ASTS",
     ]);
 
@@ -1415,20 +1331,7 @@ export default function TrnBgoUploadPage() {
             r.foundInAsts
           ),
       },
-      {
-        key: "actionReason",
-        label: "actionReason",
-        width: 190,
-        filter: "text",
-        sortable: true,
-        value: (r) => String(r.actionReason || ""),
-        sortValue: (r) => String(r.actionReason || ""),
-        render: (r) => (
-          <span style={{ fontSize: 12, color: "#475569" }}>
-            {r.actionReason || "—"}
-          </span>
-        ),
-      },
+
       {
         key: "wardNo",
         label: "wardNo",
@@ -1602,7 +1505,7 @@ export default function TrnBgoUploadPage() {
               <strong>Click to browse</strong> or drag & drop meter file here
             </p>
             <p style={styles.dropzoneSubtext}>
-              Use the official 12-column template. Maximum 200 nonblank rows; rowNo and meterNo are required.
+              Use the official 11-column template. Maximum 200 nonblank rows; rowNo and meterNo are required.
             </p>
           </div>
         </div>
@@ -1671,8 +1574,8 @@ export default function TrnBgoUploadPage() {
             <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
               <button
                 type="button"
-                disabled={!canCarryToBatch}
-                onClick={handleCarryToBatchStage}
+                disabled={!canCarryToBatch || isCreatingBatches}
+                onClick={handleCreateWardBatches}
                 style={{
                   padding: "9px 16px",
                   borderRadius: 8,
@@ -1685,13 +1588,13 @@ export default function TrnBgoUploadPage() {
                 }}
                 title={
                   ineligibleSelectedRows.length > 0
-                    ? `Cannot carry to Batch Stage: ${ineligibleSelectedRows.length} selected row(s) have eligible = False. Filter eligible = True first.`
+                    ? `Cannot create batches: ${ineligibleSelectedRows.length} selected row(s) have eligible = False. Filter eligible = True first.`
                     : selectedRows.length === 0
-                      ? "Tick 1 or more eligible = True rows in Column 1 to carry through to the Batch Draft Page"
+                      ? "Select one or more eligible rows to create Ward batches"
                       : `Open Batch Draft Page with ${selectedRows.length} eligible row(s)`
                 }
               >
-                Carry Selected to Batch Stage ({selectedRows.length}) →
+                Create Batch
               </button>
 
               <button
@@ -1727,7 +1630,7 @@ export default function TrnBgoUploadPage() {
                 Batch Stage Gate: <strong>{ineligibleSelectedRows.length}</strong> of your{" "}
                 <strong>{selectedRows.length}</strong> selected row(s) have{" "}
                 <code>eligible = False</code>. Filter{" "}
-                <code>eligible = True</code> and re-select using the Master Checkbox to carry rows to the Batch Draft Page.
+                <code>eligible = True</code> and re-select using the Master Checkbox to create Ward batches.
               </span>
             </div>
           ) : null}
@@ -1805,6 +1708,7 @@ export default function TrnBgoUploadPage() {
                       activeBg: "#eff6ff",
                       activeBorder: "#2563eb",
                     },
+                    { key: "ELIGIBLE", label: "ELIGIBLE", count: parsedRows.filter(row => row.isEligible).length, color: "#16a34a", activeBg: "#f0fdf4", activeBorder: "#16a34a" },
                     {
                       key: "SELECTED",
                       label: "Selected Rows",
@@ -1819,11 +1723,12 @@ export default function TrnBgoUploadPage() {
                       <button
                         key={stat.key}
                         type="button"
-                        onClick={() =>
-                          setStatFilter((prev) =>
-                            prev === stat.key && stat.key !== "ALL" ? "ALL" : stat.key
-                          )
-                        }
+                        onClick={() => {
+                          if (stat.key === "ELIGIBLE") {
+                            setSelectedRowKeys(previous => new Set([...previous, ...parsedRows.filter(row => row.isEligible).map(getRowSelectionKey)]));
+                            setStatFilter("ELIGIBLE");
+                          } else setStatFilter(previous => previous === stat.key && stat.key !== "ALL" ? "ALL" : stat.key);
+                        }}
                         title={
                           stat.key === "ALL"
                             ? "Show all uploaded rows"
@@ -2339,136 +2244,6 @@ export default function TrnBgoUploadPage() {
                     ))}
                   </div>
 
-                  {/* Allocation Choice: Leave Unallocated OR Allocate to TEAM / SP */}
-                  <div
-                    style={{
-                      padding: "16px",
-                      borderRadius: 10,
-                      background: "#f8fafc",
-                      border: "1px solid #e2e8f0",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                    }}
-                  >
-                    <strong style={{ fontSize: 13, color: "#0f172a" }}>
-                      Batch Allocation Option Before Opening Register:
-                    </strong>
-
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                      {[
-                        {
-                          key: "UNALLOCATED",
-                          label: "Leave Unallocated (Bank in Register)",
-                        },
-                        {
-                          key: "TEAM",
-                          label: `Allocate to Operational Team (${availableTeams.length})`,
-                        },
-                        {
-                          key: "SP",
-                          label: `Allocate to Service Provider (${availableServiceProviders.length})`,
-                        },
-                      ].map((opt) => {
-                        const active = allocationMode === opt.key;
-                        return (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() => {
-                              setAllocationMode(opt.key);
-                              setAllocationError("");
-                            }}
-                            style={{
-                              padding: "8px 14px",
-                              borderRadius: 8,
-                              border: active ? "2px solid #2563eb" : "1px solid #cbd5e1",
-                              background: active ? "#eff6ff" : "#ffffff",
-                              color: active ? "#1d4ed8" : "#334155",
-                              fontSize: 12,
-                              fontWeight: 800,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {allocationMode === "TEAM" ? (
-                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>
-                          Select Operational Team
-                        </span>
-                        <select
-                          value={selectedTeamId}
-                          onChange={(e) => setSelectedTeamId(e.target.value)}
-                          style={{
-                            padding: "9px 12px",
-                            borderRadius: 8,
-                            border: "1px solid #cbd5e1",
-                            fontSize: 13,
-                            fontWeight: 700,
-                            color: "#0f172a",
-                            background: "#ffffff",
-                          }}
-                        >
-                          <option value="">-- Select Team --</option>
-                          {availableTeams.map((team) => (
-                            <option key={team.id} value={team.id}>
-                              {team.name} ({team.memberCount || 0} members)
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-
-                    {allocationMode === "SP" ? (
-                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>
-                          Select Service Provider (SP)
-                        </span>
-                        <select
-                          value={selectedSpId}
-                          onChange={(e) => setSelectedSpId(e.target.value)}
-                          style={{
-                            padding: "9px 12px",
-                            borderRadius: 8,
-                            border: "1px solid #cbd5e1",
-                            fontSize: 13,
-                            fontWeight: 700,
-                            color: "#0f172a",
-                            background: "#ffffff",
-                          }}
-                        >
-                          <option value="">-- Select Service Provider --</option>
-                          {availableServiceProviders.map((sp) => (
-                            <option key={sp.id} value={sp.id}>
-                              {sp.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-
-                    {allocationError ? (
-                      <div
-                        role="alert"
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: 6,
-                          background: "#fef2f2",
-                          border: "1px solid #fecaca",
-                          color: "#b91c1c",
-                          fontSize: 12,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {allocationError}
-                      </div>
-                    ) : null}
-                  </div>
                 </>
               )}
             </div>
@@ -2500,29 +2275,25 @@ export default function TrnBgoUploadPage() {
                     cursor: "pointer",
                   }}
                 >
-                  Return to Batch Draft to Fix
+                  Return to File Inspection
                 </button>
               ) : (
                 <button
                   type="button"
-                  disabled={isAllocating}
+                  disabled={isCreatingBatches}
                   onClick={handleConfirmPassModalAndNavigate}
                   style={{
                     padding: "10px 20px",
                     borderRadius: 8,
                     border: "1px solid #15803d",
-                    background: isAllocating ? "#86efac" : "#16a34a",
+                    background: isCreatingBatches ? "#86efac" : "#16a34a",
                     color: "#ffffff",
                     fontSize: 13,
                     fontWeight: 800,
-                    cursor: isAllocating ? "wait" : "pointer",
+                    cursor: isCreatingBatches ? "wait" : "pointer",
                   }}
                 >
-                  {isAllocating
-                    ? "Allocating & Opening Register..."
-                    : allocationMode === "UNALLOCATED"
-                      ? "Leave Unallocated & Go to TRN BGO Register →"
-                      : `Allocate ${creationModalState.batches.length} Batch(es) & Go to TRN BGO Register →`}
+                  Go to TRN BGO Register
                 </button>
               )}
             </div>

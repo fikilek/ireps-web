@@ -387,16 +387,7 @@ export default function TrnBgoRowsPage() {
       sortValue: (r) => r.accountNo,
       render: (r) => <span style={{ fontSize: 12 }}>{r.accountNo}</span>,
     },
-    {
-      key: "actionReason",
-      label: "Action Reason",
-      width: 140,
-      filter: "text",
-      sortable: true,
-      value: (r) => r.actionReason,
-      sortValue: (r) => r.actionReason,
-      render: (r) => <span style={{ fontSize: 12, color: "#475569" }}>{r.actionReason}</span>,
-    },
+
   ], []);
 
   return (

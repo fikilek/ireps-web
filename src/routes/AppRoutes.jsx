@@ -1,3 +1,4 @@
+import TrnBgoSourcePage from "../pages/operations/TrnBgoSourcePage";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import ProtectedRoute from "../auth/ProtectedRoute";
@@ -599,6 +600,7 @@ export default function AppRoutes() {
             }
           />
 
+          <Route path="/operations/trn-bgo/source/:sourceFileId" element={<RoleRoute allowedRoles={MANAGEMENT_ROLES}><TrnBgoSourcePage /></RoleRoute>} />
           <Route
             path="/operations/tc-uploads/:tcId"
             element={

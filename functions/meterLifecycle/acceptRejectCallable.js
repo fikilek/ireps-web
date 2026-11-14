@@ -488,6 +488,10 @@ export const onAcceptRejectLifecycleInstructionCallable = onCall(
         }
 
         for (const row of trnRows) {
+          if (row.data?.origin?.trnBgo) {
+            responsePayload=buildFailureResult("INSTRUCTION_NOT_EXECUTABLE","Accept or reject this work through its TRN BGO Ward batch.",{trnId:row.trnId});
+            return;
+          }
           const trnType = getTrnType(row.data) || "NAv";
           const workflowState = normalizeUpper(row.data?.workflow?.state);
           const targets = getAssignmentTargets(row.data);

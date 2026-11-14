@@ -1,3 +1,5 @@
+import { useGetTcUploadsQuery, useAllocateTrnBgoWardBatchesMutation } from "../../redux/tcApi";
+import { buildTrnAllocationModel, toggleTrnAllocationSelection } from "./md-bgo/trnAllocationModel";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -53,12 +55,14 @@ function MdBgoAllocationPolygons({ items, selectedIds, onToggle }) {
     items.forEach(item => {
       const path = getGeoFencePath(item.fence); if (path.length < 3) return;
       const selected = selectedIds.includes(item.bgoBatchId); const style = COLORS[selected ? "SELECTED" : item.state];
-      const polygon = new window.google.maps.Polygon({ paths: path, strokeColor: style.stroke, strokeOpacity: 1, strokeWeight: selected ? 4 : 2,
+      for (const paths of item.fence.allocationPolygons || [path]) {
+      const polygon = new window.google.maps.Polygon({ paths, strokeColor: style.stroke, strokeOpacity: 1, strokeWeight: selected ? 4 : 2,
         fillColor: style.fill, fillOpacity: selected ? 0.5 : 0.34, clickable: item.state === MD_BGO_ALLOCATION_STATES.READY, zIndex: selected ? 80 : 60, map });
       if (item.state === MD_BGO_ALLOCATION_STATES.READY) polygon.addListener("click", () => onToggle(item));
       shapes.push(polygon);
+      }
       const point = batchLabelPoint(item.fence);
-      if (point) { const overlay = new LabelOverlay({ point, lines: [item.name, `${item.erfCount} ERFs`, ...(item.state === MD_BGO_ALLOCATION_STATES.ISSUED && item.targetName ? [item.targetName] : [])], color: style.label, bold: selected }); overlay.setMap(map); shapes.push(overlay); }
+      if (point) { const overlay = new LabelOverlay({ point, lines: [item.name, `${item.erfCount} ${item.unitLabel || "ERFs"}`, ...(item.state === MD_BGO_ALLOCATION_STATES.ISSUED && item.targetName ? [item.targetName] : [])], color: style.label, bold: selected }); overlay.setMap(map); shapes.push(overlay); }
     });
     return () => shapes.forEach(shape => shape.setMap(null));
   }, [map, items, selectedIds, onToggle]);
@@ -76,19 +80,26 @@ function FitBatches({ items, request }) {
   return null;
 }
 
-export default function MdBgoAllocationPage() {
+export default function MdBgoAllocationPage({ bulkMode = false }) {
+  const registerPath = bulkMode ? "/operations/trn-bgo" : "/operations/bgo";
+  const allocationPath = bulkMode ? "/operations/trn-bgo/allocation" : "/operations/bgo/allocation";
+  const bulkLabel = bulkMode ? "TRN BGO" : "MD BGO";
+  const unitLabel = bulkMode ? "meters" : "ERFs";
   const auth = useAuth(); const { geoState } = useGeo(); const [searchParams] = useSearchParams(); const navigate = useNavigate();
   const lmPcode = activeLm(auth, geoState); const mncId = getActorMncServiceProviderId(auth);
-  const { selectedIds: tickedIds, toggle: toggleRegisterTick } = useMdBgoAllocationSelection(lmPcode);
-  const { data: batches = EMPTY, isLoading, error: batchError } = useGetBgoBatchesByLmQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode });
+  const { selectedIds: tickedIds, toggle: toggleRegisterTick } = useMdBgoAllocationSelection(bulkMode ? `TRN:${lmPcode}` : lmPcode);
+  const mdBatches = useGetBgoBatchesByLmQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode || bulkMode });
+  const tcBatches = useGetTcUploadsQuery({ lmPcode, limit: 1000 }, { skip: !lmPcode || !bulkMode });
+  const { data: batches = EMPTY, isLoading, error: batchError } = bulkMode ? tcBatches : mdBatches;
   const { data: geofences = EMPTY } = useGetGeoFencesByLmQuery({ lmPcode }, { skip: !lmPcode });
   const { data: lmWards = EMPTY } = useGetWardBoundariesByLmQuery(lmPcode, { skip: !lmPcode });
   const { data: directory } = useGetTargetedBatchAllocationDirectoryQuery(mncId || skipToken);
   const [allocateTogether] = useAllocateMdBgoBatchesTogetherMutation();
+  const [allocateBulk] = useAllocateTrnBgoWardBatchesMutation();
   const [selectedIds, setSelectedIds] = useState(() => text(searchParams.get("batchId")) ? [text(searchParams.get("batchId"))] : []); const [target, setTarget] = useState(null); const [dragTarget, setDragTarget] = useState(null); const [dropFocused, setDropFocused] = useState(false); const [showAll, setShowAll] = useState(false);
   const [fitRequest, setFitRequest] = useState(0); const [message, setMessage] = useState(""); const [windowView, setWindowView] = useState(null); const [busy, setBusy] = useState(false);
   const deepLinkBatch = text(searchParams.get("batchId"));
-  const model = useMemo(() => buildMdBgoAllocationModel({ batches, geofences }), [batches, geofences]);
+  const model = useMemo(() => bulkMode ? buildTrnAllocationModel({batches, wards:lmWards}) : buildMdBgoAllocationModel({ batches, geofences }), [batches, geofences, bulkMode, lmWards]);
   const shown = useMemo(() => showAll ? model.items : model.items.filter(item => tickedIds.includes(item.bgoBatchId) || item.bgoBatchId === deepLinkBatch), [model.items, showAll, tickedIds, deepLinkBatch]);
   const selectionIds = selectedIds;
   const selection = useMemo(() => mdBgoAllocationSelection(shown, selectionIds), [shown, selectionIds]);
@@ -110,8 +121,8 @@ export default function MdBgoAllocationPage() {
   }, [selection.dropped]);
 
   const toggle = useCallback(item => {
-    setSelectedIds(current => { const next = toggleMdBgoSelection(current, item); setMessage(next.message); return next.ids; });
-  }, []);
+    setSelectedIds(current => { const next = bulkMode ? toggleTrnAllocationSelection(current,item,model.items) : toggleMdBgoSelection(current, item); setMessage(next.message); return next.ids; });
+  }, [bulkMode,model.items]);
   const chooseTarget = candidate => { const value = buildTargetPayload(candidate); if (value) setTarget(value); };
   const handleTargetDrop = event => {
     event.preventDefault(); setDropFocused(false);
@@ -120,23 +131,24 @@ export default function MdBgoAllocationPage() {
     if (candidate) chooseTarget(candidate);
     setDragTarget(null);
   };
-  const allocate = () => { if (!selection.batches || !target || locked) return; setWindowView({ kind: "confirm", selection, target }); };
+  const allocate = () => { if (!selection.batches || !target || locked || (bulkMode && selection.erfs>200)) return; setWindowView({ kind: "confirm", selection, target }); };
   const confirm = async () => {
     if (windowView?.kind !== "confirm" || busy) return;
     const live = mdBgoAllocationSelection(shown, selectionIds);
-    if (live.items.map(item => item.bgoBatchId).join(",") !== windowView.selection.items.map(item => item.bgoBatchId).join(",")) {
+    if ((bulkMode && live.erfs>200) || live.items.map(item => item.bgoBatchId).join(",") !== windowView.selection.items.map(item => item.bgoBatchId).join(",")) {
       setWindowView({ kind: "failed", selection: windowView.selection, target: windowView.target, title: "Nothing was allocated", tone: "error", lines: ["The batch selection changed while confirmation was open.", "Review the allocation window and try again."] }); return;
     }
     const { selection: submitted, target: chosen } = windowView; setWindowView({ kind: "allocating", selection: submitted, target: chosen }); setBusy(true);
     try {
-      const result = await allocateTogether({ bgoBatchIds: submitted.items.map(item => item.bgoBatchId), targetType: chosen.type, targetId: chosen.id }).unwrap();
-      setSelectedIds([]); navigate("/operations/bgo/allocation", { replace: true }); setWindowView({ kind: "done", selection: submitted, target: chosen, issuedIds: result.issuedBgoBatchIds || submitted.items.map(item => item.bgoBatchId), targetName: result.target?.name || chosen.name });
+      const result = bulkMode ? await allocateBulk({ batchIds: submitted.items.map(item=>item.bgoBatchId), targetType:chosen.type,targetId:chosen.id }).unwrap() : await allocateTogether({ bgoBatchIds: submitted.items.map(item => item.bgoBatchId), targetType: chosen.type, targetId: chosen.id }).unwrap();
+      if (result.success === false) throw { data:result };
+      setSelectedIds([]); navigate(allocationPath, { replace: true }); setWindowView({ kind: "done", selection: submitted, target: chosen, issuedIds: result.issuedBgoBatchIds || submitted.items.map(item => item.bgoBatchId), targetName: result.target?.name || chosen.name });
     } catch (failure) { setWindowView({ selection: submitted, target: chosen, ...mdBgoAllocationFailure(failure, submitted, chosen) }); }
     finally { setBusy(false); }
   };
   const closeWindow = () => {
     const view = windowView; if (!view || view.kind === "allocating") return;
-    if (view.kind === "done") { navigate("/operations/bgo"); return; }
+    if (view.kind === "done") { navigate(registerPath); return; }
     if (view.kind === "failed" || view.kind === "uncertain") setMessage(view.lines?.[0] || view.title);
     setWindowView(null);
   };
@@ -145,10 +157,10 @@ export default function MdBgoAllocationPage() {
   const allTargets = [...teams.map(item => ({ ...item, type: "TEAM" })), ...serviceProviders.map(item => ({ ...item, type: "SP" }))];
 
   return <section style={styles.page}>
-    <Link to="/operations/bgo" style={styles.back}>← Back to MD BGO Register</Link>
-    <header><p style={styles.eyebrow}>Operations / MD BGO Register</p><h1 style={styles.title}>MD BGO Allocation Map</h1>
-      <p style={styles.subtitle}>Select ready MD BGO batches on the map and issue their ERF work items together to one TEAM or SP (up to {MD_BGO_ALLOCATION_MAX} batches).</p></header>
-    {model.readyNotOnMap ? <div style={styles.note}>{model.readyNotOnMap} ready batch(es) have no linked geofence and are unavailable on this map.</div> : null}
+    <Link to={registerPath} style={styles.back}>← Back to {bulkLabel} Register</Link>
+    <header><p style={styles.eyebrow}>Operations / {bulkLabel} Register</p><h1 style={styles.title}>{bulkLabel} Allocation Map</h1>
+      <p style={styles.subtitle}>Select ready {bulkLabel} batches on the map and issue their {unitLabel} work items together to one TEAM or SP (up to {MD_BGO_ALLOCATION_MAX} batches).</p></header>
+    {model.readyNotOnMap ? <div style={styles.note}>{model.readyNotOnMap} ready batch(es) have no authoritative boundary and are unavailable on this map.</div> : null}
     {batchError ? <div role="alert" style={styles.error}>{batchError?.data?.message || batchError?.message || "MD BGO batches could not be loaded."}</div> : null}
     <div style={styles.layout}>
       <div style={styles.mapPane}>
@@ -157,21 +169,22 @@ export default function MdBgoAllocationPage() {
           <label><input type="checkbox" checked={showAll} onChange={event => setShowAll(event.target.checked)} /> Show all batches</label>
           <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Fit to map</button>
         </div>
-        <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}>Loading batches…</p> : !shown.length ? <p style={styles.status}>Tick batches in the MD BGO Register, or choose Show all batches.</p> :
+        <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}>Loading batches…</p> : !shown.length ? <p style={styles.status}>Choose Show all batches, or open allocation from the Register.</p> :
           <APIProvider apiKey={key}><GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={12} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
             <WardBoundaryPolygons wards={wards} /><MdBgoAllocationPolygons items={shown} selectedIds={selectedIds} onToggle={toggle} /><FitBatches items={shown} request={fitRequest} />
           </GoogleMap></APIProvider>}</div>
       </div>
       <aside style={styles.window}>
         <h2 style={styles.windowTitle}>Allocation window</h2>
-        <p style={styles.totals}>{selection.batches ? `${selection.batches} batch(es) · ${selection.erfs} ERFs · ${selection.wards.join(", ")}` : "Click ready geofences on the map to add them here."}</p>
-        <ul style={styles.list}>{selection.items.map(item => <li key={item.bgoBatchId} style={styles.listItem}><span><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} ERFs · {item.bgoBatchId}</small></span><button type="button" disabled={locked} onClick={() => toggle(item)} aria-label={`Remove ${item.name}`}>×</button></li>)}</ul>
+        <p style={styles.totals}>{selection.batches ? `${selection.batches} batch(es) · ${selection.erfs} ${unitLabel} · ${selection.wards.join(", ")}` : "Click ready geofences on the map to add them here."}</p>
+        {bulkMode && <p style={styles.totals}>Maximum 15 Ward batches and 200 meters per allocation.</p>}
+        <ul style={styles.list}>{selection.items.map(item => <li key={item.bgoBatchId} style={styles.listItem}><span><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} {unitLabel} · {item.bgoBatchId}</small></span><button type="button" disabled={locked} onClick={() => toggle(item)} aria-label={`Remove ${item.name}`}>×</button></li>)}</ul>
         <div style={{ ...styles.dropZone, ...(dropFocused ? styles.dropFocused : {}) }} onDragOver={event => { event.preventDefault(); setDropFocused(true); }} onDragLeave={() => setDropFocused(false)} onDrop={handleTargetDrop}>
           {target ? <>Issuing to <strong>{target.name}</strong> ({target.type}) <button type="button" disabled={locked} onClick={() => setTarget(null)}>change</button></> : "Drag a TEAM or SP here, or click one below."}
         </div>
         <div style={styles.targets}>{allTargets.map(candidate => { const value = buildTargetPayload(candidate); if (!value) return null; const chosen = target?.type === value.type && target?.id === value.id; return <button key={`${value.type}:${value.id}`} type="button" disabled={locked} draggable={!locked} onDragStart={event => { setDragTarget(value); event.dataTransfer.setData("application/json", JSON.stringify(value)); event.dataTransfer.effectAllowed = "copy"; }} onDragEnd={() => { setDragTarget(null); setDropFocused(false); }} onClick={() => chooseTarget(candidate)} style={{ ...styles.target, ...(chosen ? styles.targetChosen : {}) }}><strong>{value.name}</strong><small>{value.type}</small></button>; })}</div>
         {message ? <p role="status" style={styles.message}>{message}</p> : null}
-        <button type="button" disabled={!selection.batches || !target || locked} style={{ ...styles.allocate, ...(!selection.batches || !target || locked ? styles.disabled : {}) }} onClick={allocate}>{busy ? "Issuing…" : !selection.batches ? "Select batches on the map" : !target ? "Choose a TEAM or SP" : `Issue ${selection.batches} batch(es) · ${selection.erfs} ERFs to ${target.name}`}</button>
+        <button type="button" disabled={!selection.batches || !target || locked || (bulkMode && selection.erfs>200)} style={{ ...styles.allocate, ...(!selection.batches || !target || locked ? styles.disabled : {}) }} onClick={allocate}>{busy ? "Issuing…" : !selection.batches ? "Select batches on the map" : !target ? "Choose a TEAM or SP" : `Issue ${selection.batches} batch(es) · ${selection.erfs} ${unitLabel} to ${target.name}`}</button>
       </aside>
     </div>
     <AllocationWindow view={windowView} onConfirm={confirm} onClose={closeWindow} />
@@ -179,11 +192,12 @@ export default function MdBgoAllocationPage() {
 }
 
 function AllocationWindow({ view, onConfirm, onClose }) {
+  const unitLabel = view?.selection?.items?.[0]?.unitLabel || "ERFs";
   if (!view) return null;
   const { selection, target } = view;
-  const rows = <ul style={styles.modalList}>{selection.items.map(item => <li key={item.bgoBatchId}><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} ERFs · {item.bgoBatchId}</small></li>)}</ul>;
-  if (view.kind === "confirm") return <SubmitWindow title={`Issue ${selection.batches} batch(es) to ${target.name}`} escapeAction={onClose} lines={[`The selected MD BGO batches will be issued to ${target.type === "TEAM" ? "TEAM" : "SP"} ${target.name}.`]} actions={[{ label: "Issue batches", primary: true, onClick: onConfirm }, { label: "Cancel", onClick: onClose }]}>{rows}<p style={styles.modalNote}>All selected batches are validated and issued together, or none are changed.</p></SubmitWindow>;
-  if (view.kind === "allocating") return <SubmitWindow title={`Issuing batches to ${target.name}…`} working lines={[`${selection.batches} batch(es) · ${selection.erfs} ERFs`, "Please wait while iREPS validates and issues the complete selection."]} />;
+  const rows = <ul style={styles.modalList}>{selection.items.map(item => <li key={item.bgoBatchId}><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} {unitLabel} · {item.bgoBatchId}</small></li>)}</ul>;
+  if (view.kind === "confirm") return <SubmitWindow title={`Issue ${selection.batches} batch(es) to ${target.name}`} escapeAction={onClose} lines={[`The selected ${selection.items[0]?.unitLabel === "meters" ? "TRN BGO" : "MD BGO"} batches will be issued to ${target.type === "TEAM" ? "TEAM" : "SP"} ${target.name}.`]} actions={[{ label: "Issue batches", primary: true, onClick: onConfirm }, { label: "Cancel", onClick: onClose }]}>{rows}<p style={styles.modalNote}>All selected batches are validated and issued together, or none are changed.</p></SubmitWindow>;
+  if (view.kind === "allocating") return <SubmitWindow title={`Issuing batches to ${target.name}…`} working lines={[`${selection.batches} batch(es) · ${selection.erfs} ${unitLabel}`, "Please wait while iREPS validates and issues the complete selection."]} />;
   if (view.kind === "done") return <SubmitWindow title={`${view.issuedIds.length} batch(es) issued to ${view.targetName}`} escapeAction={onClose} lines={["They now wait for the assigned TEAM or SP to accept them."]} actions={[{ label: "OK", primary: true, onClick: onClose }]}>{rows}</SubmitWindow>;
   return <SubmitWindow title={view.title} tone={view.tone} escapeAction={onClose} lines={view.lines} actions={[{ label: "OK", primary: true, onClick: onClose }]} />;
 }

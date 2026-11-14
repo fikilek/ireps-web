@@ -1004,6 +1004,7 @@ export const onCreateBgoCallable = onCall(async (request) => {
     }
 
     const tcUpload = tcUploadSnap.data() || {};
+    if (tcUpload.contractVersion) return buildFailureResult("BULK_ALREADY_ORIGINATED", "This Ward batch already has canonical transactions. Use its existing allocation workflow.");
     const uploadTrnType = String(tcUpload?.trnType || "").trim().toUpperCase();
 
     if (uploadTrnType && uploadTrnType !== trnType) {

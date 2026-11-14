@@ -1,3 +1,4 @@
+import { verifyBulkExecution } from "../tcUploads/bulkPolicy.js";
 import { requireActiveRoles } from "../auth/authority.js";
 import { acceptedSubmission } from "../qa/submissionReceipt.js";
 import { workflowState } from "../qa/model.js";
@@ -58,6 +59,10 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     await requireActiveRoles(db, actor.uid, ["FWR", "SPV", "MNG"], tx);
     const previous = await tx.get(trnRef);
     const existing = previous.exists ? previous.data() : null;
+    if (existing?.origin?.trnBgo) {
+      if (!isOffice || data.instructionTrnId !== trnId) fail("INSTRUCTION_NOT_ASSIGNED", "Execute the assigned existing bulk instruction.");
+      await verifyBulkExecution({db,reader:tx,uid:actor.uid,id:trnId,astId,trnType:access.trnType});
+    }
     if (existing && (!isOffice || isSubmittedState(existing.workflow?.state))) {
       const sameVisit = existing.accessData?.access?.hasAccess === "no" && existing.accessData?.trnType === access.trnType &&
         existing.ast?.astData?.astId === astId && existing.accessData?.premise?.id === premiseId &&

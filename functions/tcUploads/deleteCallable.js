@@ -1,3 +1,4 @@
+import { deleteModernTc } from "./allocation.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { getFirestore } from "firebase-admin/firestore";
@@ -316,6 +317,8 @@ export const onDeleteTcUploadCallable = onCall(
       id: uploadSnapshot.id,
       ...(uploadSnapshot.data() || {}),
     };
+
+    if (uploadData.contractVersion) return deleteModernTc({ db, request });
 
     const rowDocs = await getTcRowDocs({ db, tcId });
     const rowUsageEvidence = rowDocs

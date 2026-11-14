@@ -288,6 +288,7 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
         );
       }
 
+      if (data?.origin?.trnBgo) return buildFailureResult("INVALID_BULK_ORIGIN", "Use the bulk creation workflow for bulk instructions.");
       const actorUid = authContext.uid;
       const actorName = getActorNameFromRequest(request);
       const now = new Date().toISOString();
@@ -421,6 +422,8 @@ export const onCreateMeterLifecycleInstructionCallable = onCall(
       let responsePayload = null;
 
       await db.runTransaction(async (tx) => {
+        const currentRegistration = await checkMeterRegistration({ db, astId, reader: tx });
+        if (!currentRegistration.ok) { responsePayload = buildFailureResult(currentRegistration.code, currentRegistration.message); return; }
         const trnSnap = await tx.get(trnRef);
         const astSnap = await tx.get(astRef);
         const premiseSnap = await tx.get(premiseRef);

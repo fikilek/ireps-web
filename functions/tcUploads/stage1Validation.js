@@ -1,7 +1,7 @@
 // Shared transient Stage 1 contract. Does not change stored TC or TRN contracts.
-export const OFFICIAL_HEADERS = ["rowNo", "meterNo", "meterPhase", "meterType", "linkedAccountNo", "premiseAddress", "premisePropertyType", "actionReason", "wardNo", "geofence", "meterStatus", "erfNo"];
+export const OFFICIAL_HEADERS = ["rowNo", "meterNo", "meterPhase", "meterType", "linkedAccountNo", "premiseAddress", "premisePropertyType", "wardNo", "geofence", "meterStatus", "erfNo"];
 export const MAX_UPLOAD_ROWS = 200;
-export const UPLOAD_TRN_TYPES = ["METER_DISCONNECTION", "METER_RECONNECTION", "METER_INSPECTION", "METER_REMOVAL", "METER_INSTALLATION", "METER_COMMISSIONING", "METER_READING"];
+export const UPLOAD_TRN_TYPES = ["METER_DISCONNECTION", "METER_RECONNECTION", "METER_INSPECTION", "METER_REMOVAL", "METER_READING"];
 export const meterKey = (value) => String(value ?? "").trim().toUpperCase();
 
 export function validateSourceRows(rows) {

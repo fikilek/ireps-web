@@ -1,3 +1,4 @@
+import { isVerifiedBulk } from "../tcUploads/bulkPolicy.js";
 import { isQaPassLocked } from "../qa/model.js";
 import { buildRegistrationMetadata } from "../registration/registrationMetadata.js";
 import {
@@ -1235,7 +1236,7 @@ export function validateMeterReading({ data, astDoc, actorUid = "NAv", actorName
     };
   }
 
-  if (!instructionText && normalizeUpper(data?.origin?.channel) === "OFFICE") {
+  if (!isVerifiedBulk(data) && !instructionText && normalizeUpper(data?.origin?.channel) === "OFFICE") {
     return {
       ok: false,
       code: "METER_READING_INSTRUCTION_REQUIRED",
@@ -1790,7 +1791,7 @@ export function validateMeterInspection({ data, astDoc }) {
     !!String(data?.instructionTrnId || "").trim() ||
     normalizeUpper(data?.origin?.channel || "") === "OFFICE";
 
-  if (isOfficeInspection && !instructionText) {
+  if (!isVerifiedBulk(data) && isOfficeInspection && !instructionText) {
     return {
       ok: false,
       code: "INSPECTION_INSTRUCTION_REQUIRED",
@@ -2278,7 +2279,7 @@ export function validateMeterRemoval({ data, astDoc }) {
   }
 
   // MN-R001 6.1: every removal says why, the field channel included.
-  if (!instructionText) {
+  if (!isVerifiedBulk(data) && !instructionText) {
     return {
       ok: false,
       code: "REMOVAL_INSTRUCTION_REQUIRED",
@@ -2628,7 +2629,7 @@ export function buildLifecycleTrnPayload({
           })
         : undefined,
 
-    assignment: sanitizeAssignment(data?.assignment || {}),
+    assignment: isVerifiedBulk(data) ? { ...sanitizeAssignment(data?.assignment || {}), instruction: { ...data.assignment.instruction } } : sanitizeAssignment(data?.assignment || {}),
 
     meterType: astDoc?.meterType || data?.meterType || "NAv",
 
@@ -2925,7 +2926,7 @@ export function validateMeterDisconnection({ data, astDoc }) {
     data?.assignment?.instruction?.reason?.code || "",
   ).trim();
 
-  if (!instructionText && !reasonCode) {
+  if (!isVerifiedBulk(data) && !instructionText && !reasonCode) {
     return {
       ok: false,
       code: "DISCONNECTION_INSTRUCTION_REQUIRED",
@@ -3055,7 +3056,7 @@ export function validateMeterReconnection({ data, astDoc }) {
   }
 
   if (
-    !instructionText &&
+    !isVerifiedBulk(data) && !instructionText &&
     normalizeUpper(data?.origin?.channel) !== "FIELD"
   ) {
     return {
@@ -3358,6 +3359,7 @@ export function sanitizeOrigin(origin = {}, fallback = {}) {
   return {
     channel: allowedChannels.includes(channel) ? channel : "OFFICE",
     source: source || "TRN_ORIGIN",
+    ...(origin?.trnBgo ? { trnBgo: { ...origin.trnBgo } } : {}),
     parentInspectionTrnId:
       origin?.parentInspectionTrnId || fallback?.parentInspectionTrnId || null,
     parentTrnId: parentTrnId && allowedParents.includes(parentTrnType) ? parentTrnId : null,
@@ -3455,7 +3457,7 @@ export function buildLifecycleInstructionTrnPayload({
       parentInspectionTrnId: null,
     }),
 
-    assignment: sanitizeAssignment(data?.assignment || {}),
+    assignment: isVerifiedBulk(data) ? { ...sanitizeAssignment(data?.assignment || {}), instruction: { ...data.assignment.instruction } } : sanitizeAssignment(data?.assignment || {}),
 
     workflow: {
       // `DR-R001` 5: pressing the launch button CREATES the transaction. It

@@ -1,29 +1,15 @@
+import { mncIdFor, readMdAllocationTarget } from "./mdAllocationPolicy.js";
 import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { Timestamp, getFirestore } from "firebase-admin/firestore";
 import { buildBmdBgoBatchHistoryDoc, buildBmdBgoNotificationRecord } from "./trnFactory.js";
 import { BGO_COLLECTIONS, buildFailureResult, buildSuccessResult } from "./helpers.js";
 import { getActorNameFromRequest, resolveTargetedBatchCreateAuthority } from "../targetedBatches/helpers.js";
-import { serviceProviderName } from "../serviceProviders/serviceProviderName.js";
 
 const MAX_BATCHES = 15;
 const text = value => String(value ?? "").trim();
 const upper = value => text(value).toUpperCase();
 const fail = (code, message, details = {}) => Object.assign(new Error(message), { code, details });
-
-function mncIdFor(request, authority) {
-  const token = request?.auth?.token || {};
-  const profile = authority?.profile || {};
-  return text(token.serviceProviderId || token.employmentServiceProviderId || token.mncServiceProviderId || profile.profile?.employment?.serviceProvider?.id || profile.employment?.serviceProvider?.id || profile.serviceProvider?.id || authority?.serviceProviderId);
-}
-
-function targetName(data, id, type) {
-  return text(type === "TEAM" ? data.team?.name || data.name || id : serviceProviderName(data) || id);
-}
-
-function isSubcontractorOf(data, mncId) {
-  return Array.isArray(data.clients) && data.clients.some(client => upper(client.clientType) === "SP" && upper(client.relationshipType) === "SUBC" && text(client.id) === mncId);
-}
 
 export const onAllocateMdBgoBatchesTogetherCallable = onCall({ memory: "512MiB", timeoutSeconds: 120 }, async request => {
   const db = getFirestore();
@@ -42,7 +28,6 @@ export const onAllocateMdBgoBatchesTogetherCallable = onCall({ memory: "512MiB",
     if (!["TEAM", "SP"].includes(targetType)) return buildFailureResult("INVALID_ALLOCATION_TARGET_TYPE", "targetType must be TEAM or SP.");
     if (!targetId) return buildFailureResult("ALLOCATION_TARGET_ID_REQUIRED", "targetId is required.");
 
-    const targetRef = db.collection(targetType === "TEAM" ? "teams" : "serviceProviders").doc(targetId);
     const batchRefs = batchIds.map(id => db.collection(BGO_COLLECTIONS.batches).doc(id));
     const historyRefs = batchRefs.map(ref => ref.collection("history").doc());
     const notificationRefs = batchIds.map(() => db.collection(BGO_COLLECTIONS.notifications).doc());
@@ -50,14 +35,7 @@ export const onAllocateMdBgoBatchesTogetherCallable = onCall({ memory: "512MiB",
     const issuedAt = Timestamp.now();
 
     const result = await db.runTransaction(async transaction => {
-      const targetSnapshot = await transaction.get(targetRef);
-      if (!targetSnapshot.exists) throw fail(`ALLOCATION_${targetType}_NOT_FOUND`, `${targetType} ${targetId} was not found.`);
-      const targetData = targetSnapshot.data() || {};
-      const status = upper(targetData.team?.status || targetData.status || targetData.lifecycleStatus);
-      if (status !== "ACTIVE") throw fail(`ALLOCATION_${targetType}_NOT_ACTIVE`, `${targetType} ${targetId} is not ACTIVE.`);
-      if (targetType === "TEAM" && text(targetData.ownership?.mncServiceProviderId) !== actorMncId) throw fail("ALLOCATION_TEAM_OUTSIDE_MNC", "The selected TEAM does not belong to the authorised MNC.");
-      if (targetType === "SP" && !isSubcontractorOf(targetData, actorMncId)) throw fail("ALLOCATION_SERVICE_PROVIDER_OUTSIDE_MNC", "The selected SP is not a subcontractor of the authorised MNC.");
-      const target = { type: targetType, id: targetId, name: targetName(targetData, targetId, targetType), email: text(targetData.email), phone: text(targetData.phone) };
+      const target = await readMdAllocationTarget({ db, transaction, targetType, targetId, actorMncId });
       const snapshots = await Promise.all(batchRefs.map(ref => transaction.get(ref)));
       for (let index = 0; index < snapshots.length; index += 1) {
         const snapshot = snapshots[index];

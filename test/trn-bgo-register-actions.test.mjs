@@ -126,19 +126,10 @@ test("TRN-BGO-R016 Routes: AppRoutes maps /operations/trn-bgo/allocation and /op
   );
 });
 
-test("TRN-BGO-R016 Backend: onAllocateTrnBgoWardBatchesCallable supports UNALLOCATE targetType", () => {
-  const callablesPath = path.join(
-    repoRoot,
-    "functions/tcUploads/callables.js",
-  );
-  const content = fs.readFileSync(callablesPath, "utf8");
-
-  assert.ok(
-    content.includes('targetType === "UNALLOCATE"'),
-    "onAllocateTrnBgoWardBatchesCallable must handle targetType === 'UNALLOCATE'",
-  );
-  assert.ok(
-    content.includes('code: "TRN_BGO_BATCHES_UNALLOCATED"'),
-    "onAllocateTrnBgoWardBatchesCallable must return TRN_BGO_BATCHES_UNALLOCATED code on success",
-  );
+test("TC allocation routes to the shared MD policy adapter", () => {
+ const adapter=fs.readFileSync(path.join(repoRoot,"functions/tcUploads/allocation.js"),"utf8");
+ const entry=fs.readFileSync(path.join(repoRoot,"functions/tcUploads/callables.js"),"utf8");
+ assert.ok(entry.includes("allocateTcBatches"));
+ assert.ok(adapter.includes("readMdAllocationTarget"));
+ assert.ok(adapter.includes('data.targetType==="UNALLOCATE"'));
 });

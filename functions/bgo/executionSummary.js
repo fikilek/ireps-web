@@ -1,3 +1,4 @@
+import { deriveBulkExecutionOutcome } from "../tcUploads/bulkPolicy.js";
 import * as logger from "firebase-functions/logger";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -34,6 +35,10 @@ function hasExecutionOutcome(trnData = {}) {
 }
 
 function getExecutionOutcomeCode(trnData = {}) {
+  if (trnData.origin?.trnBgo) {
+    const outcome=deriveBulkExecutionOutcome(trnData);
+    return outcome?.success ? "SUCCESS" : outcome?.outcome==="UNSUCCESSFUL_READING" ? "NO_READING" : outcome?.outcome || "NAV";
+  }
   return normalizeOutcome(
     trnData?.executionOutcome?.outcome ||
       trnData?.executionOutcome?.code ||
@@ -48,6 +53,7 @@ function getWorkflowState(trnData = {}) {
 
 export function getBgoBatchIdFromTrn(trnData = {}) {
   return readFirstString(
+    trnData?.origin?.trnBgo?.batchId,
     trnData?.bgo?.batchId,
     trnData?.bgo?.bgoBatchId,
     trnData?.refs?.bgoBatchId,
@@ -69,7 +75,7 @@ function getExecutionSignature(trnData = {}) {
     completedByUser: trnData?.workflow?.completedByUser || null,
     cancelledAt: trnData?.workflow?.cancelledAt || null,
     rejectedAt: trnData?.workflow?.rejectedAt || null,
-    executionOutcome: trnData?.executionOutcome || null,
+    executionOutcome: trnData?.origin?.trnBgo ? getExecutionOutcomeCode(trnData) : trnData?.executionOutcome || null,
   });
 }
 
@@ -83,6 +89,7 @@ export function hasBgoExecutionSummaryRelevantChange({
 async function getBgoChildTrnSnapsForSummary({ db, batchId }) {
   const trnsRef = db.collection(BGO_COLLECTIONS.trns);
   const queries = [
+    trnsRef.where("origin.trnBgo.batchId", "==", batchId),
     trnsRef.where("bgo.batchId", "==", batchId),
     trnsRef.where("bgo.bgoBatchId", "==", batchId),
     trnsRef.where("refs.bgoBatchId", "==", batchId),
@@ -159,7 +166,7 @@ function buildDerivedExecutionSummary({ childSnaps = [], now }) {
 
   return {
     sourceCollection: BGO_COLLECTIONS.trns,
-    sourceField: "bgo.batchId",
+    sourceField: childSnaps.some(s=>s.data()?.origin?.trnBgo) ? "origin.trnBgo.batchId" : "bgo.batchId",
     derivedAt: now,
     ...counts,
   };
@@ -181,8 +188,9 @@ export async function refreshBgoBatchDerivedExecutionSummary({
     };
   }
 
-  const batchRef = db.collection(BGO_COLLECTIONS.batches).doc(cleanBatchId);
-  const batchSnap = await batchRef.get();
+  let batchRef = db.collection(BGO_COLLECTIONS.batches).doc(cleanBatchId);
+  let batchSnap = await batchRef.get();
+  if (!batchSnap.exists && cleanBatchId.startsWith("TRN_BGO_")) { batchRef = db.collection("tc_uploads").doc(cleanBatchId); batchSnap = await batchRef.get(); }
 
   if (!batchSnap.exists) {
     logger.warn("refreshBgoBatchDerivedExecutionSummary -- batch missing", {
@@ -211,7 +219,7 @@ export async function refreshBgoBatchDerivedExecutionSummary({
     // Remove the ambiguous/current-design summary map whenever the batch is touched
     // by the new data contract. batchReleaseSummary + derivedExecutionSummary are
     // now the truthful named fields.
-    summary: FieldValue.delete(),
+    ...(batchRef.parent.id === "tc_uploads" ? {} : { summary: FieldValue.delete() }),
     derivedExecutionSummary,
   });
 

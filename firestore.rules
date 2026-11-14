@@ -60,6 +60,30 @@ service cloud.firestore {
         && changed(resource.data, request.resource.data, ['profile', 'owner', 'offices', 'metadata']) && ownMetadata());
       allow delete: if false;
     }
+    function hasLm(lm) {
+      let access = me().get('access', {});
+      let grants = access.get('workbases', []);
+      let current = access.get('activeWorkbase', null);
+      return active() && (lm in grants || lm == current
+        || (current is map && lm == current.get('lmPcode', current.get('pcode', current.get('id', ''))))
+        || (exists(/databases/$(database)/documents/lms/$(lm))
+          && {'id': lm, 'name': get(/databases/$(database)/documents/lms/$(lm)).data.name} in grants));
+    }
+    function tcAllowed(data) {
+      let target = data.get('bgo', {});
+      return hasLm(data.lmPcode) && (office()
+        || (target.get('targetType', '') == 'SP' && target.get('targetId', '') == me().get('employment', {}).get('serviceProvider', {}).get('id', ''))
+        || (target.get('targetType', '') == 'TEAM' && (request.auth.uid in get(/databases/$(database)/documents/teams/$(target.targetId)).data.get('memberUids', []) || request.auth.uid in get(/databases/$(database)/documents/teams/$(target.targetId)).data.get('scope', {}).get('memberUserIds', []))));
+    }
+    match /tc_uploads/{id} {
+      allow read: if tcAllowed(resource.data);
+      allow write: if false;
+      match /history/{event} { allow read: if office() && tcAllowed(get(/databases/$(database)/documents/tc_uploads/$(id)).data); allow write: if false; }
+    }
+    match /tc_rows/{id} {
+      allow read: if tcAllowed(get(/databases/$(database)/documents/tc_uploads/$(resource.data.tcId)).data);
+      allow write: if false;
+    }
     match /trns/{id} {
       allow read: if active();
       // All submission/ITO/QA mutations use their authorised server operations.
@@ -68,6 +92,11 @@ service cloud.firestore {
       match /qaHistory/{event} { allow read, write: if false; }
       match /qaVersions/{version} { allow read, write: if false; }
       match /qaAmendments/{event} { allow read, write: if false; }
+    }
+    match /tc_source_files/{id} {
+      allow read: if office() && resource.data.committed == true
+        && hasLm(resource.data.lmPcode);
+      allow write: if false;
     }
     match /qaNotifications/{id} {
       allow read: if active() && resource.data.recipientUid == request.auth.uid;
@@ -98,7 +127,7 @@ service cloud.firestore {
         'registry_accounts', 'registry_erfs', 'registry_jobs', 'registry_meters', 'registry_mread',
         'registry_premises', 'registry_wards', 'registry_workbases',
         'report_electricity_population', 'report_trn_anomaly', 'report_trn_no_access', 'report_trn_normalisation', 'report_trn_user_activity',
-        'sales-all-meters', 'stores', 'tb_rows', 'tb_uploads', 'tc_rows', 'tc_uploads',
+        'sales-all-meters', 'stores', 'tb_rows', 'tb_uploads',
         'team_member_history', 'teams', 'vending_providers'
       ];
     }

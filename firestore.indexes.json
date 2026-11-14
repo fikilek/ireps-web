@@ -2493,6 +2493,52 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "tc_uploads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "metadata.createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tc_uploads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bgo.targetId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tc_uploads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "lmPcode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bgo.targetId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bgo.targetType",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

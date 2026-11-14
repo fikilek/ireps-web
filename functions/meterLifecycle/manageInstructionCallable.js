@@ -1037,6 +1037,10 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
       }
 
       for (const row of rows) {
+        if (row.data?.origin?.trnBgo) {
+          responsePayload=buildFailureResult("INSTRUCTION_NOT_EXECUTABLE","Manage this instruction through its TRN BGO Ward batch.",{trnId:row.trnId});
+          return;
+        }
         const trnType = getTrnType(row.data) || "NAv";
         const workflowState = normalizeUpper(row.data?.workflow?.state);
         const astId = getAstId(row.data);

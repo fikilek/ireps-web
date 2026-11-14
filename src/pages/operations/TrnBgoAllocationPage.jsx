@@ -1,3 +1,4 @@
+import MdBgoAllocationPage from "./MdBgoAllocationPage";
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useMemo, useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -75,6 +76,7 @@ export default function TrnBgoAllocationPage() {
   // Synchronize with URL query parameter
   useEffect(() => {
     if (initialBatchId && initialBatchId !== selectedBatchId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronize explicit route selection
       setSelectedBatchId(initialBatchId);
     } else if (!initialBatchId && uploads.length > 0 && !selectedBatchId) {
       setSelectedBatchId(uploads[0].id);
@@ -105,9 +107,11 @@ export default function TrnBgoAllocationPage() {
   const [actionError, setActionError] = useState("");
   const [actionSuccess, setActionSuccess] = useState("");
   const [isUnallocateConfirmOpen, setIsUnallocateConfirmOpen] = useState(false);
+  const [withdrawalReason, setWithdrawalReason] = useState("");
 
   // Reset form when active batch changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset form when its selected live batch changes
     setActionError("");
     setActionSuccess("");
     if (activeBatch) {
@@ -187,6 +191,8 @@ export default function TrnBgoAllocationPage() {
         batchIds: [selectedBatchId],
         targetType: "UNALLOCATE",
         targetId: "UNALLOCATE",
+        reason: withdrawalReason,
+        expectedIssuedAt: activeBatch?.issuedAt,
       }).unwrap();
 
       if (result?.success) {
@@ -307,17 +313,10 @@ export default function TrnBgoAllocationPage() {
       value: (r) => r.linkedAccountNo,
       sortValue: (r) => r.linkedAccountNo,
     },
-    {
-      key: "actionReason",
-      label: "Action Reason",
-      width: 170,
-      sortable: true,
-      filter: "text",
-      value: (r) => r.actionReason,
-      sortValue: (r) => r.actionReason,
-      render: (r) => <span style={{ fontSize: 12, color: "#475569" }}>{r.actionReason}</span>,
-    },
+
   ], []);
+
+  if (activeBatch?.contractVersion && !isBatchAllocated) return <MdBgoAllocationPage bulkMode />;
 
   return (
     <section style={styles.page}>
@@ -447,6 +446,7 @@ export default function TrnBgoAllocationPage() {
           </div>
         ) : null}
 
+        {isBatchAllocated ? <label>Reason for withdrawing allocation<input value={withdrawalReason} onChange={event=>setWithdrawalReason(event.target.value)} style={styles.selectInput} /></label> : null}
         {/* Allocation Controls */}
         {activeBatch ? (
           <div style={styles.allocationRow}>
@@ -615,7 +615,7 @@ export default function TrnBgoAllocationPage() {
               </button>
               <button
                 type="button"
-                onClick={handleUnallocate}
+                onClick={() => { if (!withdrawalReason.trim()) { setActionError("Record why the allocation is being withdrawn."); return; } handleUnallocate(); }}
                 disabled={isAllocating}
                 style={styles.dangerButton}
               >

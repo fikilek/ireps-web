@@ -1,3 +1,4 @@
+import { verifyBulkInstruction, adoptBulkInstruction } from "../tcUploads/bulkPolicy.js";
 import { canMove, TRN_STATES } from "../meterLifecycle/trnStateMachine.js";
 import { createHash } from "node:crypto";
 import { FieldPath, Filter } from "firebase-admin/firestore";
@@ -169,6 +170,11 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
     const meterSnap = meterRef ? await tx.get(meterRef) : null;
     const meter = meterSnap?.exists ? meterSnap.data() : null;
     if ((meter ? digest(meter) : null) !== input.meterVersion) throw new HttpsError("aborted", "The meter changed while this form was open. Reload it; your local amendment is retained.");
+    if (fresh.trn.origin?.trnBgo) {
+      const stored=await verifyBulkInstruction({db,reader:tx,id:trnId,astId,trnType:fresh.trn.accessData.trnType});
+      adoptBulkInstruction(fresh.trn,stored);
+      adoptBulkInstruction(next,stored);
+    }
     const checked = checkAmendedForm(next, meter || {});
     let beforeCheck = null;
     try { beforeCheck = checkAmendedForm(fresh.trn, meter || {}); } catch { /* Invalid old facts are retained in history, not invented. */ }
@@ -178,7 +184,7 @@ export async function saveQaAmendment(db, uid, raw, { bucket } = {}) {
       success: result.executionOutcome?.success, commissioningPassed: result.commissioningPassed,
       nextAstState: result.nextAstState };
     if (beforeCheck && !same(physicalOutcome(beforeCheck), physicalOutcome(checked))) throw new HttpsError("failed-precondition", "An amendment cannot change the visit's physical outcome.");
-    if (next.accessData.trnType === "METER_READING" && checked.executionOutcome) {
+    if (!next.origin?.trnBgo && next.accessData.trnType === "METER_READING" && checked.executionOutcome) {
       // Derived reading totals belong to this visit and use its preserved
       // previous reading, never a more recent meter reading.
       const oldOutcome = fresh.trn.executionOutcome || {};

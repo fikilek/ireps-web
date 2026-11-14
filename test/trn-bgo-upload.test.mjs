@@ -36,7 +36,7 @@ test("XLS and XLSX use first worksheet and preserve displayed/text meter identif
 
 test("strict ordered headers reject missing, extra, repeated, renamed and reordered columns", () => {
   for (const headers of [OFFICIAL_HEADERS.slice(1), [...OFFICIAL_HEADERS, "extra"], OFFICIAL_HEADERS.map((key, index) => index === 1 ? "rowNo" : key), OFFICIAL_HEADERS.map((key) => key === "meterNo" ? "MeterNo" : key), [...OFFICIAL_HEADERS].reverse()]) {
-    assert.throws(() => parseUpload(csv([row(1)], headers), "meters.csv"), /12 columns in order/);
+    assert.throws(() => parseUpload(csv([row(1)], headers), "meters.csv"), /11 columns in order/);
   }
 });
 
@@ -255,51 +255,14 @@ test("TRN-BGO-R014: Ward-Grouped Batch Creation and TRN_BGO_YYYYMMDD_HHMMSS_<WAR
 });
 
 
-test("TRN-BGO-R015: Batch Draft Page, Atomic All-or-Nothing Creation Callable, and Pass/Fail Allocation Modal", () => {
-  const uploadPagePath = path.join(
-    repoRoot,
-    "src/pages/operations/TrnBgoUploadPage.jsx",
-  );
-  const callablesPath = path.join(
-    repoRoot,
-    "functions/tcUploads/callables.js",
-  );
-  const tcApiPath = path.join(repoRoot, "src/redux/tcApi.js");
-  const uploadContent = fs.readFileSync(uploadPagePath, "utf8");
-  const callablesContent = fs.readFileSync(callablesPath, "utf8");
-  const tcApiContent = fs.readFileSync(tcApiPath, "utf8");
-
-  assert.ok(
-    uploadContent.includes('viewMode === "DRAFT"'),
-    'TrnBgoUploadPage must render a dedicated Batch Draft Page when viewMode === "DRAFT"',
-  );
-  assert.ok(
-    uploadContent.includes("← Back to File Inspection"),
-    "Batch Draft Page must include a Back to File Inspection button",
-  );
-  assert.ok(
-    uploadContent.includes("creationModalState ? ("),
-    "TrnBgoUploadPage must render a Feedback Modal after batch creation attempt",
-  );
-  assert.ok(
-    uploadContent.includes("handleConfirmPassModalAndNavigate"),
-    "Pass modal must allow allocating created batches to a TEAM or SP or leaving unallocated and navigating to TRN BGO Register",
-  );
-  assert.ok(
-    uploadContent.includes('navigate("/operations/trn-bgo")'),
-    "Pass modal must navigate to /operations/trn-bgo where created batches are listed",
-  );
-  assert.ok(
-    callablesContent.includes("export const onCreateTrnBgoWardBatchesCallable"),
-    "functions/tcUploads/callables.js must export onCreateTrnBgoWardBatchesCallable for atomic all-or-nothing creation",
-  );
-  assert.ok(
-    callablesContent.includes("export const onAllocateTrnBgoWardBatchesCallable"),
-    "functions/tcUploads/callables.js must export onAllocateTrnBgoWardBatchesCallable for post-creation TEAM/SP allocation",
-  );
-  assert.ok(
-    tcApiContent.includes("useCreateTrnBgoWardBatchesMutation") &&
-      tcApiContent.includes("useAllocateTrnBgoWardBatchesMutation"),
-    "tcApi.js must export useCreateTrnBgoWardBatchesMutation and useAllocateTrnBgoWardBatchesMutation",
-  );
+test("original source stays complete while duplicate decisions only change working records", () => {
+  const original = csv([row(1, "000123", {premiseAddress:""}), row(2, "000123", {premiseAddress:"Uploaded value"}), row(3,"000999")]);
+  const parsed = parseUpload(original,"original.csv");
+  const working = resolveDuplicates(parsed.rows, {"000123":"2"});
+  assert.deepEqual(working.map(r=>r.rowNo), ["2","3"]);
+  assert.equal(parsed.sourceCsv, original);
+  assert.deepEqual(parseUpload(parsed.sourceCsv,"archived.csv").rows.map(r=>r.meterNo), ["000123","000123","000999"]);
+  assert.equal(OFFICIAL_HEADERS.length,11);
+  assert.equal(OFFICIAL_HEADERS.includes("actionReason"),false);
+  assert.throws(()=>parseUpload(csv([row(1)],[...OFFICIAL_HEADERS.slice(0,7),"actionReason",...OFFICIAL_HEADERS.slice(7)]),"old.csv"),/11 columns/);
 });

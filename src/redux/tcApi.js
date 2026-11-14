@@ -10,7 +10,7 @@ import {
   where,
 } from "firebase/firestore";
 
-import { db, functions } from "../firebase";
+import { auth, db, functions } from "../firebase";
 
 const TC_UPLOADS_COLLECTION = "tc_uploads";
 const TC_ROWS_COLLECTION = "tc_rows";
@@ -125,6 +125,9 @@ function normalizeTcUploadDoc(docSnap) {
   return {
     id: data.id || docSnap.id,
     tcId: data.id || docSnap.id,
+    sourceFileId: data.sourceFileId || null,
+    contractVersion: data.contractVersion || null,
+    requestId: data.requestId || null,
     fileName: valueOrNav(data.fileName),
     trnType: valueOrNav(data.trnType),
     trnCode: valueOrNav(data.trnCode),
@@ -363,28 +366,31 @@ export const tcApi = createApi({
         try {
           await cacheDataLoaded;
 
-          const uploadLimit = resolveLimit(arg);
-          const uploadsQuery = query(
-            collection(db, TC_UPLOADS_COLLECTION),
-            orderBy("metadata.createdAt", "desc"),
-            limitQuery(uploadLimit),
-          );
-
-          unsubscribe = onSnapshot(
-            uploadsQuery,
-            (snapshot) => {
-              const uploads = snapshot.docs
-                .map((docSnapshot) => normalizeTcUploadDoc(docSnapshot))
-                .filter(Boolean);
-
-              updateCachedData((draft) => {
-                draft.splice(0, draft.length, ...uploads);
-              });
-            },
-            (error) => {
-              console.error("tcApi getTcUploads stream error:", error);
-            },
-          );
+          if (!auth.currentUser) return;
+          let epoch = 0;
+          let stopQueries = [];
+          const stopProfile = onSnapshot(doc(db, "users", auth.currentUser.uid), snapshot => {
+            const current = ++epoch;
+            stopQueries.forEach(stop => stop()); stopQueries = [];
+            const profile = snapshot.data();
+            updateCachedData(draft => { draft.splice(0, draft.length); });
+            if (profile?.accountStatus !== "ACTIVE") return;
+            const pc = value => typeof value === "string" ? value : value?.lmPcode || value?.pcode || value?.id;
+            const grants = [...new Set([profile.access?.activeWorkbase, ...(profile.access?.workbases || [])].map(pc).filter(Boolean))];
+            const requested = typeof arg === "object" ? arg.lmPcode : null;
+            const scopes = requested ? grants.filter(lm => lm === requested) : grants;
+            const latest = new Map();
+            scopes.forEach(lm => {
+              const uploadsQuery = query(collection(db, TC_UPLOADS_COLLECTION), where("lmPcode", "==", lm), orderBy("metadata.createdAt", "desc"), limitQuery(resolveLimit(arg)));
+              stopQueries.push(onSnapshot(uploadsQuery, docs => {
+                if (current !== epoch) return;
+                latest.set(lm, docs.docs.map(normalizeTcUploadDoc).filter(row=>row && row.workflowState!=="DELETED"));
+                const rows = [...latest.values()].flat().sort((a,b)=>String(b.metadata?.createdAt||"").localeCompare(String(a.metadata?.createdAt||"")));
+                updateCachedData(draft => { draft.splice(0, draft.length, ...rows); });
+              }, () => { latest.delete(lm); updateCachedData(draft => { draft.splice(0, draft.length, ...[...latest.values()].flat()); }); }));
+            });
+          }, () => updateCachedData(draft => { draft.splice(0, draft.length); }));
+          unsubscribe = () => { epoch++; stopProfile(); stopQueries.forEach(stop => stop()); };
 
           await cacheEntryRemoved;
         } finally {
@@ -414,6 +420,7 @@ export const tcApi = createApi({
               updateCachedData(() => upload);
             },
             (error) => {
+              updateCachedData(() => null);
               console.error("tcApi getTcUploadById stream error:", error);
             },
           );
@@ -455,6 +462,7 @@ export const tcApi = createApi({
               });
             },
             (error) => {
+              updateCachedData(() => []);
               console.error("tcApi getTcRowsByTcId stream error:", error);
             },
           );

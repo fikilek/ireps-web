@@ -397,9 +397,8 @@ export default function TrnBgoRegisterPage() {
       value: (batch) => batch.fileName || "",
       sortValue: (batch) => batch.fileName || "",
       render: (batch) => (
-        <span style={styles.fileNameCell} title={batch.fileName}>
-          {batch.fileName || "NAv"}
-        </span>
+        batch.sourceFileId ? <Link to={`/operations/trn-bgo/source/${batch.sourceFileId}`} style={styles.fileNameCell}>{batch.fileName}</Link> :
+        <span style={styles.fileNameCell} title={batch.fileName}>{batch.fileName || "NAv"}</span>
       ),
     },
     {
