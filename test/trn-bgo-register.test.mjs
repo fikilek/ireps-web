@@ -106,7 +106,7 @@ test("TRN BGO Register uses canonical IrepsTable component with specification co
   assert.match(content, /label:\s*"BGO Rows"/, "Must have BGO Rows column");
   assert.match(content, /label:\s*"Allocation"/, "Must have Allocation column");
   assert.match(content, /label:\s*"BGO Status"/, "Must have BGO Status column");
-  assert.match(content, /label:\s*"Total Meters"/, "Must have Total Meters column");
+  assert.match(content, /label:\s*"Total"/, "Must have Total column");
   assert.match(content, /label:\s*"In Progress"/, "Must have In Progress column");
   assert.match(content, /label:\s*"Completed"/, "Must have Completed column");
   assert.match(content, /label:\s*"Ward"/, "Must have Ward column");

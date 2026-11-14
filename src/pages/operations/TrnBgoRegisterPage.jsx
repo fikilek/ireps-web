@@ -6,6 +6,7 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import {
   useGetTcUploadsQuery,
+  useGetTrnBgoProgressQuery,
   useDeleteTcUploadMutation,
 } from "../../redux/tcApi";
 import IrepsTable from "../../components/table/IrepsTable";
@@ -183,10 +184,19 @@ export default function TrnBgoRegisterPage() {
 
   // Stream existing TRN uploads directly from tc_uploads (mirroring BGO Dashboard stream)
   const {
-    data: uploads = [],
+    data: sourceUploads = [],
     isLoading: isUploadsLoading,
     error: uploadsError,
   } = useGetTcUploadsQuery({ limit: 500 });
+
+  const batchIds = sourceUploads.filter(batch => batch.contractVersion).map(batch => batch.id).sort();
+  const { currentData: progress } = useGetTrnBgoProgressQuery({ batchIds });
+  const uploads = useMemo(() => sourceUploads.map(batch => {
+    if (!batch.contractVersion) return { ...batch, notStartedRows: Math.max(0, Number(batch.totalRows || 0) - Number(batch.inProgressRows || 0) - Number(batch.completedRows || 0)) };
+    const counts = progress?.ready && !progress.error ? progress.counts[batch.id] : null;
+    return { ...batch, notStartedRows: counts?.notStartedRows ?? null,
+      ...(counts ? { inProgressRows: counts.inProgressRows, completedRows: counts.completedRows } : {}) };
+  }), [sourceUploads, progress]);
 
   const [deleteTcUpload, { isLoading: isDeletingUpload }] = useDeleteTcUploadMutation();
 
@@ -478,7 +488,7 @@ export default function TrnBgoRegisterPage() {
     },
     {
       key: "totalRows",
-      label: "Total Meters",
+      label: "Total",
       sortable: true,
       filter: "text",
       value: (batch) => String(batch.totalRows ?? 0),
@@ -486,6 +496,16 @@ export default function TrnBgoRegisterPage() {
       render: (batch) => (
         <strong style={styles.totalCell}>{formatNumber(batch.totalRows)}</strong>
       ),
+    },
+    {
+      key: "notStartedRows",
+      label: "Not Started",
+      sortable: true,
+      filter: "text",
+      value: (batch) => batch.notStartedRows == null ? "NAv" : String(batch.notStartedRows),
+      sortValue: (batch) => batch.notStartedRows,
+      sortEmptyLast: true,
+      render: (batch) => <strong style={styles.totalCell}>{batch.notStartedRows == null ? "NAv" : formatNumber(batch.notStartedRows)}</strong>,
     },
     {
       key: "inProgressRows",
@@ -674,6 +694,7 @@ export default function TrnBgoRegisterPage() {
       </div>
 
       <div style={styles.tablePanel}>
+        {progress?.error ? <p role="alert">{progress.error}</p> : null}
         <IrepsTable showLoadingSpinner
           title="Permanent Transaction Batches"
           columns={columns}
@@ -685,7 +706,7 @@ export default function TrnBgoRegisterPage() {
               ? "No permanent TRN BGO Batches were found."
               : "No permanent TRN BGO Batches match the current filters."
           }
-          loading={isUploadsLoading}
+          loading={isUploadsLoading || (batchIds.length > 0 && !progress?.ready)}
           loadingText="Loading TRN BGO Batches..."
           downloads={{
             registryName: "TRN BGO Register",

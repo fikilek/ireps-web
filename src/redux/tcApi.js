@@ -1,3 +1,4 @@
+import { trnBgoProgress } from "./trnBgoProgress.js";
 import { pendingStream, streamQueryHook, failStream } from "./streamReadiness.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { httpsCallable } from "firebase/functions";
@@ -356,6 +357,31 @@ export const tcApi = createApi({
   reducerPath: "tcApi",
   baseQuery: fakeBaseQuery(),
   endpoints: (builder) => ({
+    getTrnBgoProgress: builder.query({
+      queryFn: () => ({ data: { counts: {}, ready: false, error: "" } }),
+      async onCacheEntryAdded({ batchIds = [] }, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        const ids = [...new Set(batchIds)].sort();
+        const stops = [];
+        const latest = new Map();
+        const chunks = [];
+        for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+        try {
+          await cacheDataLoaded;
+          if (!ids.length) updateCachedData(draft => { draft.ready = true; });
+          chunks.forEach((ids, index) => {
+            stops.push(onSnapshot(query(collection(db, "trns"), where("origin.trnBgo.batchId", "in", ids)), snapshot => {
+              latest.set(index, snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+              updateCachedData(draft => {
+                draft.counts = trnBgoProgress([...latest.values()].flat());
+                draft.ready = latest.size === chunks.length;
+              });
+            }, error => updateCachedData(draft => { draft.ready = true; draft.error = error.message || "Could not load batch progress."; })));
+          });
+          await cacheEntryRemoved;
+        } finally { stops.forEach(stop => stop()); }
+      },
+    }),
+
     getTcUploads: builder.query({
       queryFn: () => ({ data: pendingStream([]) }),
       async onCacheEntryAdded(
@@ -589,6 +615,7 @@ export const tcApi = createApi({
 });
 
 export const {
+  useGetTrnBgoProgressQuery,
   useGetTcUploadsQuery: useGetTcUploadsQueryRaw,
   useGetTcUploadByIdQuery: useGetTcUploadByIdQueryRaw,
   useGetTcRowsByTcIdQuery: useGetTcRowsByTcIdQueryRaw,
