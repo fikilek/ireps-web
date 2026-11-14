@@ -9,15 +9,19 @@ test('TRN batch map streams only linked references, resolves ERFs/GPS/geofences 
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST);const env=await initializeTestEnvironment({projectId:'demo-ireps-qa',firestore:{host:'127.0.0.1',port:8087,rules:await readFile(new URL('../firestore.rules',import.meta.url),'utf8')}});const admin=fn=>env.withSecurityRulesDisabled(c=>fn(c.firestore()));let stop;
  try{await env.clearFirestore();await admin(async db=>{for(const [path,value] of Object.entries({
  'users/manager':{accountStatus:'ACTIVE',employment:{role:'MNG'},access:{workbases:['ZA5241']}},'users/disabled':{accountStatus:'DISABLED'},
- 'tc_uploads/B1':{id:'B1',contractVersion:'TRN_BGO_11COL_REASON_FREE_V1',lmPcode:'ZA5241',scope:{lmPcode:'ZA5241'}},
+ 'tc_uploads/B1':{id:'B1',contractVersion:'TRN_BGO_11COL_REASON_FREE_V1',lmPcode:'ZA5241',scope:{lmPcode:'ZA5241',wardPcode:'W1'}},
  'tc_rows/r1':{id:'r1',tcId:'B1',rowNo:1,lmPcode:'ZA5241',astId:'m1',premiseId:'p1',geofenceRefs:[{id:'g1'}]},
  'premises/p1':{erfId:'e1',gps:{lat:1,lng:1}},'asts/m1':{gps:{lat:1,lng:1},accessData:{premise:{id:'p1'}},ast:{astData:{astNo:'001'}}},
  'ireps_erfs/e1':{geometry:JSON.stringify({type:'Polygon',coordinates:[[[0,0],[2,0],[2,2],[0,2],[0,0]]]})},
+ 'wards/W1':{parents:{localMunicipalityId:'ZA5241'},name:'Ward one'},
+ 'geo_fences/context':{parents:{lmPcode:'ZA5241',wardPcode:'W1'}},'geo_fences/otherWard':{parents:{lmPcode:'ZA5241',wardPcode:'W2'}},
  'geo_fences/g1':{parents:{lmPcode:'ZA5241'},geometry:{points:[{lat:0,lng:0},{lat:0,lng:10},{lat:10,lng:10},{lat:10,lng:0}]}},
  'asts/unrelated':{gps:{lat:1,lng:1}},'premises/unrelated':{gps:{lat:1,lng:1}}
  }))await setDoc(doc(db,path),value)});
  const open=db=>{let latest;const waiting=new Set();const off=subscribeTrnBgoMap(db,{batchId:'B1',lmPcode:'ZA5241'},value=>{latest=value;for(const w of waiting)if(w.match(value))w.resolve(value)});return {off,wait:match=>latest&&match(latest)?Promise.resolve(latest):new Promise((resolve,reject)=>{const w={match,resolve:value=>{clearTimeout(timer);waiting.delete(w);resolve(value)}};const timer=setTimeout(()=>{waiting.delete(w);reject(Error('Map timeout: '+JSON.stringify(latest)))},15000);waiting.add(w)})}};
- const stream=open(env.authenticatedContext('manager').firestore());stop=stream.off;const loaded=await stream.wait(v=>v.ready&&!v.error&&v.erfs.length===1&&v.meters.length===1&&v.geofences.length===1);assert.deepEqual(loaded.premises.map(p=>p.id),['p1']);assert.equal(batchMapLayers({...loaded}).meters.length,1);assert.equal(batchMapLayers({...loaded}).premises.length,1);
+ const stream=open(env.authenticatedContext('manager').firestore());stop=stream.off;const loaded=await stream.wait(v=>v.ready&&!v.error&&v.erfs.length===1&&v.meters.length===1&&v.geofences.length===1);assert.deepEqual(loaded.wards.map(w=>w.id),['W1']);assert.deepEqual(loaded.wardGeofences.map(g=>g.id),['context']);
+ await admin(db=>updateDoc(doc(db,'wards/W1'),{name:'Live ward'}));await stream.wait(v=>v.ready&&v.wards[0]?.name==='Live ward');
+ assert.deepEqual(loaded.premises.map(p=>p.id),['p1']);assert.equal(batchMapLayers({...loaded}).meters.length,1);assert.equal(batchMapLayers({...loaded}).premises.length,1);
  await admin(db=>updateDoc(doc(db,'asts/m1'),{gps:{lat:15,lng:15}}));const changed=await stream.wait(v=>v.ready&&v.meters[0]?.point?.lat===15);assert.equal(batchMapLayers({...changed}).meters.length,0);stop();stop=null;
  for(const db of [env.unauthenticatedContext().firestore(),env.authenticatedContext('disabled').firestore()]){const denied=open(db);try{const value=await denied.wait(v=>v.ready&&v.error);assert.match(value.error,/permission/i)}finally{denied.off()}}
  }finally{stop?.();await env.cleanup()}

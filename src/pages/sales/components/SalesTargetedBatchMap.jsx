@@ -324,7 +324,7 @@ function ErfPolygonLayer({ erfs, focusedErfId = "" }) {
   return null;
 }
 
-function ErfLabelsLayer({ erfs, focusedErfId = "" }) {
+function ErfLabelsLayer({ erfs, focusedErfId = "", alwaysShow = false }) {
   const map = useMap();
   const overlaysRef = useRef([]);
 
@@ -372,9 +372,9 @@ function ErfLabelsLayer({ erfs, focusedErfId = "" }) {
 
         const zoom = Number(map.getZoom() || 0);
         this.div.style.display =
-          zoom >= ERF_LABEL_MIN_ZOOM ? "block" : "none";
+          alwaysShow || zoom >= ERF_LABEL_MIN_ZOOM ? "block" : "none";
 
-        if (zoom < ERF_LABEL_MIN_ZOOM) return;
+        if (!alwaysShow && zoom < ERF_LABEL_MIN_ZOOM) return;
 
         const projection = this.getProjection();
         const pixel = projection?.fromLatLngToDivPixel(
@@ -423,7 +423,7 @@ function ErfLabelsLayer({ erfs, focusedErfId = "" }) {
       overlays.forEach((overlay) => overlay.setMap(null));
       overlaysRef.current = [];
     };
-  }, [erfs, focusedErfId, map]);
+  }, [erfs, focusedErfId, map, alwaysShow]);
 
   return null;
 }
@@ -635,6 +635,7 @@ export default function SalesTargetedBatchMap({
   fitButtonStyle = null,
   geofence = null,
   batchBoundary = null,
+  alwaysShowErfNumbers = false,
   visibleLayers = { erfs: true, premises: true, meters: true },
 }) {
   const [fitRequest, setFitRequest] = useState(0);
@@ -750,7 +751,7 @@ export default function SalesTargetedBatchMap({
               />}
               <ExistingGeoFenceLayer geofences={geofenceList} selectedGeoFenceId="" interactive={false} fitSelected={false} />
               {visibleLayers.erfs && <ErfPolygonLayer erfs={safeErfs} focusedErfId={focusedErfId} />}
-              {visibleLayers.erfs && <ErfLabelsLayer
+              {visibleLayers.erfs && <ErfLabelsLayer alwaysShow={alwaysShowErfNumbers}
                 erfs={safeErfs}
                 focusedErfId={focusedErfId}
               />}

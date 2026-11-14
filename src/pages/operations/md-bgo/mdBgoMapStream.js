@@ -9,12 +9,13 @@ export function subscribeMdBgoMap(db, { batchId, lmPcode }, receive) {
   const state = { batchId, lmPcode, batch: null, rows: [], erfById: {}, premiseById: {}, meterById: {}, geofence: null };
   const groups = new Map();
   let parentError = "";
+  state.wards = []; state.wardGeofences = [];
 
   function publish() {
     if (!active) return;
     const error = parentError || [...groups.values()].find((group) => group.error)?.error || "";
     const ready = Boolean(error) || [...groups.values()].every((group) => group.ready);
-    receive({ ...buildMdBgoMapModel(state), ready, error });
+    receive({ ...buildMdBgoMapModel(state), wards: state.wards, wardGeofences: state.wardGeofences, ready, error });
   }
 
   function stop(key) {
@@ -67,7 +68,7 @@ export function subscribeMdBgoMap(db, { batchId, lmPcode }, receive) {
     if (!state.batch) {
       parentError = "";
       for (const key of [...groups.keys()]) if (key !== "Batch") stop(key);
-      state.rows = []; state.erfById = {}; state.premiseById = {}; state.meterById = {}; state.geofence = null;
+      state.wards = []; state.wardGeofences = []; state.rows = []; state.erfById = {}; state.premiseById = {}; state.meterById = {}; state.geofence = null;
       return;
     }
     const batch = state.batch;
@@ -76,9 +77,14 @@ export function subscribeMdBgoMap(db, { batchId, lmPcode }, receive) {
       : batch.scope?.lmPcode !== lmPcode ? "This batch does not belong to the active Local Municipality workbase." : "";
     if (parentError) {
       for (const key of [...groups.keys()]) if (key !== "Batch") stop(key);
-      state.rows = []; state.erfById = {}; state.premiseById = {}; state.meterById = {}; state.geofence = null;
+      state.wards = []; state.wardGeofences = []; state.rows = []; state.erfById = {}; state.premiseById = {}; state.meterById = {}; state.geofence = null;
       return;
     }
+    watch("Ward boundaries", lmPcode, [query(collection(db, "wards"), where("parents.localMunicipalityId", "==", lmPcode))], values => { state.wards = values; });
+    const wardPcode = batch.scope?.wardPcode || batch.wardPcode || "";
+    watch("Ward geofences", wardPcode, wardPcode ? [query(collection(db, "geo_fences"), where("parents.lmPcode", "==", lmPcode))] : [], values => {
+      state.wardGeofences = values.filter(fence => fence.parents?.wardPcode === wardPcode);
+    });
     watch("Rows", batchId, [query(collection(db, "bgo_rows"), where("bgoBatchId", "==", batchId))], (rows) => {
       state.rows = rows;
       syncAssets();
