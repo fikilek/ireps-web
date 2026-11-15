@@ -613,6 +613,11 @@ export default function TrnBgoUploadPage() {
           const isDuplicate = Boolean(row.isDuplicate);
           const eligibility = new Map(data.eligibility || []).get(String(row.rowNo));
           const isEligible = eligibility?.eligible === true;
+          const effectiveTrnType = eligibility?.effectiveTrnType || selectedTrnType;
+          const isProposedInspection =
+            isEligible &&
+            selectedTrnType === "METER_DISCONNECTION" &&
+            effectiveTrnType === "METER_INSPECTION";
 
           return {
             ...row,
@@ -620,10 +625,12 @@ export default function TrnBgoUploadPage() {
             isLmMatch,
             isDuplicate,
             isEligible,
+            effectiveTrnType,
+            isProposedInspection,
             nonEligibleReason: isEligible ? "" : (eligibility?.message || "Eligibility could not be confirmed. Validate the file again."),
             isDataMatch,
             duplicate: isDuplicate ? "True" : "False",
-            eligible: isEligible ? "True" : "False",
+            eligible: isEligible ? (isProposedInspection ? "True (INSP)" : "True") : "False",
             dataMatch: isDataMatch ? "True" : "False",
             irepsValues,
             comparisons,
@@ -637,6 +644,7 @@ export default function TrnBgoUploadPage() {
         });
 
       setParsedRows(enrichedRows);
+      setSelectedRowKeys(new Set(enrichedRows.filter((r) => r.isEligible).map(getRowSelectionKey)));
       setPendingSource(null);
       if (data.mismatches.length) setUploadFeedback({ title: "Municipality mismatch", message: `${data.mismatches.length} meter(s) belong to a different municipality from ${lmName} (${lmPcode}).`, rows: data.mismatches });
 
@@ -1247,18 +1255,19 @@ export default function TrnBgoUploadPage() {
         width: 110,
         filter: "select",
         sortable: true,
-        value: (r) => (r.isEligible ? "True" : "False"),
-        sortValue: (r) => (r.isEligible ? 1 : 0),
+        value: (r) => (r.isEligible ? (r.isProposedInspection ? "True (INSP)" : "True") : "False"),
+        sortValue: (r) => (r.isEligible ? (r.isProposedInspection ? 2 : 1) : 0),
         render: (r) => (
           <span
+            title={r.isProposedInspection ? "Already Disconnected ? Proposed for Inspection (MINSP)" : undefined}
             style={{
               fontFamily: "monospace",
               fontWeight: 700,
               fontSize: 12,
-              color: r.isEligible ? "#047857" : "#dc2626",
+              color: r.isEligible ? (r.isProposedInspection ? "#b45309" : "#047857") : "#dc2626",
             }}
           >
-            {r.isEligible ? "True" : "False"}
+            {r.isEligible ? (r.isProposedInspection ? "True (INSP)" : "True") : "False"}
           </span>
         ),
       },

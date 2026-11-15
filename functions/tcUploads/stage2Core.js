@@ -4,7 +4,7 @@ import { OFFICIAL_HEADERS, validateSourceRows, resolveDuplicates, meterKey } fro
 import { parseCsv } from "./sourceCsv.js";
 import { validateStage1Upload } from "./stage1Matching.js";
 import { checkMeterRegistration } from "../meterLifecycle/registrationGuard.js";
-import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle, validateLifecycleInstructionEligibility } from "../meterLifecycle/helpers.js";
+import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle, getAstCurrentState, validateLifecycleInstructionEligibility } from "../meterLifecycle/helpers.js";
 import { stripToDeclaredRoot } from "../transactions/trnShape.js";
 import { TC_TRN_TYPE_TO_CODE, buildTcUploadId, buildTcRowId, getEligibilityResult, normalizeGeoFenceRefs, getAstSummary } from "./helpers.js";
 import { STATES_HOLDING_THE_METER } from "../meterLifecycle/trnStateMachine.js";
@@ -49,27 +49,36 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   const wardLm=text(ward?.parents?.localMunicipalityId||ward?.parents?.lmPcode||ward?.lmPcode||ward?.parentPcode||ward?.localMunicipality?.pcode);
   if(!ward || wardLm!==lmPcode)return {eligible:false,message:"The authoritative Ward does not belong to the selected municipality."};
   const refs=normalizeGeoFenceRefs(ast.geofenceRefs);
-  // Geofence membership is optional for Ward-scoped TRN BGO (owner, 15 Nov 2026).
-  // Bulk disconnection origination has no current-status gate (owner, 14 Nov 2026).
-  // Individual issuance and field execution keep their separate validators.
-  if(trnType!=="METER_DISCONNECTION") {
-    const canonical=validateLifecycleInstructionEligibility({trnType,astDoc:ast});
-    const existing=getEligibilityResult({trnType,astData:ast});
-    if(!canonical.ok||!existing.eligible)return {eligible:false,message:canonical.message||existing.message};
+  // DCN origination (owner, 15 Nov 2026): CONNECTED -> MDCN; DISCONNECTED -> proposed MINSP (Inspection); DECOMMISSIONED/other -> Ineligible.
+  let effectiveTrnType = trnType;
+  if (trnType === "METER_DISCONNECTION") {
+    const astState = getAstCurrentState(ast);
+    if (astState === "DECOMMISSIONED") {
+      return { eligible: false, message: "DECOMMISSIONED meters cannot be disconnected or inspected.", effectiveTrnType };
+    }
+    if (astState === "DISCONNECTED") {
+      effectiveTrnType = "METER_INSPECTION";
+    } else if (astState !== "CONNECTED") {
+      return { eligible: false, message: `Only CONNECTED meters can be disconnected (DISCONNECTED meters route to Inspection; current state is ${astState}).`, effectiveTrnType };
+    }
   }
-  const registration=await checkMeterRegistration({db,astId,reader});
-  if(!registration.ok)return {eligible:false,message:registration.message};
-  const query=db.collection("trns").where("ast.astData.astId","==",astId).where("accessData.trnType","==",trnType).where("workflow.state","in",STATES_HOLDING_THE_METER).limit(1);
-  const active=await read(query);
-  if(!active.empty)return {eligible:false,message:`Active ${trnType} job ${active.docs[0].id} already exists.`};
-  return {eligible:true,message:"Eligible.",row,astId,ast,premiseId,premise,wardPcode,wardName:text(ward.name||ward.wardName||wardPcode),geofenceRefs:refs};
+  const canonical = validateLifecycleInstructionEligibility({ trnType: effectiveTrnType, astDoc: ast });
+  const existing = getEligibilityResult({ trnType: effectiveTrnType, astData: ast });
+  if (!canonical.ok || !existing.eligible) return { eligible: false, message: canonical.message || existing.message, effectiveTrnType };
+  const registration = await checkMeterRegistration({ db, astId, reader });
+  if (!registration.ok) return { eligible: false, message: registration.message, effectiveTrnType };
+  const query = db.collection("trns").where("ast.astData.astId", "==", astId).where("accessData.trnType", "==", effectiveTrnType).where("workflow.state", "in", STATES_HOLDING_THE_METER).limit(1);
+  const active = await read(query);
+  if (!active.empty) return { eligible: false, message: `Active ${effectiveTrnType} job ${active.docs[0].id} already exists.`, effectiveTrnType };
+  const message = effectiveTrnType !== trnType ? "Already Disconnected ? Proposed for Inspection (MINSP)." : "Eligible.";
+  return { eligible: true, message, effectiveTrnType, row, astId, ast, premiseId, premise, wardPcode, wardName: text(ward.name || ward.wardName || wardPcode), geofenceRefs: refs };
 }
 export async function previewBulk({db,uid,data}) {
   const matched=await validateStage1Upload({db,uid,data});
   const astMap=new Map(matched.meterAstEntries); const rows=resolveDuplicates(validateSourceRows(data.rows),data.keep);
   const eligibility=await Promise.all(rows.map(async row=>{
     const ast=astMap.get(meterKey(row.meterNo)); const decision=await inspectBulkRow({db,row,astId:ast?.id,trnType:data.trnType,lmPcode:data.lmPcode});
-    return [String(row.rowNo),{eligible:decision.eligible,message:decision.message,wardPcode:decision.wardPcode||null}];
+    return [String(row.rowNo),{eligible:decision.eligible,message:decision.message,wardPcode:decision.wardPcode||null,effectiveTrnType:decision.effectiveTrnType||data.trnType}];
   }));
   return {...matched,eligibility};
 }
@@ -96,11 +105,11 @@ export async function createBulkGraph({db,uid,data,source,csv,clock=()=>new Date
   const matching=await validateStage1Upload({db,uid,data:{...data,rows:allRows,fileName:source.fileName}}); const lookup=new Map(matching.meterAstEntries);
   const astIds=selected.map(r=>lookup.get(meterKey(r.meterNo))?.id);
   if(astIds.some(id=>!id)||new Set(astIds).size!==astIds.length)fail("failed-precondition","Selected meters must resolve to distinct authoritative assets.");
-  const trnIds=[]; const seen=new Set();
+  const trnStampMs=[]; const seen=new Set();
   for(let i=0;i<selected.length;i++) {
     let ms=clock().getTime();
     while(seen.has(ms)){await wait(1);ms=clock().getTime();}
-    seen.add(ms);trnIds.push(`TRN_${TC_TRN_TYPE_TO_CODE[trnType]}_${ms}_${lookup.get(meterKey(selected[i].meterNo))?.meterType==="electricity"?"ELC":lookup.get(meterKey(selected[i].meterNo))?.meterType==="water"?"WTR":"NAv"}_${text(lookup.get(meterKey(selected[i].meterNo))?.accessData?.parents?.wardPcode).replace(/[^A-Za-z0-9]/g,"").slice(0,12)}_${text(lookup.get(meterKey(selected[i].meterNo))?.accessData?.erfNo).replace(/[^A-Za-z0-9]/g,"").slice(0,12)||"NAv"}`);
+    seen.add(ms);trnStampMs.push(ms);
   }
   for(let attempt=0;attempt<4;attempt++) {
     const date=clock(),now=date.toISOString();
@@ -111,24 +120,25 @@ export async function createBulkGraph({db,uid,data,source,csv,clock=()=>new Date
       if(!stored || stored.hash!==source.hash || stored.generation!==source.generation || stored.cleanupOwned)fail("failed-precondition","Source changed or is unavailable.");
       const entries=await Promise.all(selected.map((row,i)=>inspectBulkRow({db,reader:tx,row,astId:astIds[i],trnType,lmPcode})));
       const bad=entries.find(e=>!e.eligible);if(bad)fail("failed-precondition",bad.message);
-      const wardGroups=new Map();entries.forEach((entry,i)=>{if(!wardGroups.has(entry.wardPcode))wardGroups.set(entry.wardPcode,[]);wardGroups.get(entry.wardPcode).push({...entry,trnId:trnIds[i]});});
-      const groups=[...wardGroups].map(([wardPcode,items])=>({wardPcode,items,tcId:buildTcUploadId({date,lmPcode,wardPcode,trnCode:TC_TRN_TYPE_TO_CODE[trnType]})}));
+      const trnIds=entries.map((entry,i)=>`TRN_${TC_TRN_TYPE_TO_CODE[entry.effectiveTrnType]}_${trnStampMs[i]}_${entry.ast?.meterType==="electricity"?"ELC":entry.ast?.meterType==="water"?"WTR":"NAv"}_${text(entry.wardPcode).replace(/[^A-Za-z0-9]/g,"").slice(0,12)}_${text(entry.ast?.accessData?.erfNo).replace(/[^A-Za-z0-9]/g,"").slice(0,12)||"NAv"}`);
+      const typeGroups=new Map();entries.forEach((entry,i)=>{const gKey=`${entry.wardPcode}::${entry.effectiveTrnType}`;if(!typeGroups.has(gKey))typeGroups.set(gKey,{wardPcode:entry.wardPcode,trnType:entry.effectiveTrnType,items:[]});typeGroups.get(gKey).items.push({...entry,trnId:trnIds[i]});});
+      const groups=[...typeGroups.values()].map(g=>({wardPcode:g.wardPcode,trnType:g.trnType,trnCode:TC_TRN_TYPE_TO_CODE[g.trnType],items:g.items,tcId:buildTcUploadId({date,lmPcode,wardPcode:g.wardPcode,trnCode:TC_TRN_TYPE_TO_CODE[g.trnType]})}));
       const ids=await Promise.all([...groups.map(g=>db.doc(`tc_uploads/${g.tcId}`)),...trnIds.map(id=>db.doc(`trns/${id}`))].map(ref=>tx.get(ref)));
       if(ids.some(s=>s.exists))throw Object.assign(new Error("Identifier collision"),{bulkCollision:true});
-      const batches=groups.map(g=>({tcId:g.tcId,wardPcode:g.wardPcode,wardLabel:g.items[0].wardName,meterCount:g.items.length,trnType,trnCode:TC_TRN_TYPE_TO_CODE[trnType],lmPcode}));
+      const batches=groups.map(g=>({tcId:g.tcId,wardPcode:g.wardPcode,wardLabel:g.items[0].wardName,meterCount:g.items.length,trnType:g.trnType,trnCode:g.trnCode,lmPcode}));
       const result={success:true,code:"TRN_BGO_BATCHES_CREATED",createdBatchCount:groups.length,totalMeters:entries.length,batches,sourceFileId:source.id,message:`Created ${groups.length} Ward batch(es) and ${entries.length} transactions.`};
       for(const group of groups) {
         const metadata={createdAt:now,createdByUid:uid,createdByUser:actor.name,updatedAt:now,updatedByUid:uid,updatedByUser:actor.name};
         const rowIds=group.items.map(e=>buildTcRowId({tcId:group.tcId,rowNo:e.row.rowNo}));
-        tx.create(db.doc(`tc_uploads/${group.tcId}`),{id:group.tcId,contractVersion:BULK_CONTRACT,requestId:fingerprint,sourceFileId:source.id,fileName:source.fileName,trnType,trnCode:TC_TRN_TYPE_TO_CODE[trnType],lmPcode,wardPcode:group.wardPcode,wardName:group.items[0].wardName,operationType:trnType,scope:{lmPcode,wardPcode:group.wardPcode},bgo:{batchMode:"TRN",createsChildTrnsUpfront:true},totalRows:group.items.length,readyRows:group.items.length,validRows:group.items.length,foundRows:group.items.length,trnIds:group.items.map(e=>e.trnId),rowIds,workflow:{state:"READY_FOR_ALLOCATION"},bgoStatus:"READY_FOR_ALLOCATION",writeState:"READY",assignment:{targets:[]},metadata});
+        tx.create(db.doc(`tc_uploads/${group.tcId}`),{id:group.tcId,contractVersion:BULK_CONTRACT,requestId:fingerprint,sourceFileId:source.id,fileName:source.fileName,trnType:group.trnType,trnCode:group.trnCode,lmPcode,wardPcode:group.wardPcode,wardName:group.items[0].wardName,operationType:group.trnType,scope:{lmPcode,wardPcode:group.wardPcode},bgo:{batchMode:"TRN",createsChildTrnsUpfront:true},totalRows:group.items.length,readyRows:group.items.length,validRows:group.items.length,foundRows:group.items.length,trnIds:group.items.map(e=>e.trnId),rowIds,workflow:{state:"READY_FOR_ALLOCATION"},bgoStatus:"READY_FOR_ALLOCATION",writeState:"READY",assignment:{targets:[]},metadata});
         tx.create(db.doc(`tc_uploads/${group.tcId}/history/CREATED`),{event:"CREATED",at:now,actorUid:uid,actorName:actor.name,requestId:fingerprint});
         for(const entry of group.items) {
           const rowId=buildTcRowId({tcId:group.tcId,rowNo:entry.row.rowNo});
           const lineage={requestId:fingerprint,batchId:group.tcId,rowId,sourceFileId:source.id,sourceRowNo:entry.row.rowNo,sourcePosition:entry.row.sourcePosition};
-          const trn=buildBulkTrn({entry,id:entry.trnId,trnType,lineage,actor,now});
+          const trn=buildBulkTrn({entry,id:entry.trnId,trnType:group.trnType,lineage,actor,now});
           tx.create(db.doc(`trns/${entry.trnId}`),trn);
           tx.create(db.doc(`tc_rows/${rowId}`),{id:rowId,tcId:group.tcId,contractVersion:BULK_CONTRACT,...lineage,lmPcode,wardPcode:group.wardPcode,rowNo:entry.row.rowNo,astId:entry.astId,premiseId:entry.premiseId,trnId:entry.trnId,input:Object.fromEntries(OFFICIAL_HEADERS.map(h=>[h,entry.row[h]])),frontend:{valid:true},backend:{matched:true,eligible:true,notFound:false},geofenceRefs:entry.geofenceRefs,ast:{...getAstSummary({astId:entry.astId,astData:entry.ast,meterNo:entry.row.meterNo}),gps:entry.ast.gps||entry.ast.location?.gps||null},premise:{id:entry.premiseId,address:entry.premise.address||null,addressText:entry.premise.addressText||null,propertyType:entry.premise.propertyType||null,parents:entry.premise.parents||{},gps:entry.premise.gps||entry.premise.location?.gps||null,erfNo:entry.premise.erfNo||null},bgo:{ready:true,used:false,readinessState:"READY_FOR_BGO"},metadata});
-          tx.update(db.doc(`asts/${entry.astId}`),{trnActiveLifecycle:buildTrnActiveLifecycle({trnId:entry.trnId,trnType,workflowState:"CREATED",assignedTo:{},updatedAt:now,updatedByUser:actor.name}),"metadata.updatedAt":now,"metadata.updatedByUid":uid,"metadata.updatedByUser":actor.name});
+          tx.update(db.doc(`asts/${entry.astId}`),{trnActiveLifecycle:buildTrnActiveLifecycle({trnId:entry.trnId,trnType:group.trnType,workflowState:"CREATED",assignedTo:{},updatedAt:now,updatedByUser:actor.name}),"metadata.updatedAt":now,"metadata.updatedByUid":uid,"metadata.updatedByUser":actor.name});
           tx.create(db.doc(`trns/${entry.trnId}/history/CREATED`),{event:"CREATED",workflowState:"CREATED",at:now,actorUid:uid,actorName:actor.name,...lineage});
         }
       }
