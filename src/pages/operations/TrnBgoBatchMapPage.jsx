@@ -1,3 +1,4 @@
+import { trnMapGeofenceLabels } from "./md-bgo/trnMapGeofenceLabels.js";
 import LoadingIndicator from "../../components/LoadingIndicator";
 /* eslint-disable no-unused-vars -- JSX tags are consumed by the JSX transform. */
 import { useEffect, useState } from "react";
@@ -28,12 +29,12 @@ export default function TrnBgoBatchMapPage() {
   const target = batch?.assignment?.targets?.[0];
   const identity = [
     ["Batch ID", batchId], ["Ward", batch?.scope?.wardName || batch?.scope?.wardPcode],
-    ["Geofence", data?.geofence?.name || batch?.geofenceRef?.name],
+    ["Geofences", trnMapGeofenceLabels(data?.geofences).map(fence => <span key={fence.id} style={{ display: "block", marginBottom: 4 }}>{fence.label}</span>)],
     ["Allocated To", target?.name || batch?.bgo?.targetName || "Unallocated"],
     ["Batch Status", pretty(batch?.workflow?.state)],
   ];
   const missing = Number(diagnostics.missingErfCount || 0) + Number(diagnostics.missingPremiseCount || 0) + Number(diagnostics.missingMeterCount || 0) + Number(diagnostics.rowsMissingErfRef || 0);
-  const missingFence = ready && !error && !data?.geofence;
+  const missingFence = ready && !error && !data?.geofences?.length;
 
   return <main style={{ display: "grid", gap: 18, padding: 24 }}>
     <header style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 18 }}>
@@ -47,7 +48,7 @@ export default function TrnBgoBatchMapPage() {
     {!lmPcode ? <p role="alert" style={styles.notice}>Activate a Local Municipality workbase before opening this map.</p> : null}
     {batchId && lmPcode && !ready ? <p role="status" style={styles.notice}><LoadingIndicator>Loading the live TRN BGO Batch Map…</LoadingIndicator></p> : null}
     {error ? <section role="alert" style={{ ...styles.notice, color: "#991b1b", background: "#fef2f2", borderColor: "#fecaca" }}><strong>TRN BGO Batch Map could not be loaded.</strong><div>{error}</div></section> : null}
-    {batch && !error ? <section aria-label="Batch Details" style={styles.grid}>{identity.map(([label, value]) => <article key={label} style={styles.card}><span style={styles.label}>{label}</span><strong style={styles.value}>{value || "NAv"}</strong></article>)}</section> : null}
+    {batch && !error ? <section aria-label="Batch Details" style={styles.grid}>{identity.map(([label, value]) => <article key={label} style={styles.card}><span style={styles.label}>{label}</span><strong style={styles.value}>{Array.isArray(value) && !value.length ? "NAv" : value || "NAv"}</strong></article>)}</section> : null}
     {ready && batch && !error ? <>
       <section aria-label="Batch Asset Counts" style={styles.grid}>{[["Batch Rows", data.membership.rowCount], ["ERFs", data.erfs.length], ["Premises", data.premises.length], ["Field Meters", data.meters.length]].map(([label, count]) => <article key={label} style={styles.card}><span style={styles.label}>{label}</span><strong style={{ ...styles.value, fontSize: 25 }}>{count.toLocaleString("en-ZA")}</strong></article>)}</section>
       {missing || missingFence ? <section role="status" style={{ ...styles.notice, background: "#fffbeb", color: "#92400e" }}><strong>Some batch references could not be resolved.</strong><div>ERFs: {diagnostics.missingErfCount}; premises: {diagnostics.missingPremiseCount}; field meters: {diagnostics.missingMeterCount}; rows without an ERF: {diagnostics.rowsMissingErfRef}.{missingFence ? " The linked geofence could not be resolved." : ""}</div></section> : null}
