@@ -105,7 +105,9 @@ test("TRN BGO Register uses canonical IrepsTable component with specification co
   assert.match(content, /label:\s*"File Name"/, "Must have File Name column");
   assert.match(content, /label:\s*"BGO Rows"/, "Must have BGO Rows column");
   assert.match(content, /label:\s*"Allocation"/, "Must have Allocation column");
-  assert.match(content, /label:\s*"BGO Status"/, "Must have BGO Status column");
+  assert.match(content, /label:\s*"Allocated To"/, "Must have Allocated To column");
+  assert.match(content, /label:\s*"Batch Status"/, "Must have Batch Status column");
+  assert.match(content, /stickyColumnKeys=\{\["select", "map", "batchId"\]\}/, "Must freeze select, map, and batchId columns");
   assert.match(content, /label:\s*"Total"/, "Must have Total column");
   assert.match(content, /label:\s*"In Progress"/, "Must have In Progress column");
   assert.match(content, /label:\s*"Completed"/, "Must have Completed column");

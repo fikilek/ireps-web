@@ -1,17 +1,22 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import LoadingIndicator from "../../components/LoadingIndicator";
 import { batchCreator } from "../../redux/trnBgoRegisterDetails.js";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import {
+  useAllocateTrnBgoWardBatchesMutation,
   useGetTcUploadsQuery,
   useGetTrnBgoProgressQuery,
   useGetTrnBgoRegisterDetailsQuery,
   useDeleteTcUploadMutation,
 } from "../../redux/tcApi";
+import {
+  buildTrnBgoRegisterRow,
+  trnBgoRegisterSearchValue,
+} from "./trn-bgo/trnBgoRegisterModel";
 import IrepsTable from "../../components/table/IrepsTable";
 
 function formatNumber(value) {
@@ -73,7 +78,7 @@ function getTrnTypeInfo(trnTypeRaw = "") {
   return { label: opType || "Transaction", code: "TRN", bg: "#f8fafc", text: "#334155", border: "#e2e8f0" };
 }
 
-export function getBatchAllocationStatus(batch) {
+function getBatchAllocationStatus(batch) {
   const bgoStatus = String(batch?.bgoStatus || "").toUpperCase();
   const workflowState = String(batch?.workflowState || batch?.workflow?.state || "").toUpperCase();
   const hasTarget = Array.isArray(batch?.assignment?.targets) && batch.assignment.targets.length > 0;
@@ -86,6 +91,7 @@ export function getBatchAllocationStatus(batch) {
     workflowState === "ALLOCATED" ||
     workflowState === "IN_PROGRESS" ||
     workflowState === "ISSUED" ||
+    workflowState === "ACCEPTED" ||
     hasTarget ||
     hasTeamOrSp;
 
@@ -203,6 +209,7 @@ export default function TrnBgoRegisterPage() {
   }), [sourceUploads, progress]);
 
   const [deleteTcUpload, { isLoading: isDeletingUpload }] = useDeleteTcUploadMutation();
+  const [allocateTrnBgoWardBatches, { isLoading: isUnallocatingBgo }] = useAllocateTrnBgoWardBatchesMutation();
 
   // Selection ticks
   const [tickedBatchIds, setTickedBatchIds] = useState(new Set());
@@ -216,10 +223,13 @@ export default function TrnBgoRegisterPage() {
   };
   const clearTicks = () => setTickedBatchIds(new Set());
 
-  // Delete modal state
+  // Delete & Unallocate modal state
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
+  const [unallocateCandidate, setUnallocateCandidate] = useState(null);
+  const [unallocateReason, setUnallocateReason] = useState("");
+  const [unallocateOutcome, setUnallocateOutcome] = useState(null);
 
   // KPI Help Modal state
   const [activeHelpKpi, setActiveHelpKpi] = useState(null);
@@ -244,7 +254,6 @@ export default function TrnBgoRegisterPage() {
 
     uploads.forEach((item) => {
       const totalRows = Number(item.totalRows || 0);
-      const inProgress = Number(item.inProgressRows || 0);
       const completed = Number(item.completedRows || 0);
       const isCompletedBatch = (totalRows > 0 && completed >= totalRows) ||
         String(item.workflowState || item.workflow?.state || item.bgoStatus || "").toUpperCase() === "COMPLETED";
@@ -277,6 +286,11 @@ export default function TrnBgoRegisterPage() {
       completedMeters,
     };
   }, [uploads]);
+
+  const tableRows = useMemo(
+    () => uploads.map((batch) => buildTrnBgoRegisterRow(batch, registerDetails)),
+    [uploads, registerDetails],
+  );
 
   const handleOpenDelete = (batch) => {
     setDeleteCandidate(batch);
@@ -315,14 +329,54 @@ export default function TrnBgoRegisterPage() {
     }
   };
 
-  // IrepsTable column definitions
-  const columns = useMemo(() => [
+  const handleUnallocateBatch = async () => {
+    if (!unallocateCandidate || isUnallocatingBgo) return;
+    const expectedIssuedAt =
+      unallocateCandidate.raw?.workflow?.issuedAt || unallocateCandidate.workflow?.issuedAt;
+    if (!expectedIssuedAt) {
+      setUnallocateOutcome({
+        kind: "failure",
+        batchId: unallocateCandidate.id,
+        message: "The allocation timestamp is unavailable. Refresh the register and reopen Unallocate.",
+      });
+      setUnallocateCandidate(null);
+      setUnallocateReason("");
+      return;
+    }
+    try {
+      const response = await allocateTrnBgoWardBatches({
+        batchIds: [unallocateCandidate.id],
+        targetType: "UNALLOCATE",
+        expectedIssuedAt,
+        reason: unallocateReason,
+      }).unwrap();
+      setUnallocateOutcome({
+        kind: "success",
+        batchId: unallocateCandidate.id,
+        message: response?.message || `Batch ${unallocateCandidate.id} is ready for allocation.`,
+      });
+      setUnallocateCandidate(null);
+      setUnallocateReason("");
+    } catch (err) {
+      setUnallocateOutcome({
+        kind: "failure",
+        batchId: unallocateCandidate.id,
+        message: err?.data?.message || err?.message || "Could not unallocate this TRN BGO batch.",
+      });
+      setUnallocateCandidate(null);
+      setUnallocateReason("");
+    }
+  };
+
+  const progressPendingOrError = batchIds.length > 0 && (!progress?.ready || Boolean(progress?.error));
+
+  // IrepsTable column definitions (aligned with MdBgoRegisterPage + TRN Type & File Name)
+  const columns = useMemo(() => {
+    const countCell = (value) => value == null ? (progress?.error ? "NAv" : "…") : formatNumber(value);
+    return [
     {
       key: "select",
       label: "[ ]",
-      width: 44,
-      filter: null,
-      sortable: false,
       export: false,
       render: (batch) => (
         <input
@@ -336,15 +390,13 @@ export default function TrnBgoRegisterPage() {
     {
       key: "map",
       label: "Map",
-      width: 52,
-      filter: null,
-      sortable: false,
       export: false,
       render: (batch) => (
         <Link
           to={`/operations/trn-bgo/map?batchId=${encodeURIComponent(batch.id)}`}
           style={styles.mapLinkButton}
-          title="View Batch Map"
+          title="View TRN BGO Batch Map"
+          aria-label={`View TRN BGO Batch Map for ${batch.id}`}
         >
           <svg
             width="17"
@@ -367,21 +419,14 @@ export default function TrnBgoRegisterPage() {
     {
       key: "batchId",
       label: "Batch ID",
-      sortable: true,
       filter: "text",
-      value: (batch) => batch.id || "",
-      sortValue: (batch) => batch.id || "",
-      render: (batch) => (
-        <strong style={styles.strongCell}>{batch.id}</strong>
-      ),
+      value: (batch) => batch.id,
     },
     {
       key: "trnType",
       label: "TRN Type",
-      sortable: true,
       filter: "select",
       value: (batch) => getTrnTypeInfo(batch.trnType).label,
-      sortValue: (batch) => getTrnTypeInfo(batch.trnType).label,
       render: (batch) => {
         const info = getTrnTypeInfo(batch.trnType);
         return (
@@ -396,6 +441,7 @@ export default function TrnBgoRegisterPage() {
               background: info.bg,
               color: info.text,
               border: `1px solid ${info.border}`,
+              whiteSpace: "nowrap",
             }}
           >
             {info.label}
@@ -406,21 +452,23 @@ export default function TrnBgoRegisterPage() {
     {
       key: "fileName",
       label: "File Name",
-      sortable: true,
       filter: "text",
       value: (batch) => batch.fileName || "",
-      sortValue: (batch) => batch.fileName || "",
       render: (batch) => (
-        batch.sourceFileId ? <Link to={`/operations/trn-bgo/source/${batch.sourceFileId}`} style={styles.fileNameCell}>{batch.fileName}</Link> :
-        <span style={styles.fileNameCell} title={batch.fileName}>{batch.fileName || "NAv"}</span>
+        batch.sourceFileId ? (
+          <Link to={`/operations/trn-bgo/source/${batch.sourceFileId}`} style={styles.fileNameCell}>
+            {batch.fileName}
+          </Link>
+        ) : (
+          <span style={styles.fileNameCell} title={batch.fileName}>
+            {batch.fileName || "NAv"}
+          </span>
+        )
       ),
     },
     {
       key: "bgoRows",
       label: "BGO Rows",
-      width: 96,
-      filter: null,
-      sortable: false,
       export: false,
       render: (batch) => (
         <Link
@@ -435,151 +483,129 @@ export default function TrnBgoRegisterPage() {
     {
       key: "allocation",
       label: "Allocation",
-      width: 96,
-      filter: null,
-      sortable: false,
-      export: false,
-      render: (batch) => {
-        const alloc = getBatchAllocationStatus(batch);
-        const isAllocated = alloc.label === "Allocated";
-        return (
-          <Link
-            to={`/operations/trn-bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
-            style={{
-              ...styles.allocateButton,
-              ...(isAllocated
-                ? {
-                    background: "#ecfdf5",
-                    borderColor: "#a7f3d0",
-                    color: "#047857",
-                  }
-                : null),
-            }}
-            title={isAllocated ? `Allocated to ${batch.allocatedTo || "Team/SP"}` : "Allocate this batch"}
-          >
-            {isAllocated ? "Allocated" : "Allocate"}
-          </Link>
-        );
-      },
+      filter: "select",
+      value: (batch) => batch.allocation,
+      filterOptions: [
+        { value: "NOT ALLOCATED", label: "Not Allocated" },
+        { value: "ALLOCATED", label: "Allocated" },
+      ],
+      render: (batch) => batch.isAllocated ? (
+        <button
+          type="button"
+          style={{
+            ...styles.unallocateButton,
+            ...((batch.fieldworkStarted || batch.unallocationIntentUnavailable) ? styles.disabledButton : null),
+          }}
+          disabled={batch.fieldworkStarted || batch.unallocationIntentUnavailable}
+          title={
+            batch.fieldworkStarted
+              ? "Field work has started; this batch cannot be unallocated"
+              : batch.unallocationIntentUnavailable
+                ? "Allocation details are incomplete or legacy; contact an MNG"
+                : "Unallocate this batch before field work starts"
+          }
+          onClick={() => {
+            setUnallocateReason("");
+            setUnallocateCandidate(batch);
+          }}
+        >
+          Unallocate
+        </button>
+      ) : (
+        <Link
+          to={`/operations/trn-bgo/allocation?batchId=${encodeURIComponent(batch.id)}`}
+          style={styles.rowLinkButton}
+          title="Allocate this batch on Allocation Board"
+        >
+          Allocate
+        </Link>
+      ),
     },
     {
-      key: "bgoStatus",
-      label: "BGO Status",
-      sortable: true,
+      key: "allocatedTo",
+      label: "Allocated To",
       filter: "select",
-      value: (batch) => getBatchAllocationStatus(batch).label,
-      sortValue: (batch) => getBatchAllocationStatus(batch).label,
-      render: (batch) => {
-        const badge = getBatchAllocationStatus(batch);
-        return (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "4px 8px",
-              borderRadius: 6,
-              fontSize: 11,
-              fontWeight: 800,
-              background: badge.bg,
-              color: badge.text,
-              border: `1px solid ${badge.border}`,
-            }}
-          >
-            {badge.label}
-          </span>
-        );
-      },
+      value: (batch) => batch.allocatedTo,
+    },
+    {
+      key: "batchStatus",
+      label: "Batch Status",
+      filter: "select",
+      value: (batch) => batch.batchStatus,
     },
     {
       key: "totalRows",
       label: "Total",
-      sortable: true,
       filter: "text",
-      value: (batch) => String(batch.totalRows ?? 0),
+      value: (batch) => batch.totalRows,
       sortValue: (batch) => Number(batch.totalRows || 0),
-      render: (batch) => (
-        <strong style={styles.totalCell}>{formatNumber(batch.totalRows)}</strong>
-      ),
+      sortEmptyLast: true,
+      render: (batch) => batch.totalRows == null ? "NAv" : formatNumber(batch.totalRows),
     },
     {
       key: "notStartedRows",
       label: "Not Started",
-      sortable: true,
       filter: "text",
-      value: (batch) => batch.notStartedRows == null ? "NAv" : String(batch.notStartedRows),
+      value: (batch) => batch.notStartedRows,
       sortValue: (batch) => batch.notStartedRows,
       sortEmptyLast: true,
-      render: (batch) => <strong style={styles.totalCell}>{batch.notStartedRows == null ? "NAv" : formatNumber(batch.notStartedRows)}</strong>,
+      filterDisabled: progressPendingOrError,
+      render: (batch) => countCell(batch.notStartedRows),
     },
     {
       key: "inProgressRows",
       label: "In Progress",
-      sortable: true,
       filter: "text",
-      value: (batch) => String(batch.inProgressRows ?? 0),
+      value: (batch) => batch.inProgressRows,
       sortValue: (batch) => Number(batch.inProgressRows || 0),
-      render: (batch) => (
-        <strong
-          style={{
-            color: Number(batch.inProgressRows || 0) > 0 ? "#b45309" : "#64748b",
-            fontWeight: 800,
-          }}
-        >
-          {formatNumber(batch.inProgressRows)}
-        </strong>
-      ),
+      sortEmptyLast: true,
+      render: (batch) => formatNumber(batch.inProgressRows),
     },
     {
       key: "completedRows",
       label: "Completed",
-      sortable: true,
       filter: "text",
-      value: (batch) => String(batch.completedRows ?? 0),
+      value: (batch) => batch.completedRows,
       sortValue: (batch) => Number(batch.completedRows || 0),
-      render: (batch) => (
-        <strong
-          style={{
-            color: Number(batch.completedRows || 0) > 0 ? "#15803d" : "#64748b",
-            fontWeight: 800,
-          }}
-        >
-          {formatNumber(batch.completedRows)}
-        </strong>
-      ),
+      sortEmptyLast: true,
+      render: (batch) => formatNumber(batch.completedRows),
     },
     {
-      key: "wardPcode",
+      key: "ward",
       label: "Ward",
-      sortable: true,
-      filter: "text",
-      value: (batch) => batch.wardPcode || batch.scope?.wardPcode || "NAv",
-      sortValue: (batch) => batch.wardPcode || batch.scope?.wardPcode || "",
+      filter: "select",
+      value: (batch) => batch.ward,
+      exportValue: (batch) => `${batch.ward} (${batch.wardPcode})`,
       render: (batch) => (
-        <div style={styles.strongCell}>{batch.wardPcode || batch.scope?.wardPcode || "NAv"}</div>
+        <div>
+          <div style={styles.strongCell}>{batch.wardNo}</div>
+          <div style={styles.mutedCell}>{batch.wardPcode}</div>
+        </div>
       ),
     },
     {
       key: "geofence",
       label: "Geofence",
-      sortable: true,
       filter: "text",
-      value: batch => registerDetails?.[batch.id]?.text || "NAv",
-      render: batch => registerDetails?.[batch.id]?.ready ? <div title={registerDetails[batch.id].error || undefined}>{registerDetails[batch.id].text}</div> : <LoadingIndicator>Loading…</LoadingIndicator>,
+      value: (batch) => registerDetails?.[batch.id]?.text || "NAv",
+      render: (batch) => registerDetails?.[batch.id]?.ready ? (
+        <div title={registerDetails[batch.id].error || undefined}>
+          {registerDetails[batch.id].text}
+        </div>
+      ) : (
+        <LoadingIndicator>Loading…</LoadingIndicator>
+      ),
     },
     {
       key: "createdBy",
       label: "Created By",
-      sortable: true,
       filter: "text",
       value: batchCreator,
-      render: batch => <div>{batchCreator(batch)}</div>,
+      render: (batch) => <div>{batchCreator(batch)}</div>,
     },
     {
       key: "delete",
       label: "Delete BGO",
-      width: 96,
-      filter: null,
-      sortable: false,
       export: false,
       render: (batch) => {
         const inProgress = Number(batch.inProgressRows || 0);
@@ -591,15 +617,7 @@ export default function TrnBgoRegisterPage() {
             type="button"
             style={{
               ...styles.deleteBatchButton,
-              ...(!canDelete
-                ? {
-                    opacity: 0.45,
-                    cursor: "not-allowed",
-                    background: "#f1f5f9",
-                    color: "#94a3b8",
-                    borderColor: "#e2e8f0",
-                  }
-                : null),
+              ...(!canDelete ? styles.disabledButton : null),
             }}
             disabled={!canDelete}
             onClick={() => {
@@ -607,16 +625,17 @@ export default function TrnBgoRegisterPage() {
             }}
             title={
               canDelete
-                ? "Delete this batch upload"
-                : `Cannot delete: ${inProgress} meters in progress, ${completed} completed`
+                ? "Delete this unaccepted BGO batch"
+                : "Cannot delete active or in-progress batch"
             }
           >
-            Delete
+            Delete BGO
           </button>
         );
       },
     },
-  ], [tickedBatchIds, registerDetails]);
+  ];
+  }, [tickedBatchIds, registerDetails, progressPendingOrError, progress?.error]);
 
   return (
     <section style={styles.page}>
@@ -634,7 +653,7 @@ export default function TrnBgoRegisterPage() {
           </div>
           <p style={styles.subtitle}>
             View permanent Transaction batches originating from uploaded meter lists.
-            TRN BGO batches originate from existing meters grouped into geofences.
+            TRN BGO batches originate from existing meters grouped by Ward.
           </p>
         </div>
 
@@ -659,23 +678,13 @@ export default function TrnBgoRegisterPage() {
           >
             TRN BGO Dashboard
           </Link>
-
-          {tickedBatchIds.size > 0 ? (
-            <button
-              type="button"
-              style={styles.clearTicksButton}
-              onClick={clearTicks}
-              title="Clear selected batches"
-            >
-              Clear ticks
-            </button>
-          ) : null}
         </div>
       </div>
 
       {uploadsError ? (
         <div style={styles.errorNotice}>
-          Failed to load TRN BGO batches: {uploadsError?.data?.message || uploadsError?.message}
+          <strong>TRN BGO Register could not be loaded</strong>
+          <div>{uploadsError?.data?.message || uploadsError?.message || "Unknown error"}</div>
         </div>
       ) : null}
 
@@ -713,24 +722,41 @@ export default function TrnBgoRegisterPage() {
         />
       </div>
 
-      <div style={styles.tablePanel}>
-        {progress?.error ? <p role="alert">{progress.error}</p> : null}
-        <IrepsTable showLoadingSpinner
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>
+          <div>
+            <p style={styles.panelSubtitle}>
+              Permanent batches loaded from tc_uploads for {lmName} ({lmPcode}).
+            </p>
+          </div>
+
+          <div style={styles.draftStreamBadge}>Permanent Firestore register</div>
+        </div>
+
+        {progress?.error ? <p role="alert" style={styles.errorNotice}>{progress.error}</p> : null}
+        <IrepsTable
+          showLoadingSpinner
           title="Permanent Transaction Batches"
           columns={columns}
-          rows={uploads}
+          stickyColumnKeys={["select", "map", "batchId"]}
+          rows={tableRows}
           rowKey={(batch) => batch.id}
           defaultSort={{ key: "createdAt", direction: "desc" }}
+          extraFiltersActive={tickedBatchIds.size > 0}
+          onClearFilters={clearTicks}
+          searchValue={trnBgoRegisterSearchValue}
+          searchPlaceholder="Batch IDs, types, files, teams, wards, geofences, statuses, creators…"
           emptyText={
             uploads.length === 0
               ? "No permanent TRN BGO Batches were found."
-              : "No permanent TRN BGO Batches match the current filters."
+              : "No permanent TRN BGO Batches match the current scope or filters."
           }
           loading={isUploadsLoading || (batchIds.length > 0 && !progress?.ready)}
           loadingText="Loading TRN BGO Batches..."
           downloads={{
             registryName: "TRN BGO Register",
             fileBaseName: "trn_bgo_register",
+            scope: { module: "TRN BGO Register", lmPcode },
             columns: columns.filter((col) => col.export !== false),
           }}
         />
@@ -787,16 +813,17 @@ export default function TrnBgoRegisterPage() {
 
       {/* Delete Batch Modal */}
       {deleteCandidate ? (
-        <div style={styles.modalOverlay} role="dialog" aria-modal="true">
-          <div style={styles.modalBox}>
-            <h3 style={styles.modalTitle}>Delete TRN BGO Batch</h3>
-            <p style={styles.modalText}>
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true">
+            <p style={styles.eyebrow}>Delete TRN BGO Batch</p>
+            <h2 style={styles.modalTitle}>{deleteCandidate.id}</h2>
+            <p style={styles.modalSubtitle}>
               Are you sure you want to delete batch <strong>{deleteCandidate.id}</strong> ({deleteCandidate.fileName})?
               This will remove the uploaded batch and all associated rows.
             </p>
 
             {deleteError ? (
-              <div style={styles.modalErrorNotice}>{deleteError}</div>
+              <div style={styles.modalError}>{deleteError}</div>
             ) : null}
 
             <div style={styles.modalActions}>
@@ -814,7 +841,83 @@ export default function TrnBgoRegisterPage() {
                 onClick={handleConfirmDelete}
                 disabled={isDeletingUpload}
               >
-                {isDeletingUpload ? "Deleting..." : "Delete Batch"}
+                {isDeletingUpload ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Unallocate Batch Modal */}
+      {unallocateCandidate ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="trn-bgo-unallocate-title">
+            <p style={styles.eyebrow}>Unallocate TRN BGO Batch</p>
+            <h2 id="trn-bgo-unallocate-title" style={styles.modalTitle}>{unallocateCandidate.id}</h2>
+            <p style={styles.modalSubtitle}>
+              Take this batch back from <strong>{unallocateCandidate.allocatedTo !== "NAv" ? unallocateCandidate.allocatedTo : "the assigned target"}</strong> and return it to Ready for Allocation. The batch and its meter rows will be preserved.
+            </p>
+            {String(unallocateCandidate.workflowState || unallocateCandidate.raw?.workflow?.state || "").toUpperCase() === "ACCEPTED" ? (
+              <div style={styles.unallocateWarning}>The team has accepted this batch. It may remain on their device until it reconnects; the server will refuse any later field submission.</div>
+            ) : null}
+            <label style={styles.reasonLabel} htmlFor="trn-bgo-unallocate-reason">Reason for unallocation</label>
+            <textarea
+              id="trn-bgo-unallocate-reason"
+              value={unallocateReason}
+              onChange={(event) => setUnallocateReason(event.target.value)}
+              maxLength={1000}
+              rows={4}
+              style={styles.reasonInput}
+              disabled={isUnallocatingBgo}
+            />
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalCancelButton}
+                onClick={() => setUnallocateCandidate(null)}
+                disabled={isUnallocatingBgo}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={styles.modalPrimaryButton}
+                onClick={handleUnallocateBatch}
+                disabled={isUnallocatingBgo || !unallocateReason.trim()}
+              >
+                {isUnallocatingBgo ? "Unallocating..." : "Confirm Unallocate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Unallocate Outcome Modal */}
+      {unallocateOutcome ? (
+        <div style={styles.modalOverlay} role="presentation">
+          <div style={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="trn-bgo-unallocate-outcome-title">
+            <p style={styles.eyebrow}>
+              {unallocateOutcome.kind === "success"
+                ? "Unallocation Successful"
+                : "Unallocation Failed"}
+            </p>
+            <h2 id="trn-bgo-unallocate-outcome-title" style={styles.modalTitle}>{unallocateOutcome.batchId}</h2>
+            <p style={styles.modalSubtitle}>
+              {unallocateOutcome.kind === "success"
+                ? "This batch is now Ready for Allocation."
+                : unallocateOutcome.message}
+            </p>
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.modalPrimaryButton}
+                onClick={() => {
+                  const successful = unallocateOutcome.kind === "success";
+                  setUnallocateOutcome(null);
+                  if (successful) navigate("/operations/trn-bgo");
+                }}
+              >
+                OK
               </button>
             </div>
           </div>
@@ -825,100 +928,108 @@ export default function TrnBgoRegisterPage() {
 }
 
 const styles = {
-  page: {
-    padding: 24,
-    background: "#f8fafc",
-    minHeight: "100vh",
-  },
+  page: { padding: 24 },
   header: {
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 20,
+    justifyContent: "space-between",
     gap: 16,
+    marginBottom: 18,
     flexWrap: "wrap",
   },
   eyebrow: {
+    margin: 0,
+    color: "#2563eb",
     fontSize: 12,
-    fontWeight: 800,
-    color: "#64748b",
+    fontWeight: 900,
+    letterSpacing: "0.08em",
     textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    margin: "0 0 4px",
   },
   titleHelpRow: {
     display: "flex",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
+    flexWrap: "wrap",
   },
   title: {
-    fontSize: 24,
-    fontWeight: 900,
+    margin: "8px 0 6px",
+    fontSize: 30,
     color: "#0f172a",
-    margin: 0,
   },
   subtitle: {
-    fontSize: 13,
+    margin: 0,
     color: "#64748b",
-    margin: "4px 0 0",
+    maxWidth: 780,
+    lineHeight: 1.5,
   },
   headerActions: {
     display: "flex",
-    gap: 8,
-    flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+    flexWrap: "wrap",
   },
   primaryButton: {
     display: "inline-flex",
     alignItems: "center",
-    padding: "8px 16px",
-    borderRadius: 8,
+    justifyContent: "center",
+    border: 0,
+    borderRadius: 14,
     background: "#2563eb",
     color: "#ffffff",
-    fontWeight: 800,
-    fontSize: 13,
+    padding: "12px 16px",
+    fontWeight: 900,
+    cursor: "pointer",
     textDecoration: "none",
-    border: 0,
   },
   secondaryLinkButton: {
     display: "inline-flex",
     alignItems: "center",
-    padding: "8px 16px",
-    borderRadius: 8,
-    background: "#ffffff",
-    color: "#0f172a",
-    fontWeight: 700,
-    fontSize: 13,
-    textDecoration: "none",
-    border: "1px solid #cbd5e1",
-  },
-  clearTicksButton: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "8px 12px",
-    borderRadius: 8,
-    background: "#fee2e2",
-    color: "#991b1b",
-    fontWeight: 700,
-    fontSize: 12,
-    border: "1px solid #fecaca",
+    justifyContent: "center",
+    border: "1px solid #2563eb",
+    borderRadius: 14,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    padding: "11px 16px",
+    fontWeight: 900,
     cursor: "pointer",
+    textDecoration: "none",
+  },
+  disabledButton: {
+    opacity: 0.5,
+    pointerEvents: "none",
+    cursor: "not-allowed",
+  },
+  errorNotice: {
+    marginBottom: 16,
+    padding: 14,
+    border: "1px solid #fecaca",
+    borderRadius: 16,
+    background: "#fef2f2",
+    color: "#991b1b",
+    fontSize: 13,
+  },
+  successNotice: {
+    marginBottom: 16,
+    padding: 14,
+    border: "1px solid #bbf7d0",
+    borderRadius: 16,
+    background: "#f0fdf4",
+    color: "#166534",
+    fontSize: 13,
+    fontWeight: 700,
   },
   summaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 16,
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 12,
     marginBottom: 20,
   },
   summaryCard: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
     background: "#ffffff",
     padding: "16px 18px",
-    borderRadius: 14,
-    border: "1px solid #e2e8f0",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    minHeight: 110,
     boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
   },
   summaryCardHeader: {
@@ -928,11 +1039,13 @@ const styles = {
     gap: 8,
   },
   summaryCardLabel: {
+    display: "block",
+    color: "#64748b",
     fontSize: 12,
     fontWeight: 800,
-    color: "#64748b",
     textTransform: "uppercase",
     letterSpacing: "0.04em",
+    marginBottom: 6,
   },
   helpButton: {
     width: 22,
@@ -948,16 +1061,15 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     padding: 0,
-    transition: "all 0.15s ease",
   },
   summaryCardBody: {
-    margin: "8px 0",
+    margin: "4px 0 8px",
   },
   summaryCardValue: {
-    fontSize: 28,
-    fontWeight: 900,
+    display: "block",
     color: "#0f172a",
-    lineHeight: 1,
+    fontSize: 26,
+    fontWeight: 900,
   },
   summaryCardFooter: {
     display: "flex",
@@ -975,72 +1087,109 @@ const styles = {
     fontSize: 12,
     fontWeight: 800,
   },
-  tablePanel: {
-    background: "#ffffff",
-    borderRadius: 14,
+  panel: {
     border: "1px solid #e2e8f0",
-    overflow: "hidden",
-    boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
+    borderRadius: 24,
+    background: "#ffffff",
+    padding: 20,
+    boxShadow: "0 4px 16px rgba(15, 23, 42, 0.04)",
+  },
+  panelHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 16,
+    flexWrap: "wrap",
+  },
+  panelSubtitle: {
+    margin: "4px 0 0",
+    color: "#64748b",
+    fontSize: 13,
+  },
+  draftStreamBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 12px",
+    borderRadius: 999,
+    background: "#f1f5f9",
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+  mapLinkButton: {
+    width: 30,
+    height: 30,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: "0 0 auto",
+    borderRadius: 9,
+    border: "1px solid #93c5fd",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    textDecoration: "none",
   },
   strongCell: {
-    color: "#0f172a",
     fontWeight: 700,
+    color: "#0f172a",
+  },
+  mutedCell: {
+    fontSize: 11,
+    color: "#64748b",
   },
   fileNameCell: {
     maxWidth: 240,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: "#334155",
+    color: "#1d4ed8",
     display: "block",
-  },
-  readyCell: {
-    color: "#166534",
-    fontSize: 14,
-    fontWeight: 900,
-  },
-  totalCell: {
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: 900,
   },
   rowLinkButton: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "6px 12px",
-    borderRadius: 8,
-    background: "#eff6ff",
-    color: "#2563eb",
-    fontWeight: 800,
-    fontSize: 12,
-    textDecoration: "none",
     border: "1px solid #bfdbfe",
-  },
-  allocateButton: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "6px 12px",
-    borderRadius: 8,
-    background: "#f0fdf4",
-    color: "#166534",
+    borderRadius: 999,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    padding: "5px 14px",
     fontWeight: 800,
     fontSize: 12,
     textDecoration: "none",
-    border: "1px solid #bbf7d0",
+    whiteSpace: "nowrap",
   },
-  mapLinkButton: {
+  unallocateButton: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    background: "#f1f5f9",
-    color: "#334155",
+    border: "1px solid #fde68a",
+    borderRadius: 999,
+    background: "#fffbeb",
+    color: "#b45309",
+    padding: "5px 14px",
+    fontWeight: 800,
+    fontSize: 12,
     textDecoration: "none",
-    border: "1px solid #cbd5e1",
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  deleteBatchButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #fca5a5",
+    borderRadius: 999,
+    background: "#ffffff",
+    color: "#dc2626",
+    padding: "5px 12px",
+    fontWeight: 800,
+    fontSize: 11,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
   lmHeaderPill: {
     display: "inline-flex",
@@ -1071,54 +1220,24 @@ const styles = {
     color: "#64748b",
     fontWeight: 600,
   },
-  deleteBatchButton: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "6px 10px",
-    borderRadius: 8,
-    background: "#ffffff",
-    color: "#ef4444",
-    border: "1px solid #fecaca",
-    fontSize: 12,
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  errorNotice: {
-    background: "#fef2f2",
-    color: "#991b1b",
-    border: "1px solid #fecaca",
-    borderRadius: 10,
-    padding: "12px 16px",
-    marginBottom: 16,
-    fontSize: 13,
-  },
-  successNotice: {
-    background: "#f0fdf4",
-    color: "#166534",
-    border: "1px solid #bbf7d0",
-    borderRadius: 10,
-    padding: "12px 16px",
-    marginBottom: 16,
-    fontSize: 13,
-  },
   modalOverlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(15, 23, 42, 0.6)",
+    background: "rgba(15, 23, 42, 0.45)",
+    backdropFilter: "blur(2px)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 9999,
     padding: 16,
   },
-  modalBox: {
+  modalCard: {
     background: "#ffffff",
     borderRadius: 20,
     padding: 24,
     maxWidth: 480,
     width: "100%",
-    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
+    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
   },
   helpModalBox: {
     background: "#ffffff",
@@ -1143,10 +1262,15 @@ const styles = {
     letterSpacing: "0.05em",
   },
   modalTitle: {
-    margin: "0 0 12px",
-    fontSize: 18,
-    fontWeight: 900,
+    margin: "6px 0 8px",
+    fontSize: 20,
     color: "#0f172a",
+  },
+  modalSubtitle: {
+    margin: "0 0 16px",
+    color: "#64748b",
+    fontSize: 14,
+    lineHeight: 1.5,
   },
   helpModalTitle: {
     margin: "4px 0 0",
@@ -1190,54 +1314,48 @@ const styles = {
     color: "#475569",
     lineHeight: 1.5,
   },
-  modalText: {
-    margin: "0 0 20px",
-    color: "#475569",
-    fontSize: 14,
-    lineHeight: 1.5,
+  modalError: {
+    padding: 10,
+    borderRadius: 8,
+    background: "#fef2f2",
+    border: "1px solid #fecaca",
+    color: "#991b1b",
+    fontSize: 12,
+    marginBottom: 14,
   },
   modalActions: {
     display: "flex",
     justifyContent: "flex-end",
-    gap: 12,
+    gap: 10,
   },
   modalCancelButton: {
-    padding: "10px 16px",
-    borderRadius: 10,
     border: "1px solid #cbd5e1",
+    borderRadius: 10,
     background: "#ffffff",
     color: "#475569",
-    fontWeight: 700,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  modalPrimaryButton: {
-    padding: "10px 20px",
-    borderRadius: 10,
-    border: 0,
-    background: "#2563eb",
-    color: "#ffffff",
+    padding: "8px 16px",
     fontWeight: 800,
-    fontSize: 13,
     cursor: "pointer",
   },
   modalDeleteButton: {
-    padding: "10px 16px",
-    borderRadius: 10,
     border: 0,
-    background: "#ef4444",
+    borderRadius: 10,
+    background: "#dc2626",
     color: "#ffffff",
-    fontWeight: 700,
-    fontSize: 13,
+    padding: "8px 16px",
+    fontWeight: 800,
     cursor: "pointer",
   },
-  modalErrorNotice: {
-    background: "#fef2f2",
-    color: "#991b1b",
-    border: "1px solid #fecaca",
-    borderRadius: 8,
-    padding: "8px 12px",
-    marginBottom: 16,
-    fontSize: 12,
+  modalPrimaryButton: {
+    border: 0,
+    borderRadius: 10,
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "8px 16px",
+    fontWeight: 800,
+    cursor: "pointer",
   },
+  reasonLabel: { display: "block", marginBottom: 6, color: "#334155", fontSize: 13, fontWeight: 800 },
+  reasonInput: { boxSizing: "border-box", width: "100%", border: "1px solid #cbd5e1", borderRadius: 10, padding: 10, marginBottom: 14, font: "inherit", resize: "vertical" },
+  unallocateWarning: { padding: 10, borderRadius: 8, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 12, lineHeight: 1.5, marginBottom: 14 },
 };
