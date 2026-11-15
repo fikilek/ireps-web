@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX tags are consumed by React. */
 export default function BatchMapLayerControl({ open, setOpen, visible, setVisible, counts }) {
-  return <div style={{ position: "absolute", top: 90, right: 12, zIndex: 5 }}>
+  return <div style={{ position: "absolute", top: 140, right: 12, zIndex: 5 }}>
     {!open ? <button type="button" aria-label="Map Layers" title="Map Layers" aria-expanded={false} onClick={() => setOpen(true)} style={styles.icon}>
       <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5" /></svg>
     </button> : <section aria-label="Map Layers" style={styles.panel}>
