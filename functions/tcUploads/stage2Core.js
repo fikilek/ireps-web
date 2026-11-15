@@ -49,7 +49,7 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   const wardLm=text(ward?.parents?.localMunicipalityId||ward?.parents?.lmPcode||ward?.lmPcode||ward?.parentPcode||ward?.localMunicipality?.pcode);
   if(!ward || wardLm!==lmPcode)return {eligible:false,message:"The authoritative Ward does not belong to the selected municipality."};
   const refs=normalizeGeoFenceRefs(ast.geofenceRefs);
-  if(!refs.length)return {eligible:false,message:"Matched meter has no geofenceRefs."};
+  // Geofence membership is optional for Ward-scoped TRN BGO (owner, 15 Nov 2026).
   // Bulk disconnection origination has no current-status gate (owner, 14 Nov 2026).
   // Individual issuance and field execution keep their separate validators.
   if(trnType!=="METER_DISCONNECTION") {
