@@ -18,7 +18,7 @@ const present = (v) => text(v) && text(v).toUpperCase() !== "NAV";
 const fail = (code, message) => { throw noAccessError(code, message); };
 
 // Pure construction: neither meter work nor a second outcome is written for an inaccessible meter.
-export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now, existing = null, serviceProvider = {}, batch = null }) {
+export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now, existing = null, serviceProvider = {}, batch = null, trnBgoNoAccess = null }) {
   const accessData = normalizeNoAccessAccessData(data.accessData, { actor, metadata: data.metadata });
   const parents = buildNoAccessParentsFromErf(erf);
   if (noAccessParentsAreMissing(parents) || !present(parents.wardPcode)) fail("NO_ACCESS_GEOGRAPHY_UNRESOLVED", "The ERF has no municipality or ward. Ask the office to correct its geography.");
@@ -38,7 +38,7 @@ export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now,
     media: data.media.map(({ uri: _uri, ...item }) => item),
     serviceProvider,
     assignment: existing?.assignment || {},
-    origin: { ...(existing?.origin || {}), channel: existing ? "OFFICE" : "FIELD", ...(batch ? { targetedBatch: batch } : {}) },
+    origin: { ...(existing?.origin || {}), channel: existing ? "OFFICE" : "FIELD", ...(batch ? { targetedBatch: batch } : {}), ...(trnBgoNoAccess ? { trnBgoNoAccess } : {}) },
     workflow: { ...(existing?.workflow || {}), state: "COMPLETED", completedAt: now, completedByUid: actor.uid, completedByUser: actor.name },
   };
   stripToDeclaredRoot(payload, { actor });
@@ -75,12 +75,27 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     if (isOffice && !canMove(currentState(existing.workflow?.state), "execute").ok) fail("INSTRUCTION_NOT_ACCEPTED", "Accept the office instruction before recording this visit.");
     if (isOffice && (existing.ast?.astData?.astId !== astId || existing.accessData?.premise?.id !== premiseId)) fail("INSTRUCTION_ASSET_MISMATCH", "The meter or premise does not match the office instruction.");
 
+    const trnBgoCtx = !isOffice && data?.trnBgoContext?.instructionTrnId ? data.trnBgoContext : null;
+    const instrRef = trnBgoCtx ? db.doc(`trns/${text(trnBgoCtx.instructionTrnId)}`) : null;
+    const instrSnap = instrRef ? await tx.get(instrRef) : null;
     const astSnap = await tx.get(astRef);
     const premiseSnap = await tx.get(premiseRef);
     const erfSnap = await tx.get(db.doc(`ireps_erfs/${access.erfId}`));
     if (!astSnap.exists) fail("AST_NOT_FOUND", "The meter record is missing. Refresh your meters or contact the office.");
     if (!premiseSnap.exists) fail("PREMISE_NOT_FOUND", "The premise is not on the server yet. This visit can be retried after the premise is saved.");
     if (!erfSnap.exists) fail("NO_ACCESS_ERF_NOT_FOUND", "The ERF record is missing. Ask the office to correct this work item.");
+    let instrData = null;
+    if (trnBgoCtx) {
+      if (!instrSnap?.exists) fail("INSTRUCTION_TRN_NOT_FOUND", "The TRN BGO work item no longer exists. Refresh your work orders.");
+      instrData = instrSnap.data();
+      if (!instrData?.origin?.trnBgo || (text(trnBgoCtx.batchId) && instrData.origin.trnBgo.batchId !== text(trnBgoCtx.batchId))) {
+        fail("INSTRUCTION_NOT_ASSIGNED", "This No Access visit does not match the TRN BGO batch item.");
+      }
+      if (isSubmittedState(instrData.workflow?.state)) {
+        fail("TRN_ALREADY_EXISTS", "This TRN execution is already completed.");
+      }
+      await verifyBulkExecution({ db, reader: tx, uid: actor.uid, id: instrRef.id, astId, trnType: access.trnType });
+    }
     const astDoc = astSnap.data();
     validateAst(astDoc);
     const premise = premiseSnap.data();
@@ -111,9 +126,28 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     if (!decision.allowed) fail(decision.code, decision.message);
     const payload = buildLifecycleNoAccess({ data, astDoc, premise, erf: erfSnap.data(), actor, now, existing: isOffice ? existing : null,
       serviceProvider: spId ? { id: spId, name: serviceProviderName(spSnap?.data()) } : {},
-      batch: existing?.origin?.targetedBatch || recognisedBatchContext({ decision, erfId: access.erfId, premiseId }) });
+      batch: existing?.origin?.targetedBatch || recognisedBatchContext({ decision, erfId: access.erfId, premiseId }),
+      trnBgoNoAccess: trnBgoCtx ? { batchId: text(trnBgoCtx.batchId) || instrData?.origin?.trnBgo?.batchId || null, instructionTrnId: instrRef.id } : null });
     tx.set(trnRef, payload);
     tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(trnId), ...noAccessPremiseMetadata(payload.metadata, premise.metadata) });
+    if (trnBgoCtx && instrRef && instrData) {
+      const existingNaIds = Array.isArray(instrData.noAccessTrnIds) ? instrData.noAccessTrnIds : [];
+      const nextNaCount = existingNaIds.includes(trnId) ? existingNaIds.length : existingNaIds.length + 1;
+      const instrPatch = {
+        noAccessTrnIds: FieldValue.arrayUnion(trnId),
+        noAccessCount: nextNaCount,
+        "metadata.updatedAt": now,
+        "metadata.updatedByUid": actor.uid || "NAv",
+        "metadata.updatedByUser": actor.name || "NAv",
+      };
+      if (currentState(instrData.workflow?.state) === "ACCEPTED") {
+        instrPatch["workflow.state"] = "IN_PROGRESS";
+        instrPatch["workflow.executionStartedAt"] = instrData.workflow?.executionStartedAt || now;
+        instrPatch["workflow.executionStartedByUid"] = instrData.workflow?.executionStartedByUid || actor.uid || null;
+        instrPatch["workflow.executionStartedByUser"] = instrData.workflow?.executionStartedByUser || actor.name || null;
+      }
+      tx.update(instrRef, instrPatch);
+    }
     // DR-R001 3.3: the meter's own No Access count is raised HERE, in the same
     // commit as the record and the premise's link, because this is the one door
     // every No Access goes through. Raising it anywhere else — in particular in
