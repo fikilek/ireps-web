@@ -1,5 +1,7 @@
-import BatchMapLayerControl from "./BatchMapLayerControl";
 /* eslint-disable no-unused-vars -- JSX tags are consumed by React. */
+import TrnMeterConnectionLayer from "./TrnMeterConnectionLayer";
+import { trnMeterConnections } from "./trnMeterConnections.js";
+import BatchMapLayerControl from "./BatchMapLayerControl";
 import { useEffect, useMemo, useState } from "react";
 import { useMap } from "@vis.gl/react-google-maps";
 import SalesTargetedBatchMap from "../../sales/components/SalesTargetedBatchMap";
@@ -15,13 +17,14 @@ function FenceBoundaries({ boundaries, ward = false, context = false }) {
   }, [map, boundaries, ward, context]);
   return null;
 }
-export default function BgoBatchMap({ erfs, premises, meters, geofence, geofences, wards = [], wardGeofences = [] }) {
+export default function BgoBatchMap({ erfs, premises, meters, geofence, geofences, wards = [], wardGeofences = [], showMeterConnections = false }) {
   const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState({ erfs: true, premises: true, meters: true, wards: true, geofences: false });
   const fences = useMemo(() => geofences || (geofence ? [geofence] : []), [geofences, geofence]);
   const layers = useMemo(() => batchMapLayers({ erfs, premises, meters, geofences: fences }), [erfs, premises, meters, fences]);
   const wardBoundaries = useMemo(() => wards.map(bgoFenceGeometry).filter(Boolean), [wards]);
   const contextBoundaries = useMemo(() => wardGeofences.filter(fence => !fences.some(selected => selected.id === fence.id)).map(bgoFenceGeometry).filter(Boolean), [wardGeofences, fences]);
+  const connections = useMemo(() => trnMeterConnections(layers.premises, layers.meters, showMeterConnections && visible.meters), [layers.premises, layers.meters, showMeterConnections, visible.meters]);
   const boundary = useMemo(() => layers.boundaries.flatMap(geometry => (geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates).flatMap(polygon => polygon.flatMap(ring => ring.map(([lng, lat]) => ({ lat, lng }))))), [layers.boundaries]);
   return <div style={{ position: "relative" }}>
     {!layers.boundaries.length ? <p role="status">The batch geofence boundary is unavailable. No assets are shown outside a verified batch boundary.</p> : null}
@@ -29,6 +32,7 @@ export default function BgoBatchMap({ erfs, premises, meters, geofence, geofence
       {visible.wards && <FenceBoundaries boundaries={wardBoundaries} ward />}
       {visible.geofences && <FenceBoundaries boundaries={contextBoundaries} context />}
       <FenceBoundaries boundaries={layers.boundaries} />
+      {showMeterConnections && <TrnMeterConnectionLayer connections={connections} />}
     </SalesTargetedBatchMap>
     <BatchMapLayerControl open={open} setOpen={setOpen} visible={visible} setVisible={setVisible} counts={{ erfs: layers.erfs.length, premises: layers.premises.length, meters: layers.meters.length, wards: wardBoundaries.length, geofences: contextBoundaries.length }} />
   </div>;
