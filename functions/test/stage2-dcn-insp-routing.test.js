@@ -225,8 +225,9 @@ test("DCN upload routing: CONNECTED -> MDCN, DISCONNECTED -> MINSP (separate bat
   assert.equal(eligMap.get("2").effectiveTrnType, "METER_INSPECTION");
   assert.match(eligMap.get("2").message, /Proposed for Inspection \(MINSP\)/);
 
-  assert.equal(eligMap.get("3").eligible, false);
-  assert.match(eligMap.get("3").message, /Decommissioned/i);
+  assert.equal(eligMap.get("3").eligible, true);
+  assert.equal(eligMap.get("3").effectiveTrnType, "METER_INSPECTION");
+  assert.match(eligMap.get("3").message, /DECOMMISSIONED/);
 
   const csv = serializeCsv([OFFICIAL_HEADERS, ...rows.map((r) => OFFICIAL_HEADERS.map((h) => r[h]))]);
   const source = {
@@ -409,4 +410,35 @@ test("Duplicate active DCN/RCN routes to MINSP unless an active MINSP already ex
   assert.equal(rcnElig.eligible, true, JSON.stringify(rcnElig));
   assert.equal(rcnElig.effectiveTrnType, "METER_INSPECTION");
   assert.match(rcnElig.message, /Active METER_RECONNECTION job TRN_ACTIVE_RCN already exists/);
+});
+
+test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; INSP allows DECOMMISSIONED", async () => {
+  const lmPcode = "ZA5241";
+  const wardPcode = "ZA5241001";
+  const uid = "M_USER_6";
+  const docs = makeBaseDocs({ lmPcode, wardPcode, uid });
+  addMeterDocs(docs, { id: "TRN_MDIS_REM", meterNo: "60000001", lmPcode, wardPcode, premiseId: "P1", state: "REMOVED" });
+  addMeterDocs(docs, { id: "TRN_MDIS_FLD", meterNo: "60000002", lmPcode, wardPcode, premiseId: "P2", state: "FIELD" });
+  addMeterDocs(docs, { id: "TRN_MDIS_CON", meterNo: "60000003", lmPcode, wardPcode, premiseId: "P3", state: "CONNECTED" });
+  addMeterDocs(docs, { id: "TRN_MDIS_DEC", meterNo: "60000004", lmPcode, wardPcode, premiseId: "P4", state: "DECOMMISSIONED" });
+
+  const db = makeMockDb(docs);
+  const dcnPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_DISCONNECTION", rows: [makeRow(1, "60000001"), makeRow(2, "60000002")], keep: {} } });
+  const dcnMap = new Map(dcnPreview.eligibility);
+  assert.equal(dcnMap.get("1").eligible, true);
+  assert.equal(dcnMap.get("1").effectiveTrnType, "METER_INSPECTION");
+  assert.equal(dcnMap.get("2").eligible, true);
+  assert.equal(dcnMap.get("2").effectiveTrnType, "METER_INSPECTION");
+
+  const rcnPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_RECONNECTION", rows: [makeRow(1, "60000003"), makeRow(2, "60000001")], keep: {} } });
+  const rcnMap = new Map(rcnPreview.eligibility);
+  assert.equal(rcnMap.get("1").eligible, true);
+  assert.equal(rcnMap.get("1").effectiveTrnType, "METER_INSPECTION");
+  assert.equal(rcnMap.get("2").eligible, true);
+  assert.equal(rcnMap.get("2").effectiveTrnType, "METER_INSPECTION");
+
+  const inspPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_INSPECTION", rows: [makeRow(1, "60000004")], keep: {} } });
+  const inspElig = new Map(inspPreview.eligibility).get("1");
+  assert.equal(inspElig.eligible, true);
+  assert.equal(inspElig.effectiveTrnType, "METER_INSPECTION");
 });

@@ -50,18 +50,16 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   const wardLm=text(ward?.parents?.localMunicipalityId||ward?.parents?.lmPcode||ward?.lmPcode||ward?.parentPcode||ward?.localMunicipality?.pcode);
   if(!ward || wardLm!==lmPcode)return {eligible:false,message:"The authoritative Ward does not belong to the selected municipality."};
   const refs=normalizeGeoFenceRefs(ast.geofenceRefs);
-  // DCN origination (owner, 15 Nov 2026): CONNECTED -> MDCN; DISCONNECTED -> proposed MINSP (Inspection); DECOMMISSIONED/other -> Ineligible.
+  // DCN / RCN / INSP state routing (owner, 16 Nov 2026):
   let effectiveTrnType = trnType;
-  if (trnType === "METER_DISCONNECTION") {
-    const astState = getAstCurrentState(ast);
-    if (astState === "DECOMMISSIONED") {
-      return { eligible: false, message: "DECOMMISSIONED meters cannot be disconnected or inspected.", effectiveTrnType };
-    }
-    if (astState === "DISCONNECTED") {
-      effectiveTrnType = "METER_INSPECTION";
-    } else if (astState !== "CONNECTED") {
-      return { eligible: false, message: `Only CONNECTED meters can be disconnected (DISCONNECTED meters route to Inspection; current state is ${astState}).`, effectiveTrnType };
-    }
+  let stateRoutingMessage = "";
+  const astState = getAstCurrentState(ast);
+  if (trnType === "METER_DISCONNECTION" && astState !== "CONNECTED") {
+    effectiveTrnType = "METER_INSPECTION";
+    stateRoutingMessage = `Current state is ${astState} — Proposed for Inspection (MINSP).`;
+  } else if (trnType === "METER_RECONNECTION" && astState !== "DISCONNECTED") {
+    effectiveTrnType = "METER_INSPECTION";
+    stateRoutingMessage = `Current state is ${astState} — Proposed for Inspection (MINSP).`;
   }
   const canonical = validateLifecycleInstructionEligibility({ trnType: effectiveTrnType, astDoc: ast });
   const existing = getEligibilityResult({ trnType: effectiveTrnType, astData: ast });
@@ -83,7 +81,7 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
     effectiveTrnType = "METER_INSPECTION";
     duplicateRoutingMessage = `Active ${priorType} job ${active.docs[0].id} already exists — Proposed for Inspection (MINSP).`;
   }
-  const message = duplicateRoutingMessage || (effectiveTrnType !== trnType ? "Already Disconnected — Proposed for Inspection (MINSP)." : "Eligible.");
+  const message = duplicateRoutingMessage || stateRoutingMessage || "Eligible.";
   return { eligible: true, message, effectiveTrnType, row, astId, ast, premiseId, premise, wardPcode, wardName: text(ward.name || ward.wardName || wardPcode), geofenceRefs: refs };
 }
 export async function previewBulk({db,uid,data}) {
