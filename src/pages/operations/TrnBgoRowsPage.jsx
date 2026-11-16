@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
+import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import {
   useGetBgoBatchesByLmQuery,
   useGetBgoRowsByBatchIdQuery,
@@ -106,14 +107,19 @@ export default function TrnBgoRowsPage() {
   );
 
   const { data: childTrns = [] } = useGetTrnBgoChildTrnsByBatchIdQuery(batchId, { skip: !batchId });
+  const batchWardPcode = String(activeBatch?.wardPcode || activeBatch?.scope?.wardPcode || "").trim();
+  const { data: asts = [] } = useGetAstsByLmPcodeWardPcodeQuery(
+    { lmPcode: activeLmPcode, wardPcode: batchWardPcode },
+    { skip: !activeLmPcode || !batchWardPcode },
+  );
   const rawRows = tcRows.length > 0 ? tcRows : bgoRows;
   const isLoading = isTcUploadLoading || isTcRowsLoading || (!tcUpload && areBatchesLoading) || (tcRows.length === 0 && isBgoRowsLoading);
   const rowsError = tcRowsError || bgoRowsError;
 
   // Normalize rows for IrepsTable (joining live child TRN truth onto tc_rows)
   const displayRows = useMemo(
-    () => buildTrnBgoDisplayRows({ rawRows, childTrns, activeBatch }),
-    [rawRows, childTrns, activeBatch],
+    () => buildTrnBgoDisplayRows({ rawRows, childTrns, asts, activeBatch }),
+    [rawRows, childTrns, asts, activeBatch],
   );
 
   // IrepsTable column definitions
@@ -185,122 +191,29 @@ export default function TrnBgoRowsPage() {
       },
     },
     {
-      key: "validationState",
-      label: "Validation",
-      width: 110,
+      key: "rowStatus",
+      label: "Row Status",
+      width: 135,
       filter: "select",
       sortable: true,
-      value: (r) => r.validationState,
-      sortValue: (r) => r.validationState,
+      value: (r) => r.rowStatus,
+      sortValue: (r) => r.rowStatus,
       render: (r) => {
-        const ok = r.isEligible;
+        const isCompleted = r.rowStatus === "COMPLETED";
+        const isInProgress = r.rowStatus === "IN PROGRESS";
         return (
           <span
             style={{
               ...styles.badge,
-              background: ok ? "#f0fdf4" : "#fef2f2",
-              color: ok ? "#15803d" : "#b91c1c",
-              border: `1px solid ${ok ? "#bbf7d0" : "#fecaca"}`,
+              background: isCompleted ? "#dcfce7" : isInProgress ? "#fef3c7" : "#dbeafe",
+              color: isCompleted ? "#166534" : isInProgress ? "#92400e" : "#1e40af",
+              border: `1px solid ${isCompleted ? "#bbf7d0" : isInProgress ? "#fde68a" : "#bfdbfe"}`,
             }}
           >
-            {r.validationState}
+            {r.rowStatus}
           </span>
         );
       },
-    },
-    {
-      key: "readinessState",
-      label: "BGO Readiness",
-      width: 140,
-      filter: "select",
-      value: (r) => (r.isReady ? "Ready for BGO" : "Blocked"),
-      sortValue: (r) => (r.isReady ? "Ready" : "Blocked"),
-      render: (r) => (
-        <span
-          style={{
-            ...styles.badge,
-            background: r.isReady ? "#ecfdf5" : "#fff7ed",
-            color: r.isReady ? "#047857" : "#c2410c",
-            border: `1px solid ${r.isReady ? "#a7f3d0" : "#fed7aa"}`,
-          }}
-        >
-          {r.isReady ? "READY FOR BGO" : "BLOCKED"}
-        </span>
-      ),
-    },
-    {
-      key: "blockingMessage",
-      label: "Reason / Exception",
-      filter: "text",
-      sortable: true,
-      value: (r) => `${r.reasonCode ? r.reasonCode + " - " : ""}${r.blockingMessage}`,
-      sortValue: (r) => r.blockingMessage,
-      render: (r) => (
-        <div>
-          {r.reasonCode ? (
-            <div style={styles.reasonCodeBadge}>
-              {r.reasonCode}
-            </div>
-          ) : null}
-          <div style={{ fontSize: 12, color: r.isReady ? "#059669" : "#334155" }}>
-            {r.blockingMessage}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "activeTrnId",
-      label: "Active TRN ID",
-      width: 180,
-      filter: "text",
-      sortable: true,
-      value: (r) => r.activeTrnId,
-      sortValue: (r) => r.activeTrnId,
-      render: (r) => {
-        if (!r.activeTrnId || r.activeTrnId === "None") {
-          return <span style={{ color: "#94a3b8", fontSize: 12 }}>None</span>;
-        }
-        return (
-          <div>
-            <div style={styles.activeTrnCode}>
-              {r.activeTrnId}
-            </div>
-            {r.activeTrnState ? (
-              <span style={styles.activeTrnState}>
-                State: {r.activeTrnState}
-              </span>
-            ) : null}
-          </div>
-        );
-      },
-    },
-    {
-      key: "address",
-      label: "Address & ERF",
-      filter: "text",
-      sortable: true,
-      value: (r) => `${r.address} ERF ${r.erfNo}`,
-      sortValue: (r) => r.address,
-      render: (r) => (
-        <div>
-          <div style={styles.addressLine}>{r.address}</div>
-          <div style={styles.subtleLine}>ERF: {r.erfNo}</div>
-        </div>
-      ),
-    },
-    {
-      key: "geofenceName",
-      label: "Ward & Geofence",
-      filter: "text",
-      sortable: true,
-      value: (r) => `${r.wardNo} ${r.geofenceName}`,
-      sortValue: (r) => r.geofenceName,
-      render: (r) => (
-        <div>
-          <div style={styles.geofenceLine}>{r.geofenceName}</div>
-          <div style={styles.subtleLine}>Ward: {r.wardNo}</div>
-        </div>
-      ),
     },
     {
       key: "naCount",
@@ -323,6 +236,61 @@ export default function TrnBgoRowsPage() {
       ),
     },
     {
+      key: "activeTrnId",
+      label: "TRN ID",
+      width: 220,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.activeTrnId,
+      sortValue: (r) => r.activeTrnId,
+      render: (r) => {
+        if (!r.activeTrnId || r.activeTrnId === "None") {
+          return <span style={{ color: "#94a3b8", fontSize: 12 }}>None</span>;
+        }
+        return <span style={styles.activeTrnCode}>{r.activeTrnId}</span>;
+      },
+    },
+    {
+      key: "address",
+      label: "Address",
+      width: 210,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.address,
+      sortValue: (r) => r.address,
+      render: (r) => <div style={styles.addressLine}>{r.address}</div>,
+    },
+    {
+      key: "erfNo",
+      label: "Erf No",
+      width: 100,
+      filter: "text",
+      sortable: true,
+      value: (r) => r.erfNo,
+      sortValue: (r) => r.erfNo,
+      render: (r) => <span style={{ fontSize: 12, fontWeight: 600 }}>{r.erfNo}</span>,
+    },
+    {
+      key: "wardNo",
+      label: "Ward",
+      width: 110,
+      filter: "select",
+      sortable: true,
+      value: (r) => r.wardNo,
+      sortValue: (r) => r.wardNo,
+      render: (r) => <span style={{ fontSize: 12 }}>{r.wardNo}</span>,
+    },
+    {
+      key: "geofenceName",
+      label: "Geofence",
+      width: 160,
+      filter: "select",
+      sortable: true,
+      value: (r) => r.geofenceName,
+      sortValue: (r) => r.geofenceName,
+      render: (r) => <div style={styles.geofenceLine}>{r.geofenceName}</div>,
+    },
+    {
       key: "updatedAt",
       label: "Updated At",
       width: 155,
@@ -336,17 +304,6 @@ export default function TrnBgoRowsPage() {
         </span>
       ),
     },
-    {
-      key: "accountNo",
-      label: "Account No",
-      width: 110,
-      filter: "text",
-      sortable: true,
-      value: (r) => r.accountNo,
-      sortValue: (r) => r.accountNo,
-      render: (r) => <span style={{ fontSize: 12 }}>{r.accountNo}</span>,
-    },
-
   ], []);
 
   return (

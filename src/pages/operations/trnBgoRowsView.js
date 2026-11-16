@@ -35,7 +35,19 @@ function liveTrnStatusMessage(state = "", naCount = 0) {
   return "";
 }
 
-export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBatch = null } = {}) {
+export function deriveTrnBgoRowStatus(workflowState = "") {
+  const upper = String(workflowState || "").trim().toUpperCase();
+  if (upper === "COMPLETED" || upper === "QA PASS" || upper === "QA FAIL") return "COMPLETED";
+  if (upper === "IN_PROGRESS") return "IN PROGRESS";
+  return "NOT STARTED";
+}
+
+export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], asts = [], activeBatch = null } = {}) {
+  const astById = new Map(
+    (Array.isArray(asts) ? asts : [])
+      .filter((a) => a?.id)
+      .map((a) => [a.id, a]),
+  );
   const trnById = new Map(
     (Array.isArray(childTrns) ? childTrns : [])
       .filter((t) => t?.id)
@@ -51,6 +63,8 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBat
       row.bgo?.trnId,
     );
     const liveTrn = trnId ? trnById.get(trnId) || null : null;
+    const astId = firstMeaningful(row.astId, row.raw?.astId, row.ast?.id, liveTrn?.ast?.astData?.astId);
+    const liveAst = astId ? astById.get(astId) || null : null;
 
     const meterNo = firstMeaningful(
       liveTrn?.ast?.astData?.astNo,
@@ -61,6 +75,8 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBat
     ) || "NAv";
 
     const meterType = firstMeaningful(
+      liveAst?.ast?.astData?.meter?.type,
+      liveAst?.meterType,
       liveTrn?.ast?.astData?.meter?.type,
       liveTrn?.meterType,
       row.ast?.meterType,
@@ -69,6 +85,8 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBat
     ) || "NAv";
 
     const meterPhase = firstMeaningful(
+      liveAst?.ast?.astData?.meter?.phase,
+      liveAst?.ast?.astData?.meter?.phaseType,
       liveTrn?.ast?.astData?.meter?.phase,
       liveTrn?.ast?.astData?.meter?.phaseType,
       row.ast?.meterPhase,
@@ -105,6 +123,8 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBat
 
     const meterStatus = String(
       firstMeaningful(
+        liveAst?.status?.state,
+        typeof liveAst?.status === "string" ? liveAst.status : "",
         liveTrn?.status?.state,
         row.ast?.statusState,
         row.ast?.meterStatus,
@@ -193,6 +213,7 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBat
       readinessState,
       blockingMessage,
       reasonCode,
+      rowStatus: deriveTrnBgoRowStatus(activeTrnState),
       activeTrnId,
       activeTrnState,
       naCount,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTrnBgoDisplayRows, formatBatchAllocatedTo } from "./trnBgoRowsView.js";
+import { buildTrnBgoDisplayRows, deriveTrnBgoRowStatus, formatBatchAllocatedTo } from "./trnBgoRowsView.js";
 
 test("buildTrnBgoDisplayRows joins live child TRN truth with tc_rows snapshot", () => {
   const rawRows = [
@@ -54,4 +54,17 @@ test("formatBatchAllocatedTo resolves batch target, child TRN target, or Unalloc
   assert.equal(formatBatchAllocatedTo({}, [{ assignment: { targets: [{ type: "SP", name: "Acorn" }] } }]), "SP: Acorn");
   assert.equal(formatBatchAllocatedTo({ bgo: { targetName: "SubC One" } }), "SubC One");
   assert.equal(formatBatchAllocatedTo({}), "Unallocated");
+});
+
+test("buildTrnBgoDisplayRows reads live asts.status.state and derives Row Status", () => {
+  const [row] = buildTrnBgoDisplayRows({
+    rawRows: [{ id: "R1", rowNo: 1, astId: "AST_1", trnId: "TRN_1", ast: { statusState: "CONNECTED" } }],
+    childTrns: [{ id: "TRN_1", workflow: { state: "COMPLETED" }, noAccessCount: 1 }],
+    asts: [{ id: "AST_1", status: { state: "DISCONNECTED" } }],
+  });
+  assert.equal(row.meterStatus, "DISCONNECTED");
+  assert.equal(row.rowStatus, "COMPLETED");
+  assert.equal(deriveTrnBgoRowStatus("ACCEPTED"), "NOT STARTED");
+  assert.equal(deriveTrnBgoRowStatus("IN_PROGRESS"), "IN PROGRESS");
+  assert.equal(deriveTrnBgoRowStatus("COMPLETED"), "COMPLETED");
 });
