@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTrnBgoDisplayRows } from "./trnBgoRowsView.js";
+import { buildTrnBgoDisplayRows, formatBatchAllocatedTo } from "./trnBgoRowsView.js";
 
 test("buildTrnBgoDisplayRows joins live child TRN truth with tc_rows snapshot", () => {
   const rawRows = [
@@ -47,4 +47,11 @@ test("buildTrnBgoDisplayRows joins live child TRN truth with tc_rows snapshot", 
   assert.equal(row.blockingMessage, "In progress (2 NA)");
   assert.equal(row.address, "4241 Acacia Street Dundee");
   assert.equal(row.geofenceName, "Gf W6 Acacia");
+});
+
+test("formatBatchAllocatedTo resolves batch target, child TRN target, or Unallocated", () => {
+  assert.equal(formatBatchAllocatedTo({ assignment: { targets: [{ type: "TEAM", name: "Alpha Team" }] } }), "TEAM: Alpha Team");
+  assert.equal(formatBatchAllocatedTo({}, [{ assignment: { targets: [{ type: "SP", name: "Acorn" }] } }]), "SP: Acorn");
+  assert.equal(formatBatchAllocatedTo({ bgo: { targetName: "SubC One" } }), "SubC One");
+  assert.equal(formatBatchAllocatedTo({}), "Unallocated");
 });

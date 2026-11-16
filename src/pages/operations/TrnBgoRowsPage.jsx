@@ -13,7 +13,7 @@ import {
   useGetTcRowsByTcIdQuery,
   useGetTrnBgoChildTrnsByBatchIdQuery,
 } from "../../redux/tcApi";
-import { buildTrnBgoDisplayRows } from "./trnBgoRowsView";
+import { buildTrnBgoDisplayRows, formatBatchAllocatedTo } from "./trnBgoRowsView";
 import IrepsTable from "../../components/table/IrepsTable";
 
 function formatNumber(value) {
@@ -428,6 +428,12 @@ export default function TrnBgoRowsPage() {
             <span style={styles.bannerLabel}>BGO Status</span>
             <strong style={styles.bannerValue}>
               {activeBatch.bgoStatus || activeBatch.workflow?.state || "NAv"}
+            </strong>
+          </div>
+          <div style={styles.bannerItem}>
+            <span style={styles.bannerLabel}>Allocated To</span>
+            <strong style={styles.bannerValue}>
+              {formatBatchAllocatedTo(activeBatch, childTrns)}
             </strong>
           </div>
         </div>

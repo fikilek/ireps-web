@@ -17,6 +17,7 @@ import QaPill from "../../components/table/QaPill";
 import { formatSastDateTime } from "../../utils/formatSastDateTime.js";
 import { enrichMdBgoRowQa, mdBgoRowQaLinks } from "./md-bgo/mdBgoRowQaModel.js";
 import { ReadFailure } from "./MdBgoDashboardPage.jsx";
+import { formatBatchAllocatedTo } from "./trnBgoRowsView";
 
 const QA_OPTIONS = ["QA NAv", "QA PENDING", "QA PASS", "QA FAIL"];
 const PROGRESS_OPTIONS = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "UNAVAILABLE"];
@@ -159,6 +160,7 @@ export default function MdBgoRowsPage() {
         <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>WARD</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{shown(scope.wardName)}{scope.wardPcode ? ` (${scope.wardPcode})` : ""}</strong></div>
         <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>BATCH STATUS</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{prettyState(batch?.workflow?.state)}</strong></div>
         <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>ERFs IN BATCH</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{Number(batch?.summary?.erfCount ?? batch?.summary?.totalRows ?? rows.length).toLocaleString("en-ZA")}</strong></div>
+        <div style={{ minWidth: 0 }}><small style={{ display: "block", color: "#64748b", fontWeight: 800 }}>ALLOCATED TO</small><strong style={{ display: "block", overflowWrap: "anywhere" }}>{formatBatchAllocatedTo(batch)}</strong></div>
       </div>
     </section>
     {qaSource?.error ? <ReadFailure error={qaSource.error} title="Linked row QA could not be loaded" /> : null}
