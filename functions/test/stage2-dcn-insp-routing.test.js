@@ -300,3 +300,67 @@ test("DCN upload blocks DISCONNECTED meter only if it already has an active METE
   assert.equal(elig.eligible, false);
   assert.match(elig.message, /Active METER_INSPECTION job .* already exists/);
 });
+
+test("DCN upload blocks DISCONNECTED meter if it already has an IN_PROGRESS METER_INSPECTION job", async () => {
+  const lmPcode = "ZA5241";
+  const wardPcode = "ZA5241001";
+  const uid = "M_USER_3";
+  const docs = makeBaseDocs({ lmPcode, wardPcode, uid });
+
+  addMeterDocs(docs, { id: "TRN_MDIS_DISC_IP", meterNo: "30000001", lmPcode, wardPcode, premiseId: "P1", state: "DISCONNECTED" });
+  docs["trns/TRN_INPROG_INSP"] = {
+    id: "TRN_INPROG_INSP",
+    accessData: { trnType: "METER_INSPECTION" },
+    ast: { astData: { astId: "TRN_MDIS_DISC_IP" } },
+    workflow: { state: "IN_PROGRESS" },
+  };
+
+  const db = makeMockDb(docs);
+  const preview = await previewBulk({
+    db,
+    uid,
+    data: { lmPcode, trnType: "METER_DISCONNECTION", rows: [makeRow(1, "30000001")], keep: {} },
+  });
+
+  const elig = new Map(preview.eligibility).get("1");
+  assert.equal(elig.eligible, false);
+  assert.match(elig.message, /Active METER_INSPECTION job TRN_INPROG_INSP already exists/);
+});
+
+test("TRN BGO upload blocks meter whose ERF has an open Targeted Batch", async () => {
+  const lmPcode = "ZA5241";
+  const wardPcode = "ZA5241001";
+  const uid = "M_USER_4";
+  const docs = makeBaseDocs({ lmPcode, wardPcode, uid });
+
+  addMeterDocs(docs, { id: "TRN_MDIS_TB_LOCKED", meterNo: "40000001", lmPcode, wardPcode, premiseId: "P1", state: "CONNECTED" });
+  docs["tb_uploads/TGB_OPEN_1"] = {
+    id: "TGB_OPEN_1",
+    geofenceId: "GF1",
+    geofenceName: "Gf W6",
+    allocation: {
+      status: "ALLOCATED",
+      targetType: "TEAM",
+      targetId: "TEAM_PETER",
+      targetName: "Peter Team",
+      allocatedAt: "2026-09-17T00:00:00.000Z",
+    },
+  };
+  docs["tb_rows/TGB_OPEN_1_R1"] = {
+    id: "TGB_OPEN_1_R1",
+    tbId: "TGB_OPEN_1",
+    refs: { erfId: "E_TRN_MDIS_TB_LOCKED" },
+    execution: { status: "NOT_STARTED" },
+  };
+
+  const db = makeMockDb(docs);
+  const preview = await previewBulk({
+    db,
+    uid,
+    data: { lmPcode, trnType: "METER_DISCONNECTION", rows: [makeRow(1, "40000001")], keep: {} },
+  });
+
+  const elig = new Map(preview.eligibility).get("1");
+  assert.equal(elig.eligible, false);
+  assert.match(elig.message, /TGB_OPEN_1/);
+});
