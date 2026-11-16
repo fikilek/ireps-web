@@ -485,9 +485,16 @@ export const tcApi = createApi({
             q,
             (snapshot) => {
               const docs = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
-              updateCachedData(() => docs);
+              updateCachedData((draft) => {
+                draft.value.splice(0, draft.value.length, ...docs);
+                draft.ready = true;
+              });
             },
             (error) => {
+              updateCachedData((draft) => {
+                draft.value = [];
+                failStream(draft, error);
+              });
               console.error("tcApi getTrnBgoChildTrnsByBatchId stream error:", error);
             },
           );
