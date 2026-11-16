@@ -1325,6 +1325,22 @@ export default function TrnBgoUploadPage() {
         },
       },
       {
+        key: "meterStatus",
+        label: "meterStatus",
+        width: 175,
+        filter: "text",
+        sortable: true,
+        value: (r) =>
+          `File: ${r.comparisons?.meterStatus?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.meterStatus?.irepsDisplay || "NAv"}`,
+        sortValue: (r) =>
+          `${r.comparisons?.meterStatus?.fileDisplay || ""}|${r.comparisons?.meterStatus?.irepsDisplay || ""}`,
+        render: (r) =>
+          renderStackedComparisonCell(
+            r.comparisons?.meterStatus,
+            r.foundInAsts
+          ),
+      },
+      {
         key: "meterPhase",
         label: "meterPhase",
         width: 185,
@@ -1424,22 +1440,6 @@ export default function TrnBgoUploadPage() {
           `${r.comparisons?.geofence?.fileDisplay || ""}|${r.comparisons?.geofence?.irepsDisplay || ""}`,
         render: (r) =>
           renderStackedComparisonCell(r.comparisons?.geofence, r.foundInAsts),
-      },
-      {
-        key: "meterStatus",
-        label: "meterStatus",
-        width: 175,
-        filter: "text",
-        sortable: true,
-        value: (r) =>
-          `File: ${r.comparisons?.meterStatus?.fileDisplay || "Blank"} | iREPS: ${r.comparisons?.meterStatus?.irepsDisplay || "NAv"}`,
-        sortValue: (r) =>
-          `${r.comparisons?.meterStatus?.fileDisplay || ""}|${r.comparisons?.meterStatus?.irepsDisplay || ""}`,
-        render: (r) =>
-          renderStackedComparisonCell(
-            r.comparisons?.meterStatus,
-            r.foundInAsts
-          ),
       },
       {
         key: "erfNo",
