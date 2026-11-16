@@ -613,7 +613,7 @@ export default function TrnBgoUploadPage() {
           const isDuplicate = Boolean(row.isDuplicate);
           const eligibility = new Map(data.eligibility || []).get(String(row.rowNo));
           const isEligible = eligibility?.eligible === true;
-          const effectiveTrnType = eligibility?.effectiveTrnType || selectedTrnType;
+          const effectiveTrnType = isEligible ? (eligibility?.effectiveTrnType || selectedTrnType) : selectedTrnType;
           const isProposedInspection =
             isEligible &&
             selectedTrnType !== "METER_INSPECTION" &&
@@ -632,7 +632,7 @@ export default function TrnBgoUploadPage() {
             nonEligibleReason: isEligible ? "" : (eligibility?.message || "Eligibility could not be confirmed. Validate the file again."),
             isDataMatch,
             duplicate: isDuplicate ? "True" : "False",
-            eligible: isEligible ? (isProposedInspection ? "True (INSP)" : "True") : "False",
+            eligible: isEligible ? "True" : "False",
             dataMatch: isDataMatch ? "True" : "False",
             irepsValues,
             comparisons,
@@ -1257,19 +1257,18 @@ export default function TrnBgoUploadPage() {
         width: 110,
         filter: "select",
         sortable: true,
-        value: (r) => (r.isEligible ? (r.isProposedInspection ? "True (INSP)" : "True") : "False"),
-        sortValue: (r) => (r.isEligible ? (r.isProposedInspection ? 2 : 1) : 0),
+        value: (r) => (r.isEligible ? "True" : "False"),
+        sortValue: (r) => (r.isEligible ? 1 : 0),
         render: (r) => (
           <span
-            title={r.isProposedInspection ? (r.proposedReason || "Proposed for Inspection (MINSP)") : undefined}
             style={{
               fontFamily: "monospace",
               fontWeight: 700,
               fontSize: 12,
-              color: r.isEligible ? (r.isProposedInspection ? "#b45309" : "#047857") : "#dc2626",
+              color: r.isEligible ? "#047857" : "#dc2626",
             }}
           >
-            {r.isEligible ? (r.isProposedInspection ? "True (INSP)" : "True") : "False"}
+            {r.isEligible ? "True" : "False"}
           </span>
         ),
       },
