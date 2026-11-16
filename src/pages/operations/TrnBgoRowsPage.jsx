@@ -253,7 +253,8 @@ export default function TrnBgoRowsPage() {
     {
       key: "address",
       label: "Address",
-      width: 210,
+      width: 300,
+      minWidth: 280,
       filter: "text",
       sortable: true,
       value: (r) => r.address,
@@ -283,7 +284,8 @@ export default function TrnBgoRowsPage() {
     {
       key: "geofenceName",
       label: "Geofence",
-      width: 160,
+      width: 240,
+      minWidth: 220,
       filter: "select",
       sortable: true,
       value: (r) => r.geofenceName,
@@ -367,15 +369,6 @@ export default function TrnBgoRowsPage() {
             </strong>
           </div>
           <div style={styles.bannerItem}>
-            <span style={styles.bannerLabel}>Geofence</span>
-            <strong style={styles.bannerValue}>
-              {activeBatch.geofenceName ||
-                activeBatch.geofenceRef?.name ||
-                activeBatch.summary?.geofenceBreakdown?.[0]?.name ||
-                "NAv"}
-            </strong>
-          </div>
-          <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>Total Meters</span>
             <strong style={styles.bannerValue}>
               {formatNumber(activeBatch.totalRows || displayRows.length)}
@@ -405,6 +398,7 @@ export default function TrnBgoRowsPage() {
       <div style={styles.panel}>
         <IrepsTable showLoadingSpinner
           rows={displayRows}
+          stickyColumnKeys={["rowNo", "meterNo"]}
           downloads={{
             registryName: `TRN BGO Batch Rows ${batchId || ""}`.trim(),
             fileBaseName: `trn_bgo_rows_${(batchId || "batch").toLowerCase()}`,
