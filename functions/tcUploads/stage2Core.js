@@ -8,7 +8,7 @@ import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle, getAstCur
 import { stripToDeclaredRoot } from "../transactions/trnShape.js";
 import { TC_TRN_TYPE_TO_CODE, buildTcUploadId, buildTcRowId, getEligibilityResult, normalizeGeoFenceRefs, getAstSummary } from "./helpers.js";
 import { STATES_HOLDING_THE_METER } from "../meterLifecycle/trnStateMachine.js";
-const BULK_ACTIVE_JOB_STATES = [...STATES_HOLDING_THE_METER, "IN_PROGRESS", "QA FAIL"];
+const BULK_ACTIVE_JOB_STATES = [...STATES_HOLDING_THE_METER, "IN_PROGRESS"];
 
 export const BULK_CONTRACT = "TRN_BGO_11COL_REASON_FREE_V1";
 export const text = value => String(value ?? "").trim();
@@ -68,10 +68,22 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   if (!canonical.ok || !existing.eligible) return { eligible: false, message: canonical.message || existing.message, effectiveTrnType };
   const registration = await checkMeterRegistration({ db, astId, reader });
   if (!registration.ok) return { eligible: false, message: registration.message, effectiveTrnType };
-  const query = db.collection("trns").where("ast.astData.astId", "==", astId).where("accessData.trnType", "==", effectiveTrnType).where("workflow.state", "in", BULK_ACTIVE_JOB_STATES).limit(1);
-  const active = await read(query);
-  if (!active.empty) return { eligible: false, message: `Active ${effectiveTrnType} job ${active.docs[0].id} already exists.`, effectiveTrnType };
-  const message = effectiveTrnType !== trnType ? "Already Disconnected ? Proposed for Inspection (MINSP)." : "Eligible.";
+  const activeQuery = (type) => db.collection("trns").where("ast.astData.astId", "==", astId).where("accessData.trnType", "==", type).where("workflow.state", "in", BULK_ACTIVE_JOB_STATES).limit(1);
+  const active = await read(activeQuery(effectiveTrnType));
+  let duplicateRoutingMessage = "";
+  if (!active.empty) {
+    if (effectiveTrnType === "METER_INSPECTION") {
+      return { eligible: false, message: `Active ${effectiveTrnType} job ${active.docs[0].id} already exists.`, effectiveTrnType };
+    }
+    const activeInsp = await read(activeQuery("METER_INSPECTION"));
+    if (!activeInsp.empty) {
+      return { eligible: false, message: `Active METER_INSPECTION job ${activeInsp.docs[0].id} already exists.`, effectiveTrnType: "METER_INSPECTION" };
+    }
+    const priorType = effectiveTrnType;
+    effectiveTrnType = "METER_INSPECTION";
+    duplicateRoutingMessage = `Active ${priorType} job ${active.docs[0].id} already exists — Proposed for Inspection (MINSP).`;
+  }
+  const message = duplicateRoutingMessage || (effectiveTrnType !== trnType ? "Already Disconnected — Proposed for Inspection (MINSP)." : "Eligible.");
   return { eligible: true, message, effectiveTrnType, row, astId, ast, premiseId, premise, wardPcode, wardName: text(ward.name || ward.wardName || wardPcode), geofenceRefs: refs };
 }
 export async function previewBulk({db,uid,data}) {
