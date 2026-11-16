@@ -204,3 +204,23 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], activeBat
     };
   });
 }
+
+export function formatBatchAllocatedTo(batch = null, childTrns = []) {
+  const fromBatchTarget = batch?.assignment?.targets?.[0];
+  const fromChildTarget = Array.isArray(childTrns)
+    ? childTrns.find((t) => t?.assignment?.targets?.[0])?.assignment?.targets?.[0]
+    : null;
+  const target = fromBatchTarget || fromChildTarget || batch?.target || null;
+  const name = String(
+    target?.name ||
+      target?.label ||
+      target?.targetName ||
+      batch?.targetName ||
+      batch?.bgo?.targetName ||
+      target?.id ||
+      "",
+  ).trim();
+  if (!name || name.toUpperCase() === "NAV") return "Unallocated";
+  const type = String(target?.type || target?.targetType || "").trim().toUpperCase();
+  return type && !name.toUpperCase().startsWith(`${type}:`) ? `${type}: ${name}` : name;
+}
