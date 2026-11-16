@@ -140,8 +140,10 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
         fail("INSTRUCTION_NOT_ASSIGNED", "This instruction belongs to another worker or team. Ask the office to assign it to you.");
       }
     }
-    const decision = await checkBatchWork({ db, read: (ref) => tx.get(ref), meterNo: astMeterNo(astDoc), uid: actor.uid,
-      erfId: access.erfId, premiseId, anomaly: [astDoc.ast] });
+    const decision = (isTrnBgoInstruction || trnBgoCtx)
+      ? { allowed: true }
+      : await checkBatchWork({ db, read: (ref) => tx.get(ref), meterNo: astMeterNo(astDoc), uid: actor.uid,
+        erfId: access.erfId, premiseId, anomaly: [astDoc.ast] });
     if (!decision.allowed) fail(decision.code, decision.message);
     const trnBgoNoAccess = (isTrnBgoInstruction || trnBgoCtx) && instrRef && instrData
       ? { batchId: text(trnBgoCtx?.batchId) || instrData?.origin?.trnBgo?.batchId || null, instructionTrnId: instrRef.id }

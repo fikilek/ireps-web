@@ -327,7 +327,7 @@ test("DCN upload blocks DISCONNECTED meter if it already has an IN_PROGRESS METE
   assert.match(elig.message, /Active METER_INSPECTION job TRN_INPROG_INSP already exists/);
 });
 
-test("TRN BGO upload blocks meter whose ERF has an open Targeted Batch", async () => {
+test("TRN BGO upload does NOT block a FOUND meter even if its ERF has an open Targeted Batch", async () => {
   const lmPcode = "ZA5241";
   const wardPcode = "ZA5241001";
   const uid = "M_USER_4";
@@ -361,6 +361,6 @@ test("TRN BGO upload blocks meter whose ERF has an open Targeted Batch", async (
   });
 
   const elig = new Map(preview.eligibility).get("1");
-  assert.equal(elig.eligible, false);
-  assert.match(elig.message, /TGB_OPEN_1/);
+  assert.equal(elig.eligible, true);
+  assert.equal(elig.effectiveTrnType, "METER_DISCONNECTION");
 });

@@ -677,7 +677,9 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       //
       // Rules TB-R062 (1.3.65): the ERF too — the AST's own ERF, or the premise this work is using. The
       // anomaly is read from what this form captured, falling back to what the AST already holds.
-      const batchWorkCheck = await checkBatchWork({
+      const batchWorkCheck = isVerifiedBulk(data)
+        ? { allowed: true }
+        : await checkBatchWork({
         db,
         read: (refOrQuery) => tx.get(refOrQuery),
         meterNo: astMeterNo(astDoc),
@@ -686,7 +688,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         premiseId,
         anomaly: [data, astDoc?.ast],
         log: logger,
-      });
+        });
 
       batchWorkDecision = batchWorkCheck;
       workMeterNo = astMeterNo(astDoc);
