@@ -616,8 +616,9 @@ export default function TrnBgoUploadPage() {
           const effectiveTrnType = eligibility?.effectiveTrnType || selectedTrnType;
           const isProposedInspection =
             isEligible &&
-            selectedTrnType === "METER_DISCONNECTION" &&
+            selectedTrnType !== "METER_INSPECTION" &&
             effectiveTrnType === "METER_INSPECTION";
+          const proposedReason = isProposedInspection ? (eligibility?.message || "Proposed for Inspection (MINSP)") : "";
 
           return {
             ...row,
@@ -627,6 +628,7 @@ export default function TrnBgoUploadPage() {
             isEligible,
             effectiveTrnType,
             isProposedInspection,
+            proposedReason,
             nonEligibleReason: isEligible ? "" : (eligibility?.message || "Eligibility could not be confirmed. Validate the file again."),
             isDataMatch,
             duplicate: isDuplicate ? "True" : "False",
@@ -913,6 +915,45 @@ export default function TrnBgoUploadPage() {
         filter: "select",
         value: (r) => String(r.irepsValues?.meterType || r.meterType || "NAv"),
         sortValue: (r) => String(r.irepsValues?.meterType || r.meterType || ""),
+      },
+      {
+        key: "effectiveTrnType",
+        label: "Trn Type",
+        width: 130,
+        filter: "select",
+        sortable: true,
+        value: (r) => {
+          const labels = {
+            METER_DISCONNECTION: "Disconnection",
+            METER_RECONNECTION: "Reconnection",
+            METER_INSPECTION: "Inspection",
+            METER_REMOVAL: "Removal",
+            METER_READING: "Reading",
+          };
+          return labels[r.effectiveTrnType] || r.effectiveTrnType || "NAv";
+        },
+        render: (r) => {
+          const labels = {
+            METER_DISCONNECTION: "Disconnection",
+            METER_RECONNECTION: "Reconnection",
+            METER_INSPECTION: "Inspection",
+            METER_REMOVAL: "Removal",
+            METER_READING: "Reading",
+          };
+          const label = labels[r.effectiveTrnType] || r.effectiveTrnType || "NAv";
+          return (
+            <span
+              title={r.isProposedInspection ? r.proposedReason : undefined}
+              style={{
+                fontWeight: 700,
+                fontSize: 12,
+                color: r.isProposedInspection ? "#b45309" : "#0f172a",
+              }}
+            >
+              {label}
+            </span>
+          );
+        },
       },
       {
         key: "meterPhase",
@@ -1259,7 +1300,7 @@ export default function TrnBgoUploadPage() {
         sortValue: (r) => (r.isEligible ? (r.isProposedInspection ? 2 : 1) : 0),
         render: (r) => (
           <span
-            title={r.isProposedInspection ? "Already Disconnected ? Proposed for Inspection (MINSP)" : undefined}
+            title={r.isProposedInspection ? (r.proposedReason || "Proposed for Inspection (MINSP)") : undefined}
             style={{
               fontFamily: "monospace",
               fontWeight: 700,

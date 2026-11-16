@@ -364,3 +364,49 @@ test("TRN BGO upload does NOT block a FOUND meter even if its ERF has an open Ta
   assert.equal(elig.eligible, true);
   assert.equal(elig.effectiveTrnType, "METER_DISCONNECTION");
 });
+
+test("Duplicate active DCN/RCN routes to MINSP unless an active MINSP already exists; QA FAIL does not block", async () => {
+  const lmPcode = "ZA5241";
+  const wardPcode = "ZA5241001";
+  const uid = "M_USER_5";
+  const docs = makeBaseDocs({ lmPcode, wardPcode, uid });
+
+  addMeterDocs(docs, { id: "TRN_MDIS_DUP_DCN", meterNo: "50000001", lmPcode, wardPcode, premiseId: "P1", state: "CONNECTED" });
+  docs["trns/TRN_ACTIVE_DCN"] = { id: "TRN_ACTIVE_DCN", accessData: { trnType: "METER_DISCONNECTION" }, ast: { astData: { astId: "TRN_MDIS_DUP_DCN" } }, workflow: { state: "ACCEPTED" } };
+
+  addMeterDocs(docs, { id: "TRN_MDIS_DUP_DCN_AND_INSP", meterNo: "50000002", lmPcode, wardPcode, premiseId: "P2", state: "CONNECTED" });
+  docs["trns/TRN_ACTIVE_DCN_2"] = { id: "TRN_ACTIVE_DCN_2", accessData: { trnType: "METER_DISCONNECTION" }, ast: { astData: { astId: "TRN_MDIS_DUP_DCN_AND_INSP" } }, workflow: { state: "ISSUED" } };
+  docs["trns/TRN_ACTIVE_INSP_2"] = { id: "TRN_ACTIVE_INSP_2", accessData: { trnType: "METER_INSPECTION" }, ast: { astData: { astId: "TRN_MDIS_DUP_DCN_AND_INSP" } }, workflow: { state: "IN_PROGRESS" } };
+
+  addMeterDocs(docs, { id: "TRN_MDIS_QA_FAIL", meterNo: "50000003", lmPcode, wardPcode, premiseId: "P3", state: "CONNECTED" });
+  docs["trns/TRN_QAF_DCN"] = { id: "TRN_QAF_DCN", accessData: { trnType: "METER_DISCONNECTION" }, ast: { astData: { astId: "TRN_MDIS_QA_FAIL" } }, workflow: { state: "QA FAIL" } };
+
+  addMeterDocs(docs, { id: "TRN_MDIS_DUP_RCN", meterNo: "50000004", lmPcode, wardPcode, premiseId: "P4", state: "DISCONNECTED" });
+  docs["trns/TRN_ACTIVE_RCN"] = { id: "TRN_ACTIVE_RCN", accessData: { trnType: "METER_RECONNECTION" }, ast: { astData: { astId: "TRN_MDIS_DUP_RCN" } }, workflow: { state: "CREATED" } };
+
+
+  const db = makeMockDb(docs);
+  const preview = await previewBulk({
+    db,
+    uid,
+    data: { lmPcode, trnType: "METER_DISCONNECTION", rows: [makeRow(1, "50000001"), makeRow(2, "50000002"), makeRow(3, "50000003")], keep: {} },
+  });
+
+  const eligMap = new Map(preview.eligibility);
+  assert.equal(eligMap.get("1").eligible, true);
+  assert.equal(eligMap.get("1").effectiveTrnType, "METER_INSPECTION");
+  assert.match(eligMap.get("1").message, /Active METER_DISCONNECTION job TRN_ACTIVE_DCN already exists/);
+
+  assert.equal(eligMap.get("2").eligible, false);
+  assert.match(eligMap.get("2").message, /Active METER_INSPECTION job TRN_ACTIVE_INSP_2 already exists/);
+
+  assert.equal(eligMap.get("3").eligible, true);
+  assert.equal(eligMap.get("3").effectiveTrnType, "METER_DISCONNECTION");
+
+  // Also verify RCN over active RCN routes to MINSP
+  const rcnPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_RECONNECTION", rows: [makeRow(1, "50000004")], keep: {} } });
+  const rcnElig = new Map(rcnPreview.eligibility).get("1");
+  assert.equal(rcnElig.eligible, true, JSON.stringify(rcnElig));
+  assert.equal(rcnElig.effectiveTrnType, "METER_INSPECTION");
+  assert.match(rcnElig.message, /Active METER_RECONNECTION job TRN_ACTIVE_RCN already exists/);
+});
