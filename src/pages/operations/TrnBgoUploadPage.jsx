@@ -917,45 +917,6 @@ export default function TrnBgoUploadPage() {
         sortValue: (r) => String(r.irepsValues?.meterType || r.meterType || ""),
       },
       {
-        key: "effectiveTrnType",
-        label: "Trn Type",
-        width: 130,
-        filter: "select",
-        sortable: true,
-        value: (r) => {
-          const labels = {
-            METER_DISCONNECTION: "Disconnection",
-            METER_RECONNECTION: "Reconnection",
-            METER_INSPECTION: "Inspection",
-            METER_REMOVAL: "Removal",
-            METER_READING: "Reading",
-          };
-          return labels[r.effectiveTrnType] || r.effectiveTrnType || "NAv";
-        },
-        render: (r) => {
-          const labels = {
-            METER_DISCONNECTION: "Disconnection",
-            METER_RECONNECTION: "Reconnection",
-            METER_INSPECTION: "Inspection",
-            METER_REMOVAL: "Removal",
-            METER_READING: "Reading",
-          };
-          const label = labels[r.effectiveTrnType] || r.effectiveTrnType || "NAv";
-          return (
-            <span
-              title={r.isProposedInspection ? r.proposedReason : undefined}
-              style={{
-                fontWeight: 700,
-                fontSize: 12,
-                color: r.isProposedInspection ? "#b45309" : "#0f172a",
-              }}
-            >
-              {label}
-            </span>
-          );
-        },
-      },
-      {
         key: "meterPhase",
         label: "meterPhase",
         width: 120,
@@ -1324,6 +1285,45 @@ export default function TrnBgoUploadPage() {
             {r.nonEligibleReason}
           </span>
         ),
+      },
+      {
+        key: "effectiveTrnType",
+        label: "Trn Type",
+        width: 130,
+        filter: "select",
+        sortable: true,
+        value: (r) => {
+          const labels = {
+            METER_DISCONNECTION: "Disconnection",
+            METER_RECONNECTION: "Reconnection",
+            METER_INSPECTION: "Inspection",
+            METER_REMOVAL: "Removal",
+            METER_READING: "Reading",
+          };
+          return labels[r.effectiveTrnType] || r.effectiveTrnType || "NAv";
+        },
+        render: (r) => {
+          const labels = {
+            METER_DISCONNECTION: "Disconnection",
+            METER_RECONNECTION: "Reconnection",
+            METER_INSPECTION: "Inspection",
+            METER_REMOVAL: "Removal",
+            METER_READING: "Reading",
+          };
+          const label = labels[r.effectiveTrnType] || r.effectiveTrnType || "NAv";
+          return (
+            <span
+              title={r.isProposedInspection ? r.proposedReason : undefined}
+              style={{
+                fontWeight: 700,
+                fontSize: 12,
+                color: r.isProposedInspection ? "#b45309" : "#0f172a",
+              }}
+            >
+              {label}
+            </span>
+          );
+        },
       },
       {
         key: "meterPhase",
