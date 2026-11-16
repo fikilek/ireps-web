@@ -1747,22 +1747,14 @@ export function validateMeterInspection({ data, astDoc }) {
   const readingAt = getInspectionReadingAt(data);
   const noReadingReason = getInspectionNoReadingReason(data);
 
-  if (currentState === "DECOMMISSIONED") {
-    return {
-      ok: false,
-      code: "INVALID_AST_STATE",
-      message: "DECOMMISSIONED meters cannot be inspected",
-    };
-  }
-
   if (
-    !["FIELD", "CONNECTED", "DISCONNECTED", "REMOVED"].includes(currentState)
+    !["FIELD", "CONNECTED", "DISCONNECTED", "REMOVED", "DECOMMISSIONED"].includes(currentState)
   ) {
     return {
       ok: false,
       code: "INVALID_AST_STATE",
       message:
-        "Only FIELD, CONNECTED, DISCONNECTED, or REMOVED meters can be inspected",
+        "Only FIELD, CONNECTED, DISCONNECTED, REMOVED, or DECOMMISSIONED meters can be inspected",
     };
   }
 
@@ -3250,14 +3242,6 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
   const currentState = getAstCurrentState(astDoc);
 
   if (trnType === "METER_INSPECTION") {
-    if (currentState === "DECOMMISSIONED") {
-      return {
-        ok: false,
-        code: "INVALID_AST_STATE",
-        message: "DECOMMISSIONED meters cannot be issued for inspection",
-      };
-    }
-
     return { ok: true };
   }
 

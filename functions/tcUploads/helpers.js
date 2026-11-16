@@ -456,15 +456,7 @@ export function getEligibilityResult({ trnType, astData }) {
   }
 
   if (normalizedTrnType === "METER_INSPECTION") {
-    if (statusState !== "DECOMMISSIONED") {
-      return { eligible: true, code: "ELIGIBLE", message: "Eligible." };
-    }
-
-    return {
-      eligible: false,
-      code: "STATUS_NOT_ELIGIBLE_FOR_INSP",
-      message: "DECOMMISSIONED meters cannot be selected for METER_INSPECTION.",
-    };
+    return { eligible: true, code: "ELIGIBLE", message: "Eligible." };
   }
 
   return {
