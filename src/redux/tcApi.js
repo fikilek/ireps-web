@@ -314,6 +314,7 @@ function normalizeTcRowDoc(docSnap) {
   return {
     id: data.id || docSnap.id,
     tcId: valueOrNav(data.tcId || upload.tcId),
+    trnId: data.trnId || null,
     rowNo: safeNumber(data.rowNo ?? input.rowNo ?? data.frontend?.rowNo),
     input: {
       ...input,
@@ -465,6 +466,31 @@ export const tcApi = createApi({
             },
           );
 
+          await cacheEntryRemoved;
+        } finally {
+          if (unsubscribe) unsubscribe();
+        }
+      },
+    }),
+
+    getTrnBgoChildTrnsByBatchId: builder.query({
+      queryFn: () => ({ data: pendingStream([]) }),
+      async onCacheEntryAdded(batchId, { updateCachedData, cacheDataLoaded, cacheEntryRemoved }) {
+        if (!batchId) return;
+        let unsubscribe = null;
+        try {
+          await cacheDataLoaded;
+          const q = query(collection(db, "trns"), where("origin.trnBgo.batchId", "==", batchId));
+          unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+              const docs = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+              updateCachedData(() => docs);
+            },
+            (error) => {
+              console.error("tcApi getTrnBgoChildTrnsByBatchId stream error:", error);
+            },
+          );
           await cacheEntryRemoved;
         } finally {
           if (unsubscribe) unsubscribe();
@@ -631,6 +657,7 @@ export const {
   useGetTrnBgoRegisterDetailsQuery,
   useGetTcUploadsQuery: useGetTcUploadsQueryRaw,
   useGetTcUploadByIdQuery: useGetTcUploadByIdQueryRaw,
+  useGetTrnBgoChildTrnsByBatchIdQuery: useGetTrnBgoChildTrnsByBatchIdQueryRaw,
   useGetTcRowsByTcIdQuery: useGetTcRowsByTcIdQueryRaw,
   useCreateTrnBgoWardBatchesMutation,
   useAllocateTrnBgoWardBatchesMutation,
@@ -644,3 +671,5 @@ export const useGetTcUploadsQuery = streamQueryHook(useGetTcUploadsQueryRaw);
 export const useGetTcUploadByIdQuery = streamQueryHook(useGetTcUploadByIdQueryRaw);
 
 export const useGetTcRowsByTcIdQuery = streamQueryHook(useGetTcRowsByTcIdQueryRaw);
+
+export const useGetTrnBgoChildTrnsByBatchIdQuery = streamQueryHook(useGetTrnBgoChildTrnsByBatchIdQueryRaw);

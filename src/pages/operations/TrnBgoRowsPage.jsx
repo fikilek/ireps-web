@@ -11,7 +11,9 @@ import {
 import {
   useGetTcUploadByIdQuery,
   useGetTcRowsByTcIdQuery,
+  useGetTrnBgoChildTrnsByBatchIdQuery,
 } from "../../redux/tcApi";
+import { buildTrnBgoDisplayRows } from "./trnBgoRowsView";
 import IrepsTable from "../../components/table/IrepsTable";
 
 function formatNumber(value) {
@@ -103,93 +105,16 @@ export default function TrnBgoRowsPage() {
     { skip: !batchId || isTcRowsLoading || tcRows.length > 0 },
   );
 
+  const { data: childTrns = [] } = useGetTrnBgoChildTrnsByBatchIdQuery(batchId, { skip: !batchId });
   const rawRows = tcRows.length > 0 ? tcRows : bgoRows;
   const isLoading = isTcUploadLoading || isTcRowsLoading || (!tcUpload && areBatchesLoading) || (tcRows.length === 0 && isBgoRowsLoading);
   const rowsError = tcRowsError || bgoRowsError;
 
-  // Normalize rows for IrepsTable
-  const displayRows = useMemo(() => {
-    return rawRows.map((row, index) => {
-      const rowNo = row.rowNo ?? index + 1;
-      const meterNo = row.input?.meterNo || row.meterNo || row.ast?.meterNo || row.ast?.astNo || "NAv";
-      const address = row.premise?.address || row.input?.premiseAddress || row.address || "NAv";
-      const erfNo = row.premise?.erfNo || row.input?.erfNo || row.ast?.erfNo || row.erfNo || "NAv";
-      const accountNo = row.input?.accountNo || row.input?.linkedAccountNo || row.accountNo || "NAv";
-      const actionReason = row.input?.reason || row.input?.actionReason || row.actionReason || "NAv";
-
-      // Meter State
-      const meterStatus = String(
-        row.ast?.statusState || row.ast?.meterStatus || row.input?.meterStatus || "CONNECTED",
-      ).toUpperCase();
-
-      // Validation state
-      const isEligible = row.backend?.eligible === true;
-      const validationState = isEligible
-        ? "ELIGIBLE"
-        : (row.backend?.eligibilityCode || row.backend?.state || (row.backend?.matched ? "ELIGIBLE" : "NOT_ELIGIBLE"));
-
-      // Readiness
-      const isReady = row.bgo?.ready === true || (isEligible && !row.backend?.alreadyHasActiveSameOperationTrn);
-      const readinessState = isReady
-        ? "READY_FOR_BGO"
-        : (row.bgo?.readinessState || (row.backend?.alreadyHasActiveSameOperationTrn ? "BLOCKED" : "NOT_READY"));
-
-      // Blocking / exception message
-      const blockingMessage =
-        row.backend?.errors?.[0] ||
-        row.bgo?.readinessReason ||
-        row.backend?.message ||
-        (isReady ? "Ready for batch allocation" : "Not ready");
-      const reasonCode =
-        row.backend?.reasonCodes?.[0] ||
-        (row.backend?.alreadyHasActiveSameOperationTrn ? "BLOCKED_ACTIVE_SAME_OPERATION_TRN" : "");
-
-      // Active conflicting TRN ID
-      const activeTrnId =
-        row.backend?.activeLifecycle?.trnId ||
-        row.trnId ||
-        row.childTrnId ||
-        row.bgo?.trnId ||
-        "None";
-      const activeTrnState = row.backend?.activeLifecycle?.workflowState || "";
-
-      // Ward and Geofence
-      const wardNo =
-        row.premise?.wardNo ||
-        row.premise?.wardPcode ||
-        row.input?.wardNo ||
-        row.wardPcode ||
-        activeBatch?.wardPcode ||
-        "NAv";
-      const geofenceName =
-        row.geofenceRefs?.[0]?.name ||
-        row.geofenceName ||
-        (activeBatch?.summary?.geofenceBreakdown?.[0]?.name) ||
-        "NAv";
-
-      return {
-        id: row.id || `row_${index}`,
-        rowNo,
-        meterNo,
-        address,
-        erfNo,
-        accountNo,
-        actionReason,
-        meterStatus,
-        isEligible,
-        validationState,
-        isReady,
-        readinessState,
-        blockingMessage,
-        reasonCode,
-        activeTrnId,
-        activeTrnState,
-        wardNo,
-        geofenceName,
-        raw: row,
-      };
-    });
-  }, [rawRows, activeBatch]);
+  // Normalize rows for IrepsTable (joining live child TRN truth onto tc_rows)
+  const displayRows = useMemo(
+    () => buildTrnBgoDisplayRows({ rawRows, childTrns, activeBatch }),
+    [rawRows, childTrns, activeBatch],
+  );
 
   // IrepsTable column definitions
   const columns = useMemo(() => [
@@ -375,6 +300,40 @@ export default function TrnBgoRowsPage() {
           <div style={styles.geofenceLine}>{r.geofenceName}</div>
           <div style={styles.subtleLine}>Ward: {r.wardNo}</div>
         </div>
+      ),
+    },
+    {
+      key: "naCount",
+      label: "NA Count",
+      width: 95,
+      filter: "select",
+      sortable: true,
+      value: (r) => String(r.naCount ?? 0),
+      sortValue: (r) => Number(r.naCount ?? 0),
+      render: (r) => (
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 12,
+            color: r.naCount > 0 ? "#b45309" : "#64748b",
+          }}
+        >
+          {r.naCount ?? 0}
+        </span>
+      ),
+    },
+    {
+      key: "updatedAt",
+      label: "Updated At",
+      width: 155,
+      filter: "text",
+      sortable: true,
+      value: (r) => (r.updatedAt ? new Date(r.updatedAt).toLocaleString("en-ZA") : "NAv"),
+      sortValue: (r) => (r.updatedAt ? Date.parse(r.updatedAt) || 0 : 0),
+      render: (r) => (
+        <span style={{ fontSize: 12, color: "#475569" }}>
+          {r.updatedAt ? new Date(r.updatedAt).toLocaleString("en-ZA") : "NAv"}
+        </span>
       ),
     },
     {
@@ -616,6 +575,7 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 4,
+    minWidth: 0,
   },
   bannerLabel: {
     fontSize: 11,
@@ -628,6 +588,7 @@ const styles = {
     fontSize: 13,
     fontWeight: 800,
     color: "#0f172a",
+    overflowWrap: "anywhere",
   },
   panel: {
     background: "#ffffff",
