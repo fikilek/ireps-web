@@ -29,33 +29,26 @@ test("TRN-BGO-R016 Action 1: TrnBgoRowsPage passes rows to IrepsTable and displa
   );
 });
 
-test("TRN-BGO-R016 Action 2: TrnBgoAllocationPage provides dedicated batch allocation and unallocation controls", () => {
+test("TRN-BGO-R016 Action 2: MdBgoAllocationPage bulkMode handles TRN BGO allocation and returns to TRN BGO Register", () => {
   const allocPagePath = path.join(
     repoRoot,
-    "src/pages/operations/TrnBgoAllocationPage.jsx",
+    "src/pages/operations/MdBgoAllocationPage.jsx",
   );
-  assert.ok(fs.existsSync(allocPagePath), "TrnBgoAllocationPage.jsx must exist");
+  assert.ok(fs.existsSync(allocPagePath), "MdBgoAllocationPage.jsx must exist");
   const content = fs.readFileSync(allocPagePath, "utf8");
 
   assert.ok(
-    content.includes("export default function TrnBgoAllocationPage"),
-    "TrnBgoAllocationPage must default export TrnBgoAllocationPage component",
+    content.includes("export default function MdBgoAllocationPage({ bulkMode = false })"),
+    "MdBgoAllocationPage must accept bulkMode prop",
   );
   assert.ok(
-    content.includes("Operational Team") && content.includes("Service Provider (SP)"),
-    "TrnBgoAllocationPage must provide radio toggle between Operational Team and Service Provider",
+    content.includes("useAllocateTrnBgoWardBatchesMutation"),
+    "MdBgoAllocationPage must invoke useAllocateTrnBgoWardBatchesMutation in bulkMode",
   );
   assert.ok(
-    content.includes("handleAllocate") && content.includes("useAllocateTrnBgoWardBatchesMutation"),
-    "TrnBgoAllocationPage must define handleAllocate invoking useAllocateTrnBgoWardBatchesMutation",
-  );
-  assert.ok(
-    content.includes("handleUnallocate") && content.includes('targetType: "UNALLOCATE"'),
-    "TrnBgoAllocationPage must support unallocating batches via targetType UNALLOCATE",
-  );
-  assert.ok(
-    content.includes("<IrepsTable"),
-    "TrnBgoAllocationPage must render IrepsTable listing constituent meters of the selected batch",
+    content.includes('const registerPath = bulkMode ? "/operations/trn-bgo" : "/operations/bgo"') &&
+      content.includes('if (view.kind === "done") { navigate(registerPath); return; }'),
+    "MdBgoAllocationPage must navigate back to /operations/trn-bgo after allocation completes",
   );
 });
 
@@ -116,8 +109,8 @@ test("TRN-BGO-R016 Routes: AppRoutes maps /operations/trn-bgo/allocation and /op
 
   assert.ok(
     content.includes('path="/operations/trn-bgo/allocation"') &&
-      content.includes("<TrnBgoAllocationPage />"),
-    "AppRoutes must route /operations/trn-bgo/allocation to TrnBgoAllocationPage",
+      content.includes("<MdBgoAllocationPage bulkMode />"),
+    "AppRoutes must route /operations/trn-bgo/allocation to <MdBgoAllocationPage bulkMode />",
   );
   assert.ok(
     content.includes('path="/operations/trn-bgo/map"') &&

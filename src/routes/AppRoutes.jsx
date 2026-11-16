@@ -65,7 +65,6 @@ import MdBgoRowsPage from "../pages/operations/MdBgoRowsPage";
 import MdBgoBatchMapPage from "../pages/operations/MdBgoBatchMapPage";
 import TrnBgoRegisterPage from "../pages/operations/TrnBgoRegisterPage";
 import TrnBgoRowsPage from "../pages/operations/TrnBgoRowsPage";
-import TrnBgoAllocationPage from "../pages/operations/TrnBgoAllocationPage";
 import TrnBgoBatchMapPage from "../pages/operations/TrnBgoBatchMapPage";
 import TcBgoDashboardPage from "../pages/operations/TcBgoDashboardPage";
 
@@ -463,7 +462,7 @@ export default function AppRoutes() {
             path="/operations/trn-bgo/allocation"
             element={
               <RoleRoute allowedRoles={MANAGEMENT_ROLES}>
-                <TrnBgoAllocationPage />
+                <MdBgoAllocationPage bulkMode />
               </RoleRoute>
             }
           />
