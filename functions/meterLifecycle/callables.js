@@ -1,4 +1,4 @@
-import { verifyBulkInstruction, adoptBulkInstruction, verifyBulkExecution, deriveBulkExecutionOutcome } from "../tcUploads/bulkPolicy.js";
+import { verifyBulkInstruction, adoptBulkInstruction, verifyBulkExecution, deriveBulkExecutionOutcome, isVerifiedBulk } from "../tcUploads/bulkPolicy.js";
 import { requireActiveRoles } from "../auth/authority.js";
 import { acceptedSubmission } from "../qa/submissionReceipt.js";
 import { workflowState as canonicalWorkflowState } from "../qa/model.js";
