@@ -8,7 +8,6 @@ import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle, getAstCur
 import { stripToDeclaredRoot } from "../transactions/trnShape.js";
 import { TC_TRN_TYPE_TO_CODE, buildTcUploadId, buildTcRowId, getEligibilityResult, normalizeGeoFenceRefs, getAstSummary } from "./helpers.js";
 import { STATES_HOLDING_THE_METER } from "../meterLifecycle/trnStateMachine.js";
-import { checkBatchWork } from "../targetedBatches/batch-work-guard.js";
 const BULK_ACTIVE_JOB_STATES = [...STATES_HOLDING_THE_METER, "IN_PROGRESS", "QA FAIL"];
 
 export const BULK_CONTRACT = "TRN_BGO_11COL_REASON_FREE_V1";
@@ -69,9 +68,6 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   if (!canonical.ok || !existing.eligible) return { eligible: false, message: canonical.message || existing.message, effectiveTrnType };
   const registration = await checkMeterRegistration({ db, astId, reader });
   if (!registration.ok) return { eligible: false, message: registration.message, effectiveTrnType };
-  const erfId = text(ast.accessData?.erfId || premise.erfId || "");
-  const tbDecision = await checkBatchWork({ db, read, meterNo: row.meterNo, uid: "", erfId, premiseId });
-  if (!tbDecision.allowed) return { eligible: false, message: tbDecision.message || "Meter or ERF has an open Targeted Batch.", effectiveTrnType };
   const query = db.collection("trns").where("ast.astData.astId", "==", astId).where("accessData.trnType", "==", effectiveTrnType).where("workflow.state", "in", BULK_ACTIVE_JOB_STATES).limit(1);
   const active = await read(query);
   if (!active.empty) return { eligible: false, message: `Active ${effectiveTrnType} job ${active.docs[0].id} already exists.`, effectiveTrnType };
