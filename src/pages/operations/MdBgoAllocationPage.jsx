@@ -302,20 +302,27 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
           )}
         </div>
         <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}><LoadingIndicator>Loading batches…</LoadingIndicator></p> : !bulkMode && !shown.length ? <p style={styles.status}>Choose Show all batches, or open allocation from the Register.</p> :
-          <APIProvider apiKey={key}><GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={12} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
-            <WardBoundaryPolygons wards={wards} />
-            {bulkMode ? (
-              <>
-                <TrnMeterPins pins={meterPins} selectedPin={activePin} onSelectPin={setActivePin} />
-                <FitMeterPins pins={meterPins} selectedBatchId={selectedBulkBatchId} request={fitRequest} wards={wards} />
-              </>
-            ) : (
-              <>
-                <MdBgoAllocationPolygons items={shown} selectedIds={selectedIds} onToggle={toggle} />
-                <FitBatches items={shown} request={fitRequest} />
-              </>
-            )}
-          </GoogleMap></APIProvider>}</div>
+          <>
+            <APIProvider apiKey={key}><GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={12} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
+              <WardBoundaryPolygons wards={wards} />
+              {bulkMode ? (
+                <>
+                  <TrnMeterPins pins={meterPins} selectedPin={activePin} onSelectPin={setActivePin} />
+                  <FitMeterPins pins={meterPins} selectedBatchId={selectedBulkBatchId} request={fitRequest} wards={wards} />
+                </>
+              ) : (
+                <>
+                  <MdBgoAllocationPolygons items={shown} selectedIds={selectedIds} onToggle={toggle} />
+                  <FitBatches items={shown} request={fitRequest} />
+                </>
+              )}
+            </GoogleMap></APIProvider>
+            {bulkMode && selectedBulkBatchId && !bulkMapReady ? (
+              <div style={styles.mapOverlay} role="status" aria-live="polite">
+                <LoadingIndicator>Loading meter locations…</LoadingIndicator>
+              </div>
+            ) : null}
+          </>}</div>
         {bulkMode && selectedBulkBatchId && bulkMapReady && !meterPins.length ? (
           <p style={styles.note}>No meter GPS coordinates found for {selectedBulkBatchId}.</p>
         ) : null}
@@ -331,9 +338,37 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
                 : "Click ready geofences on the map to add them here."}
           </p>
           {bulkMode && <p style={styles.totals}>Select 1 batch at a time (maximum 200 meters per allocation).</p>}
-          <ul style={styles.list}>{selection.items.map(item => <li key={item.bgoBatchId} style={styles.listItem}><span><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} {unitLabel}{item.allocatedTo && item.allocatedTo !== "Unallocated" ? ` · ${item.allocatedTo}` : ""}</small></span><button type="button" disabled={locked} onClick={() => toggle(item)} aria-label={`Remove ${item.name}`}>×</button></li>)}</ul>
+          <ul style={styles.list}>
+            {selection.items.map((item) => (
+              <li key={item.bgoBatchId} style={styles.listItem}>
+                <span style={styles.listItemText}>
+                  <strong style={styles.listItemTitle}>{item.name}</strong>
+                  <small style={styles.listItemMeta}>
+                    {`Ward ${item.wardLabel} · ${item.erfCount} ${unitLabel}`}
+                    {item.allocatedTo && item.allocatedTo !== "Unallocated" ? ` · ${item.allocatedTo}` : ""}
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => toggle(item)}
+                  aria-label={`Remove ${item.name}`}
+                  style={styles.removeBtn}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
           <div style={{ ...styles.dropZone, ...(dropFocused ? styles.dropFocused : {}) }} onDragOver={event => { event.preventDefault(); setDropFocused(true); }} onDragLeave={() => setDropFocused(false)} onDrop={handleTargetDrop}>
-            {target ? <>Issuing to <strong>{target.name}</strong> ({target.type}) <button type="button" disabled={locked} onClick={() => setTarget(null)}>change</button></> : "Drag a TEAM or SP here, or click one below."}
+            {target ? (
+              <span style={styles.dropZoneAssigned}>
+                <span>Issuing to <strong>{target.name}</strong> ({target.type})</span>
+                <button type="button" disabled={locked} onClick={() => setTarget(null)} style={styles.changeBtn}>
+                  change
+                </button>
+              </span>
+            ) : "Drag a TEAM or SP here, or click one below."}
           </div>
           <div style={styles.targets}>{allTargets.map(candidate => { const value = buildTargetPayload(candidate); if (!value) return null; const chosen = target?.type === value.type && target?.id === value.id; return <button key={`${value.type}:${value.id}`} type="button" disabled={locked} draggable={!locked} onDragStart={event => { setDragTarget(value); event.dataTransfer.setData("application/json", JSON.stringify(value)); event.dataTransfer.effectAllowed = "copy"; }} onDragEnd={() => { setDragTarget(null); setDropFocused(false); }} onClick={() => chooseTarget(candidate)} style={{ ...styles.target, ...(chosen ? styles.targetChosen : {}) }}><strong>{value.name}</strong><small>{value.type}</small></button>; })}</div>
           {message ? <p role="status" style={selectedBulkItem?.fieldworkStarted ? styles.warnMessage : styles.message}>{message}</p> : null}
@@ -450,7 +485,7 @@ const styles = {
   eyebrow: { margin: 0, color: "#2563eb", fontSize: 12, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }, title: { margin: "4px 0 0", color: "#0f172a", fontSize: 30 }, subtitle: { maxWidth: 900, margin: "8px 0 0", color: "#64748b", fontSize: 14, lineHeight: 1.6 },
   note: { border: "1px solid #fde68a", background: "#fffbeb", color: "#92400e", borderRadius: 12, padding: 12 }, error: { color: "#991b1b", background: "#fef2f2", padding: 12, borderRadius: 10 },
   layout: { display: "grid", gridTemplateColumns: "minmax(0, 1.7fr) minmax(300px, 1fr)", gap: 14, alignItems: "start" }, mapPane: { display: "grid", gap: 8, border: "1px solid #dbe4f0", borderRadius: 16, padding: 12, background: "#fff" },
-  mapBar: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, justifyContent: "space-between", fontSize: 13, color: "#334155", fontWeight: 700 }, legend: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontWeight: 600 }, swatch: { width: 12, height: 12, border: "1px solid #64748b", display: "inline-block" }, smallButton: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "5px 10px", background: "#fff", color: "#1d4ed8", fontWeight: 800 }, map: { height: 620, borderRadius: 12, overflow: "hidden", background: "#f1f5f9" }, status: { display: "grid", placeItems: "center", height: "100%", color: "#475569" },
+  mapBar: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, justifyContent: "space-between", fontSize: 13, color: "#334155", fontWeight: 700 }, legend: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontWeight: 600 }, swatch: { width: 12, height: 12, border: "1px solid #64748b", display: "inline-block" }, smallButton: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "5px 10px", background: "#fff", color: "#1d4ed8", fontWeight: 800 }, map: { position: "relative", height: 620, borderRadius: 12, overflow: "hidden", background: "#f1f5f9" }, mapOverlay: { position: "absolute", inset: 0, display: "grid", placeItems: "center", background: "rgba(248, 250, 252, 0.72)", backdropFilter: "blur(1px)", zIndex: 5, pointerEvents: "none" }, status: { display: "grid", placeItems: "center", height: "100%", color: "#475569" },
   window: { display: "flex", flexDirection: "column", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#fff", boxSizing: "border-box" },
   sidebar: { display: "grid", gap: 14, alignItems: "start" },
   batchesBox: { display: "grid", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#fff", boxSizing: "border-box" },
@@ -467,6 +502,13 @@ const styles = {
   bbRowSelected: { background: "#eff6ff" },
   bbTd: { padding: "8px 10px", verticalAlign: "middle", color: "#0f172a" },
   warnMessage: { margin: 0, color: "#b45309", fontSize: 13, fontWeight: 700 },
-  windowTitle: { margin: 0, fontSize: 18 }, totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 }, list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }, listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 13 },
+  windowTitle: { margin: 0, fontSize: 18 }, totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 }, list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" },
+  listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 10px", fontSize: 13, background: "#f8fafc" },
+  listItemText: { display: "grid", gap: 3, minWidth: 0 },
+  listItemTitle: { fontSize: 12, fontWeight: 800, color: "#0f172a", wordBreak: "break-all" },
+  listItemMeta: { fontSize: 12, color: "#475569", fontWeight: 600 },
+  removeBtn: { border: "1px solid #cbd5e1", borderRadius: 6, width: 24, height: 24, display: "inline-grid", placeItems: "center", background: "#fff", color: "#475569", fontWeight: 700, cursor: "pointer", flexShrink: 0 },
+  dropZoneAssigned: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
+  changeBtn: { border: "1px solid #93c5fd", borderRadius: 6, padding: "3px 8px", background: "#fff", color: "#1d4ed8", fontSize: 12, fontWeight: 700, cursor: "pointer" },
   dropZone: { border: "2px dashed #93c5fd", borderRadius: 10, padding: 10, color: "#1d4ed8", fontSize: 13, background: "#eff6ff" }, dropFocused: { borderColor: "#2563eb", boxShadow: "0 0 0 3px #bfdbfe" }, targets: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 6, overflowY: "auto", minHeight: 100 }, target: { display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid #bfdbfe", borderRadius: 10, padding: 8, background: "#eff6ff", color: "#1e3a8a", textAlign: "left", cursor: "grab" }, targetChosen: { borderColor: "#1d4ed8", background: "#dbeafe", boxShadow: "0 0 0 2px #93c5fd" }, message: { margin: 0, color: "#166534", fontSize: 13, fontWeight: 700 }, allocate: { border: 0, borderRadius: 12, padding: 12, background: "#2563eb", color: "#fff", fontWeight: 900, cursor: "pointer" }, disabled: { background: "#94a3b8", cursor: "not-allowed" }, modalList: { listStyle: "none", display: "grid", gap: 6, padding: 0, maxHeight: 260, overflowY: "auto" }, modalNote: { color: "#334155", fontSize: 13 },
 };
