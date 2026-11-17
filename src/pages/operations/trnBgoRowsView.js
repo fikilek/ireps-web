@@ -179,6 +179,15 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], asts = []
       row.backend?.reasonCodes?.[0] ||
       (row.backend?.alreadyHasActiveSameOperationTrn ? "BLOCKED_ACTIVE_SAME_OPERATION_TRN" : "");
 
+    const erfId = firstMeaningful(
+      liveTrn?.accessData?.erfId,
+      liveTrn?.property?.erfId,
+      row.premise?.erfId,
+      row.erfId,
+      row.raw?.erfId,
+      row.ast?.erfId,
+    );
+
     const wardNo = firstMeaningful(
       liveTrn?.accessData?.parents?.wardPcode,
       row.premise?.wardNo,
@@ -199,6 +208,8 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], asts = []
     return {
       id: row.id || `row_${index}`,
       rowNo,
+      astId: astId || "",
+      erfId: erfId || "",
       meterNo,
       meterType,
       meterPhase,
@@ -224,6 +235,36 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], asts = []
       liveTrn,
     };
   });
+}
+
+export function buildTrnBgoRowsSummary(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  let notStarted = 0;
+  let inProgress = 0;
+  let completed = 0;
+  for (const row of list) {
+    if (row?.rowStatus === "COMPLETED") completed += 1;
+    else if (row?.rowStatus === "IN PROGRESS") inProgress += 1;
+    else notStarted += 1;
+  }
+  return { total: list.length, notStarted, inProgress, completed };
+}
+
+export function trnBgoRowSearchValue(row = {}) {
+  return [
+    row.meterNo,
+    row.meterType,
+    row.meterPhase,
+    row.meterStatus,
+    row.rowStatus,
+    row.activeTrnId,
+    row.address,
+    row.erfNo,
+    row.wardNo,
+    row.geofenceName,
+  ]
+    .filter((v) => v && String(v).trim() && String(v).trim().toUpperCase() !== "NAV")
+    .join(" ");
 }
 
 export function formatBatchAllocatedTo(batch = null, childTrns = []) {

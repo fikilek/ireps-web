@@ -107,7 +107,7 @@ export default function MdBgoRowsPage() {
     { key: "propertyType", label: "Property Type", filter: "select", value: (row) => row.propertyType },
     { key: "propertyName", label: "Property Name", filter: "text", value: (row) => row.propertyName },
     { key: "unitNo", label: "Unit No", filter: "text", value: (row) => row.unitNo },
-    { key: "progress", label: "Progress", filter: "select", filterOptions: PROGRESS_OPTIONS.map((value) => ({ value, label: PROGRESS_LABELS[value] })), value: (row) => row.progress, render: (row) => <StatusBadge value={row.progress} /> },
+    { key: "progress", label: "Row Status", filter: "select", filterOptions: PROGRESS_OPTIONS.map((value) => ({ value, label: PROGRESS_LABELS[value] })), value: (row) => row.progress, render: (row) => <StatusBadge value={row.progress} /> },
     { key: "lastActivity", label: "Last Activity", filter: "date", sortable: true, value: row => row.lastActivity, sortValue: row => row.lastActivity || 0, render: row => formatSastDateTime(row.lastActivity), sortEmptyLast: true },
     ...[["premiseQa", "Premise", "premiseQaHref"], ["meterQa", "Meter", "meterQaHref"]].map(([key, label, href]) => ({
       key, label, filter: "select", sortable: true, filterOptions: QA_OPTIONS.map(value => ({ value, label: value })), value: row => row[key],
@@ -169,6 +169,9 @@ export default function MdBgoRowsPage() {
     <IrepsTable showLoadingSpinner
       title="BGO Rows"
       columns={columns}
+      stickyColumnKeys={["meterNo"]}
+      defaultPageSize={25}
+      pageSizeOptions={[10, 25, 50, 100]}
       toolbar={<button type="button" aria-expanded={showColumnControls} onClick={() => setShowColumnControls(current => !current)} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 10px", color: "#1d4ed8", background: "white", font: "inherit", cursor: "pointer" }}>{showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}</button>}
       columnControls={columnControls}
       rows={enrichedRows}

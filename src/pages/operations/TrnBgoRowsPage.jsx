@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
@@ -14,8 +14,97 @@ import {
   useGetTcRowsByTcIdQuery,
   useGetTrnBgoChildTrnsByBatchIdQuery,
 } from "../../redux/tcApi";
-import { buildTrnBgoDisplayRows, formatBatchAllocatedTo } from "./trnBgoRowsView";
+import {
+  buildTrnBgoDisplayRows,
+  buildTrnBgoRowsSummary,
+  formatBatchAllocatedTo,
+  trnBgoRowSearchValue,
+} from "./trnBgoRowsView";
 import IrepsTable from "../../components/table/IrepsTable";
+import DataActionButton, { ErfActionIcon, MeterActionIcon } from "../../components/table/DataActionButton";
+import BoundaryMapModal from "../registries/components/BoundaryMapModal";
+import MeterDeepDetailsModal from "../registries/components/MeterDeepDetailsModal";
+import { formatSastDateTime } from "../../utils/formatSastDateTime.js";
+
+const TRN_BGO_COLUMN_OPTIONS = [
+  { key: "meterType", label: "Meter Type" },
+  { key: "meterPhase", label: "Meter Phase" },
+  { key: "meterStatus", label: "Meter State" },
+  { key: "rowStatus", label: "Row Status" },
+  { key: "naCount", label: "NA Count" },
+  { key: "activeTrnId", label: "TRN ID" },
+  { key: "address", label: "Address" },
+  { key: "erfNo", label: "Erf No" },
+  { key: "wardNo", label: "Ward" },
+  { key: "geofenceName", label: "Geofence" },
+  { key: "updatedAt", label: "Last Activity" },
+];
+
+const TRN_BGO_DEFAULT_VISIBILITY = Object.fromEntries(
+  TRN_BGO_COLUMN_OPTIONS.map((opt) => [opt.key, true]),
+);
+
+function prettyState(value) {
+  const s = String(value || "").trim();
+  return s ? s.replaceAll("_", " ") : "NAv";
+}
+
+function formatWardScope(batch) {
+  const pcode = String(batch?.wardPcode || batch?.scope?.wardPcode || batch?.wardNo || "").trim();
+  const explicitName = String(batch?.wardName || batch?.scope?.wardName || "").trim();
+  if (explicitName && explicitName !== "NAv") {
+    return pcode ? `${explicitName} (${pcode})` : explicitName;
+  }
+  const match = pcode.match(/(\d{1,3})$/);
+  if (match && pcode) {
+    return `Ward ${Number(match[1])} (${pcode})`;
+  }
+  return pcode || "NAv";
+}
+
+function SummaryCards({ summary, selected, onSelect }) {
+  const items = [
+    ["Total Rows", "total", ""],
+    ["Not Started", "notStarted", "NOT STARTED"],
+    ["In Progress", "inProgress", "IN PROGRESS"],
+    ["Completed", "completed", "COMPLETED"],
+  ];
+  return (
+    <div
+      style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 10 }}
+      role="group"
+      aria-label="Filter rows by status"
+    >
+      {items.map(([label, key, filterValue]) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={selected === filterValue}
+          onClick={() => onSelect(filterValue)}
+          style={{
+            textAlign: "left",
+            background: selected === filterValue ? "#eff6ff" : "white",
+            border: selected === filterValue ? "1px solid #2563eb" : "1px solid #e2e8f0",
+            borderRadius: 14,
+            padding: 14,
+            cursor: "pointer",
+            font: "inherit",
+          }}
+        >
+          <span style={{ display: "block", color: "#64748b", fontSize: 11, fontWeight: 800, textTransform: "uppercase" }}>
+            {label}
+          </span>
+          <strong style={{ display: "block", marginTop: 6, color: "#0f172a", fontSize: 23 }}>
+            {summary[key].toLocaleString("en-ZA")}
+          </strong>
+          <span style={{ display: "block", color: "#475569", fontSize: 11, marginTop: 4 }}>
+            {selected === filterValue ? "Selected" : filterValue ? "Filter rows" : "All statuses"}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function formatNumber(value) {
   const number = Number(value);
@@ -121,32 +210,37 @@ export default function TrnBgoRowsPage() {
     () => buildTrnBgoDisplayRows({ rawRows, childTrns, asts, activeBatch }),
     [rawRows, childTrns, asts, activeBatch],
   );
+  const summary = useMemo(() => buildTrnBgoRowsSummary(displayRows), [displayRows]);
+  const [filters, setFilters] = useState({});
+  const [mapView, setMapView] = useState(null);
+  const [selectedMeterId, setSelectedMeterId] = useState(null);
+  const [columnVisibility, setColumnVisibility] = useState(TRN_BGO_DEFAULT_VISIBILITY);
+  const [showColumnControls, setShowColumnControls] = useState(false);
+  const selectedRowStatus = filters.rowStatus || "";
+  const filterRows = (value) => setFilters((current) => ({ ...current, rowStatus: current.rowStatus === value ? "" : value }));
 
   // IrepsTable column definitions
-  const columns = useMemo(() => [
-    {
-      key: "rowNo",
-      label: "#",
-      width: 50,
-      filter: null,
-      sortable: true,
-      value: (r) => String(r.rowNo),
-      sortValue: (r) => r.rowNo,
-      render: (r) => <strong>{r.rowNo}</strong>,
-    },
+  const allColumns = useMemo(() => [
     {
       key: "meterNo",
       label: "Meter No",
-      width: 140,
+      width: 160,
       filter: "text",
       sortable: true,
       value: (r) => r.meterNo,
       sortValue: (r) => r.meterNo,
-      render: (r) => (
-        <span style={styles.meterNoCell}>
-          {r.meterNo}
-        </span>
-      ),
+      render: (r) =>
+        r.astId ? (
+          <DataActionButton
+            icon={<MeterActionIcon />}
+            title="Open meter details"
+            onClick={() => setSelectedMeterId(r.astId)}
+          >
+            {r.meterNo}
+          </DataActionButton>
+        ) : (
+          <span style={styles.meterNoCell}>{r.meterNo}</span>
+        ),
     },
     {
       key: "meterType",
@@ -264,12 +358,24 @@ export default function TrnBgoRowsPage() {
     {
       key: "erfNo",
       label: "Erf No",
-      width: 100,
+      width: 120,
       filter: "text",
       sortable: true,
       value: (r) => r.erfNo,
       sortValue: (r) => r.erfNo,
-      render: (r) => <span style={{ fontSize: 12, fontWeight: 600 }}>{r.erfNo}</span>,
+      render: (r) =>
+        r.erfId ? (
+          <DataActionButton
+            compact
+            title="Where this ERF is"
+            icon={<ErfActionIcon />}
+            onClick={() => setMapView({ erfId: r.erfId, erfNo: r.erfNo, wardPcode: r.wardNo !== "NAv" ? r.wardNo : batchWardPcode })}
+          >
+            {r.erfNo}
+          </DataActionButton>
+        ) : (
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{r.erfNo}</span>
+        ),
     },
     {
       key: "wardNo",
@@ -294,30 +400,64 @@ export default function TrnBgoRowsPage() {
     },
     {
       key: "updatedAt",
-      label: "Updated At",
+      label: "Last Activity",
       width: 155,
-      filter: "text",
+      filter: "date",
       sortable: true,
-      value: (r) => (r.updatedAt ? new Date(r.updatedAt).toLocaleString("en-ZA") : "NAv"),
+      sortEmptyLast: true,
+      value: (r) => r.updatedAt || "",
       sortValue: (r) => (r.updatedAt ? Date.parse(r.updatedAt) || 0 : 0),
-      render: (r) => (
-        <span style={{ fontSize: 12, color: "#475569" }}>
-          {r.updatedAt ? new Date(r.updatedAt).toLocaleString("en-ZA") : "NAv"}
-        </span>
-      ),
+      render: (r) => formatSastDateTime(r.updatedAt),
     },
-  ], []);
+  ], [batchWardPcode]);
+
+  const columns = useMemo(
+    () => allColumns.filter((col) => col.key === "meterNo" || columnVisibility[col.key] !== false),
+    [allColumns, columnVisibility],
+  );
+
+  const toggleColumn = (key) => {
+    if (columnVisibility[key]) {
+      setFilters((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
+    setColumnVisibility((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const columnControls = showColumnControls ? (
+    <div style={{ padding: "12px 14px", borderTop: "1px solid #e2e8f0", background: "#f8fafc" }}>
+      <div style={{ color: "#64748b", fontSize: 12, marginBottom: 10 }}>Always visible: Meter No</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 18px" }}>
+        {TRN_BGO_COLUMN_OPTIONS.map((option) => (
+          <label key={option.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={Boolean(columnVisibility[option.key])}
+              onChange={() => toggleColumn(option.key)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <section style={styles.page}>
       <div style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>
-            <Link to="/operations/trn-bgo" style={styles.breadcrumbLink}>
-              Operations / TRN BGO Register
-            </Link>{" "}
-            / Batch Rows
-          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 10 }}>
+            <Link to="/operations/trn-bgo" style={{ color: "#1d4ed8", fontWeight: 800, textDecoration: "none" }}>
+              ← Back to TRN BGO Register
+            </Link>
+            <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800, letterSpacing: ".08em" }}>
+              OPERATIONS / TRN BGO ROWS
+            </span>
+          </div>
           <div style={styles.titleHelpRow}>
             <h2 style={styles.title}>TRN BGO Batch Rows</h2>
             <div style={styles.lmHeaderPill}>
@@ -328,14 +468,11 @@ export default function TrnBgoRowsPage() {
             </div>
           </div>
           <p style={styles.subtitle}>
-            Batch ID: <strong>{batchId || "No Batch Selected"}</strong> · {displayRows.length} total constituent rows with state machine diagnostics
+            Batch ID: <strong>{batchId || "No Batch Selected"}</strong> · {displayRows.length} total constituent rows with live meter and TRN status
           </p>
         </div>
 
         <div style={styles.headerActions}>
-          <Link to="/operations/trn-bgo" style={styles.secondaryLinkButton}>
-            ← Back to Register
-          </Link>
           <Link
             to="/operations/trn-bgo/upload"
             style={styles.secondaryLinkButton}
@@ -353,7 +490,7 @@ export default function TrnBgoRowsPage() {
           <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>Operation</span>
             <strong style={styles.bannerValue}>
-              {activeBatch.trnType || activeBatch.operationType || "METER_DISCONNECTION"}
+              {prettyState(activeBatch.trnType || activeBatch.operationType || "METER_DISCONNECTION")}
             </strong>
           </div>
           <div style={styles.bannerItem}>
@@ -365,7 +502,7 @@ export default function TrnBgoRowsPage() {
           <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>Ward Scope</span>
             <strong style={styles.bannerValue}>
-              {activeBatch.wardPcode || activeBatch.scope?.wardPcode || activeBatch.wardNo || "NAv"}
+              {formatWardScope(activeBatch)}
             </strong>
           </div>
           <div style={styles.bannerItem}>
@@ -377,7 +514,7 @@ export default function TrnBgoRowsPage() {
           <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>BGO Status</span>
             <strong style={styles.bannerValue}>
-              {activeBatch.bgoStatus || activeBatch.workflow?.state || "NAv"}
+              {prettyState(activeBatch.bgoStatus || activeBatch.workflow?.state || "NAv")}
             </strong>
           </div>
           <div style={styles.bannerItem}>
@@ -395,10 +532,34 @@ export default function TrnBgoRowsPage() {
         </div>
       ) : null}
 
+      <SummaryCards summary={summary} selected={selectedRowStatus} onSelect={filterRows} />
+
       <div style={styles.panel}>
         <IrepsTable showLoadingSpinner
           rows={displayRows}
-          stickyColumnKeys={["rowNo", "meterNo"]}
+          stickyColumnKeys={["meterNo"]}
+          filters={filters}
+          onFiltersChange={setFilters}
+          searchValue={trnBgoRowSearchValue}
+          toolbar={
+            <button
+              type="button"
+              aria-expanded={showColumnControls}
+              onClick={() => setShowColumnControls((current) => !current)}
+              style={{
+                border: "1px solid #cbd5e1",
+                borderRadius: 8,
+                padding: "6px 10px",
+                color: "#1d4ed8",
+                background: "white",
+                font: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              {showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}
+            </button>
+          }
+          columnControls={columnControls}
           downloads={{
             registryName: `TRN BGO Batch Rows ${batchId || ""}`.trim(),
             fileBaseName: `trn_bgo_rows_${(batchId || "batch").toLowerCase()}`,
@@ -407,11 +568,23 @@ export default function TrnBgoRowsPage() {
           columns={columns}
           loading={isLoading}
           emptyText="No constituent meters found for this batch."
-          title={`Batch Rows: ${batchId || "All Rows"}`}
+          title="BGO Rows"
           pageSizeOptions={[10, 25, 50, 100]}
           defaultPageSize={25}
         />
       </div>
+      {mapView ? (
+        <BoundaryMapModal
+          mode="ERF"
+          erfId={mapView.erfId}
+          erfNo={mapView.erfNo}
+          wardPcode={mapView.wardPcode}
+          onClose={() => setMapView(null)}
+        />
+      ) : null}
+      {selectedMeterId ? (
+        <MeterDeepDetailsModal meterId={selectedMeterId} onClose={() => setSelectedMeterId(null)} />
+      ) : null}
     </section>
   );
 }
