@@ -29,7 +29,7 @@ function formatAllocatedTarget(batch = {}) {
   return type && !name.toUpperCase().startsWith(`${type}:`) ? `${type}: ${name}` : name;
 }
 
-export function buildTrnAllocationModel({ batches = [], wards = [] } = {}) {
+export function buildTrnAllocationModel({ batches = [], wards = [], progressByBatchId = {} } = {}) {
   const items = [];
   let readyNotOnMap = 0;
 
@@ -58,8 +58,9 @@ export function buildTrnAllocationModel({ batches = [], wards = [] } = {}) {
           : "UNAVAILABLE";
 
     const totalMeters = Number(batch.totalRows || 0);
-    const inProgress = Number(batch.progress?.inProgress || 0);
-    const completed = Number(batch.progress?.completed || 0);
+    const liveCounts = progressByBatchId?.[batch.id] || null;
+    const inProgress = Number(liveCounts?.inProgressRows ?? batch.progress?.inProgress ?? 0);
+    const completed = Number(liveCounts?.completedRows ?? batch.progress?.completed ?? 0);
     const workStatus =
       workflowState === "COMPLETED" || (totalMeters > 0 && completed >= totalMeters)
         ? "COMPLETED"
