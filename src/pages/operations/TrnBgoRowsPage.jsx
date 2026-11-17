@@ -287,7 +287,7 @@ export default function TrnBgoRowsPage() {
     {
       key: "rowStatus",
       label: "Row Status",
-      width: 135,
+      minWidth: 135,
       filter: "select",
       sortable: true,
       value: (r) => r.rowStatus,
@@ -298,10 +298,14 @@ export default function TrnBgoRowsPage() {
         return (
           <span
             style={{
-              ...styles.badge,
+              display: "inline-flex",
+              borderRadius: 999,
+              padding: "5px 9px",
+              fontSize: 11,
+              fontWeight: 800,
+              whiteSpace: "nowrap",
               background: isCompleted ? "#dcfce7" : isInProgress ? "#fef3c7" : "#dbeafe",
               color: isCompleted ? "#166534" : isInProgress ? "#92400e" : "#1e40af",
-              border: `1px solid ${isCompleted ? "#bbf7d0" : isInProgress ? "#fde68a" : "#bfdbfe"}`,
             }}
           >
             {r.rowStatus}
