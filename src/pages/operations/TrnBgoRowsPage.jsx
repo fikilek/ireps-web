@@ -20,6 +20,7 @@ import {
   formatBatchAllocatedTo,
   trnBgoRowSearchValue,
 } from "./trnBgoRowsView";
+import { getTrnBgoBatchStatus } from "./trn-bgo/trnBgoRegisterModel";
 import IrepsTable from "../../components/table/IrepsTable";
 import DataActionButton, { ErfActionIcon, MeterActionIcon } from "../../components/table/DataActionButton";
 import BoundaryMapModal from "../registries/components/BoundaryMapModal";
@@ -496,7 +497,12 @@ export default function TrnBgoRowsPage() {
           <div style={styles.bannerItem}>
             <span style={styles.bannerLabel}>BGO Status</span>
             <strong style={styles.bannerValue}>
-              {prettyState(activeBatch.bgoStatus || activeBatch.workflow?.state || "NAv")}
+              {getTrnBgoBatchStatus({
+                ...activeBatch,
+                totalRows: activeBatch.totalRows || summary.total,
+                inProgressRows: summary.inProgress,
+                completedRows: summary.completed,
+              })}
             </strong>
           </div>
           <div style={styles.bannerItem}>

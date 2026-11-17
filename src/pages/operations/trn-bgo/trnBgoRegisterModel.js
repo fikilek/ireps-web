@@ -13,6 +13,11 @@ const TRN_BATCH_STATES = new Set([
 ]);
 
 export function getTrnBgoBatchStatus(batch = {}) {
+  const total = Number(batch?.totalRows || 0);
+  const inProgress = Number(batch?.inProgressRows || 0);
+  const completed = Number(batch?.completedRows || 0);
+  if (total > 0 && completed >= total) return "COMPLETED";
+  if (inProgress > 0 || completed > 0) return "IN PROGRESS";
   const state = String(
     batch?.workflowState || batch?.raw?.workflow?.state || batch?.bgoStatus || "",
   )
