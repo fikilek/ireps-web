@@ -108,25 +108,33 @@ export function buildTrnAllocationModel({ batches = [], wards = [] } = {}) {
   };
 }
 
-export function buildTrnAllocationMeterPins({ rawRows = [], asts = [], premises = [] } = {}) {
+export function buildTrnAllocationMeterPins({ rawRows = [], asts = [], premises = [], erfs = [] } = {}) {
   const displayRows = buildTrnBgoDisplayRows({ rawRows, asts });
   const astById = new Map((Array.isArray(asts) ? asts : []).filter((a) => a?.id).map((a) => [a.id, a]));
   const premiseById = new Map((Array.isArray(premises) ? premises : []).filter((p) => p?.id).map((p) => [p.id, p]));
+  const erfById = new Map((Array.isArray(erfs) ? erfs : []).filter((e) => e?.id).map((e) => [e.id, e]));
 
   const pins = [];
   for (const row of displayRows) {
     const raw = row.raw || {};
     const liveAst = row.astId ? astById.get(row.astId) : null;
-    const premiseId = raw.premiseId || raw.premise?.id || "";
+    const premiseId = raw.premiseId || raw.premise?.id || liveAst?.premiseId || "";
     const livePremise = premiseId ? premiseById.get(premiseId) : null;
+    const erfId = row.erfId || livePremise?.erfId || liveAst?.erfId || "";
+    const liveErf = erfId ? erfById.get(erfId) : null;
     const position =
+      readGpsPoint(liveAst?.gps) ||
       readGpsPoint(liveAst?.astData?.location?.gps) ||
+      readGpsPoint(liveAst?.ast?.location?.gps) ||
       readGpsPoint(liveAst?.location?.gps) ||
       readGpsPoint(raw?.ast?.location?.gps) ||
-      readGpsPoint(livePremise?.location?.gps) ||
       readGpsPoint(livePremise?.gps) ||
+      readGpsPoint(livePremise?.geometry?.centroid) ||
+      readGpsPoint(livePremise?.location?.gps) ||
       readGpsPoint(raw?.premise?.location?.gps) ||
-      readGpsPoint(raw?.premise?.gps);
+      readGpsPoint(raw?.premise?.gps) ||
+      readGpsPoint(liveErf?.centroid) ||
+      readGpsPoint(liveErf?.geometry?.centroid);
     if (!position) continue;
 
     pins.push({

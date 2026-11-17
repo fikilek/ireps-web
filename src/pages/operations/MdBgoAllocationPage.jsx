@@ -7,14 +7,14 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { APIProvider, InfoWindow, Map as GoogleMap, Marker, useMap } from "@vis.gl/react-google-maps";
 
+import { db } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import { useAllocateMdBgoBatchesTogetherMutation, useGetBgoBatchesByLmQuery } from "../../redux/bgoApi";
-import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/geofencesApi";
-import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
 import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
 import { useGetTargetedBatchAllocationDirectoryQuery } from "../../redux/salesTargetedBatchApi";
+import { subscribeTrnBgoMap } from "./md-bgo/trnBgoMapStream.js";
 import { WardBoundaryPolygons } from "./geofence-map-layers";
 import { getGeoFencePath, geoJsonPolygonToGooglePaths, parseGeometry } from "./geofence-map-helpers";
 import { getActorMncServiceProviderId, buildTargetPayload } from "./targeted-batches/allocation/targetedBatchAllocationUtils";
@@ -165,14 +165,26 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
   const selectedBulkBatchId = bulkMode ? (selectedIds[0] || "") : "";
   const selectedBulkItem = useMemo(() => (bulkMode && selectedBulkBatchId ? model.items.find((item) => item.bgoBatchId === selectedBulkBatchId) || null : null), [bulkMode, selectedBulkBatchId, model.items]);
   const { data: bulkTcRows = EMPTY, isLoading: isBulkRowsLoading } = useGetTcRowsByTcIdQuery(selectedBulkBatchId, { skip: !bulkMode || !selectedBulkBatchId });
-  const { data: bulkAsts = EMPTY } = useGetAstsByLmPcodeWardPcodeQuery(
-    { lmPcode, wardPcode: selectedBulkItem?.wardPcode || "" },
-    { skip: !bulkMode || !lmPcode || !selectedBulkItem?.wardPcode },
-  );
-  const { data: bulkPremises = EMPTY } = useGetPremisesByWardQuery(selectedBulkItem?.wardPcode || "", { skip: !bulkMode || !selectedBulkItem?.wardPcode });
+  const [bulkMapState, setBulkMapState] = useState(null);
+  useEffect(() => {
+    if (!bulkMode || !selectedBulkBatchId || !lmPcode) return undefined;
+    return subscribeTrnBgoMap(db, { batchId: selectedBulkBatchId, lmPcode }, (value) => {
+      setBulkMapState({ ...value, batchId: selectedBulkBatchId });
+    });
+  }, [bulkMode, selectedBulkBatchId, lmPcode]);
+  const activeBulkMap = bulkMapState?.batchId === selectedBulkBatchId ? bulkMapState : null;
+  const bulkMapReady = Boolean(activeBulkMap?.ready) && !isBulkRowsLoading;
   const meterPins = useMemo(
-    () => (bulkMode && selectedBulkBatchId ? buildTrnAllocationMeterPins({ rawRows: bulkTcRows, asts: bulkAsts, premises: bulkPremises }) : EMPTY),
-    [bulkMode, selectedBulkBatchId, bulkTcRows, bulkAsts, bulkPremises],
+    () =>
+      bulkMode && selectedBulkBatchId
+        ? buildTrnAllocationMeterPins({
+            rawRows: bulkTcRows,
+            asts: activeBulkMap?.meters || EMPTY,
+            premises: activeBulkMap?.premises || EMPTY,
+            erfs: activeBulkMap?.erfs || EMPTY,
+          })
+        : EMPTY,
+    [bulkMode, selectedBulkBatchId, bulkTcRows, activeBulkMap],
   );
   const bbRows = useMemo(() => {
     if (!bulkMode) return EMPTY;
@@ -304,7 +316,7 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
               </>
             )}
           </GoogleMap></APIProvider>}</div>
-        {bulkMode && selectedBulkBatchId && !isBulkRowsLoading && !meterPins.length ? (
+        {bulkMode && selectedBulkBatchId && bulkMapReady && !meterPins.length ? (
           <p style={styles.note}>No meter GPS coordinates found for {selectedBulkBatchId}.</p>
         ) : null}
       </div>
