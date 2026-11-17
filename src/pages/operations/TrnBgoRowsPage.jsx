@@ -41,7 +41,7 @@ const TRN_BGO_COLUMN_OPTIONS = [
 ];
 
 const TRN_BGO_DEFAULT_VISIBILITY = Object.fromEntries(
-  TRN_BGO_COLUMN_OPTIONS.map((opt) => [opt.key, true]),
+  TRN_BGO_COLUMN_OPTIONS.map((opt) => [opt.key, opt.key !== "activeTrnId"]),
 );
 
 function prettyState(value) {
