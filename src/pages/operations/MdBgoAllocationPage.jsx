@@ -165,13 +165,14 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
     () => (bulkMode ? batches.filter((b) => b?.contractVersion && b?.id).map((b) => b.id).sort() : EMPTY),
     [bulkMode, batches],
   );
-  const { currentData: trnProgress = {} } = useGetTrnBgoProgressQuery(
+  const { currentData: trnProgress } = useGetTrnBgoProgressQuery(
     { batchIds: bulkBatchIds },
     { skip: !bulkMode || !bulkBatchIds.length },
   );
+  const trnProgressCounts = trnProgress?.ready && !trnProgress?.error ? trnProgress.counts : undefined;
   const model = useMemo(
-    () => (bulkMode ? buildTrnAllocationModel({ batches, wards: lmWards, progressByBatchId: trnProgress }) : buildMdBgoAllocationModel({ batches, geofences })),
-    [batches, geofences, bulkMode, lmWards, trnProgress],
+    () => (bulkMode ? buildTrnAllocationModel({ batches, wards: lmWards, progressByBatchId: trnProgressCounts }) : buildMdBgoAllocationModel({ batches, geofences })),
+    [batches, geofences, bulkMode, lmWards, trnProgressCounts],
   );
   const selectedBulkBatchId = bulkMode ? (selectedIds[0] || "") : "";
   const selectedBulkItem = useMemo(() => (bulkMode && selectedBulkBatchId ? model.items.find((item) => item.bgoBatchId === selectedBulkBatchId) || null : null), [bulkMode, selectedBulkBatchId, model.items]);
