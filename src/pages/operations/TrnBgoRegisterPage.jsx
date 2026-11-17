@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import LoadingIndicator from "../../components/LoadingIndicator";
 import { batchCreator } from "../../redux/trnBgoRegisterDetails.js";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
@@ -22,6 +22,84 @@ import IrepsTable from "../../components/table/IrepsTable";
 function formatNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number.toLocaleString("en-ZA") : "0";
+}
+
+function GeofenceCountPill({ batchId, detail }) {
+  const anchorRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  const names = useMemo(() => {
+    if (Array.isArray(detail?.names)) return detail.names;
+    const text = String(detail?.text || "").trim();
+    if (!text || text === "NAv") return [];
+    return text.split(",").map((s) => s.trim()).filter(Boolean);
+  }, [detail]);
+
+  if (!names.length) {
+    return (
+      <span style={styles.mutedCell} title={detail?.error || undefined}>
+        NAv
+      </span>
+    );
+  }
+
+  const updatePos = () => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 320;
+    const maxLeft = Math.max(12, window.innerWidth - width - 12);
+    setPos({
+      top: Math.min(rect.bottom + 6, Math.max(12, window.innerHeight - 280)),
+      left: Math.min(Math.max(12, rect.left), maxLeft),
+    });
+  };
+
+  return (
+    <span
+      ref={anchorRef}
+      style={styles.geofenceWrap}
+      onMouseEnter={() => {
+        updatePos();
+        setOpen(true);
+      }}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        style={styles.geofencePill}
+        onFocus={() => {
+          updatePos();
+          setOpen(true);
+        }}
+        onBlur={() => setOpen(false)}
+        aria-label={`${names.length} geofences for batch ${batchId}`}
+      >
+        {names.length}
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={`Geofences for ${batchId}`}
+          style={{ ...styles.geofencePopover, top: pos.top, left: pos.left }}
+        >
+          <div style={styles.geofencePopoverHead}>
+            <span style={styles.geofencePopoverTitle}>
+              Geofences ({names.length})
+            </span>
+            <span style={styles.geofencePopoverSub}>{batchId}</span>
+          </div>
+          <ol style={styles.geofenceList}>
+            {names.map((name) => (
+              <li key={name} style={styles.geofenceListItem}>
+                {name}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </span>
+  );
 }
 
 function resolveWorkbase(auth = {}, geoState = {}) {
@@ -589,9 +667,7 @@ export default function TrnBgoRegisterPage() {
       filter: "text",
       value: (batch) => registerDetails?.[batch.id]?.text || "NAv",
       render: (batch) => registerDetails?.[batch.id]?.ready ? (
-        <div title={registerDetails[batch.id].error || undefined}>
-          {registerDetails[batch.id].text}
-        </div>
+        <GeofenceCountPill batchId={batch.id} detail={registerDetails[batch.id]} />
       ) : (
         <LoadingIndicator>Loading…</LoadingIndicator>
       ),
@@ -1358,4 +1434,52 @@ const styles = {
   reasonLabel: { display: "block", marginBottom: 6, color: "#334155", fontSize: 13, fontWeight: 800 },
   reasonInput: { boxSizing: "border-box", width: "100%", border: "1px solid #cbd5e1", borderRadius: 10, padding: 10, marginBottom: 14, font: "inherit", resize: "vertical" },
   unallocateWarning: { padding: 10, borderRadius: 8, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 12, lineHeight: 1.5, marginBottom: 14 },
+  geofenceWrap: { position: "relative", display: "inline-flex", alignItems: "center" },
+  geofencePill: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 28,
+    height: 24,
+    padding: "0 9px",
+    borderRadius: 999,
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  geofencePopover: {
+    position: "fixed",
+    zIndex: 1200,
+    width: 320,
+    maxHeight: 260,
+    overflowY: "auto",
+    background: "#ffffff",
+    border: "1px solid #cbd5e1",
+    borderRadius: 12,
+    boxShadow: "0 16px 32px rgba(15, 23, 42, 0.16)",
+    padding: 12,
+    display: "grid",
+    gap: 8,
+    textAlign: "left",
+  },
+  geofencePopoverHead: {
+    display: "grid",
+    gap: 2,
+    paddingBottom: 6,
+    borderBottom: "1px solid #e2e8f0",
+  },
+  geofencePopoverTitle: { fontSize: 12, fontWeight: 800, color: "#0f172a" },
+  geofencePopoverSub: { fontSize: 11, color: "#64748b", wordBreak: "break-all" },
+  geofenceList: {
+    margin: 0,
+    paddingLeft: 18,
+    display: "grid",
+    gap: 4,
+    fontSize: 12,
+    color: "#1e293b",
+  },
+  geofenceListItem: { lineHeight: 1.35 },
 };
