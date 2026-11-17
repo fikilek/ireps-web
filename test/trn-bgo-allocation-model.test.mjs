@@ -16,10 +16,13 @@ test('buildTrnAllocationModel sorts newest first and marks started batches non-r
  const model = buildTrnAllocationModel({
   batches: [
    { id: 'OLD', contractVersion: 'current', workflowState: 'READY_FOR_ALLOCATION', wardPcode: 'W1', totalRows: 5, createdAt: '2026-11-16T10:00:00Z' },
-   { id: 'NEW_STARTED', contractVersion: 'current', workflowState: 'ISSUED', wardPcode: 'W1', totalRows: 3, createdAt: '2026-11-17T10:00:00Z', progress: { inProgress: 1 }, assignment: { targets: [{ type: 'SP', name: 'Acorn' }] } },
+   { id: 'NEW_STARTED', contractVersion: 'current', workflowState: 'ACCEPTED', wardPcode: 'W1', totalRows: 3, createdAt: '2026-11-17T10:00:00Z', assignment: { targets: [{ type: 'SP', name: 'Acorn' }] } },
    { id: 'DONE', contractVersion: 'current', workflowState: 'COMPLETED', wardPcode: 'W1', totalRows: 2, createdAt: '2026-11-17T11:00:00Z', progress: { completed: 2 }, assignment: { targets: [{ type: 'TEAM', name: 'Alpha' }] } },
   ],
   wards: [],
+  progressByBatchId: {
+   NEW_STARTED: { inProgressRows: 1, completedRows: 0 },
+  },
  });
  assert.deepEqual(model.items.map((i) => i.bgoBatchId), ['DONE', 'NEW_STARTED', 'OLD']);
  assert.equal(model.items[0].workStatus, 'COMPLETED');

@@ -1,5 +1,5 @@
 import LoadingIndicator from "../../components/LoadingIndicator";
-import { useGetTcUploadsQuery, useGetTcRowsByTcIdQuery, useAllocateTrnBgoWardBatchesMutation } from "../../redux/tcApi";
+import { useGetTcUploadsQuery, useGetTcRowsByTcIdQuery, useGetTrnBgoProgressQuery, useAllocateTrnBgoWardBatchesMutation } from "../../redux/tcApi";
 import { buildTrnAllocationMeterPins, buildTrnAllocationModel } from "./md-bgo/trnAllocationModel";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -161,7 +161,18 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
   const [bbFilter, setBbFilter] = useState("ALL"); const [bbSearch, setBbSearch] = useState(""); const [activePin, setActivePin] = useState(null);
   const [fitRequest, setFitRequest] = useState(0); const [message, setMessage] = useState(""); const [windowView, setWindowView] = useState(null); const [busy, setBusy] = useState(false);
   const deepLinkBatch = text(searchParams.get("batchId"));
-  const model = useMemo(() => bulkMode ? buildTrnAllocationModel({batches, wards:lmWards}) : buildMdBgoAllocationModel({ batches, geofences }), [batches, geofences, bulkMode, lmWards]);
+  const bulkBatchIds = useMemo(
+    () => (bulkMode ? batches.filter((b) => b?.contractVersion && b?.id).map((b) => b.id).sort() : EMPTY),
+    [bulkMode, batches],
+  );
+  const { currentData: trnProgress = {} } = useGetTrnBgoProgressQuery(
+    { batchIds: bulkBatchIds },
+    { skip: !bulkMode || !bulkBatchIds.length },
+  );
+  const model = useMemo(
+    () => (bulkMode ? buildTrnAllocationModel({ batches, wards: lmWards, progressByBatchId: trnProgress }) : buildMdBgoAllocationModel({ batches, geofences })),
+    [batches, geofences, bulkMode, lmWards, trnProgress],
+  );
   const selectedBulkBatchId = bulkMode ? (selectedIds[0] || "") : "";
   const selectedBulkItem = useMemo(() => (bulkMode && selectedBulkBatchId ? model.items.find((item) => item.bgoBatchId === selectedBulkBatchId) || null : null), [bulkMode, selectedBulkBatchId, model.items]);
   const { data: bulkTcRows = EMPTY, isLoading: isBulkRowsLoading } = useGetTcRowsByTcIdQuery(selectedBulkBatchId, { skip: !bulkMode || !selectedBulkBatchId });
