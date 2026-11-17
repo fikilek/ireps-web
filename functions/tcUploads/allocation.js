@@ -30,19 +30,38 @@ export async function allocateTcBatches({db,request}) {
   const children=[]; const notices=[];
   for(const parent of parents) {
    const p=parent.data();
+   const isReallocate=data.targetType!=="UNALLOCATE"&&["ISSUED","ACCEPTED"].includes(p.workflow?.state);
    if(data.targetType==="UNALLOCATE") {
     if(!["ISSUED","ACCEPTED"].includes(p.workflow?.state))denied("Batch has no active allocation.");
     if(p.workflow?.issuedByUid!==uid&&actor.role!=="MNG")denied("Only the allocator or manager may unallocate this batch.");
     notices.push(...(await tx.get(db.collection("notifications").where("bgo.batchId","==",parent.id))).docs);
     if(!text(data.reason))denied("Record why this allocation is being withdrawn.");
     if(!data.expectedIssuedAt||data.expectedIssuedAt!==p.workflow.issuedAt)denied("Allocation changed. Reopen the current batch.");
+   } else if(isReallocate) {
+    if(Number(p.progress?.inProgress||0)>0||Number(p.progress?.completed||0)>0)denied("Field work has already started; this batch cannot be re-allocated.");
+    notices.push(...(await tx.get(db.collection("notifications").where("bgo.batchId","==",parent.id))).docs);
    } else if(p.workflow?.state!=="READY_FOR_ALLOCATION"||p.assignment?.targets?.length)denied("Batch is not ready for allocation.");
    const snaps=(p.trnIds||[]).map(id=>byId.get(id));
    if(!snaps.length||snaps.some(s=>!s.exists||s.data().origin?.trnBgo?.batchId!==parent.id))denied("Batch membership is incomplete.");
    for(const child of snaps) {
-    const trn=child.data();const move=canMoveAs(trn.workflow?.state,target?"allocate":"cancel",actor.role);
-    if(!move.ok || (!target&&(trn.workflow?.completedAt||trn.accessData?.access?.hasAccess==="no")))denied(move.message||"Field execution has already occurred.");
-    children.push({child,trn,to:move.to});
+    const trn=child.data();
+    const trnState=trn.workflow?.state;
+    if(isReallocate) {
+     if(!["CREATED","ISSUED","ACCEPTED"].includes(trnState)||trn.workflow?.executionStartedAt||trn.workflow?.completedAt||trn.accessData?.access?.hasAccess==="no"||Number(trn.noAccessCount||0)>0) {
+      denied("Field work has already started; this batch cannot be re-allocated.");
+     }
+     if(trnState!=="CREATED") {
+      const cancelMove=canMoveAs(trnState,"cancel",actor.role);
+      if(!cancelMove.ok)denied(cancelMove.message||"Field work has already started; this batch cannot be re-allocated.");
+     }
+     const allocMove=canMoveAs("CREATED","allocate",actor.role);
+     if(!allocMove.ok)denied(allocMove.message||"Batch is not ready for allocation.");
+     children.push({child,trn,to:allocMove.to});
+    } else {
+     const move=canMoveAs(trnState,target?"allocate":"cancel",actor.role);
+     if(!move.ok || (!target&&(trn.workflow?.completedAt||trn.accessData?.access?.hasAccess==="no")))denied(move.message||"Field execution has already occurred.");
+     children.push({child,trn,to:move.to});
+    }
    }
   }
   for (const notice of notices) {
