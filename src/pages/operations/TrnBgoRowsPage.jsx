@@ -452,42 +452,20 @@ export default function TrnBgoRowsPage() {
 
   return (
     <section style={styles.page}>
-      <div style={styles.header}>
-        <div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 10 }}>
-            <Link to="/operations/trn-bgo" style={{ color: "#1d4ed8", fontWeight: 800, textDecoration: "none" }}>
-              ← Back to TRN BGO Register
-            </Link>
-            <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800, letterSpacing: ".08em" }}>
-              OPERATIONS / TRN BGO ROWS
-            </span>
-          </div>
-          <div style={styles.titleHelpRow}>
-            <h2 style={styles.title}>TRN BGO Batch Rows</h2>
-            <div style={styles.lmHeaderPill}>
-              <span style={styles.lmHeaderDot} />
-              <span style={styles.lmHeaderLabel}>Local Municipality:</span>
-              <strong style={styles.lmHeaderValue}>{resolvedLmName || activeLmPcode || "Active LM"}</strong>
-              {activeLmPcode ? <span style={styles.lmHeaderPcode}>({activeLmPcode})</span> : null}
-            </div>
-          </div>
-          <p style={styles.subtitle}>
-            Batch ID: <strong>{batchId || "No Batch Selected"}</strong> · {displayRows.length} total constituent rows with live meter and TRN status
-          </p>
-        </div>
-
-        <div style={styles.headerActions}>
-          <Link
-            to="/operations/trn-bgo/upload"
-            style={styles.secondaryLinkButton}
-          >
-            Upload & Create TRN BGO
-          </Link>
-          <Link to="/operations/trn-bgo/dashboard" style={styles.secondaryLinkButton}>
-            TRN BGO Dashboard
-          </Link>
-        </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 18 }}>
+        <Link to="/operations/trn-bgo" style={{ color: "#1d4ed8", fontWeight: 800, textDecoration: "none" }}>
+          ← Back to TRN BGO Register
+        </Link>
+        <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800, letterSpacing: ".08em" }}>
+          OPERATIONS / TRN BGO ROWS
+        </span>
       </div>
+      <header style={{ marginBottom: 18 }}>
+        <h1 style={{ margin: "0 0 6px", color: "#0f172a", fontSize: 30 }}>TRN BGO Rows</h1>
+        <p style={{ margin: 0, color: "#64748b" }}>
+          Batch ID: <strong>{batchId || "No Batch Selected"}</strong> · {displayRows.length} total constituent rows with live meter and TRN status
+        </p>
+      </header>
 
       {activeBatch ? (
         <div style={styles.batchBanner}>
