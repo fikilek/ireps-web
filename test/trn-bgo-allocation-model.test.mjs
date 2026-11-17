@@ -26,13 +26,18 @@ test('buildTrnAllocationModel sorts newest first and marks started batches non-r
  assert.equal(model.items[1].allocatedTo, 'Unallocated');
  assert.equal(model.items[1].canAllocate, true);
 });
-test('buildTrnAllocationMeterPins extracts GPS and InfoWindow metadata from asts and premises', () => {
+test('buildTrnAllocationMeterPins extracts GPS and InfoWindow metadata from asts, premises, and erfs', () => {
  const pins = buildTrnAllocationMeterPins({
-  rawRows: [{ id: 'R1', astId: 'A1', input: { meterNo: 'M1', erfNo: '101' }, premise: { address: '1 Main St' } }],
+  rawRows: [
+   { id: 'R1', astId: 'A1', input: { meterNo: 'M1', erfNo: '101' }, premise: { address: '1 Main St' } },
+   { id: 'R2', astId: 'A2', premiseId: 'P2', erfId: 'E2', input: { meterNo: 'M2', erfNo: '102' } },
+  ],
   asts: [{ id: 'A1', status: { state: 'DISCONNECTED' }, astData: { location: { gps: { latitude: -28.16, longitude: 30.23 } } } }],
+  erfs: [{ id: 'E2', centroid: { lat: -28.17, lng: 30.24 } }],
  });
- assert.equal(pins.length, 1);
+ assert.equal(pins.length, 2);
  assert.equal(pins[0].meterNo, 'M1');
  assert.equal(pins[0].meterStatus, 'DISCONNECTED');
  assert.deepEqual(pins[0].position, { lat: -28.16, lng: 30.23 });
+ assert.deepEqual(pins[1].position, { lat: -28.17, lng: 30.24 });
 });
