@@ -15,6 +15,8 @@ test("TRN BGO batch status reads parent lifecycle state cleanly", () => {
   assert.equal(getTrnBgoBatchStatus({ workflowState: "ACCEPTED" }), "ACCEPTED");
   assert.equal(getTrnBgoBatchStatus({ workflowState: "IN_PROGRESS" }), "IN PROGRESS");
   assert.equal(getTrnBgoBatchStatus({ workflowState: "COMPLETED" }), "COMPLETED");
+  assert.equal(getTrnBgoBatchStatus({ workflowState: "ACCEPTED", totalRows: 2, inProgressRows: 2, completedRows: 0 }), "IN PROGRESS");
+  assert.equal(getTrnBgoBatchStatus({ workflowState: "ACCEPTED", totalRows: 2, inProgressRows: 0, completedRows: 2 }), "COMPLETED");
   assert.equal(getTrnBgoBatchStatus({ workflowState: "UNKNOWN" }), "NAv");
 });
 
