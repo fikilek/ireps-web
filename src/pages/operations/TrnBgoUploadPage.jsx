@@ -5,6 +5,110 @@ function getRowSelectionKey(row) {
   return String(row?.rowNo || row?._rowNo || row?.meterNo || "");
 }
 
+function PendingTrnReasonButton({ row, pending, onClick }) {
+  const [hoverRect, setHoverRect] = useState(null);
+  const openAt = (el) => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setHoverRect({
+      top: Math.min(rect.bottom + 8, window.innerHeight - 290),
+      left: Math.min(rect.left, window.innerWidth - 380),
+    });
+  };
+  const meterNo = row?.irepsValues?.meterNo || row?.meterNo || "NAv";
+  const meterState = row?.astStatus || row?.irepsValues?.meterStatus || row?.meterStatus || "NAv";
+  const meterType = row?.irepsValues?.meterType || row?.meterType || "NAv";
+  const meterPhase = row?.irepsValues?.meterPhase || row?.meterPhase || "NAv";
+  const address = row?.resolvedAddress || row?.irepsValues?.premiseAddress || row?.premiseAddress || "NAv";
+  const erfNo = row?.resolvedErf || row?.irepsValues?.erfNo || row?.erfNo || "NAv";
+  const ward = row?.astWardPcode && row.astWardPcode !== "NAv" ? row.astWardPcode : row?.wardNo || "NAv";
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        onClick={onClick}
+        onMouseEnter={(e) => openAt(e.currentTarget)}
+        onMouseLeave={() => setHoverRect(null)}
+        onFocus={(e) => openAt(e.currentTarget)}
+        onBlur={() => setHoverRect(null)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 10px",
+          borderRadius: 999,
+          border: "1px solid #fecaca",
+          background: "#fef2f2",
+          color: "#b91c1c",
+          fontSize: 12,
+          fontWeight: 800,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        ⏳ {pending.buttonLabel} ↗
+      </button>
+      {hoverRect ? (
+        <div
+          role="dialog"
+          aria-label="Pending TRN Summary"
+          style={{
+            position: "fixed",
+            top: Math.max(12, hoverRect.top),
+            left: Math.max(12, hoverRect.left),
+            zIndex: 9999,
+            width: 360,
+            background: "#fff",
+            border: "1px solid #cbd5e1",
+            borderRadius: 14,
+            boxShadow: "0 18px 36px rgba(15, 23, 42, 0.18)",
+            padding: 14,
+            display: "grid",
+            gap: 10,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>Pending {pending.trnType}</span>
+            <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 999, background: "#fef3c7", color: "#92400e" }}>{pending.workflowState}</span>
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: ".05em" }}>Pending TRN</span>
+            <div>
+              <small style={{ display: "block", fontSize: 10, color: "#64748b" }}>TRN ID</small>
+              <strong style={{ fontSize: 12, color: "#0f172a", wordBreak: "break-all" }}>{pending.trnId}</strong>
+            </div>
+            <div>
+              <small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Allocated To</small>
+              <strong style={{ fontSize: 12, color: "#0f172a" }}>{pending.allocatedTo}</strong>
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: ".05em" }}>Meter Details</span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 10px" }}>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Meter No</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{meterNo}</strong></div>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>State</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{meterState}</strong></div>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Type</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{meterType}</strong></div>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Phase</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{meterPhase}</strong></div>
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: ".05em" }}>Premise Details</span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 10px" }}>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Address</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{address}</strong></div>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Erf No / Ward</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{erfNo} · {ward}</strong></div>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "#1d4ed8", fontWeight: 700, borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+            Click button to open &amp; filter in TRNs Registry →
+          </div>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 function MasterCheckbox({ checked, indeterminate, disabled, onChange, title }) {
   const checkboxRef = useRef(null);
 
@@ -42,6 +146,7 @@ import { functions } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
+import { parsePendingTrnFromReason } from "./trnBgoUploadPendingTrn";
 import {
   useCreateTrnBgoWardBatchesMutation,
 } from "../../redux/tcApi";
@@ -637,6 +742,7 @@ export default function TrnBgoUploadPage() {
             irepsValues,
             comparisons,
             astDocId: astDoc?.id || null,
+            astActiveLifecycle: astDoc?.trnActiveLifecycle || null,
             astLmPcode: astLmPcode || "NAv",
             astWardPcode: astWardPcode || "NAv",
             astStatus: foundInAsts ? astStatus : "NOT_IN_ASTS",
@@ -1275,15 +1381,27 @@ export default function TrnBgoUploadPage() {
       {
         key: "nonEligibleReason",
         label: "non eligible reason",
-        width: 310,
+        width: 210,
         filter: "text",
         sortable: true,
         value: (r) => r.nonEligibleReason || "",
-        render: (r) => (
-          <span style={{ color: "#b91c1c", whiteSpace: "normal", overflowWrap: "anywhere" }}>
-            {r.nonEligibleReason}
-          </span>
-        ),
+        render: (r) => {
+          const pending = parsePendingTrnFromReason(r);
+          if (!pending) {
+            return (
+              <span style={{ color: "#b91c1c", whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                {r.nonEligibleReason}
+              </span>
+            );
+          }
+          return (
+            <PendingTrnReasonButton
+              row={r}
+              pending={pending}
+              onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(pending.trnId)}`)}
+            />
+          );
+        },
       },
       {
         key: "effectiveTrnType",
