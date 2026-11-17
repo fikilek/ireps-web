@@ -57,20 +57,34 @@ export function buildTrnAllocationModel({ batches = [], wards = [] } = {}) {
           ? "ISSUED"
           : "UNAVAILABLE";
 
+    const totalMeters = Number(batch.totalRows || 0);
     const inProgress = Number(batch.progress?.inProgress || 0);
     const completed = Number(batch.progress?.completed || 0);
-    const fieldworkStarted =
-      inProgress > 0 || completed > 0 || ["IN_PROGRESS", "COMPLETED"].includes(workflowState);
+    const workStatus =
+      workflowState === "COMPLETED" || (totalMeters > 0 && completed >= totalMeters)
+        ? "COMPLETED"
+        : inProgress > 0 || completed > 0 || workflowState === "IN_PROGRESS"
+          ? "IN_PROGRESS"
+          : "NOT_STARTED";
+    const workStatusTooltip =
+      workStatus === "COMPLETED"
+        ? `Completed (${completed} of ${totalMeters} completed)`
+        : workStatus === "IN_PROGRESS"
+          ? `In Progress (${inProgress} in progress, ${completed} completed of ${totalMeters})`
+          : `Not Started (0 of ${totalMeters} worked)`;
+    const fieldworkStarted = workStatus !== "NOT_STARTED";
     const canAllocate = !fieldworkStarted && !["COMPLETED", "CLOSED", "CANCELLED"].includes(workflowState);
 
     items.push({
       bgoBatchId: batch.id,
       geofenceId: ward?.id || batch.wardPcode || "",
       name: batch.id,
-      erfCount: batch.totalRows || 0,
+      erfCount: totalMeters,
       unitLabel: "meters",
       state,
       workflowState,
+      workStatus,
+      workStatusTooltip,
       targetName: targets[0]?.name || batch.bgo?.targetName || "",
       allocatedTo: formatAllocatedTarget(batch),
       fieldworkStarted,

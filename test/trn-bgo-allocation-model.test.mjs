@@ -17,14 +17,20 @@ test('buildTrnAllocationModel sorts newest first and marks started batches non-r
   batches: [
    { id: 'OLD', contractVersion: 'current', workflowState: 'READY_FOR_ALLOCATION', wardPcode: 'W1', totalRows: 5, createdAt: '2026-11-16T10:00:00Z' },
    { id: 'NEW_STARTED', contractVersion: 'current', workflowState: 'ISSUED', wardPcode: 'W1', totalRows: 3, createdAt: '2026-11-17T10:00:00Z', progress: { inProgress: 1 }, assignment: { targets: [{ type: 'SP', name: 'Acorn' }] } },
+   { id: 'DONE', contractVersion: 'current', workflowState: 'COMPLETED', wardPcode: 'W1', totalRows: 2, createdAt: '2026-11-17T11:00:00Z', progress: { completed: 2 }, assignment: { targets: [{ type: 'TEAM', name: 'Alpha' }] } },
   ],
   wards: [],
  });
- assert.deepEqual(model.items.map((i) => i.bgoBatchId), ['NEW_STARTED', 'OLD']);
- assert.equal(model.items[0].allocatedTo, 'SP: Acorn');
+ assert.deepEqual(model.items.map((i) => i.bgoBatchId), ['DONE', 'NEW_STARTED', 'OLD']);
+ assert.equal(model.items[0].workStatus, 'COMPLETED');
+ assert.match(model.items[0].workStatusTooltip, /Completed/);
  assert.equal(model.items[0].canAllocate, false);
- assert.equal(model.items[1].allocatedTo, 'Unallocated');
- assert.equal(model.items[1].canAllocate, true);
+ assert.equal(model.items[1].allocatedTo, 'SP: Acorn');
+ assert.equal(model.items[1].workStatus, 'IN_PROGRESS');
+ assert.equal(model.items[1].canAllocate, false);
+ assert.equal(model.items[2].allocatedTo, 'Unallocated');
+ assert.equal(model.items[2].workStatus, 'NOT_STARTED');
+ assert.equal(model.items[2].canAllocate, true);
 });
 test('buildTrnAllocationMeterPins extracts GPS and InfoWindow metadata from asts, premises, and erfs', () => {
  const pins = buildTrnAllocationMeterPins({

@@ -422,23 +422,36 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
                     <th style={styles.bbTh}>Batch ID</th>
                     <th style={{ ...styles.bbTh, textAlign: "right" }}>Meters</th>
                     <th style={styles.bbTh}>Allocated To</th>
+                    <th style={{ ...styles.bbTh, textAlign: "center", width: 42 }}>St</th>
                   </tr>
                 </thead>
                 <tbody>
                   {bbRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} style={{ ...styles.bbTd, textAlign: "center", color: "#64748b" }}>
+                      <td colSpan={5} style={{ ...styles.bbTd, textAlign: "center", color: "#64748b" }}>
                         No matching TRN BGO batches.
                       </td>
                     </tr>
                   ) : (
                     bbRows.map((item) => {
                       const isSelected = selectedBulkBatchId === item.bgoBatchId;
+                      const isUnavailable = !item.canAllocate;
+                      const statusIcon = item.workStatus === "COMPLETED" ? "✓" : item.workStatus === "IN_PROGRESS" ? "◐" : "○";
+                      const statusStyle =
+                        item.workStatus === "COMPLETED"
+                          ? styles.bbStatusCp
+                          : item.workStatus === "IN_PROGRESS"
+                            ? styles.bbStatusIp
+                            : styles.bbStatusNs;
                       return (
                         <tr
                           key={item.bgoBatchId}
                           onClick={() => selectBulkBatch(item)}
-                          style={{ ...styles.bbRow, ...(isSelected ? styles.bbRowSelected : {}) }}
+                          style={{
+                            ...styles.bbRow,
+                            ...(isUnavailable ? styles.bbRowDisabled : {}),
+                            ...(isSelected ? styles.bbRowSelected : {}),
+                          }}
                         >
                           <td style={styles.bbTd}>
                             <input
@@ -449,10 +462,19 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
                               aria-label={`Select ${item.bgoBatchId}`}
                             />
                           </td>
-                          <td style={{ ...styles.bbTd, fontWeight: 700, wordBreak: "break-all" }}>{item.bgoBatchId}</td>
-                          <td style={{ ...styles.bbTd, textAlign: "right", fontWeight: 700 }}>{item.erfCount}</td>
-                          <td style={{ ...styles.bbTd, color: item.allocatedTo === "Unallocated" ? "#64748b" : "#166534", fontWeight: 600 }}>
+                          <td style={{ ...styles.bbTd, fontWeight: 700, wordBreak: "break-all", color: isUnavailable ? "#64748b" : "#0f172a" }}>{item.bgoBatchId}</td>
+                          <td style={{ ...styles.bbTd, textAlign: "right", fontWeight: 700, color: isUnavailable ? "#64748b" : "#0f172a" }}>{item.erfCount}</td>
+                          <td style={{ ...styles.bbTd, color: isUnavailable ? "#64748b" : item.allocatedTo === "Unallocated" ? "#64748b" : "#166534", fontWeight: 600 }}>
                             {item.allocatedTo}
+                          </td>
+                          <td style={{ ...styles.bbTd, textAlign: "center" }}>
+                            <span
+                              title={item.workStatusTooltip}
+                              aria-label={item.workStatusTooltip}
+                              style={{ ...styles.bbStatusIcon, ...statusStyle }}
+                            >
+                              {statusIcon}
+                            </span>
                           </td>
                         </tr>
                       );
@@ -499,8 +521,13 @@ const styles = {
   bbTable: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
   bbTh: { textAlign: "left", padding: "8px 10px", background: "#f8fafc", color: "#475569", fontWeight: 800, borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 },
   bbRow: { cursor: "pointer", borderBottom: "1px solid #f1f5f9" },
-  bbRowSelected: { background: "#eff6ff" },
+  bbRowDisabled: { background: "#f8fafc", color: "#94a3b8", opacity: 0.72 },
+  bbRowSelected: { background: "#eff6ff", opacity: 1 },
   bbTd: { padding: "8px 10px", verticalAlign: "middle", color: "#0f172a" },
+  bbStatusIcon: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 999, fontSize: 13, fontWeight: 900, cursor: "help" },
+  bbStatusNs: { background: "#dbeafe", color: "#1e40af" },
+  bbStatusIp: { background: "#fef3c7", color: "#92400e" },
+  bbStatusCp: { background: "#dcfce7", color: "#166534" },
   warnMessage: { margin: 0, color: "#b45309", fontSize: 13, fontWeight: 700 },
   windowTitle: { margin: 0, fontSize: 18 }, totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 }, list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" },
   listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 10px", fontSize: 13, background: "#f8fafc" },
