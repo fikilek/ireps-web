@@ -1,16 +1,18 @@
 import LoadingIndicator from "../../components/LoadingIndicator";
-import { useGetTcUploadsQuery, useAllocateTrnBgoWardBatchesMutation } from "../../redux/tcApi";
-import { buildTrnAllocationModel, toggleTrnAllocationSelection } from "./md-bgo/trnAllocationModel";
+import { useGetTcUploadsQuery, useGetTcRowsByTcIdQuery, useAllocateTrnBgoWardBatchesMutation } from "../../redux/tcApi";
+import { buildTrnAllocationMeterPins, buildTrnAllocationModel } from "./md-bgo/trnAllocationModel";
 /* eslint-disable no-unused-vars -- JSX tags are used by React. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
-import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, InfoWindow, Map as GoogleMap, Marker, useMap } from "@vis.gl/react-google-maps";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import { useAllocateMdBgoBatchesTogetherMutation, useGetBgoBatchesByLmQuery } from "../../redux/bgoApi";
+import { useGetAstsByLmPcodeWardPcodeQuery } from "../../redux/astsApi";
 import { useGetGeoFencesByLmQuery } from "../../redux/geofencesApi";
+import { useGetPremisesByWardQuery } from "../../redux/mapPremisesApi";
 import { useGetWardBoundariesByLmQuery } from "../../redux/mapWardsApi";
 import { useGetTargetedBatchAllocationDirectoryQuery } from "../../redux/salesTargetedBatchApi";
 import { WardBoundaryPolygons } from "./geofence-map-layers";
@@ -81,6 +83,64 @@ function FitBatches({ items, request }) {
   return null;
 }
 
+function FitMeterPins({ pins, selectedBatchId, request, wards }) {
+  const map = useMap();
+  const fitted = useRef("");
+  const pinKey = pins.map((p) => `${p.id}:${p.position.lat.toFixed(5)},${p.position.lng.toFixed(5)}`).join("|");
+  useEffect(() => {
+    if (!map || !window.google?.maps) return;
+    const fitKey = `${selectedBatchId}:${request}:${pinKey}`;
+    if (fitted.current === fitKey) return;
+    if (pins.length === 1) {
+      map.panTo(pins[0].position);
+      map.setZoom(17);
+      fitted.current = fitKey;
+      return;
+    }
+    if (pins.length > 1) {
+      const bounds = new window.google.maps.LatLngBounds();
+      pins.forEach((p) => bounds.extend(p.position));
+      map.fitBounds(bounds, 64);
+      fitted.current = fitKey;
+      return;
+    }
+    if (!selectedBatchId && wards.length) {
+      const bounds = new window.google.maps.LatLngBounds();
+      wards.forEach((w) => (w.paths?.[0] || []).forEach((pt) => bounds.extend(pt)));
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, 40);
+        fitted.current = fitKey;
+      }
+    }
+  }, [map, pins, selectedBatchId, request, pinKey, wards]);
+  return null;
+}
+
+function TrnMeterPins({ pins, selectedPin, onSelectPin }) {
+  return (
+    <>
+      {pins.map((pin) => (
+        <Marker
+          key={pin.id}
+          position={pin.position}
+          title={`${pin.meterNo} · ${pin.meterStatus}`}
+          onClick={() => onSelectPin(pin)}
+        />
+      ))}
+      {selectedPin ? (
+        <InfoWindow position={selectedPin.position} onCloseClick={() => onSelectPin(null)}>
+          <div style={{ display: "grid", gap: 4, fontSize: 12, color: "#0f172a", minWidth: 180 }}>
+            <strong style={{ fontSize: 13 }}>Meter {selectedPin.meterNo}</strong>
+            <div><span style={{ color: "#64748b" }}>State:</span> <strong>{selectedPin.meterStatus}</strong></div>
+            <div><span style={{ color: "#64748b" }}>Erf No:</span> {selectedPin.erfNo}</div>
+            <div><span style={{ color: "#64748b" }}>Address:</span> {selectedPin.address}</div>
+          </div>
+        </InfoWindow>
+      ) : null}
+    </>
+  );
+}
+
 export default function MdBgoAllocationPage({ bulkMode = false }) {
   const registerPath = bulkMode ? "/operations/trn-bgo" : "/operations/bgo";
   const allocationPath = bulkMode ? "/operations/trn-bgo/allocation" : "/operations/bgo/allocation";
@@ -98,12 +158,41 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
   const [allocateTogether] = useAllocateMdBgoBatchesTogetherMutation();
   const [allocateBulk] = useAllocateTrnBgoWardBatchesMutation();
   const [selectedIds, setSelectedIds] = useState(() => text(searchParams.get("batchId")) ? [text(searchParams.get("batchId"))] : []); const [target, setTarget] = useState(null); const [dragTarget, setDragTarget] = useState(null); const [dropFocused, setDropFocused] = useState(false); const [showAll, setShowAll] = useState(false);
+  const [bbFilter, setBbFilter] = useState("ALL"); const [bbSearch, setBbSearch] = useState(""); const [activePin, setActivePin] = useState(null);
   const [fitRequest, setFitRequest] = useState(0); const [message, setMessage] = useState(""); const [windowView, setWindowView] = useState(null); const [busy, setBusy] = useState(false);
   const deepLinkBatch = text(searchParams.get("batchId"));
   const model = useMemo(() => bulkMode ? buildTrnAllocationModel({batches, wards:lmWards}) : buildMdBgoAllocationModel({ batches, geofences }), [batches, geofences, bulkMode, lmWards]);
+  const selectedBulkBatchId = bulkMode ? (selectedIds[0] || "") : "";
+  const selectedBulkItem = useMemo(() => (bulkMode && selectedBulkBatchId ? model.items.find((item) => item.bgoBatchId === selectedBulkBatchId) || null : null), [bulkMode, selectedBulkBatchId, model.items]);
+  const { data: bulkTcRows = EMPTY, isLoading: isBulkRowsLoading } = useGetTcRowsByTcIdQuery(selectedBulkBatchId, { skip: !bulkMode || !selectedBulkBatchId });
+  const { data: bulkAsts = EMPTY } = useGetAstsByLmPcodeWardPcodeQuery(
+    { lmPcode, wardPcode: selectedBulkItem?.wardPcode || "" },
+    { skip: !bulkMode || !lmPcode || !selectedBulkItem?.wardPcode },
+  );
+  const { data: bulkPremises = EMPTY } = useGetPremisesByWardQuery(selectedBulkItem?.wardPcode || "", { skip: !bulkMode || !selectedBulkItem?.wardPcode });
+  const meterPins = useMemo(
+    () => (bulkMode && selectedBulkBatchId ? buildTrnAllocationMeterPins({ rawRows: bulkTcRows, asts: bulkAsts, premises: bulkPremises }) : EMPTY),
+    [bulkMode, selectedBulkBatchId, bulkTcRows, bulkAsts, bulkPremises],
+  );
+  const bbRows = useMemo(() => {
+    if (!bulkMode) return EMPTY;
+    const q = bbSearch.trim().toLowerCase();
+    return model.items.filter((item) => {
+      if (bbFilter === "READY" && item.state !== "READY") return false;
+      if (bbFilter === "ALLOCATED" && item.state !== "ISSUED") return false;
+      if (!q) return true;
+      return `${item.bgoBatchId} ${item.allocatedTo} ${item.wardLabel}`.toLowerCase().includes(q);
+    });
+  }, [bulkMode, model.items, bbFilter, bbSearch]);
   const shown = useMemo(() => showAll ? model.items : model.items.filter(item => tickedIds.includes(item.bgoBatchId) || item.bgoBatchId === deepLinkBatch), [model.items, showAll, tickedIds, deepLinkBatch]);
   const selectionIds = selectedIds;
-  const selection = useMemo(() => mdBgoAllocationSelection(shown, selectionIds), [shown, selectionIds]);
+  const selection = useMemo(() => {
+    if (!bulkMode) return mdBgoAllocationSelection(shown, selectionIds);
+    const items = selectedBulkItem ? [selectedBulkItem] : [];
+    const erfs = items.reduce((sum, item) => sum + Number(item.erfCount || 0), 0);
+    const wardsSet = [...new Set(items.map((item) => item.wardLabel).filter(Boolean))];
+    return { items, batches: items.length, erfs, wards: wardsSet, dropped: [] };
+  }, [bulkMode, shown, selectionIds, selectedBulkItem]);
   const teams = directory?.teams || EMPTY; const serviceProviders = directory?.serviceProviders || EMPTY;
   const locked = busy || Boolean(windowView);
 
@@ -121,9 +210,24 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
     setMessage(`${selection.dropped.join(", ")} left the allocation window because they are no longer shown or ready.`);
   }, [selection.dropped]);
 
+  const selectBulkBatch = useCallback((item) => {
+    if (!item?.bgoBatchId) return;
+    setSelectedIds([item.bgoBatchId]);
+    setActivePin(null);
+    setMessage(
+      item.fieldworkStarted
+        ? `${item.bgoBatchId}: field work has started; re-allocation is disabled.`
+        : "",
+    );
+  }, []);
   const toggle = useCallback(item => {
-    setSelectedIds(current => { const next = bulkMode ? toggleTrnAllocationSelection(current,item,model.items) : toggleMdBgoSelection(current, item); setMessage(next.message); return next.ids; });
-  }, [bulkMode,model.items]);
+    if (bulkMode) {
+      setSelectedIds((current) => (current[0] === item.bgoBatchId ? [] : [item.bgoBatchId]));
+      setActivePin(null);
+      return;
+    }
+    setSelectedIds(current => { const next = toggleMdBgoSelection(current, item); setMessage(next.message); return next.ids; });
+  }, [bulkMode]);
   const chooseTarget = candidate => { const value = buildTargetPayload(candidate); if (value) setTarget(value); };
   const handleTargetDrop = event => {
     event.preventDefault(); setDropFocused(false);
@@ -132,11 +236,15 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
     if (candidate) chooseTarget(candidate);
     setDragTarget(null);
   };
-  const allocate = () => { if (!selection.batches || !target || locked || (bulkMode && selection.erfs>200)) return; setWindowView({ kind: "confirm", selection, target }); };
+  const allocate = () => {
+    if (!selection.batches || !target || locked) return;
+    if (bulkMode && (selection.erfs > 200 || !selectedBulkItem?.canAllocate)) return;
+    setWindowView({ kind: "confirm", selection, target });
+  };
   const confirm = async () => {
     if (windowView?.kind !== "confirm" || busy) return;
-    const live = mdBgoAllocationSelection(shown, selectionIds);
-    if ((bulkMode && live.erfs>200) || live.items.map(item => item.bgoBatchId).join(",") !== windowView.selection.items.map(item => item.bgoBatchId).join(",")) {
+    const live = bulkMode ? selection : mdBgoAllocationSelection(shown, selectionIds);
+    if ((bulkMode && (live.erfs > 200 || !selectedBulkItem?.canAllocate)) || live.items.map(item => item.bgoBatchId).join(",") !== windowView.selection.items.map(item => item.bgoBatchId).join(",")) {
       setWindowView({ kind: "failed", selection: windowView.selection, target: windowView.target, title: "Nothing was allocated", tone: "error", lines: ["The batch selection changed while confirmation was open.", "Review the allocation window and try again."] }); return;
     }
     const { selection: submitted, target: chosen } = windowView; setWindowView({ kind: "allocating", selection: submitted, target: chosen }); setBusy(true);
@@ -166,28 +274,149 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
     {batchError ? <div role="alert" style={styles.error}>{batchError?.data?.message || batchError?.message || "MD BGO batches could not be loaded."}</div> : null}
     <div style={styles.layout}>
       <div style={styles.mapPane}>
-        <div style={styles.mapBar}><span>{shown.length} shown · {shown.filter(item => item.state === "READY").length} ready · {shown.filter(item => item.state === "ISSUED").length} issued</span>
-          <span style={styles.legend}><i style={{ ...styles.swatch, background: COLORS.READY.fill }} />Ready, click to select <i style={{ ...styles.swatch, background: COLORS.SELECTED.fill }} />Selected <i style={{ ...styles.swatch, background: COLORS.ISSUED.fill }} />Issued</span>
-          <label><input type="checkbox" checked={showAll} onChange={event => setShowAll(event.target.checked)} /> Show all batches</label>
-          <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Fit to map</button>
+        <div style={styles.mapBar}>
+          {bulkMode ? (
+            <>
+              <span>{model.items.length} batches · {model.counts.ready} ready · {model.counts.issued} allocated{selectedBulkBatchId ? ` · ${meterPins.length} meter(s) on map` : ""}</span>
+              <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Fit to map</button>
+            </>
+          ) : (
+            <>
+              <span>{shown.length} shown · {shown.filter(item => item.state === "READY").length} ready · {shown.filter(item => item.state === "ISSUED").length} issued</span>
+              <span style={styles.legend}><i style={{ ...styles.swatch, background: COLORS.READY.fill }} />Ready, click to select <i style={{ ...styles.swatch, background: COLORS.SELECTED.fill }} />Selected <i style={{ ...styles.swatch, background: COLORS.ISSUED.fill }} />Issued</span>
+              <label><input type="checkbox" checked={showAll} onChange={event => setShowAll(event.target.checked)} /> Show all batches</label>
+              <button type="button" style={styles.smallButton} onClick={() => setFitRequest(value => value + 1)}>Fit to map</button>
+            </>
+          )}
         </div>
-        <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}><LoadingIndicator>Loading batches…</LoadingIndicator></p> : !shown.length ? <p style={styles.status}>Choose Show all batches, or open allocation from the Register.</p> :
+        <div style={styles.map}>{!key ? <p style={styles.status}>Google Maps key missing</p> : isLoading ? <p style={styles.status}><LoadingIndicator>Loading batches…</LoadingIndicator></p> : !bulkMode && !shown.length ? <p style={styles.status}>Choose Show all batches, or open allocation from the Register.</p> :
           <APIProvider apiKey={key}><GoogleMap defaultCenter={{ lat: -28.16, lng: 30.23 }} defaultZoom={12} gestureHandling="greedy" style={{ width: "100%", height: "100%" }}>
-            <WardBoundaryPolygons wards={wards} /><MdBgoAllocationPolygons items={shown} selectedIds={selectedIds} onToggle={toggle} /><FitBatches items={shown} request={fitRequest} />
+            <WardBoundaryPolygons wards={wards} />
+            {bulkMode ? (
+              <>
+                <TrnMeterPins pins={meterPins} selectedPin={activePin} onSelectPin={setActivePin} />
+                <FitMeterPins pins={meterPins} selectedBatchId={selectedBulkBatchId} request={fitRequest} wards={wards} />
+              </>
+            ) : (
+              <>
+                <MdBgoAllocationPolygons items={shown} selectedIds={selectedIds} onToggle={toggle} />
+                <FitBatches items={shown} request={fitRequest} />
+              </>
+            )}
           </GoogleMap></APIProvider>}</div>
+        {bulkMode && selectedBulkBatchId && !isBulkRowsLoading && !meterPins.length ? (
+          <p style={styles.note}>No meter GPS coordinates found for {selectedBulkBatchId}.</p>
+        ) : null}
       </div>
-      <aside style={styles.window}>
-        <h2 style={styles.windowTitle}>Allocation window</h2>
-        <p style={styles.totals}>{selection.batches ? `${selection.batches} batch(es) · ${selection.erfs} ${unitLabel} · ${selection.wards.join(", ")}` : "Click ready geofences on the map to add them here."}</p>
-        {bulkMode && <p style={styles.totals}>Maximum 15 Ward batches and 200 meters per allocation.</p>}
-        <ul style={styles.list}>{selection.items.map(item => <li key={item.bgoBatchId} style={styles.listItem}><span><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} {unitLabel} · {item.bgoBatchId}</small></span><button type="button" disabled={locked} onClick={() => toggle(item)} aria-label={`Remove ${item.name}`}>×</button></li>)}</ul>
-        <div style={{ ...styles.dropZone, ...(dropFocused ? styles.dropFocused : {}) }} onDragOver={event => { event.preventDefault(); setDropFocused(true); }} onDragLeave={() => setDropFocused(false)} onDrop={handleTargetDrop}>
-          {target ? <>Issuing to <strong>{target.name}</strong> ({target.type}) <button type="button" disabled={locked} onClick={() => setTarget(null)}>change</button></> : "Drag a TEAM or SP here, or click one below."}
-        </div>
-        <div style={styles.targets}>{allTargets.map(candidate => { const value = buildTargetPayload(candidate); if (!value) return null; const chosen = target?.type === value.type && target?.id === value.id; return <button key={`${value.type}:${value.id}`} type="button" disabled={locked} draggable={!locked} onDragStart={event => { setDragTarget(value); event.dataTransfer.setData("application/json", JSON.stringify(value)); event.dataTransfer.effectAllowed = "copy"; }} onDragEnd={() => { setDragTarget(null); setDropFocused(false); }} onClick={() => chooseTarget(candidate)} style={{ ...styles.target, ...(chosen ? styles.targetChosen : {}) }}><strong>{value.name}</strong><small>{value.type}</small></button>; })}</div>
-        {message ? <p role="status" style={styles.message}>{message}</p> : null}
-        <button type="button" disabled={!selection.batches || !target || locked || (bulkMode && selection.erfs>200)} style={{ ...styles.allocate, ...(!selection.batches || !target || locked ? styles.disabled : {}) }} onClick={allocate}>{busy ? "Issuing…" : !selection.batches ? "Select batches on the map" : !target ? "Choose a TEAM or SP" : `Issue ${selection.batches} batch(es) · ${selection.erfs} ${unitLabel} to ${target.name}`}</button>
-      </aside>
+      <div style={styles.sidebar}>
+        <aside style={styles.window}>
+          <h2 style={styles.windowTitle}>Allocation window</h2>
+          <p style={styles.totals}>
+            {selection.batches
+              ? `${selection.batches} batch · ${selection.erfs} ${unitLabel} · ${selection.wards.join(", ")}`
+              : bulkMode
+                ? "Select a batch from Batches below."
+                : "Click ready geofences on the map to add them here."}
+          </p>
+          {bulkMode && <p style={styles.totals}>Select 1 batch at a time (maximum 200 meters per allocation).</p>}
+          <ul style={styles.list}>{selection.items.map(item => <li key={item.bgoBatchId} style={styles.listItem}><span><strong>{item.name}</strong><small>{item.wardLabel} · {item.erfCount} {unitLabel}{item.allocatedTo && item.allocatedTo !== "Unallocated" ? ` · ${item.allocatedTo}` : ""}</small></span><button type="button" disabled={locked} onClick={() => toggle(item)} aria-label={`Remove ${item.name}`}>×</button></li>)}</ul>
+          <div style={{ ...styles.dropZone, ...(dropFocused ? styles.dropFocused : {}) }} onDragOver={event => { event.preventDefault(); setDropFocused(true); }} onDragLeave={() => setDropFocused(false)} onDrop={handleTargetDrop}>
+            {target ? <>Issuing to <strong>{target.name}</strong> ({target.type}) <button type="button" disabled={locked} onClick={() => setTarget(null)}>change</button></> : "Drag a TEAM or SP here, or click one below."}
+          </div>
+          <div style={styles.targets}>{allTargets.map(candidate => { const value = buildTargetPayload(candidate); if (!value) return null; const chosen = target?.type === value.type && target?.id === value.id; return <button key={`${value.type}:${value.id}`} type="button" disabled={locked} draggable={!locked} onDragStart={event => { setDragTarget(value); event.dataTransfer.setData("application/json", JSON.stringify(value)); event.dataTransfer.effectAllowed = "copy"; }} onDragEnd={() => { setDragTarget(null); setDropFocused(false); }} onClick={() => chooseTarget(candidate)} style={{ ...styles.target, ...(chosen ? styles.targetChosen : {}) }}><strong>{value.name}</strong><small>{value.type}</small></button>; })}</div>
+          {message ? <p role="status" style={selectedBulkItem?.fieldworkStarted ? styles.warnMessage : styles.message}>{message}</p> : null}
+          <button
+            type="button"
+            disabled={!selection.batches || !target || locked || (bulkMode && (selection.erfs > 200 || !selectedBulkItem?.canAllocate))}
+            style={{ ...styles.allocate, ...((!selection.batches || !target || locked || (bulkMode && (selection.erfs > 200 || !selectedBulkItem?.canAllocate))) ? styles.disabled : {}) }}
+            onClick={allocate}
+          >
+            {busy
+              ? "Issuing…"
+              : !selection.batches
+                ? (bulkMode ? "Select a batch below" : "Select batches on the map")
+                : (bulkMode && selectedBulkItem?.fieldworkStarted)
+                  ? "Field work started (cannot re-allocate)"
+                  : !target
+                    ? "Choose a TEAM or SP"
+                    : `${selectedBulkItem?.state === "ISSUED" ? "Re-allocate" : "Issue"} ${selection.batches} batch(es) · ${selection.erfs} ${unitLabel} to ${target.name}`}
+          </button>
+        </aside>
+
+        {bulkMode ? (
+          <section style={styles.batchesBox} aria-label="Batches">
+            <div style={styles.bbHeader}>
+              <h3 style={styles.bbTitle}>Batches ({bbRows.length})</h3>
+              <div style={styles.bbPills}>
+                {[["ALL", "All"], ["READY", "Ready"], ["ALLOCATED", "Allocated"]].map(([keyVal, label]) => (
+                  <button
+                    key={keyVal}
+                    type="button"
+                    onClick={() => setBbFilter(keyVal)}
+                    style={{ ...styles.bbPill, ...(bbFilter === keyVal ? styles.bbPillActive : {}) }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <input
+              type="search"
+              value={bbSearch}
+              onChange={(e) => setBbSearch(e.target.value)}
+              placeholder="Search batch ID or allocated target..."
+              style={styles.bbSearch}
+            />
+            <div style={styles.bbTableWrap}>
+              <table style={styles.bbTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.bbTh} aria-label="Select" />
+                    <th style={styles.bbTh}>Batch ID</th>
+                    <th style={{ ...styles.bbTh, textAlign: "right" }}>Meters</th>
+                    <th style={styles.bbTh}>Allocated To</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bbRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ ...styles.bbTd, textAlign: "center", color: "#64748b" }}>
+                        No matching TRN BGO batches.
+                      </td>
+                    </tr>
+                  ) : (
+                    bbRows.map((item) => {
+                      const isSelected = selectedBulkBatchId === item.bgoBatchId;
+                      return (
+                        <tr
+                          key={item.bgoBatchId}
+                          onClick={() => selectBulkBatch(item)}
+                          style={{ ...styles.bbRow, ...(isSelected ? styles.bbRowSelected : {}) }}
+                        >
+                          <td style={styles.bbTd}>
+                            <input
+                              type="radio"
+                              name="trn-bgo-bb-select"
+                              checked={isSelected}
+                              onChange={() => selectBulkBatch(item)}
+                              aria-label={`Select ${item.bgoBatchId}`}
+                            />
+                          </td>
+                          <td style={{ ...styles.bbTd, fontWeight: 700, wordBreak: "break-all" }}>{item.bgoBatchId}</td>
+                          <td style={{ ...styles.bbTd, textAlign: "right", fontWeight: 700 }}>{item.erfCount}</td>
+                          <td style={{ ...styles.bbTd, color: item.allocatedTo === "Unallocated" ? "#64748b" : "#166534", fontWeight: 600 }}>
+                            {item.allocatedTo}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+      </div>
     </div>
     <AllocationWindow view={windowView} onConfirm={confirm} onClose={closeWindow} />
   </section>;
@@ -210,6 +439,22 @@ const styles = {
   note: { border: "1px solid #fde68a", background: "#fffbeb", color: "#92400e", borderRadius: 12, padding: 12 }, error: { color: "#991b1b", background: "#fef2f2", padding: 12, borderRadius: 10 },
   layout: { display: "grid", gridTemplateColumns: "minmax(0, 1.7fr) minmax(300px, 1fr)", gap: 14, alignItems: "start" }, mapPane: { display: "grid", gap: 8, border: "1px solid #dbe4f0", borderRadius: 16, padding: 12, background: "#fff" },
   mapBar: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, justifyContent: "space-between", fontSize: 13, color: "#334155", fontWeight: 700 }, legend: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontWeight: 600 }, swatch: { width: 12, height: 12, border: "1px solid #64748b", display: "inline-block" }, smallButton: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "5px 10px", background: "#fff", color: "#1d4ed8", fontWeight: 800 }, map: { height: 620, borderRadius: 12, overflow: "hidden", background: "#f1f5f9" }, status: { display: "grid", placeItems: "center", height: "100%", color: "#475569" },
-  window: { display: "flex", flexDirection: "column", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#fff", position: "sticky", top: 12, maxHeight: "calc(100vh - 24px)", boxSizing: "border-box", overflow: "hidden" }, windowTitle: { margin: 0, fontSize: 18 }, totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 }, list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }, listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 13 },
+  window: { display: "flex", flexDirection: "column", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#fff", boxSizing: "border-box" },
+  sidebar: { display: "grid", gap: 14, alignItems: "start" },
+  batchesBox: { display: "grid", gap: 10, border: "1px solid #dbe4f0", borderRadius: 16, padding: 14, background: "#fff", boxSizing: "border-box" },
+  bbHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
+  bbTitle: { margin: 0, fontSize: 16, fontWeight: 800, color: "#0f172a" },
+  bbPills: { display: "inline-flex", gap: 6 },
+  bbPill: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "4px 10px", background: "#fff", color: "#334155", fontSize: 12, fontWeight: 700, cursor: "pointer" },
+  bbPillActive: { borderColor: "#2563eb", background: "#eff6ff", color: "#1d4ed8" },
+  bbSearch: { width: "100%", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: 8, padding: "7px 10px", fontSize: 12 },
+  bbTableWrap: { maxHeight: 320, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 10 },
+  bbTable: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  bbTh: { textAlign: "left", padding: "8px 10px", background: "#f8fafc", color: "#475569", fontWeight: 800, borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 },
+  bbRow: { cursor: "pointer", borderBottom: "1px solid #f1f5f9" },
+  bbRowSelected: { background: "#eff6ff" },
+  bbTd: { padding: "8px 10px", verticalAlign: "middle", color: "#0f172a" },
+  warnMessage: { margin: 0, color: "#b45309", fontSize: 13, fontWeight: 700 },
+  windowTitle: { margin: 0, fontSize: 18 }, totals: { margin: 0, color: "#334155", fontSize: 13, fontWeight: 700 }, list: { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }, listItem: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 13 },
   dropZone: { border: "2px dashed #93c5fd", borderRadius: 10, padding: 10, color: "#1d4ed8", fontSize: 13, background: "#eff6ff" }, dropFocused: { borderColor: "#2563eb", boxShadow: "0 0 0 3px #bfdbfe" }, targets: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 6, overflowY: "auto", minHeight: 100 }, target: { display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid #bfdbfe", borderRadius: 10, padding: 8, background: "#eff6ff", color: "#1e3a8a", textAlign: "left", cursor: "grab" }, targetChosen: { borderColor: "#1d4ed8", background: "#dbeafe", boxShadow: "0 0 0 2px #93c5fd" }, message: { margin: 0, color: "#166534", fontSize: 13, fontWeight: 700 }, allocate: { border: 0, borderRadius: 12, padding: 12, background: "#2563eb", color: "#fff", fontWeight: 900, cursor: "pointer" }, disabled: { background: "#94a3b8", cursor: "not-allowed" }, modalList: { listStyle: "none", display: "grid", gap: 6, padding: 0, maxHeight: 260, overflowY: "auto" }, modalNote: { color: "#334155", fontSize: 13 },
 };
