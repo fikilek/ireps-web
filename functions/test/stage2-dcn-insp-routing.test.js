@@ -225,8 +225,8 @@ test("DCN upload routing: CONNECTED -> MDCN, DISCONNECTED -> MINSP (separate bat
   assert.equal(eligMap.get("2").effectiveTrnType, "METER_INSPECTION");
   assert.match(eligMap.get("2").message, /Proposed for Inspection \(MINSP\)/);
 
-  assert.equal(eligMap.get("3").eligible, true);
-  assert.equal(eligMap.get("3").effectiveTrnType, "METER_INSPECTION");
+  assert.equal(eligMap.get("3").eligible, false);
+  assert.equal(eligMap.get("3").effectiveTrnType, "METER_DISCONNECTION");
   assert.match(eligMap.get("3").message, /DECOMMISSIONED/);
 
   const csv = serializeCsv([OFFICIAL_HEADERS, ...rows.map((r) => OFFICIAL_HEADERS.map((h) => r[h]))]);
@@ -441,4 +441,19 @@ test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; 
   const inspElig = new Map(inspPreview.eligibility).get("1");
   assert.equal(inspElig.eligible, true);
   assert.equal(inspElig.effectiveTrnType, "METER_INSPECTION");
+
+  // REM on FIELD -> MINSP; MREAD conventional allowed on REMOVED, blocked on DECOMMISSIONED
+  const remPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_REMOVAL", rows: [makeRow(1, "60000002"), makeRow(2, "60000004")], keep: {} } });
+  const remMap = new Map(remPreview.eligibility);
+  assert.equal(remMap.get("1").eligible, true);
+  assert.equal(remMap.get("1").effectiveTrnType, "METER_INSPECTION");
+  assert.equal(remMap.get("2").eligible, false);
+
+  docs["asts/TRN_MDIS_REM"].ast.astData.meter = { type: "conventional", phase: "single" };
+  docs["asts/TRN_MDIS_DEC"].ast.astData.meter = { type: "conventional", phase: "single" };
+  const mreadPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_READING", rows: [makeRow(1, "60000001"), makeRow(2, "60000004")], keep: {} } });
+  const mreadMap = new Map(mreadPreview.eligibility);
+  assert.equal(mreadMap.get("1").eligible, true);
+  assert.equal(mreadMap.get("1").effectiveTrnType, "METER_READING");
+  assert.equal(mreadMap.get("2").eligible, false);
 });

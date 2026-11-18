@@ -4,9 +4,9 @@ import { OFFICIAL_HEADERS, validateSourceRows, resolveDuplicates, meterKey } fro
 import { parseCsv } from "./sourceCsv.js";
 import { validateStage1Upload } from "./stage1Matching.js";
 import { checkMeterRegistration } from "../meterLifecycle/registrationGuard.js";
-import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle, getAstCurrentState, validateLifecycleInstructionEligibility } from "../meterLifecycle/helpers.js";
+import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle, validateLifecycleInstructionEligibility } from "../meterLifecycle/helpers.js";
 import { stripToDeclaredRoot } from "../transactions/trnShape.js";
-import { TC_TRN_TYPE_TO_CODE, buildTcUploadId, buildTcRowId, getEligibilityResult, normalizeGeoFenceRefs, getAstSummary } from "./helpers.js";
+import { TC_TRN_TYPE_TO_CODE, buildTcUploadId, buildTcRowId, getEligibilityResult, normalizeGeoFenceRefs, getAstSummary, resolveBulkStateRouting } from "./helpers.js";
 import { STATES_HOLDING_THE_METER } from "../meterLifecycle/trnStateMachine.js";
 const BULK_ACTIVE_JOB_STATES = [...STATES_HOLDING_THE_METER, "IN_PROGRESS"];
 
@@ -50,17 +50,13 @@ export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   const wardLm=text(ward?.parents?.localMunicipalityId||ward?.parents?.lmPcode||ward?.lmPcode||ward?.parentPcode||ward?.localMunicipality?.pcode);
   if(!ward || wardLm!==lmPcode)return {eligible:false,message:"The authoritative Ward does not belong to the selected municipality."};
   const refs=normalizeGeoFenceRefs(ast.geofenceRefs);
-  // DCN / RCN / INSP state routing (owner, 16 Nov 2026):
-  let effectiveTrnType = trnType;
-  let stateRoutingMessage = "";
-  const astState = getAstCurrentState(ast);
-  if (trnType === "METER_DISCONNECTION" && astState !== "CONNECTED") {
-    effectiveTrnType = "METER_INSPECTION";
-    stateRoutingMessage = `Current state is ${astState} — Proposed for Inspection (MINSP).`;
-  } else if (trnType === "METER_RECONNECTION" && astState !== "DISCONNECTED") {
-    effectiveTrnType = "METER_INSPECTION";
-    stateRoutingMessage = `Current state is ${astState} — Proposed for Inspection (MINSP).`;
+  // 5-state upload eligibility + INSP fallback matrix (TRN-BGO-R002, 19 Nov 2026):
+  const stateRouting = resolveBulkStateRouting({ trnType, astData: ast });
+  if (!stateRouting.eligible) {
+    return { eligible: false, message: stateRouting.message, effectiveTrnType: stateRouting.effectiveTrnType };
   }
+  let effectiveTrnType = stateRouting.effectiveTrnType;
+  const stateRoutingMessage = stateRouting.message;
   const canonical = validateLifecycleInstructionEligibility({ trnType: effectiveTrnType, astDoc: ast });
   const existing = getEligibilityResult({ trnType: effectiveTrnType, astData: ast });
   if (!canonical.ok || !existing.eligible) return { eligible: false, message: canonical.message || existing.message, effectiveTrnType };
