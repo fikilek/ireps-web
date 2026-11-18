@@ -433,7 +433,7 @@ export function getEligibilityResult({ trnType, astData }) {
   }
 
   if (normalizedTrnType === "METER_READING") {
-    if (["REMOVED", "DECOMMISSIONED"].includes(statusState)) {
+    if (statusState === "DECOMMISSIONED") {
       return {
         eligible: false,
         code: "STATUS_NOT_ELIGIBLE_FOR_MREAD",
@@ -463,6 +463,72 @@ export function getEligibilityResult({ trnType, astData }) {
     eligible: false,
     code: "UNSUPPORTED_TRN_TYPE",
     message: `${normalizedTrnType} is not supported by TC Uploads v1.`,
+  };
+}
+
+const BULK_STATE_ALLOWED_TRNS = {
+  FIELD: ["METER_COMMISSIONING", "METER_INSPECTION"],
+  CONNECTED: ["METER_DISCONNECTION", "METER_REMOVAL", "METER_INSPECTION"],
+  DISCONNECTED: ["METER_RECONNECTION", "METER_REMOVAL", "METER_INSPECTION"],
+  REMOVED: ["METER_DISPOSAL", "METER_INSPECTION"],
+  DECOMMISSIONED: ["METER_INSPECTION"],
+};
+
+export function resolveBulkStateRouting({ trnType, astData }) {
+  const requested = normalizeTrnType(trnType);
+  const statusState = getAstStatusState(astData);
+
+  if (!statusState || statusState === "NAV") {
+    return {
+      eligible: false,
+      effectiveTrnType: requested,
+      message: "Meter status could not be resolved.",
+    };
+  }
+
+  if (requested === "METER_READING") {
+    if (statusState === "DECOMMISSIONED") {
+      return {
+        eligible: false,
+        effectiveTrnType: requested,
+        message: "DECOMMISSIONED meters cannot be selected for METER_READING.",
+      };
+    }
+    if (isExplicitPrepaidMeter(astData)) {
+      return {
+        eligible: false,
+        effectiveTrnType: requested,
+        message: "Prepaid/token meters are not supported for MREAD v1 TC upload.",
+      };
+    }
+    return { eligible: true, effectiveTrnType: requested, message: "" };
+  }
+
+  const allowed = BULK_STATE_ALLOWED_TRNS[statusState];
+  if (!allowed) {
+    return {
+      eligible: false,
+      effectiveTrnType: requested,
+      message: `Meter state ${statusState} is not recognized.`,
+    };
+  }
+
+  if (allowed.includes(requested)) {
+    return { eligible: true, effectiveTrnType: requested, message: "" };
+  }
+
+  if (statusState === "DECOMMISSIONED") {
+    return {
+      eligible: false,
+      effectiveTrnType: requested,
+      message: `Meter is DECOMMISSIONED and can only do METER_INSPECTION.`,
+    };
+  }
+
+  return {
+    eligible: true,
+    effectiveTrnType: "METER_INSPECTION",
+    message: `Current state is ${statusState} — Proposed for Inspection (MINSP).`,
   };
 }
 
