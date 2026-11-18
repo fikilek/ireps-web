@@ -5,8 +5,11 @@ const subtract = (a, b) => difference({ type: "FeatureCollection", features: [fe
 export function bgoFenceGeometry(fence) {
   try { const geometry = fence.geometry || { points: fence.points }; return normalizeBatchGeometry(geometry.points ? { points: [...geometry.points].sort((a, b) => Number(a.order || 0) - Number(b.order || 0)) } : geometry); } catch { return null; }
 }
-export function batchMapLayers({ erfs = [], premises = [], meters = [], geofences = [] }) {
+export function batchMapLayers({ erfs = [], premises = [], meters = [], geofences = [], clipToGeofences = true }) {
   const boundaries = geofences.map(bgoFenceGeometry).filter(Boolean);
+  if (!clipToGeofences) {
+    return { boundaries, erfs, premises, meters };
+  }
   const inside = point => point && boundaries.some(boundary => { try { return strictlyInside(point, boundary); } catch { return false; } });
   const clippedErfs = erfs.flatMap(erf => {
     if (!erf.geometry) return inside(erf.centroid) ? [erf] : [];
