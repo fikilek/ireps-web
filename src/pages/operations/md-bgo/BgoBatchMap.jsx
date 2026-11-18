@@ -17,17 +17,17 @@ function FenceBoundaries({ boundaries, ward = false, context = false }) {
   }, [map, boundaries, ward, context]);
   return null;
 }
-export default function BgoBatchMap({ erfs, premises, meters, geofence, geofences, wards = [], wardGeofences = [], showMeterConnections = false }) {
+export default function BgoBatchMap({ erfs, premises, meters, geofence, geofences, wards = [], wardGeofences = [], showMeterConnections = false, clipToGeofences = true }) {
   const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState({ erfs: true, premises: true, meters: true, wards: true, geofences: false });
   const fences = useMemo(() => geofences || (geofence ? [geofence] : []), [geofences, geofence]);
-  const layers = useMemo(() => batchMapLayers({ erfs, premises, meters, geofences: fences }), [erfs, premises, meters, fences]);
+  const layers = useMemo(() => batchMapLayers({ erfs, premises, meters, geofences: fences, clipToGeofences }), [erfs, premises, meters, fences, clipToGeofences]);
   const wardBoundaries = useMemo(() => wards.map(bgoFenceGeometry).filter(Boolean), [wards]);
   const contextBoundaries = useMemo(() => wardGeofences.filter(fence => !fences.some(selected => selected.id === fence.id)).map(bgoFenceGeometry).filter(Boolean), [wardGeofences, fences]);
   const connections = useMemo(() => trnMeterConnections(layers.premises, layers.meters, showMeterConnections && visible.meters), [layers.premises, layers.meters, showMeterConnections, visible.meters]);
   const boundary = useMemo(() => layers.boundaries.flatMap(geometry => (geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates).flatMap(polygon => polygon.flatMap(ring => ring.map(([lng, lat]) => ({ lat, lng }))))), [layers.boundaries]);
   return <div style={{ position: "relative" }}>
-    {!layers.boundaries.length ? <p role="status">The batch geofence boundary is unavailable. No assets are shown outside a verified batch boundary.</p> : null}
+    {clipToGeofences && !layers.boundaries.length ? <p role="status">The batch geofence boundary is unavailable. No assets are shown outside a verified batch boundary.</p> : null}
     <SalesTargetedBatchMap erfs={layers.erfs} premises={layers.premises} meters={layers.meters} batchBoundary={boundary} visibleLayers={visible} alwaysShowErfNumbers>
       {visible.wards && <FenceBoundaries boundaries={wardBoundaries} ward />}
       {visible.geofences && <FenceBoundaries boundaries={contextBoundaries} context />}
