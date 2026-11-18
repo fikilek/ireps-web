@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildTrnBgoDisplayRows,
   buildTrnBgoRowsSummary,
+  deriveTrnBgoMeterQa,
   deriveTrnBgoRowStatus,
   formatBatchAllocatedTo,
   trnBgoRowSearchValue,
@@ -83,4 +84,10 @@ test("buildTrnBgoDisplayRows reads live asts.status.state, astId/erfId, and deri
   assert.equal(deriveTrnBgoRowStatus("ACCEPTED"), "NOT STARTED");
   assert.equal(deriveTrnBgoRowStatus("IN_PROGRESS"), "IN PROGRESS");
   assert.equal(deriveTrnBgoRowStatus("COMPLETED"), "COMPLETED");
+  assert.equal(rows[0].meterQa, "QA PENDING");
+  assert.equal(rows[0].meterQaHref, "/registries/trns?trnId=TRN_1");
+  assert.equal(rows[1].meterQa, "QA NAv");
+  assert.equal(rows[1].meterQaHref, "");
+  assert.equal(deriveTrnBgoMeterQa("QA PASS"), "QA PASS");
+  assert.equal(deriveTrnBgoMeterQa("QA FAIL"), "QA FAIL");
 });

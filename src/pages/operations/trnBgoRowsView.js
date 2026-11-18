@@ -42,6 +42,14 @@ export function deriveTrnBgoRowStatus(workflowState = "") {
   return "NOT STARTED";
 }
 
+export function deriveTrnBgoMeterQa(workflowState = "") {
+  const upper = String(workflowState || "").trim().toUpperCase();
+  if (upper === "QA PASS") return "QA PASS";
+  if (upper === "QA FAIL") return "QA FAIL";
+  if (upper === "COMPLETED") return "QA PENDING";
+  return "QA NAv";
+}
+
 export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], asts = [], activeBatch = null } = {}) {
   const astById = new Map(
     (Array.isArray(asts) ? asts : [])
@@ -225,6 +233,11 @@ export function buildTrnBgoDisplayRows({ rawRows = [], childTrns = [], asts = []
       blockingMessage,
       reasonCode,
       rowStatus: deriveTrnBgoRowStatus(activeTrnState),
+      meterQa: deriveTrnBgoMeterQa(activeTrnState),
+      meterQaHref:
+        activeTrnId && activeTrnId !== "None" && deriveTrnBgoMeterQa(activeTrnState) !== "QA NAv"
+          ? `/registries/trns?trnId=${encodeURIComponent(activeTrnId)}`
+          : "",
       activeTrnId,
       activeTrnState,
       naCount,
@@ -257,6 +270,7 @@ export function trnBgoRowSearchValue(row = {}) {
     row.meterPhase,
     row.meterStatus,
     row.rowStatus,
+    row.meterQa,
     row.activeTrnId,
     row.address,
     row.erfNo,

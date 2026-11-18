@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars -- JSX component tags are consumed by the JSX transform. */
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
@@ -22,6 +22,7 @@ import {
 } from "./trnBgoRowsView";
 import { getTrnBgoBatchStatus } from "./trn-bgo/trnBgoRegisterModel";
 import IrepsTable from "../../components/table/IrepsTable";
+import QaPill from "../../components/table/QaPill";
 import DataActionButton, { ErfActionIcon, MeterActionIcon } from "../../components/table/DataActionButton";
 import BoundaryMapModal from "../registries/components/BoundaryMapModal";
 import MeterDeepDetailsModal from "../registries/components/MeterDeepDetailsModal";
@@ -39,7 +40,10 @@ const TRN_BGO_COLUMN_OPTIONS = [
   { key: "wardNo", label: "Ward" },
   { key: "geofenceName", label: "Geofence" },
   { key: "updatedAt", label: "Last Activity" },
+  { key: "meterQa", label: "QA Meter" },
 ];
+
+const QA_OPTIONS = ["QA NAv", "QA PENDING", "QA PASS", "QA FAIL"];
 
 const TRN_BGO_DEFAULT_VISIBILITY = Object.fromEntries(
   TRN_BGO_COLUMN_OPTIONS.map((opt) => [opt.key, opt.key !== "activeTrnId"]),
@@ -146,6 +150,7 @@ function resolveWorkbase(auth = {}, geoState = {}) {
 }
 
 export default function TrnBgoRowsPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const batchId = searchParams.get("batchId") || "";
   const wardPcodeParam = searchParams.get("wardPcode") || "";
@@ -414,7 +419,25 @@ export default function TrnBgoRowsPage() {
       sortValue: (r) => (r.updatedAt ? Date.parse(r.updatedAt) || 0 : 0),
       render: (r) => formatSastDateTime(r.updatedAt),
     },
-  ], [batchWardPcode]);
+    {
+      key: "meterQa",
+      label: "QA Meter",
+      width: 135,
+      filter: "select",
+      sortable: true,
+      filterOptions: QA_OPTIONS.map((value) => ({ value, label: value })),
+      value: (r) => r.meterQa || "QA NAv",
+      render: (r) => (
+        <QaPill
+          status={r.meterQa || "QA NAv"}
+          disabled={!r.meterQaHref}
+          title={r.meterQaHref ? "Open linked TRN in TRN Registry" : "QA unavailable until TRN execution completes"}
+          ariaLabel={`QA Meter: ${r.meterQa || "QA NAv"}`}
+          onClick={() => navigate(r.meterQaHref)}
+        />
+      ),
+    },
+  ], [batchWardPcode, navigate]);
 
   const columns = useMemo(
     () => allColumns.filter((col) => col.key === "meterNo" || columnVisibility[col.key] !== false),
