@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parsePendingTrnFromReason } from "./trnBgoUploadPendingTrn.js";
+import {
+  parseFallbackReason,
+  parsePendingTrnFromReason,
+  parseRegistrationDisagreeReason,
+} from "./trnBgoUploadPendingTrn.js";
 
 test("parsePendingTrnFromReason parses active METER_INSPECTION job message into Pending INSP Trn", () => {
   const info = parsePendingTrnFromReason({
@@ -20,4 +24,27 @@ test("parsePendingTrnFromReason parses active METER_INSPECTION job message into 
 
 test("parsePendingTrnFromReason returns null for non-TRN eligibility reasons", () => {
   assert.equal(parsePendingTrnFromReason({ nonEligibleReason: "Meter is DECOMMISSIONED." }), null);
+});
+
+test("parseFallbackReason formats DCN -> INSP Fallback pill and explanation", () => {
+  const fb = parseFallbackReason(
+    { isProposedInspection: true, astStatus: "DISCONNECTED", proposedReason: "Current state is DISCONNECTED — Proposed for Inspection (MINSP)." },
+    "METER_DISCONNECTION",
+  );
+  assert.equal(fb.pillLabel, "DCN → INSP Fallback");
+  assert.equal(fb.uploadTrnLabel, "Disconnection (DCN)");
+  assert.equal(fb.fallbackTrnLabel, "Inspection (INSP)");
+  assert.equal(fb.meterState, "DISCONNECTED");
+  assert.match(fb.explanation, /Cannot DCN a meter that is DISCONNECTED/);
+  assert.equal(parseFallbackReason({ isProposedInspection: false }, "METER_DISCONNECTION"), null);
+});
+
+test("parseRegistrationDisagreeReason shows Meter Removed pill with original reason on hover", () => {
+  const res = parseRegistrationDisagreeReason({
+    nonEligibleReason: "The premise does not list this meter, so the two records disagree",
+    astStatus: "REMOVED",
+  });
+  assert.equal(res.pillLabel, "Meter Removed");
+  assert.equal(res.explanation, "The premise does not list this meter, so the two records disagree");
+  assert.equal(parseRegistrationDisagreeReason({ nonEligibleReason: "Other" }), null);
 });

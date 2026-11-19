@@ -109,6 +109,84 @@ function PendingTrnReasonButton({ row, pending, onClick }) {
   );
 }
 
+function FallbackReasonButton({ fallback, tone = "amber" }) {
+  const [hoverRect, setHoverRect] = useState(null);
+  const isDanger = tone === "danger";
+  const openAt = (el) => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setHoverRect({
+      top: Math.min(rect.bottom + 8, window.innerHeight - 230),
+      left: Math.min(rect.left, window.innerWidth - 360),
+    });
+  };
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        onMouseEnter={(e) => openAt(e.currentTarget)}
+        onMouseLeave={() => setHoverRect(null)}
+        onFocus={(e) => openAt(e.currentTarget)}
+        onBlur={() => setHoverRect(null)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 10px",
+          borderRadius: 999,
+          border: `1px solid ${isDanger ? "#fecaca" : "#fde68a"}`,
+          background: isDanger ? "#fef2f2" : "#fffbeb",
+          color: isDanger ? "#b91c1c" : "#b45309",
+          fontSize: 12,
+          fontWeight: 800,
+          cursor: "default",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {isDanger ? "⊘" : "⇄"} {fallback.pillLabel}
+      </button>
+      {hoverRect ? (
+        <div
+          role="dialog"
+          aria-label={isDanger ? "Ineligible Reason" : "TRN Fallback Explanation"}
+          style={{
+            position: "fixed",
+            top: Math.max(12, hoverRect.top),
+            left: Math.max(12, hoverRect.left),
+            zIndex: 9999,
+            width: 340,
+            background: "#fff",
+            border: "1px solid #cbd5e1",
+            borderRadius: 14,
+            boxShadow: "0 18px 36px rgba(15, 23, 42, 0.18)",
+            padding: 14,
+            display: "grid",
+            gap: 8,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>
+              {isDanger ? fallback.pillLabel : "TRN Fallback Routing"}
+            </span>
+            <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 999, background: isDanger ? "#fee2e2" : "#fef3c7", color: isDanger ? "#b91c1c" : "#92400e" }}>{fallback.meterState}</span>
+          </div>
+          {!isDanger ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 10px" }}>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Upload TRN</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{fallback.uploadTrnLabel}</strong></div>
+              <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Fallback TRN</small><strong style={{ fontSize: 12, color: "#b45309" }}>{fallback.fallbackTrnLabel}</strong></div>
+            </div>
+          ) : null}
+          <div style={{ fontSize: 12, color: "#334155", lineHeight: 1.45, borderTop: isDanger ? "none" : "1px solid #f1f5f9", paddingTop: isDanger ? 0 : 8 }}>
+            {fallback.explanation}
+          </div>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 function MasterCheckbox({ checked, indeterminate, disabled, onChange, title }) {
   const checkboxRef = useRef(null);
 
@@ -146,7 +224,11 @@ import { functions } from "../../firebase";
 import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
-import { parsePendingTrnFromReason } from "./trnBgoUploadPendingTrn";
+import {
+  parseFallbackReason,
+  parsePendingTrnFromReason,
+  parseRegistrationDisagreeReason,
+} from "./trnBgoUploadPendingTrn";
 import {
   useCreateTrnBgoWardBatchesMutation,
 } from "../../redux/tcApi";
@@ -823,22 +905,24 @@ export default function TrnBgoUploadPage() {
   }, [currentFilteredRows, selectedRowKeys, allFilteredSelected]);
 
   const handleToggleMasterSelect = useCallback(() => {
-    if (currentFilteredRows.length === 0) return;
+    const eligibleRows = currentFilteredRows.filter((r) => r.isEligible);
+    if (eligibleRows.length === 0) return;
     setSelectedRowKeys((prev) => {
       const next = new Set(prev);
-      const everySelected = currentFilteredRows.every((r) =>
+      const everySelected = eligibleRows.every((r) =>
         next.has(getRowSelectionKey(r))
       );
       if (everySelected) {
-        currentFilteredRows.forEach((r) => next.delete(getRowSelectionKey(r)));
+        eligibleRows.forEach((r) => next.delete(getRowSelectionKey(r)));
       } else {
-        currentFilteredRows.forEach((r) => next.add(getRowSelectionKey(r)));
+        eligibleRows.forEach((r) => next.add(getRowSelectionKey(r)));
       }
       return next;
     });
   }, [currentFilteredRows]);
 
   const handleToggleRowSelect = useCallback((row) => {
+    if (!row?.isEligible) return;
     const key = getRowSelectionKey(row);
     if (!key) return;
     setSelectedRowKeys((prev) => {
@@ -1261,12 +1345,15 @@ export default function TrnBgoUploadPage() {
               <input
                 type="checkbox"
                 checked={isSelected}
+                disabled={!r.isEligible}
                 onChange={() => handleToggleRowSelect(r)}
                 aria-label={`Select row ${r.rowNo || r._rowNo}`}
+                title={!r.isEligible ? (r.nonEligibleReason || "Row is not eligible") : undefined}
                 style={{
                   width: 16,
                   height: 16,
-                  cursor: "pointer",
+                  cursor: r.isEligible ? "pointer" : "not-allowed",
+                  opacity: r.isEligible ? 1 : 0.45,
                   accentColor: "#2563eb",
                 }}
               />
@@ -1381,25 +1468,36 @@ export default function TrnBgoUploadPage() {
       {
         key: "nonEligibleReason",
         label: "non eligible reason",
-        width: 210,
+        width: 220,
         filter: "text",
         sortable: true,
-        value: (r) => r.nonEligibleReason || "",
+        value: (r) => {
+          const fb = parseFallbackReason(r, selectedTrnType);
+          return r.nonEligibleReason || (fb ? `${fb.pillLabel} ${fb.explanation}` : "");
+        },
         render: (r) => {
           const pending = parsePendingTrnFromReason(r);
-          if (!pending) {
+          if (pending) {
             return (
-              <span style={{ color: "#b91c1c", whiteSpace: "normal", overflowWrap: "anywhere" }}>
-                {r.nonEligibleReason}
-              </span>
+              <PendingTrnReasonButton
+                row={r}
+                pending={pending}
+                onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(pending.trnId)}`)}
+              />
             );
           }
+          const fallback = parseFallbackReason(r, selectedTrnType);
+          if (fallback) {
+            return <FallbackReasonButton fallback={fallback} />;
+          }
+          const regMismatch = parseRegistrationDisagreeReason(r);
+          if (regMismatch) {
+            return <FallbackReasonButton fallback={regMismatch} tone="danger" />;
+          }
           return (
-            <PendingTrnReasonButton
-              row={r}
-              pending={pending}
-              onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(pending.trnId)}`)}
-            />
+            <span style={{ color: "#b91c1c", whiteSpace: "normal", overflowWrap: "anywhere" }}>
+              {r.nonEligibleReason}
+            </span>
           );
         },
       },
