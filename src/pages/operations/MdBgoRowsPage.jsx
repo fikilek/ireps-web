@@ -64,9 +64,16 @@ function SummaryCards({ summary, selected, onSelect }) {
 }
 
 export default function MdBgoRowsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const batchId = text(searchParams.get("batchId") || searchParams.get("bgoBatchId"));
+  const bgoRowFilter = text(searchParams.get("bgoRowId") || searchParams.get("rowId"));
+  const clearBgoRowFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("bgoRowId");
+    next.delete("rowId");
+    setSearchParams(next, { replace: true });
+  };
   const { data: batchResult } = useGetMdBgoBatchByIdQuery(batchId, { skip: !batchId });
   const { data: rowResult } = useGetMdBgoRowsByBatchIdQuery(batchId, { skip: !batchId });
   const batch = batchResult?.batch || null;
@@ -86,7 +93,16 @@ export default function MdBgoRowsPage() {
   const qaLinks = useMemo(() => ({ ...mdBgoRowQaLinks(meterRows), batchId }), [meterRows, batchId]);
   const { currentData: qaSource } = useGetMdBgoRowQaQuery(qaLinks, { skip: !batchId || !rowResult?.ready });
   const enrichedRows = useMemo(() => enrichMdBgoRowQa(meterRows, qaSource), [meterRows, qaSource]);
-  const summary = useMemo(() => buildMdBgoRowsSummary(enrichedRows), [enrichedRows]);
+  const visibleRows = useMemo(() => {
+    if (!bgoRowFilter) return enrichedRows;
+    return enrichedRows.filter(
+      (row) =>
+        text(row.sourceRowId) === bgoRowFilter ||
+        text(row.id) === bgoRowFilter ||
+        text(row.trnId) === bgoRowFilter,
+    );
+  }, [enrichedRows, bgoRowFilter]);
+  const summary = useMemo(() => buildMdBgoRowsSummary(visibleRows), [visibleRows]);
   const selectedProgress = filters.progress || "";
   const allColumns = useMemo(() => [
     { key: "meterNo", label: "Meter No", filter: "text", value: (row) => row.meterNo,
@@ -115,6 +131,39 @@ export default function MdBgoRowsPage() {
     })),
     { key: "qaFinal", label: "QA Final", filter: "select", sortable: true, filterOptions: QA_OPTIONS.filter(value => value !== "QA PENDING").map(value => ({ value, label: value })), value: row => row.qaFinal,
       render: row => <QaPill status={row.qaFinal} disabled title={`QA Final: ${row.qaFinal}; derived from current Premise and Meter QA`} /> },
+    {
+      key: "trnId",
+      label: "TRN ID",
+      filter: "text",
+      sortable: true,
+      value: (row) => row.trnId || "NAv",
+      render: (row) =>
+        row.trnId ? (
+          <button
+            type="button"
+            title={`Open ${row.trnId} in TRN Registry`}
+            onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(row.trnId)}`)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "3px 10px",
+              borderRadius: 999,
+              border: "1px solid #bfdbfe",
+              background: "#eff6ff",
+              color: "#1d4ed8",
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: "monospace",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {row.trnId}
+          </button>
+        ) : (
+          <span style={{ color: "#94a3b8", fontSize: 12 }}>NAv</span>
+        ),
+    },
     { key: "sourceRowId", label: "BGO Row ID", filter: "text", value: (row) => row.sourceRowId },
   ], [wardPcode, navigate]);
   const columns = useMemo(() => mdBgoVisibleRowColumns(allColumns, columnVisibility), [allColumns, columnVisibility]);
@@ -166,6 +215,12 @@ export default function MdBgoRowsPage() {
     {qaSource?.error ? <ReadFailure error={qaSource.error} title="Linked row QA could not be loaded" /> : null}
     {!qaSource?.ready ? <p role="status" style={{ color: "#64748b", fontSize: 12 }}>{qaSource?.error ? "Linked QA is unavailable. No current outcome is shown." : <LoadingIndicator>Loading current linked QA records…</LoadingIndicator>}</p> : null}
     <SummaryCards summary={summary} selected={selectedProgress} onSelect={filterRows} />
+    {bgoRowFilter ? (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", marginBottom: 12, borderRadius: 12, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1e3a8a", fontSize: 13 }}>
+        <span>Filtered to BGO Row <strong>{bgoRowFilter}</strong></span>
+        <button type="button" onClick={clearBgoRowFilter} style={{ border: "1px solid #93c5fd", background: "#ffffff", color: "#1d4ed8", borderRadius: 999, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Show All Rows</button>
+      </div>
+    ) : null}
     <IrepsTable showLoadingSpinner
       title="BGO Rows"
       columns={columns}
@@ -174,7 +229,7 @@ export default function MdBgoRowsPage() {
       pageSizeOptions={[10, 25, 50, 100]}
       toolbar={<button type="button" aria-expanded={showColumnControls} onClick={() => setShowColumnControls(current => !current)} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 10px", color: "#1d4ed8", background: "white", font: "inherit", cursor: "pointer" }}>{showColumnControls ? "Hide Column Controls" : "Show / Hide Columns"}</button>}
       columnControls={columnControls}
-      rows={enrichedRows}
+      rows={visibleRows}
       rowKey={(row) => row.rowKey}
       filters={filters}
       onFiltersChange={setFilters}
