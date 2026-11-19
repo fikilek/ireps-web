@@ -238,6 +238,26 @@ function getRegistryCreatedForName(data = {}) {
   return valueOrNav(firstTarget?.name || firstTarget?.displayName);
 }
 
+function getRegistryAssignmentTargets(data = {}) {
+  const targets = [...asArray(data.assignment?.targets)];
+  const singleTarget = data.assignment?.target || data.bgo?.target;
+  if (targets.length === 0 && singleTarget && typeof singleTarget === "object") {
+    targets.push(singleTarget);
+  }
+
+  return targets
+    .map((target) => ({
+      type: normalizeRegistryCode(
+        target?.type || target?.targetType || data.bgo?.targetType,
+      ),
+      id: valueOrNav(target?.id || target?.uid || data.bgo?.targetId),
+      name: valueOrNav(
+        target?.name || target?.displayName || target?.label || data.bgo?.targetName,
+      ),
+    }))
+    .filter((target) => target.id !== "NAv" || target.name !== "NAv");
+}
+
 function getRegistryAssignedUserIds(data = {}) {
   const targets = [...asArray(data.assignment?.targets)];
   const singleTarget = data.assignment?.target || data.bgo?.target;
@@ -366,6 +386,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
     lastUpdatedAt: normalizeDateValue(metadata.updatedAt || data.updatedAt),
     createdForName: getRegistryCreatedForName(data),
+    assignmentTargets: getRegistryAssignmentTargets(data),
     assignedUserIds: getRegistryAssignedUserIds(data),
     issuedAt: normalizeDateValue(data.workflow?.issuedAt),
     acceptedRejected: getRegistryAcceptedRejected(data),
