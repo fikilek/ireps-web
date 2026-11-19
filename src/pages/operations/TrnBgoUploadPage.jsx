@@ -1257,7 +1257,10 @@ export default function TrnBgoUploadPage() {
     }
   };
 
-  const handleConfirmPassModalAndNavigate = () => navigate("/operations/trn-bgo");
+  const handleConfirmPassModalAndNavigate = () => {
+    setCreationModalState(null);
+    navigate("/operations/trn-bgo");
+  };
 
   // Download Not Found CSV Report
   const handleDownloadNotFoundCsv = () => {
