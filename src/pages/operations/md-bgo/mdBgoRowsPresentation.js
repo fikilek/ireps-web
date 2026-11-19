@@ -10,10 +10,11 @@ export const MD_BGO_ROW_COLUMN_OPTIONS = Object.freeze([
   { key: "premiseQa", label: "Premise" },
   { key: "meterQa", label: "Meter" },
   { key: "qaFinal", label: "QA Final" },
+  { key: "trnId", label: "TRN ID" },
   { key: "sourceRowId", label: "BGO Row ID" },
 ]);
 export const MD_BGO_ROW_DEFAULT_VISIBILITY = Object.freeze(Object.fromEntries(
-  MD_BGO_ROW_COLUMN_OPTIONS.map(({ key }) => [key, key !== "sourceRowId"]),
+  MD_BGO_ROW_COLUMN_OPTIONS.map(({ key }) => [key, key !== "sourceRowId" && key !== "trnId"]),
 ));
 
 export function mdBgoVisibleRowColumns(columns, visibility) {

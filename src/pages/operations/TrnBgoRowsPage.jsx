@@ -151,8 +151,15 @@ function resolveWorkbase(auth = {}, geoState = {}) {
 
 export default function TrnBgoRowsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const batchId = searchParams.get("batchId") || "";
+  const bgoRowFilter = String(searchParams.get("bgoRowId") || searchParams.get("rowId") || "").trim();
+  const clearBgoRowFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("bgoRowId");
+    next.delete("rowId");
+    setSearchParams(next, { replace: true });
+  };
   const wardPcodeParam = searchParams.get("wardPcode") || "";
   const lmPcodeParam = searchParams.get("lmPcode") || "";
 
@@ -216,7 +223,17 @@ export default function TrnBgoRowsPage() {
     () => buildTrnBgoDisplayRows({ rawRows, childTrns, asts, activeBatch }),
     [rawRows, childTrns, asts, activeBatch],
   );
-  const summary = useMemo(() => buildTrnBgoRowsSummary(displayRows), [displayRows]);
+  const visibleRows = useMemo(() => {
+    if (!bgoRowFilter) return displayRows;
+    return displayRows.filter(
+      (r) =>
+        String(r.id || "").trim() === bgoRowFilter ||
+        String(r.bgoRowId || "").trim() === bgoRowFilter ||
+        String(r.tcRowId || "").trim() === bgoRowFilter ||
+        String(r.activeTrnId || "").trim() === bgoRowFilter,
+    );
+  }, [displayRows, bgoRowFilter]);
+  const summary = useMemo(() => buildTrnBgoRowsSummary(visibleRows), [visibleRows]);
   const [filters, setFilters] = useState({});
   const [mapView, setMapView] = useState(null);
   const [selectedMeterId, setSelectedMeterId] = useState(null);
@@ -351,7 +368,16 @@ export default function TrnBgoRowsPage() {
         if (!r.activeTrnId || r.activeTrnId === "None") {
           return <span style={{ color: "#94a3b8", fontSize: 12 }}>None</span>;
         }
-        return <span style={styles.activeTrnCode}>{r.activeTrnId}</span>;
+        return (
+          <button
+            type="button"
+            title={`Open ${r.activeTrnId} in TRN Registry`}
+            onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(r.activeTrnId)}`)}
+            style={styles.activeTrnPill}
+          >
+            {r.activeTrnId}
+          </button>
+        );
       },
     },
     {
@@ -545,9 +571,47 @@ export default function TrnBgoRowsPage() {
 
       <SummaryCards summary={summary} selected={selectedRowStatus} onSelect={filterRows} />
 
+      {bgoRowFilter ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            padding: "10px 14px",
+            marginBottom: 12,
+            borderRadius: 12,
+            border: "1px solid #bfdbfe",
+            background: "#eff6ff",
+            color: "#1e3a8a",
+            fontSize: 13,
+          }}
+        >
+          <span>
+            Filtered to BGO Row <strong>{bgoRowFilter}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={clearBgoRowFilter}
+            style={{
+              border: "1px solid #93c5fd",
+              background: "#ffffff",
+              color: "#1d4ed8",
+              borderRadius: 999,
+              padding: "4px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Show All Rows
+          </button>
+        </div>
+      ) : null}
+
       <div style={styles.panel}>
         <IrepsTable showLoadingSpinner
-          rows={displayRows}
+          rows={visibleRows}
           stickyColumnKeys={["meterNo"]}
           filters={filters}
           onFiltersChange={setFilters}
@@ -773,6 +837,20 @@ const styles = {
     fontSize: 11,
     fontWeight: 700,
     color: "#1d4ed8",
+  },
+  activeTrnPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "3px 10px",
+    borderRadius: 999,
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontFamily: "monospace",
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
   activeTrnState: {
     display: "inline-block",

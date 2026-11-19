@@ -9,7 +9,7 @@ import DataActionButton, {
 import IrepsTable from "../../components/table/IrepsTable";
 import QaPill from "../../components/table/QaPill";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
@@ -23,6 +23,7 @@ import {
   normalizeTargetType,
   resolveTargetMembers,
 } from "./trnIssuedTo.js";
+import { resolveTrnBgoLink } from "./trnBgoLink.js";
 import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import TrnMediaGalleryModal from "./components/TrnMediaGalleryModal";
@@ -449,6 +450,7 @@ function IssuedToCell({ targets = [], memberLookups }) {
 }
 
 export default function TrnsRegistryPage() {
+  const navigate = useNavigate();
   const { activeWorkbase, role, uid, profile, serviceProvider } = useAuth();
   const { data: providers = [] } = useGetAvailableServiceProvidersQuery();
   const { data: teams = [] } = useGetAvailableTeamsQuery({ limit: 500 });
@@ -601,6 +603,10 @@ export default function TrnsRegistryPage() {
       {
         header: "Issued To",
         value: (row) => formatIssuedToText(row.assignmentTargets),
+      },
+      {
+        header: "BGO Batch",
+        value: (row) => resolveTrnBgoLink(row)?.batchId || "NAv",
       },
       { header: "Updated By User", value: (row) => getTrnUpdatedByUser(row) },
       { header: "Completed By User", value: (row) => row.completedByUser || "NAv" },
@@ -1042,6 +1048,32 @@ export default function TrnsRegistryPage() {
         memberLookups={memberLookups}
       />
     ),
+    sortEmptyLast: true,
+
+  }, {
+    key: "bgoBatch",
+    label: "BGO Batch",
+    filter: "text",
+    sortable: true,
+    value: row => resolveTrnBgoLink(row)?.batchId || "NAv",
+    sortValue: row => {
+      const link = resolveTrnBgoLink(row);
+      return link ? link.batchId : null;
+    },
+    render: row => {
+      const link = resolveTrnBgoLink(row);
+      if (!link) return <>NAv</>;
+      return (
+        <button
+          type="button"
+          style={styles.bgoBatchPill}
+          title={`Open ${link.kindLabel} Row${link.rowId ? ` (${link.rowId})` : ""} in ${link.batchId}`}
+          onClick={() => navigate(link.href)}
+        >
+          {link.batchId}
+        </button>
+      );
+    },
     sortEmptyLast: true,
 
   }, {
@@ -1578,6 +1610,20 @@ const styles = {
     fontSize: "12px",
     color: "#64748b",
     fontStyle: "italic",
+  },
+  bgoBatchPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "3px 10px",
+    borderRadius: "999px",
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontFamily: "monospace",
+    fontSize: "11px",
+    fontWeight: 700,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 
 };
