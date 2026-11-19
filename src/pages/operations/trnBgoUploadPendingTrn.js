@@ -67,6 +67,30 @@ export function parseRegistrationDisagreeReason(row = {}) {
   };
 }
 
+export function parseGenericNonEligibleReason(row = {}) {
+  const reason = String(row?.nonEligibleReason || "").trim();
+  if (!reason) return null;
+  const meterState = String(
+    row?.astStatus || row?.irepsValues?.meterStatus || row?.meterStatus || "NAv",
+  )
+    .trim()
+    .toUpperCase();
+
+  let pillLabel = "Ineligible";
+  if (/not found in asts/i.test(reason)) pillLabel = "Not Found in ASTS";
+  else if (/decommissioned/i.test(reason)) pillLabel = "Decommissioned";
+  else if (/prepaid|token/i.test(reason)) pillLabel = "Prepaid (MREAD N/A)";
+  else if (/municipality|ward/i.test(reason)) pillLabel = "LM / Ward Mismatch";
+  else if (/duplicate/i.test(reason)) pillLabel = "Duplicate Row";
+  else if (/no authoritative premise|no premise/i.test(reason)) pillLabel = "No Premise";
+
+  return {
+    pillLabel,
+    meterState,
+    explanation: reason,
+  };
+}
+
 export function parsePendingTrnFromReason(row = {}) {
   const reason = String(row?.nonEligibleReason || "").trim();
   const lifecycle = row?.activeLifecycle || row?.astActiveLifecycle || null;

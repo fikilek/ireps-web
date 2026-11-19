@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseFallbackReason,
+  parseGenericNonEligibleReason,
   parsePendingTrnFromReason,
   parseRegistrationDisagreeReason,
 } from "./trnBgoUploadPendingTrn.js";
@@ -47,4 +48,19 @@ test("parseRegistrationDisagreeReason shows Meter Removed pill with original rea
   assert.equal(res.pillLabel, "Meter Removed");
   assert.equal(res.explanation, "The premise does not list this meter, so the two records disagree");
   assert.equal(parseRegistrationDisagreeReason({ nonEligibleReason: "Other" }), null);
+});
+
+test("parseGenericNonEligibleReason maps ASTS not found and other reasons to pills", () => {
+  const notFound = parseGenericNonEligibleReason({
+    nonEligibleReason: "Meter was not found in ASTS.",
+    astStatus: "NOT_IN_ASTS",
+  });
+  assert.equal(notFound.pillLabel, "Not Found in ASTS");
+  assert.equal(notFound.explanation, "Meter was not found in ASTS.");
+
+  const generic = parseGenericNonEligibleReason({
+    nonEligibleReason: "Some custom eligibility block.",
+  });
+  assert.equal(generic.pillLabel, "Ineligible");
+  assert.equal(parseGenericNonEligibleReason({ nonEligibleReason: "" }), null);
 });

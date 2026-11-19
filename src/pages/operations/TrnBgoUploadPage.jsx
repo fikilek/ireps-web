@@ -226,6 +226,7 @@ import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
 import {
   parseFallbackReason,
+  parseGenericNonEligibleReason,
   parsePendingTrnFromReason,
   parseRegistrationDisagreeReason,
 } from "./trnBgoUploadPendingTrn";
@@ -1494,11 +1495,11 @@ export default function TrnBgoUploadPage() {
           if (regMismatch) {
             return <FallbackReasonButton fallback={regMismatch} tone="danger" />;
           }
-          return (
-            <span style={{ color: "#b91c1c", whiteSpace: "normal", overflowWrap: "anywhere" }}>
-              {r.nonEligibleReason}
-            </span>
-          );
+          const genericReason = parseGenericNonEligibleReason(r);
+          if (genericReason) {
+            return <FallbackReasonButton fallback={genericReason} tone="danger" />;
+          }
+          return null;
         },
       },
       {
