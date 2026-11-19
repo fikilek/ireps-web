@@ -8,12 +8,21 @@ import DataActionButton, {
 } from "../../components/table/DataActionButton";
 import IrepsTable from "../../components/table/IrepsTable";
 import QaPill from "../../components/table/QaPill";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { skipToken } from "@reduxjs/toolkit/query";
 
 import { useAuth } from "../../auth/useAuth";
 import { useGetRegistryTrnsByLmPcodeQuery } from "../../redux/trnsApi";
+import { useGetAvailableTeamsQuery } from "../../redux/teamsApi";
+import { useGetUsersDirectoryQuery } from "../../redux/usersApi";
+import {
+  buildMemberLookups,
+  formatIssuedToText,
+  formatTargetLabel,
+  normalizeTargetType,
+  resolveTargetMembers,
+} from "./trnIssuedTo.js";
 import BoundaryMapModal from "./components/BoundaryMapModal";
 import MeterDeepDetailsModal from "./components/MeterDeepDetailsModal";
 import TrnMediaGalleryModal from "./components/TrnMediaGalleryModal";
@@ -337,9 +346,117 @@ function matchesDateFilter(value, filter = EMPTY_DATETIME_FILTER) {
   return true;
 }
 
+function IssuedToTargetPill({ target, memberLookups }) {
+  const anchorRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const label = formatTargetLabel(target);
+  const type = normalizeTargetType(target?.type || target?.targetType);
+  const isGroup = type === "TEAM" || type === "SP";
+
+  const members = useMemo(
+    () => (isGroup ? resolveTargetMembers({ target, ...memberLookups }) : []),
+    [isGroup, target, memberLookups],
+  );
+
+  if (!label) return null;
+  if (!isGroup) {
+    return <span>{label}</span>;
+  }
+
+  const updatePos = () => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 300;
+    const maxLeft = Math.max(12, window.innerWidth - width - 12);
+    setPos({
+      top: Math.min(rect.bottom + 6, Math.max(12, window.innerHeight - 280)),
+      left: Math.min(Math.max(12, rect.left), maxLeft),
+    });
+  };
+
+  return (
+    <span
+      ref={anchorRef}
+      style={styles.issuedToWrap}
+      onMouseEnter={() => {
+        updatePos();
+        setOpen(true);
+      }}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        style={styles.issuedToPill}
+        onFocus={() => {
+          updatePos();
+          setOpen(true);
+        }}
+        onBlur={() => setOpen(false)}
+        aria-label={`${label} (${members.length} members)`}
+      >
+        {label}
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={`Members of ${label}`}
+          style={{ ...styles.issuedToPopover, top: pos.top, left: pos.left }}
+        >
+          <div style={styles.issuedToPopoverHead}>
+            <span style={styles.issuedToPopoverTitle}>{label}</span>
+            <span style={styles.issuedToPopoverSub}>
+              {members.length} {members.length === 1 ? "member" : "members"}
+            </span>
+          </div>
+          {members.length ? (
+            <ol style={styles.issuedToList}>
+              {members.map((member) => (
+                <li key={member.uid || member.name} style={styles.issuedToListItem}>
+                  <span>{member.name}</span>
+                  {member.role ? <span style={styles.issuedToRole}>{member.role}</span> : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div style={styles.issuedToEmpty}>No members found</div>
+          )}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+function IssuedToCell({ targets = [], memberLookups }) {
+  if (!Array.isArray(targets) || targets.length === 0) {
+    return <>NAv</>;
+  }
+  const visible = targets.filter((target) => formatTargetLabel(target));
+  if (visible.length === 0) {
+    return <>NAv</>;
+  }
+  return (
+    <div style={styles.issuedToCell}>
+      {visible.map((target, idx) => (
+        <IssuedToTargetPill
+          key={`${target.type || "USER"}_${target.id || idx}`}
+          target={target}
+          memberLookups={memberLookups}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function TrnsRegistryPage() {
   const { activeWorkbase, role, uid, profile, serviceProvider } = useAuth();
   const { data: providers = [] } = useGetAvailableServiceProvidersQuery();
+  const { data: teams = [] } = useGetAvailableTeamsQuery({ limit: 500 });
+  const { data: users = [] } = useGetUsersDirectoryQuery({ limit: 1000 });
+  const memberLookups = useMemo(
+    () => buildMemberLookups({ users, teams }),
+    [users, teams],
+  );
   const reviewerProvider = providers.find(item => item.id === serviceProvider?.id);
   const reviewerRole = profile?.accountStatus === "ACTIVE" && ["MNG", "SPV"].includes(role)
     && isMainContractor(reviewerProvider) && !parentIdOf(reviewerProvider);
@@ -480,6 +597,10 @@ export default function TrnsRegistryPage() {
       {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
+      },
+      {
+        header: "Issued To",
+        value: (row) => formatIssuedToText(row.assignmentTargets),
       },
       { header: "Updated By User", value: (row) => getTrnUpdatedByUser(row) },
       { header: "Completed By User", value: (row) => row.completedByUser || "NAv" },
@@ -903,6 +1024,24 @@ export default function TrnsRegistryPage() {
     render: row => {
       return <>{row.createdByUser || "NAv"}</>;
     },
+    sortEmptyLast: true,
+
+  }, {
+    key: "issuedTo",
+    label: "Issued To",
+    filter: "text",
+    sortable: true,
+    value: row => formatIssuedToText(row.assignmentTargets),
+    sortValue: row => {
+      const value = formatIssuedToText(row.assignmentTargets);
+      return isMissingSortValue(value) ? null : value;
+    },
+    render: row => (
+      <IssuedToCell
+        targets={row.assignmentTargets}
+        memberLookups={memberLookups}
+      />
+    ),
     sortEmptyLast: true,
 
   }, {
@@ -1359,6 +1498,86 @@ const styles = {
     display: "block",
     width: "1.5rem",
     height: "1.5rem",
+  },
+  issuedToCell: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "4px",
+    alignItems: "center",
+  },
+  issuedToWrap: {
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+  },
+  issuedToPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "3px 10px",
+    borderRadius: "999px",
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: "12px",
+    fontWeight: 700,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  issuedToPopover: {
+    position: "fixed",
+    zIndex: 1200,
+    width: "300px",
+    maxHeight: "260px",
+    overflowY: "auto",
+    background: "#ffffff",
+    border: "1px solid #cbd5e1",
+    borderRadius: "12px",
+    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.16)",
+    padding: "10px 12px",
+  },
+  issuedToPopoverHead: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    gap: "8px",
+    paddingBottom: "6px",
+    marginBottom: "6px",
+    borderBottom: "1px solid #e2e8f0",
+  },
+  issuedToPopoverTitle: {
+    fontSize: "12px",
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+  issuedToPopoverSub: {
+    fontSize: "11px",
+    fontWeight: 700,
+    color: "#64748b",
+    whiteSpace: "nowrap",
+  },
+  issuedToList: {
+    margin: 0,
+    paddingLeft: "18px",
+    display: "grid",
+    gap: "4px",
+    fontSize: "12px",
+    color: "#1e293b",
+  },
+  issuedToListItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    alignItems: "center",
+  },
+  issuedToRole: {
+    fontSize: "11px",
+    fontWeight: 700,
+    color: "#64748b",
+  },
+  issuedToEmpty: {
+    fontSize: "12px",
+    color: "#64748b",
+    fontStyle: "italic",
   },
 
 };
