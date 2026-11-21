@@ -13,7 +13,6 @@
     "deploy:dev": "npm run build:dev && firebase deploy --only hosting:ireps-web --project ireps2",
     "deploy:test": "npm run build:test && firebase deploy --only hosting:ireps-web --project ireps-test",
     "deploy:live": "npm run build:live && firebase deploy --only hosting:ireps-web --project ireps-5c3e9",
-    "deploy:all": "npm run deploy:dev && npm run deploy:test",
     "lint": "eslint .",
     "lint:functions": "eslint functions",
     "lint:web": "eslint src",
