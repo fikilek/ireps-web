@@ -112,6 +112,8 @@ const EMPTY_TRN_FILTERS = {
   anomalyDetail: "",
   normalisation: "",
   createdByUser: "",
+  issuedTo: "",
+  bgoBatch: "",
   updatedByUser: "",
   completedByUser: "",
   qaState: "ALL",
@@ -526,7 +528,7 @@ export default function TrnsRegistryPage() {
       const mediaFilterIsEmpty = filters.mediaCount === "";
       const mediaFilterValue = Number(filters.mediaCount);
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
-      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && (includesText(getTrnUpdatedByUser(row), filters.updatedByUser || filters.completedByUser) || includesText(row.completedByUser, filters.updatedByUser || filters.completedByUser));
+      return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && includesText(formatIssuedToText(row.assignmentTargets), filters.issuedTo) && includesText(resolveTrnBgoLink(row)?.batchId || "NAv", filters.bgoBatch) && (includesText(getTrnUpdatedByUser(row), filters.updatedByUser || filters.completedByUser) || includesText(row.completedByUser, filters.updatedByUser || filters.completedByUser));
     });
   }, []);
 
