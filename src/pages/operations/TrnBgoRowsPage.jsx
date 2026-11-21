@@ -46,7 +46,7 @@ const TRN_BGO_COLUMN_OPTIONS = [
 const QA_OPTIONS = ["QA NAv", "QA PENDING", "QA PASS", "QA FAIL"];
 
 const TRN_BGO_DEFAULT_VISIBILITY = Object.fromEntries(
-  TRN_BGO_COLUMN_OPTIONS.map((opt) => [opt.key, opt.key !== "activeTrnId"]),
+  TRN_BGO_COLUMN_OPTIONS.map((opt) => [opt.key, true]),
 );
 
 function prettyState(value) {
@@ -571,50 +571,14 @@ export default function TrnBgoRowsPage() {
 
       <SummaryCards summary={summary} selected={selectedRowStatus} onSelect={filterRows} />
 
-      {bgoRowFilter ? (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 14px",
-            marginBottom: 12,
-            borderRadius: 12,
-            border: "1px solid #bfdbfe",
-            background: "#eff6ff",
-            color: "#1e3a8a",
-            fontSize: 13,
-          }}
-        >
-          <span>
-            Filtered to BGO Row <strong>{bgoRowFilter}</strong>
-          </span>
-          <button
-            type="button"
-            onClick={clearBgoRowFilter}
-            style={{
-              border: "1px solid #93c5fd",
-              background: "#ffffff",
-              color: "#1d4ed8",
-              borderRadius: 999,
-              padding: "4px 12px",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            Show All Rows
-          </button>
-        </div>
-      ) : null}
-
       <div style={styles.panel}>
         <IrepsTable showLoadingSpinner
           rows={visibleRows}
           stickyColumnKeys={["meterNo"]}
           filters={filters}
           onFiltersChange={setFilters}
+          extraFiltersActive={Boolean(bgoRowFilter)}
+          onClearFilters={clearBgoRowFilter}
           searchValue={trnBgoRowSearchValue}
           toolbar={
             <button

@@ -215,12 +215,6 @@ export default function MdBgoRowsPage() {
     {qaSource?.error ? <ReadFailure error={qaSource.error} title="Linked row QA could not be loaded" /> : null}
     {!qaSource?.ready ? <p role="status" style={{ color: "#64748b", fontSize: 12 }}>{qaSource?.error ? "Linked QA is unavailable. No current outcome is shown." : <LoadingIndicator>Loading current linked QA records…</LoadingIndicator>}</p> : null}
     <SummaryCards summary={summary} selected={selectedProgress} onSelect={filterRows} />
-    {bgoRowFilter ? (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", marginBottom: 12, borderRadius: 12, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1e3a8a", fontSize: 13 }}>
-        <span>Filtered to BGO Row <strong>{bgoRowFilter}</strong></span>
-        <button type="button" onClick={clearBgoRowFilter} style={{ border: "1px solid #93c5fd", background: "#ffffff", color: "#1d4ed8", borderRadius: 999, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Show All Rows</button>
-      </div>
-    ) : null}
     <IrepsTable showLoadingSpinner
       title="BGO Rows"
       columns={columns}
@@ -233,6 +227,8 @@ export default function MdBgoRowsPage() {
       rowKey={(row) => row.rowKey}
       filters={filters}
       onFiltersChange={setFilters}
+      extraFiltersActive={Boolean(bgoRowFilter)}
+      onClearFilters={clearBgoRowFilter}
       searchValue={mdBgoRowSearchValue}
       downloads={downloads}
       loading={loading}

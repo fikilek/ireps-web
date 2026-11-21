@@ -599,16 +599,16 @@ export default function TrnsRegistryPage() {
       { header: "Field Comment Voice Clip", value: row => fieldCommentMediaUrls(row.fieldComments?.voiceClips) },
       { header: "Field Comment Video", value: row => fieldCommentMediaUrls(row.fieldComments?.videos) },
       {
+        header: "BGO Batch",
+        value: (row) => resolveTrnBgoLink(row)?.batchId || "NAv",
+      },
+      {
         header: "Created By User",
         value: (row) => row.createdByUser || "NAv",
       },
       {
         header: "Issued To",
         value: (row) => formatIssuedToText(row.assignmentTargets),
-      },
-      {
-        header: "BGO Batch",
-        value: (row) => resolveTrnBgoLink(row)?.batchId || "NAv",
       },
       { header: "Updated By User", value: (row) => getTrnUpdatedByUser(row) },
       { header: "Completed By User", value: (row) => row.completedByUser || "NAv" },
@@ -650,9 +650,7 @@ export default function TrnsRegistryPage() {
       return isMissingSortValue(value) || Number.isNaN(value) ? null : value;
     },
     render: row => {
-      return <><span style={styles.trnIdDisplay} title={row.trnId || "NAv"}>
-                                    {getCompactTrnId(row.trnId, row.wardPcode)}
-                                  </span></>;
+      return <span style={styles.trnIdDisplay} title={row.trnId || "NAv"}>{row.trnId || "NAv"}</span>;
     },
     sortEmptyLast: true,
 
@@ -1017,6 +1015,32 @@ export default function TrnsRegistryPage() {
       </div>;
     },
   }, {
+    key: "bgoBatch",
+    label: "BGO Batch",
+    filter: "text",
+    sortable: true,
+    value: row => resolveTrnBgoLink(row)?.batchId || "NAv",
+    sortValue: row => {
+      const link = resolveTrnBgoLink(row);
+      return link ? link.batchId : null;
+    },
+    render: row => {
+      const link = resolveTrnBgoLink(row);
+      if (!link) return <>NAv</>;
+      return (
+        <button
+          type="button"
+          style={styles.bgoBatchPill}
+          title={`Open ${link.kindLabel} Row${link.rowId ? ` (${link.rowId})` : ""} in ${link.batchId}`}
+          onClick={() => navigate(link.href)}
+        >
+          {link.batchId}
+        </button>
+      );
+    },
+    sortEmptyLast: true,
+
+  }, {
     key: "createdByUser",
     label: "Created By User",
     filter: "text",
@@ -1050,32 +1074,6 @@ export default function TrnsRegistryPage() {
         memberLookups={memberLookups}
       />
     ),
-    sortEmptyLast: true,
-
-  }, {
-    key: "bgoBatch",
-    label: "BGO Batch",
-    filter: "text",
-    sortable: true,
-    value: row => resolveTrnBgoLink(row)?.batchId || "NAv",
-    sortValue: row => {
-      const link = resolveTrnBgoLink(row);
-      return link ? link.batchId : null;
-    },
-    render: row => {
-      const link = resolveTrnBgoLink(row);
-      if (!link) return <>NAv</>;
-      return (
-        <button
-          type="button"
-          style={styles.bgoBatchPill}
-          title={`Open ${link.kindLabel} Row${link.rowId ? ` (${link.rowId})` : ""} in ${link.batchId}`}
-          onClick={() => navigate(link.href)}
-        >
-          {link.batchId}
-        </button>
-      );
-    },
     sortEmptyLast: true,
 
   }, {
