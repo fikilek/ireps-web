@@ -118,8 +118,8 @@ test("5. Reverse navigation: TRN BGO Rows resolves activeTrnId for TRN Registry 
   assert.equal(rows[1].activeTrnId, "None");
 });
 
-test("6. Reverse navigation & AST identity: MD BGO preserves originating-TRN semantics and hidden-by-default TRN ID column", () => {
-  assert.equal(MD_BGO_ROW_DEFAULT_VISIBILITY.trnId, false);
+test("6. Reverse navigation & AST identity: MD BGO preserves originating-TRN semantics and visible-by-default TRN ID column", () => {
+  assert.equal(MD_BGO_ROW_DEFAULT_VISIBILITY.trnId, true);
   assert.equal(MD_BGO_ROW_DEFAULT_VISIBILITY.sourceRowId, false);
 
   const rowWithRefs = {
