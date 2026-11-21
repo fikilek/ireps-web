@@ -13,6 +13,13 @@ import { registryNoAccessDetails } from "../utils/registryNoAccess.js";
 import { savedRegistryUnits } from "../utils/registryTrnUnits.js";
 import { getFieldComments } from "../utils/fieldComments.js";
 import { db } from "../firebase";
+import {
+  getTcId,
+  getBgoBatchId,
+  getBgoRowId,
+  getTcRowId,
+  extractTrnBgoFields,
+} from "./trnBgoFields.js";
 import { fieldSubmitter, qaState, qaEligibility } from "../../functions/qa/model.js";
 import { rowUpdatedAtMs } from "../components/table/irepsTableModel.js";
 
@@ -79,45 +86,6 @@ function hasMeaningfulValue(value) {
 
 function getWorkflowState(data = {}) {
   return valueOrNav(data.workflow?.state || data.workflowState || data.state);
-}
-
-function getTcId(data = {}) {
-  return valueOrNav(
-    data.origin?.tcId ||
-      data.bgo?.tcId ||
-      data.tcId ||
-      data.refs?.tcId ||
-      data.refs?.tcUploadId ||
-      data.upload?.tcId,
-  );
-}
-
-function getBgoBatchId(data = {}) {
-  return valueOrNav(
-    data.bgo?.batchId ||
-      data.bgo?.bgoBatchId ||
-      data.origin?.bgoBatchId ||
-      data.bucket?.batchId ||
-      data.bgoBatchId ||
-      data.batchId ||
-      data.refs?.bgoBatchId ||
-      data.refs?.batchId,
-  );
-}
-
-function getBgoRowId(data = {}) {
-  return valueOrNav(
-    data.bgo?.bgoRowId ||
-      data.bgoRowId ||
-      data.origin?.bgoRowId ||
-      data.refs?.bgoRowId,
-  );
-}
-
-function getTcRowId(data = {}) {
-  return valueOrNav(
-    data.origin?.tcRowId || data.bgo?.tcRowId || data.tcRowId || data.refs?.tcRowId,
-  );
 }
 
 function getExecutionOutcome(data = {}) {
@@ -380,6 +348,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     fieldComments: getFieldComments(data),
     mediaCount: asArray(data.media).length,
     originChannel: getRegistryOriginChannel(data),
+    ...extractTrnBgoFields(data),
     createdByUid: valueOrNav(metadata.createdByUid),
     createdByUser: valueOrNav(metadata.createdByUser),
     updatedByUid: valueOrNav(metadata.updatedByUid),

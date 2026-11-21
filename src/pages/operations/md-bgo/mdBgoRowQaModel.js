@@ -41,7 +41,8 @@ export function enrichMdBgoRowQa(rows, source) {
     // Same lifecycle authority as TRN Registry, rather than AST QA copies.
     const state = String(trn?.workflow?.state || "").trim().toUpperCase();
     const meterQa = state === "COMPLETED" ? "QA PENDING" : ["QA PASS", "QA FAIL"].includes(state) ? state : "QA NAv";
-    return { ...row, trnId: trn ? trnId : "", premiseQa, meterQa,
+    const explicitRowTrnId = id(row.refs?.trnId || row.meter?.trnId);
+    return { ...row, trnId: trn ? trnId : explicitRowTrnId, premiseQa, meterQa,
       premiseQaHref: premise ? `/registries/premises?premiseId=${encodeURIComponent(premiseId)}${premise.parents?.wardPcode ? `&wardPcode=${encodeURIComponent(premise.parents.wardPcode)}` : ""}` : "",
       meterQaHref: trn ? `/registries/trns?trnId=${encodeURIComponent(trnId)}` : "",
       qaFinal: reportingQaFinal({ completed: source?.ready && row.progress === "COMPLETED", premise: premiseQa, meter: meterQa }),
