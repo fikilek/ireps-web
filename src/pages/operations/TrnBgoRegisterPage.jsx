@@ -1313,6 +1313,7 @@ const styles = {
     padding: 24,
     maxWidth: 480,
     width: "100%",
+    boxSizing: "border-box",
     boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
   },
   helpModalBox: {
@@ -1339,7 +1340,10 @@ const styles = {
   },
   modalTitle: {
     margin: "6px 0 8px",
-    fontSize: 20,
+    fontSize: 18,
+    lineHeight: 1.3,
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
     color: "#0f172a",
   },
   modalSubtitle: {
@@ -1347,6 +1351,7 @@ const styles = {
     color: "#64748b",
     fontSize: 14,
     lineHeight: 1.5,
+    overflowWrap: "anywhere",
   },
   helpModalTitle: {
     margin: "4px 0 0",
