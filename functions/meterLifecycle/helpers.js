@@ -2198,19 +2198,20 @@ export function validateMeterInspection({ data, astDoc }) {
   }
 
   // MN-R001 section 8: an inspection records the status it found, and the meter
-  // takes it. Only Connected and Disconnected: Field, Removed and Decommissioned
-  // belong to their own transactions. This is how a meter that was disconnected
-  // and has been illegally reconnected can be disconnected again.
+  // takes it (Connected, Disconnected, or Removed). Field and Decommissioned
+  // belong to their own transactions.
   const foundState = normalizeUpper(data?.status?.state || "");
   const foundStateIsUsable =
-    foundState === "CONNECTED" || foundState === "DISCONNECTED";
+    foundState === "CONNECTED" ||
+    foundState === "DISCONNECTED" ||
+    foundState === "REMOVED";
 
   if (foundState && !foundStateIsUsable) {
     return {
       ok: false,
       code: "INSPECTION_STATUS_NOT_ALLOWED",
       message:
-        "An inspection records the meter as Connected or Disconnected only",
+        "An inspection records the meter as Connected, Disconnected, or Removed only",
     };
   }
 

@@ -102,18 +102,33 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     if (!premiseSnap.exists) fail("PREMISE_NOT_FOUND", "The premise is not on the server yet. This visit can be retried after the premise is saved.");
     if (!erfSnap.exists) fail("NO_ACCESS_ERF_NOT_FOUND", "The ERF record is missing. Ask the office to correct this work item.");
     let instrData = null;
+    let isLegacyBgoInstruction = false;
     if (isOffice) {
       instrData = existing;
     } else if (trnBgoCtx) {
       if (!instrSnap?.exists) fail("INSTRUCTION_TRN_NOT_FOUND", "The TRN BGO work item no longer exists. Refresh your work orders.");
       instrData = instrSnap.data();
-      if (!instrData?.origin?.trnBgo || (text(trnBgoCtx.batchId) && instrData.origin.trnBgo.batchId !== text(trnBgoCtx.batchId))) {
-        fail("INSTRUCTION_NOT_ASSIGNED", "This No Access visit does not match the TRN BGO batch item.");
-      }
       if (isSubmittedState(instrData.workflow?.state)) {
         fail("TRN_ALREADY_EXISTS", "This TRN execution is already completed.");
       }
-      await verifyBulkExecution({ db, reader: tx, uid: actor.uid, id: instrRef.id, astId, trnType: access.trnType });
+      if (instrData?.origin?.trnBgo) {
+        if (text(trnBgoCtx.batchId) && instrData.origin.trnBgo.batchId !== text(trnBgoCtx.batchId)) {
+          fail("INSTRUCTION_NOT_ASSIGNED", "This No Access visit does not match the TRN BGO batch item.");
+        }
+        await verifyBulkExecution({ db, reader: tx, uid: actor.uid, id: instrRef.id, astId, trnType: access.trnType });
+      } else {
+        const legacyBatchId = text(instrData?.bgo?.batchId || instrData?.origin?.bgoBatchId);
+        if (!legacyBatchId || (text(trnBgoCtx.batchId) && legacyBatchId !== text(trnBgoCtx.batchId))) {
+          fail("INSTRUCTION_NOT_ASSIGNED", "This No Access visit does not match the TRN BGO batch item.");
+        }
+        if (!canMove(currentState(instrData.workflow?.state), "execute").ok) {
+          fail("INSTRUCTION_NOT_ACCEPTED", "Accept the office instruction before recording this visit.");
+        }
+        if (instrData.ast?.astData?.astId !== astId || instrData.accessData?.premise?.id !== premiseId) {
+          fail("INSTRUCTION_ASSET_MISMATCH", "The meter or premise does not match the office instruction.");
+        }
+        isLegacyBgoInstruction = true;
+      }
     }
     const astDoc = astSnap.data();
     validateAst(astDoc);
@@ -130,13 +145,14 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     }
     const spId = profileServiceProviderId(profile);
     const spSnap = spId ? await tx.get(db.doc(`serviceProviders/${spId}`)) : null;
-    if (isOffice) {
+    if (isOffice || isLegacyBgoInstruction) {
+      const authTrnData = isOffice ? existing : instrData;
       const teamMap = new Map();
-      for (const target of getAssignmentTargets(existing).filter((target) => target.type === "TEAM")) {
+      for (const target of getAssignmentTargets(authTrnData).filter((target) => target.type === "TEAM")) {
         const snap = await tx.get(db.doc(`teams/${target.id}`));
         teamMap.set(target.id, snap.data() || {});
       }
-      if (!isAssignedToActor({ trnData: existing, actorUid: actor.uid, actorSpId: spId, teamMap })) {
+      if (!isAssignedToActor({ trnData: authTrnData, actorUid: actor.uid, actorSpId: spId, teamMap })) {
         fail("INSTRUCTION_NOT_ASSIGNED", "This instruction belongs to another worker or team. Ask the office to assign it to you.");
       }
     }
@@ -146,7 +162,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
         erfId: access.erfId, premiseId, anomaly: [astDoc.ast] });
     if (!decision.allowed) fail(decision.code, decision.message);
     const trnBgoNoAccess = (isTrnBgoInstruction || trnBgoCtx) && instrRef && instrData
-      ? { batchId: text(trnBgoCtx?.batchId) || instrData?.origin?.trnBgo?.batchId || null, instructionTrnId: instrRef.id }
+      ? { batchId: text(trnBgoCtx?.batchId) || instrData?.origin?.trnBgo?.batchId || instrData?.bgo?.batchId || instrData?.origin?.bgoBatchId || null, instructionTrnId: instrRef.id }
       : null;
     const payload = buildLifecycleNoAccess({ data: targetTrnId === trnId ? data : { ...data, id: targetTrnId }, astDoc, premise, erf: erfSnap.data(), actor, now, existing: null,
       serviceProvider: spId ? { id: spId, name: serviceProviderName(spSnap?.data()) } : {},
