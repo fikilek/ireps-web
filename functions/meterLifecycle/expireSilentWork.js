@@ -206,6 +206,9 @@ export async function expireOne({ db, job, nowMs, now }) {
 
     const astRef = astId ? db.collection("asts").doc(astId) : null;
     const astSnap = astRef ? await tx.get(astRef) : null;
+    const trnBgoBatchId = text(data?.origin?.trnBgo?.batchId);
+    const batchRef = trnBgoBatchId ? db.collection("tc_uploads").doc(trnBgoBatchId) : null;
+    const batchSnap = batchRef ? await tx.get(batchRef) : null;
 
     tx.update(job.ref, buildExpiryPatch({ now }));
 
@@ -238,6 +241,29 @@ export async function expireOne({ db, job, nowMs, now }) {
           "metadata.updatedByUser": EXPIRY_ACTOR.name,
         });
       }
+    }
+
+    if (batchSnap?.exists && batchSnap.data()?.workflow?.state === TRN_STATES.ISSUED) {
+      tx.update(batchRef, {
+        "workflow.state": "READY_FOR_ALLOCATION",
+        "workflow.acceptedAt": null,
+        "workflow.expiredAt": now,
+        "workflow.returnedToCreatedAt": now,
+        "assignment.targets": [],
+        "bgo.releaseState": null,
+        "bgo.targetId": null,
+        bgoStatus: "READY_FOR_ALLOCATION",
+        "metadata.updatedAt": now,
+        "metadata.updatedByUid": EXPIRY_ACTOR.uid,
+        "metadata.updatedByUser": EXPIRY_ACTOR.name,
+      });
+      tx.set(batchRef.collection("history").doc(), {
+        event: EXPIRY_EVENT,
+        workflowState: "READY_FOR_ALLOCATION",
+        at: now,
+        actor: { uid: EXPIRY_ACTOR.uid, name: EXPIRY_ACTOR.name },
+        note: "Batch returned to READY_FOR_ALLOCATION after 72-hour acceptance expiry.",
+      });
     }
 
     return { trnId: job.trnId, done: true, astId: astId || "NAv", ageMs };
