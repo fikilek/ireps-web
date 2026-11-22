@@ -20,6 +20,7 @@ export function fieldSubmitter(trn = {}) {
 export function qaEligibility(trn = {}) {
   const stage = qaText(trn.workflow?.state).toUpperCase();
   const access = qaText(trn.accessData?.access?.hasAccess).toLowerCase();
+  if (access === "no" && !(trn.accessData?.trnType === "METER_READING" && String(trn.meterReading?.reading ?? "").trim())) return { eligible: false, label: "No Access visit recorded; operation outstanding" };
   if (stage === "DELETED") return { eligible: false, label: "Deleted" };
   if (stage && !["COMPLETED", "QA FAIL", "QA PASS"].includes(stage)) return { eligible: false, label: "Awaiting submission" };
   if (!qaText(trn.accessData?.trnType)) return { eligible: false, label: "Transaction type unavailable" };

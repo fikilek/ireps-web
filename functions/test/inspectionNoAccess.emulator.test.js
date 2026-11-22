@@ -71,11 +71,11 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.ok(concurrent.every((result) => result.success));
     assert.equal((await db.doc("premises/P1").get()).data().noAccessTrnIds.filter((id) => id === "CONCURRENT").length, 1);
   });
-  await t.test("office instruction keeps ID, assignment and original creation; IN_PROGRESS and team member execution work", async () => {
-    await db.doc("teams/TEAM1").set({ memberUids: ["U1"] });
+  await t.test("office instruction stays outstanding and preserves assignment while a separate visit is recorded", async () => {
+    await db.doc("teams/TEAM1").set({ memberUids: ["U1"], scope: { memberUserIds: ["U1"] } });
     const instruction = { id: "OFFICE1", accessData: { trnType: "METER_INSPECTION", premise: { id: "P1" } },
       ast: { astData: { astId: "A1" } }, origin: { channel: "OFFICE", source: "WMS" },
-      workflow: { state: "IN_PROGRESS" }, assignment: { targets: [{ type: "TEAM", id: "TEAM1", name: "Team One" }], instruction: { text: "Inspect" } },
+      workflow: { state: "IN_PROGRESS" }, assignment: { targets: [{ type: "TEAM", id: "TEAM1", name: "Team One" }], instruction: { code: "METER_INSPECTION", text: "Inspect" } },
       metadata: { createdAt: "2026-09-01T00:00:00.000Z", createdByUid: "M1", createdByUser: "Manager" }, inspection: { stale: true }, executionOutcome: { outcome: "SUCCESS" } };
     await db.doc("trns/OFFICE1").set(instruction);
     await db.doc("asts/A1").update({ trnActiveLifecycle: { trnId: "OFFICE1" } });
@@ -88,11 +88,13 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     assert.equal(trn.origin.channel, "OFFICE");
     assert.equal(trn.metadata.createdAt, instruction.metadata.createdAt);
     assert.equal(trn.metadata.createdByUid, "M1");
-    assert.equal(trn.metadata.createdOnDeviceByUid, "U1");
-    assert.equal(trn.workflow.state, "COMPLETED");
-    assert.equal(trn.inspection, undefined);
-    assert.equal(trn.executionOutcome, undefined);
-    assert.deepEqual(physicalAsset((await db.doc("asts/A1").get()).data()), physicalAsset(asset));
+    assert.equal(trn.workflow.state, "ACCEPTED");
+    assert.equal(trn.noAccessCount,1);
+    assert.equal(trn.noAccessTrnIds.length,1);
+    const visit=(await db.doc(`trns/${trn.noAccessTrnIds[0]}`).get()).data();
+    assert.equal(visit.metadata.createdOnDeviceByUid,"U1");
+    assert.equal(visit.accessData.access.hasAccess,"no");
+    assert.equal((await db.doc("asts/A1").get()).data().trnActiveLifecycle.trnId,"OFFICE1");
     assert.equal((await send(payload)).idempotent, true);
     assert.equal((await db.collection("trns/OFFICE1/history").get()).size, 1);
   });
@@ -141,7 +143,7 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     await db.doc("trns/NOT_YOURS").delete();
     const at = "2026-10-01T10:00:00.000Z";
     const payload = {
-      id: "ACCESS_PROOF", origin: { channel: "FIELD" }, status: { state: "DISCONNECTED" },
+      id: "OFFICE1", instructionTrnId: "OFFICE1", assignment: (await db.doc("trns/OFFICE1").get()).data().assignment, origin: { channel: "OFFICE", source: "WMS" }, status: { state: "DISCONNECTED" },
       accessData: { trnType: "METER_INSPECTION", access: { hasAccess: "yes" }, premise: { id: "P1" }, erfId: "E1" },
       ast: { astData: { astId: "A1" } }, metadata: { createdOnDevice: at, updatedOnDevice: at },
       media: ["astNoPhoto", "astCbPhoto", "keypadPhoto"].map((tag) => ({ tag, url: `https://example.test/${tag}.jpg` })),
@@ -152,12 +154,17 @@ test("shared phone payload through the real lifecycle callable and Firestore tra
     };
     const result = await send(payload);
     assert.equal(result.success, true, JSON.stringify(result));
-    const proof = (await db.doc("trns/ACCESS_PROOF").get()).data();
+    const proof = (await db.doc("trns/OFFICE1").get()).data();
     assert.equal(proof.metadata.createdOnDevice, at);
     const visits = await db.collection("trns").where("accessData.premise.id", "==", "P1").get();
     const { groups } = deriveNoAccessGroups(visits.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
     assert.equal(groups[0].status, "CLOSED");
-    assert.equal(groups[0].closingProof.trnId, "ACCESS_PROOF");
+    assert.equal(groups[0].closingProof.trnId, "OFFICE1");
+    assert.equal(proof.workflow.state,"COMPLETED");
+    assert.equal(proof.noAccessCount,1);
+    assert.equal(proof.noAccessTrnIds.length,1);
+    assert.equal(proof.assignment.targets[0].id,"TEAM1");
+    assert.equal((await db.doc("asts/A1").get()).data().trnActiveLifecycle,undefined);
   });
   await t.test("reconciliation restores missing links, removes stale/deleted links and supports read-only assessment", async () => {
     await db.doc("premises/P1").update({ noAccessTrnIds: ["MISSING_TRN"] });

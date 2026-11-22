@@ -1,3 +1,4 @@
+import { deriveBulkExecutionOutcome } from "../../functions/tcUploads/bulkPolicy.js";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
@@ -94,6 +95,9 @@ function getExecutionOutcome(data = {}) {
 
   if (normalized !== "NAv") return normalized;
 
+  const derived = deriveBulkExecutionOutcome(data);
+  if (derived) return derived.outcome;
+
   const hasAccess = data.accessData?.access?.hasAccess;
 
   if (String(hasAccess || "").trim().toLowerCase() === "no") {
@@ -111,7 +115,7 @@ function getOutcomeSuccess(data = {}) {
   const outcome = String(getExecutionOutcome(data) || "").trim().toUpperCase();
   if (!hasMeaningfulValue(outcome)) return null;
 
-  return outcome === "SUCCESS";
+  return ["SUCCESS", "SUCCESSFUL_READING"].includes(outcome);
 }
 
 /**

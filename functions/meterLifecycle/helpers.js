@@ -909,7 +909,7 @@ export function sanitizeMeterReading(
   }
 
   return {
-    reading: isPrepaidMeter ? "" : String(meterReading?.reading || "").trim(),
+    reading: isPrepaidMeter ? "" : String(meterReading?.reading ?? "").trim(),
     tokenReading: isPrepaidMeter
       ? String(meterReading?.tokenReading || "").trim()
       : "",
@@ -925,7 +925,7 @@ function getMeterReadingPayload(data = {}) {
 }
 
 function getMeterReadingValue(data = {}) {
-  return String(getMeterReadingPayload(data)?.reading || "").trim();
+  return String(getMeterReadingPayload(data)?.reading ?? "").trim();
 }
 
 function getMeterReadingTokenValue(data = {}) {
@@ -1195,7 +1195,7 @@ export function validateMeterReading({ data, astDoc, actorUid = "NAv", actorName
   const meterType = getAstMeterType(astDoc, data);
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
-  const noAccess = isNoAccessExecution(data);
+  const noAccess = isNoAccessExecution(data) && !getMeterReadingValue(data);
   const noAccessReason = getNoAccessReason(data);
 
   const instructionText = String(
@@ -1302,7 +1302,7 @@ export function validateMeterReading({ data, astDoc, actorUid = "NAv", actorName
     };
   }
 
-  if (reading && !isNumericReading(reading)) {
+  if (reading && !/^-?\d+(\.\d+)?$/.test(reading)) {
     return {
       ok: false,
       code: "INVALID_METER_READING",
@@ -2579,7 +2579,7 @@ export function buildLifecycleTrnPayload({
       trnType === "METER_READING"
         ? sanitizeMeterReading(data?.meterReading || {}, {
             isPrepaidMeter,
-            noAccess,
+            noAccess: noAccess && !getMeterReadingValue(data),
           })
         : undefined,
 

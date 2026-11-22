@@ -1,4 +1,6 @@
-import test, { beforeEach, after } from "node:test";
+import nodeTest, { beforeEach, after } from "node:test";
+// Each case retains the 90-second deadline; the whole file contains many cases.
+const test = (name, fn) => nodeTest(name, { timeout: 90000 }, fn);
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { initializeApp, deleteApp } from "firebase-admin/app";

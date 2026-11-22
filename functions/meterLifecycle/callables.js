@@ -3,6 +3,7 @@ import { requireActiveRoles } from "../auth/authority.js";
 import { acceptedSubmission } from "../qa/submissionReceipt.js";
 import { workflowState as canonicalWorkflowState } from "../qa/model.js";
 import { canMove, currentState } from "./trnStateMachine.js";
+import { capturedReading, operationObjectiveAchieved } from "./operationCompletion.js";
 import { recordLifecycleNoAccess } from "../noAccess/recordLifecycleNoAccess.js";
 import { meterCountKeyForTrnType, outcomeMeansWorkWasDone } from "../registration/meterCounts.js";
 import { recordRefusedSubmission } from "../registration/refusedSubmissions.js";
@@ -584,7 +585,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       }
     }
 
-    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no") {
+    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no" && !(trnType === "METER_READING" && capturedReading(data))) {
       try {
         return await recordLifecycleNoAccess({ db, data, actor: { uid: actorUid, name: actorName }, now, isOffice: isWmsLifecycleExecution });
       } catch (error) {
@@ -881,6 +882,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
           return;
         }
 
+        if (!operationObjectiveAchieved({trnType, data, validation: actionCheck})) {
+          responsePayload = buildFailureResult("OPERATION_OBJECTIVE_NOT_ACHIEVED", "The required operation has not been achieved. This instruction remains outstanding.", {trnId, trnType, astId});
+          return;
+        }
         const statusAfter = actionCheck.nextAstState;
 
         const cleanExecution = buildLifecycleTrnPayload({
@@ -951,7 +956,7 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
 
         const completedAccessBlock = withResolvedNoAccessAccessBlock(
           cleanExecution?.accessData?.access || {
-            hasAccess: "yes",
+            hasAccess: trnType === "METER_READING" ? data.accessData.access.hasAccess : "yes",
             reason: "NAv",
           },
           executionOutcome,
@@ -1219,6 +1224,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
         return;
       }
 
+      if (!operationObjectiveAchieved({trnType, data, validation: actionCheck})) {
+        responsePayload = buildFailureResult("OPERATION_OBJECTIVE_NOT_ACHIEVED", "The required operation has not been achieved. The work is not complete.", {trnId, trnType, astId});
+        return;
+      }
       const statusAfter = actionCheck.nextAstState;
 
       const cleanTrn = buildLifecycleTrnPayload({

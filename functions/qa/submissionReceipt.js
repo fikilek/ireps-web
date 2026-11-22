@@ -16,7 +16,8 @@ const subset = (input, saved) => {
 // No new receipt storage: compare the accepted capture or its protected version.
 // Missing/transformed facts that cannot prove the operation fail closed, not success.
 export function matchesSubmission(snapshot, input, uid) {
-  if (!qaEligibility(snapshot).eligible) return false;
+  const recordedVisit = snapshot.accessData?.access?.hasAccess === "no" && isSubmittedState(snapshot.workflow?.state);
+  if (!recordedVisit && !qaEligibility(snapshot).eligible) return false;
   const captured = input.metadata?.createdOnDevice;
   if (!captured || !equal(captured, snapshot.metadata?.createdOnDevice)) return false;
   const author = qaText(snapshot.metadata?.createdOnDeviceByUid || snapshot.workflow?.completedByUid);

@@ -83,7 +83,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     let targetTrnRef = trnRef;
     let instrRef = trnBgoCtx ? db.doc(`trns/${text(trnBgoCtx.instructionTrnId)}`) : null;
     let instrSnap = instrRef ? await tx.get(instrRef) : null;
-    if (isTrnBgoInstruction) {
+    if (isOffice) {
       const stampSource = text(data?.metadata?.updatedOnDevice || data?.metadata?.createdOnDevice || now);
       const naSuffix = createHash("sha256").update(`${trnId}:${actor.uid}:${stampSource}`).digest("hex").slice(0, 10).toUpperCase();
       targetTrnId = `${trnId}_NA_${naSuffix}`;
@@ -102,7 +102,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     if (!premiseSnap.exists) fail("PREMISE_NOT_FOUND", "The premise is not on the server yet. This visit can be retried after the premise is saved.");
     if (!erfSnap.exists) fail("NO_ACCESS_ERF_NOT_FOUND", "The ERF record is missing. Ask the office to correct this work item.");
     let instrData = null;
-    if (isTrnBgoInstruction) {
+    if (isOffice) {
       instrData = existing;
     } else if (trnBgoCtx) {
       if (!instrSnap?.exists) fail("INSTRUCTION_TRN_NOT_FOUND", "The TRN BGO work item no longer exists. Refresh your work orders.");
@@ -148,13 +148,13 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     const trnBgoNoAccess = (isTrnBgoInstruction || trnBgoCtx) && instrRef && instrData
       ? { batchId: text(trnBgoCtx?.batchId) || instrData?.origin?.trnBgo?.batchId || null, instructionTrnId: instrRef.id }
       : null;
-    const payload = buildLifecycleNoAccess({ data: targetTrnId === trnId ? data : { ...data, id: targetTrnId }, astDoc, premise, erf: erfSnap.data(), actor, now, existing: isOffice && !isTrnBgoInstruction ? existing : null,
+    const payload = buildLifecycleNoAccess({ data: targetTrnId === trnId ? data : { ...data, id: targetTrnId }, astDoc, premise, erf: erfSnap.data(), actor, now, existing: null,
       serviceProvider: spId ? { id: spId, name: serviceProviderName(spSnap?.data()) } : {},
       batch: existing?.origin?.targetedBatch || recognisedBatchContext({ decision, erfId: access.erfId, premiseId }),
       trnBgoNoAccess });
     tx.set(targetTrnRef, payload);
     tx.update(premiseRef, { noAccessTrnIds: FieldValue.arrayUnion(targetTrnId), ...noAccessPremiseMetadata(payload.metadata, premise.metadata) });
-    if (trnBgoNoAccess && instrRef && instrData) {
+    if (instrRef && instrData) {
       const existingNaIds = Array.isArray(instrData.noAccessTrnIds) ? instrData.noAccessTrnIds : [];
       const nextNaCount = existingNaIds.includes(targetTrnId) ? existingNaIds.length : existingNaIds.length + 1;
       const instrPatch = {
@@ -165,7 +165,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
         "metadata.updatedByUser": actor.name || "NAv",
       };
       if (currentState(instrData.workflow?.state) === "ACCEPTED") {
-        instrPatch["workflow.state"] = "IN_PROGRESS";
+        instrPatch["workflow.state"] = isTrnBgoInstruction ? "IN_PROGRESS" : "ACCEPTED";
         instrPatch["workflow.executionStartedAt"] = instrData.workflow?.executionStartedAt || now;
         instrPatch["workflow.executionStartedByUid"] = instrData.workflow?.executionStartedByUid || actor.uid || null;
         instrPatch["workflow.executionStartedByUser"] = instrData.workflow?.executionStartedByUser || actor.name || null;
@@ -183,10 +183,9 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
     // instruction already exists as a document when its No Access completes, so
     // existence alone is not the test: the test is whether this document was
     // ALREADY a No Access.
-    const alreadyRecorded = isTrnBgoInstruction ? false : existing?.accessData?.access?.hasAccess === "no";
+    const alreadyRecorded = isOffice ? false : existing?.accessData?.access?.hasAccess === "no";
     const astPatch = alreadyRecorded ? {} : { "counts.noAccess": FieldValue.increment(1) };
-    // Completing office workflow releases the instruction lock, never a physical meter field.
-    if (isOffice && !isTrnBgoInstruction && astDoc.trnActiveLifecycle?.trnId === trnId) astPatch.trnActiveLifecycle = FieldValue.delete();
+    // OC-R002: recording a failed visit never releases the outstanding instruction reservation.
     // UI-R008: a write that changes a document stamps it. Raising the count
     // without this left the meter claiming it had last changed an hour before
     // it had — and the registry rebuild tests that stamp first, so the copy was
@@ -198,7 +197,7 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
       astPatch["metadata.updatedByUser"] = actor.name || "NAv";
       tx.update(astRef, astPatch);
     }
-    if (isOffice && !isTrnBgoInstruction) tx.set(trnRef.collection("history").doc(), { event: "COMPLETED", outcome: "NO_ACCESS", trnId,
+    if (isOffice) tx.set(trnRef.collection("history").doc(), { event: "NO_ACCESS_RECORDED", outcome: "NO_ACCESS", trnId, visitTrnId: targetTrnId,
       trnType: access.trnType, astId, actorUid: actor.uid, actorName: actor.name, at: now });
     return { success: true, code: "OK", trnId: targetTrnId, workflowState: "COMPLETED", message: "No Access recorded. Meter state unchanged.",
       astStatusChanged: false, astDataChanged: false, executionOutcome: { outcome: "NO_ACCESS", success: false } };

@@ -40,8 +40,16 @@ test("actual bulk coordinator: atomic 200-row creation, source lineage, retry an
  const row=(await db.doc(`tc_rows/${parent.rowIds[0]}`).get()).data();assert.equal(row.input.meterPhase,"");assert.deepEqual(row.geofenceRefs,[]);assert.equal(row.input.actionReason,undefined);assert.equal(row.input.meterNo,rows[0].meterNo);
  await t.test("another upload cannot create an active same-operation job",async()=>{
   const other={...source,id:digest(`${uid}:other`)};await db.doc(`tc_source_files/${other.id}`).set(other);
-  await assert.rejects(createBulkGraph({db,uid,data:{...data,selectedRowNos:["1"]},source:other,csv}),/already exists/);
-  assert.equal((await db.doc(`tc_source_files/${other.id}`).get()).data().committed,undefined);
+  const fallback=await createBulkGraph({db,uid,data:{...data,selectedRowNos:["1"]},source:other,csv});
+  const inspectionParent=(await db.doc(`tc_uploads/${fallback.batches[0].tcId}`).get()).data();
+  const inspection=(await db.doc(`trns/${inspectionParent.trnIds[0]}`).get()).data();
+  assert.equal(inspection.accessData.trnType,"METER_INSPECTION");
+  assert.equal(inspection.workflow.state,"CREATED");
+  const activeDcn=await db.collection("trns").where("ast.astData.astId","==",trn.ast.astData.astId).where("accessData.trnType","==",trnType).where("workflow.state","in",["CREATED","ISSUED","ACCEPTED","IN_PROGRESS"]).get();
+  assert.equal(activeDcn.size,1,"fallback must not duplicate the disconnection");
+  const third={...source,id:digest(`${uid}:third`)};await db.doc(`tc_source_files/${third.id}`).set(third);
+  await assert.rejects(createBulkGraph({db,uid,data:{...data,selectedRowNos:["1"]},source:third,csv}),/already exists/);
+  assert.equal((await db.doc(`tc_source_files/${third.id}`).get()).data().committed,undefined);
  });
  await t.test("MD policy allocates fifteen TC parents and current TEAM member accepts existing children without a business reason",async()=>{
   const teamId=`TEAM_${stamp}`,worker=`FIELD_${stamp}`;

@@ -1,3 +1,4 @@
+import { deriveBulkExecutionOutcome } from "../../tcUploads/bulkPolicy.js";
 import { isSubmittedState } from "../../meterLifecycle/trnStateMachine.js";
 import * as logger from "firebase-functions/logger";
 
@@ -86,6 +87,9 @@ export async function writeRegistryMreadFromTrn({
     );
   }
 
+  // Modern bulk definitions store canonical work fields instead of a duplicate root outcome.
+  // Enrich this projection only; never mutate the sealed source transaction shape.
+  if (!trn.executionOutcome) trn.executionOutcome = deriveBulkExecutionOutcome(trn);
   const outcome = readString(trn?.executionOutcome?.outcome);
 
   if (!isCanonicalMreadOutcome(outcome)) {

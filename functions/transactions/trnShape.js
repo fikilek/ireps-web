@@ -65,6 +65,9 @@ export const TRN_DECLARED_ROOT_KEYS = Object.freeze([
   // nobody asked.
   "fieldComment",
   "qa",
+  // OC-R002: existing append-only instruction attempt history survives completion.
+  "noAccessTrnIds",
+  "noAccessCount",
   ...TRN_ROOT_OBJECT_KEYS,
   // The one property named for the work (TR-R001). A no access carries none of them.
   "commissioning",

@@ -37,9 +37,31 @@ test('all five created bulk instructions allocate, accept and execute real No Ac
   assert.equal((await db.doc(`trns/${id}`).get()).data().workflow.state,'ACCEPTED');
   await db.doc(`users/${worker}`).update({'access.workbases':[lmPcode]});
   const result=await send();assert.equal(result.success,true,JSON.stringify(result));
-  const saved=(await db.doc(`trns/${id}`).get()).data();assert.equal(saved.workflow.state,'COMPLETED');assert.equal(saved.origin.trnBgo.batchId,batchId);assert.equal(saved.assignment.instruction.reason,undefined);
+  const saved=(await db.doc(`trns/${id}`).get()).data();assert.equal(saved.workflow.state,'IN_PROGRESS');assert.equal(saved.noAccessCount,1);assert.equal(saved.noAccessTrnIds.length,1);
+  const visit=(await db.doc(`trns/${saved.noAccessTrnIds[0]}`).get()).data();assert.equal(visit.accessData.access.hasAccess,'no');assert.equal(saved.workflow.completedAt,null);
+  assert.equal((await db.doc(`asts/${astId}`).get()).data().trnActiveLifecycle.trnId,id);assert.equal(saved.origin.trnBgo.batchId,batchId);assert.equal(saved.assignment.instruction.reason,undefined);
   assert.ok(Object.keys(saved).every(key=>TRN_DECLARED_ROOT_KEYS.includes(key)));
-  assert.equal((await send()).idempotent,true);
+  assert.equal((await send()).idempotent,true);assert.equal((await db.doc(`trns/${id}`).get()).data().noAccessCount,1);
   assert.equal((await db.doc(`asts/${astId}`).get()).data().status.state,ast.status.state);
+  const next=structuredClone(payload);next.metadata.createdOnDevice=new Date(Date.parse(payload.metadata.createdOnDevice)+1000).toISOString();next.metadata.updatedOnDevice=next.metadata.createdOnDevice;
+  const second=await onMeterLifecycleTrnCallable.run({data:next,auth:{uid:worker,token:{role:'FWR',name:'Worker'}}});assert.equal(second.success,true,JSON.stringify(second));
+  const attempted=(await db.doc(`trns/${id}`).get()).data();assert.equal(attempted.noAccessCount,2);assert.equal(attempted.noAccessTrnIds.length,2);assert.equal(attempted.workflow.state,'IN_PROGRESS');
+  if(trnType==='METER_READING') {
+   const work={...structuredClone(payload),meterReading:{reading:'-12',readingAt:new Date().toISOString(),readingGps:{lat:-28,lng:30}},media:[{tag:'meterReadingEvidence',url:'https://example.test/reading.jpg'}]};
+   const done=await onMeterLifecycleTrnCallable.run({data:work,auth:{uid:worker,token:{role:'FWR',name:'Worker'}}});assert.equal(done.success,true,JSON.stringify(done));
+   const completed=(await db.doc(`trns/${id}`).get()).data();assert.equal(completed.workflow.state,'COMPLETED');assert.equal(completed.accessData.access.hasAccess,'no');assert.equal(completed.meterReading.reading,'-12');assert.deepEqual(completed.noAccessTrnIds,attempted.noAccessTrnIds);
+   assert.equal((await db.doc(`registry_mread/${id}`).get()).exists,true,'completed reading must reach its registry');
+  }
+  if(trnType==='METER_DISCONNECTION') {
+   const work={...structuredClone(payload),accessData:{...payload.accessData,access:{hasAccess:'yes'}},media:[],disconnection:{level:{code:'LEVEL_1_CB_ONLY',label:'Level 1 - Flip circuit breaker only'}}};
+   const submit=()=>onMeterLifecycleTrnCallable.run({data:structuredClone(work),auth:{uid:worker,token:{role:'FWR',name:'Worker'}}});
+   assert.equal((await submit()).success,false,'a form without disconnection evidence cannot complete');
+   assert.equal((await db.doc(`trns/${id}`).get()).data().workflow.state,'IN_PROGRESS');
+   work.media=[{tag:'disconnectionLevelEvidence',url:'https://example.test/disconnected.jpg'}];
+   const done=await submit();assert.equal(done.success,true,JSON.stringify(done));
+   const completed=(await db.doc(`trns/${id}`).get()).data();assert.equal(completed.workflow.state,'COMPLETED');assert.deepEqual(completed.noAccessTrnIds,attempted.noAccessTrnIds);assert.equal(completed.noAccessCount,2);
+   assert.equal((await db.doc(`asts/${astId}`).get()).data().status.state,'DISCONNECTED');
+  }
+
  });
 });
