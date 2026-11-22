@@ -57,6 +57,9 @@ export async function allocateTcBatches({db,request}) {
      const allocMove=canMoveAs("CREATED","allocate",actor.role);
      if(!allocMove.ok)denied(allocMove.message||"Batch is not ready for allocation.");
      children.push({child,trn,to:allocMove.to});
+    } else if (!target && trnState === "CREATED") {
+     if(trn.workflow?.completedAt||trn.accessData?.access?.hasAccess==="no")denied("Field execution has already occurred.");
+     children.push({child,trn,to:"CREATED",skipChildWrite:true});
     } else {
      const move=canMoveAs(trnState,target?"allocate":"cancel",actor.role);
      if(!move.ok || (!target&&(trn.workflow?.completedAt||trn.accessData?.access?.hasAccess==="no")))denied(move.message||"Field execution has already occurred.");
@@ -68,7 +71,8 @@ export async function allocateTcBatches({db,request}) {
    const n=notice.data();
    if(n.type==="BGO_BATCH_ISSUED"&&n.delivery?.status!=="DELIVERED"&&!n.delivery?.deliveredAt)tx.update(notice.ref,{"delivery.status":"CANCELLED","delivery.cancelledAt":now,"delivery.cancelledByUid":uid,"delivery.cancelReason":"TRN BGO batch unallocated"});
   }
-  for(const {child,trn,to} of children) {
+  for(const {child,trn,to,skipChildWrite} of children) {
+   if(skipChildWrite)continue;
    tx.update(child.ref,{"workflow.state":to,"workflow.issuedAt":target?now:null,"workflow.issuedByUid":target?uid:null,"workflow.acceptedAt":null,"assignment.acceptedRejectedAt":null,"assignment.acceptedRejectedUid":null,"assignment.targets":target?[target]:[],"metadata.updatedAt":now,"metadata.updatedByUid":uid,"metadata.updatedByUser":actor.name});
    tx.update(db.doc(`asts/${trn.ast.astData.astId}`),{trnActiveLifecycle:buildTrnActiveLifecycle({trnId:child.id,trnType:trn.accessData.trnType,workflowState:to,assignedTo:target||{},updatedAt:now,updatedByUser:actor.name})});
    tx.create(child.ref.collection("history").doc(),{event:target?"ISSUED":"CANCELLED",workflowState:to,at:now,actorUid:uid,actorName:actor.name,reason:data.reason||null});
