@@ -11,6 +11,6 @@ setGlobalOptions({
   timeoutSeconds: 60,
   concurrency: 80,
   minInstances: 0,
-  maxInstances: 20,
+  maxInstances: 10,
   preserveExternalChanges: false,
 });

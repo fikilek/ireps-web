@@ -55,7 +55,7 @@ test("Batch Stats keeps its bounded high-memory single-request profile", () => {
   assert.equal(actual.timeoutSeconds, 300);
   assert.equal(actual.concurrency, 1);
   assert.equal(actual.maxInstances, 5);
-  assert.equal(Object.values(stack.endpoints).filter(e => e.maxInstances === 20).length, 125);
+  assert.equal(Object.values(stack.endpoints).filter(e => e.maxInstances === 10).length, 125);
 });
 
 test("Node runtime remains the approved Node.js 22 engine", () => {
