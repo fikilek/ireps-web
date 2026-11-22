@@ -6,7 +6,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "assessSalesTargetedBatchCallable": {
     "region": "us-central1",
@@ -15,7 +15,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "authorizeFieldWorker": {
     "region": "us-central1",
@@ -24,7 +24,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "changeUserEmail": {
     "region": "us-central1",
@@ -33,7 +33,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "checkBatchWorkCallable": {
     "region": "us-central1",
@@ -42,7 +42,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "createAdminUser": {
     "region": "us-central1",
@@ -51,7 +51,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "createGeoFence": {
     "region": "us-central1",
@@ -60,7 +60,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "createServiceProvider": {
     "region": "us-central1",
@@ -69,7 +69,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "createTeam": {
     "region": "us-central1",
@@ -78,7 +78,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "deleteGeneratedReportCallable": {
     "region": "us-central1",
@@ -87,7 +87,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "deleteTeam": {
     "region": "us-central1",
@@ -96,7 +96,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "finalizeGeneratedReportCallable": {
     "region": "us-central1",
@@ -105,7 +105,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "generateGeneralMonthlyReportCallable": {
     "region": "us-central1",
@@ -114,7 +114,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "generateMreadStaging": {
     "region": "us-central1",
@@ -123,7 +123,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getBatchStatsCallable": {
     "region": "us-central1",
@@ -141,7 +141,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getFieldWorkSummaryCallable": {
     "region": "us-central1",
@@ -150,7 +150,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getGeneratedReportDownloadCallable": {
     "region": "us-central1",
@@ -159,7 +159,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getPremiseQaReview": {
     "region": "us-central1",
@@ -168,7 +168,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getQuickTrnMediaCallable": {
     "region": "us-central1",
@@ -177,7 +177,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getSalesGovernedMonths": {
     "region": "us-central1",
@@ -186,7 +186,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getTargetedBatchRowsCallable": {
     "region": "us-central1",
@@ -195,7 +195,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getTrnQaAmendment": {
     "region": "us-central1",
@@ -204,7 +204,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "getTrnQaReview": {
     "region": "us-central1",
@@ -213,7 +213,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "inviteAdminUser": {
     "region": "us-central1",
@@ -222,7 +222,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "inviteManagerUser": {
     "region": "us-central1",
@@ -231,7 +231,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "inviteSupervisorUser": {
     "region": "us-central1",
@@ -240,7 +240,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "listGeneratedReportsCallable": {
     "region": "us-central1",
@@ -249,7 +249,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "listMreadStagingCycles": {
     "region": "us-central1",
@@ -258,7 +258,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "listMreadStagingRows": {
     "region": "us-central1",
@@ -267,7 +267,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "listMreadStagingSessions": {
     "region": "us-central1",
@@ -276,7 +276,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "listSignupServiceProviders": {
     "region": "us-central1",
@@ -285,7 +285,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "listTrnQaAmendments": {
     "region": "us-central1",
@@ -294,7 +294,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "markTrnQaNoticeRead": {
     "region": "us-central1",
@@ -303,7 +303,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAcceptRejectBgoBatchCallable": {
     "region": "us-central1",
@@ -312,7 +312,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAcceptRejectLifecycleInstructionCallable": {
     "region": "us-central1",
@@ -321,7 +321,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAcceptRejectTargetedBatchCallable": {
     "region": "us-central1",
@@ -330,7 +330,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAccountMasterWritten": {
     "region": "us-central1",
@@ -339,7 +339,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAllocateMdBgoBatchesTogetherCallable": {
     "region": "us-central1",
@@ -348,7 +348,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAllocateTargetedBatchCallable": {
     "region": "us-central1",
@@ -357,7 +357,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAllocateTargetedBatchesTogetherCallable": {
     "region": "us-central1",
@@ -366,7 +366,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onAllocateTrnBgoWardBatchesCallable": {
     "region": "us-central1",
@@ -375,7 +375,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onBgoChildTrnExecutionSummaryWritten": {
     "region": "us-central1",
@@ -384,7 +384,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCheckMeterRegistrationCallable": {
     "region": "us-central1",
@@ -393,7 +393,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCreateAccountDataCallable": {
     "region": "us-central1",
@@ -402,7 +402,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCreateBgoCallable": {
     "region": "us-central1",
@@ -411,7 +411,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCreateMeterCommissioningCallable": {
     "region": "us-central1",
@@ -420,7 +420,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCreateMeterLifecycleInstructionCallable": {
     "region": "us-central1",
@@ -429,7 +429,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCreateTargetedBatchCallable": {
     "region": "us-central1",
@@ -438,7 +438,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onCreateTrnBgoWardBatchesCallable": {
     "region": "us-central1",
@@ -447,7 +447,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onDeleteTargetedBatchCallable": {
     "region": "us-central1",
@@ -456,7 +456,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onDeleteTcUploadCallable": {
     "region": "us-central1",
@@ -465,7 +465,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onDeleteUnacceptedBgoCallable": {
     "region": "us-central1",
@@ -474,7 +474,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onErfWardCountsWritten": {
     "region": "us-central1",
@@ -483,7 +483,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onFieldAccountDataWritten": {
     "region": "us-central1",
@@ -492,7 +492,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onGeneratedReportsRetentionCleanup": {
     "region": "us-central1",
@@ -501,7 +501,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onGeoFenceCreated": {
     "region": "us-central1",
@@ -510,7 +510,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onIrepsSelectLookupAdminCallable": {
     "region": "us-central1",
@@ -519,7 +519,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onIrepsSelectOptionsCallable": {
     "region": "us-central1",
@@ -528,7 +528,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onIssuedWorkExpires": {
     "region": "us-central1",
@@ -537,7 +537,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onManageLifecycleInstructionCallable": {
     "region": "us-central1",
@@ -546,7 +546,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterCommissioningTrnCreated": {
     "region": "us-central1",
@@ -555,7 +555,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterCreated": {
     "region": "us-central1",
@@ -564,7 +564,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterDiscoveryCallable": {
     "region": "us-central1",
@@ -573,7 +573,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterDiscoveryCreated": {
     "region": "us-central1",
@@ -582,7 +582,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterInstallationCallable": {
     "region": "us-central1",
@@ -591,7 +591,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterLifecycleTrnCallable": {
     "region": "us-central1",
@@ -600,7 +600,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterMasterUpdated": {
     "region": "us-central1",
@@ -609,7 +609,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterUpdated": {
     "region": "us-central1",
@@ -618,7 +618,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onMeterWardCountsWritten": {
     "region": "us-central1",
@@ -627,7 +627,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onNoAccessDeleted": {
     "region": "us-central1",
@@ -636,7 +636,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onNoAccessRecorded": {
     "region": "us-central1",
@@ -645,7 +645,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onNoAccessUpdated": {
     "region": "us-central1",
@@ -654,7 +654,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onPremiseCreateCallable": {
     "region": "us-central1",
@@ -663,7 +663,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onPremiseCreated": {
     "region": "us-central1",
@@ -672,7 +672,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onPremiseUpdated": {
     "region": "us-central1",
@@ -681,7 +681,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onPremiseWardCountsWritten": {
     "region": "us-central1",
@@ -690,7 +690,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onPrepareTrnBgoSourceCallable": {
     "region": "us-central1",
@@ -699,7 +699,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onPreviewTrnBgoEligibilityCallable": {
     "region": "us-central1",
@@ -708,7 +708,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onQaEmailQueued": {
     "region": "us-central1",
@@ -717,7 +717,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onRefreshTcUploadGeofenceReadinessCallable": {
     "region": "us-central1",
@@ -726,7 +726,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onReverseBgoBatchAcceptanceCallable": {
     "region": "us-central1",
@@ -735,7 +735,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onSalesAllMetersCreated": {
     "region": "us-central1",
@@ -744,7 +744,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onSalesMeterVisibleBatchRow": {
     "region": "us-central1",
@@ -753,7 +753,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onServiceProviderUpdated": {
     "region": "us-central1",
@@ -762,7 +762,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onTakeMeterOutOfBatchCallable": {
     "region": "us-central1",
@@ -771,7 +771,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onTargetedBatchStateRowFollowsSales": {
     "region": "us-central1",
@@ -780,7 +780,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onTrnWardCountsWritten": {
     "region": "us-central1",
@@ -789,7 +789,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onTrnWritten": {
     "region": "us-central1",
@@ -798,7 +798,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onUnallocateMdBgoBatchCallable": {
     "region": "us-central1",
@@ -807,7 +807,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onUnallocateTargetedBatchCallable": {
     "region": "us-central1",
@@ -816,7 +816,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onUploadAndValidateTcCallable": {
     "region": "us-central1",
@@ -825,7 +825,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onValidateTrnBgoStage1Callable": {
     "region": "us-central1",
@@ -834,7 +834,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onWardRegistryJobCreated": {
     "region": "us-central1",
@@ -843,7 +843,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onWardSourceCountsWritten": {
     "region": "us-central1",
@@ -852,7 +852,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "onWorkbaseRegistryJobCreated": {
     "region": "us-central1",
@@ -861,7 +861,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "prepareGeneratedReportCallable": {
     "region": "us-central1",
@@ -870,7 +870,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "readTrnBgoSource": {
     "region": "us-central1",
@@ -879,7 +879,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "rebuildMeterRegistryRowCallable": {
     "region": "us-central1",
@@ -888,7 +888,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "rebuildPremiseRegistryRowCallable": {
     "region": "us-central1",
@@ -897,7 +897,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "rebuildRegistryMreadCallable": {
     "region": "us-central1",
@@ -906,7 +906,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "rebuildRegistryMreadRowCallable": {
     "region": "us-central1",
@@ -915,7 +915,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "rebuildWardRegistryForLmCallable": {
     "region": "us-central1",
@@ -924,7 +924,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "rebuildWorkbaseRegistryRowCallable": {
     "region": "us-central1",
@@ -933,7 +933,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "recoverWardCounts": {
     "region": "us-central1",
@@ -942,7 +942,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "removeTeamMember": {
     "region": "us-central1",
@@ -951,7 +951,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "renameTeam": {
     "region": "us-central1",
@@ -960,7 +960,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "repairRegistrationCallable": {
     "region": "us-central1",
@@ -969,7 +969,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "resolveSalesTargetedBatchCallable": {
     "region": "us-central1",
@@ -978,7 +978,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "retryQaEmails": {
     "region": "us-central1",
@@ -987,7 +987,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "savePremiseCorrection": {
     "region": "us-central1",
@@ -996,7 +996,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "savePremiseQaReview": {
     "region": "us-central1",
@@ -1005,7 +1005,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "saveSalesTargetedBatchGeofenceCallable": {
     "region": "us-central1",
@@ -1014,7 +1014,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "saveTrnQaAmendment": {
     "region": "us-central1",
@@ -1023,7 +1023,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "saveTrnQaReview": {
     "region": "us-central1",
@@ -1032,7 +1032,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "sendGeneratedReportEmailCallable": {
     "region": "us-central1",
@@ -1041,7 +1041,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "signupFieldWorker": {
     "region": "us-central1",
@@ -1050,7 +1050,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "startWardRegistrySyncCallable": {
     "region": "us-central1",
@@ -1059,7 +1059,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "startWorkbaseRegistrySyncCallable": {
     "region": "us-central1",
@@ -1068,7 +1068,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "submitFwrLocationCallable": {
     "region": "us-central1",
@@ -1077,7 +1077,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "submitInformalErfCallable": {
     "region": "us-central1",
@@ -1086,7 +1086,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "syncSignInEmail": {
     "region": "us-central1",
@@ -1095,7 +1095,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "updateFwrMonitoringStatusCallable": {
     "region": "us-central1",
@@ -1104,7 +1104,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "updateGeoFence": {
     "region": "us-central1",
@@ -1113,7 +1113,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "updateServiceProvider": {
     "region": "us-central1",
@@ -1122,7 +1122,7 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   },
   "updateUserCallable": {
     "region": "us-central1",
@@ -1131,6 +1131,6 @@
     "cpu": 1,
     "concurrency": 80,
     "minInstances": 0,
-    "maxInstances": 20
+    "maxInstances": 10
   }
 }
