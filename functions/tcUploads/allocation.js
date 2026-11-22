@@ -86,6 +86,18 @@ export async function allocateTcBatches({db,request}) {
   return {success:true,code:target?"TRN_BGO_BATCHES_ALLOCATED":"TRN_BGO_BATCHES_UNALLOCATED",batchIds:ids,target,message:target?"Ward batches allocated.":"Ward batches unallocated."};
  });
 }
+export function explainChildDecisionBlocker(snap, batchId, action, role) {
+  const t = snap.data();
+  if (!t) return "One or more jobs in this batch no longer exist.";
+  if (t.origin?.trnBgo?.batchId !== batchId) return "One or more jobs no longer belong to this batch.";
+  const move = canMoveAs(t.workflow?.state, action === "ACCEPT" ? "accept" : "reject", role);
+  if (move.ok) return null;
+  if (t.workflow?.state === "CREATED" && t.workflow?.expiredAt) {
+    return "This batch expired because it was not accepted within 72 hours. Ask the office to re-allocate it.";
+  }
+  return `Cannot ${action.toLowerCase()} batch: job ${snap.id} is currently ${t.workflow?.state || "UNKNOWN"}.`;
+}
+
 export async function decideTcBatch({db,request}) {
  const uid=request.auth?.uid,data=request.data||{},id=text(data.batchId||data.id);
  if(!uid||!id||id.includes("/")||!["ACCEPT","REJECT"].includes(data.action))denied("Invalid batch decision.");
@@ -107,7 +119,7 @@ export async function decideTcBatch({db,request}) {
   if(p.workflow?.state!=="ISSUED")denied("Batch is not awaiting acceptance.");
   if(data.action==="REJECT"&&!text(data.rejectReason))denied("Record why the batch was rejected.");
   const children=await Promise.all(p.trnIds.map(id=>tx.get(db.doc(`trns/${id}`))));
-  for(const snap of children){const t=snap.data();if(!t||t.origin?.trnBgo?.batchId!==id||!canMoveAs(t.workflow?.state,data.action==="ACCEPT"?"accept":"reject",user.employment.role).ok)denied("One or more children cannot take this decision.");}
+  for(const snap of children){const blocker=explainChildDecisionBlocker(snap,id,data.action,user.employment.role);if(blocker)denied(blocker);}
   for(const snap of children){const t=snap.data(),state=data.action==="ACCEPT"?"ACCEPTED":"CREATED";
    tx.update(snap.ref,{"workflow.state":state,"workflow.acceptedAt":state==="ACCEPTED"?now:null,"assignment.acceptedRejectedAt":now,"assignment.acceptedRejectedUid":uid,"assignment.targets":state==="ACCEPTED"?[target]:[],"metadata.updatedAt":now});
    tx.update(db.doc(`asts/${t.ast.astData.astId}`),{trnActiveLifecycle:buildTrnActiveLifecycle({trnId:snap.id,trnType:t.accessData.trnType,workflowState:state,assignedTo:state==="ACCEPTED"?target:{},updatedAt:now,updatedByUser:uid})});
