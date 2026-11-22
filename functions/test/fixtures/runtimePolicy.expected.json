@@ -1,0 +1,1136 @@
+{
+  "addTeamMember": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "assessSalesTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 180,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "authorizeFieldWorker": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "changeUserEmail": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "checkBatchWorkCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "createAdminUser": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "createGeoFence": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 180,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "createServiceProvider": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "createTeam": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "deleteGeneratedReportCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "deleteTeam": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "finalizeGeneratedReportCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "generateGeneralMonthlyReportCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "generateMreadStaging": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getBatchStatsCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 300,
+    "cpu": 1,
+    "concurrency": 1,
+    "minInstances": 0,
+    "maxInstances": 5
+  },
+  "getElectricityPopulationCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 300,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getFieldWorkSummaryCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getGeneratedReportDownloadCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getPremiseQaReview": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getQuickTrnMediaCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getSalesGovernedMonths": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getTargetedBatchRowsCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getTrnQaAmendment": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "getTrnQaReview": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "inviteAdminUser": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "inviteManagerUser": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "inviteSupervisorUser": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "listGeneratedReportsCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "listMreadStagingCycles": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "listMreadStagingRows": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "listMreadStagingSessions": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "listSignupServiceProviders": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "listTrnQaAmendments": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "markTrnQaNoticeRead": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAcceptRejectBgoBatchCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAcceptRejectLifecycleInstructionCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAcceptRejectTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAccountMasterWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAllocateMdBgoBatchesTogetherCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAllocateTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAllocateTargetedBatchesTogetherCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onAllocateTrnBgoWardBatchesCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onBgoChildTrnExecutionSummaryWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCheckMeterRegistrationCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCreateAccountDataCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCreateBgoCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCreateMeterCommissioningCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCreateMeterLifecycleInstructionCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCreateTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 180,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onCreateTrnBgoWardBatchesCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onDeleteTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onDeleteTcUploadCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onDeleteUnacceptedBgoCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onErfWardCountsWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onFieldAccountDataWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onGeneratedReportsRetentionCleanup": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onGeoFenceCreated": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onIrepsSelectLookupAdminCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onIrepsSelectOptionsCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onIssuedWorkExpires": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onManageLifecycleInstructionCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterCommissioningTrnCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterDiscoveryCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterDiscoveryCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterInstallationCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterLifecycleTrnCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterMasterUpdated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterUpdated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onMeterWardCountsWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onNoAccessDeleted": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onNoAccessRecorded": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onNoAccessUpdated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onPremiseCreateCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onPremiseCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onPremiseUpdated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onPremiseWardCountsWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onPrepareTrnBgoSourceCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onPreviewTrnBgoEligibilityCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onQaEmailQueued": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onRefreshTcUploadGeofenceReadinessCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onReverseBgoBatchAcceptanceCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onSalesAllMetersCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onSalesMeterVisibleBatchRow": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onServiceProviderUpdated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onTakeMeterOutOfBatchCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 300,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onTargetedBatchStateRowFollowsSales": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onTrnWardCountsWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onTrnWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onUnallocateMdBgoBatchCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onUnallocateTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onUploadAndValidateTcCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onValidateTrnBgoStage1Callable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 300,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onWardRegistryJobCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onWardSourceCountsWritten": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "onWorkbaseRegistryJobCreated": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "prepareGeneratedReportCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "readTrnBgoSource": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "rebuildMeterRegistryRowCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "rebuildPremiseRegistryRowCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "rebuildRegistryMreadCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "rebuildRegistryMreadRowCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "rebuildWardRegistryForLmCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "rebuildWorkbaseRegistryRowCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "recoverWardCounts": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "removeTeamMember": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "renameTeam": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "repairRegistrationCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "resolveSalesTargetedBatchCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 540,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "retryQaEmails": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "savePremiseCorrection": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "savePremiseQaReview": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "saveSalesTargetedBatchGeofenceCallable": {
+    "region": "us-central1",
+    "memory": "1GiB",
+    "timeoutSeconds": 180,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "saveTrnQaAmendment": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "saveTrnQaReview": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "sendGeneratedReportEmailCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "signupFieldWorker": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "startWardRegistrySyncCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "startWorkbaseRegistrySyncCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "submitFwrLocationCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "submitInformalErfCallable": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 120,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "syncSignInEmail": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "updateFwrMonitoringStatusCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "updateGeoFence": {
+    "region": "us-central1",
+    "memory": "512MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "updateServiceProvider": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  },
+  "updateUserCallable": {
+    "region": "us-central1",
+    "memory": "256MiB",
+    "timeoutSeconds": 60,
+    "cpu": 1,
+    "concurrency": 80,
+    "minInstances": 0,
+    "maxInstances": 20
+  }
+}
