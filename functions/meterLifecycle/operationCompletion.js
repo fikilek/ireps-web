@@ -9,6 +9,6 @@ export function operationObjectiveAchieved({trnType, data, validation}) {
     METER_COMMISSIONING:"commissioningPassed"};
   const flag = flags[trnType];
   if (!flag || validation[flag] !== true) return false;
-  if (trnType === "METER_READING") return capturedReading(data) !== "";
+  if (trnType === "METER_READING") return capturedReading(data) !== "" && String(data?.accessData?.access?.hasAccess).toLowerCase() === "yes";
   return String(data?.accessData?.access?.hasAccess || "").toLowerCase() === "yes";
 }

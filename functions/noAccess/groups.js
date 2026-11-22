@@ -20,10 +20,14 @@ export function deriveNoAccessGroups(transactions, { cutoff = new Date().toISOSt
       continue;
     }
     if (at > cutoff) continue;
-    if (!byPremise.has(premiseId)) byPremise.set(premiseId, []);
-    byPremise.get(premiseId).push({ trn, at });
+    // A display reading is not proof of physical access, and vice versa.
+    const basis = trn.accessData?.trnType === "METER_READING" ? "READING" : "PHYSICAL";
+    const key = JSON.stringify([premiseId, basis]);
+    if (!byPremise.has(key)) byPremise.set(key, []);
+    byPremise.get(key).push({ trn, at });
   }
-  for (const [premiseId, visits] of byPremise) {
+  for (const [key, visits] of byPremise) {
+    const [premiseId] = JSON.parse(key);
     visits.sort((a, b) => a.at.localeCompare(b.at) ||
       Number(a.trn.accessData.access.hasAccess === "yes") - Number(b.trn.accessData.access.hasAccess === "yes") ||
       String(a.trn.id).localeCompare(String(b.trn.id)));

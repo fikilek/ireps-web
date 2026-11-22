@@ -585,7 +585,10 @@ export const onMeterLifecycleTrnCallable = onCall(async (request) => {
       }
     }
 
-    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no" && !(trnType === "METER_READING" && capturedReading(data))) {
+    if (trnType === "METER_READING" && String(data?.accessData?.access?.hasAccess).toLowerCase() === "no" && capturedReading(data)) {
+      return buildFailureResult("MREAD_ACCESS_CONFLICT", "NO READING cannot include a captured reading. Correct the reading availability and submit the valid reading form.", {trnId, trnType, astId});
+    }
+    if (String(data?.accessData?.access?.hasAccess).toLowerCase() === "no") {
       try {
         return await recordLifecycleNoAccess({ db, data, actor: { uid: actorUid, name: actorName }, now, isOffice: isWmsLifecycleExecution });
       } catch (error) {

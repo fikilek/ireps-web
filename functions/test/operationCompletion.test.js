@@ -20,15 +20,21 @@ test("a recorded No Access visit is not operation-QA eligible",()=>{
 });
 test("reading capture succeeds without touch but still requires valid form and evidence",()=>{
  for(const reading of [0,"0","-12","123"]){
-  const data={id:"READ",origin:{channel:"FIELD"},accessData:{trnType:"METER_READING",access:{hasAccess:"no"}},meterReading:{reading,readingAt:"2026-11-22T08:00:00Z",readingGps:{lat:-28,lng:30}},media:[{tag:"meterReadingEvidence",url:"https://example.test/reading.jpg"}]};
+  const data={id:"READ",origin:{channel:"FIELD"},accessData:{trnType:"METER_READING",access:{hasAccess:"yes"}},meterReading:{reading,readingAt:"2026-11-22T08:00:00Z",readingGps:{lat:-28,lng:30}},media:[{tag:"meterReadingEvidence",url:"https://example.test/reading.jpg"}]};
   const validation=validateMeterReading({data,astDoc:asset});
   assert.equal(validation.ok,true,JSON.stringify(validation));
   assert.equal(operationObjectiveAchieved({trnType:"METER_READING",data,validation}),true);
   const saved=buildLifecycleTrnPayload({data,astDoc:asset,now:"2026-11-22T08:01:00Z",actorUid:"U",actorName:"Worker",statusState:"CONNECTED"});
-  assert.equal(saved.meterReading.reading,String(reading));assert.equal(saved.accessData.access.hasAccess,"no");
+  assert.equal(saved.meterReading.reading,String(reading));assert.equal(saved.accessData.access.hasAccess,"yes");
   data.media=[];assert.equal(validateMeterReading({data,astDoc:asset}).ok,false);
  }
  const data={accessData:{trnType:"METER_READING",access:{hasAccess:"yes"}},meterReading:{noReadingReason:"Display faulty"}};
  const validation=validateMeterReading({data,astDoc:asset});
  assert.equal(operationObjectiveAchieved({trnType:"METER_READING",data,validation}),false);
+});
+
+test("a new MREAD capture cannot claim NO READING and a captured reading",()=>{
+ const data={accessData:{trnType:"METER_READING",access:{hasAccess:"no"}},meterReading:{reading:"123"}};
+ assert.equal(validateMeterReading({data,astDoc:asset}).code,"MREAD_ACCESS_CONFLICT");
+ assert.equal(operationObjectiveAchieved({trnType:"METER_READING",data,validation:{ok:true,readingPassed:true}}),false);
 });

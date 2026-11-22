@@ -25,3 +25,13 @@ test("a September visit arriving in October remains in September, including an o
   assert.equal(isGmrTransactionInMonth(row, getGmrReportMonthWindow("2026-09")), true);
   assert.equal(isGmrTransactionInMonth(row, getGmrReportMonthWindow("2026-10")), false);
 });
+
+test("reading availability and physical access cannot close one another's failures",()=>{
+ const reading=(id,access,at)=>({...visit(id,access,at),accessData:{...visit(id,access,at).accessData,trnType:"METER_READING"}});
+ const rows=[visit("physical-na","no","2026-11-01"),reading("reading-na","no","2026-11-01"),reading("reading-ok","yes","2026-11-02")];
+ const result=deriveNoAccessGroups(rows);
+ assert.equal(result.groups.find(g=>g.id==="physical-na").status,"OPEN");
+ assert.equal(result.groups.find(g=>g.id==="reading-na").status,"CLOSED");
+ const physicalOnly=deriveNoAccessGroups([reading("reading-na","no","2026-11-01"),visit("physical-ok","yes","2026-11-02")]);
+ assert.equal(physicalOnly.groups[0].status,"OPEN");
+});

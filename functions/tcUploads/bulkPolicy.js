@@ -43,7 +43,7 @@ export async function verifyBulkExecution({db,reader,uid,id,astId,trnType}) {
 // Response/projection only: canonical work/access facts remain the stored truth.
 export function deriveBulkExecutionOutcome(trn) {
  if(!trn?.origin?.trnBgo||!trn.workflow?.completedAt)return null;
- if(trn.accessData?.access?.hasAccess==="no" && !(trn.accessData.trnType==="METER_READING" && String(trn.meterReading?.reading??"").trim()))return {outcome:"NO_ACCESS",success:false};
+ if(trn.accessData?.access?.hasAccess==="no")return {outcome:"NO_ACCESS",success:false};
  if(!["yes","no"].includes(trn.accessData?.access?.hasAccess))return null;
  if(trn.accessData.trnType==="METER_READING") {
   const reading=String(trn.meterReading?.reading??trn.meterReading?.tokenReading??"").trim();

@@ -1195,7 +1195,8 @@ export function validateMeterReading({ data, astDoc, actorUid = "NAv", actorName
   const meterType = getAstMeterType(astDoc, data);
   const isPrepaidMeter = isPrepaidAstMeter(astDoc, data);
 
-  const noAccess = isNoAccessExecution(data) && !getMeterReadingValue(data);
+  if (isNoAccessExecution(data) && getMeterReadingValue(data)) return {ok:false,code:"MREAD_ACCESS_CONFLICT",message:"NO READING cannot include a captured reading."};
+  const noAccess = isNoAccessExecution(data);
   const noAccessReason = getNoAccessReason(data);
 
   const instructionText = String(
@@ -2579,7 +2580,7 @@ export function buildLifecycleTrnPayload({
       trnType === "METER_READING"
         ? sanitizeMeterReading(data?.meterReading || {}, {
             isPrepaidMeter,
-            noAccess: noAccess && !getMeterReadingValue(data),
+            noAccess,
           })
         : undefined,
 

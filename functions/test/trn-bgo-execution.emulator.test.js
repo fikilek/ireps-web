@@ -47,9 +47,9 @@ test('all five created bulk instructions allocate, accept and execute real No Ac
   const second=await onMeterLifecycleTrnCallable.run({data:next,auth:{uid:worker,token:{role:'FWR',name:'Worker'}}});assert.equal(second.success,true,JSON.stringify(second));
   const attempted=(await db.doc(`trns/${id}`).get()).data();assert.equal(attempted.noAccessCount,2);assert.equal(attempted.noAccessTrnIds.length,2);assert.equal(attempted.workflow.state,'IN_PROGRESS');
   if(trnType==='METER_READING') {
-   const work={...structuredClone(payload),meterReading:{reading:'-12',readingAt:new Date().toISOString(),readingGps:{lat:-28,lng:30}},media:[{tag:'meterReadingEvidence',url:'https://example.test/reading.jpg'}]};
+   const work={...structuredClone(payload),accessData:{...payload.accessData,access:{hasAccess:'yes'}},meterReading:{reading:'-12',readingAt:new Date().toISOString(),readingGps:{lat:-28,lng:30}},media:[{tag:'meterReadingEvidence',url:'https://example.test/reading.jpg'}]};
    const done=await onMeterLifecycleTrnCallable.run({data:work,auth:{uid:worker,token:{role:'FWR',name:'Worker'}}});assert.equal(done.success,true,JSON.stringify(done));
-   const completed=(await db.doc(`trns/${id}`).get()).data();assert.equal(completed.workflow.state,'COMPLETED');assert.equal(completed.accessData.access.hasAccess,'no');assert.equal(completed.meterReading.reading,'-12');assert.deepEqual(completed.noAccessTrnIds,attempted.noAccessTrnIds);
+   const completed=(await db.doc(`trns/${id}`).get()).data();assert.equal(completed.workflow.state,'COMPLETED');assert.equal(completed.accessData.access.hasAccess,'yes');assert.equal(completed.meterReading.reading,'-12');assert.deepEqual(completed.noAccessTrnIds,attempted.noAccessTrnIds);
    assert.equal((await db.doc(`registry_mread/${id}`).get()).exists,true,'completed reading must reach its registry');
   }
   if(trnType==='METER_DISCONNECTION') {
