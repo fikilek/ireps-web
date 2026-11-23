@@ -2576,8 +2576,8 @@ export default function TrnBgoUploadPage() {
                   Return to File Inspection
                 </button>
               ) : (
-                <a
-                  href="/operations/trn-bgo"
+                <Link
+                  to="/operations/trn-bgo"
                   aria-disabled={isCreatingBatches}
                   onClick={(e) => {
                     if (isCreatingBatches) {
@@ -2600,7 +2600,7 @@ export default function TrnBgoUploadPage() {
                   }}
                 >
                   Go to TRN BGO Register
-                </a>
+                </Link>
               )}
             </div>
           </div>
