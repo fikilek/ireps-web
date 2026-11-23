@@ -2576,15 +2576,13 @@ export default function TrnBgoUploadPage() {
                   Return to File Inspection
                 </button>
               ) : (
-                <Link
-                  to="/operations/trn-bgo"
+                <a
+                  href="/operations/trn-bgo"
                   aria-disabled={isCreatingBatches}
                   onClick={(e) => {
                     if (isCreatingBatches) {
                       e.preventDefault();
-                      return;
                     }
-                    setCreationModalState(null);
                   }}
                   style={{
                     padding: "10px 20px",
@@ -2602,7 +2600,7 @@ export default function TrnBgoUploadPage() {
                   }}
                 >
                   Go to TRN BGO Register
-                </Link>
+                </a>
               )}
             </div>
           </div>
