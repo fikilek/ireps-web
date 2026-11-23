@@ -99,6 +99,7 @@ test("expireOne resets all sibling ISSUED TRNs and matching AST markers in the s
       }),
     },
     "trns/TRN_2": {
+      id: "TRN_2",
       exists: true,
       data: () => ({
         ast: { astData: { astId: "AST_2" } },

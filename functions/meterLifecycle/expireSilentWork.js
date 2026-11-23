@@ -221,8 +221,9 @@ export async function expireOne({ db, job, nowMs, now }) {
       if (!sibSnap.exists) continue;
       const sibData = sibSnap.data() || {};
       if (sibData.workflow?.state !== TRN_STATES.ISSUED || sibData.qa?.state) continue;
+      const sibRef = sibSnap.ref || db.collection("trns").doc(sibSnap.id);
       const sibAstId = getAstId(sibData);
-      if (sibAstId) siblingAstTargets.push({ sibSnap, sibData, sibAstId, sibAstRef: db.collection("asts").doc(sibAstId) });
+      if (sibAstId) siblingAstTargets.push({ sibSnap, sibRef, sibData, sibAstId, sibAstRef: db.collection("asts").doc(sibAstId) });
     }
     const siblingAstSnaps = siblingAstTargets.length
       ? await Promise.all(siblingAstTargets.map((item) => tx.get(item.sibAstRef)))
@@ -257,11 +258,11 @@ export async function expireOne({ db, job, nowMs, now }) {
     }
 
     siblingAstTargets.forEach((item, index) => {
-      const { sibSnap, sibData, sibAstId, sibAstRef } = item;
+      const { sibSnap, sibRef, sibData, sibAstId, sibAstRef } = item;
       const sibTrnType = getTrnType(sibData) || trnType;
-      tx.update(sibSnap.ref, buildExpiryPatch({ now }));
+      tx.update(sibRef, buildExpiryPatch({ now }));
       tx.set(
-        sibSnap.ref.collection("history").doc(),
+        sibRef.collection("history").doc(),
         buildExpiryHistoryEvent({ trnId: sibSnap.id, trnType: sibTrnType, astId: sibAstId, now, ageMs }),
       );
       const sibAstSnap = siblingAstSnaps[index];

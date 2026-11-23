@@ -459,7 +459,8 @@ test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; 
 
   // MREAD fail-closed when meter kind is missing or unknown
   docs["asts/TRN_MDIS_REM"].ast.astData.meter = { phase: "single" };
-  const missingKindPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_READING", rows: [makeRow(1, "60000001")], keep: {} } });
+  const dbMissingKind = makeMockDb(docs);
+  const missingKindPreview = await previewBulk({ db: dbMissingKind, uid, data: { lmPcode, trnType: "METER_READING", rows: [makeRow(1, "60000001")], keep: {} } });
   assert.equal(new Map(missingKindPreview.eligibility).get("1").eligible, false);
 });
 
@@ -475,7 +476,7 @@ test("Stage 1 & createBulkGraph explicitly enforce MAX_UPLOAD_ROWS = 80 atomic b
   const csv80 = serializeCsv([OFFICIAL_HEADERS, ...rows80.map((r) => OFFICIAL_HEADERS.map((h) => r[h]))]);
   const { digest } = await import("../tcUploads/stage2Core.js");
   const uid = "MNG_80";
-  const db = makeFakeDb({ [`users/${uid}`]: { accountStatus: "ACTIVE", employment: { role: "MNG" }, access: { workbases: ["ZA5241"] } } });
+  const db = makeMockDb({ [`users/${uid}`]: { accountStatus: "ACTIVE", employment: { role: "MNG" }, access: { workbases: ["ZA5241"] } } });
   const source = { uid, id: "S1", lmPcode: "ZA5241", trnType: "METER_DISCONNECTION", contractVersion: "TRN_BGO_11COL_REASON_FREE_V1", hash: digest(csv80), fileName: "f.csv", generation: "1" };
   await assert.rejects(
     createBulkGraph({ db, uid, data: { lmPcode: "ZA5241", trnType: "METER_DISCONNECTION", selectedRowNos: rows81.map((r) => r.rowNo), keep: {} }, source, csv: csv80 }),
