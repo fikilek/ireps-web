@@ -1257,11 +1257,6 @@ export default function TrnBgoUploadPage() {
     }
   };
 
-  const handleConfirmPassModalAndNavigate = () => {
-    setCreationModalState(null);
-    navigate("/operations/trn-bgo");
-  };
-
   // Download Not Found CSV Report
   const handleDownloadNotFoundCsv = () => {
     const notFoundRows = parsedRows.filter((r) => !r.foundInAsts);
@@ -2581,10 +2576,16 @@ export default function TrnBgoUploadPage() {
                   Return to File Inspection
                 </button>
               ) : (
-                <button
-                  type="button"
-                  disabled={isCreatingBatches}
-                  onClick={handleConfirmPassModalAndNavigate}
+                <Link
+                  to="/operations/trn-bgo"
+                  aria-disabled={isCreatingBatches}
+                  onClick={(e) => {
+                    if (isCreatingBatches) {
+                      e.preventDefault();
+                      return;
+                    }
+                    setCreationModalState(null);
+                  }}
                   style={{
                     padding: "10px 20px",
                     borderRadius: 8,
@@ -2593,11 +2594,15 @@ export default function TrnBgoUploadPage() {
                     color: "#ffffff",
                     fontSize: 13,
                     fontWeight: 800,
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                     cursor: isCreatingBatches ? "wait" : "pointer",
                   }}
                 >
                   Go to TRN BGO Register
-                </button>
+                </Link>
               )}
             </div>
           </div>
