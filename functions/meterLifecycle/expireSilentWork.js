@@ -302,7 +302,7 @@ export async function expireOne({ db, job, nowMs, now }) {
         workflowState: "READY_FOR_ALLOCATION",
         at: now,
         actor: { uid: EXPIRY_ACTOR.uid, name: EXPIRY_ACTOR.name },
-        note: "Batch returned to READY_FOR_ALLOCATION after 72-hour acceptance expiry.",
+        note: "Batch returned to READY_FOR_ALLOCATION after acceptance-window expiry.",
       });
     }
 
