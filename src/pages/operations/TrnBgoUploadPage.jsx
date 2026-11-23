@@ -1728,7 +1728,7 @@ export default function TrnBgoUploadPage() {
             <div>
               <h3 style={styles.uploadCardTitle}>Select File to Upload</h3>
               <p style={styles.uploadCardSubtitle}>
-                Supported formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>, <code>.xls</code>). Maximum <strong>100 meters</strong> per file.
+                Supported formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>, <code>.xls</code>). Maximum <strong>80 meters</strong> per file.
               </p>
             </div>
           </div>
@@ -1794,7 +1794,7 @@ export default function TrnBgoUploadPage() {
               <strong>Click to browse</strong> or drag & drop meter file here
             </p>
             <p style={styles.dropzoneSubtext}>
-              Use the official 11-column template. Maximum 100 nonblank rows; rowNo and meterNo are required.
+              Use the official 11-column template. Maximum 80 nonblank rows; rowNo and meterNo are required.
             </p>
           </div>
         </div>

@@ -24,7 +24,7 @@ export async function allocateTcBatches({db,request}) {
    target=await readMdAllocationTarget({db,transaction:tx,targetType:data.targetType,targetId:data.targetId,actorMncId:actor.providerId});
   }
   const childIds=parents.flatMap(parent=>parent.data().trnIds||[]);
-  if(childIds.length>100)denied(`Selected Ward batches contain ${childIds.length} meters. Maximum per allocation action is 100.`);
+  if(childIds.length>80)denied(`Selected Ward batches contain ${childIds.length} meters. Maximum per allocation action is 80.`);
   if(!childIds.length||new Set(childIds).size!==childIds.length)denied("Batch membership is empty or duplicated.");
   const childSnapshots=await tx.getAll(...childIds.map(id=>db.doc(`trns/${id}`)));
   const byId=new Map(childSnapshots.map(snap=>[snap.id,snap]));
@@ -68,9 +68,12 @@ export async function allocateTcBatches({db,request}) {
     }
    }
   }
-  for (const notice of notices) {
-   const n=notice.data();
-   if(n.type==="BGO_BATCH_ISSUED"&&n.delivery?.status!=="DELIVERED"&&!n.delivery?.deliveredAt)tx.update(notice.ref,{"delivery.status":"CANCELLED","delivery.cancelledAt":now,"delivery.cancelledByUid":uid,"delivery.cancelReason":"TRN BGO batch unallocated"});
+  const noticesToWrite=notices.filter(notice=>{const n=notice.data();return n.type==="BGO_BATCH_ISSUED"&&n.delivery?.status!=="DELIVERED"&&!n.delivery?.deliveredAt;});
+  const childrenToWrite=children.filter(c=>!c.skipChildWrite);
+  const plannedWrites=noticesToWrite.length+childrenToWrite.length*3+parents.length*(target?3:2);
+  if(plannedWrites>500)denied(`Allocation requires ${plannedWrites} atomic writes (limit 500). Select fewer batches or meters.`);
+  for (const notice of noticesToWrite) {
+   tx.update(notice.ref,{"delivery.status":"CANCELLED","delivery.cancelledAt":now,"delivery.cancelledByUid":uid,"delivery.cancelReason":"TRN BGO batch unallocated"});
   }
   for(const {child,trn,to,skipChildWrite} of children) {
    if(skipChildWrite)continue;

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
-import { OFFICIAL_HEADERS, validateSourceRows, resolveDuplicates, meterKey } from "./stage1Validation.js";
+import { OFFICIAL_HEADERS, MAX_UPLOAD_ROWS, validateSourceRows, resolveDuplicates, meterKey } from "./stage1Validation.js";
 import { parseCsv } from "./sourceCsv.js";
 import { validateStage1Upload } from "./stage1Matching.js";
 import { checkMeterRegistration } from "../meterLifecycle/registrationGuard.js";
@@ -103,6 +103,7 @@ export async function createBulkGraph({db,uid,data,source,csv,clock=()=>new Date
   const allRows=parseSource(csv); const resolved=resolveDuplicates(allRows,data.keep||{});
   const requested=data.selectedRowNos;
   if(!Array.isArray(requested)||!requested.length||new Set(requested.map(String)).size!==requested.length)fail("invalid-argument","Select distinct eligible source rows.");
+  if(requested.length>MAX_UPLOAD_ROWS)fail("invalid-argument",`Select at most ${MAX_UPLOAD_ROWS} eligible rows per batch creation request.`);
   const selected=requested.map(key=>resolved.find(r=>String(r.rowNo)===String(key)));
   if(selected.some(r=>!r))fail("invalid-argument","Selection contains a missing or dropped original source row.");
   const identity={uid,lmPcode,trnType,sourceFileId:source.id,sourceHash:source.hash,keep:Object.fromEntries(Object.entries(data.keep||{}).sort(([a],[b])=>a.localeCompare(b))),rows:selected.map(r=>String(r.rowNo)).sort((a,b)=>Number(a)-Number(b))};
@@ -130,6 +131,8 @@ export async function createBulkGraph({db,uid,data,source,csv,clock=()=>new Date
       const trnIds=entries.map((entry,i)=>`TRN_${TC_TRN_TYPE_TO_CODE[entry.effectiveTrnType]}_${trnStampMs[i]}_${entry.ast?.meterType==="electricity"?"ELC":entry.ast?.meterType==="water"?"WTR":"NAv"}_${text(entry.wardPcode).replace(/[^A-Za-z0-9]/g,"").slice(0,12)}_${text(entry.ast?.accessData?.erfNo).replace(/[^A-Za-z0-9]/g,"").slice(0,12)||"NAv"}`);
       const typeGroups=new Map();entries.forEach((entry,i)=>{const gKey=`${entry.wardPcode}::${entry.effectiveTrnType}`;if(!typeGroups.has(gKey))typeGroups.set(gKey,{wardPcode:entry.wardPcode,trnType:entry.effectiveTrnType,items:[]});typeGroups.get(gKey).items.push({...entry,trnId:trnIds[i]});});
       const groups=[...typeGroups.values()].map(g=>({wardPcode:g.wardPcode,trnType:g.trnType,trnCode:TC_TRN_TYPE_TO_CODE[g.trnType],items:g.items,tcId:buildTcUploadId({date,lmPcode,wardPcode:g.wardPcode,trnCode:TC_TRN_TYPE_TO_CODE[g.trnType]})}));
+      const plannedWrites=4*entries.length+2*groups.length+2;
+      if(plannedWrites>500)fail("failed-precondition",`Batch creation requires ${plannedWrites} atomic writes (limit 500). Split the selection.`);
       const ids=await Promise.all([...groups.map(g=>db.doc(`tc_uploads/${g.tcId}`)),...trnIds.map(id=>db.doc(`trns/${id}`))].map(ref=>tx.get(ref)));
       if(ids.some(s=>s.exists))throw Object.assign(new Error("Identifier collision"),{bulkCollision:true});
       const batches=groups.map(g=>({tcId:g.tcId,wardPcode:g.wardPcode,wardLabel:g.items[0].wardName,meterCount:g.items.length,trnType:g.trnType,trnCode:g.trnCode,lmPcode}));

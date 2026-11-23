@@ -6,13 +6,13 @@ import { buildLifecycleInstructionTrnPayload, buildTrnActiveLifecycle } from "..
 import { stripToDeclaredRoot } from "../transactions/trnShape.js";
 
 const types = ["METER_DISCONNECTION", "METER_RECONNECTION", "METER_INSPECTION", "METER_REMOVAL", "METER_READING"];
-test("200-meter / 200-Ward canonical graphs commit atomically beyond the removed 300-write ceiling", {skip: !process.env.FIRESTORE_EMULATOR_HOST}, async t => {
+test("80-meter / 80-Ward canonical graphs commit atomically within the 500-write ceiling", {skip: !process.env.FIRESTORE_EMULATOR_HOST}, async t => {
   assert.match(process.env.GCLOUD_PROJECT || "", /^demo-/);
   const app=initializeApp({projectId:process.env.GCLOUD_PROJECT}, `capacity-${Date.now()}`);
   t.after(()=>deleteApp(app)); const db=getFirestore(app); const now=new Date().toISOString();
   for (const type of types) await t.test(type, async()=>{
     const prefix=`capacity_${type}_${Date.now()}`; const writes=[];
-    for(let i=0;i<200;i++) {
+    for(let i=0;i<80;i++) {
       const astId=`${prefix}_A${i}`, id=`${prefix}_T${i}`, batchId=`${prefix}_B${i}`, ward=`ZA5241${String(i).padStart(3,"0")}`;
       const ast={meterType:"electricity",accessData:{parents:{lmPcode:"ZA5241",wardPcode:ward},premise:{id:`P${i}`}},ast:{astData:{astId,astNo:`00${i}`,meter:{type:"conventional"}}},status:{state:type==="METER_RECONNECTION"?"DISCONNECTED":"CONNECTED"}};
       const trn=buildLifecycleInstructionTrnPayload({data:{id,astId,premiseId:`P${i}`,trnType:type,assignment:{instruction:{code:type}},origin:{channel:"OFFICE",source:"TRN_BGO"}},astDoc:ast,premiseData:{id:`P${i}`},now,actorUid:"U1",actorName:"Manager",allocating:false});
@@ -24,8 +24,9 @@ test("200-meter / 200-Ward canonical graphs commit atomically beyond the removed
     const receipt=db.doc(`tc_upload_dedupe/${prefix}`);
     const bytes=Buffer.byteLength(JSON.stringify(writes));
     assert.ok(bytes<10*1024*1024);
-    await db.runTransaction(async tx=>{assert.equal((await tx.get(receipt)).exists,false); for(const [path,data] of writes)tx.create(db.doc(path),data);tx.create(receipt,{complete:true,count:200,writeCount:writes.length+1});});
-    assert.equal((await receipt.get()).data().writeCount,1201);
+    assert.ok(writes.length+1<=500, `Expected <=500 writes, got ${writes.length+1}`);
+    await db.runTransaction(async tx=>{assert.equal((await tx.get(receipt)).exists,false); for(const [path,data] of writes)tx.create(db.doc(path),data);tx.create(receipt,{complete:true,count:80,writeCount:writes.length+1});});
+    assert.equal((await receipt.get()).data().writeCount,481);
     assert.ok((await db.doc(writes.at(-1)[0]).get()).exists);
     const absent=db.doc(`tc_uploads/${prefix}_must_not_exist`);
     await assert.rejects(db.runTransaction(async tx=>{await tx.get(receipt);tx.create(absent,{partial:true});tx.create(receipt,{overwrite:true});}));
