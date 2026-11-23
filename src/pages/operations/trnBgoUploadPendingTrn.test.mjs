@@ -64,6 +64,12 @@ test("parseFallbackReason formats DCN -> INSP Fallback pill and explanation", ()
   assert.equal(fb.meterState, "DISCONNECTED");
   assert.match(fb.explanation, /Cannot DCN a meter that is DISCONNECTED/);
   assert.equal(parseFallbackReason({ isProposedInspection: false }, "METER_DISCONNECTION"), null);
+
+  const dupFb = parseFallbackReason(
+    { isProposedInspection: true, astStatus: "CONNECTED", proposedReason: "Active METER_DISCONNECTION job TRN_123 already exists — Proposed for Inspection (MINSP)." },
+    "METER_DISCONNECTION",
+  );
+  assert.equal(dupFb.explanation, "Active METER_DISCONNECTION job TRN_123 already exists — Proposed for Inspection (MINSP).");
 });
 
 test("parseRegistrationDisagreeReason shows Meter Removed pill with original reason on hover", () => {

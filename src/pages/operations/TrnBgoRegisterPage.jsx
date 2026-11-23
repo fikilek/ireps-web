@@ -295,8 +295,12 @@ export default function TrnBgoRegisterPage() {
   const uploads = useMemo(() => sourceUploads.map(batch => {
     if (!batch.contractVersion) return { ...batch, notStartedRows: Math.max(0, Number(batch.totalRows || 0) - Number(batch.inProgressRows || 0) - Number(batch.completedRows || 0)) };
     const counts = progress?.ready && !progress.error ? progress.counts[batch.id] : null;
-    return { ...batch, notStartedRows: counts?.notStartedRows ?? null,
-      ...(counts ? { inProgressRows: counts.inProgressRows, completedRows: counts.completedRows } : {}) };
+    return {
+      ...batch,
+      notStartedRows: counts?.notStartedRows ?? null,
+      inProgressRows: counts ? counts.inProgressRows : null,
+      completedRows: counts ? counts.completedRows : null,
+    };
   }), [sourceUploads, progress]);
 
   const [deleteTcUpload, { isLoading: isDeletingUpload }] = useDeleteTcUploadMutation();
@@ -648,18 +652,20 @@ export default function TrnBgoRegisterPage() {
       label: "In Progress",
       filter: "text",
       value: (batch) => batch.inProgressRows,
-      sortValue: (batch) => Number(batch.inProgressRows || 0),
+      sortValue: (batch) => batch.inProgressRows,
       sortEmptyLast: true,
-      render: (batch) => formatNumber(batch.inProgressRows),
+      filterDisabled: progressPendingOrError,
+      render: (batch) => countCell(batch.inProgressRows),
     },
     {
       key: "completedRows",
       label: "Completed",
       filter: "text",
       value: (batch) => batch.completedRows,
-      sortValue: (batch) => Number(batch.completedRows || 0),
+      sortValue: (batch) => batch.completedRows,
       sortEmptyLast: true,
-      render: (batch) => formatNumber(batch.completedRows),
+      filterDisabled: progressPendingOrError,
+      render: (batch) => countCell(batch.completedRows),
     },
     {
       key: "ward",

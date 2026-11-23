@@ -1,3 +1,4 @@
+import { FieldValue } from "firebase-admin/firestore";
 import { buildBmdBgoNotificationRecord } from "../bgo/trnFactory.js";
 import { HttpsError } from "firebase-functions/v2/https";
 import { bulkAuthority, text, BULK_CONTRACT } from "./stage2Core.js";
@@ -23,7 +24,7 @@ export async function allocateTcBatches({db,request}) {
    target=await readMdAllocationTarget({db,transaction:tx,targetType:data.targetType,targetId:data.targetId,actorMncId:actor.providerId});
   }
   const childIds=parents.flatMap(parent=>parent.data().trnIds||[]);
-  if(childIds.length>200)denied(`Selected Ward batches contain ${childIds.length} meters. Maximum per allocation action is 200.`);
+  if(childIds.length>100)denied(`Selected Ward batches contain ${childIds.length} meters. Maximum per allocation action is 100.`);
   if(!childIds.length||new Set(childIds).size!==childIds.length)denied("Batch membership is empty or duplicated.");
   const childSnapshots=await tx.getAll(...childIds.map(id=>db.doc(`trns/${id}`)));
   const byId=new Map(childSnapshots.map(snap=>[snap.id,snap]));
@@ -129,7 +130,7 @@ export async function decideTcBatch({db,request}) {
    tx.update(db.doc(`asts/${t.ast.astData.astId}`),{trnActiveLifecycle:buildTrnActiveLifecycle({trnId:snap.id,trnType:t.accessData.trnType,workflowState:state,assignedTo:state==="ACCEPTED"?target:{},updatedAt:now,updatedByUser:uid})});
    tx.create(snap.ref.collection("history").doc(),{event:data.action,workflowState:state,at:now,actorUid:uid,reason:data.rejectReason||null});
   }
-  tx.update(parent.ref,{"workflow.state":expected,"workflow.acceptedAt":data.action==="ACCEPT"?now:null,"bgo.releaseState":data.action==="ACCEPT"?"RELEASED_TO_EXECUTION":null,"assignment.targets":data.action==="ACCEPT"?[target]:[],"bgo.targetId":data.action==="ACCEPT"?target.id:null,bgoStatus:data.action==="ACCEPT"?"ALLOCATED":"READY_FOR_ALLOCATION","metadata.updatedAt":now});
+  tx.update(parent.ref,{"workflow.state":expected,"workflow.acceptedAt":data.action==="ACCEPT"?now:null,"workflow.issuedAt":data.action==="ACCEPT"?p.workflow?.issuedAt||null:null,"workflow.issuedByUid":data.action==="ACCEPT"?p.workflow?.issuedByUid||null:null,"bgo.releaseState":data.action==="ACCEPT"?"RELEASED_TO_EXECUTION":null,"assignment.targets":data.action==="ACCEPT"?[target]:[],"bgo.targetId":data.action==="ACCEPT"?target.id:null,"bgo.targetType":data.action==="ACCEPT"?target.type||null:null,"bgo.targetName":data.action==="ACCEPT"?target.name||null:null,bgoStatus:data.action==="ACCEPT"?"ALLOCATED":"READY_FOR_ALLOCATION",allocatedTo:data.action==="ACCEPT"?target.name||null:null,allocatedAt:data.action==="ACCEPT"?p.allocatedAt||now:null,"metadata.updatedAt":now});
   tx.create(parent.ref.collection("history").doc(),{event:data.action,at:now,actorUid:uid,reason:data.rejectReason||null});
   return {success:true,batchId:id,message:data.action==="ACCEPT"?"Batch accepted.":"Batch rejected."};
  });
@@ -143,7 +144,10 @@ export async function deleteModernTc({db,request}) {
   if(p.workflow?.state==="DELETED")return {success:true,tcId:id,message:"Batch already deleted."};
   const children=await Promise.all(p.trnIds.map(id=>tx.get(db.doc(`trns/${id}`))));
   for(const snap of children)if(!snap.exists||!canMoveAs(snap.data().workflow?.state,"delete",actor.role).ok)denied("Only unassigned, unexecuted jobs may be deleted.");
-  for(const snap of children){const trn=snap.data();tx.update(snap.ref,{"workflow.state":"DELETED","metadata.updatedAt":now});tx.update(db.doc(`asts/${trn.ast.astData.astId}`),{trnActiveLifecycle:buildTrnActiveLifecycle({trnId:snap.id,trnType:trn.accessData.trnType,workflowState:"DELETED",assignedTo:{},updatedAt:now,updatedByUser:actor.name})});tx.create(snap.ref.collection("history").doc(),{event:"DELETED",at:now,actorUid:actor.uid});}
+  const astRefs=children.map(snap=>db.doc(`asts/${snap.data().ast.astData.astId}`));
+  const astSnaps=astRefs.length?await tx.getAll(...astRefs):[];
+  const astById=new Map(astSnaps.map(s=>[s.id,s]));
+  for(const snap of children){const trn=snap.data();const astId=trn.ast.astData.astId;const astSnap=astById.get(astId);tx.update(snap.ref,{"workflow.state":"DELETED","metadata.updatedAt":now});if(astSnap?.exists&&astSnap.data()?.trnActiveLifecycle?.trnId===snap.id){tx.update(astSnap.ref,{trnActiveLifecycle:FieldValue.delete(),"metadata.updatedAt":now,"metadata.updatedByUid":actor.uid,"metadata.updatedByUser":actor.name});}tx.create(snap.ref.collection("history").doc(),{event:"DELETED",at:now,actorUid:actor.uid});}
   tx.update(parent.ref,{"workflow.state":"DELETED",bgoStatus:"DELETED","metadata.updatedAt":now});tx.create(parent.ref.collection("history").doc(),{event:"DELETED",at:now,actorUid:actor.uid});
   return {success:true,tcId:id,message:"Ward batch and its unassigned transactions moved to Deleted. Original source retained."};
  });

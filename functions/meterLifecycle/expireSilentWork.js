@@ -209,6 +209,24 @@ export async function expireOne({ db, job, nowMs, now }) {
     const trnBgoBatchId = text(data?.origin?.trnBgo?.batchId);
     const batchRef = trnBgoBatchId ? db.collection("tc_uploads").doc(trnBgoBatchId) : null;
     const batchSnap = batchRef ? await tx.get(batchRef) : null;
+    const siblingIds =
+      batchSnap?.exists && batchSnap.data()?.workflow?.state === TRN_STATES.ISSUED
+        ? (batchSnap.data()?.trnIds || []).filter((id) => id && id !== job.trnId)
+        : [];
+    const siblingSnaps = siblingIds.length
+      ? await Promise.all(siblingIds.map((id) => tx.get(db.collection("trns").doc(id))))
+      : [];
+    const siblingAstTargets = [];
+    for (const sibSnap of siblingSnaps) {
+      if (!sibSnap.exists) continue;
+      const sibData = sibSnap.data() || {};
+      if (sibData.workflow?.state !== TRN_STATES.ISSUED || sibData.qa?.state) continue;
+      const sibAstId = getAstId(sibData);
+      if (sibAstId) siblingAstTargets.push({ sibSnap, sibData, sibAstId, sibAstRef: db.collection("asts").doc(sibAstId) });
+    }
+    const siblingAstSnaps = siblingAstTargets.length
+      ? await Promise.all(siblingAstTargets.map((item) => tx.get(item.sibAstRef)))
+      : [];
 
     tx.update(job.ref, buildExpiryPatch({ now }));
 
@@ -217,11 +235,6 @@ export async function expireOne({ db, job, nowMs, now }) {
       buildExpiryHistoryEvent({ trnId: job.trnId, trnType, astId: astId || "NAv", now, ageMs }),
     );
 
-    // The meter is still held - a job back in `Created` holds it (5.2) - but
-    // by a job waiting to be given out rather than by a worker, so the
-    // marker must stop naming him. Only if it names THIS job, matched on the
-    // id alone: the marker is one field and may be naming a different kind
-    // of work on the same meter.
     if (astSnap?.exists) {
       const marker = astSnap.data()?.trnActiveLifecycle;
 
@@ -242,6 +255,33 @@ export async function expireOne({ db, job, nowMs, now }) {
         });
       }
     }
+
+    siblingAstTargets.forEach((item, index) => {
+      const { sibSnap, sibData, sibAstId, sibAstRef } = item;
+      const sibTrnType = getTrnType(sibData) || trnType;
+      tx.update(sibSnap.ref, buildExpiryPatch({ now }));
+      tx.set(
+        sibSnap.ref.collection("history").doc(),
+        buildExpiryHistoryEvent({ trnId: sibSnap.id, trnType: sibTrnType, astId: sibAstId, now, ageMs }),
+      );
+      const sibAstSnap = siblingAstSnaps[index];
+      if (sibAstSnap?.exists && String(sibAstSnap.data()?.trnActiveLifecycle?.trnId || "").trim() === sibSnap.id) {
+        tx.update(sibAstRef, {
+          trnActiveLifecycle: buildTrnActiveLifecycle({
+            trnId: sibSnap.id,
+            trnType: sibTrnType,
+            workflowState: TRN_STATES.CREATED,
+            outcome: "NAv",
+            assignedTo: {},
+            updatedAt: now,
+            updatedByUser: EXPIRY_ACTOR.name,
+          }),
+          "metadata.updatedAt": now,
+          "metadata.updatedByUid": EXPIRY_ACTOR.uid,
+          "metadata.updatedByUser": EXPIRY_ACTOR.name,
+        });
+      }
+    });
 
     if (batchSnap?.exists && batchSnap.data()?.workflow?.state === TRN_STATES.ISSUED) {
       tx.update(batchRef, {
