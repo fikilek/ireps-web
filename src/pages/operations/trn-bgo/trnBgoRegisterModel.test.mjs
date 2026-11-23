@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   buildTrnBgoRegisterRow,
+  buildTrnBgoRegisterSummary,
   getTrnBatchAllocationStatus,
   getTrnBgoBatchStatus,
   trnBgoRegisterSearchValue,
@@ -116,4 +117,57 @@ test("TrnBgoRegisterPage aligns columns, sticky pins, and unallocate controls wi
   assert.match(screen, /stickyColumnKeys=\{\["select", "map", "batchId"\]\}/);
   assert.match(screen, /useAllocateTrnBgoWardBatchesMutation/);
   assert.match(screen, /targetType:\s*"UNALLOCATE"/);
+});
+
+test("buildTrnBgoRegisterSummary consolidates batch states and meter columns cleanly", () => {
+  const sampleBatches = [
+    { id: "B1", workflowState: "READY_FOR_ALLOCATION", totalRows: 4, notStartedRows: 4, inProgressRows: 0, completedRows: 0 },
+    { id: "B2", workflowState: "READY_FOR_ALLOCATION", totalRows: 6, notStartedRows: 6, inProgressRows: 0, completedRows: 0 },
+    { id: "B3", workflowState: "READY_FOR_ALLOCATION", totalRows: 5, notStartedRows: 5, inProgressRows: 0, completedRows: 0 },
+    { id: "B4", workflowState: "IN_PROGRESS", totalRows: 7, notStartedRows: 5, inProgressRows: 1, completedRows: 1 },
+    { id: "B5", workflowState: "COMPLETED", totalRows: 1, notStartedRows: 0, inProgressRows: 0, completedRows: 1 },
+    { id: "B6", workflowState: "IN_PROGRESS", totalRows: 2, notStartedRows: 0, inProgressRows: 2, completedRows: 0 },
+    { id: "B7", workflowState: "IN_PROGRESS", totalRows: 3, notStartedRows: 1, inProgressRows: 0, completedRows: 2 },
+    { id: "B8", workflowState: "COMPLETED", totalRows: 2, notStartedRows: 0, inProgressRows: 0, completedRows: 2 },
+    { id: "B9", workflowState: "IN_PROGRESS", totalRows: 2, notStartedRows: 1, inProgressRows: 1, completedRows: 0 },
+  ];
+
+  assert.deepEqual(buildTrnBgoRegisterSummary(sampleBatches), {
+    totalBatches: 9,
+    totalMeters: 32,
+    notStartedBatches: 3,
+    notStartedMeters: 22,
+    inProgressBatches: 4,
+    inProgressMeters: 4,
+    completedBatches: 2,
+    completedMeters: 6,
+  });
+
+  assert.deepEqual(buildTrnBgoRegisterSummary(sampleBatches, { pendingOrError: true }), {
+    totalBatches: 9,
+    totalMeters: 32,
+    notStartedBatches: null,
+    notStartedMeters: null,
+    inProgressBatches: null,
+    inProgressMeters: null,
+    completedBatches: null,
+    completedMeters: null,
+  });
+});
+
+test("trnBgoProgress aligns QA PASS and QA FAIL rows with completedRows", async () => {
+  const { trnBgoProgress } = await import("../../../redux/trnBgoProgress.js");
+  const counts = trnBgoProgress([
+    { id: "T1", origin: { trnBgo: { batchId: "B1" } }, workflow: { state: "ISSUED" } },
+    { id: "T2", origin: { trnBgo: { batchId: "B1" } }, workflow: { state: "IN_PROGRESS" } },
+    { id: "T3", origin: { trnBgo: { batchId: "B1" } }, workflow: { state: "COMPLETED" } },
+    { id: "T4", origin: { trnBgo: { batchId: "B1" } }, workflow: { state: "QA PASS" } },
+    { id: "T5", origin: { trnBgo: { batchId: "B1" } }, workflow: { state: "QA FAIL" } },
+  ]);
+  assert.deepEqual(counts.B1, {
+    notStartedRows: 1,
+    inProgressRows: 1,
+    completedRows: 3,
+    total: 5,
+  });
 });

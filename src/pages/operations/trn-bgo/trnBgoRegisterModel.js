@@ -157,3 +157,72 @@ export function trnBgoRegisterSearchValue(row = {}) {
     .filter((value) => value != null)
     .join(" ");
 }
+
+export function buildTrnBgoRegisterSummary(uploads = [], { pendingOrError = false } = {}) {
+  const list = Array.isArray(uploads) ? uploads : [];
+  const totalBatches = list.length;
+  let totalMeters = 0;
+
+  if (pendingOrError) {
+    list.forEach((item) => {
+      totalMeters += Number(item?.totalRows || 0);
+    });
+    return {
+      totalBatches,
+      totalMeters,
+      notStartedBatches: null,
+      notStartedMeters: null,
+      inProgressBatches: null,
+      inProgressMeters: null,
+      completedBatches: null,
+      completedMeters: null,
+    };
+  }
+
+  let notStartedBatches = 0;
+  let notStartedMeters = 0;
+  let inProgressBatches = 0;
+  let inProgressMeters = 0;
+  let completedBatches = 0;
+  let completedMeters = 0;
+
+  list.forEach((item) => {
+    const total = Number(item?.totalRows || 0);
+    const inProgress = Number(item?.inProgressRows || 0);
+    const completed = Number(item?.completedRows || 0);
+    const notStarted =
+      item?.notStartedRows != null
+        ? Number(item.notStartedRows || 0)
+        : Math.max(0, total - inProgress - completed);
+    const batchStatus = getTrnBgoBatchStatus({
+      ...item,
+      totalRows: total,
+      inProgressRows: inProgress,
+      completedRows: completed,
+    });
+
+    totalMeters += total;
+    notStartedMeters += notStarted;
+    inProgressMeters += inProgress;
+    completedMeters += completed;
+
+    if (batchStatus === "COMPLETED") {
+      completedBatches += 1;
+    } else if (batchStatus === "IN PROGRESS") {
+      inProgressBatches += 1;
+    } else {
+      notStartedBatches += 1;
+    }
+  });
+
+  return {
+    totalBatches,
+    totalMeters,
+    notStartedBatches,
+    notStartedMeters,
+    inProgressBatches,
+    inProgressMeters,
+    completedBatches,
+    completedMeters,
+  };
+}
