@@ -889,12 +889,29 @@ export default function TrnBgoUploadPage() {
     });
   }, [parsedRows, statFilter, selectedRowKeys, foundFilter, lmFilter]);
 
+  const handleRowsShown = useCallback((nextRows) => {
+    setShownRows((prev) => {
+      if (
+        prev &&
+        prev.length === nextRows.length &&
+        prev.every((row, index) => row === nextRows[index])
+      ) {
+        return prev;
+      }
+      return nextRows;
+    });
+  }, []);
+
   const currentFilteredRows = shownRows ?? filteredRows;
 
   const eligibleFilteredRows = useMemo(
     () => currentFilteredRows.filter((r) => r.isEligible),
     [currentFilteredRows],
   );
+  const eligibleFilteredRowsRef = useRef(eligibleFilteredRows);
+  useEffect(() => {
+    eligibleFilteredRowsRef.current = eligibleFilteredRows;
+  }, [eligibleFilteredRows]);
 
   const allFilteredSelected = useMemo(() => {
     if (eligibleFilteredRows.length === 0) return false;
@@ -911,7 +928,7 @@ export default function TrnBgoUploadPage() {
   }, [eligibleFilteredRows, selectedRowKeys, allFilteredSelected]);
 
   const handleToggleMasterSelect = useCallback(() => {
-    const eligibleRows = currentFilteredRows.filter((r) => r.isEligible);
+    const eligibleRows = eligibleFilteredRowsRef.current;
     if (eligibleRows.length === 0) return;
     setSelectedRowKeys((prev) => {
       const next = new Set(prev);
@@ -925,7 +942,7 @@ export default function TrnBgoUploadPage() {
       }
       return next;
     });
-  }, [currentFilteredRows]);
+  }, []);
 
   const handleToggleRowSelect = useCallback((row) => {
     if (!row?.isEligible) return;
@@ -1941,7 +1958,7 @@ export default function TrnBgoUploadPage() {
             <IrepsTable showLoadingSpinner
               rows={filteredRows}
               columns={columns}
-              onRowsShown={setShownRows}
+              onRowsShown={handleRowsShown}
               extraFiltersActive={
                 statFilter !== "ALL" ||
                 foundFilter !== "ALL" ||

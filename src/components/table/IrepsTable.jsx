@@ -212,8 +212,20 @@ export default function IrepsTable({
     value => value && (typeof value === "object" ? value.mode && value.mode !== "ALL" : value !== "ALL"),
   ));
 
+  const lastReportedRowsRef = useRef(null);
   useEffect(() => {
-    onRowsShown?.(sorted);
+    if (!onRowsShown) return;
+    const prev = lastReportedRowsRef.current;
+    if (
+      prev &&
+      prev.callback === onRowsShown &&
+      prev.rows.length === sorted.length &&
+      prev.rows.every((row, index) => row === sorted[index])
+    ) {
+      return;
+    }
+    lastReportedRowsRef.current = { callback: onRowsShown, rows: sorted };
+    onRowsShown(sorted);
   }, [sorted, onRowsShown]);
 
   function setFilter(key, value) {
