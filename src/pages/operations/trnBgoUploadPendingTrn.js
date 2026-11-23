@@ -35,10 +35,13 @@ export function parseFallbackReason(row = {}, selectedTrnType = "") {
     .trim()
     .toUpperCase();
   const rawMessage = String(row?.proposedReason || "").trim();
+  const isDuplicateFallback = /^Active\s+/i.test(rawMessage);
   const explanation =
-    meterState && meterState !== "NAV" && meterState !== "NOT_IN_ASTS"
-      ? `Cannot ${shortCode} a meter that is ${meterState}. INSP will investigate the mismatch on site.`
-      : rawMessage || `Proposed for Inspection (INSP).`;
+    isDuplicateFallback
+      ? rawMessage
+      : meterState && meterState !== "NAV" && meterState !== "NOT_IN_ASTS"
+        ? `Cannot ${shortCode} a meter that is ${meterState}. INSP will investigate the mismatch on site.`
+        : rawMessage || `Proposed for Inspection (INSP).`;
 
   return {
     shortCode,

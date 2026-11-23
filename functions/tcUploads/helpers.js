@@ -360,6 +360,16 @@ function isExplicitPrepaidMeter(astData = {}) {
   return meterKind.includes("PREPAID") || meterKind.includes("TOKEN");
 }
 
+function isExplicitConventionalMeter(astData = {}) {
+  const meterKind = getAstMeterKind(astData);
+  if (!meterKind || meterKind === "NAV" || isExplicitPrepaidMeter(astData)) return false;
+  return (
+    meterKind.includes("CONVENTIONAL") ||
+    meterKind.includes("POSTPAID") ||
+    meterKind.includes("CREDIT")
+  );
+}
+
 export function getAstSummary({ astId, astData, meterNo }) {
   const accessData = astData?.accessData || {};
   const parents = accessData?.parents || {};
@@ -452,6 +462,15 @@ export function getEligibilityResult({ trnType, astData }) {
       };
     }
 
+    if (!isExplicitConventionalMeter(astData)) {
+      return {
+        eligible: false,
+        code: "METER_KIND_NOT_CONVENTIONAL_FOR_MREAD",
+        message:
+          "Meter kind must be explicitly conventional for METER_READING.",
+      };
+    }
+
     return { eligible: true, code: "ELIGIBLE", message: "Eligible." };
   }
 
@@ -499,6 +518,13 @@ export function resolveBulkStateRouting({ trnType, astData }) {
         eligible: false,
         effectiveTrnType: requested,
         message: "Prepaid/token meters are not supported for MREAD v1 TC upload.",
+      };
+    }
+    if (!isExplicitConventionalMeter(astData)) {
+      return {
+        eligible: false,
+        effectiveTrnType: requested,
+        message: "Meter kind must be explicitly conventional for METER_READING.",
       };
     }
     return { eligible: true, effectiveTrnType: requested, message: "" };

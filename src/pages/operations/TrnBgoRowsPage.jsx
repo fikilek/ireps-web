@@ -208,14 +208,20 @@ export default function TrnBgoRowsPage() {
     { skip: !batchId || isTcRowsLoading || tcRows.length > 0 },
   );
 
-  const { data: childTrns = [] } = useGetTrnBgoChildTrnsByBatchIdQuery(batchId, { skip: !batchId });
+  const { data: childTrns = [], isLoading: isChildTrnsLoading } = useGetTrnBgoChildTrnsByBatchIdQuery(batchId, { skip: !batchId });
   const batchWardPcode = String(activeBatch?.wardPcode || activeBatch?.scope?.wardPcode || "").trim();
-  const { data: asts = [] } = useGetAstsByLmPcodeWardPcodeQuery(
+  const { data: asts = [], isLoading: isAstsLoading } = useGetAstsByLmPcodeWardPcodeQuery(
     { lmPcode: activeLmPcode, wardPcode: batchWardPcode },
     { skip: !activeLmPcode || !batchWardPcode },
   );
   const rawRows = tcRows.length > 0 ? tcRows : bgoRows;
-  const isLoading = isTcUploadLoading || isTcRowsLoading || (!tcUpload && areBatchesLoading) || (tcRows.length === 0 && isBgoRowsLoading);
+  const isLoading =
+    isTcUploadLoading ||
+    isTcRowsLoading ||
+    isChildTrnsLoading ||
+    (Boolean(activeLmPcode && batchWardPcode) && isAstsLoading) ||
+    (!tcUpload && areBatchesLoading) ||
+    (tcRows.length === 0 && isBgoRowsLoading);
   const rowsError = tcRowsError || bgoRowsError;
 
   // Normalize rows for IrepsTable (joining live child TRN truth onto tc_rows)

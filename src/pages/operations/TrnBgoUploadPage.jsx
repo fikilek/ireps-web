@@ -891,19 +891,24 @@ export default function TrnBgoUploadPage() {
 
   const currentFilteredRows = shownRows ?? filteredRows;
 
+  const eligibleFilteredRows = useMemo(
+    () => currentFilteredRows.filter((r) => r.isEligible),
+    [currentFilteredRows],
+  );
+
   const allFilteredSelected = useMemo(() => {
-    if (currentFilteredRows.length === 0) return false;
-    return currentFilteredRows.every((r) =>
+    if (eligibleFilteredRows.length === 0) return false;
+    return eligibleFilteredRows.every((r) =>
       selectedRowKeys.has(getRowSelectionKey(r))
     );
-  }, [currentFilteredRows, selectedRowKeys]);
+  }, [eligibleFilteredRows, selectedRowKeys]);
 
   const someFilteredSelected = useMemo(() => {
-    if (currentFilteredRows.length === 0 || allFilteredSelected) return false;
-    return currentFilteredRows.some((r) =>
+    if (eligibleFilteredRows.length === 0 || allFilteredSelected) return false;
+    return eligibleFilteredRows.some((r) =>
       selectedRowKeys.has(getRowSelectionKey(r))
     );
-  }, [currentFilteredRows, selectedRowKeys, allFilteredSelected]);
+  }, [eligibleFilteredRows, selectedRowKeys, allFilteredSelected]);
 
   const handleToggleMasterSelect = useCallback(() => {
     const eligibleRows = currentFilteredRows.filter((r) => r.isEligible);
@@ -1301,12 +1306,14 @@ export default function TrnBgoUploadPage() {
             <MasterCheckbox
               checked={allFilteredSelected}
               indeterminate={someFilteredSelected}
-              disabled={currentFilteredRows.length === 0}
+              disabled={eligibleFilteredRows.length === 0}
               onChange={handleToggleMasterSelect}
               title={
-                allFilteredSelected
-                  ? `Deselect all ${currentFilteredRows.length} filtered row(s)`
-                  : `Select all ${currentFilteredRows.length} filtered row(s)`
+                eligibleFilteredRows.length === 0
+                  ? "No eligible rows to select"
+                  : allFilteredSelected
+                  ? `Deselect all ${eligibleFilteredRows.length} eligible filtered row(s)`
+                  : `Select all ${eligibleFilteredRows.length} eligible filtered row(s)`
               }
             />
           </div>
@@ -1721,7 +1728,7 @@ export default function TrnBgoUploadPage() {
             <div>
               <h3 style={styles.uploadCardTitle}>Select File to Upload</h3>
               <p style={styles.uploadCardSubtitle}>
-                Supported formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>, <code>.xls</code>). Maximum <strong>200 meters</strong> per file.
+                Supported formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>, <code>.xls</code>). Maximum <strong>100 meters</strong> per file.
               </p>
             </div>
           </div>
@@ -1787,7 +1794,7 @@ export default function TrnBgoUploadPage() {
               <strong>Click to browse</strong> or drag & drop meter file here
             </p>
             <p style={styles.dropzoneSubtext}>
-              Use the official 11-column template. Maximum 200 nonblank rows; rowNo and meterNo are required.
+              Use the official 11-column template. Maximum 100 nonblank rows; rowNo and meterNo are required.
             </p>
           </div>
         </div>

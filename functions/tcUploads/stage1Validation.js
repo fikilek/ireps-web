@@ -1,12 +1,12 @@
 // Shared transient Stage 1 contract. Does not change stored TC or TRN contracts.
 export const OFFICIAL_HEADERS = ["rowNo", "meterNo", "meterPhase", "meterType", "linkedAccountNo", "premiseAddress", "premisePropertyType", "wardNo", "geofence", "meterStatus", "erfNo"];
-export const MAX_UPLOAD_ROWS = 200;
+export const MAX_UPLOAD_ROWS = 100;
 export const UPLOAD_TRN_TYPES = ["METER_DISCONNECTION", "METER_RECONNECTION", "METER_INSPECTION", "METER_REMOVAL", "METER_READING"];
 export const meterKey = (value) => String(value ?? "").trim().toUpperCase();
 
 export function validateSourceRows(rows) {
   if (!Array.isArray(rows) || !rows.length) throw new Error("The uploaded file contains 0 meter rows.");
-  if (rows.length > MAX_UPLOAD_ROWS) throw new Error(`The file contains ${rows.length} nonblank rows. Maximum allowed is 200. Split the file and re-upload.`);
+  if (rows.length > MAX_UPLOAD_ROWS) throw new Error(`The file contains ${rows.length} nonblank rows. Maximum allowed is 100. Split the file and re-upload.`);
   return rows.map((row, index) => {
     const values = Object.fromEntries(OFFICIAL_HEADERS.map((key) => [key, String(row[key] ?? "")]));
     const rowNo = values.rowNo.trim();
