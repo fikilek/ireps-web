@@ -276,9 +276,22 @@ export default function TrnBgoRegisterPage() {
     error: uploadsError,
   } = useGetTcUploadsQuery({ limit: 500 });
 
-  const batchIds = sourceUploads.filter(batch => batch.contractVersion).map(batch => batch.id).sort();
-  const { currentData: progress } = useGetTrnBgoProgressQuery({ batchIds });
-  const { currentData: registerDetails } = useGetTrnBgoRegisterDetailsQuery({ batchIds: sourceUploads.map(batch => batch.id).sort() });
+  const batchIds = useMemo(
+    () => sourceUploads.filter(batch => batch.contractVersion).map(batch => batch.id).sort(),
+    [sourceUploads],
+  );
+  const allBatchIds = useMemo(
+    () => sourceUploads.map(batch => batch.id).sort(),
+    [sourceUploads],
+  );
+  const { currentData: progress } = useGetTrnBgoProgressQuery(
+    { batchIds },
+    { skip: !batchIds.length },
+  );
+  const { currentData: registerDetails } = useGetTrnBgoRegisterDetailsQuery(
+    { batchIds: allBatchIds },
+    { skip: !allBatchIds.length },
+  );
   const uploads = useMemo(() => sourceUploads.map(batch => {
     if (!batch.contractVersion) return { ...batch, notStartedRows: Math.max(0, Number(batch.totalRows || 0) - Number(batch.inProgressRows || 0) - Number(batch.completedRows || 0)) };
     const counts = progress?.ready && !progress.error ? progress.counts[batch.id] : null;
