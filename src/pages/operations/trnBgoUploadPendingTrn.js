@@ -91,12 +91,18 @@ export function parseGenericNonEligibleReason(row = {}) {
   };
 }
 
+const ACTIVE_TRN_WORKFLOW_STATES = new Set(["CREATED", "ISSUED", "ACCEPTED", "IN_PROGRESS"]);
+
 export function parsePendingTrnFromReason(row = {}) {
+  if (row?.isEligible === true) return null;
   const reason = String(row?.nonEligibleReason || "").trim();
   const lifecycle = row?.activeLifecycle || row?.astActiveLifecycle || null;
   const match = reason.match(/Active\s+([A-Z_]+)\s+job\s+(TRN_[^\s]+)\s+already exists/i);
-  const trnType = String(lifecycle?.trnType || match?.[1] || "").trim().toUpperCase();
-  const trnId = String(lifecycle?.trnId || match?.[2] || "").trim();
+  const lifecycleState = String(lifecycle?.workflowState || "").trim().toUpperCase();
+  const hasActiveLifecycle = Boolean(lifecycle?.trnId) && ACTIVE_TRN_WORKFLOW_STATES.has(lifecycleState);
+  if (!match && !hasActiveLifecycle) return null;
+  const trnType = String((hasActiveLifecycle ? lifecycle?.trnType : null) || match?.[1] || "").trim().toUpperCase();
+  const trnId = String((hasActiveLifecycle ? lifecycle?.trnId : null) || match?.[2] || "").trim();
   if (!trnId) return null;
 
   const shortCode = TRN_SHORT_CODES[trnType] || "TRN";

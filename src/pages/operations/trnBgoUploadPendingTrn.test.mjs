@@ -27,6 +27,32 @@ test("parsePendingTrnFromReason returns null for non-TRN eligibility reasons", (
   assert.equal(parsePendingTrnFromReason({ nonEligibleReason: "Meter is DECOMMISSIONED." }), null);
 });
 
+test("parsePendingTrnFromReason ignores DELETED lifecycle markers and eligible rows", () => {
+  assert.equal(
+    parsePendingTrnFromReason({
+      isEligible: true,
+      nonEligibleReason: "",
+      astActiveLifecycle: {
+        trnId: "TRN_MDCN_1795452015881_ELC_ZA5241002_1865",
+        trnType: "METER_DISCONNECTION",
+        workflowState: "DELETED",
+      },
+    }),
+    null,
+  );
+  assert.equal(
+    parsePendingTrnFromReason({
+      nonEligibleReason: "",
+      astActiveLifecycle: {
+        trnId: "TRN_MDCN_1795452015881_ELC_ZA5241002_1865",
+        trnType: "METER_DISCONNECTION",
+        workflowState: "DELETED",
+      },
+    }),
+    null,
+  );
+});
+
 test("parseFallbackReason formats DCN -> INSP Fallback pill and explanation", () => {
   const fb = parseFallbackReason(
     { isProposedInspection: true, astStatus: "DISCONNECTED", proposedReason: "Current state is DISCONNECTED — Proposed for Inspection (MINSP)." },
