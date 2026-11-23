@@ -262,13 +262,13 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
   };
   const allocate = () => {
     if (!selection.batches || !target || locked) return;
-    if (bulkMode && (selection.erfs > 100 || !selectedBulkItem?.canAllocate)) return;
+    if (bulkMode && (selection.erfs > 80 || !selectedBulkItem?.canAllocate)) return;
     setWindowView({ kind: "confirm", selection, target });
   };
   const confirm = async () => {
     if (windowView?.kind !== "confirm" || busy) return;
     const live = bulkMode ? selection : mdBgoAllocationSelection(shown, selectionIds);
-    if ((bulkMode && (live.erfs > 100 || !selectedBulkItem?.canAllocate)) || live.items.map(item => item.bgoBatchId).join(",") !== windowView.selection.items.map(item => item.bgoBatchId).join(",")) {
+    if ((bulkMode && (live.erfs > 80 || !selectedBulkItem?.canAllocate)) || live.items.map(item => item.bgoBatchId).join(",") !== windowView.selection.items.map(item => item.bgoBatchId).join(",")) {
       setWindowView({ kind: "failed", selection: windowView.selection, target: windowView.target, title: "Nothing was allocated", tone: "error", lines: ["The batch selection changed while confirmation was open.", "Review the allocation window and try again."] }); return;
     }
     const { selection: submitted, target: chosen } = windowView; setWindowView({ kind: "allocating", selection: submitted, target: chosen }); setBusy(true);
@@ -349,7 +349,7 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
                 ? "Select a batch from Batches below."
                 : "Click ready geofences on the map to add them here."}
           </p>
-          {bulkMode && <p style={styles.totals}>Select 1 batch at a time (maximum 100 meters per allocation).</p>}
+          {bulkMode && <p style={styles.totals}>Select 1 batch at a time (maximum 80 meters per allocation).</p>}
           <ul style={styles.list}>
             {selection.items.map((item) => (
               <li key={item.bgoBatchId} style={styles.listItem}>
@@ -386,8 +386,8 @@ export default function MdBgoAllocationPage({ bulkMode = false }) {
           {message ? <p role="status" style={selectedBulkItem?.fieldworkStarted ? styles.warnMessage : styles.message}>{message}</p> : null}
           <button
             type="button"
-            disabled={!selection.batches || !target || locked || (bulkMode && (selection.erfs > 100 || !selectedBulkItem?.canAllocate))}
-            style={{ ...styles.allocate, ...((!selection.batches || !target || locked || (bulkMode && (selection.erfs > 100 || !selectedBulkItem?.canAllocate))) ? styles.disabled : {}) }}
+            disabled={!selection.batches || !target || locked || (bulkMode && (selection.erfs > 80 || !selectedBulkItem?.canAllocate))}
+            style={{ ...styles.allocate, ...((!selection.batches || !target || locked || (bulkMode && (selection.erfs > 80 || !selectedBulkItem?.canAllocate))) ? styles.disabled : {}) }}
             onClick={allocate}
           >
             {busy

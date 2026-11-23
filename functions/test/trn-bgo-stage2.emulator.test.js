@@ -9,14 +9,14 @@ import { OFFICIAL_HEADERS } from "../tcUploads/stage1Validation.js";
 import { serializeCsv } from "../tcUploads/sourceCsv.js";
 import { verifyBulkInstruction, verifyBulkExecution } from "../tcUploads/bulkPolicy.js";
 
-test("actual bulk coordinator: atomic 200-row creation, source lineage, retry and concurrent work protection",{skip:!process.env.FIRESTORE_EMULATOR_HOST},async t=>{
+test("actual bulk coordinator: atomic 80-row creation, source lineage, retry and concurrent work protection",{skip:!process.env.FIRESTORE_EMULATOR_HOST},async t=>{
  assert.match(process.env.GCLOUD_PROJECT||"",/^demo-/);
  const app=initializeApp({projectId:process.env.GCLOUD_PROJECT},`bulk-${Date.now()}`);t.after(()=>deleteApp(app));const db=getFirestore(app);
  const uid=`M_${Date.now()}`,lmPcode="ZA5241",trnType="METER_DISCONNECTION",stamp=Date.now();
  await db.doc(`users/${uid}`).set({accountStatus:"ACTIVE",employment:{role:"MNG"},access:{workbases:[lmPcode]}});
- const rows=Array.from({length:200},(_,i)=>Object.fromEntries(OFFICIAL_HEADERS.map(h=>[h,h==="rowNo"?String(i+1):h==="meterNo"?`00${stamp}${String(i).padStart(3,"0")}`:""])));
+ const rows=Array.from({length:80},(_,i)=>Object.fromEntries(OFFICIAL_HEADERS.map(h=>[h,h==="rowNo"?String(i+1):h==="meterNo"?`00${stamp}${String(i).padStart(3,"0")}`:""])));
  const fixture=[];
- for(let i=0;i<200;i++) {
+ for(let i=0;i<80;i++) {
   const id=`TRN_MDIS_${stamp}_${i}`,wardPcode=`${lmPcode}${String(i).padStart(3,"0")}`,premiseId=`P_${stamp}_${i}`,no=rows[i].meterNo,parents={lmPcode,wardPcode};
   fixture.push([`wards/${wardPcode}`,{parents:{localMunicipalityId:lmPcode},name:`Ward${i}`}],[`premises/${premiseId}`,{id:premiseId,parents,erfId:`E${i}`,erfNo:`${i}`,services:{electricityMeters:[{trnId:id}]}}],[`asts/${id}`,{id,meterType:"electricity",accessData:{parents,premise:{id:premiseId},erfNo:`${i}`},ast:{astData:{astId:id,astNo:no,meter:{type:"conventional"}}},status:{state:i===0?"CONNECTED":"DISCONNECTED"},...(i===0?{}:{geofenceRefs:[]})}],[`trns/${id}`,{id,accessData:{trnType:"METER_DISCOVERY",access:{hasAccess:"yes"}},ast:{astData:{astNo:no}}}],[`meter_master/${no}`,{refs:{asts:{id}}}]);
  }
@@ -30,7 +30,7 @@ test("actual bulk coordinator: atomic 200-row creation, source lineage, retry an
  assert.deepEqual(concurrentResult,result);
  assert.equal(validateLifecycleInstructionEligibility({trnType,astDoc:{status:{state:"DISCONNECTED"}}}).ok,false,"individual issuance retains its status gate");
  assert.equal((await db.doc(`asts/TRN_MDIS_${stamp}_1`).get()).data().status.state,"DISCONNECTED","bulk creation must not change physical meter status");
- assert.equal(result.success,true);assert.equal(result.totalMeters,200);assert.equal(result.batches.length,200);
+ assert.equal(result.success,true);assert.equal(result.totalMeters,80);assert.equal(result.batches.length,80);
  assert.deepEqual(await createBulkGraph({db,uid,data,source,csv}),result);
  const parent=(await db.doc(`tc_uploads/${result.batches[0].tcId}`).get()).data();
  const trn=(await db.doc(`trns/${parent.trnIds[0]}`).get()).data();
@@ -58,8 +58,8 @@ test("actual bulk coordinator: atomic 200-row creation, source lineage, retry an
   await db.doc(`teams/${teamId}`).set({status:"ACTIVE",name:"Field team",ownership:{mncServiceProviderId:"MNC1"},scope:{memberUserIds:[worker]}});
   const batchIds=result.batches.slice(0,15).map(b=>b.tcId);
   const oversized=`CAPACITY_${stamp}`;
-  await db.doc(`tc_uploads/${oversized}`).set({contractVersion:BULK_CONTRACT,lmPcode,workflow:{state:"READY_FOR_ALLOCATION"},trnIds:Array.from({length:201},(_,i)=>`EXCESS_${i}`)});
-  await assert.rejects(allocateTcBatches({db,request:{auth:{uid},data:{batchIds:[oversized],targetType:"TEAM",targetId:teamId}}}),/Maximum per allocation action is 200/);
+  await db.doc(`tc_uploads/${oversized}`).set({contractVersion:BULK_CONTRACT,lmPcode,workflow:{state:"READY_FOR_ALLOCATION"},trnIds:Array.from({length:81},(_,i)=>`EXCESS_${i}`)});
+  await assert.rejects(allocateTcBatches({db,request:{auth:{uid},data:{batchIds:[oversized],targetType:"TEAM",targetId:teamId}}}),/Maximum per allocation action is 80/);
   assert.equal((await db.doc(`tc_uploads/${oversized}`).get()).data().workflow.state,"READY_FOR_ALLOCATION");
 
   const allocated=await allocateTcBatches({db,request:{auth:{uid},data:{batchIds,targetType:"TEAM",targetId:teamId}}});assert.equal(allocated.success,true);
@@ -86,10 +86,11 @@ test("actual bulk coordinator: atomic 200-row creation, source lineage, retry an
   assert.deepEqual(await createBulkGraph({db,uid,data,source,csv}),result);
  });
  await t.test("invalid selection and lost authorization do not create a graph",async()=>{
-  await assert.rejects(createBulkGraph({db,uid,data:{...data,selectedRowNos:["201"]},source,csv}),/missing or dropped/);
+  await assert.rejects(createBulkGraph({db,uid,data:{...data,selectedRowNos:["81"]},source,csv}),/missing or dropped/);
+  await assert.rejects(createBulkGraph({db,uid,data:{...data,selectedRowNos:Array.from({length:81},(_,i)=>String(i+1))},source,csv}),/at most 80/);
   await db.doc(`users/${uid}`).update({accountStatus:"DISABLED"});
   await assert.rejects(createBulkGraph({db,uid,data,source,csv}),/authorized/);
  });
  assert.equal(parseSource(csv)[0].meterNo,rows[0].meterNo);
- t.diagnostic("Actual coordinator created 200 authoritative Ward parents and 200 canonical CREATED instructions in one transaction; retries returned identical mapping.");
+ t.diagnostic("Actual coordinator created 80 authoritative Ward parents and 80 canonical CREATED instructions in one transaction (482 <= 500 writes); retries returned identical mapping.");
 });

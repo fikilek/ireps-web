@@ -456,4 +456,29 @@ test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; 
   assert.equal(mreadMap.get("1").eligible, true);
   assert.equal(mreadMap.get("1").effectiveTrnType, "METER_READING");
   assert.equal(mreadMap.get("2").eligible, false);
+
+  // MREAD fail-closed when meter kind is missing or unknown
+  docs["asts/TRN_MDIS_REM"].ast.astData.meter = { phase: "single" };
+  const missingKindPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_READING", rows: [makeRow(1, "60000001")], keep: {} } });
+  assert.equal(new Map(missingKindPreview.eligibility).get("1").eligible, false);
+});
+
+test("Stage 1 & createBulkGraph explicitly enforce MAX_UPLOAD_ROWS = 80 atomic boundary", async () => {
+  const { MAX_UPLOAD_ROWS, OFFICIAL_HEADERS, validateSourceRows } = await import("../tcUploads/stage1Validation.js");
+  const { serializeCsv } = await import("../tcUploads/sourceCsv.js");
+  assert.equal(MAX_UPLOAD_ROWS, 80);
+  const rows81 = Array.from({ length: 81 }, (_, i) => Object.fromEntries(OFFICIAL_HEADERS.map((h) => [h, h === "rowNo" ? String(i + 1) : h === "meterNo" ? `M_${i + 1}` : ""])));
+  assert.throws(() => validateSourceRows(rows81), /Maximum allowed is 80/);
+  const rows80 = rows81.slice(0, 80);
+  assert.equal(validateSourceRows(rows80).length, 80);
+
+  const csv80 = serializeCsv([OFFICIAL_HEADERS, ...rows80.map((r) => OFFICIAL_HEADERS.map((h) => r[h]))]);
+  const { digest } = await import("../tcUploads/stage2Core.js");
+  const uid = "MNG_80";
+  const db = makeFakeDb({ [`users/${uid}`]: { accountStatus: "ACTIVE", employment: { role: "MNG" }, access: { workbases: ["ZA5241"] } } });
+  const source = { uid, id: "S1", lmPcode: "ZA5241", trnType: "METER_DISCONNECTION", contractVersion: "TRN_BGO_11COL_REASON_FREE_V1", hash: digest(csv80), fileName: "f.csv", generation: "1" };
+  await assert.rejects(
+    createBulkGraph({ db, uid, data: { lmPcode: "ZA5241", trnType: "METER_DISCONNECTION", selectedRowNos: rows81.map((r) => r.rowNo), keep: {} }, source, csv: csv80 }),
+    /at most 80/,
+  );
 });

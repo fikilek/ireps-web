@@ -467,7 +467,7 @@ export default function TrnBgoRegisterPage() {
 
   // IrepsTable column definitions (aligned with MdBgoRegisterPage + TRN Type & File Name)
   const columns = useMemo(() => {
-    const countCell = (value) => value == null ? (progress?.error ? "NAv" : "…") : formatNumber(value);
+    const countCell = (value) => (value == null ? "Unavailable" : formatNumber(value));
     return [
     {
       key: "select",
