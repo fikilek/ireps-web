@@ -149,9 +149,9 @@ test("TRN BGO Register renders 4 lifecycle KPI cards with '?' help button and me
   const content = fs.readFileSync(registerPath, "utf8");
 
   // Verify 4 required KPI card labels
-  assert.match(content, /label="Total Batches"/, "Must render Total Batches KPI card");
-  assert.match(content, /label="Unallocated"/, "Must render Unallocated KPI card");
-  assert.match(content, /label="Allocated"/, "Must render Allocated KPI card");
+  assert.match(content, /label="Total"/, "Must render Total KPI card");
+  assert.match(content, /label="Not Started"/, "Must render Not Started KPI card");
+  assert.match(content, /label="In Progress"/, "Must render In Progress KPI card");
   assert.match(content, /label="Completed"/, "Must render Completed KPI card");
 
   // Verify '?' help button and modal definition
@@ -161,9 +161,9 @@ test("TRN BGO Register renders 4 lifecycle KPI cards with '?' help button and me
 
   // Verify bottom-right meter pill
   assert.match(content, /style=\{styles\.metersPill\}/, "Each card must display bottom-right meters pill");
-  assert.match(content, /metersCount=\{summary\.totalMeters\}/, "Total Batches card must pass totalMeters");
-  assert.match(content, /metersCount=\{summary\.unallocatedMeters\}/, "Unallocated card must pass unallocatedMeters");
-  assert.match(content, /metersCount=\{summary\.allocatedMeters\}/, "Allocated card must pass allocatedMeters");
+  assert.match(content, /metersCount=\{summary\.totalMeters\}/, "Total card must pass totalMeters");
+  assert.match(content, /metersCount=\{summary\.notStartedMeters\}/, "Not Started card must pass notStartedMeters");
+  assert.match(content, /metersCount=\{summary\.inProgressMeters\}/, "In Progress card must pass inProgressMeters");
   assert.match(content, /metersCount=\{summary\.completedMeters\}/, "Completed card must pass completedMeters");
 });
 

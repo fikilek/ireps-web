@@ -15,6 +15,7 @@ import {
 } from "../../redux/tcApi";
 import {
   buildTrnBgoRegisterRow,
+  buildTrnBgoRegisterSummary,
   trnBgoRegisterSearchValue,
 } from "./trn-bgo/trnBgoRegisterModel";
 import IrepsTable from "../../components/table/IrepsTable";
@@ -191,33 +192,39 @@ function getBatchAllocationStatus(batch) {
 }
 
 const KPI_HELP_DETAILS = {
-  totalBatches: {
-    title: "Total Batches",
-    meaning: "The total number of Transaction Bulk Geofence Origination (TRN BGO) batches currently loaded in the register.",
-    criteria: "Aggregates all permanent transaction batches originating from external uploads or meter selections, spanning all lifecycle states.",
-    nextAction: "Use the top action bar to upload new meter batches or monitor existing batches across all Local Municipalities.",
+  total: {
+    title: "Total",
+    meaning: "The total number of Transaction Bulk Geofence Origination (TRN BGO) batches currently loaded in the register and all constituent meters across them.",
+    criteria: "Consolidates all permanent transaction batches in the active Local Municipality and sums each batch's Total column.",
+    nextAction: "Use the top action bar to upload new meter batches or inspect existing batches across Wards.",
   },
-  unallocated: {
-    title: "Unallocated",
-    meaning: "Batches that are staged or validated and ready for field assignment, but have not yet been allocated to an operational TEAM or Service Provider (SP).",
-    criteria: "Batches with status 'READY_FOR_BGO' or 'READY_FOR_ALLOCATION' where team and SP assignments are empty.",
-    nextAction: "Click 'Allocate' on any row or open the 'Allocation Board' to assign these batches to available field teams or contractors.",
+  notStarted: {
+    title: "Not Started",
+    meaning: "Batches where field execution has not started on any row, paired with the consolidated Not Started meter count across all batches.",
+    criteria: "Batch count consolidates batches with zero In Progress and zero Completed rows (excluding IN_PROGRESS and COMPLETED); the meters pill sums the Not Started column across all batches.",
+    nextAction: "Click 'Allocate' on any unallocated batch or open the 'Allocation Board' to dispatch work to field teams.",
   },
-  allocated: {
-    title: "Allocated",
-    meaning: "Batches that have been officially issued and assigned to an active operational TEAM or Service Provider.",
-    criteria: "Batches with status 'ALLOCATED', 'USED', or 'PARTIALLY_USED', with assigned team/SP and active child transactions dispatched to mobile field workers.",
+  inProgress: {
+    title: "In Progress",
+    meaning: "Batches currently undergoing field execution, paired with the consolidated In Progress meter count across all batches.",
+    criteria: "Batch count consolidates batches that are not completed where at least one row is In Progress or Completed; the meters pill sums the In Progress column across all batches.",
     nextAction: "Monitor live field progress on the TRN BGO Dashboard or inspect individual row completion in BGO Rows.",
   },
   completed: {
     title: "Completed",
-    meaning: "Batches where field execution has finished and all constituent child transactions have been executed.",
-    criteria: "Batches with status 'COMPLETED' or where 100% of child transactions have reached their terminal completion or closure state.",
+    meaning: "Batches where field execution has finished for all constituent meters, paired with the consolidated Completed meter count across all batches.",
+    criteria: "Batch count consolidates batches where Completed rows equal Total rows (including QA Pending, QA Pass, and QA Fail states); the meters pill sums the Completed column across all batches.",
     nextAction: "Review final completion reports, verify audit records, and confirm meter reconciliation.",
   },
 };
 
-function SummaryCard({ label, value, metersCount, onHelpClick }) {
+function SummaryCard({ label, value, metersCount, onHelpClick, pendingLabel = "Unavailable" }) {
+  const valueText = value == null ? "—" : formatNumber(value);
+  const metersText =
+    metersCount == null
+      ? pendingLabel
+      : `${formatNumber(metersCount)} ${metersCount === 1 ? "Meter" : "Meters"}`;
+
   return (
     <div style={styles.summaryCard}>
       <div style={styles.summaryCardHeader}>
@@ -234,11 +241,11 @@ function SummaryCard({ label, value, metersCount, onHelpClick }) {
       </div>
 
       <div style={styles.summaryCardBody}>
-        <strong style={styles.summaryCardValue}>{formatNumber(value)}</strong>
+        <strong style={styles.summaryCardValue}>{valueText}</strong>
       </div>
 
       <div style={styles.summaryCardFooter}>
-        <span style={styles.metersPill} title={`Total meters in ${label.toLowerCase()} batches`}>
+        <span style={styles.metersPill} title={`Total meters in ${label.toLowerCase()} consolidation`}>
           <svg
             width="12"
             height="12"
@@ -252,7 +259,7 @@ function SummaryCard({ label, value, metersCount, onHelpClick }) {
           >
             <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>
-          {formatNumber(metersCount)} {metersCount === 1 ? "Meter" : "Meters"}
+          {metersText}
         </span>
       </div>
     </div>
@@ -329,58 +336,18 @@ export default function TrnBgoRegisterPage() {
   // KPI Help Modal state
   const [activeHelpKpi, setActiveHelpKpi] = useState(null);
 
-  // Summary KPIs across existing TRN candidate batches
-  // 1. Total Batches (with total meters)
-  // 2. Unallocated (with unallocated meters)
-  // 3. Allocated (with allocated meters)
-  // 4. Completed (with completed meters)
-  const summary = useMemo(() => {
-    let unallocatedBatches = 0;
-    let unallocatedMeters = 0;
+  const progressPendingOrError = batchIds.length > 0 && (!progress?.ready || Boolean(progress?.error));
+  const kpiPendingLabel = progress?.error ? "Unavailable" : "Loading…";
 
-    let allocatedBatches = 0;
-    let allocatedMeters = 0;
-
-    let completedBatches = 0;
-    let completedMeters = 0;
-
-    let totalBatches = uploads.length;
-    let totalMeters = 0;
-
-    uploads.forEach((item) => {
-      const totalRows = Number(item.totalRows || 0);
-      const completed = Number(item.completedRows || 0);
-      const isCompletedBatch = (totalRows > 0 && completed >= totalRows) ||
-        String(item.workflowState || item.workflow?.state || item.bgoStatus || "").toUpperCase() === "COMPLETED";
-
-      totalMeters += totalRows;
-
-      if (isCompletedBatch) {
-        completedBatches += 1;
-        completedMeters += totalRows;
-      } else {
-        const alloc = getBatchAllocationStatus(item);
-        if (alloc.label === "Allocated") {
-          allocatedBatches += 1;
-          allocatedMeters += totalRows;
-        } else {
-          unallocatedBatches += 1;
-          unallocatedMeters += totalRows;
-        }
-      }
-    });
-
-    return {
-      totalBatches,
-      totalMeters,
-      unallocatedBatches,
-      unallocatedMeters,
-      allocatedBatches,
-      allocatedMeters,
-      completedBatches,
-      completedMeters,
-    };
-  }, [uploads]);
+  // Summary KPIs consolidated from batch execution states & row counts
+  // 1. Total (batches & total meters)
+  // 2. Not Started (not-started batches & sum of Not Started meters)
+  // 3. In Progress (in-progress batches & sum of In Progress meters)
+  // 4. Completed (completed batches & sum of Completed meters)
+  const summary = useMemo(
+    () => buildTrnBgoRegisterSummary(uploads, { pendingOrError: progressPendingOrError }),
+    [uploads, progressPendingOrError],
+  );
 
   const tableRows = useMemo(
     () => uploads.map((batch) => buildTrnBgoRegisterRow(batch, registerDetails)),
@@ -462,8 +429,6 @@ export default function TrnBgoRegisterPage() {
       setUnallocateReason("");
     }
   };
-
-  const progressPendingOrError = batchIds.length > 0 && (!progress?.ready || Boolean(progress?.error));
 
   // IrepsTable column definitions (aligned with MdBgoRegisterPage + TRN Type & File Name)
   const columns = useMemo(() => {
@@ -792,27 +757,30 @@ export default function TrnBgoRegisterPage() {
       {/* 4 Standardized KPI Summary Cards */}
       <div style={styles.summaryGrid}>
         <SummaryCard
-          label="Total Batches"
+          label="Total"
           value={summary.totalBatches}
           metersCount={summary.totalMeters}
-          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.totalBatches)}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.total)}
         />
         <SummaryCard
-          label="Unallocated"
-          value={summary.unallocatedBatches}
-          metersCount={summary.unallocatedMeters}
-          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.unallocated)}
+          label="Not Started"
+          value={summary.notStartedBatches}
+          metersCount={summary.notStartedMeters}
+          pendingLabel={kpiPendingLabel}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.notStarted)}
         />
         <SummaryCard
-          label="Allocated"
-          value={summary.allocatedBatches}
-          metersCount={summary.allocatedMeters}
-          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.allocated)}
+          label="In Progress"
+          value={summary.inProgressBatches}
+          metersCount={summary.inProgressMeters}
+          pendingLabel={kpiPendingLabel}
+          onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.inProgress)}
         />
         <SummaryCard
           label="Completed"
           value={summary.completedBatches}
           metersCount={summary.completedMeters}
+          pendingLabel={kpiPendingLabel}
           onHelpClick={() => setActiveHelpKpi(KPI_HELP_DETAILS.completed)}
         />
       </div>
