@@ -118,6 +118,10 @@ test("isSubmittedRegistryTrn excludes unexecuted instructions while keeping NA v
   assert.equal(isSubmittedRegistryTrn({ workflowState: "ISSUED", hasAccess: "NAv", originChannel: "OFFICE" }), false);
   assert.equal(isSubmittedRegistryTrn({ workflowState: "ACCEPTED", hasAccess: "NAv", originChannel: "OFFICE" }), false);
   assert.equal(isSubmittedRegistryTrn({ workflowState: "IN_PROGRESS", hasAccess: "NAv", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "CREATED", hasAccess: "YES", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "ISSUED", hasAccess: "YES", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "ACCEPTED", hasAccess: "YES", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "IN_PROGRESS", hasAccess: "YES", originChannel: "OFFICE" }), false);
   assert.equal(isSubmittedRegistryTrn({ workflowState: "COMPLETED", hasAccess: "NO", originChannel: "OFFICE" }), true);
   assert.equal(isSubmittedRegistryTrn({ workflowState: "COMPLETED", hasAccess: "YES", originChannel: "OFFICE" }), true);
   assert.equal(isSubmittedRegistryTrn({ workflowState: "NAv", hasAccess: "NAv", originChannel: "FIELD" }), true);

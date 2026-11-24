@@ -356,6 +356,7 @@ function normalizeTrnRegistryDoc(docSnap) {
     createdByUid: valueOrNav(metadata.createdByUid),
     createdByUser: valueOrNav(metadata.createdByUser),
     updatedByUid: valueOrNav(metadata.updatedByUid),
+    updatedByUser: valueOrNav(metadata.updatedByUser),
     createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
     lastUpdatedAt: normalizeDateValue(metadata.updatedAt || data.updatedAt),
     createdForName: getRegistryCreatedForName(data),
@@ -455,6 +456,7 @@ function normalizeTrnDoc(docSnap) {
     cancelledAt: getCancelledAt(data),
     issuedByUser: getIssuedByUser(data),
     completedByUser: getCompletedByUser(data),
+    updatedByUser: valueOrNav(metadata.updatedByUser),
     workflow: {
       ...(data.workflow || {}),
       state: workflowState,

@@ -63,9 +63,13 @@ export function isSubmittedRegistryTrn(row = {}) {
   )
     .trim()
     .toUpperCase();
-  if (hasAccess === "YES" || hasAccess === "NO") return true;
-  if (["COMPLETED", "QA PASS", "QA FAIL"].includes(state)) return true;
+  // Always include explicit No Access visits. Check unsubmitted workflow states BEFORE
+  // hasAccess === "YES", because buildLifecycleInstructionTrnPayload defaults unexecuted
+  // office instructions to accessData.access.hasAccess = "yes" at creation time.
+  if (hasAccess === "NO") return true;
   if (state && UNSUBMITTED_REGISTRY_STATES.has(state)) return false;
+  if (hasAccess === "YES") return true;
+  if (["COMPLETED", "QA PASS", "QA FAIL"].includes(state)) return true;
   const channel = String(row.originChannel || row.origin?.channel || "")
     .trim()
     .toUpperCase();
