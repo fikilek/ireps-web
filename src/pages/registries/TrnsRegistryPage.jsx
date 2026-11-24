@@ -38,6 +38,8 @@ import {
   getTrnUpdatedByUser,
   getTrnHistoryCount,
   formatQaStatusDate,
+  isNoAccessTrnRow,
+  isSubmittedRegistryTrn,
   TRN_QA_STATUS_OPTIONS,
 } from "../../utils/trnQa.js";
 import { useGetAvailableServiceProvidersQuery } from "../../redux/serviceProvidersApi";
@@ -45,9 +47,10 @@ import { isMainContractor, parentIdOf, resolveMainContractor, mncPcodesOf } from
 
 const DEFAULT_SORT = { key: "lastUpdatedAt", direction: "desc" };
 
-// Unified TRN Lifecycle v3: only workflow.state determines the QA lifecycle.
+// Unified TRN Lifecycle v3 + OC-R002: workflow.state determines QA, excluding No Access visits.
 const QA_STATUS_OPTIONS = ["COMPLETED", "QA FAIL", "QA PASS"];
 function qaLifecycleStatus(row) {
+  if (isNoAccessTrnRow(row)) return "NOT_ELIGIBLE";
   const state = String(row?.workflowState || row?.workflow?.state || "").trim().toUpperCase();
   return QA_STATUS_OPTIONS.includes(state) ? state : "NOT_ELIGIBLE";
 }
@@ -494,6 +497,12 @@ export default function TrnsRegistryPage() {
     return EMPTY_TRN_FILTERS;
   });
 
+  const [requestedTrnId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const searchParams = new URLSearchParams(window.location.search);
+    return String(searchParams.get("trnId") || searchParams.get("trn") || "").trim();
+  });
+
   const [showTrnId, setShowTrnId] = useState(() => {
     if (typeof window === "undefined") return false;
     const searchParams = new URLSearchParams(window.location.search);
@@ -522,6 +531,9 @@ export default function TrnsRegistryPage() {
     }
     const updatedAtFilter = tableFilters.lastUpdatedAt || EMPTY_DATETIME_FILTER;
     return rows.filter(row => {
+      if (!isSubmittedRegistryTrn(row) && !(requestedTrnId && row.trnId === requestedTrnId && includesText(row.trnId, filters.trnId))) {
+        return false;
+      }
       if (!matchesDateFilter(row.lastUpdatedAt, updatedAtFilter)) return false;
       if (!matchesSelect(qaLifecycleStatus(row), filters.qaState)) return false;
       if (!matchesSelect(row.premisePropertyType, filters.premisePropertyType)) return false;
@@ -530,7 +542,7 @@ export default function TrnsRegistryPage() {
       const mediaMatches = mediaFilterIsEmpty || Number.isFinite(mediaFilterValue) && Number(row.mediaCount) === mediaFilterValue;
       return includesText(row.trnId, filters.trnId) && includesText(row.meterNo, filters.meterNo) && includesText(row.premiseAddress, filters.premiseAddress) && includesText(row.unitName, filters.unitName) && includesText(row.unitNo, filters.unitNo) && includesText(row.erfNo, filters.erfNo) && includesText(row.wardNo, filters.wardNo) && mediaMatches && matchesSelect(row.trnType, filters.trnType) && matchesSelect(row.hasAccess, filters.hasAccess) && includesText(row.accessReason, filters.accessReason) && matchesSelect(row.meterType, filters.meterType) && matchesSelect(row.astState, filters.astState) && includesText(row.anomaly, filters.anomaly) && includesText(row.anomalyDetail, filters.anomalyDetail) && includesText(row.normalisation, filters.normalisation) && includesText(row.createdByUser, filters.createdByUser) && includesText(formatIssuedToText(row.assignmentTargets), filters.issuedTo) && includesText(resolveTrnBgoLink(row)?.batchId || "NAv", filters.bgoBatch) && (includesText(getTrnUpdatedByUser(row), filters.updatedByUser || filters.completedByUser) || includesText(row.completedByUser, filters.updatedByUser || filters.completedByUser));
     });
-  }, []);
+  }, [requestedTrnId]);
 
   const filteredTrnRows = useMemo(() => filterRegistryRows(trnRows, filters), [trnRows, filters, filterRegistryRows]);
 
@@ -1113,6 +1125,9 @@ export default function TrnsRegistryPage() {
       const rawStatus = qaLifecycleStatus(row);
       const status = rawStatus === "COMPLETED" ? "QA PENDING" : rawStatus === "NOT_ELIGIBLE" ? "QA NAv" : rawStatus;
       const isEligible = rawStatus !== "NOT_ELIGIBLE";
+      const ineligibleNote = isNoAccessTrnRow(row)
+        ? "No Access visit recorded — excluded from operation QA"
+        : "Awaiting submission / check required";
       return (
         <div className="qa-status-cell">
           <QaPill
@@ -1120,8 +1135,8 @@ export default function TrnsRegistryPage() {
             label={qaLifecycleLabel(row)}
             disabled={!isEligible}
             onClick={isEligible ? () => setSelectedQa({ trnId: row.trnId, action: "", mode: "review" }) : undefined}
-            title={isEligible ? `Open QA Review for ${row.trnId}` : "Awaiting submission / check required"}
-            ariaLabel={`QA Status: ${qaLifecycleLabel(row)}${!isEligible ? " - Awaiting submission / check required" : ""}`}
+            title={isEligible ? `Open QA Review for ${row.trnId}` : ineligibleNote}
+            ariaLabel={`QA Status: ${qaLifecycleLabel(row)}${!isEligible ? ` - ${ineligibleNote}` : ""}`}
           />
           {(() => {
             const dateVal = rawStatus === "COMPLETED"

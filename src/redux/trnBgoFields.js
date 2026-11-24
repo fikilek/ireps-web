@@ -11,6 +11,7 @@ export function getTcId(data = {}) {
   return valueOrNav(
     data.origin?.tcId ||
       data.origin?.trnBgo?.batchId ||
+      data.origin?.trnBgoNoAccess?.batchId ||
       data.bgo?.tcId ||
       data.tcId ||
       data.refs?.tcId ||
@@ -22,6 +23,7 @@ export function getTcId(data = {}) {
 export function getBgoBatchId(data = {}) {
   return valueOrNav(
     data.origin?.trnBgo?.batchId ||
+      data.origin?.trnBgoNoAccess?.batchId ||
       data.origin?.mdBgo?.batchId ||
       data.bgo?.batchId ||
       data.bgo?.bgoBatchId ||
@@ -37,6 +39,7 @@ export function getBgoBatchId(data = {}) {
 export function getBgoRowId(data = {}) {
   return valueOrNav(
     data.origin?.trnBgo?.rowId ||
+      data.origin?.trnBgoNoAccess?.rowId ||
       data.origin?.mdBgo?.rowId ||
       data.bgo?.bgoRowId ||
       data.bgoRowId ||
@@ -49,6 +52,7 @@ export function getTcRowId(data = {}) {
   return valueOrNav(
     data.origin?.tcRowId ||
       data.origin?.trnBgo?.rowId ||
+      data.origin?.trnBgoNoAccess?.rowId ||
       data.bgo?.tcRowId ||
       data.tcRowId ||
       data.refs?.tcRowId,
@@ -71,6 +75,7 @@ export function getBgoKind(data = {}, bgoBatchId = "NAv") {
   if (
     data.origin?.trnBgo?.batchId ||
     data.origin?.trnBgo?.rowId ||
+    data.origin?.trnBgoNoAccess?.batchId ||
     source === "TRN_BGO" ||
     kind === "BGO_TRN" ||
     kind === "TRN_BGO"

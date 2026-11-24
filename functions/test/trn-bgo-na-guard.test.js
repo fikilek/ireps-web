@@ -197,6 +197,12 @@ test("recordLifecycleNoAccess never completes a TRN BGO instruction even when su
   assert.deepEqual(instrAfter1.noAccessTrnIds, [first.trnId]);
   assert.equal(db._store.get(`asts/${astId}`).trnActiveLifecycle.trnId, instrId);
 
+  const naDoc1 = db._store.get(`trns/${first.trnId}`);
+  assert.deepEqual(naDoc1.assignment, { targets: [{ type: "SP", id: "SP1" }] });
+  assert.equal(naDoc1.origin?.trnBgoNoAccess?.batchId, batchId);
+  assert.equal(naDoc1.origin?.trnBgoNoAccess?.rowId, rowId);
+  assert.equal(naDoc1.origin?.trnBgoNoAccess?.instructionTrnId, instrId);
+
   const second = await recordLifecycleNoAccess({
     db,
     data: makePayload("2026-11-16T00:31:00.000Z"),

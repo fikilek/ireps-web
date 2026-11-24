@@ -12,7 +12,10 @@ import {
   getTrnUpdatedByUser,
   formatQaStatusDate,
   getTrnHistoryCount,
+  isNoAccessTrnRow,
+  isSubmittedRegistryTrn,
 } from "../src/utils/trnQa.js";
+import { getBgoBatchId, getBgoRowId, getBgoKind } from "../src/redux/trnBgoFields.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 
@@ -97,5 +100,51 @@ test("TrnQaModal source supports mode='history' and hides form data, evidence an
 
   // Closes modal upon successful submit
   assert.match(modalSrc, /onClose\?\.?\(\)/);
+});
+
+test("getTrnUpdatedByUser skips 'NAv' placeholders and falls back to metadata.updatedByUser", () => {
+  const row = {
+    workflowState: "IN_PROGRESS",
+    completedByUser: "NAv",
+    updatedByUser: "NAv",
+    metadata: { updatedByUser: "Elsa Swanepoel" },
+    createdByUser: "Mandy Mandy",
+  };
+  assert.equal(getTrnUpdatedByUser(row), "Elsa Swanepoel");
+});
+
+test("isSubmittedRegistryTrn excludes unexecuted instructions while keeping NA visits and executed TRNs", () => {
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "CREATED", hasAccess: "NAv", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "ISSUED", hasAccess: "NAv", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "ACCEPTED", hasAccess: "NAv", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "IN_PROGRESS", hasAccess: "NAv", originChannel: "OFFICE" }), false);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "COMPLETED", hasAccess: "NO", originChannel: "OFFICE" }), true);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "COMPLETED", hasAccess: "YES", originChannel: "OFFICE" }), true);
+  assert.equal(isSubmittedRegistryTrn({ workflowState: "NAv", hasAccess: "NAv", originChannel: "FIELD" }), true);
+
+  assert.equal(isNoAccessTrnRow({ hasAccess: "NO" }), true);
+  assert.equal(isNoAccessTrnRow({ hasAccess: "YES" }), false);
+});
+
+test("trnBgoFields reads origin.trnBgoNoAccess batchId and rowId for TRN BGO NA rows", () => {
+  const naDoc = {
+    origin: {
+      channel: "OFFICE",
+      trnBgoNoAccess: {
+        batchId: "TRN_BGO_20261124_033837_ZA5241006_MDCN",
+        rowId: "TRN_BGO_20261124_033837_ZA5241006_MDCN_R000001",
+        instructionTrnId: "TRN_MDCN_1",
+      },
+    },
+  };
+  assert.equal(getBgoBatchId(naDoc), "TRN_BGO_20261124_033837_ZA5241006_MDCN");
+  assert.equal(getBgoRowId(naDoc), "TRN_BGO_20261124_033837_ZA5241006_MDCN_R000001");
+  assert.equal(getBgoKind(naDoc, getBgoBatchId(naDoc)), "TRN_BGO");
+});
+
+test("TrnsRegistryPage excludes NA visits from operation QA and filters out unsubmitted instructions", () => {
+  const trnsSrc = readFileSync(join(here, "../src/pages/registries/TrnsRegistryPage.jsx"), "utf8");
+  assert.match(trnsSrc, /if \(isNoAccessTrnRow\(row\)\) return "NOT_ELIGIBLE";/);
+  assert.match(trnsSrc, /if \(!isSubmittedRegistryTrn\(row\)/);
 });
 

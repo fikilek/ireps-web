@@ -19,7 +19,7 @@ const present = (v) => text(v) && text(v).toUpperCase() !== "NAV";
 const fail = (code, message) => { throw noAccessError(code, message); };
 
 // Pure construction: neither meter work nor a second outcome is written for an inaccessible meter.
-export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now, existing = null, serviceProvider = {}, batch = null, trnBgoNoAccess = null }) {
+export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now, existing = null, assignment = null, serviceProvider = {}, batch = null, trnBgoNoAccess = null }) {
   const accessData = normalizeNoAccessAccessData(data.accessData, { actor, metadata: data.metadata });
   const parents = buildNoAccessParentsFromErf(erf);
   if (noAccessParentsAreMissing(parents) || !present(parents.wardPcode)) fail("NO_ACCESS_GEOGRAPHY_UNRESOLVED", "The ERF has no municipality or ward. Ask the office to correct its geography.");
@@ -29,6 +29,7 @@ export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now,
     for (const key of ["createdAt", "createdByUid", "createdByUser"]) metadata[key] = existing.metadata?.[key] ?? null;
   }
   const astId = data.astId || data.ast?.astData?.astId;
+  const resolvedAssignment = existing?.assignment || assignment || {};
   const payload = {
     id: data.id,
     accessData: { trnType: accessData.trnType, erfId: accessData.erfId, erfNo: accessData.erfNo, parents,
@@ -38,7 +39,7 @@ export function buildLifecycleNoAccess({ data, astDoc, premise, erf, actor, now,
     ast: { astData: { ...(astDoc.ast?.astData || {}), astId }, location: buildNoAccessLocation({ assetLocation: astDoc.ast?.location, premiseGeometry: premise.geometry }) },
     media: data.media.map(({ uri: _uri, ...item }) => item),
     serviceProvider,
-    assignment: existing?.assignment || {},
+    assignment: resolvedAssignment,
     origin: { ...(existing?.origin || {}), channel: existing ? "OFFICE" : "FIELD", ...(batch ? { targetedBatch: batch } : {}), ...(trnBgoNoAccess ? { trnBgoNoAccess } : {}) },
     workflow: { ...(existing?.workflow || {}), state: "COMPLETED", completedAt: now, completedByUid: actor.uid, completedByUser: actor.name },
   };
@@ -162,9 +163,14 @@ export async function recordLifecycleNoAccess({ db, data, actor, now, isOffice, 
         erfId: access.erfId, premiseId, anomaly: [astDoc.ast] });
     if (!decision.allowed) fail(decision.code, decision.message);
     const trnBgoNoAccess = (isTrnBgoInstruction || trnBgoCtx) && instrRef && instrData
-      ? { batchId: text(trnBgoCtx?.batchId) || instrData?.origin?.trnBgo?.batchId || instrData?.bgo?.batchId || instrData?.origin?.bgoBatchId || null, instructionTrnId: instrRef.id }
+      ? {
+          batchId: text(trnBgoCtx?.batchId) || instrData?.origin?.trnBgo?.batchId || instrData?.bgo?.batchId || instrData?.origin?.bgoBatchId || null,
+          rowId: instrData?.origin?.trnBgo?.rowId || instrData?.bgo?.bgoRowId || null,
+          instructionTrnId: instrRef.id,
+        }
       : null;
     const payload = buildLifecycleNoAccess({ data: targetTrnId === trnId ? data : { ...data, id: targetTrnId }, astDoc, premise, erf: erfSnap.data(), actor, now, existing: null,
+      assignment: instrData?.assignment || data?.assignment || null,
       serviceProvider: spId ? { id: spId, name: serviceProviderName(spSnap?.data()) } : {},
       batch: existing?.origin?.targetedBatch || recognisedBatchContext({ decision, erfId: access.erfId, premiseId }),
       trnBgoNoAccess });
