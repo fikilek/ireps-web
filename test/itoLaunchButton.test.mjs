@@ -91,11 +91,11 @@ test("a removal is not offered on a meter already removed or decommissioned", ()
   assert.equal(byWork.remove.available("DECOMMISSIONED"), false);
 });
 
-test("a reading is offered on anything but a decommissioned meter", () => {
-  for (const state of STATES) {
+test("a reading is offered on any meter, in any state", () => {
+  for (const state of [...STATES, "NAv", "", "SOMETHING_NEW"]) {
     assert.equal(
       byWork.read.available(state),
-      state !== "DECOMMISSIONED",
+      true,
       `read on a ${state} meter`,
     );
   }
@@ -105,10 +105,9 @@ test("a refused button says why, in words the office can act on", () => {
   assert.equal(byWork.disconnect.refusal("DISCONNECTED"), "This meter is already disconnected");
   assert.equal(byWork.reconnect.refusal("CONNECTED"), "This meter is already connected");
   assert.equal(byWork.remove.refusal("REMOVED"), "This meter has already been removed");
-  assert.equal(byWork.read.refusal("DECOMMISSIONED"), "A decommissioned meter cannot be read");
 
   for (const transaction of ITO_TRANSACTIONS) {
-    if (transaction.work === "inspect") continue;
+    if (transaction.work === "inspect" || transaction.work === "read") continue;
 
     assert.ok(
       transaction.refusal("DECOMMISSIONED").length > 0,

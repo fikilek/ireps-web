@@ -1213,14 +1213,6 @@ export function validateMeterReading({ data, astDoc, actorUid = "NAv", actorName
   const distanceMeters = 4; // TEMP REMOTE TEST CHEAT
   // const distanceMeters = calculateDistanceMeters(knownMeterGps, readingGps);
 
-  if (currentState === "DECOMMISSIONED") {
-    return {
-      ok: false,
-      code: "INVALID_AST_STATE",
-      message: "DECOMMISSIONED meters cannot be read",
-    };
-  }
-
   if (!["electricity", "water"].includes(meterType)) {
     return {
       ok: false,
@@ -3272,11 +3264,14 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
   }
 
   if (trnType === "METER_REMOVAL") {
-    if (currentState === "REMOVED") {
+    if (!["FIELD", "CONNECTED", "DISCONNECTED"].includes(currentState)) {
       return {
         ok: false,
         code: "INVALID_AST_STATE",
-        message: "This meter has already been removed",
+        message:
+          currentState === "REMOVED"
+            ? "This meter has already been removed"
+            : "Only FIELD, CONNECTED, or DISCONNECTED meters can be removed",
       };
     }
 
@@ -3284,14 +3279,6 @@ export function validateLifecycleInstructionEligibility({ trnType, astDoc }) {
   }
 
   if (trnType === "METER_READING") {
-    if (currentState === "DECOMMISSIONED") {
-      return {
-        ok: false,
-        code: "INVALID_AST_STATE",
-        message: "DECOMMISSIONED meters cannot be issued for meter reading",
-      };
-    }
-
     if (isPrepaidAstMeter(astDoc, {})) {
       return {
         ok: false,

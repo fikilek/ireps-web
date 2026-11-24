@@ -13,6 +13,7 @@ import {
   normalizeUpper,
   sanitizeAssignment,
   validateLifecycleInstructionAssignment,
+  validateLifecycleInstructionEligibility,
 } from "./helpers.js";
 import { TRN_STATES, canMoveAs, currentState } from "./trnStateMachine.js";
 import {
@@ -1106,6 +1107,21 @@ export const onManageLifecycleInstructionCallable = onCall(async (request) => {
           });
 
           return;
+        }
+
+        if (["ALLOCATE", "REASSIGN", "RESTORE"].includes(action)) {
+          const liveEligibility = validateLifecycleInstructionEligibility({
+            trnType,
+            astDoc: astSnap.data() || {},
+          });
+          if (!liveEligibility.ok) {
+            responsePayload = buildFailureResult(
+              liveEligibility.code,
+              liveEligibility.message,
+              { trnId: row.trnId, trnType, astId },
+            );
+            return;
+          }
         }
 
         if (action === "ALLOCATE") {
