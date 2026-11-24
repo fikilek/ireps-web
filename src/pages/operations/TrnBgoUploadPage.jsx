@@ -229,10 +229,10 @@ import { useAuth } from "../../auth/useAuth";
 import { useGeo } from "@/context/GeoContext";
 import IrepsTable from "../../components/table/IrepsTable";
 import {
+  buildNonEligibleReasonFilterOptions,
+  classifyNonEligibleReasonCell,
+  getNonEligibleReasonFilterValues,
   parseFallbackReason,
-  parseGenericNonEligibleReason,
-  parsePendingTrnFromReason,
-  parseRegistrationDisagreeReason,
   resolveNonEligibleDescriptor,
 } from "./trnBgoUploadPendingTrn";
 import {
@@ -917,6 +917,11 @@ export default function TrnBgoUploadPage() {
     }
   }, [integrityFaultRows, lmPcode, lmName, selectedFile, selectedTrnType]);
 
+  const nonEligibleReasonFilterOptions = useMemo(
+    () => buildNonEligibleReasonFilterOptions(parsedRows, selectedTrnType),
+    [parsedRows, selectedTrnType],
+  );
+
   // Summary counts
   const summary = useMemo(() => {
     const total = parsedRows.length;
@@ -1550,7 +1555,9 @@ export default function TrnBgoUploadPage() {
         key: "nonEligibleReason",
         label: "non eligible reason",
         width: 240,
-        filter: "text",
+        filter: "select",
+        filterOptions: nonEligibleReasonFilterOptions,
+        filterValues: (r) => getNonEligibleReasonFilterValues(r, selectedTrnType),
         sortable: true,
         value: (r) => {
           const fb = parseFallbackReason(r, selectedTrnType);
@@ -1559,29 +1566,23 @@ export default function TrnBgoUploadPage() {
           return desc ? `${desc.pillLabel}: ${desc.explanation}` : (r.nonEligibleReason || "");
         },
         render: (r) => {
-          const pending = parsePendingTrnFromReason(r);
-          if (pending) {
+          const classified = classifyNonEligibleReasonCell(r, selectedTrnType);
+          if (!classified) return null;
+          if (classified.kind === "PENDING_TRN") {
             return (
               <PendingTrnReasonButton
                 row={r}
-                pending={pending}
-                onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(pending.trnId)}`)}
+                pending={classified.data}
+                onClick={() => navigate(`/registries/trns?trnId=${encodeURIComponent(classified.data.trnId)}`)}
               />
             );
           }
-          const fallback = parseFallbackReason(r, selectedTrnType);
-          if (fallback) {
-            return <FallbackReasonButton fallback={fallback} />;
-          }
-          const regMismatch = parseRegistrationDisagreeReason(r);
-          if (regMismatch) {
-            return <FallbackReasonButton fallback={regMismatch} tone="danger" />;
-          }
-          const genericReason = parseGenericNonEligibleReason(r);
-          if (genericReason) {
-            return <FallbackReasonButton fallback={genericReason} tone="danger" />;
-          }
-          return null;
+          return (
+            <FallbackReasonButton
+              fallback={classified.data}
+              tone={classified.kind === "FALLBACK" ? "amber" : "danger"}
+            />
+          );
         },
       },
       {
@@ -1761,6 +1762,9 @@ export default function TrnBgoUploadPage() {
     handleToggleMasterSelect,
     handleToggleRowSelect,
     selectedRowKeys,
+    nonEligibleReasonFilterOptions,
+    selectedTrnType,
+    navigate,
   ]);
 
   return (

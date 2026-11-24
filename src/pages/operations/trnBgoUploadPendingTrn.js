@@ -310,3 +310,89 @@ export function parsePendingTrnFromReason(row = {}) {
     allocatedTo,
   };
 }
+
+export function classifyNonEligibleReasonCell(row = {}, selectedTrnType = "") {
+  const pending = parsePendingTrnFromReason(row);
+  if (pending) {
+    return {
+      kind: "PENDING_TRN",
+      pillLabel: pending.buttonLabel,
+      data: pending,
+      isDataIntegrityFault: false,
+    };
+  }
+  const fallback = parseFallbackReason(row, selectedTrnType);
+  if (fallback) {
+    return {
+      kind: "FALLBACK",
+      pillLabel: fallback.pillLabel,
+      data: fallback,
+      isDataIntegrityFault: false,
+    };
+  }
+  const regMismatch = parseRegistrationDisagreeReason(row);
+  if (regMismatch) {
+    return {
+      kind: "DANGER",
+      pillLabel: regMismatch.pillLabel,
+      data: regMismatch,
+      isDataIntegrityFault: Boolean(row?.isDataIntegrityFault || regMismatch.isDataIntegrityFault),
+    };
+  }
+  const genericReason = parseGenericNonEligibleReason(row);
+  if (genericReason) {
+    return {
+      kind: "DANGER",
+      pillLabel: genericReason.pillLabel,
+      data: genericReason,
+      isDataIntegrityFault: Boolean(row?.isDataIntegrityFault || genericReason.isDataIntegrityFault),
+    };
+  }
+  return null;
+}
+
+export function getNonEligibleReasonFilterValues(row = {}, selectedTrnType = "") {
+  const classified = classifyNonEligibleReasonCell(row, selectedTrnType);
+  if (!classified) return ["GROUP:CLEAN"];
+  if (classified.kind === "FALLBACK") {
+    return ["GROUP:FALLBACK", `PILL:${classified.pillLabel}`];
+  }
+  if (classified.kind === "PENDING_TRN") {
+    return ["GROUP:BLOCKED", `PILL:${classified.pillLabel}`];
+  }
+  return [
+    "GROUP:BLOCKED",
+    ...(classified.isDataIntegrityFault ? ["GROUP:INTEGRITY_FAULTS"] : []),
+    `PILL:${classified.pillLabel}`,
+  ];
+}
+
+const REASON_GROUP_OPTIONS = [
+  { value: "GROUP:CLEAN", label: "Clean — Ready (No Issue / Fallback)" },
+  { value: "GROUP:FALLBACK", label: "All INSP Fallbacks" },
+  { value: "GROUP:BLOCKED", label: "All Ineligible / Blocked" },
+  { value: "GROUP:INTEGRITY_FAULTS", label: "All Data Integrity Faults" },
+];
+
+export function buildNonEligibleReasonFilterOptions(rows = [], selectedTrnType = "") {
+  const counts = new Map();
+  for (const row of rows) {
+    for (const key of getNonEligibleReasonFilterValues(row, selectedTrnType)) {
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const options = [];
+  for (const group of REASON_GROUP_OPTIONS) {
+    const count = counts.get(group.value) || 0;
+    if (count > 0) {
+      options.push({ value: group.value, label: `${group.label} (${count})` });
+    }
+  }
+  const pillKeys = [...counts.keys()]
+    .filter((key) => key.startsWith("PILL:"))
+    .sort((a, b) => a.slice(5).localeCompare(b.slice(5), undefined, { numeric: true, sensitivity: "base" }));
+  for (const key of pillKeys) {
+    options.push({ value: key, label: `${key.slice(5)} (${counts.get(key)})` });
+  }
+  return options;
+}

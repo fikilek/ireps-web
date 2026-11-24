@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildNonEligibleReasonFilterOptions,
+  classifyNonEligibleReasonCell,
+  getNonEligibleReasonFilterValues,
   parseGenericNonEligibleReason,
   parseRegistrationDisagreeReason,
   resolveNonEligibleDescriptor,
 } from "../src/pages/operations/trnBgoUploadPendingTrn.js";
+import { filterIrepsTableRows } from "../src/components/table/irepsTableModel.js";
 
 test("PREMISE_DOES_NOT_LIST_METER on REMOVED meter never says 'Meter Removed' and reports 'Meter Has No Linked Premise'", () => {
   const byMessageOnly = parseRegistrationDisagreeReason({
@@ -64,4 +68,91 @@ test("every registration, master, premise, and state integrity code maps to a cl
     assert.equal(legacyFallback.pillLabel, expectedLabel, `legacy regex mismatch for ${code}`);
     assert.equal(legacyFallback.isDataIntegrityFault, expectedIntegrity, `legacy integrity mismatch for ${code}`);
   }
+});
+
+test("nonEligibleReason select filter groups and pill options filter IrepsTable rows accurately", () => {
+  const rows = [
+    { rowNo: "1", isEligible: true, isProposedInspection: false },
+    {
+      rowNo: "2",
+      isEligible: true,
+      isProposedInspection: true,
+      astStatus: "DISCONNECTED",
+      proposedReason: "Current state is DISCONNECTED — Proposed for Inspection (MINSP).",
+    },
+    {
+      rowNo: "3",
+      isEligible: false,
+      astStatus: "REMOVED",
+      nonEligibleCode: "PREMISE_DOES_NOT_LIST_METER",
+      nonEligibleReason: "The premise does not list this meter, so the two records disagree",
+      isDataIntegrityFault: true,
+    },
+    {
+      rowNo: "4",
+      isEligible: false,
+      astStatus: "CONNECTED",
+      nonEligibleReason: "Active METER_INSPECTION job TRN_INSP_123 already exists.",
+    },
+    {
+      rowNo: "5",
+      isEligible: false,
+      astStatus: "DECOMMISSIONED",
+      nonEligibleCode: "DECOMMISSIONED_INSP_ONLY",
+      nonEligibleReason: "Meter is DECOMMISSIONED and can only do METER_INSPECTION.",
+      isDataIntegrityFault: false,
+    },
+  ];
+
+  assert.equal(classifyNonEligibleReasonCell(rows[0], "METER_DISCONNECTION"), null);
+  assert.equal(classifyNonEligibleReasonCell(rows[1], "METER_DISCONNECTION")?.kind, "FALLBACK");
+  assert.equal(classifyNonEligibleReasonCell(rows[2], "METER_DISCONNECTION")?.pillLabel, "Meter Has No Linked Premise");
+  assert.equal(classifyNonEligibleReasonCell(rows[3], "METER_DISCONNECTION")?.kind, "PENDING_TRN");
+
+  const options = buildNonEligibleReasonFilterOptions(rows, "METER_DISCONNECTION");
+  assert.deepEqual(
+    options.map((o) => [o.value, o.label]),
+    [
+      ["GROUP:CLEAN", "Clean — Ready (No Issue / Fallback) (1)"],
+      ["GROUP:FALLBACK", "All INSP Fallbacks (1)"],
+      ["GROUP:BLOCKED", "All Ineligible / Blocked (3)"],
+      ["GROUP:INTEGRITY_FAULTS", "All Data Integrity Faults (1)"],
+      ["PILL:DCN → INSP Fallback", "DCN → INSP Fallback (1)"],
+      ["PILL:Decommissioned (INSP Only)", "Decommissioned (INSP Only) (1)"],
+      ["PILL:Meter Has No Linked Premise", "Meter Has No Linked Premise (1)"],
+      ["PILL:Pending INSP Trn", "Pending INSP Trn (1)"],
+    ],
+  );
+
+  const columns = [
+    {
+      key: "nonEligibleReason",
+      label: "non eligible reason",
+      filter: "select",
+      filterOptions: options,
+      filterValues: (r) => getNonEligibleReasonFilterValues(r, "METER_DISCONNECTION"),
+      value: (r) => r.nonEligibleReason || "",
+    },
+  ];
+
+  assert.deepEqual(
+    filterIrepsTableRows(rows, columns, { filters: { nonEligibleReason: "GROUP:CLEAN" } }).map((r) => r.rowNo),
+    ["1"],
+  );
+  assert.deepEqual(
+    filterIrepsTableRows(rows, columns, { filters: { nonEligibleReason: "GROUP:INTEGRITY_FAULTS" } }).map((r) => r.rowNo),
+    ["3"],
+  );
+  assert.deepEqual(
+    filterIrepsTableRows(rows, columns, { filters: { nonEligibleReason: "GROUP:BLOCKED" } }).map((r) => r.rowNo),
+    ["3", "4", "5"],
+  );
+  assert.deepEqual(
+    filterIrepsTableRows(rows, columns, { filters: { nonEligibleReason: "PILL:DCN → INSP Fallback" } }).map((r) => r.rowNo),
+    ["2"],
+  );
+  assert.deepEqual(
+    filterIrepsTableRows(rows, columns, { filters: { nonEligibleReason: "PILL:Meter Has No Linked Premise" } }).map((r) => r.rowNo),
+    ["3"],
+  );
 });
