@@ -443,16 +443,6 @@ export function getEligibilityResult({ trnType, astData }) {
   }
 
   if (normalizedTrnType === "METER_READING") {
-    if (statusState === "DECOMMISSIONED") {
-      return {
-        eligible: false,
-        code: "STATUS_NOT_ELIGIBLE_FOR_MREAD",
-        message:
-          `Meter is ${statusState} and cannot be selected for ` +
-          "METER_READING.",
-      };
-    }
-
     if (isExplicitPrepaidMeter(astData)) {
       return {
         eligible: false,
@@ -506,13 +496,6 @@ export function resolveBulkStateRouting({ trnType, astData }) {
   }
 
   if (requested === "METER_READING") {
-    if (statusState === "DECOMMISSIONED") {
-      return {
-        eligible: false,
-        effectiveTrnType: requested,
-        message: "DECOMMISSIONED meters cannot be selected for METER_READING.",
-      };
-    }
     if (isExplicitPrepaidMeter(astData)) {
       return {
         eligible: false,

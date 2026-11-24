@@ -5,7 +5,8 @@ import { bulkAuthority, text, BULK_CONTRACT } from "./stage2Core.js";
 import { readMdAllocationTarget } from "../bgo/mdAllocationPolicy.js";
 import { isActorAllowedForBgoTarget } from "../bgo/acceptanceCallable.js";
 import { canMoveAs } from "../meterLifecycle/trnStateMachine.js";
-import { buildTrnActiveLifecycle } from "../meterLifecycle/helpers.js";
+import { buildTrnActiveLifecycle, validateLifecycleInstructionEligibility } from "../meterLifecycle/helpers.js";
+import { isExplicitConventionalMeter } from "./helpers.js";
 const denied=message=>{throw new HttpsError("failed-precondition",message);};
 export async function allocateTcBatches({db,request}) {
  const uid=request.auth?.uid,data=request.data||{};
@@ -28,6 +29,8 @@ export async function allocateTcBatches({db,request}) {
   if(!childIds.length||new Set(childIds).size!==childIds.length)denied("Batch membership is empty or duplicated.");
   const childSnapshots=await tx.getAll(...childIds.map(id=>db.doc(`trns/${id}`)));
   const byId=new Map(childSnapshots.map(snap=>[snap.id,snap]));
+  const astIds=[...new Set(childSnapshots.map(s=>s.data()?.ast?.astData?.astId).filter(Boolean))];
+  const astById=target&&astIds.length?new Map((await tx.getAll(...astIds.map(id=>db.doc(`asts/${id}`)))).map(snap=>[snap.id,snap])):new Map();
   const children=[]; const notices=[];
   for(const parent of parents) {
    const p=parent.data();
@@ -47,6 +50,15 @@ export async function allocateTcBatches({db,request}) {
    for(const child of snaps) {
     const trn=child.data();
     const trnState=trn.workflow?.state;
+    if (target) {
+     const astId=trn.ast?.astData?.astId;
+     const astSnap=astId?astById.get(astId):null;
+     if(!astSnap?.exists)denied("Referenced meter record no longer exists.");
+     const astData=astSnap.data()||{};
+     const elig=validateLifecycleInstructionEligibility({trnType:trn.accessData?.trnType,astDoc:astData});
+     if(!elig.ok)denied(elig.message||"Meter state is no longer eligible for this TRN.");
+     if(trn.accessData?.trnType==="METER_READING"&&!isExplicitConventionalMeter(astData))denied("Meter kind must be explicitly conventional for METER_READING.");
+    }
     if(isReallocate) {
      if(!["CREATED","ISSUED","ACCEPTED"].includes(trnState)||trn.workflow?.executionStartedAt||trn.workflow?.completedAt||trn.accessData?.access?.hasAccess==="no"||Number(trn.noAccessCount||0)>0) {
       denied("Field work has already started; this batch cannot be re-allocated.");

@@ -98,8 +98,8 @@ export const ITO_TRANSACTIONS = [
     code: "MREAD",
     name: "Meter reading",
     countKey: "readings",
-    available: (state) => state !== "DECOMMISSIONED",
-    refusal: () => "A decommissioned meter cannot be read",
+    available: alwaysAvailable,
+    refusal: () => "",
   },
 ];
 

@@ -442,7 +442,7 @@ test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; 
   assert.equal(inspElig.eligible, true);
   assert.equal(inspElig.effectiveTrnType, "METER_INSPECTION");
 
-  // REM on FIELD -> MINSP; MREAD conventional allowed on REMOVED, blocked on DECOMMISSIONED
+  // REM on FIELD -> MINSP; MREAD conventional allowed across all 5 states including REMOVED & DECOMMISSIONED
   const remPreview = await previewBulk({ db, uid, data: { lmPcode, trnType: "METER_REMOVAL", rows: [makeRow(1, "60000002"), makeRow(2, "60000004")], keep: {} } });
   const remMap = new Map(remPreview.eligibility);
   assert.equal(remMap.get("1").eligible, true);
@@ -455,13 +455,51 @@ test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; 
   const mreadMap = new Map(mreadPreview.eligibility);
   assert.equal(mreadMap.get("1").eligible, true);
   assert.equal(mreadMap.get("1").effectiveTrnType, "METER_READING");
-  assert.equal(mreadMap.get("2").eligible, false);
+  assert.equal(mreadMap.get("2").eligible, true);
+  assert.equal(mreadMap.get("2").effectiveTrnType, "METER_READING");
 
   // MREAD fail-closed when meter kind is missing or unknown
   docs["asts/TRN_MDIS_REM"].ast.astData.meter = { phase: "single" };
   const dbMissingKind = makeMockDb(docs);
   const missingKindPreview = await previewBulk({ db: dbMissingKind, uid, data: { lmPcode, trnType: "METER_READING", rows: [makeRow(1, "60000001")], keep: {} } });
   assert.equal(new Map(missingKindPreview.eligibility).get("1").eligible, false);
+
+  // Standing rule parity on validateLifecycleInstructionEligibility & validateMeterReading:
+  // MREM blocked on REMOVED & DECOMMISSIONED; INSP & conventional MREAD allowed on all 5 states.
+  const { validateLifecycleInstructionEligibility, validateMeterReading } = await import("../meterLifecycle/helpers.js");
+  assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_REMOVAL", astDoc: { status: { state: "REMOVED" } } }).ok, false);
+  assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_REMOVAL", astDoc: { status: { state: "DECOMMISSIONED" } } }).ok, false);
+  assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_REMOVAL", astDoc: { status: { state: "CONNECTED" } } }).ok, true);
+  assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_READING", astDoc: { status: { state: "DECOMMISSIONED" }, ast: { astData: { meter: { type: "conventional" } } } } }).ok, true);
+  assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_READING", astDoc: { status: { state: "REMOVED" }, ast: { astData: { meter: { type: "prepaid" } } } } }).ok, false);
+  assert.equal(validateMeterReading({ data: { accessData: { access: { hasAccess: "no" }, parents: { lmPcode, wardPcode } }, meterType: "electricity", assignment: { instruction: { code: "MONTHLY_METER_READING" } }, meterReading: { noReadingReason: "NO_ACCESS" }, media: [{ tag: "noAccessPhoto" }] }, astDoc: { meterType: "electricity", status: { state: "DECOMMISSIONED" }, ast: { astData: { meter: { type: "conventional" } } } } }).ok, true);
+
+  // Stale CREATED MDCN batch cannot be allocated once meter moves to REMOVED
+  const { allocateTcBatches } = await import("../tcUploads/allocation.js");
+  const allocDocs = makeBaseDocs({ lmPcode, wardPcode, uid });
+  allocDocs[`users/${uid}`].employment.serviceProvider.id = "MNC1";
+  allocDocs["teams/TEAM_1"] = { status: "ACTIVE", name: "Team 1", ownership: { mncServiceProviderId: "MNC1" }, scope: { memberUserIds: ["F1"] } };
+  addMeterDocs(allocDocs, { id: "TRN_MDIS_STALE", meterNo: "70000001", lmPcode, wardPcode, premiseId: "P1", state: "REMOVED" });
+  allocDocs["tc_uploads/BATCH_STALE"] = {
+    id: "BATCH_STALE",
+    contractVersion: "TRN_BGO_11COL_REASON_FREE_V1",
+    lmPcode,
+    workflow: { state: "READY_FOR_ALLOCATION" },
+    assignment: { targets: [] },
+    trnIds: ["TRN_MDCN_STALE"],
+  };
+  allocDocs["trns/TRN_MDCN_STALE"] = {
+    id: "TRN_MDCN_STALE",
+    origin: { trnBgo: { batchId: "BATCH_STALE" } },
+    accessData: { trnType: "METER_DISCONNECTION" },
+    ast: { astData: { astId: "TRN_MDIS_STALE" } },
+    workflow: { state: "CREATED" },
+  };
+  const staleDb = makeMockDb(allocDocs);
+  await assert.rejects(
+    allocateTcBatches({ db: staleDb, request: { auth: { uid }, data: { batchIds: ["BATCH_STALE"], targetType: "TEAM", targetId: "TEAM_1" } } }),
+    /Only CONNECTED meters/,
+  );
 });
 
 test("Stage 1 & createBulkGraph explicitly enforce MAX_UPLOAD_ROWS = 80 atomic boundary", async () => {
