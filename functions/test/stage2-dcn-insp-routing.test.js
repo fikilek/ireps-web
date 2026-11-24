@@ -472,7 +472,7 @@ test("DCN routes REMOVED/FIELD to MINSP; RCN routes CONNECTED/REMOVED to MINSP; 
   assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_REMOVAL", astDoc: { status: { state: "CONNECTED" } } }).ok, true);
   assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_READING", astDoc: { status: { state: "DECOMMISSIONED" }, ast: { astData: { meter: { type: "conventional" } } } } }).ok, true);
   assert.equal(validateLifecycleInstructionEligibility({ trnType: "METER_READING", astDoc: { status: { state: "REMOVED" }, ast: { astData: { meter: { type: "prepaid" } } } } }).ok, false);
-  assert.equal(validateMeterReading({ data: { accessData: { access: { hasAccess: "no" }, parents: { lmPcode, wardPcode } }, meterType: "electricity", assignment: { instruction: { code: "MONTHLY_METER_READING" } }, meterReading: { noReadingReason: "NO_ACCESS" }, media: [{ tag: "noAccessPhoto" }] }, astDoc: { meterType: "electricity", status: { state: "DECOMMISSIONED" }, ast: { astData: { meter: { type: "conventional" } } } } }).ok, true);
+  assert.equal(validateMeterReading({ data: { id: "READ_DEC", origin: { channel: "FIELD" }, accessData: { trnType: "METER_READING", access: { hasAccess: "yes" } }, meterReading: { reading: "12", readingAt: "2026-11-24T00:00:00Z", readingGps: { lat: -28, lng: 30 } }, media: [{ tag: "meterReadingEvidence", url: "https://example.test/reading.jpg" }] }, astDoc: { meterType: "electricity", status: { state: "DECOMMISSIONED" }, ast: { astData: { meter: { type: "conventional" } }, location: { gps: { lat: -28, lng: 30 } } } } }).ok, true);
 
   // Stale CREATED MDCN batch cannot be allocated once meter moves to REMOVED
   const { allocateTcBatches } = await import("../tcUploads/allocation.js");

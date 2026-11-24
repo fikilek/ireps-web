@@ -360,7 +360,7 @@ function isExplicitPrepaidMeter(astData = {}) {
   return meterKind.includes("PREPAID") || meterKind.includes("TOKEN");
 }
 
-function isExplicitConventionalMeter(astData = {}) {
+export function isExplicitConventionalMeter(astData = {}) {
   const meterKind = getAstMeterKind(astData);
   if (!meterKind || meterKind === "NAV" || isExplicitPrepaidMeter(astData)) return false;
   return (
