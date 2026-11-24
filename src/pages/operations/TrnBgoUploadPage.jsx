@@ -177,6 +177,10 @@ function FallbackReasonButton({ fallback, tone = "amber" }) {
               <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Upload TRN</small><strong style={{ fontSize: 12, color: "#0f172a" }}>{fallback.uploadTrnLabel}</strong></div>
               <div><small style={{ display: "block", fontSize: 10, color: "#64748b" }}>Fallback TRN</small><strong style={{ fontSize: 12, color: "#b45309" }}>{fallback.fallbackTrnLabel}</strong></div>
             </div>
+          ) : fallback?.isDataIntegrityFault ? (
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "6px 8px" }}>
+              iREPS Data Integrity Fault — Blocked to protect field accuracy &amp; flagged for developer attention.
+            </div>
           ) : null}
           <div style={{ fontSize: 12, color: "#334155", lineHeight: 1.45, borderTop: isDanger ? "none" : "1px solid #f1f5f9", paddingTop: isDanger ? 0 : 8 }}>
             {fallback.explanation}
@@ -229,6 +233,7 @@ import {
   parseGenericNonEligibleReason,
   parsePendingTrnFromReason,
   parseRegistrationDisagreeReason,
+  resolveNonEligibleDescriptor,
 } from "./trnBgoUploadPendingTrn";
 import {
   useCreateTrnBgoWardBatchesMutation,
@@ -579,7 +584,8 @@ export default function TrnBgoUploadPage() {
   const [parsedRows, setParsedRows] = useState([]);
   const [foundFilter, setFoundFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND
   const [lmFilter, setLmFilter] = useState("ALL"); // ALL, MATCH, MISMATCH
-  const [statFilter, setStatFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND, LM_MATCH, SELECTED
+  const [statFilter, setStatFilter] = useState("ALL"); // ALL, FOUND, NOT_FOUND, LM_MATCH, INTEGRITY_FAULTS, SELECTED
+  const [devReportCopied, setDevReportCopied] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState(() => new Set());
   const [shownRows, setShownRows] = useState(null);
   const navigate = useNavigate();
@@ -605,7 +611,7 @@ export default function TrnBgoUploadPage() {
     setFileError(""); setParsedRows([]); setSelectedRowKeys(new Set());
     setShownRows(null); setViewMode("INSPECTION"); setCarriedBatchRows([]);
     setCreatedBatchesResult([]); setBatchCreateError(""); setCreationModalState(null);
-    setFoundFilter("ALL"); setLmFilter("ALL"); setStatFilter("ALL");
+    setFoundFilter("ALL"); setLmFilter("ALL"); setStatFilter("ALL"); setDevReportCopied(false);
     setDuplicateKeep({}); setUploadFeedback(null); setFidelityWarnings([]);
     if (!file) { setSelectedFile(null); return; }
     if (!lmPcode || !UPLOAD_TRN_TYPES.includes(selectedTrnType)) {
@@ -808,6 +814,17 @@ export default function TrnBgoUploadPage() {
             effectiveTrnType === "METER_INSPECTION";
           const proposedReason = isProposedInspection ? (eligibility?.message || "Proposed for Inspection (MINSP)") : "";
 
+          const nonEligibleCode = isEligible ? null : (eligibility?.code || null);
+          const nonEligibleReason = isEligible ? "" : (eligibility?.message || "Eligibility could not be confirmed. Validate the file again.");
+          const descriptor = isEligible
+            ? null
+            : resolveNonEligibleDescriptor({
+                nonEligibleCode,
+                nonEligibleReason,
+                isDataIntegrityFault: eligibility?.isDataIntegrityFault,
+                astStatus: foundInAsts ? astStatus : "NOT_IN_ASTS",
+              });
+
           return {
             ...row,
             foundInAsts,
@@ -817,7 +834,9 @@ export default function TrnBgoUploadPage() {
             effectiveTrnType,
             isProposedInspection,
             proposedReason,
-            nonEligibleReason: isEligible ? "" : (eligibility?.message || "Eligibility could not be confirmed. Validate the file again."),
+            nonEligibleCode,
+            nonEligibleReason,
+            isDataIntegrityFault: Boolean(!isEligible && (eligibility?.isDataIntegrityFault || descriptor?.isDataIntegrityFault)),
             isDataMatch,
             duplicate: isDuplicate ? "True" : "False",
             eligible: isEligible ? "True" : "False",
@@ -857,8 +876,46 @@ export default function TrnBgoUploadPage() {
     setValidationProgress("");
     setFoundFilter("ALL");
     setLmFilter("ALL");
+    setStatFilter("ALL");
+    setDevReportCopied(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const integrityFaultRows = useMemo(() => {
+    return parsedRows.filter((r) => !r.isEligible && r.isDataIntegrityFault);
+  }, [parsedRows]);
+
+  const handleCopyDevReport = useCallback(async () => {
+    if (!integrityFaultRows.length || !navigator?.clipboard?.writeText) return;
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      lmPcode: lmPcode || null,
+      lmName: lmName || null,
+      fileName: selectedFile?.name || null,
+      trnType: selectedTrnType || null,
+      faultCount: integrityFaultRows.length,
+      faults: integrityFaultRows.map((r) => {
+        const descriptor = resolveNonEligibleDescriptor(r);
+        return {
+          rowNo: r.rowNo,
+          meterNo: r.meterNo,
+          astDocId: r.astDocId || null,
+          meterStatus: r.astStatus || r.irepsValues?.meterStatus || "NAv",
+          code: descriptor?.code || r.nonEligibleCode || null,
+          pillLabel: descriptor?.pillLabel || "Ineligible",
+          message: r.nonEligibleReason || "",
+          premiseAddress: r.resolvedAddress || r.irepsValues?.premiseAddress || "NAv",
+        };
+      }),
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setDevReportCopied(true);
+      setTimeout(() => setDevReportCopied(false), 3000);
+    } catch {
+      setDevReportCopied(false);
+    }
+  }, [integrityFaultRows, lmPcode, lmName, selectedFile, selectedTrnType]);
 
   // Summary counts
   const summary = useMemo(() => {
@@ -877,6 +934,7 @@ export default function TrnBgoUploadPage() {
       if (statFilter === "FOUND" && !row.foundInAsts) return false;
       if (statFilter === "NOT_FOUND" && row.foundInAsts) return false;
       if (statFilter === "LM_MATCH" && (!row.foundInAsts || !row.isLmMatch)) return false;
+      if (statFilter === "INTEGRITY_FAULTS" && !(!row.isEligible && row.isDataIntegrityFault)) return false;
       if (statFilter === "SELECTED" && !selectedRowKeys.has(getRowSelectionKey(row))) return false;
 
       if (foundFilter === "FOUND" && !row.foundInAsts) return false;
@@ -1491,12 +1549,14 @@ export default function TrnBgoUploadPage() {
       {
         key: "nonEligibleReason",
         label: "non eligible reason",
-        width: 220,
+        width: 240,
         filter: "text",
         sortable: true,
         value: (r) => {
           const fb = parseFallbackReason(r, selectedTrnType);
-          return r.nonEligibleReason || (fb ? `${fb.pillLabel} ${fb.explanation}` : "");
+          if (fb) return `${fb.pillLabel}: ${fb.explanation}`;
+          const desc = resolveNonEligibleDescriptor(r);
+          return desc ? `${desc.pillLabel}: ${desc.explanation}` : (r.nonEligibleReason || "");
         },
         render: (r) => {
           const pending = parsePendingTrnFromReason(r);
@@ -1950,6 +2010,73 @@ export default function TrnBgoUploadPage() {
                 <code>eligible = False</code>. Filter{" "}
                 <code>eligible = True</code> and re-select using the Master Checkbox to create Ward batches.
               </span>
+            </div>
+          ) : null}
+
+          {/* Data Integrity Alert Banner for blocked rows needing iREPS master-data repair */}
+          {integrityFaultRows.length > 0 ? (
+            <div
+              role="status"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 12,
+                padding: "10px 16px",
+                borderRadius: 10,
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                color: "#991b1b",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              <span>
+                <strong>iREPS Data Integrity Faults:</strong>{" "}
+                <strong>{integrityFaultRows.length}</strong> meter(s) could not proceed or fall back to{" "}
+                <code>INSP</code> because of broken iREPS master-data links (flagged for developer attention).
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatFilter((prev) =>
+                      prev === "INTEGRITY_FAULTS" ? "ALL" : "INTEGRITY_FAULTS",
+                    )
+                  }
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #dc2626",
+                    background: statFilter === "INTEGRITY_FAULTS" ? "#dc2626" : "#ffffff",
+                    color: statFilter === "INTEGRITY_FAULTS" ? "#ffffff" : "#b91c1c",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {statFilter === "INTEGRITY_FAULTS"
+                    ? `Showing Data Faults (${integrityFaultRows.length})`
+                    : `Filter Data Faults (${integrityFaultRows.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyDevReport}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {devReportCopied ? "Copied Dev Report ✓" : "Copy Dev Report"}
+                </button>
+              </div>
             </div>
           ) : null}
 

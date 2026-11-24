@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
+import * as logger from "firebase-functions/logger";
 import { OFFICIAL_HEADERS, MAX_UPLOAD_ROWS, validateSourceRows, resolveDuplicates, meterKey } from "./stage1Validation.js";
 import { parseCsv } from "./sourceCsv.js";
 import { validateStage1Upload } from "./stage1Matching.js";
@@ -40,53 +41,97 @@ export function parseSource(csv) {
 }
 export async function inspectBulkRow({db,reader,row,astId,trnType,lmPcode}) {
   const read=ref=>reader?reader.get(ref):ref.get();
-  if(!astId)return {eligible:false,message:"Meter was not found in ASTS."};
+  if(!astId)return {eligible:false,code:"METER_NOT_FOUND",isDataIntegrityFault:false,message:"Meter was not found in ASTS."};
   const astSnap=await read(db.doc(`asts/${astId}`)); const ast=astSnap.data()||{};
-  const premiseId=text(ast.accessData?.premise?.id); if(!astSnap.exists||!premiseId)return {eligible:false,message:"Meter has no authoritative premise."};
-  const premiseSnap=await read(db.doc(`premises/${premiseId}`)); const premise=premiseSnap.data()||{};
+  const premiseId=text(ast.accessData?.premise?.id); if(!astSnap.exists||!premiseId)return {eligible:false,code:"PREMISE_NOT_NAMED",isDataIntegrityFault:true,message:"Meter has no authoritative premise."};
+  const premiseSnap=await read(db.doc(`premises/${premiseId}`));
+  if(!premiseSnap.exists)return {eligible:false,code:"PREMISE_NOT_FOUND",isDataIntegrityFault:true,message:"The premise this meter belongs to cannot be found"};
+  const premise=premiseSnap.data()||{};
   const wardPcode=text(ast.accessData?.parents?.wardPcode); const premiseWard=text(premise.parents?.wardPcode);
-  if(ast.accessData?.parents?.lmPcode!==lmPcode || premise.parents?.lmPcode!==lmPcode || !wardPcode || (premiseWard && premiseWard!==wardPcode))return {eligible:false,message:"Authoritative municipality/Ward binding is missing or contradictory."};
+  if(ast.accessData?.parents?.lmPcode!==lmPcode || premise.parents?.lmPcode!==lmPcode || !wardPcode || (premiseWard && premiseWard!==wardPcode))return {eligible:false,code:"LM_WARD_CONTRADICTION",isDataIntegrityFault:true,message:"Authoritative municipality/Ward binding is missing or contradictory."};
   const ward=(await read(db.doc(`wards/${wardPcode}`))).data();
   const wardLm=text(ward?.parents?.localMunicipalityId||ward?.parents?.lmPcode||ward?.lmPcode||ward?.parentPcode||ward?.localMunicipality?.pcode);
-  if(!ward || wardLm!==lmPcode)return {eligible:false,message:"The authoritative Ward does not belong to the selected municipality."};
+  if(!ward || wardLm!==lmPcode)return {eligible:false,code:"WARD_OUTSIDE_LM",isDataIntegrityFault:true,message:"The authoritative Ward does not belong to the selected municipality."};
   const refs=normalizeGeoFenceRefs(ast.geofenceRefs);
   // 5-state upload eligibility + INSP fallback matrix (TRN-BGO-R002, 19 Nov 2026):
   const stateRouting = resolveBulkStateRouting({ trnType, astData: ast });
   if (!stateRouting.eligible) {
-    return { eligible: false, message: stateRouting.message, effectiveTrnType: stateRouting.effectiveTrnType };
+    return {
+      eligible: false,
+      code: stateRouting.code || "STATE_ROUTING_INELIGIBLE",
+      isDataIntegrityFault: Boolean(stateRouting.isDataIntegrityFault),
+      message: stateRouting.message,
+      effectiveTrnType: stateRouting.effectiveTrnType,
+    };
   }
   let effectiveTrnType = stateRouting.effectiveTrnType;
   const stateRoutingMessage = stateRouting.message;
   const canonical = validateLifecycleInstructionEligibility({ trnType: effectiveTrnType, astDoc: ast });
   const existing = getEligibilityResult({ trnType: effectiveTrnType, astData: ast });
-  if (!canonical.ok || !existing.eligible) return { eligible: false, message: canonical.message || existing.message, effectiveTrnType };
+  if (!canonical.ok || !existing.eligible) {
+    return {
+      eligible: false,
+      code: (!canonical.ok ? canonical.code : existing.code) || "INELIGIBLE",
+      isDataIntegrityFault: false,
+      message: canonical.message || existing.message,
+      effectiveTrnType,
+    };
+  }
   const registration = await checkMeterRegistration({ db, astId, reader });
-  if (!registration.ok) return { eligible: false, message: registration.message, effectiveTrnType };
+  if (!registration.ok) {
+    return {
+      eligible: false,
+      code: registration.code || "REGISTRATION_CHECK_FAILED",
+      isDataIntegrityFault: registration.code !== "METER_NOT_FOUND",
+      message: registration.message,
+      effectiveTrnType,
+    };
+  }
   const activeQuery = (type) => db.collection("trns").where("ast.astData.astId", "==", astId).where("accessData.trnType", "==", type).where("workflow.state", "in", BULK_ACTIVE_JOB_STATES).limit(1);
   const active = await read(activeQuery(effectiveTrnType));
   let duplicateRoutingMessage = "";
   if (!active.empty) {
     if (effectiveTrnType === "METER_INSPECTION") {
-      return { eligible: false, message: `Active ${effectiveTrnType} job ${active.docs[0].id} already exists.`, effectiveTrnType };
+      return { eligible: false, code: "ACTIVE_TRN_EXISTS", isDataIntegrityFault: false, message: `Active ${effectiveTrnType} job ${active.docs[0].id} already exists.`, effectiveTrnType };
     }
     const activeInsp = await read(activeQuery("METER_INSPECTION"));
     if (!activeInsp.empty) {
-      return { eligible: false, message: `Active METER_INSPECTION job ${activeInsp.docs[0].id} already exists.`, effectiveTrnType: "METER_INSPECTION" };
+      return { eligible: false, code: "ACTIVE_TRN_EXISTS", isDataIntegrityFault: false, message: `Active METER_INSPECTION job ${activeInsp.docs[0].id} already exists.`, effectiveTrnType: "METER_INSPECTION" };
     }
     const priorType = effectiveTrnType;
     effectiveTrnType = "METER_INSPECTION";
     duplicateRoutingMessage = `Active ${priorType} job ${active.docs[0].id} already exists — Proposed for Inspection (MINSP).`;
   }
   const message = duplicateRoutingMessage || stateRoutingMessage || "Eligible.";
-  return { eligible: true, message, effectiveTrnType, row, astId, ast, premiseId, premise, wardPcode, wardName: text(ward.name || ward.wardName || wardPcode), geofenceRefs: refs };
+  return { eligible: true, code: "ELIGIBLE", isDataIntegrityFault: false, message, effectiveTrnType, row, astId, ast, premiseId, premise, wardPcode, wardName: text(ward.name || ward.wardName || wardPcode), geofenceRefs: refs };
 }
 export async function previewBulk({db,uid,data}) {
   const matched=await validateStage1Upload({db,uid,data});
   const astMap=new Map(matched.meterAstEntries); const rows=resolveDuplicates(validateSourceRows(data.rows),data.keep);
+  const integrityFaults=[];
   const eligibility=await Promise.all(rows.map(async row=>{
     const ast=astMap.get(meterKey(row.meterNo)); const decision=await inspectBulkRow({db,row,astId:ast?.id,trnType:data.trnType,lmPcode:data.lmPcode});
-    return [String(row.rowNo),{eligible:decision.eligible,message:decision.message,wardPcode:decision.wardPcode||null,effectiveTrnType:decision.effectiveTrnType||data.trnType}];
+    if(!decision.eligible && decision.isDataIntegrityFault) {
+      integrityFaults.push({
+        rowNo: String(row.rowNo),
+        meterNo: row.meterNo,
+        astId: ast?.id || null,
+        premiseId: text(ast?.accessData?.premise?.id) || null,
+        code: decision.code || null,
+        message: decision.message,
+      });
+    }
+    return [String(row.rowNo),{eligible:decision.eligible,code:decision.code||null,isDataIntegrityFault:Boolean(decision.isDataIntegrityFault),message:decision.message,wardPcode:decision.wardPcode||null,effectiveTrnType:decision.effectiveTrnType||data.trnType}];
   }));
+  if(integrityFaults.length>0) {
+    logger.warn("TRN_BGO_DATA_INTEGRITY_FAULT",{
+      lmPcode: data.lmPcode || null,
+      trnType: data.trnType || null,
+      uid: uid || null,
+      count: integrityFaults.length,
+      faults: integrityFaults,
+    });
+  }
   return {...matched,eligibility};
 }
 export function buildBulkTrn({entry,id,trnType,lineage,actor,now}) {

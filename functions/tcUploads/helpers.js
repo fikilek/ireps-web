@@ -486,10 +486,13 @@ const BULK_STATE_ALLOWED_TRNS = {
 export function resolveBulkStateRouting({ trnType, astData }) {
   const requested = normalizeTrnType(trnType);
   const statusState = getAstStatusState(astData);
+  const meterKind = getAstMeterKind(astData);
 
   if (!statusState || statusState === "NAV") {
     return {
       eligible: false,
+      code: "UNKNOWN_METER_STATUS",
+      isDataIntegrityFault: true,
       effectiveTrnType: requested,
       message: "Meter status could not be resolved.",
     };
@@ -499,6 +502,8 @@ export function resolveBulkStateRouting({ trnType, astData }) {
     if (isExplicitPrepaidMeter(astData)) {
       return {
         eligible: false,
+        code: "PREPAID_NOT_SUPPORTED_FOR_MREAD_V1",
+        isDataIntegrityFault: false,
         effectiveTrnType: requested,
         message: "Prepaid/token meters are not supported for MREAD v1 TC upload.",
       };
@@ -506,29 +511,35 @@ export function resolveBulkStateRouting({ trnType, astData }) {
     if (!isExplicitConventionalMeter(astData)) {
       return {
         eligible: false,
+        code: "METER_KIND_NOT_CONVENTIONAL_FOR_MREAD",
+        isDataIntegrityFault: !meterKind || meterKind === "NAV",
         effectiveTrnType: requested,
         message: "Meter kind must be explicitly conventional for METER_READING.",
       };
     }
-    return { eligible: true, effectiveTrnType: requested, message: "" };
+    return { eligible: true, code: "ELIGIBLE", isDataIntegrityFault: false, effectiveTrnType: requested, message: "" };
   }
 
   const allowed = BULK_STATE_ALLOWED_TRNS[statusState];
   if (!allowed) {
     return {
       eligible: false,
+      code: "UNKNOWN_AST_STATE",
+      isDataIntegrityFault: true,
       effectiveTrnType: requested,
       message: `Meter state ${statusState} is not recognized.`,
     };
   }
 
   if (allowed.includes(requested)) {
-    return { eligible: true, effectiveTrnType: requested, message: "" };
+    return { eligible: true, code: "ELIGIBLE", isDataIntegrityFault: false, effectiveTrnType: requested, message: "" };
   }
 
   if (statusState === "DECOMMISSIONED") {
     return {
       eligible: false,
+      code: "DECOMMISSIONED_INSP_ONLY",
+      isDataIntegrityFault: false,
       effectiveTrnType: requested,
       message: `Meter is DECOMMISSIONED and can only do METER_INSPECTION.`,
     };
@@ -536,6 +547,8 @@ export function resolveBulkStateRouting({ trnType, astData }) {
 
   return {
     eligible: true,
+    code: "ELIGIBLE",
+    isDataIntegrityFault: false,
     effectiveTrnType: "METER_INSPECTION",
     message: `Current state is ${statusState} — Proposed for Inspection (MINSP).`,
   };

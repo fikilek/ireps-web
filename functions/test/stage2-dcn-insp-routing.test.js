@@ -521,3 +521,68 @@ test("Stage 1 & createBulkGraph explicitly enforce MAX_UPLOAD_ROWS = 80 atomic b
     /at most 80/,
   );
 });
+
+test("previewBulk returns structured code and isDataIntegrityFault for unlinked REMOVED premise vs valid REMOVED fallback", async () => {
+  const lmPcode = "ZA5241";
+  const wardPcode = "ZA5241002";
+  const uid = "MNG_INTEGRITY";
+  const docs = makeBaseDocs({ lmPcode, wardPcode, uid });
+  addMeterDocs(docs, { id: "TRN_MDIS_REM_OK", meterNo: "80000001", lmPcode, wardPcode, premiseId: "P_OK", state: "REMOVED" });
+  addMeterDocs(docs, { id: "TRN_MDIS_REM_BAD", meterNo: "80000002", lmPcode, wardPcode, premiseId: "P_BAD", state: "REMOVED" });
+  docs["premises/P_BAD"].services.electricityMeters = [];
+  addMeterDocs(docs, { id: "TRN_MDIS_DECOM_RULE", meterNo: "80000003", lmPcode, wardPcode, premiseId: "P_DEC", state: "DECOMMISSIONED" });
+
+  const db = makeMockDb(docs);
+  const res = await previewBulk({
+    db,
+    uid,
+    data: {
+      fileName: "integrity.csv",
+      lmPcode,
+      lmName: "Endumeni",
+      trnType: "METER_RECONNECTION",
+      rows: [
+        makeRow(1, "80000001"),
+        makeRow(2, "80000002"),
+        makeRow(3, "80000003"),
+        makeRow(4, "99999999"),
+      ],
+    },
+  });
+
+  const byRow = new Map(res.eligibility);
+  assert.deepEqual(
+    {
+      eligible: byRow.get("1").eligible,
+      code: byRow.get("1").code,
+      isDataIntegrityFault: byRow.get("1").isDataIntegrityFault,
+      effectiveTrnType: byRow.get("1").effectiveTrnType,
+    },
+    { eligible: true, code: "ELIGIBLE", isDataIntegrityFault: false, effectiveTrnType: "METER_INSPECTION" },
+  );
+  assert.deepEqual(
+    {
+      eligible: byRow.get("2").eligible,
+      code: byRow.get("2").code,
+      isDataIntegrityFault: byRow.get("2").isDataIntegrityFault,
+      effectiveTrnType: byRow.get("2").effectiveTrnType,
+    },
+    { eligible: false, code: "PREMISE_DOES_NOT_LIST_METER", isDataIntegrityFault: true, effectiveTrnType: "METER_INSPECTION" },
+  );
+  assert.deepEqual(
+    {
+      eligible: byRow.get("3").eligible,
+      code: byRow.get("3").code,
+      isDataIntegrityFault: byRow.get("3").isDataIntegrityFault,
+    },
+    { eligible: false, code: "DECOMMISSIONED_INSP_ONLY", isDataIntegrityFault: false },
+  );
+  assert.deepEqual(
+    {
+      eligible: byRow.get("4").eligible,
+      code: byRow.get("4").code,
+      isDataIntegrityFault: byRow.get("4").isDataIntegrityFault,
+    },
+    { eligible: false, code: "METER_NOT_FOUND", isDataIntegrityFault: false },
+  );
+});
