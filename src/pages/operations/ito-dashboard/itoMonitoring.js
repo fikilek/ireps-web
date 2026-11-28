@@ -22,6 +22,7 @@ import { ITO_TRANSACTIONS } from "../../../components/ito/itoTransactions.js";
 import { EXPIRES_AFTER_MS } from "../../../../functions/meterLifecycle/trnStateMachine.js";
 import {
   ITO_ACCEPTED_STATES,
+  ITO_COMPLETED_STATES,
   ITO_CREATED_STATES,
   ITO_ISSUED_STATES,
   ITO_TRN_TYPES,
@@ -67,7 +68,7 @@ export function columnFor(state) {
 
   if (ITO_ISSUED_STATES.includes(value)) return "issued";
   if (ITO_ACCEPTED_STATES.includes(value)) return "accepted";
-  if (value === "COMPLETED") return "completed";
+  if (ITO_COMPLETED_STATES.includes(value)) return "completed";
 
   return null;
 }
@@ -764,6 +765,7 @@ export function buildWorkerJobRows(work, uid, nowMs) {
         // ISSUED, ACCEPTED or COMPLETED, written as iREPS writes it.
         state: titleCase(readWorkflowState(trn)) || NAV,
         isIssued: state === "issued",
+        isCompleted: state === "completed",
         // A state the five cannot place. It is drawn and counted, and no
         // action is offered on it - the machine would refuse one anyway, and
         // offering a button that cannot work is worse than offering none.

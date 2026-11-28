@@ -665,8 +665,39 @@ test("his page lists EVERYTHING with his name on it in this ward", async () => {
   );
 
   // And the tile that says what is still his to do excludes the finished one.
-  assert.equal(rows.filter((row) => row.state !== "Completed").length, 2);
+  assert.equal(rows.filter((row) => !row.isCompleted).length, 2);
   assert.equal(countWorkerCompleted(all, KAISER), 1);
+});
+
+test("QA PASS and QA FAIL count under Completed per worker and finished, while Status preserves the exact TRN state", async () => {
+  const { buildWorkerRows, buildWorkerJobRows, countWorkerCompleted } = await import(
+    "../src/pages/operations/ito-dashboard/itoMonitoring.js"
+  );
+
+  const peter = { targetType: "USER", targetId: "u-peter", targetName: "Peter" };
+  const wardTrns = [
+    job("QA PASS", { trnId: "P1", trnType: "METER_DISCONNECTION", ...peter }),
+    job("QA PASS", { trnId: "P2", trnType: "METER_RECONNECTION", ...peter }),
+    job("COMPLETED", { trnId: "P3", trnType: "METER_DISCONNECTION", ...peter }),
+    job("QA FAIL", { trnId: "P4", trnType: "METER_INSPECTION", ...peter }),
+  ];
+
+  const { rows } = { rows: buildWorkerRows({ trns: wardTrns }) };
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].total, 4);
+  assert.equal(rows[0].issued, 0);
+  assert.equal(rows[0].accepted, 0);
+  assert.equal(rows[0].completed, 4);
+  assert.deepEqual(rows[0].unaccounted, []);
+
+  const jobRows = buildWorkerJobRows(wardTrns, "u-peter", Date.parse("2026-11-28T04:00:00.000Z"));
+  assert.equal(jobRows.length, 4);
+  assert.deepEqual(
+    jobRows.map((r) => r.state).sort(),
+    ["Completed", "Qa fail", "Qa pass", "Qa pass"],
+  );
+  assert.equal(jobRows.filter((r) => !r.isCompleted).length, 0, "0 he holds for finished/QA jobs");
+  assert.equal(countWorkerCompleted(wardTrns, "u-peter"), 4, "all 4 count under finished");
 });
 
 test("the oldest is first, because that is what the office came about", async () => {
