@@ -77,6 +77,13 @@ export const ITO_ACCEPTED_STATES = Object.freeze(["ACCEPTED"]);
  */
 export const ITO_CREATED_STATES = Object.freeze(["CREATED", "REJECTED", "CANCELLED"]);
 
+/**
+ * Post-execution finished states grouped under `Completed` in ITO summaries
+ * (`UI-R009` 5.1, owner 28 November 2026 — Option A). Each row inside a worker's
+ * page still displays its exact TRN state (`Completed`, `Qa pass`, `Qa fail`).
+ */
+export const ITO_COMPLETED_STATES = Object.freeze(["COMPLETED", "QA PASS", "QA FAIL"]);
+
 const upper = (value) => String(value ?? "").trim().toUpperCase();
 
 // Two normalisers feed this screen - the registry rows flatten the fields,
@@ -130,7 +137,7 @@ export function summariseIto(rows) {
     if (ITO_CREATED_STATES.includes(state)) figures.created += 1;
     else if (ITO_ISSUED_STATES.includes(state)) figures.issued += 1;
     else if (ITO_ACCEPTED_STATES.includes(state)) figures.accepted += 1;
-    else if (state === "COMPLETED") figures.completed += 1;
+    else if (ITO_COMPLETED_STATES.includes(state)) figures.completed += 1;
     else unaccounted.push(state || "(no state)");
   }
 

@@ -917,7 +917,7 @@ export default function ItoDashboardPage() {
                     work too since 13 October, so counting its rows would make
                     this tile say he is carrying work he has already done. */}
                 <p style={styles.workerCountValue}>
-                  {workerJobs.filter((job) => job.state !== "Completed").length}
+                  {workerJobs.filter((job) => !job.isCompleted).length}
                 </p>
                 <p style={styles.workerCountLabel}>he holds</p>
               </div>

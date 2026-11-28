@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 
 import {
   ITO_ACCEPTED_STATES,
+  ITO_COMPLETED_STATES,
   ITO_CREATED_STATES,
   ITO_ISSUED_STATES,
   ITO_TRN_TYPES,
@@ -104,7 +105,12 @@ test("a record rejected before the list existed still counts as one refusal", ()
 });
 
 test("every state a job can be in lands in a figure", () => {
-  const states = [...ITO_CREATED_STATES, ...ITO_ISSUED_STATES, ...ITO_ACCEPTED_STATES, "COMPLETED"];
+  const states = [
+    ...ITO_CREATED_STATES,
+    ...ITO_ISSUED_STATES,
+    ...ITO_ACCEPTED_STATES,
+    ...ITO_COMPLETED_STATES,
+  ];
   const summary = summariseIto(states.map((state) => trn(state)));
 
   assert.deepEqual(summary.unaccounted, [], "a state with no figure");
@@ -113,6 +119,7 @@ test("every state a job can be in lands in a figure", () => {
     summary.total,
     "the figures must account for every row",
   );
+  assert.equal(summary.completed, 3, "COMPLETED, QA PASS, and QA FAIL group under Completed");
 });
 
 test("a deleted job is in no figure and in no total", () => {
